@@ -232,6 +232,15 @@
 }
 
 /* Branded AI commit-message generation state. */
+.wyrm-commit-description {
+  field-sizing: fixed;
+  height: 74px;
+  min-height: 74px;
+  max-height: 74px;
+  overflow-y: auto;
+  resize: none;
+}
+
 .wyrm-ai-stage {
   position: absolute;
   inset: 0;
@@ -239,6 +248,7 @@
   display: grid;
   grid-template-columns: 82px minmax(0, 1fr);
   align-items: center;
+  min-height: 116px;
   overflow: hidden;
   padding: 6px 38px 6px 10px;
   border: 1px solid color-mix(in srgb, var(--gw-accent) 24%, transparent);

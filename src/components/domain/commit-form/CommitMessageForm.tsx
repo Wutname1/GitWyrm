@@ -91,8 +91,8 @@ export function CommitMessageForm() {
   const generating = ai.generate.isPending
 
   return (
-    <div className="flex-none border-t border-border bg-panel2 px-3.5 pb-[13px] pt-[11px]">
-      <div className="relative mb-[9px]">
+    <div className="min-h-[183px] flex-none border-t border-border bg-panel2 px-3 pb-[13px] pt-[11px]">
+      <div className="relative mb-[9px] min-h-[116px]">
         <div className="relative mb-[7px] rounded-md">
           <Input
             value={generating ? '' : msg}
@@ -140,7 +140,7 @@ export function CommitMessageForm() {
           placeholder={generating ? '' : 'Extended description…'}
           rows={2}
           className={cn(
-            'min-h-0 w-full resize-none bg-background px-2.5 py-2 text-[11.5px] transition-[opacity,filter] duration-200',
+            'wyrm-commit-description w-full bg-background px-2.5 py-2 text-[11.5px] transition-[opacity,filter] duration-200',
             generating && 'opacity-[0.18] saturate-[0.35]'
           )}
         />
