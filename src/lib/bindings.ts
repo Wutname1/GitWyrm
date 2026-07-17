@@ -179,6 +179,18 @@ async discardFile(repoId: string, path: string) : Promise<Result<null, string>> 
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Discard every uncommitted change: unstage the index, restore all tracked
+ * files to HEAD, and remove untracked files. Irreversible; the caller confirms.
+ */
+async discardAll(repoId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("discard_all", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async createCommit(repoId: string, summary: string, description: string) : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("create_commit", { repoId, summary, description }) };

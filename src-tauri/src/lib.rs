@@ -35,6 +35,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::staging::stage_all,
     commands::staging::unstage_all,
     commands::staging::discard_file,
+    commands::staging::discard_all,
     commands::commit::create_commit,
     commands::branch::checkout_branch,
     commands::branch::create_branch,

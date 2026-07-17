@@ -109,3 +109,27 @@ pub async fn discard_file(
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
 }
+
+/// Discard every uncommitted change: unstage the index, restore all tracked
+/// files to HEAD, and remove untracked files. Irreversible; the caller confirms.
+#[tauri::command]
+#[specta::specta]
+pub async fn discard_all(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    // Reset the index to HEAD so staged changes are dropped too.
+    let head = repo.head()?.peel(git2::ObjectType::Commit)?;
+    repo.reset(&head, git2::ResetType::Mixed, None)?;
+    // Force the working tree back to HEAD and delete untracked files.
+    let mut builder = git2::build::CheckoutBuilder::new();
+    builder.force().remove_untracked(true);
+    repo.checkout_head(Some(&mut builder))?;
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
