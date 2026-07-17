@@ -156,10 +156,12 @@ pub async fn generate_commit_message(
     .ok_or_else(|| AppError::Other(format!("no API key configured for {provider}")))?;
   let cat = catalog::find(&app, &provider).await?;
 
-  let instruction = settings::get_settings(app.clone())?
+  // The user's editable guidance (empty falls back to the default), always
+  // combined with the fixed format contract our parser depends on.
+  let user_instruction = settings::get_settings(app.clone())?
     .ai_instruction
-    .filter(|s| !s.trim().is_empty())
-    .unwrap_or_else(prompt::default_instruction);
+    .unwrap_or_default();
+  let system = prompt::build_system(&user_instruction);
 
   let (diff, log) = tauri::async_runtime::spawn_blocking(move || {
     let diff = run_git(Some(&repo_path), &["diff", "--cached", "--no-color"])?.stdout;
@@ -185,7 +187,7 @@ pub async fn generate_commit_message(
     provider: &cat,
     bearer: bearer_for(&info),
     model: &model,
-    system: &instruction,
+    system: &system,
     user: &user,
     max_tokens: 1024,
   })

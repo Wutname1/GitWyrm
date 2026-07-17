@@ -301,7 +301,8 @@ function InstructionSetting() {
           )}
         </div>
         <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-          How the AI is told to write your commit messages.
+          Guidance for tone and style. GitWyrm always enforces the summary and
+          description format on top of this.
         </div>
       </div>
       <div className="min-w-0 flex-1 space-y-2">
