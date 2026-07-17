@@ -204,7 +204,7 @@
 }
 
 .wyrm-blast-logo {
-  animation: wyrm-blast-logo 10.5s ease-in-out forwards;
+  animation: wyrm-blast-logo 5.2s ease-in-out forwards;
   filter: drop-shadow(0 0 40px rgba(45, 212, 167, 0.55));
 }
 
@@ -557,6 +557,13 @@
     transform: scale(1.12);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--gw-accent) 0%, transparent);
   }
+}
+
+/* Ref pills sit inside a body with `user-select: none`; WebKit/WebView2 then
+   refuses to start a native HTML5 drag unless the element opts in explicitly. */
+.wyrm-draggable {
+  -webkit-user-drag: element;
+  user-select: none;
 }
 
 /* A ref pill that will accept the current drag: its whole border pulses so the

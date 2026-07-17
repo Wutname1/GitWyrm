@@ -99,7 +99,7 @@ export function WyrmExplosion({ blast }: { blast: number }) {
 
     setShards(next)
     setShowLogo(true)
-    const t1 = setTimeout(() => setShowLogo(false), 10500)
+    const t1 = setTimeout(() => setShowLogo(false), 2400)
     const t2 = setTimeout(() => setShards([]), 2600)
     return () => {
       clearTimeout(t1)
@@ -116,7 +116,7 @@ export function WyrmExplosion({ blast }: { blast: number }) {
           src={logoUrl}
           alt=""
           draggable={false}
-          className="absolute left-1/2 top-1/2 size-[26rem] -translate-x-1/2 -translate-y-1/2 wyrm-blast-logo"
+          className="absolute left-1/2 top-1/2 size-[26rem] wyrm-blast-logo"
         />
       )}
       {shards.map((s) => (
