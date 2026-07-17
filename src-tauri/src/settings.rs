@@ -83,6 +83,10 @@ pub struct Settings {
   /// Commit-graph column order and visibility.
   #[serde(default)]
   pub column_layout: Option<ColumnLayout>,
+  /// Default action for the commit button: "commit" or "commit_push". None
+  /// falls back to plain commit. Validated on the frontend.
+  #[serde(default)]
+  pub commit_button_mode: Option<String>,
 }
 
 fn default_update_channel() -> UpdateChannel {
@@ -103,6 +107,7 @@ impl Default for Settings {
       ai_model: None,
       ai_instruction: None,
       column_layout: None,
+      commit_button_mode: None,
     }
   }
 }

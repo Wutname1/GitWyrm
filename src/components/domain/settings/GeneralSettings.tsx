@@ -1,5 +1,9 @@
 import { Input } from '@/components/ui/input'
-import { useWorkspaceStore, type BranchSwitchMode } from '@/stores/workspaceStore'
+import {
+  useWorkspaceStore,
+  type BranchSwitchMode,
+  type CommitButtonMode,
+} from '@/stores/workspaceStore'
 import { FolderSetting, SettingRow } from './SettingRow'
 
 const selectClass =
@@ -11,6 +15,11 @@ const branchSwitchHints: Record<BranchSwitchMode, string> = {
   refuse: 'Switching is blocked while you have uncommitted changes.',
 }
 
+const commitButtonHints: Record<CommitButtonMode, string> = {
+  commit: 'The commit button just commits. You can push later from the toolbar.',
+  commit_push: 'The commit button commits, then pushes to your branch in one step.',
+}
+
 export function GeneralSettings() {
   const codeFolder = useWorkspaceStore((s) => s.codeFolder)
   const setCodeFolder = useWorkspaceStore((s) => s.setCodeFolder)
@@ -18,6 +27,8 @@ export function GeneralSettings() {
   const setCloneDirectory = useWorkspaceStore((s) => s.setCloneDirectory)
   const branchSwitchMode = useWorkspaceStore((s) => s.branchSwitchMode)
   const setBranchSwitchMode = useWorkspaceStore((s) => s.setBranchSwitchMode)
+  const commitButtonMode = useWorkspaceStore((s) => s.commitButtonMode)
+  const setCommitButtonMode = useWorkspaceStore((s) => s.setCommitButtonMode)
 
   return (
     <div>
@@ -49,6 +60,16 @@ export function GeneralSettings() {
           <option value="auto_stash">Stash my changes and bring them along</option>
           <option value="carry">Carry my changes over (like git checkout)</option>
           <option value="refuse">Don't let me switch with changes</option>
+        </select>
+      </SettingRow>
+      <SettingRow label="Commit button" hint={commitButtonHints[commitButtonMode]}>
+        <select
+          className={selectClass}
+          value={commitButtonMode}
+          onChange={(e) => setCommitButtonMode(e.target.value as CommitButtonMode)}
+        >
+          <option value="commit">Commit only</option>
+          <option value="commit_push">Commit and push</option>
         </select>
       </SettingRow>
     </div>

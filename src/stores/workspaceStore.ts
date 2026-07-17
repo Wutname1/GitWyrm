@@ -10,6 +10,7 @@ export interface RecentRepo {
 }
 
 export type UpdateChannel = 'stable' | 'beta'
+export type CommitButtonMode = 'commit' | 'commit_push'
 export type { BranchSwitchMode }
 
 interface WorkspaceState {
@@ -37,6 +38,8 @@ interface WorkspaceState {
   columnOrder: ColumnId[]
   /** Commit-graph columns the user has hidden (persisted). */
   hiddenColumns: ColumnId[]
+  /** Default action for the commit button (persisted). */
+  commitButtonMode: CommitButtonMode
   /** True once settings.json has been read on launch. */
   hydrated: boolean
 
@@ -49,6 +52,7 @@ interface WorkspaceState {
   setBranchSwitchMode: (mode: BranchSwitchMode) => void
   setAiSelection: (provider: string | null, model: string | null) => void
   setAiInstruction: (instruction: string | null) => void
+  setCommitButtonMode: (mode: CommitButtonMode) => void
   /** Move a column to a new index in the display order. */
   reorderColumn: (id: ColumnId, toIndex: number) => void
   /** Show or hide a column. */
@@ -73,6 +77,7 @@ function toSettings(s: WorkspaceState): Settings {
     ai_model: s.aiModel,
     ai_instruction: s.aiInstruction,
     column_layout: { order: s.columnOrder, hidden: s.hiddenColumns },
+    commit_button_mode: s.commitButtonMode,
   }
 }
 
@@ -132,6 +137,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   aiInstruction: null,
   columnOrder: DEFAULT_COLUMN_ORDER,
   hiddenColumns: [],
+  commitButtonMode: 'commit',
   hydrated: false,
 
   addRepo: (repo) => {
@@ -184,6 +190,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ aiInstruction: instruction })
     schedulePersist()
   },
+  setCommitButtonMode: (mode) => {
+    set({ commitButtonMode: mode })
+    schedulePersist()
+  },
   reorderColumn: (id, toIndex) => {
     set((s) => {
       const from = s.columnOrder.indexOf(id)
@@ -222,6 +232,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         aiInstruction: settings.ai_instruction ?? null,
         columnOrder: normalizeOrder(settings.column_layout?.order),
         hiddenColumns: normalizeHidden(settings.column_layout?.hidden),
+        commitButtonMode: settings.commit_button_mode === 'commit_push' ? 'commit_push' : 'commit',
         hydrated: true,
       })
     }

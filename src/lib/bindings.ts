@@ -970,7 +970,12 @@ ai_instruction?: string | null;
 /**
  * Commit-graph column order and visibility.
  */
-column_layout?: ColumnLayout | null }
+column_layout?: ColumnLayout | null; 
+/**
+ * Default action for the commit button: "commit" or "commit_push". None
+ * falls back to plain commit. Validated on the frontend.
+ */
+commit_button_mode?: string | null }
 export type StashInfo = { index: number; message: string }
 export type StatusCode = "A" | "M" | "D" | "R" | "!"
 export type TagInfo = { name: string }

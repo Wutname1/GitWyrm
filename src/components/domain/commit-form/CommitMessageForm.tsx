@@ -1,14 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, GitCommitHorizontal, Sparkles } from 'lucide-react'
+import { Check, ChevronDown, GitCommitHorizontal, Sparkles, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import logoUrl from '@/assets/logo.png'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useAiConfigured, useAiMutations } from '@/hooks/useAi'
 import { useBranches, useStatus } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
-import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
+import {
+  useActiveRepo,
+  useWorkspaceStore,
+  type CommitButtonMode,
+} from '@/stores/workspaceStore'
 import { useUiStore } from '@/stores/uiStore'
 
 export function CommitMessageForm() {
@@ -26,6 +39,8 @@ export function CommitMessageForm() {
   const aiProvider = useWorkspaceStore((s) => s.aiProvider)
   const aiModel = useWorkspaceStore((s) => s.aiModel)
   const showSettings = useUiStore((s) => s.showSettings)
+  const commitButtonMode = useWorkspaceStore((s) => s.commitButtonMode)
+  const setCommitButtonMode = useWorkspaceStore((s) => s.setCommitButtonMode)
   const aiReady =
     aiProvider != null &&
     aiModel != null &&
@@ -33,10 +48,12 @@ export function CommitMessageForm() {
 
   const stagedCount = status.data?.staged.length ?? 0
   const currentBranch = branches.data?.local.find((b) => b.is_head)?.name ?? 'HEAD'
+  const pushPending = m.push.isPending
   const canCommit =
     stagedCount > 0 &&
     msg.trim().length > 0 &&
     !m.createCommit.isPending &&
+    !pushPending &&
     !ai.generate.isPending
 
   useEffect(
@@ -46,7 +63,7 @@ export function CommitMessageForm() {
     []
   )
 
-  const doCommit = () => {
+  const doCommit = (mode: CommitButtonMode = commitButtonMode) => {
     if (!canCommit) {
       toast(stagedCount ? 'Enter a commit message' : 'Stage files to commit')
       return
@@ -57,6 +74,7 @@ export function CommitMessageForm() {
         onSuccess: () => {
           setMsg('')
           setDesc('')
+          if (mode === 'commit_push') m.push.mutate()
         },
       }
     )
@@ -168,18 +186,71 @@ export function CommitMessageForm() {
           </div>
         )}
       </div>
-      <button
-        onClick={doCommit}
+      <div
         className={cn(
-          'flex h-[34px] w-full items-center justify-center gap-2 rounded-md border text-[12.5px] font-semibold transition-colors',
+          'flex h-[34px] w-full overflow-hidden rounded-md border transition-colors',
           canCommit
-            ? 'cursor-pointer border-primary/50 bg-soft text-primary hover:border-primary hover:bg-primary hover:text-primary-foreground'
+            ? 'border-primary/50 bg-soft text-primary hover:border-primary'
             : 'cursor-not-allowed border-transparent bg-panel3 text-muted-foreground'
         )}
       >
-        <GitCommitHorizontal size={15} strokeWidth={2} />
-        Commit {stagedCount} file{stagedCount === 1 ? '' : 's'} to {currentBranch}
-      </button>
+        <button
+          onClick={() => doCommit()}
+          disabled={!canCommit}
+          className={cn(
+            'flex flex-1 items-center justify-center gap-2 text-[12.5px] font-semibold transition-colors',
+            canCommit
+              ? 'cursor-pointer hover:bg-primary hover:text-primary-foreground'
+              : 'cursor-not-allowed'
+          )}
+        >
+          {commitButtonMode === 'commit_push' ? (
+            <Upload size={14} strokeWidth={2} />
+          ) : (
+            <GitCommitHorizontal size={15} strokeWidth={2} />
+          )}
+          {pushPending
+            ? 'Pushing…'
+            : commitButtonMode === 'commit_push'
+              ? `Commit & push to ${currentBranch}`
+              : `Commit ${stagedCount} file${stagedCount === 1 ? '' : 's'} to ${currentBranch}`}
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="Change default commit action"
+              title="Change default commit action"
+              className={cn(
+                'flex w-[30px] items-center justify-center border-l transition-colors',
+                canCommit
+                  ? 'cursor-pointer border-primary/40 hover:bg-primary hover:text-primary-foreground'
+                  : 'cursor-pointer border-border/60 text-sub hover:bg-panel2 hover:text-foreground'
+              )}
+            >
+              <ChevronDown size={14} strokeWidth={2.2} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel className="text-xs text-sub">
+              Default commit button action
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuRadioGroup
+              value={commitButtonMode}
+              onValueChange={(v) => setCommitButtonMode(v as CommitButtonMode)}
+            >
+              <DropdownMenuRadioItem value="commit" className="text-xs">
+                <GitCommitHorizontal size={13} className="text-current" />
+                Commit only
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="commit_push" className="text-xs">
+                <Upload size={13} className="text-current" />
+                Commit & push
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   )
 }
