@@ -11,6 +11,7 @@ export type ModalKind =
   | 'merge'
   | 'remote-sync'
   | 'newBranch'
+  | 'newTag'
   | 'remotes'
   | null
 
@@ -31,12 +32,14 @@ interface UiState {
   mergeSource: string | null
   syncSource: string | null
   syncTarget: string | null
+  tagTargetSha: string | null
   settingsSection: SettingsSection
   changesFocusNonce: number
 
   selectCommit: (sha: string | null) => void
   focusChanges: () => void
   openMerge: (source?: string) => void
+  openNewTag: (sha?: string) => void
   openRemoteSync: (source: string, target: string) => void
   openDiff: (request: DiffRequest) => void
   closeDiff: () => void
@@ -67,12 +70,14 @@ export const useUiStore = create<UiState>((set) => ({
   mergeSource: null,
   syncSource: null,
   syncTarget: null,
+  tagTargetSha: null,
   settingsSection: 'general',
   changesFocusNonce: 0,
 
   selectCommit: (sha) => set({ selectedSha: sha }),
   focusChanges: () => set((s) => ({ changesFocusNonce: s.changesFocusNonce + 1 })),
   openMerge: (source) => set({ activeModal: 'merge', mergeSource: source ?? null }),
+  openNewTag: (sha) => set({ activeModal: 'newTag', tagTargetSha: sha ?? null }),
   openRemoteSync: (source, target) =>
     set({ activeModal: 'remote-sync', syncSource: source, syncTarget: target }),
   openDiff: (request) => set({ diffRequest: request, centerView: 'diff' }),
@@ -88,6 +93,7 @@ export const useUiStore = create<UiState>((set) => ({
   toggleSection: (key) =>
     set((s) => ({ sectionOpen: { ...s.sectionOpen, [key]: !s.sectionOpen[key] } })),
   openModal: (kind) => set({ activeModal: kind }),
-  closeModal: () => set({ activeModal: null, syncSource: null, syncTarget: null }),
+  closeModal: () =>
+    set({ activeModal: null, syncSource: null, syncTarget: null, tagTargetSha: null }),
   setSettingsSection: (section) => set({ settingsSection: section }),
 }))

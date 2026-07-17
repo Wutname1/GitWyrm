@@ -85,6 +85,58 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  const deleteBranch = useMutation({
+    mutationFn: async (name: string) => {
+      await unwrap(await commands.deleteBranch(id, name))
+      return name
+    },
+    onSuccess: (name) => {
+      invalidate(qc, id, ['branches'])
+      toast(`Deleted branch ${name}`)
+    },
+    onError,
+  })
+
+  const createTag = useMutation({
+    mutationFn: async (args: { name: string; sha: string; message: string }) => {
+      await unwrap(await commands.createTag(id, args.name, args.sha, args.message))
+      return args.name
+    },
+    onSuccess: (name) => {
+      invalidate(qc, id, ['tags', 'log'])
+      toast(`Created tag ${name}`)
+    },
+    onError,
+  })
+
+  const deleteTag = useMutation({
+    mutationFn: async (name: string) => {
+      await unwrap(await commands.deleteTag(id, name))
+      return name
+    },
+    onSuccess: (name) => {
+      invalidate(qc, id, ['tags', 'log'])
+      toast(`Deleted tag ${name}`)
+    },
+    onError,
+  })
+
+  // Hand the repo off to an external program. No cache to touch.
+  const revealInFileManager = useMutation({
+    mutationFn: async () => unwrap(await commands.revealInFileManager(id)),
+    onError,
+  })
+
+  const openInEditor = useMutation({
+    mutationFn: async () => unwrap(await commands.openInEditor(id)),
+    onError,
+  })
+
+  const openInTerminal = useMutation({
+    mutationFn: async () => unwrap(await commands.openInTerminal(id)),
+    onError,
+  })
+
   const checkout = useMutation({
     mutationFn: async (name: string) => {
       const mode = useWorkspaceStore.getState().branchSwitchMode
@@ -407,6 +459,12 @@ export function useGitMutations(repoId: string | null) {
     discardAll,
     createCommit,
     createBranch,
+    deleteBranch,
+    createTag,
+    deleteTag,
+    revealInFileManager,
+    openInEditor,
+    openInTerminal,
     checkout,
     stashSave,
     stashPop,

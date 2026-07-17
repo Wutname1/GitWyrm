@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { ChevronRight, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SidebarSectionData, SectionItem } from '@/lib/types'
@@ -9,6 +10,12 @@ interface SidebarSectionProps {
   currentBranch: string
   onItemClick: (section: SidebarSectionData, item: SectionItem) => void
   onItemContextMenu?: (section: SidebarSectionData, item: SectionItem, e: React.MouseEvent) => void
+  /** Wraps a row in a right-click menu. Return null for items with no actions. */
+  renderItemMenu?: (
+    section: SidebarSectionData,
+    item: SectionItem,
+    row: ReactNode
+  ) => ReactNode
   /** When set, a `+` button appears on hover in the section header. */
   onAdd?: () => void
   addLabel?: string
@@ -19,6 +26,7 @@ export function SidebarSection({
   currentBranch,
   onItemClick,
   onItemContextMenu,
+  renderItemMenu,
   onAdd,
   addLabel,
 }: SidebarSectionProps) {
@@ -60,18 +68,21 @@ export function SidebarSection({
       </div>
       {open && (
         <div className="pb-1">
-          {section.items.map((item) => (
-            <SectionItemRow
-              key={item.name}
-              section={section}
-              item={item}
-              isCurrent={section.type === 'branch' && item.name === currentBranch}
-              onClick={() => onItemClick(section, item)}
-              onContextMenu={
-                onItemContextMenu ? (e) => onItemContextMenu(section, item, e) : undefined
-              }
-            />
-          ))}
+          {section.items.map((item) => {
+            const row = (
+              <SectionItemRow
+                section={section}
+                item={item}
+                isCurrent={section.type === 'branch' && item.name === currentBranch}
+                onClick={() => onItemClick(section, item)}
+                onContextMenu={
+                  onItemContextMenu ? (e) => onItemContextMenu(section, item, e) : undefined
+                }
+              />
+            )
+            const wrapped = renderItemMenu?.(section, item, row)
+            return <div key={item.name}>{wrapped ?? row}</div>
+          })}
         </div>
       )}
     </div>

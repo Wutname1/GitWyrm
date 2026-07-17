@@ -43,6 +43,41 @@ async openLogsFolder() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Open the repo folder in the OS file manager (Explorer / Finder / xdg).
+ */
+async revealInFileManager(repoId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reveal_in_file_manager", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Open the repo in VS Code via its `code` launcher. Requires `code` on PATH
+ * (VS Code's "Shell Command: Install 'code' command in PATH").
+ */
+async openInEditor(repoId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_in_editor", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Open a terminal in the repo folder. Uses Windows Terminal if present,
+ * falling back to the classic console; a native terminal elsewhere.
+ */
+async openInTerminal(repoId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_in_terminal", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getSettings() : Promise<Result<Settings, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_settings") };
@@ -216,6 +251,41 @@ async createBranch(repoId: string, name: string, checkout: boolean) : Promise<Re
 }
 },
 /**
+ * Delete a local branch. Refuses to delete the branch HEAD is on.
+ */
+async deleteBranch(repoId: string, name: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_branch", { repoId, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Create a tag. `sha` is the commit to tag (empty = current HEAD). When
+ * `message` is non-empty the tag is annotated (carries author + message);
+ * otherwise it is a lightweight tag pointing straight at the commit.
+ */
+async createTag(repoId: string, name: string, sha: string, message: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_tag", { repoId, name, sha, message }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a tag by name.
+ */
+async deleteTag(repoId: string, name: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_tag", { repoId, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Reset the current branch to a commit. Hard reset discards uncommitted work,
  * so it is refused over a dirty tree. Returns where the branch pointed before
  * the reset, so the caller can offer an undo. Soft/Mixed keep the working tree.
@@ -294,6 +364,11 @@ async gitPush(repoId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Push the current branch, overwriting the remote with `--force-with-lease`.
+ * Lease-based so it refuses to clobber remote commits the user hasn't fetched;
+ * used after a local rewind/rebase leaves the branch diverged from its upstream.
+ */
 async gitPushForce(repoId: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_push_force", { repoId }) };
@@ -302,6 +377,13 @@ async gitPushForce(repoId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Rebase the current branch onto `onto` (e.g. `origin/main`), replaying local
+ * commits on top. A clean rebase returns no conflicts. A rebase that hits
+ * conflicts leaves the repo paused (rebase-in-progress) and returns the
+ * conflicted paths instead of erroring, so the frontend can guide the user.
+ * Refuses to start over a dirty working tree.
+ */
 async gitRebase(repoId: string, onto: string) : Promise<Result<RebaseResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_rebase", { repoId, onto }) };
@@ -318,6 +400,10 @@ async gitClone(url: string, destination: string) : Promise<Result<string, string
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * List configured remotes with their URLs and remote-tracking branches.
+ * Local config read only; no network.
+ */
 async listRemotes(repoId: string) : Promise<Result<RemoteInfo[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_remotes", { repoId }) };
@@ -326,6 +412,9 @@ async listRemotes(repoId: string) : Promise<Result<RemoteInfo[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Add a new remote. Fails if the name is already in use.
+ */
 async addRemote(repoId: string, name: string, url: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_remote", { repoId, name, url }) };
@@ -334,6 +423,10 @@ async addRemote(repoId: string, name: string, url: string) : Promise<Result<null
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Rename a remote. Also rewrites its remote-tracking refs and any branch
+ * upstreams that referenced the old name.
+ */
 async renameRemote(repoId: string, name: string, newName: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("rename_remote", { repoId, name, newName }) };
@@ -342,6 +435,9 @@ async renameRemote(repoId: string, name: string, newName: string) : Promise<Resu
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Change a remote's fetch URL.
+ */
 async setRemoteUrl(repoId: string, name: string, url: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_remote_url", { repoId, name, url }) };
@@ -350,6 +446,9 @@ async setRemoteUrl(repoId: string, name: string, url: string) : Promise<Result<n
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Delete a remote and its remote-tracking branches.
+ */
 async removeRemote(repoId: string, name: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("remove_remote", { repoId, name }) };
@@ -358,6 +457,11 @@ async removeRemote(repoId: string, name: string) : Promise<Result<null, string>>
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Set a remote-tracking branch as the upstream ("set target") of the current
+ * local branch. `remote_branch` is the full remote-tracking name, e.g.
+ * `origin/main`.
+ */
 async setUpstream(repoId: string, remoteBranch: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_upstream", { repoId, remoteBranch }) };
@@ -513,6 +617,12 @@ async aiRemoveProvider(provider: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * The models the user can actually use for a provider. Asks the provider's
+ * `/models` endpoint when a key is configured (so Copilot reflects plan
+ * entitlements and other providers reflect key access), falling back to the
+ * static catalog list.
+ */
 async aiListModels(provider: string) : Promise<Result<CatalogModel[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("ai_list_models", { provider }) };
@@ -520,6 +630,13 @@ async aiListModels(provider: string) : Promise<Result<CatalogModel[], string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * The built-in commit instruction, exposed so the settings UI can show it as
+ * the placeholder and restore it with "Reset to default".
+ */
+async aiDefaultInstruction() : Promise<string> {
+    return await TAURI_INVOKE("ai_default_instruction");
 },
 async aiCopilotDeviceStart() : Promise<Result<DeviceCodeInfo, string>> {
     try {
@@ -582,7 +699,13 @@ export type BranchSwitchMode =
  */
 "refuse"
 export type BuildInfo = { version: string; build_date: string; git_hash: string; debug: boolean }
-export type CatalogModel = { id: string; name: string; enabled: boolean }
+export type CatalogModel = { id: string; name: string; 
+/**
+ * Whether the account can actually select this model. Always true for static
+ * catalog entries; a live Copilot list marks plan-gated models false so the
+ * picker can show them greyed out instead of hiding them.
+ */
+enabled: boolean }
 export type CatalogProvider = { id: string; name: string; base_url: string; dialect: Dialect; models: CatalogModel[] }
 /**
  * What happened to uncommitted changes during a branch switch.
@@ -706,16 +829,6 @@ fast_forwarded: boolean;
  */
 conflicts: string[] }
 /**
- * Outcome of a rebase. A clean rebase returns no conflicts; a paused rebase
- * (conflicts to resolve) lists the conflicted paths and leaves the repo in its
- * rebase-in-progress state.
- */
-export type RebaseResult = {
-/**
- * Paths left in a conflicted state; the rebase is paused until resolved.
- */
-conflicts: string[] }
-/**
  * Current in-progress operation state of the repo (merge or cherry-pick).
  */
 export type MergeState = { 
@@ -748,6 +861,16 @@ export type PollResult =
  * User has not finished authorizing yet; poll again after `interval`.
  */
 { status: "pending"; interval: number }
+/**
+ * Outcome of a rebase. A clean rebase returns no conflicts; a paused rebase
+ * (conflicts to resolve) lists the conflicted paths and leaves the repo in its
+ * rebase-in-progress state.
+ */
+export type RebaseResult = { 
+/**
+ * Paths left in a conflicted state; the rebase is paused until resolved.
+ */
+conflicts: string[] }
 export type RecentRepo = { name: string; path: string }
 export type RefInfo = { name: string; type: RefKind }
 export type RefKind = "head" | "branch" | "remote" | "tag"
@@ -763,6 +886,19 @@ branch: string;
  * Full sha the branch pointed at before the move.
  */
 previous_sha: string }
+/**
+ * A configured remote and the remote-tracking branches under it.
+ */
+export type RemoteInfo = { name: string; url: string; 
+/**
+ * Push URL when it differs from the fetch URL, else None.
+ */
+push_url: string | null; 
+/**
+ * Short branch names under this remote (without the `<remote>/` prefix),
+ * e.g. `main`, `dependabot/npm/foo`. Excludes the symbolic HEAD ref.
+ */
+branches: string[] }
 export type RepoChangedPayload = { repo_id: string }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
 /**
@@ -812,10 +948,14 @@ open_repos?: string[];
 /**
  * Id of the repo that was active when the app last closed.
  */
-active_repo_path?: string | null; recents?: RecentRepo[]; code_folder?: string | null; clone_directory?: string | null; update_channel?: UpdateChannel; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null }
+active_repo_path?: string | null; recents?: RecentRepo[]; code_folder?: string | null; clone_directory?: string | null; update_channel?: UpdateChannel; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null; 
+/**
+ * Custom system instruction for commit-message generation. None uses the
+ * built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).
+ */
+ai_instruction?: string | null }
 export type StashInfo = { index: number; message: string }
 export type StatusCode = "A" | "M" | "D" | "R" | "!"
-export type RemoteInfo = { name: string; url: string; push_url: string | null; branches: string[] }
 export type TagInfo = { name: string }
 export type UpdateChannel = "stable" | "beta"
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }

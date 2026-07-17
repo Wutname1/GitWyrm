@@ -9,6 +9,7 @@ import { OnboardingModal } from '@/components/modals/OnboardingModal'
 import { DirectionModal } from '@/components/modals/DirectionModal'
 import { RemoteSyncModal } from '@/components/modals/RemoteSyncModal'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
+import { NewTagModal } from '@/components/modals/NewTagModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { commands } from '@/lib/bindings'
@@ -92,6 +93,7 @@ function AppInner() {
       <DirectionModal />
       <RemoteSyncModal />
       <NewBranchModal />
+      <NewTagModal />
       <RemotesModal />
       <Toaster position="bottom-center" />
     </>

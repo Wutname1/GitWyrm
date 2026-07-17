@@ -7,7 +7,12 @@ use std::path::PathBuf;
 use git2::{Repository, Signature};
 
 fn scratch_repo() -> (PathBuf, Repository) {
-  let dir = std::env::temp_dir().join(format!("gitwyrm-test-{}", std::process::id()));
+  scratch_repo_named("default")
+}
+
+fn scratch_repo_named(label: &str) -> (PathBuf, Repository) {
+  let dir =
+    std::env::temp_dir().join(format!("gitwyrm-test-{}-{label}", std::process::id()));
   let _ = fs::remove_dir_all(&dir);
   fs::create_dir_all(&dir).unwrap();
   let repo = Repository::init(&dir).unwrap();
@@ -96,6 +101,67 @@ fn full_stage_commit_stash_branch_cycle() {
   repo.checkout_tree(&obj, None).unwrap();
   repo.set_head("refs/heads/feature/x").unwrap();
   assert_eq!(repo.head().unwrap().shorthand().unwrap(), "feature/x");
+
+  let _ = fs::remove_dir_all(&dir);
+}
+
+/// Mirrors the tag + branch-delete command logic: lightweight/annotated tag
+/// creation, tag deletion, and deleting a non-current local branch.
+#[test]
+fn tag_and_branch_delete_cycle() {
+  let (dir, repo) = scratch_repo_named("tags");
+
+  fs::write(dir.join("readme.md"), "hello\n").unwrap();
+  let mut index = repo.index().unwrap();
+  index.add_path(std::path::Path::new("readme.md")).unwrap();
+  index.write().unwrap();
+  let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+  repo
+    .commit(Some("HEAD"), &sig(), &sig(), "initial", &tree, &[])
+    .unwrap();
+
+  let head = repo.head().unwrap().peel_to_commit().unwrap().into_object();
+
+  // Lightweight tag (empty message path).
+  repo.tag_lightweight("v0.1.0", &head, false).unwrap();
+  // Annotated tag (non-empty message path).
+  repo.tag("v0.2.0", &head, &sig(), "second release", false).unwrap();
+
+  let names: Vec<String> = repo
+    .tag_names(None)
+    .unwrap()
+    .iter()
+    .flatten()
+    .map(str::to_string)
+    .collect();
+  assert!(names.contains(&"v0.1.0".to_string()));
+  assert!(names.contains(&"v0.2.0".to_string()));
+
+  // Delete one tag.
+  repo.tag_delete("v0.1.0").unwrap();
+  let after: Vec<String> = repo
+    .tag_names(None)
+    .unwrap()
+    .iter()
+    .flatten()
+    .map(str::to_string)
+    .collect();
+  assert!(!after.contains(&"v0.1.0".to_string()));
+  assert!(after.contains(&"v0.2.0".to_string()));
+
+  // Create a branch, confirm HEAD branch can't be deleted, then delete the other.
+  let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+  repo.branch("feature/y", &head_commit, false).unwrap();
+
+  let current = repo.head().unwrap().shorthand().unwrap().to_string();
+  let current_branch = repo.find_branch(&current, git2::BranchType::Local).unwrap();
+  assert!(current_branch.is_head(), "HEAD guard relies on is_head");
+  // The command refuses this; here we just confirm the flag is what it checks.
+
+  let mut feature = repo.find_branch("feature/y", git2::BranchType::Local).unwrap();
+  assert!(!feature.is_head());
+  feature.delete().unwrap();
+  assert!(repo.find_branch("feature/y", git2::BranchType::Local).is_err());
 
   let _ = fs::remove_dir_all(&dir);
 }

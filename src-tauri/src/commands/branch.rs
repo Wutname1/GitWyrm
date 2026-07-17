@@ -222,6 +222,94 @@ pub async fn list_tags(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Create a tag. `sha` is the commit to tag (empty = current HEAD). When
+/// `message` is non-empty the tag is annotated (carries author + message);
+/// otherwise it is a lightweight tag pointing straight at the commit.
+#[tauri::command]
+#[specta::specta]
+pub async fn create_tag(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  name: String,
+  sha: String,
+  message: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+
+    let name = name.trim();
+    if name.is_empty() {
+      return Err(AppError::Other("tag name is required".into()));
+    }
+
+    // Resolve the target commit: an explicit sha, or HEAD when none is given.
+    let target = if sha.trim().is_empty() {
+      repo
+        .head()?
+        .peel_to_commit()
+        .map_err(|_| AppError::Other("repository has no commits yet".into()))?
+        .into_object()
+    } else {
+      let oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+      repo.find_object(oid, None)?
+    };
+
+    let message = message.trim();
+    if message.is_empty() {
+      repo.tag_lightweight(name, &target, false)?;
+    } else {
+      let signature = repo.signature()?;
+      repo.tag(name, &target, &signature, message, false)?;
+    }
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Delete a tag by name.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_tag(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  name: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    repo.tag_delete(name.trim())?;
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Delete a local branch. Refuses to delete the branch HEAD is on.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_branch(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  name: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let mut branch = repo.find_branch(name.trim(), BranchType::Local)?;
+    if branch.is_head() {
+      return Err(AppError::Other(
+        "that is the branch you're on; switch to another branch first".into(),
+      ));
+    }
+    branch.delete()?;
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// Reset the current branch to a commit. Hard reset discards uncommitted work,
 /// so it is refused over a dirty tree. Returns where the branch pointed before
 /// the reset, so the caller can offer an undo. Soft/Mixed keep the working tree.

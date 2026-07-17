@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import { Copy, ExternalLink, GitBranchPlus, Info, MoveVertical, RotateCcw } from 'lucide-react'
+import { Copy, ExternalLink, GitBranchPlus, Info, MoveVertical, RotateCcw, Tag } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CommitEntry, ResetMode } from '@/lib/bindings'
 import {
@@ -17,6 +17,7 @@ import {
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { useBranches, useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
 interface CommitContextMenuProps {
@@ -32,6 +33,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
   const branches = useBranches(repo?.id ?? null)
   const mergeState = useMergeState(repo?.id ?? null)
   const m = useGitMutations(repo?.id ?? null)
+  const openNewTag = useUiStore((s) => s.openNewTag)
   const [pending, setPending] = useState<Pending>(null)
 
   const current = branches.data?.local.find((b) => b.is_head)
@@ -77,6 +79,10 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
           <ContextMenuItem onSelect={() => m.openOnGitHub.mutate(commit.sha)}>
             <ExternalLink />
             Open on GitHub
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => openNewTag(commit.sha)}>
+            <Tag />
+            Tag this commit
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem disabled={!canCherryPick} onSelect={() => m.cherryPick.mutate(commit.sha)}>
