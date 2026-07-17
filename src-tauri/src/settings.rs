@@ -64,6 +64,10 @@ pub struct Settings {
   pub ai_provider: Option<String>,
   #[serde(default)]
   pub ai_model: Option<String>,
+  /// Custom system instruction for commit-message generation. None uses the
+  /// built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).
+  #[serde(default)]
+  pub ai_instruction: Option<String>,
 }
 
 fn default_update_channel() -> UpdateChannel {
@@ -82,6 +86,7 @@ impl Default for Settings {
       branch_switch_mode: default_branch_switch_mode(),
       ai_provider: None,
       ai_model: None,
+      ai_instruction: None,
     }
   }
 }

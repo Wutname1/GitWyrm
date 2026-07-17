@@ -6,7 +6,8 @@ use serde::Serialize;
 use specta::Type;
 use tauri::State;
 
-use crate::ai::{auth, catalog, client, copilot, models};
+use crate::ai::{auth, catalog, client, copilot, models, prompt};
+use crate::settings;
 use crate::error::AppError;
 use crate::git::shell::run_git;
 use crate::state::RepoManager;
@@ -104,12 +105,13 @@ pub struct GeneratedCommitMessage {
   pub description: String,
 }
 
-const SYSTEM_PROMPT: &str = "You write git commit messages. Given a staged diff and recent \
-commit subjects for style reference, respond with the commit message only: a single summary \
-line (imperative mood, no trailing period, under 72 characters), then, only when the change \
-is not self-explanatory, a blank line and a short body explaining what changed and why. \
-Match the style conventions visible in the recent subjects (prefixes, casing). Do not use \
-markdown, code fences, or any commentary outside the commit message itself.";
+/// The built-in commit instruction, exposed so the settings UI can show it as
+/// the placeholder and restore it with "Reset to default".
+#[tauri::command]
+#[specta::specta]
+pub fn ai_default_instruction() -> String {
+  prompt::default_instruction()
+}
 
 fn truncate_diff(diff: &str) -> String {
   if diff.len() <= MAX_DIFF_CHARS {
@@ -154,6 +156,11 @@ pub async fn generate_commit_message(
     .ok_or_else(|| AppError::Other(format!("no API key configured for {provider}")))?;
   let cat = catalog::find(&app, &provider).await?;
 
+  let instruction = settings::get_settings(app.clone())?
+    .ai_instruction
+    .filter(|s| !s.trim().is_empty())
+    .unwrap_or_else(prompt::default_instruction);
+
   let (diff, log) = tauri::async_runtime::spawn_blocking(move || {
     let diff = run_git(Some(&repo_path), &["diff", "--cached", "--no-color"])?.stdout;
     let log = run_git(Some(&repo_path), &["log", "--oneline", "--no-decorate", "-10"])
@@ -178,7 +185,7 @@ pub async fn generate_commit_message(
     provider: &cat,
     bearer: bearer_for(&info),
     model: &model,
-    system: SYSTEM_PROMPT,
+    system: &instruction,
     user: &user,
     max_tokens: 1024,
   })

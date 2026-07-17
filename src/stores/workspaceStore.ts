@@ -30,6 +30,8 @@ interface WorkspaceState {
   aiProvider: string | null
   /** Model id within the selected AI provider (persisted). */
   aiModel: string | null
+  /** Custom commit-generation instruction; null uses the built-in default (persisted). */
+  aiInstruction: string | null
   /** True once settings.json has been read on launch. */
   hydrated: boolean
 
@@ -41,6 +43,7 @@ interface WorkspaceState {
   setUpdateChannel: (channel: UpdateChannel) => void
   setBranchSwitchMode: (mode: BranchSwitchMode) => void
   setAiSelection: (provider: string | null, model: string | null) => void
+  setAiInstruction: (instruction: string | null) => void
   /** Reads settings.json once and hydrates the store; returns the raw settings for launch-time restore. */
   hydrate: () => Promise<Settings>
 }
@@ -57,6 +60,7 @@ function toSettings(s: WorkspaceState): Settings {
     branch_switch_mode: s.branchSwitchMode,
     ai_provider: s.aiProvider,
     ai_model: s.aiModel,
+    ai_instruction: s.aiInstruction,
   }
 }
 
@@ -82,6 +86,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   branchSwitchMode: 'auto_stash',
   aiProvider: null,
   aiModel: null,
+  aiInstruction: null,
   hydrated: false,
 
   addRepo: (repo) => {
@@ -130,6 +135,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ aiProvider: provider, aiModel: model })
     schedulePersist()
   },
+  setAiInstruction: (instruction) => {
+    set({ aiInstruction: instruction })
+    schedulePersist()
+  },
 
   hydrate: async () => {
     const settings = unwrap(await commands.getSettings())
@@ -142,6 +151,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         branchSwitchMode: settings.branch_switch_mode ?? 'auto_stash',
         aiProvider: settings.ai_provider ?? null,
         aiModel: settings.ai_model ?? null,
+        aiInstruction: settings.ai_instruction ?? null,
         hydrated: true,
       })
     }

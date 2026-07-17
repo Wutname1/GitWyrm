@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Trash2 } from 'lucide-react'
+import { Check, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import {
   useAiCatalog,
   useAiConfigured,
+  useAiDefaultInstruction,
   useAiModels,
   useAiMutations,
   useCopilotSignIn,
@@ -258,6 +260,71 @@ export function AiSettings() {
           </div>
         </div>
       )}
+
+      <InstructionSetting />
+    </div>
+  )
+}
+
+/** Editable system instruction with a reset-to-default control. */
+function InstructionSetting() {
+  const defaultQuery = useAiDefaultInstruction()
+  const aiInstruction = useWorkspaceStore((s) => s.aiInstruction)
+  const setAiInstruction = useWorkspaceStore((s) => s.setAiInstruction)
+
+  const defaultText = defaultQuery.data ?? ''
+  // Local draft so typing is smooth; committed to the store on blur.
+  const [draft, setDraft] = useState<string | null>(null)
+  const value = draft ?? aiInstruction ?? defaultText
+  const isCustom = aiInstruction != null && aiInstruction.trim() !== ''
+
+  const commit = (text: string) => {
+    const trimmed = text.trim()
+    // Treat "same as default" or empty as "use default" (null).
+    setAiInstruction(trimmed === '' || trimmed === defaultText.trim() ? null : text)
+  }
+
+  const reset = () => {
+    setDraft(defaultText)
+    setAiInstruction(null)
+  }
+
+  return (
+    <div className="flex items-start gap-6 py-3">
+      <div className="w-52 flex-none">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-foreground">Instructions</span>
+          {isCustom && (
+            <span className="rounded bg-panel3 px-1.5 py-0.5 text-[9.5px] font-medium text-sub">
+              Customized
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 text-[10.5px] text-muted-foreground">
+          How the AI is told to write your commit messages.
+        </div>
+      </div>
+      <div className="min-w-0 flex-1 space-y-2">
+        <Textarea
+          value={value}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => draft != null && commit(draft)}
+          rows={8}
+          spellCheck={false}
+          className="resize-y bg-background px-2.5 py-2 font-mono text-[11px] leading-relaxed"
+          placeholder={defaultText}
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+          disabled={!isCustom || defaultText === ''}
+          onClick={reset}
+        >
+          <RotateCcw size={12} />
+          Reset to default
+        </Button>
+      </div>
     </div>
   )
 }

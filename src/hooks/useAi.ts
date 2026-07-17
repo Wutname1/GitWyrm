@@ -16,6 +16,15 @@ export function useAiCatalog(enabled = true) {
   })
 }
 
+export function useAiDefaultInstruction() {
+  return useQuery({
+    queryKey: ['ai-default-instruction'],
+    enabled: isTauri,
+    staleTime: Infinity,
+    queryFn: async () => await commands.aiDefaultInstruction(),
+  })
+}
+
 export function useAiConfigured() {
   return useQuery({
     queryKey: configuredKey,
