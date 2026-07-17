@@ -1,16 +1,24 @@
-@import 'tailwindcss';
-@import 'tw-animate-css';
-@import '@fontsource-variable/inter';
-@import '@fontsource/geist-mono';
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter";
+@import "@fontsource/geist-mono";
 
 @custom-variant dark (&:is(.dark *));
 
 @font-face {
-  font-family: 'Sora';
+  font-family: "Sora";
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url('./assets/fonts/Sora-SemiBold.ttf') format('truetype');
+  src: url("./assets/fonts/Sora-SemiBold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans Variable";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/IBMPlexSans-VariableFont.ttf") format("truetype");
 }
 
 .titlebar-no-drag {
@@ -62,9 +70,9 @@
 }
 
 @theme inline {
-  --font-sans: 'Inter Variable', system-ui, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
-  --font-wordmark: 'Sora', 'Inter Variable', system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans Variable", system-ui, sans-serif;
+  --font-mono: "Inter", ui-monospace, "SF Mono", monospace;
+  --font-wordmark: "Sora", "Inter Variable", system-ui, sans-serif;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -121,7 +129,8 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-size: 12px;
+    font-size: 13px;
+    font-weight: 400;
     user-select: none;
   }
   input,
@@ -146,4 +155,78 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+}
+
+/* GitWyrm logo easter egg: spring bounce on click, blast on rapid clicks */
+@keyframes wyrm-spring {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(0.72);
+  }
+  55% {
+    transform: scale(1.18);
+  }
+  75% {
+    transform: scale(0.94);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.wyrm-spring {
+  animation: wyrm-spring 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes wyrm-blast-logo {
+  0% {
+    transform: translate(-50%, -50%) scale(0.2) rotate(-8deg);
+    opacity: 0;
+  }
+  6% {
+    transform: translate(-50%, -50%) scale(1.15) rotate(4deg);
+    opacity: 1;
+  }
+  10% {
+    transform: translate(-50%, -50%) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  90% {
+    transform: translate(-50%, -50%) scale(1.05) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.25) rotate(0deg);
+    opacity: 0;
+  }
+}
+
+.wyrm-blast-logo {
+  animation: wyrm-blast-logo 10.5s ease-in-out forwards;
+  filter: drop-shadow(0 0 40px rgba(45, 212, 167, 0.55));
+}
+
+@keyframes wyrm-shard {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3) rotate(0deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty)))
+      scale(1) rotate(var(--rot));
+    opacity: 0;
+  }
+}
+
+.wyrm-shard {
+  animation: wyrm-shard 1.6s cubic-bezier(0.16, 0.8, 0.34, 1) forwards;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
