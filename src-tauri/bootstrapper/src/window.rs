@@ -28,6 +28,24 @@ const CLOSE_H: i32 = 32;
 const ERR_BTN_W: i32 = 110;
 const ERR_BTN_H: i32 = 44;
 
+// Cancel-confirmation overlay (centered card)
+const CONFIRM_W: i32 = 360;
+const CONFIRM_H: i32 = 160;
+const CONFIRM_X: i32 = (WND_W - CONFIRM_W) / 2;
+const CONFIRM_Y: i32 = (WND_H - CONFIRM_H) / 2;
+const CONFIRM_BTN_W: i32 = 130;
+const CONFIRM_BTN_H: i32 = 40;
+const CONFIRM_BTN_GAP: i32 = 16;
+const CONFIRM_YES_X: i32 = CONFIRM_X + CONFIRM_W - 24 - CONFIRM_BTN_W;
+const CONFIRM_NO_X: i32 = CONFIRM_YES_X - CONFIRM_BTN_GAP - CONFIRM_BTN_W;
+const CONFIRM_BTN_Y: i32 = CONFIRM_Y + CONFIRM_H - 24 - CONFIRM_BTN_H;
+
+// Wordmark colors: Git in #D7DEE7, Wyrm in #2DD4A7
+const WORDMARK_GIT: COLORREF = COLORREF(0x00E7DED7);
+const WORDMARK_WYRM: COLORREF = COLORREF(0x00A7D42D);
+const FONT_SIZE_WORDMARK_TITLE: i32 = -34;
+const FONT_SIZE_WORDMARK_TITLEBAR: i32 = -18;
+
 struct AppState {
     tx: Sender<DownloadMsg>,
     rx: std::sync::mpsc::Receiver<DownloadMsg>,
@@ -36,6 +54,8 @@ struct AppState {
     detail: String,
     error: String,
     font_title: HFONT,
+    font_wordmark_title: HFONT,
+    font_wordmark_titlebar: HFONT,
     font_tagline: HFONT,
     font_body: HFONT,
     font_small: HFONT,
@@ -46,10 +66,15 @@ struct AppState {
     anim_tick: u64,
     hover_close_x: bool,
     hover_close_btn: bool,
+    confirming_cancel: bool,
+    hover_confirm_yes: bool,
+    hover_confirm_no: bool,
     tracking_mouse: bool,
 }
 
 pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
+    load_private_fonts();
+
     let dry_run = std::env::args().any(|a| a == "--dry-run");
 
     // Replace the original channel with one we control,
@@ -71,6 +96,8 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
         detail: String::new(),
         error: String::new(),
         font_title: create_font(-32, 700),
+        font_wordmark_title: create_font_named(FONT_SIZE_WORDMARK_TITLE, 600, "Sora"),
+        font_wordmark_titlebar: create_font_named(FONT_SIZE_WORDMARK_TITLEBAR, 600, "Sora"),
         font_tagline: create_font(-20, 600),
         font_body: create_font(-17, 600),
         font_small: create_font(-15, 400),
@@ -81,6 +108,9 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
         anim_tick: 0,
         hover_close_x: false,
         hover_close_btn: false,
+        confirming_cancel: false,
+        hover_confirm_yes: false,
+        hover_confirm_no: false,
         tracking_mouse: false,
     });
 
@@ -344,9 +374,20 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             // Right content panel background
             fill_rect(mem_dc, PANEL_W, 0, WND_W - PANEL_W, WND_H, COLOR_PANEL);
 
-            // Title bar (icon + product name, over the right panel)
+            // Title bar (icon + wordmark, over the right panel)
             draw_logo(mem_dc, PANEL_W + 24, 12, 32, 32);
-            draw_text(mem_dc, "GitWyrm Setup", PANEL_W + 68, 18, 300, 24, s.font_body, COLOR_TEXT);
+            let wordmark_w = draw_wordmark(
+                mem_dc,
+                PANEL_W + 68,
+                16,
+                200,
+                24,
+                s.font_wordmark_titlebar,
+                FONT_SIZE_WORDMARK_TITLEBAR,
+                WORDMARK_GIT,
+                WORDMARK_WYRM,
+            );
+            draw_text(mem_dc, " Setup", PANEL_W + 68 + wordmark_w, 18, 100, 24, s.font_body, COLOR_TEXT);
             fill_rect(mem_dc, PANEL_W, TITLEBAR_H, WND_W - PANEL_W, 1, COLOR_DIVIDER);
 
             // X close button (top-right)
@@ -366,7 +407,18 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 draw_text_center(mem_dc, "Close", content_x, btn_y, ERR_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_TEXT);
             } else {
                 draw_text(mem_dc, "Welcome to", content_x, 110, content_w, 44, s.font_title, COLOR_TEXT);
-                draw_text(mem_dc, "GitWyrm Setup", content_x, 154, content_w, 44, s.font_title, COLOR_TEXT);
+                let wordmark_w = draw_wordmark(
+                    mem_dc,
+                    content_x,
+                    154,
+                    content_w,
+                    44,
+                    s.font_wordmark_title,
+                    FONT_SIZE_WORDMARK_TITLE,
+                    WORDMARK_GIT,
+                    WORDMARK_WYRM,
+                );
+                draw_text(mem_dc, " Setup", content_x + wordmark_w, 154, content_w - wordmark_w, 44, s.font_title, COLOR_TEXT);
 
                 draw_text(mem_dc, "Fast. Focused. Familiar.", content_x, 212, content_w, 30, s.font_tagline, COLOR_ACCENT);
 
@@ -404,6 +456,30 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 }
             }
 
+            if s.confirming_cancel {
+                fill_rect(mem_dc, 0, 0, WND_W, WND_H, COLOR_SCRIM);
+                fill_rounded_rect(mem_dc, CONFIRM_X, CONFIRM_Y, CONFIRM_W, CONFIRM_H, 10, COLOR_PANEL);
+                draw_text(mem_dc, "Cancel setup?", CONFIRM_X + 24, CONFIRM_Y + 24, CONFIRM_W - 48, 28, s.font_body, COLOR_TEXT);
+                draw_text_wrap(
+                    mem_dc,
+                    "GitWyrm has not finished installing yet.",
+                    CONFIRM_X + 24,
+                    CONFIRM_Y + 56,
+                    CONFIRM_W - 48,
+                    40,
+                    s.font_small,
+                    COLOR_SUBTEXT,
+                );
+
+                let no_bg = if s.hover_confirm_no { COLOR_HOVER } else { COLOR_BAR_BG };
+                fill_rounded_rect(mem_dc, CONFIRM_NO_X, CONFIRM_BTN_Y, CONFIRM_BTN_W, CONFIRM_BTN_H, 8, no_bg);
+                draw_text_center(mem_dc, "Keep going", CONFIRM_NO_X, CONFIRM_BTN_Y, CONFIRM_BTN_W, CONFIRM_BTN_H, s.font_small_bold, COLOR_TEXT);
+
+                let yes_bg = if s.hover_confirm_yes { COLOR_ERROR } else { COLOR_BAR_BG };
+                fill_rounded_rect(mem_dc, CONFIRM_YES_X, CONFIRM_BTN_Y, CONFIRM_BTN_W, CONFIRM_BTN_H, 8, yes_bg);
+                draw_text_center(mem_dc, "Cancel setup", CONFIRM_YES_X, CONFIRM_BTN_Y, CONFIRM_BTN_W, CONFIRM_BTN_H, s.font_small_bold, COLOR_TEXT);
+            }
+
             let _ = BitBlt(hdc, 0, 0, WND_W, WND_H, Some(mem_dc), 0, 0, SRCCOPY);
 
             SelectObject(mem_dc, old);
@@ -424,10 +500,40 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             let click_x = (lparam.0 & 0xFFFF) as i16 as i32;
             let click_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
 
+            if s.confirming_cancel {
+                if click_x >= CONFIRM_YES_X
+                    && click_x < CONFIRM_YES_X + CONFIRM_BTN_W
+                    && click_y >= CONFIRM_BTN_Y
+                    && click_y < CONFIRM_BTN_Y + CONFIRM_BTN_H
+                {
+                    s.exiting = true;
+                    KillTimer(Some(hwnd), 1).ok();
+                    let _ = DestroyWindow(hwnd);
+                    return LRESULT(0);
+                }
+
+                if click_x >= CONFIRM_NO_X
+                    && click_x < CONFIRM_NO_X + CONFIRM_BTN_W
+                    && click_y >= CONFIRM_BTN_Y
+                    && click_y < CONFIRM_BTN_Y + CONFIRM_BTN_H
+                {
+                    s.confirming_cancel = false;
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+
+                // Swallow all other clicks while the overlay is up (modal).
+                return LRESULT(0);
+            }
+
             if click_x >= CLOSE_X && click_x < CLOSE_X + CLOSE_W && click_y >= CLOSE_Y && click_y < CLOSE_Y + CLOSE_H {
-                s.exiting = true;
-                KillTimer(Some(hwnd), 1).ok();
-                let _ = DestroyWindow(hwnd);
+                if s.error.is_empty() {
+                    s.confirming_cancel = true;
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                } else {
+                    s.exiting = true;
+                    KillTimer(Some(hwnd), 1).ok();
+                    let _ = DestroyWindow(hwnd);
+                }
                 return LRESULT(0);
             }
 
@@ -464,6 +570,25 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 s.tracking_mouse = true;
             }
 
+            if s.confirming_cancel {
+                let over_yes = mx >= CONFIRM_YES_X
+                    && mx < CONFIRM_YES_X + CONFIRM_BTN_W
+                    && my >= CONFIRM_BTN_Y
+                    && my < CONFIRM_BTN_Y + CONFIRM_BTN_H;
+                let over_no = mx >= CONFIRM_NO_X
+                    && mx < CONFIRM_NO_X + CONFIRM_BTN_W
+                    && my >= CONFIRM_BTN_Y
+                    && my < CONFIRM_BTN_Y + CONFIRM_BTN_H;
+
+                if over_yes != s.hover_confirm_yes || over_no != s.hover_confirm_no {
+                    s.hover_confirm_yes = over_yes;
+                    s.hover_confirm_no = over_no;
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+
+                return LRESULT(0);
+            }
+
             let over_x = mx >= CLOSE_X && mx < CLOSE_X + CLOSE_W && my >= CLOSE_Y && my < CLOSE_Y + CLOSE_H;
             let over_btn = if !s.error.is_empty() {
                 let content_x = PANEL_W + 56;
@@ -484,15 +609,19 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
 
         WM_MOUSELEAVE_MSG => {
             s.tracking_mouse = false;
-            if s.hover_close_x || s.hover_close_btn {
+            if s.hover_close_x || s.hover_close_btn || s.hover_confirm_yes || s.hover_confirm_no {
                 s.hover_close_x = false;
                 s.hover_close_btn = false;
+                s.hover_confirm_yes = false;
+                s.hover_confirm_no = false;
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
             LRESULT(0)
         }
 
-        // Drag the borderless window by the title bar area (right panel only, avoid the splash image)
+        // Drag the borderless window by the title bar area (right panel only, avoid the splash image
+        // and the close button - the close button must stay a real client-area hit so it gets
+        // WM_LBUTTONUP instead of being swallowed as a caption drag).
         WM_NCHITTEST => {
             let x = (lparam.0 & 0xFFFF) as i16 as i32;
             let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
@@ -500,7 +629,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             let _ = GetWindowRect(hwnd, &mut rect);
             let local_x = x - rect.left;
             let local_y = y - rect.top;
-            if local_y >= 0 && local_y < TITLEBAR_H && local_x >= PANEL_W && local_x < WND_W {
+            let over_close = local_x >= CLOSE_X && local_x < CLOSE_X + CLOSE_W && local_y >= CLOSE_Y && local_y < CLOSE_Y + CLOSE_H;
+            if !over_close && local_y >= 0 && local_y < TITLEBAR_H && local_x >= PANEL_W && local_x < WND_W {
                 LRESULT(2) // HTCAPTION
             } else {
                 DefWindowProcW(hwnd, msg, wparam, lparam)

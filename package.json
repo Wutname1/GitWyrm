@@ -11,7 +11,8 @@
     "free-port": "node scripts/free-port.mjs",
     "typecheck": "tsc -b --force",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "test": "npm run free-port && npm run typecheck && npm run test:rust && tauri dev"
+    "test": "npm run free-port && npm run typecheck && npm run test:rust && tauri dev",
+    "bootstrapper:dev": "cargo run --manifest-path src-tauri/bootstrapper/Cargo.toml --release -- --dry-run"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

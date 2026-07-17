@@ -1,5 +1,6 @@
 use std::sync::OnceLock;
 
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 
@@ -13,6 +14,7 @@ pub const COLOR_BAR_BG: COLORREF = COLORREF(rgb(30, 38, 37));
 pub const COLOR_ERROR: COLORREF = COLORREF(rgb(220, 90, 90));
 pub const COLOR_HOVER: COLORREF = COLORREF(rgb(45, 212, 191));
 pub const COLOR_DIVIDER: COLORREF = COLORREF(rgb(40, 48, 47));
+pub const COLOR_SCRIM: COLORREF = COLORREF(rgb(4, 6, 6));
 pub const COLOR_BAR_START: [u8; 3] = [16, 185, 160]; // teal
 pub const COLOR_BAR_END: [u8; 3] = [45, 212, 191]; // lighter teal
 
@@ -167,7 +169,13 @@ pub fn draw_text_wrap(hdc: HDC, text: &str, x: i32, y: i32, w: i32, h: i32, font
 }
 
 pub fn create_font(size: i32, weight: u32) -> HFONT {
+    create_font_named(size, weight, "Segoe UI")
+}
+
+pub fn create_font_named(size: i32, weight: u32, face: &str) -> HFONT {
     unsafe {
+        let mut wide: Vec<u16> = face.encode_utf16().chain(std::iter::once(0)).collect();
+        wide.resize(32, 0);
         CreateFontW(
             size,
             0,
@@ -181,10 +189,47 @@ pub fn create_font(size: i32, weight: u32) -> HFONT {
             OUT_DEFAULT_PRECIS,
             CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY,
-            FIXED_PITCH.0 as u32,
-            windows::core::w!("Segoe UI"),
+            (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
+            PCWSTR(wide.as_ptr()),
         )
     }
+}
+
+static SORA_TTF: &[u8] = include_bytes!("../fonts/Sora-SemiBold.ttf");
+
+/// Register the embedded Sora font for this process only (no install, no admin rights).
+/// Must be called once before any font using face name "Sora" is created.
+pub fn load_private_fonts() {
+    unsafe {
+        let mut num_fonts: u32 = 0;
+        let _ = AddFontMemResourceEx(SORA_TTF.as_ptr() as *const _, SORA_TTF.len() as u32, None, &mut num_fonts);
+    }
+}
+
+/// Draw "Git" in `git_color` immediately followed by "Wyrm" in `wyrm_color`, applying the
+/// wordmark's tight tracking (letter-spacing: -0.035em) that Sora needs at display sizes.
+/// `font_size` must match the negative pixel height used to create `font` (see create_font).
+pub fn draw_wordmark(
+    hdc: HDC,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    font: HFONT,
+    font_size: i32,
+    git_color: COLORREF,
+    wyrm_color: COLORREF,
+) -> i32 {
+    let tracking = -((font_size.unsigned_abs() as f64) * 0.035) as i32;
+    unsafe {
+        SetTextCharacterExtra(hdc, tracking);
+    }
+    let git_w = draw_text_w(hdc, "Git", x, y, w, h, font, git_color);
+    let wyrm_w = draw_text_w(hdc, "Wyrm", x + git_w, y, w - git_w, h, font, wyrm_color);
+    unsafe {
+        SetTextCharacterExtra(hdc, 0);
+    }
+    git_w + wyrm_w
 }
 
 struct RgbBitmap {
