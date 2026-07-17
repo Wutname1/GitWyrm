@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { ChevronRight, Cloud, Folder, GitBranch, Plus } from 'lucide-react'
+import { ChevronRight, Folder, GitBranch, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { RemoteInfo } from '@/lib/bindings'
 import { buildBranchTree, type BranchTreeNode } from '@/lib/branchTree'
+import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -17,7 +18,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
 function BranchNode({ node, depth }: { node: BranchTreeNode; depth: number }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const pad = 24 + depth * 12
 
   if (node.branch === null) {
@@ -58,10 +59,11 @@ function RemoteNode({
   remote: RemoteInfo
   onManage: () => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const repo = useActiveRepo()
   const m = useGitMutations(repo?.id ?? null)
   const tree = useMemo(() => buildBranchTree(remote.branches), [remote.branches])
+  const provider = detectProvider(remote.url)
 
   return (
     <div>
@@ -75,7 +77,7 @@ function RemoteNode({
               size={11}
               className={cn('flex-none text-muted-foreground transition-transform', open && 'rotate-90')}
             />
-            <Cloud size={12} className="flex-none text-sub" />
+            <RemoteIcon provider={provider} width={12} height={12} className="flex-none text-sub" />
             <span className="truncate text-[11.5px] text-foreground">{remote.name}</span>
             <span className="ml-auto pl-1.5 font-mono text-[9px] text-muted-foreground">
               {remote.branches.length}

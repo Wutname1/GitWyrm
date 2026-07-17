@@ -1,9 +1,11 @@
-import { useState, type DragEvent } from 'react'
+import { type DragEvent } from 'react'
 import { cn } from '@/lib/utils'
 import type { RefInfo, RefKind } from '@/lib/bindings'
 import { REF_DND_MIME, resolveSyncPair, type DraggedRef } from '@/lib/refSync'
-import { useBranches } from '@/hooks/useGitQueries'
+import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
+import { useBranches, useRemotes } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
+import { useDragStore } from '@/stores/dragStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { RefContextMenu } from './RefContextMenu'
 
@@ -14,78 +16,93 @@ const styles: Record<RefKind, string> = {
   tag: 'bg-modified text-[#1a1400]',
 }
 
-/** Read a dragged ref off a drop event, or null if the payload isn't ours. */
-function readDraggedRef(e: DragEvent): DraggedRef | null {
-  const raw = e.dataTransfer.getData(REF_DND_MIME)
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as DraggedRef
-    return parsed && typeof parsed.name === 'string' ? parsed : null
-  } catch {
-    return null
-  }
-}
-
 export function RefBadge({ refTag }: { refTag: RefInfo }) {
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
+  const remotes = useRemotes(repo?.id ?? null)
   const openRemoteSync = useUiStore((s) => s.openRemoteSync)
-  const [dropActive, setDropActive] = useState(false)
+  const draggingRef = useDragStore((s) => s.draggingRef)
+  const startDrag = useDragStore((s) => s.startDrag)
+  const endDrag = useDragStore((s) => s.endDrag)
 
-  // Local branches and their upstream can take part in a sync drag; tags cannot.
+  const self: DraggedRef = { name: refTag.name, type: refTag.type }
+
+  // Tags can't sync; everything else can be dragged.
   const draggable = refTag.type !== 'tag'
 
+  // Resolve the remote this pill belongs to (for a remote pill) or that a local
+  // pill tracks, so we can show the provider logo and shorten the label.
+  const remoteName = refTag.type === 'remote' ? refTag.name.split('/')[0] : null
+  const remoteList = remotes.data ?? []
+  const remoteInfo = remoteName ? remoteList.find((r) => r.name === remoteName) : null
+  const provider = detectProvider(remoteInfo?.url)
+  const hasProviderIcon = refTag.type === 'remote' && provider !== 'unknown'
+
+  // Label: for a remote pill, drop the `origin/` prefix when the provider logo
+  // already signals which remote it is, or when there's only a single remote so
+  // the prefix carries no information. With multiple remotes and no logo to tell
+  // them apart, keep the full name.
+  const label =
+    remoteName && (hasProviderIcon || remoteList.length <= 1)
+      ? refTag.name.slice(remoteName.length + 1)
+      : refTag.name
+
+  // Would this pill accept whatever is currently being dragged?
+  const isValidTarget =
+    !!draggingRef &&
+    draggingRef.name !== refTag.name &&
+    !!branches.data &&
+    !!resolveSyncPair(draggingRef, self, branches.data)
+
   const onDragStart = (e: DragEvent) => {
-    const payload: DraggedRef = { name: refTag.name, type: refTag.type }
-    e.dataTransfer.setData(REF_DND_MIME, JSON.stringify(payload))
+    e.dataTransfer.setData(REF_DND_MIME, JSON.stringify(self))
     e.dataTransfer.effectAllowed = 'move'
+    startDrag(self)
   }
 
-  // Highlight only when the hovered pill would form a valid tracking pair with
-  // whatever is being dragged, so the drop target reads as meaningful.
-  const pairFor = (dragged: DraggedRef | null) => {
-    if (!dragged || dragged.name === refTag.name || !branches.data) return null
-    return resolveSyncPair(dragged, { name: refTag.name, type: refTag.type }, branches.data)
-  }
+  const onDragEnd = () => endDrag()
 
   const onDragOver = (e: DragEvent) => {
-    if (!e.dataTransfer.types.includes(REF_DND_MIME)) return
-    // The payload isn't readable during dragover, so accept optimistically for
-    // any ref drag and validate on drop; keep the cursor a move cursor.
+    // Accept the drop when the live drag forms a valid tracking pair. Calling
+    // preventDefault is what turns the cursor from "no-drop" into "move".
+    if (!isValidTarget) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    if (!dropActive) setDropActive(true)
   }
-
-  const onDragLeave = () => setDropActive(false)
 
   const onDrop = (e: DragEvent) => {
-    setDropActive(false)
-    const dragged = readDraggedRef(e)
-    if (!dragged || dragged.name === refTag.name) return
+    if (!draggingRef || !isValidTarget) return
     e.preventDefault()
-    if (!pairFor(dragged)) return
-    // Source = the dragged pill, target = this pill. The modal resolves the
-    // direction and the concrete action from these two names.
-    openRemoteSync(dragged.name, refTag.name)
+    openRemoteSync(draggingRef.name, refTag.name)
+    endDrag()
   }
+
+  // While something is being dragged, dim pills that can't accept it so the
+  // valid targets stand out.
+  const dragging = !!draggingRef
+  const isSource = draggingRef?.name === refTag.name
 
   return (
     <RefContextMenu refTag={refTag}>
       <span
         draggable={draggable}
         onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
         onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
         onDrop={onDrop}
         className={cn(
-          'max-w-[92px] flex-none overflow-hidden text-ellipsis whitespace-nowrap rounded-[5px] px-1.5 py-px font-mono text-[9.5px] font-semibold leading-[1.4]',
+          'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-[9.5px] font-semibold leading-[1.4] transition-[box-shadow,opacity]',
           draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-default',
           styles[refTag.type],
-          dropActive && 'ring-2 ring-primary ring-offset-1 ring-offset-background'
+          isValidTarget && 'ring-2 ring-added ring-offset-1 ring-offset-background',
+          dragging && !isValidTarget && !isSource && 'opacity-40',
+          isSource && 'opacity-70'
         )}
       >
-        {refTag.name}
+        {refTag.type === 'remote' && (
+          <RemoteIcon provider={provider} width={9} height={9} className="flex-none" />
+        )}
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
       </span>
     </RefContextMenu>
   )

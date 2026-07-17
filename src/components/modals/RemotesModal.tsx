@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Cloud, Folder, GitBranch, Pencil, Plus, Target, Trash2, X } from 'lucide-react'
+import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,7 +30,7 @@ function BranchNode({
   depth: number
   onSetUpstream: (branch: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const isFolder = node.branch === null
   const pad = 8 + depth * 14
 
@@ -90,8 +91,9 @@ function RemoteRow({
   onDelete: () => void
   onSetUpstream: (branch: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const tree = useMemo(() => buildBranchTree(remote.branches), [remote.branches])
+  const provider = detectProvider(remote.url)
 
   return (
     <div className="rounded-md border border-border bg-background">
@@ -109,7 +111,7 @@ function RemoteRow({
                   open && 'rotate-90'
                 )}
               />
-              <Cloud size={13} className="flex-none text-sub" />
+              <RemoteIcon provider={provider} width={13} height={13} className="flex-none text-sub" />
               <span className="flex-none text-[12px] font-semibold text-foreground">{remote.name}</span>
               <span className="truncate font-mono text-[10.5px] text-muted-foreground">
                 {remote.url}
