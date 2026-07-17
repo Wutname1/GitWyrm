@@ -1,15 +1,111 @@
+import { useMemo, useState } from 'react'
 import { useFileDiff } from '@/hooks/useGitQueries'
+import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { FileHeader } from '@/components/domain/diff/FileHeader'
 import { DiffLineRow } from '@/components/domain/diff/DiffLineRow'
+import { HunkBar } from '@/components/domain/diff/HunkBar'
+import { LineSelectionBar } from '@/components/domain/diff/LineSelectionBar'
+import type { DiffLineEntry, SelectedLine } from '@/lib/bindings'
+
+/** Stable key for a changed line within a file diff. */
+function lineKey(l: DiffLineEntry): string {
+  return `${l.hunk_index}:${l.sign}:${l.old_no ?? ''}:${l.new_no ?? ''}`
+}
+
+function isChanged(l: DiffLineEntry): boolean {
+  return l.sign === '+' || l.sign === '-'
+}
+
+function toSelected(l: DiffLineEntry): SelectedLine {
+  return { hunk_index: l.hunk_index, old_no: l.old_no, new_no: l.new_no }
+}
 
 export function DiffView() {
   const repo = useActiveRepo()
   const request = useUiStore((s) => s.diffRequest)
   const diff = useFileDiff(repo?.id ?? null, request?.path ?? null, request?.source ?? null)
+  const m = useGitMutations(repo?.id ?? null)
+
+  // Selected changed-line keys, local to this file view.
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  // Anchor for shift-click range selection.
+  const [anchor, setAnchor] = useState<number | null>(null)
+
+  const lines = diff.data?.lines ?? []
+  const kind = request?.source.kind
+
+  // Only working-tree diffs are partially stageable; commit diffs are read-only.
+  const canPatch = kind === 'staged' || kind === 'unstaged'
+
+  // Index of every changed line, for range selection.
+  const changedIndices = useMemo(
+    () => lines.map((l, i) => (isChanged(l) ? i : -1)).filter((i) => i >= 0),
+    [lines]
+  )
 
   if (!request) return null
+
+  const path = request.path
+
+  const clearSelection = () => {
+    setSelected(new Set())
+    setAnchor(null)
+  }
+
+  const toggleLine = (index: number, shift: boolean) => {
+    const line = lines[index]
+    if (!isChanged(line)) return
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (shift && anchor != null) {
+        const [lo, hi] = anchor < index ? [anchor, index] : [index, anchor]
+        for (let i = lo; i <= hi; i++) {
+          if (isChanged(lines[i])) next.add(lineKey(lines[i]))
+        }
+      } else {
+        const key = lineKey(line)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+      }
+      return next
+    })
+    setAnchor(index)
+  }
+
+  const selectionFor = (predicate: (l: DiffLineEntry) => boolean): SelectedLine[] =>
+    lines.filter((l) => isChanged(l) && predicate(l)).map(toSelected)
+
+  const applyHunk = (hunkIndex: number) => {
+    const sel = selectionFor((l) => l.hunk_index === hunkIndex)
+    runPatch(sel)
+  }
+
+  const applySelected = () => {
+    const sel = lines.filter((l) => isChanged(l) && selected.has(lineKey(l))).map(toSelected)
+    runPatch(sel)
+  }
+
+  function runPatch(selection: SelectedLine[]) {
+    if (selection.length === 0) return
+    const args = { path, selection }
+    if (kind === 'staged') m.unstageLines.mutate(args, { onSuccess: clearSelection })
+    else m.stageLines.mutate(args, { onSuccess: clearSelection })
+  }
+
+  const discardSelected = () => {
+    const sel = lines.filter((l) => isChanged(l) && selected.has(lineKey(l))).map(toSelected)
+    if (sel.length === 0) return
+    m.discardLines.mutate({ path, selection: sel }, { onSuccess: clearSelection })
+  }
+
+  const discardHunk = (hunkIndex: number) => {
+    const sel = selectionFor((l) => l.hunk_index === hunkIndex)
+    m.discardLines.mutate({ path, selection: sel }, { onSuccess: clearSelection })
+  }
+
+  const patchPending = m.stageLines.isPending || m.unstageLines.isPending || m.discardLines.isPending
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -19,20 +115,48 @@ export function DiffView() {
         deletions={diff.data?.deletions ?? 0}
       />
       <div className="min-h-0 flex-1 overflow-auto pb-5 font-mono text-[11.5px] leading-[1.8]">
-        {diff.isLoading && (
-          <div className="p-4 text-xs text-muted-foreground">Loading diff…</div>
-        )}
+        {diff.isLoading && <div className="p-4 text-xs text-muted-foreground">Loading diff…</div>}
         {diff.isError && (
           <div className="p-4 text-xs text-removed">{(diff.error as Error).message}</div>
         )}
         {diff.data?.binary && (
           <div className="p-4 text-xs text-muted-foreground">Binary file — no text diff.</div>
         )}
-        {diff.data && !diff.data.binary && diff.data.lines.length === 0 && (
+        {diff.data && !diff.data.binary && lines.length === 0 && (
           <div className="p-4 text-xs text-muted-foreground">No changes to show.</div>
         )}
-        {diff.data?.lines.map((line, i) => <DiffLineRow key={i} line={line} />)}
+        {lines.map((line, i) =>
+          line.sign === '@' ? (
+            <HunkBar
+              key={i}
+              text={line.text}
+              canPatch={canPatch && !diff.data?.binary}
+              kind={kind === 'staged' ? 'staged' : 'unstaged'}
+              disabled={patchPending}
+              onApply={() => applyHunk(line.hunk_index)}
+              onDiscard={kind === 'unstaged' ? () => discardHunk(line.hunk_index) : undefined}
+            />
+          ) : (
+            <DiffLineRow
+              key={i}
+              line={line}
+              selectable={canPatch && !diff.data?.binary && isChanged(line)}
+              selected={selected.has(lineKey(line))}
+              onSelect={(shift) => toggleLine(i, shift)}
+            />
+          )
+        )}
       </div>
+      {canPatch && selected.size > 0 && (
+        <LineSelectionBar
+          count={selected.size}
+          kind={kind === 'staged' ? 'staged' : 'unstaged'}
+          disabled={patchPending}
+          onApply={applySelected}
+          onDiscard={kind === 'unstaged' ? discardSelected : undefined}
+          onClear={clearSelection}
+        />
+      )}
     </div>
   )
 }

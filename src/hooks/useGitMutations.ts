@@ -1,9 +1,13 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { commands } from '@/lib/bindings'
+import { commands, type Resolution, type SelectedLine } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 
-function invalidate(qc: QueryClient, repoId: string, which: Array<'status' | 'log' | 'branches' | 'stashes' | 'tags'>) {
+function invalidate(
+  qc: QueryClient,
+  repoId: string,
+  which: Array<'status' | 'log' | 'branches' | 'stashes' | 'tags' | 'mergeState'>
+) {
   for (const k of which) {
     qc.invalidateQueries({ queryKey: keys[k](repoId) })
   }
@@ -113,6 +117,86 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  const merge = useMutation({
+    mutationFn: async (reference: string) => ({
+      reference,
+      result: unwrap(await commands.mergeBranch(id, reference)),
+    }),
+    onSuccess: ({ reference, result }) => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      if (result.up_to_date) {
+        toast(`Already up to date with ${reference}`)
+      } else if (result.fast_forwarded) {
+        toast(`Fast-forwarded to ${reference}`)
+      } else if (result.conflicts.length > 0) {
+        toast.warning(
+          `Merged ${reference} with ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'} to resolve`
+        )
+      } else {
+        toast(`Merged ${reference}`)
+      }
+    },
+    onError,
+  })
+
+  const abortMerge = useMutation({
+    mutationFn: async () => unwrap(await commands.abortMerge(id)),
+    onSuccess: () => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      toast('Merge aborted')
+    },
+    onError,
+  })
+
+  const resolveConflict = useMutation({
+    mutationFn: async (args: { path: string; resolution: Resolution }) =>
+      unwrap(await commands.resolveConflict(id, args.path, args.resolution)),
+    onSuccess: (_d, args) => {
+      invalidate(qc, id, ['status', 'mergeState'])
+      qc.invalidateQueries({ queryKey: keys.conflict(id, args.path) })
+    },
+    onError,
+  })
+
+  const commitMerge = useMutation({
+    mutationFn: async (message: string) => unwrap(await commands.commitMerge(id, message)),
+    onSuccess: (sha) => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      toast(`Merge committed ${sha.slice(0, 7)}`)
+    },
+    onError,
+  })
+
+  // Partial staging: refreshes status and every open file-diff view.
+  const afterPatch = () => {
+    invalidate(qc, id, ['status'])
+    qc.invalidateQueries({ queryKey: ['diff', id] })
+  }
+
+  const stageLines = useMutation({
+    mutationFn: async (args: { path: string; selection: SelectedLine[] }) =>
+      unwrap(await commands.stageLines(id, args.path, args.selection)),
+    onSuccess: afterPatch,
+    onError,
+  })
+
+  const unstageLines = useMutation({
+    mutationFn: async (args: { path: string; selection: SelectedLine[] }) =>
+      unwrap(await commands.unstageLines(id, args.path, args.selection)),
+    onSuccess: afterPatch,
+    onError,
+  })
+
+  const discardLines = useMutation({
+    mutationFn: async (args: { path: string; selection: SelectedLine[] }) =>
+      unwrap(await commands.discardLines(id, args.path, args.selection)),
+    onSuccess: () => {
+      afterPatch()
+      toast('Discarded selected lines')
+    },
+    onError,
+  })
+
   return {
     stageFile,
     unstageFile,
@@ -126,5 +210,12 @@ export function useGitMutations(repoId: string | null) {
     fetch,
     pull,
     push,
+    merge,
+    abortMerge,
+    resolveConflict,
+    commitMerge,
+    stageLines,
+    unstageLines,
+    discardLines,
   }
 }
