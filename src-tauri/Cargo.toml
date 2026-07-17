@@ -1,0 +1,38 @@
+[package]
+name = "gitwyrm"
+version = "0.1.0"
+description = "GitWyrm - a targeted Git client for Windows"
+authors = ["Jeremy"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "gitwyrm_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+thiserror = "2"
+git2 = "0.20"
+notify = "8"
+notify-debouncer-full = "0.5"
+specta = "=2.0.0-rc.22"
+specta-typescript = "0.0.9"
+tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

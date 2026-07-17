@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            rust_target: x86_64-pc-windows-msvc
+            tauri_args: ''
+            bundle_base: src-tauri/target/release/bundle
+            portable_suffix: ''
+          - arch: aarch64
+            rust_target: aarch64-pc-windows-msvc
+            tauri_args: '--target aarch64-pc-windows-msvc'
+            bundle_base: src-tauri/target/aarch64-pc-windows-msvc/release/bundle
+            portable_suffix: '-arm64'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.arch }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and release (NSIS + updater manifest)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'GitWyrm ${{ github.ref_name }}'
+          releaseBody: 'See the assets below. The .exe installer auto-updates; gitwyrm-portable.exe does not.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.tauri_args }}
+
+      - name: Attach portable exe
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          Copy-Item src-tauri/target/${{ matrix.rust_target }}/release/gitwyrm.exe gitwyrm-portable${{ matrix.portable_suffix }}.exe -ErrorAction SilentlyContinue
+          if (-not (Test-Path gitwyrm-portable${{ matrix.portable_suffix }}.exe)) {
+            Copy-Item src-tauri/target/release/gitwyrm.exe gitwyrm-portable${{ matrix.portable_suffix }}.exe
+          }
+          gh release upload ${{ github.ref_name }} gitwyrm-portable${{ matrix.portable_suffix }}.exe --clobber
+
+      # TODO: cdn.gitwyrm.com / R2 bucket is not provisioned yet. Once it exists, add
+      # R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_ENDPOINT repo secrets to enable this step.
+      # It republishes the just-built NSIS installer to a stable "latest" path per arch so the
+      # bootstrapper (see .github/workflows/bootstrapper.yml) always fetches the newest build
+      # without its own download link/filename ever changing.
+      - name: Upload installer to CDN latest path
+        if: false
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          pip install awscli
+          NSIS_EXE=$(find "${{ matrix.bundle_base }}/nsis" -name "*.exe" -type f | head -1)
+          SUFFIX=""
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            SUFFIX="-ARM64"
+          fi
+          aws s3 cp "$NSIS_EXE" "s3://gitwyrm-cdn/installers/latest/GitWyrm-Setup${SUFFIX}.exe" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --cache-control "no-cache, no-store"

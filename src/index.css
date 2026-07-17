@@ -1,0 +1,149 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/inter';
+@import '@fontsource/geist-mono';
+
+@custom-variant dark (&:is(.dark *));
+
+@font-face {
+  font-family: 'Sora';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./assets/fonts/Sora-SemiBold.ttf') format('truetype');
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+:root {
+  /* GitWyrm design tokens (from GitWyrmFinal design) */
+  --gw-bg: #0b0f14;
+  --gw-panel: #0f151c;
+  --gw-panel2: #131b24;
+  --gw-panel3: #1a2430;
+  --gw-border: #1e2833;
+  --gw-text: #d7e0ea;
+  --gw-sub: #8b99a8;
+  --gw-muted: #5d6b7a;
+  --gw-accent: #2dd4a7;
+  --gw-accent-fg: #04120d;
+  --gw-accent-soft: rgba(45, 212, 167, 0.13);
+  --gw-green: #34d399;
+  --gw-red: #f87171;
+  --gw-amber: #fbbf24;
+  --gw-lane0: #2dd4a7;
+  --gw-lane1: #38bdf8;
+  --gw-lane2: #f59e0b;
+
+  /* shadcn semantic mapping */
+  --background: var(--gw-bg);
+  --foreground: var(--gw-text);
+  --card: var(--gw-panel);
+  --card-foreground: var(--gw-text);
+  --popover: var(--gw-panel2);
+  --popover-foreground: var(--gw-text);
+  --primary: var(--gw-accent);
+  --primary-foreground: var(--gw-accent-fg);
+  --secondary: var(--gw-panel3);
+  --secondary-foreground: var(--gw-text);
+  --muted: var(--gw-panel2);
+  --muted-foreground: var(--gw-muted);
+  --accent: var(--gw-panel3);
+  --accent-foreground: var(--gw-text);
+  --destructive: var(--gw-red);
+  --destructive-foreground: var(--gw-bg);
+  --border: var(--gw-border);
+  --input: var(--gw-border);
+  --ring: var(--gw-accent);
+  --radius: 0.375rem;
+}
+
+@theme inline {
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
+  --font-wordmark: 'Sora', 'Inter Variable', system-ui, sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* GitWyrm domain colors as Tailwind utilities (bg-panel, text-sub, ...) */
+  --color-panel: var(--gw-panel);
+  --color-panel2: var(--gw-panel2);
+  --color-panel3: var(--gw-panel3);
+  --color-sub: var(--gw-sub);
+  --color-soft: var(--gw-accent-soft);
+  --color-added: var(--gw-green);
+  --color-removed: var(--gw-red);
+  --color-modified: var(--gw-amber);
+  --color-lane0: var(--gw-lane0);
+  --color-lane1: var(--gw-lane1);
+  --color-lane2: var(--gw-lane2);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+  html,
+  body,
+  #root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 12px;
+    user-select: none;
+  }
+  input,
+  textarea {
+    user-select: text;
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(120, 140, 155, 0.28);
+    border-radius: 9px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 140, 155, 0.45);
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

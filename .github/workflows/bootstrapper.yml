@@ -1,0 +1,67 @@
+name: Build Bootstrapper
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            rust_target: x86_64-pc-windows-msvc
+            output_name: GitWyrm-Setup.exe
+          - arch: aarch64
+            rust_target: aarch64-pc-windows-msvc
+            output_name: GitWyrm-Setup-ARM64.exe
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri/bootstrapper -> target
+          key: ${{ matrix.arch }}
+
+      - name: Build bootstrapper
+        run: cargo build --release --target ${{ matrix.rust_target }}
+        working-directory: src-tauri/bootstrapper
+
+      - name: Save binary
+        shell: bash
+        run: cp src-tauri/bootstrapper/target/${{ matrix.rust_target }}/release/gitwyrm-setup.exe "${{ matrix.output_name }}"
+
+      # TODO: cdn.gitwyrm.com / R2 bucket is not provisioned yet. Once it exists, add
+      # R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_ENDPOINT repo secrets to enable this step.
+      # The bootstrapper filename never changes across versions, so this is the one link the
+      # public "Download for Windows" button points at - its download count stays intact
+      # regardless of how many app releases ship behind it.
+      - name: Upload to CDN
+        if: false
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          pip install awscli
+          aws s3 cp "${{ matrix.output_name }}" \
+            "s3://gitwyrm-cdn/${{ matrix.output_name }}" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --cache-control "no-cache, no-store"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrapper-${{ matrix.arch }}
+          path: ${{ matrix.output_name }}

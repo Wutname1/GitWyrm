@@ -1,0 +1,94 @@
+//! App settings: a JSON file in the app data dir holding the open/recent
+//! repos and other UI preferences, so they survive relaunch. Mirrors the
+//! `ai::auth` module's pattern (plain JSON, no encryption needed here).
+
+use std::fs;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use tauri::Manager;
+
+use crate::error::AppError;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct RecentRepo {
+  pub name: String,
+  pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateChannel {
+  Stable,
+  Beta,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct Settings {
+  /// Paths of repos open in tabs, in tab order, so they can be reopened on launch.
+  #[serde(default)]
+  pub open_repos: Vec<String>,
+  /// Id of the repo that was active when the app last closed.
+  #[serde(default)]
+  pub active_repo_path: Option<String>,
+  #[serde(default)]
+  pub recents: Vec<RecentRepo>,
+  #[serde(default)]
+  pub code_folder: Option<String>,
+  #[serde(default)]
+  pub clone_directory: Option<String>,
+  #[serde(default = "default_update_channel")]
+  pub update_channel: UpdateChannel,
+  #[serde(default)]
+  pub ai_provider: Option<String>,
+  #[serde(default)]
+  pub ai_model: Option<String>,
+}
+
+fn default_update_channel() -> UpdateChannel {
+  UpdateChannel::Stable
+}
+
+impl Default for Settings {
+  fn default() -> Self {
+    Self {
+      open_repos: Vec::new(),
+      active_repo_path: None,
+      recents: Vec::new(),
+      code_folder: None,
+      clone_directory: None,
+      update_channel: default_update_channel(),
+      ai_provider: None,
+      ai_model: None,
+    }
+  }
+}
+
+fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+  let dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| AppError::Other(e.to_string()))?;
+  fs::create_dir_all(&dir)?;
+  Ok(dir.join("settings.json"))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, AppError> {
+  let path = settings_path(&app)?;
+  let Ok(raw) = fs::read_to_string(&path) else {
+    return Ok(Settings::default());
+  };
+  Ok(serde_json::from_str(&raw).unwrap_or_default())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), AppError> {
+  let path = settings_path(&app)?;
+  let json = serde_json::to_string_pretty(&settings).map_err(|e| AppError::Other(e.to_string()))?;
+  fs::write(path, json)?;
+  Ok(())
+}
