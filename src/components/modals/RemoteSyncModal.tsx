@@ -26,8 +26,11 @@ function Chip({ name, tone }: { name: string; tone: 'source' | 'target' }) {
 }
 
 /**
- * The concrete action a drop resolves to, chosen from the local branch's
- * ahead/behind vs its upstream and which way the pills were dragged.
+ * The concrete action a drop resolves to. The branch's actual ahead/behind
+ * state decides - not which way the pills were dragged - so any drag between a
+ * branch and its remote offers whatever would put them in sync. Drag direction
+ * only picks the options for the diverged case (dropping local onto remote
+ * reads as "make the cloud look like me" -> offer the overwrite).
  */
 type Action =
   | { kind: 'up-to-date' }
@@ -39,17 +42,11 @@ type Action =
 function chooseAction(pair: RefSyncPair): Action {
   const { ahead, behind } = pair.branch
   if (ahead === 0 && behind === 0) return { kind: 'up-to-date' }
-  if (pair.direction === 'incoming') {
-    if (behind > 0 && ahead === 0) return { kind: 'fast-forward' }
-    if (ahead > 0 && behind > 0) return { kind: 'diverged-incoming' }
-    // ahead only: remote has nothing new for us.
-    return { kind: 'up-to-date' }
-  }
-  // outgoing
+  if (behind > 0 && ahead === 0) return { kind: 'fast-forward' }
   if (ahead > 0 && behind === 0) return { kind: 'push' }
-  if (ahead > 0 && behind > 0) return { kind: 'diverged-outgoing' }
-  // behind only: nothing local to send.
-  return { kind: 'up-to-date' }
+  return pair.direction === 'outgoing'
+    ? { kind: 'diverged-outgoing' }
+    : { kind: 'diverged-incoming' }
 }
 
 export function RemoteSyncModal() {
@@ -80,6 +77,15 @@ export function RemoteSyncModal() {
   }, [syncSource, syncTarget, branches.data])
 
   const action = pair ? chooseAction(pair) : null
+
+  // The chips show where commits will actually flow, which may be the reverse
+  // of the drag: dropping origin/main onto main while you're ahead means a
+  // push, so the picture reads main -> origin/main. Falls back to drag order
+  // when the pair is invalid.
+  const commitsGoUp = action?.kind === 'push' || action?.kind === 'diverged-outgoing'
+  const flowFrom = pair ? (commitsGoUp ? pair.branch.name : pair.upstream) : syncSource
+  const flowInto = pair ? (commitsGoUp ? pair.upstream : pair.branch.name) : syncTarget
+
   const pending =
     m.pull.isPending || m.push.isPending || m.pushForce.isPending || m.rebase.isPending
 
@@ -110,14 +116,14 @@ export function RemoteSyncModal() {
         <div className="grid gap-3 px-4 py-4">
           <div className="flex items-center justify-center gap-3 rounded-md border border-border bg-panel2 px-3 py-3">
             <div className="flex flex-col items-center gap-1">
-              <Chip name={syncSource ?? ''} tone="source" />
+              <Chip name={flowFrom ?? ''} tone="source" />
               <span className="text-[9px] uppercase tracking-[.06em] text-muted-foreground">
                 from
               </span>
             </div>
             <ArrowRight size={16} className="mt-[-14px] flex-none text-sub" />
             <div className="flex flex-col items-center gap-1">
-              <Chip name={syncTarget ?? ''} tone="target" />
+              <Chip name={flowInto ?? ''} tone="target" />
               <span className="text-[9px] uppercase tracking-[.06em] text-muted-foreground">
                 into
               </span>
