@@ -19,6 +19,9 @@ interface SidebarSectionProps {
   /** When set, a `+` button appears on hover in the section header. */
   onAdd?: () => void
   addLabel?: string
+  isItemPending?: (section: SidebarSectionData, item: SectionItem) => boolean
+  isItemDisabled?: (section: SidebarSectionData, item: SectionItem) => boolean
+  getPendingLabel?: (section: SidebarSectionData, item: SectionItem) => string
 }
 
 export function SidebarSection({
@@ -29,6 +32,9 @@ export function SidebarSection({
   renderItemMenu,
   onAdd,
   addLabel,
+  isItemPending,
+  isItemDisabled,
+  getPendingLabel,
 }: SidebarSectionProps) {
   const open = useUiStore((s) => s.sectionOpen[section.key])
   const toggleSection = useUiStore((s) => s.toggleSection)
@@ -75,6 +81,9 @@ export function SidebarSection({
                 item={item}
                 isCurrent={section.type === 'branch' && item.name === currentBranch}
                 onClick={() => onItemClick(section, item)}
+                pending={isItemPending?.(section, item)}
+                disabled={isItemDisabled?.(section, item)}
+                pendingLabel={getPendingLabel?.(section, item)}
                 onContextMenu={
                   onItemContextMenu ? (e) => onItemContextMenu(section, item, e) : undefined
                 }

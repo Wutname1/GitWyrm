@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Eraser, FileText, FolderOpen } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { LogsModal } from '@/components/modals/LogsModal'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
@@ -9,6 +10,19 @@ import { SettingRow } from './SettingRow'
 
 export function LogsSettings() {
   const [logsOpen, setLogsOpen] = useState(false)
+  const [clearing, setClearing] = useState(false)
+
+  const clearLogs = async () => {
+    setClearing(true)
+    try {
+      unwrap(await commands.clearLog())
+      toast('Logs cleared')
+    } catch (e) {
+      toast.error(`Could not clear logs: ${(e as Error).message}`)
+    } finally {
+      setClearing(false)
+    }
+  }
 
   return (
     <div>
@@ -36,17 +50,12 @@ export function LogsSettings() {
             variant="secondary"
             size="sm"
             className="h-7 gap-1.5 text-xs"
-            onClick={async () => {
-              try {
-                unwrap(await commands.clearLog())
-                toast('Logs cleared')
-              } catch (e) {
-                toast.error(`Could not clear logs: ${(e as Error).message}`)
-              }
-            }}
+            onClick={clearLogs}
+            disabled={clearing}
+            aria-busy={clearing || undefined}
           >
-            <Eraser size={12} />
-            Clear logs
+            {clearing ? <PendingIndicator /> : <Eraser size={12} />}
+            {clearing ? 'Clearing…' : 'Clear logs'}
           </Button>
         </div>
       </SettingRow>

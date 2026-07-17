@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, FileWarning } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { useConflict, useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
@@ -90,6 +91,9 @@ export function ConflictView() {
   }
 
   const data = conflict.data
+  const activeResolution = m.resolveConflict.isPending
+    ? m.resolveConflict.variables?.resolution.kind
+    : undefined
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -134,7 +138,8 @@ export function ConflictView() {
             disabled={m.resolveConflict.isPending || !data}
             onClick={() => resolveWith({ kind: 'ours' })}
           >
-            Use ours
+            {activeResolution === 'ours' && <PendingIndicator />}
+            {activeResolution === 'ours' ? 'Using ours…' : 'Use ours'}
           </Button>
           <Button
             size="sm"
@@ -143,7 +148,8 @@ export function ConflictView() {
             disabled={m.resolveConflict.isPending || !data}
             onClick={() => resolveWith({ kind: 'theirs' })}
           >
-            Use theirs
+            {activeResolution === 'theirs' && <PendingIndicator />}
+            {activeResolution === 'theirs' ? 'Using theirs…' : 'Use theirs'}
           </Button>
           <Button
             size="sm"
@@ -151,8 +157,8 @@ export function ConflictView() {
             disabled={m.resolveConflict.isPending || !data}
             onClick={() => resolveWith({ kind: 'manual', text: draft })}
           >
-            <Check size={13} />
-            Mark resolved
+            {activeResolution === 'manual' ? <PendingIndicator /> : <Check size={13} />}
+            {activeResolution === 'manual' ? 'Marking resolved…' : 'Mark resolved'}
           </Button>
         </div>
 

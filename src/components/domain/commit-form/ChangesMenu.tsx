@@ -9,6 +9,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { useStatus } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useActiveRepo } from '@/stores/workspaceStore'
@@ -30,6 +31,8 @@ export function ChangesMenu({ children, asChild = true }: ChangesMenuProps) {
   const unstaged = status.data?.unstaged.length ?? 0
   const total = staged + unstaged
   const hasChanges = total > 0
+  const operationPending =
+    m.stageAll.isPending || m.unstageAll.isPending || m.stashSave.isPending
 
   return (
     <>
@@ -40,17 +43,35 @@ export function ChangesMenu({ children, asChild = true }: ChangesMenuProps) {
             {hasChanges ? `${total} changed file${total === 1 ? '' : 's'}` : 'No changes'}
           </ContextMenuLabel>
           <ContextMenuSeparator />
-          <ContextMenuItem disabled={unstaged === 0} onSelect={() => m.stageAll.mutate()}>
-            <PlusCircle />
-            Stage all changes
+          <ContextMenuItem
+            disabled={unstaged === 0 || operationPending}
+            onSelect={(e) => {
+              e.preventDefault()
+              m.stageAll.mutate()
+            }}
+          >
+            {m.stageAll.isPending ? <PendingIndicator /> : <PlusCircle />}
+            {m.stageAll.isPending ? 'Staging all changes…' : 'Stage all changes'}
           </ContextMenuItem>
-          <ContextMenuItem disabled={staged === 0} onSelect={() => m.unstageAll.mutate()}>
-            <MinusCircle />
-            Unstage all
+          <ContextMenuItem
+            disabled={staged === 0 || operationPending}
+            onSelect={(e) => {
+              e.preventDefault()
+              m.unstageAll.mutate()
+            }}
+          >
+            {m.unstageAll.isPending ? <PendingIndicator /> : <MinusCircle />}
+            {m.unstageAll.isPending ? 'Unstaging all…' : 'Unstage all'}
           </ContextMenuItem>
-          <ContextMenuItem disabled={!hasChanges} onSelect={() => m.stashSave.mutate(undefined)}>
-            <Archive />
-            Stash all changes
+          <ContextMenuItem
+            disabled={!hasChanges || operationPending}
+            onSelect={(e) => {
+              e.preventDefault()
+              m.stashSave.mutate(undefined)
+            }}
+          >
+            {m.stashSave.isPending ? <PendingIndicator /> : <Archive />}
+            {m.stashSave.isPending ? 'Stashing changes…' : 'Stash all changes'}
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem

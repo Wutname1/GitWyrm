@@ -15,6 +15,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { useBranches, useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
@@ -40,9 +41,10 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
   const branchName = current?.name ?? 'current'
   const opInProgress = mergeState.data?.merging ?? false
   const isHead = commit.refs.some((r) => r.type === 'head')
-  const canCherryPick = !opInProgress && !isHead
+  const historyPending = m.cherryPick.isPending || m.reset.isPending || m.moveBranch.isPending
+  const canCherryPick = !opInProgress && !isHead && !historyPending
   // Moving/resetting to where the branch already is would be a no-op.
-  const canRetarget = !opInProgress && !isHead && current != null
+  const canRetarget = !opInProgress && !isHead && current != null && !historyPending
 
   const copySha = () => {
     void navigator.clipboard
@@ -85,9 +87,15 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
             Tag this commit
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem disabled={!canCherryPick} onSelect={() => m.cherryPick.mutate(commit.sha)}>
-            <GitBranchPlus />
-            Cherry-pick onto {branchName}
+          <ContextMenuItem
+            disabled={!canCherryPick || m.cherryPick.isPending}
+            onSelect={(e) => {
+              e.preventDefault()
+              m.cherryPick.mutate(commit.sha)
+            }}
+          >
+            {m.cherryPick.isPending ? <PendingIndicator /> : <GitBranchPlus />}
+            {m.cherryPick.isPending ? 'Adding commit…' : `Cherry-pick onto ${branchName}`}
           </ContextMenuItem>
           <ContextMenuItem disabled={!canRetarget} onSelect={() => setPending({ kind: 'move' })}>
             <MoveVertical />
@@ -102,17 +110,31 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
               Rewind {branchName} to here
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="w-64">
-              <ContextMenuItem onSelect={() => runReset('Mixed')}>
+              <ContextMenuItem
+                disabled={historyPending}
+                onSelect={(e) => {
+                  e.preventDefault()
+                  runReset('Mixed')
+                }}
+              >
+                {m.reset.isPending && m.reset.variables?.mode === 'Mixed' && <PendingIndicator />}
                 <div className="flex flex-col">
-                  <span>Undo the later commits</span>
+                  <span>{m.reset.isPending && m.reset.variables?.mode === 'Mixed' ? 'Rewinding…' : 'Undo the later commits'}</span>
                   <span className="text-[10px] text-muted-foreground">
                     Keeps their changes in your files
                   </span>
                 </div>
               </ContextMenuItem>
-              <ContextMenuItem onSelect={() => runReset('Soft')}>
+              <ContextMenuItem
+                disabled={historyPending}
+                onSelect={(e) => {
+                  e.preventDefault()
+                  runReset('Soft')
+                }}
+              >
+                {m.reset.isPending && m.reset.variables?.mode === 'Soft' && <PendingIndicator />}
                 <div className="flex flex-col">
-                  <span>Undo, and keep changes ready to commit</span>
+                  <span>{m.reset.isPending && m.reset.variables?.mode === 'Soft' ? 'Rewinding…' : 'Undo, and keep changes ready to commit'}</span>
                   <span className="text-[10px] text-muted-foreground">
                     Changes stay staged
                   </span>
@@ -144,7 +166,15 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
         }
         confirmLabel="Erase and rewind"
         confirmPhrase={branchName}
-        onConfirm={() => m.reset.mutate({ sha: commit.sha, mode: 'Hard' })}
+        pending={m.reset.isPending}
+        pendingLabel="Erasing and rewinding…"
+        keepOpenOnConfirm
+        onConfirm={() =>
+          m.reset.mutate(
+            { sha: commit.sha, mode: 'Hard' },
+            { onSuccess: () => setPending(null) }
+          )
+        }
       />
 
       <ConfirmDialog
@@ -160,7 +190,12 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
           </>
         }
         confirmLabel="Move branch"
-        onConfirm={() => m.moveBranch.mutate(commit.sha)}
+        pending={m.moveBranch.isPending}
+        pendingLabel="Moving branch…"
+        keepOpenOnConfirm
+        onConfirm={() =>
+          m.moveBranch.mutate(commit.sha, { onSuccess: () => setPending(null) })
+        }
       />
     </>
   )

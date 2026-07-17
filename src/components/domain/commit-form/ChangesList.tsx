@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { cn } from '@/lib/utils'
 import { useStatus } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
@@ -43,6 +44,11 @@ export function ChangesList() {
   const staged = status.data?.staged ?? []
   const unstaged = status.data?.unstaged ?? []
   const hasChanges = staged.length > 0 || unstaged.length > 0
+  const stagingPending =
+    m.stageFile.isPending ||
+    m.unstageFile.isPending ||
+    m.stageAll.isPending ||
+    m.unstageAll.isPending
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -67,9 +73,11 @@ export function ChangesList() {
             variant="ghost"
             size="sm"
             onClick={() => m.unstageAll.mutate()}
+            disabled={stagingPending}
             className="h-auto rounded px-[7px] py-0.5 text-[10px] text-sub hover:bg-panel3 hover:text-foreground"
           >
-            Unstage all
+            {m.unstageAll.isPending && <PendingIndicator className="size-3" />}
+            {m.unstageAll.isPending ? 'Unstaging…' : 'Unstage all'}
           </Button>
         )}
       </GroupHeader>
@@ -82,6 +90,8 @@ export function ChangesList() {
           action={
             <StageToggle
               direction="unstage"
+              disabled={stagingPending}
+              pending={m.unstageFile.isPending && m.unstageFile.variables === f.path}
               onToggle={(e) => {
                 e.stopPropagation()
                 m.unstageFile.mutate(f.path)
@@ -103,9 +113,11 @@ export function ChangesList() {
           <Button
             size="sm"
             onClick={() => m.stageAll.mutate()}
+            disabled={stagingPending}
             className="h-auto rounded border border-primary/50 bg-soft px-2 py-0.5 text-[10px] font-semibold text-primary hover:border-primary hover:bg-primary hover:text-primary-foreground"
           >
-            Stage all
+            {m.stageAll.isPending && <PendingIndicator className="size-3" />}
+            {m.stageAll.isPending ? 'Staging…' : 'Stage all'}
           </Button>
         )}
       </GroupHeader>
@@ -138,6 +150,8 @@ export function ChangesList() {
             action={
               <StageToggle
                 direction="stage"
+                disabled={stagingPending}
+                pending={m.stageFile.isPending && m.stageFile.variables === f.path}
                 onToggle={(e) => {
                   e.stopPropagation()
                   m.stageFile.mutate(f.path)

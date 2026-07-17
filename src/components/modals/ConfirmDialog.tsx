@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,9 @@ interface ConfirmDialogProps {
   /** When set, the confirm button stays disabled until the user types this. */
   confirmPhrase?: string
   onConfirm: () => void
+  pending?: boolean
+  pendingLabel?: string
+  keepOpenOnConfirm?: boolean
 }
 
 export function ConfirmDialog({
@@ -32,6 +36,9 @@ export function ConfirmDialog({
   destructive,
   confirmPhrase,
   onConfirm,
+  pending = false,
+  pendingLabel,
+  keepOpenOnConfirm = false,
 }: ConfirmDialogProps) {
   const [typed, setTyped] = useState('')
 
@@ -42,7 +49,13 @@ export function ConfirmDialog({
   const ready = !confirmPhrase || typed.trim() === confirmPhrase
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && pending) return
+        onOpenChange(nextOpen)
+      }}
+    >
       <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
         <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
           <DialogTitle className="flex items-center gap-2 text-sm">
@@ -66,25 +79,28 @@ export function ConfirmDialog({
                 placeholder={confirmPhrase}
                 className="h-auto bg-background py-1.5 font-mono text-xs"
                 autoFocus
+                disabled={pending}
               />
             </div>
           )}
         </div>
 
         <DialogFooter className="flex justify-end gap-2 border-t border-border px-4 py-3">
-          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)}>
+          <Button variant="secondary" size="sm" disabled={pending} onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button
             size="sm"
             variant={destructive ? 'destructive' : 'default'}
-            disabled={!ready}
+            disabled={!ready || pending}
+            aria-busy={pending || undefined}
             onClick={() => {
               onConfirm()
-              onOpenChange(false)
+              if (!keepOpenOnConfirm) onOpenChange(false)
             }}
           >
-            {confirmLabel}
+            {pending && <PendingIndicator />}
+            {pending ? pendingLabel ?? 'Working…' : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

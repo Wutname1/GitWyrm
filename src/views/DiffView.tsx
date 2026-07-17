@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFileDiff } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { FileHeader } from '@/components/domain/diff/FileHeader'
@@ -175,6 +176,11 @@ export function DiffView() {
   }
 
   const patchPending = m.stageLines.isPending || m.unstageLines.isPending || m.discardLines.isPending
+  const patchLabel = m.discardLines.isPending
+    ? 'Discarding selected lines…'
+    : kind === 'staged'
+      ? 'Unstaging selected lines…'
+      : 'Staging selected lines…'
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -183,6 +189,12 @@ export function DiffView() {
         additions={diff.data?.additions ?? 0}
         deletions={diff.data?.deletions ?? 0}
       />
+      {patchPending && (
+        <div className="flex h-7 flex-none items-center gap-2 border-b border-primary/25 bg-soft px-3 text-[10.5px] font-medium text-primary" role="status">
+          <PendingIndicator />
+          {patchLabel}
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-auto pb-5 font-mono text-[11.5px] leading-[1.8]">
         {diff.isLoading && <div className="p-4 text-xs text-muted-foreground">Loading diff…</div>}
         {diff.isError && (

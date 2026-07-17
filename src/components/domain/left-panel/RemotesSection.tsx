@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ChevronRight, Folder, GitBranch, Plus } from 'lucide-react'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { cn } from '@/lib/utils'
 import type { RemoteInfo } from '@/lib/bindings'
 import { buildBranchTree, type BranchTreeNode } from '@/lib/branchTree'
@@ -92,11 +93,14 @@ function RemoteNode({
             Edit
           </ContextMenuItem>
           <ContextMenuItem
-            disabled={remote.branches.length === 0}
-            onSelect={() => m.setUpstream.mutate(`${remote.name}/${remote.branches[0]}`)}
+            disabled={remote.branches.length === 0 || m.setUpstream.isPending}
+            onSelect={(e) => {
+              e.preventDefault()
+              m.setUpstream.mutate(`${remote.name}/${remote.branches[0]}`)
+            }}
           >
-            <Target />
-            Set target (upstream)
+            {m.setUpstream.isPending ? <PendingIndicator /> : <Target />}
+            {m.setUpstream.isPending ? 'Setting target…' : 'Set target (upstream)'}
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem variant="destructive" onSelect={onManage}>

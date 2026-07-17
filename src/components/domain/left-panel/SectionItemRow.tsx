@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 
 function markerStyle(section: SidebarSectionData, item: SectionItem, isCurrent: boolean): CSSProperties {
   switch (section.type) {
@@ -32,26 +33,47 @@ interface SectionItemRowProps {
   isCurrent: boolean
   onClick: () => void
   onContextMenu?: (e: React.MouseEvent) => void
+  disabled?: boolean
+  pending?: boolean
+  pendingLabel?: string
 }
 
-export function SectionItemRow({ section, item, isCurrent, onClick, onContextMenu }: SectionItemRowProps) {
+export function SectionItemRow({
+  section,
+  item,
+  isCurrent,
+  onClick,
+  onContextMenu,
+  disabled,
+  pending,
+  pendingLabel,
+}: SectionItemRowProps) {
   return (
     <div
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
       onContextMenu={onContextMenu}
+      aria-disabled={disabled || undefined}
+      aria-busy={pending || undefined}
       className={cn(
-        'flex cursor-pointer items-center gap-2 py-1 pl-6 pr-3 hover:bg-panel2',
-        isCurrent && 'bg-soft'
+        'flex cursor-pointer items-center gap-2 py-1 pl-6 pr-3 transition-colors hover:bg-panel2',
+        isCurrent && 'bg-soft',
+        disabled && !pending && 'cursor-wait opacity-40',
+        pending && 'cursor-wait bg-soft text-primary'
       )}
     >
-      <span className="size-2 flex-none" style={markerStyle(section, item, isCurrent)} />
+      {pending ? (
+        <PendingIndicator className="size-3 text-primary" />
+      ) : (
+        <span className="size-2 flex-none" style={markerStyle(section, item, isCurrent)} />
+      )}
       <span
         className={cn(
           'overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]',
-          isCurrent ? 'font-semibold text-foreground' : 'text-sub'
+          isCurrent ? 'font-semibold text-foreground' : 'text-sub',
+          pending && 'font-semibold text-primary'
         )}
       >
-        {item.name}
+        {pending ? pendingLabel ?? 'Working…' : item.name}
       </span>
       {item.meta && (
         <span className="ml-auto whitespace-nowrap pl-1.5 font-mono text-[9.5px] text-muted-foreground">

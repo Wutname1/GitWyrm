@@ -1,5 +1,6 @@
 import { AlertTriangle, GitMerge, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
@@ -66,7 +67,7 @@ export function MergeBanner() {
 
       <Button
         size="sm"
-        disabled={remaining > 0 || m.commitMerge.isPending}
+        disabled={remaining > 0 || m.commitMerge.isPending || m.abortMerge.isPending}
         onClick={commit}
         className="h-7 flex-none text-[11px]"
       >
@@ -76,10 +77,12 @@ export function MergeBanner() {
       <button
         onClick={() => m.abortMerge.mutate()}
         title={abortTitle}
-        disabled={m.abortMerge.isPending}
-        className="flex size-7 flex-none items-center justify-center rounded border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3"
+        disabled={m.abortMerge.isPending || m.commitMerge.isPending}
+        aria-busy={m.abortMerge.isPending || undefined}
+        className="flex h-7 flex-none items-center justify-center gap-1.5 rounded border border-border bg-panel2 px-2 text-[11px] text-sub hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none disabled:opacity-50"
       >
-        <X size={14} />
+        {m.abortMerge.isPending ? <PendingIndicator /> : <X size={14} />}
+        {m.abortMerge.isPending && <span>Aborting…</span>}
       </button>
     </div>
   )

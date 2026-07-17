@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import {
   useAiCatalog,
   useAiConfigured,
@@ -152,14 +153,16 @@ export function AiSettings() {
                     size="sm"
                     className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
                     title="Remove API key"
+                    disabled={m.removeProvider.isPending}
+                    aria-busy={m.removeProvider.isPending || undefined}
                     onClick={() =>
                       m.removeProvider.mutate(provider.id, {
                         onError: (e) => toast.error(String(e)),
                       })
                     }
                   >
-                    <Trash2 size={12} />
-                    Remove
+                    {m.removeProvider.isPending ? <PendingIndicator /> : <Trash2 size={12} />}
+                    {m.removeProvider.isPending ? 'Removing…' : 'Remove'}
                   </Button>
                 </div>
               ) : provider.id === 'github-copilot' ? (
@@ -219,7 +222,8 @@ export function AiSettings() {
                     disabled={!keyDraft.trim() || m.setApiKey.isPending}
                     onClick={saveKey}
                   >
-                    Save
+                    {m.setApiKey.isPending && <PendingIndicator />}
+                    {m.setApiKey.isPending ? 'Saving…' : 'Save'}
                   </Button>
                 </div>
               )}
@@ -275,6 +279,8 @@ function InstructionSetting() {
   const defaultText = defaultQuery.data ?? ''
   // Local draft so typing is smooth; committed to the store on blur.
   const [draft, setDraft] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const value = draft ?? aiInstruction ?? defaultText
   const isCustom = aiInstruction != null && aiInstruction.trim() !== ''
 
@@ -282,12 +288,25 @@ function InstructionSetting() {
     const trimmed = text.trim()
     // Treat "same as default" or empty as "use default" (null).
     setAiInstruction(trimmed === '' || trimmed === defaultText.trim() ? null : text)
+    setSaved(true)
+    if (savedTimer.current) clearTimeout(savedTimer.current)
+    savedTimer.current = setTimeout(() => setSaved(false), 1600)
   }
 
   const reset = () => {
     setDraft(defaultText)
     setAiInstruction(null)
+    setSaved(true)
+    if (savedTimer.current) clearTimeout(savedTimer.current)
+    savedTimer.current = setTimeout(() => setSaved(false), 1600)
   }
+
+  useEffect(
+    () => () => {
+      if (savedTimer.current) clearTimeout(savedTimer.current)
+    },
+    []
+  )
 
   return (
     <div className="flex items-start gap-6 py-3">
@@ -315,16 +334,23 @@ function InstructionSetting() {
           className="resize-y bg-background px-2.5 py-2 font-mono text-[11px] leading-relaxed"
           placeholder={defaultText}
         />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-          disabled={!isCustom || defaultText === ''}
-          onClick={reset}
-        >
-          <RotateCcw size={12} />
-          Reset to default
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+            disabled={!isCustom || defaultText === ''}
+            onClick={reset}
+          >
+            <RotateCcw size={12} />
+            Reset to default
+          </Button>
+          {saved && (
+            <span className="flex animate-in items-center gap-1 text-[10.5px] text-primary fade-in slide-in-from-left-1">
+              <Check size={12} /> Saved
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -80,6 +80,20 @@ export function LeftPanel() {
     tags: { run: () => openNewTag(), label: 'New tag' },
   }
 
+  const isItemPending = (section: SidebarSectionData, item: SectionItem) =>
+    (section.type === 'branch' && m.checkout.isPending && m.checkout.variables === item.name) ||
+    (section.type === 'stash' &&
+      m.stashPop.isPending &&
+      (stashes.data ?? []).findIndex((s) => s.message === item.name) === m.stashPop.variables)
+
+  const isItemDisabled = (section: SidebarSectionData, item: SectionItem) =>
+    isItemPending(section, item) ||
+    (section.type === 'branch' && m.checkout.isPending) ||
+    (section.type === 'stash' && m.stashPop.isPending)
+
+  const getPendingLabel = (section: SidebarSectionData, item: SectionItem) =>
+    section.type === 'branch' ? `Switching to ${item.name}…` : 'Restoring stash…'
+
   const onItemClick = (section: SidebarSectionData, item: SectionItem) => {
     switch (section.type) {
       case 'branch':
@@ -175,6 +189,9 @@ export function LeftPanel() {
         renderItemMenu={renderItemMenu}
         onAdd={addAction.local?.run}
         addLabel={addAction.local?.label}
+        isItemPending={isItemPending}
+        isItemDisabled={isItemDisabled}
+        getPendingLabel={getPendingLabel}
       />
 
       <RemotesSection remotes={remotes.data ?? []} onManage={() => openModal('remotes')} />
@@ -188,6 +205,9 @@ export function LeftPanel() {
           renderItemMenu={renderItemMenu}
           onAdd={addAction[section.key]?.run}
           addLabel={addAction[section.key]?.label}
+          isItemPending={isItemPending}
+          isItemDisabled={isItemDisabled}
+          getPendingLabel={getPendingLabel}
         />
       ))}
 

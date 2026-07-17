@@ -3,6 +3,7 @@ import { Copy, Eraser, FolderOpen, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { commands } from '@/lib/bindings'
@@ -38,6 +39,7 @@ export function LogsModal({ open, onClose }: { open: boolean; onClose: () => voi
   const [loading, setLoading] = useState(false)
   const [level, setLevel] = useState<Level>('all')
   const [search, setSearch] = useState('')
+  const [clearing, setClearing] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -85,12 +87,15 @@ export function LogsModal({ open, onClose }: { open: boolean; onClose: () => voi
   const errorCount = useMemo(() => events.filter((e) => e.level === 'ERROR').length, [events])
 
   const clearLogs = async () => {
+    setClearing(true)
     try {
       unwrap(await commands.clearLog())
       setRaw('')
       toast('Logs cleared')
     } catch (e) {
       toast.error(`Could not clear logs: ${(e as Error).message}`)
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -171,9 +176,16 @@ export function LogsModal({ open, onClose }: { open: boolean; onClose: () => voi
             Copy view
           </Button>
           <div className="flex-1" />
-          <Button variant="secondary" size="sm" className="h-7 gap-1.5 text-xs" onClick={clearLogs}>
-            <Eraser size={12} />
-            Clear logs
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={clearLogs}
+            disabled={clearing}
+            aria-busy={clearing || undefined}
+          >
+            {clearing ? <PendingIndicator /> : <Eraser size={12} />}
+            {clearing ? 'Clearing…' : 'Clear logs'}
           </Button>
         </div>
       </DialogContent>

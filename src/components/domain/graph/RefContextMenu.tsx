@@ -13,6 +13,7 @@ import { useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 
 interface RefContextMenuProps {
   refTag: RefInfo
@@ -42,11 +43,17 @@ export function RefContextMenu({ refTag, children }: RefContextMenuProps) {
       <ContextMenuContent className="w-52">
         <ContextMenuLabel className="font-mono text-[11px] text-sub">{refTag.name}</ContextMenuLabel>
         <ContextMenuSeparator />
-        <ContextMenuItem disabled={opInProgress} onSelect={() => m.checkout.mutate(refTag.name)}>
-          <GitBranch />
-          Switch to {refTag.name}
+        <ContextMenuItem
+          disabled={opInProgress || m.checkout.isPending}
+          onSelect={(e) => {
+            e.preventDefault()
+            m.checkout.mutate(refTag.name)
+          }}
+        >
+          {m.checkout.isPending ? <PendingIndicator /> : <GitBranch />}
+          {m.checkout.isPending ? `Switching to ${refTag.name}…` : `Switch to ${refTag.name}`}
         </ContextMenuItem>
-        <ContextMenuItem disabled={opInProgress} onSelect={() => openMerge(refTag.name)}>
+        <ContextMenuItem disabled={opInProgress || m.checkout.isPending} onSelect={() => openMerge(refTag.name)}>
           <GitMerge />
           Combine with this branch…
         </ContextMenuItem>

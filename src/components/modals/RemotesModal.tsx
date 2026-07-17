@@ -3,6 +3,7 @@ import { ChevronRight, Cloud, Folder, GitBranch, Pencil, Plus, Target, Trash2, X
 import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -25,10 +26,14 @@ function BranchNode({
   node,
   depth,
   onSetUpstream,
+  upstreamPending,
+  upstreamTarget,
 }: {
   node: BranchTreeNode
   depth: number
   onSetUpstream: (branch: string) => void
+  upstreamPending: boolean
+  upstreamTarget?: string
 }) {
   const [open, setOpen] = useState(true)
   const isFolder = node.branch === null
@@ -54,7 +59,14 @@ function BranchNode({
         </button>
         {open &&
           node.children.map((c) => (
-            <BranchNode key={c.branch ?? c.name} node={c} depth={depth + 1} onSetUpstream={onSetUpstream} />
+            <BranchNode
+              key={c.branch ?? c.name}
+              node={c}
+              depth={depth + 1}
+              onSetUpstream={onSetUpstream}
+              upstreamPending={upstreamPending}
+              upstreamTarget={upstreamTarget}
+            />
           ))}
       </div>
     )
@@ -70,9 +82,13 @@ function BranchNode({
       <button
         onClick={() => node.branch && onSetUpstream(node.branch)}
         title="Track this branch"
-        className="ml-auto flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:text-primary group-hover/branch:opacity-100"
+        disabled={upstreamPending}
+        className={cn(
+          'ml-auto flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:text-primary disabled:pointer-events-none group-hover/branch:opacity-100',
+          upstreamTarget === node.branch && 'text-primary opacity-100'
+        )}
       >
-        <Target size={12} />
+        {upstreamTarget === node.branch ? <PendingIndicator className="size-3" /> : <Target size={12} />}
       </button>
     </div>
   )
@@ -85,11 +101,15 @@ function RemoteRow({
   onEdit,
   onDelete,
   onSetUpstream,
+  upstreamPending,
+  upstreamTarget,
 }: {
   remote: RemoteInfo
   onEdit: () => void
   onDelete: () => void
   onSetUpstream: (branch: string) => void
+  upstreamPending: boolean
+  upstreamTarget?: string
 }) {
   const [open, setOpen] = useState(true)
   const tree = useMemo(() => buildBranchTree(remote.branches), [remote.branches])
@@ -123,14 +143,16 @@ function RemoteRow({
             <button
               onClick={onEdit}
               title="Edit remote"
-              className="flex-none rounded p-1 text-muted-foreground hover:text-foreground"
+              disabled={upstreamPending}
+              className="flex-none rounded p-1 text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
             >
               <Pencil size={12} />
             </button>
             <button
               onClick={onDelete}
               title="Delete remote"
-              className="flex-none rounded p-1 text-muted-foreground hover:text-removed"
+              disabled={upstreamPending}
+              className="flex-none rounded p-1 text-muted-foreground hover:text-removed disabled:pointer-events-none disabled:opacity-40"
             >
               <Trash2 size={12} />
             </button>
@@ -139,19 +161,22 @@ function RemoteRow({
         <ContextMenuContent className="w-48">
           <ContextMenuLabel className="font-mono text-[11px] text-sub">{remote.name}</ContextMenuLabel>
           <ContextMenuSeparator />
-          <ContextMenuItem onSelect={onEdit}>
+          <ContextMenuItem disabled={upstreamPending} onSelect={onEdit}>
             <Pencil />
             Edit
           </ContextMenuItem>
           <ContextMenuItem
-            disabled={remote.branches.length === 0}
-            onSelect={() => onSetUpstream(`${remote.name}/${remote.branches[0]}`)}
+            disabled={remote.branches.length === 0 || upstreamPending}
+            onSelect={(e) => {
+              e.preventDefault()
+              onSetUpstream(`${remote.name}/${remote.branches[0]}`)
+            }}
           >
-            <Target />
-            Set target (upstream)
+            {upstreamTarget === `${remote.name}/${remote.branches[0]}` ? <PendingIndicator /> : <Target />}
+            {upstreamTarget === `${remote.name}/${remote.branches[0]}` ? 'Setting target…' : 'Set target (upstream)'}
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onSelect={onDelete}>
+          <ContextMenuItem disabled={upstreamPending} variant="destructive" onSelect={onDelete}>
             <Trash2 />
             Delete
           </ContextMenuItem>
@@ -166,7 +191,14 @@ function RemoteRow({
             </p>
           ) : (
             tree.map((n) => (
-              <BranchNode key={n.branch ?? n.name} node={n} depth={0} onSetUpstream={onSetUpstream} />
+              <BranchNode
+                key={n.branch ?? n.name}
+                node={n}
+                depth={0}
+                onSetUpstream={onSetUpstream}
+                upstreamPending={upstreamPending}
+                upstreamTarget={upstreamTarget}
+              />
             ))
           )}
         </div>
@@ -213,6 +245,8 @@ export function RemotesModal() {
     newUrl.trim() !== '' &&
     !existingNames.has(newName.trim()) &&
     !m.addRemote.isPending
+  const editPending = m.renameRemote.isPending || m.setRemoteUrl.isPending
+  const upstreamTarget = m.setUpstream.isPending ? m.setUpstream.variables : undefined
 
   const submitAdd = () => {
     if (!canAdd) return
@@ -272,6 +306,7 @@ export function RemotesModal() {
                       onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                       className="h-auto bg-background py-1.5 font-mono text-xs"
                       autoFocus
+                      disabled={editPending}
                     />
                   </div>
                   <div className="grid gap-1.5">
@@ -281,14 +316,16 @@ export function RemotesModal() {
                       onChange={(e) => setEditing({ ...editing, url: e.target.value })}
                       onKeyDown={(e) => e.key === 'Enter' && submitEdit()}
                       className="h-auto bg-background py-1.5 font-mono text-xs"
+                      disabled={editPending}
                     />
                   </div>
                   <div className="flex justify-end gap-2 pt-1">
-                    <Button variant="secondary" size="sm" onClick={() => setEditing(null)}>
+                    <Button variant="secondary" size="sm" disabled={editPending} onClick={() => setEditing(null)}>
                       Cancel
                     </Button>
-                    <Button size="sm" onClick={submitEdit}>
-                      Save
+                    <Button size="sm" disabled={editPending} aria-busy={editPending || undefined} onClick={submitEdit}>
+                      {editPending && <PendingIndicator />}
+                      {editPending ? 'Saving…' : 'Save'}
                     </Button>
                   </div>
                 </div>
@@ -299,6 +336,8 @@ export function RemotesModal() {
                   onEdit={() => setEditing({ name: r.name, url: r.url, original: r.name })}
                   onDelete={() => setDeleteTarget(r.name)}
                   onSetUpstream={(branch) => m.setUpstream.mutate(branch)}
+                  upstreamPending={m.setUpstream.isPending}
+                  upstreamTarget={upstreamTarget}
                 />
               )
             )}
@@ -313,6 +352,7 @@ export function RemotesModal() {
                     placeholder="origin"
                     className="h-auto bg-background py-1.5 font-mono text-xs"
                     autoFocus
+                    disabled={m.addRemote.isPending}
                   />
                   {existingNames.has(newName.trim()) && newName.trim() !== '' && (
                     <p className="text-[10px] text-removed">That name is already used.</p>
@@ -326,14 +366,16 @@ export function RemotesModal() {
                     onKeyDown={(e) => e.key === 'Enter' && submitAdd()}
                     placeholder="https://github.com/you/repo.git"
                     className="h-auto bg-background py-1.5 font-mono text-xs"
+                    disabled={m.addRemote.isPending}
                   />
                 </div>
                 <div className="flex justify-end gap-2 pt-1">
-                  <Button variant="secondary" size="sm" onClick={() => setAdding(false)}>
+                  <Button variant="secondary" size="sm" disabled={m.addRemote.isPending} onClick={() => setAdding(false)}>
                     Cancel
                   </Button>
                   <Button size="sm" disabled={!canAdd} onClick={submitAdd}>
-                    Add remote
+                    {m.addRemote.isPending && <PendingIndicator />}
+                    {m.addRemote.isPending ? 'Adding…' : 'Add remote'}
                   </Button>
                 </div>
               </div>
@@ -370,9 +412,13 @@ export function RemotesModal() {
           </>
         }
         confirmLabel="Delete remote"
+        pending={m.removeRemote.isPending}
+        pendingLabel="Deleting remote…"
+        keepOpenOnConfirm
         onConfirm={() => {
-          if (deleteTarget) m.removeRemote.mutate(deleteTarget)
-          setDeleteTarget(null)
+          if (deleteTarget) {
+            m.removeRemote.mutate(deleteTarget, { onSuccess: () => setDeleteTarget(null) })
+          }
         }}
       />
     </>

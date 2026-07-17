@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import type { FileChange } from '@/lib/bindings'
 import { StatusBadge } from './StatusBadge'
 import { FileChangeMenu } from './commit-form/FileChangeMenu'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 
 interface FileChangeRowProps {
   file: FileChange
@@ -59,19 +60,24 @@ export function FileChangeRow({
 interface StageToggleProps {
   direction: 'stage' | 'unstage'
   onToggle: (e: MouseEvent) => void
+  disabled?: boolean
+  pending?: boolean
 }
 
-export function StageToggle({ direction, onToggle }: StageToggleProps) {
+export function StageToggle({ direction, onToggle, disabled, pending }: StageToggleProps) {
   return (
     <button
       onClick={onToggle}
-      title={direction === 'stage' ? 'Stage' : 'Unstage'}
+      disabled={disabled}
+      aria-busy={pending || undefined}
+      title={pending ? (direction === 'stage' ? 'Staging file' : 'Unstaging file') : direction === 'stage' ? 'Stage' : 'Unstage'}
       className={cn(
-        'flex size-[18px] flex-none items-center justify-center rounded border border-border bg-panel2 p-0 text-[13px] leading-none hover:bg-panel3 hover:border-muted-foreground',
-        direction === 'stage' ? 'text-added' : 'text-sub'
+        'flex size-[18px] flex-none items-center justify-center rounded border border-border bg-panel2 p-0 text-[13px] leading-none hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none disabled:opacity-40',
+        direction === 'stage' ? 'text-added' : 'text-sub',
+        pending && 'border-primary/50 bg-soft !text-primary !opacity-100'
       )}
     >
-      {direction === 'stage' ? '+' : '−'}
+      {pending ? <PendingIndicator className="size-3" /> : direction === 'stage' ? '+' : '−'}
     </button>
   )
 }

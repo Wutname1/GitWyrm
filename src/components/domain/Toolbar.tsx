@@ -13,6 +13,8 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Separator } from '@/components/ui/separator'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
+import { cn } from '@/lib/utils'
 import { useBranches, useStashes } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
@@ -23,19 +25,27 @@ interface ToolbarButtonProps {
   label: string
   badge?: string
   onClick: () => void
+  disabled?: boolean
+  pending?: boolean
 }
 
-function ToolbarButton({ icon, label, badge, onClick }: ToolbarButtonProps) {
+function ToolbarButton({ icon, label, badge, onClick, disabled, pending }: ToolbarButtonProps) {
   return (
     <button
       onClick={onClick}
       title={label}
-      className="flex h-8 items-center gap-[7px] rounded-md border border-transparent px-[11px] text-foreground hover:border-muted-foreground hover:bg-panel3"
+      disabled={disabled}
+      aria-busy={pending || undefined}
+      className={cn(
+        'relative flex h-8 items-center gap-[7px] overflow-hidden rounded-md border border-transparent px-[11px] text-foreground transition-[border-color,background-color,color,opacity] hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none',
+        disabled && !pending && 'opacity-35',
+        pending && 'wyrm-operation-active border-primary/40 bg-soft text-primary'
+      )}
     >
       <span className="relative flex flex-none">
-        {icon}
-        {badge && (
-          <span className="absolute -right-[9px] -top-[7px] rounded-full bg-primary px-1 font-mono text-[8.5px] font-bold leading-[1.3] text-primary-foreground">
+        {pending ? <PendingIndicator /> : icon}
+        {badge && !pending && (
+          <span className="wyrm-sync-pulse absolute -right-[9px] -top-[7px] rounded-full bg-primary px-1 font-mono text-[8.5px] font-bold leading-[1.3] text-primary-foreground">
             {badge}
           </span>
         )}
@@ -66,6 +76,16 @@ export function Toolbar() {
   const openModal = useUiStore((s) => s.openModal)
   const head = branches.data?.local.find((b) => b.is_head)
   const currentBranch = head?.name ?? ''
+  const syncAction = m.fetch.isPending
+    ? 'fetch'
+    : m.pull.isPending
+      ? 'pull'
+      : m.push.isPending
+        ? 'push'
+        : null
+  const syncPending = syncAction !== null
+  const stashAction = m.stashSave.isPending ? 'stash' : m.stashPop.isPending ? 'pop' : null
+  const stashPending = stashAction !== null
 
   const requireRepo = (fn: () => void) => () => {
     if (!repo) {
@@ -76,24 +96,51 @@ export function Toolbar() {
   }
 
   return (
-    <div className="flex h-12 flex-none items-center gap-1 border-b border-border bg-panel px-2.5">
+    <div className="relative flex h-12 flex-none items-center gap-1 border-b border-border bg-panel px-2.5">
       <ToolbarButton
         icon={<ArrowDownToLine size={16} strokeWidth={1.9} />}
-        label="Fetch"
+        label={m.fetch.isPending ? 'Fetching…' : 'Fetch'}
         onClick={requireRepo(() => m.fetch.mutate())}
+        disabled={syncPending}
+        pending={m.fetch.isPending}
       />
       <ToolbarButton
         icon={<ArrowDown size={16} strokeWidth={1.9} />}
-        label="Pull"
+        label={m.pull.isPending ? 'Pulling…' : 'Pull'}
         badge={head?.behind ? String(head.behind) : undefined}
         onClick={requireRepo(() => m.pull.mutate())}
+        disabled={syncPending}
+        pending={m.pull.isPending}
       />
       <ToolbarButton
         icon={<ArrowUp size={16} strokeWidth={1.9} />}
-        label="Push"
+        label={m.push.isPending ? 'Pushing…' : 'Push'}
         badge={head?.ahead ? String(head.ahead) : undefined}
         onClick={requireRepo(() => m.push.mutate())}
+        disabled={syncPending}
+        pending={m.push.isPending}
       />
+
+      {syncAction && (
+        <div
+          className={cn(
+            'wyrm-sync-track pointer-events-none absolute bottom-0 left-2.5 w-[224px]',
+            syncAction === 'push' ? 'wyrm-sync-track-out' : 'wyrm-sync-track-in'
+          )}
+          aria-hidden="true"
+        >
+          <span />
+        </div>
+      )}
+      <span className="sr-only" role="status" aria-live="polite">
+        {syncAction === 'fetch'
+          ? 'Fetching from the remote'
+          : syncAction === 'pull'
+            ? 'Pulling changes from the remote'
+            : syncAction === 'push'
+              ? 'Pushing changes to the remote'
+              : ''}
+      </span>
 
       <Separator orientation="vertical" className="mx-1.5 !h-[26px]" />
 
@@ -109,12 +156,14 @@ export function Toolbar() {
       />
       <ToolbarButton
         icon={<Archive size={16} strokeWidth={1.9} />}
-        label="Stash"
+        label={m.stashSave.isPending ? 'Stashing…' : 'Stash'}
         onClick={requireRepo(() => m.stashSave.mutate(undefined))}
+        disabled={stashPending}
+        pending={m.stashSave.isPending}
       />
       <ToolbarButton
         icon={<ArchiveRestore size={16} strokeWidth={1.9} />}
-        label="Pop"
+        label={m.stashPop.isPending ? 'Restoring…' : 'Pop'}
         onClick={requireRepo(() => {
           if ((stashes.data?.length ?? 0) === 0) {
             toast('No stashes')
@@ -122,6 +171,8 @@ export function Toolbar() {
           }
           m.stashPop.mutate(0)
         })}
+        disabled={stashPending}
+        pending={m.stashPop.isPending}
       />
 
       <div className="flex-1" />

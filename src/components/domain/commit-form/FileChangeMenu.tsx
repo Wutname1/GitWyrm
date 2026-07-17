@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from 'react'
 import { FileText, MinusCircle, PlusCircle, Trash2 } from 'lucide-react'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import type { FileChange } from '@/lib/bindings'
 import {
   ContextMenu,
@@ -25,6 +26,7 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
   const m = useGitMutations(repo?.id ?? null)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const name = file.path.split('/').pop() ?? file.path
+  const stagePending = m.stageFile.isPending || m.unstageFile.isPending
 
   return (
     <>
@@ -40,14 +42,26 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
             {file.conflicted ? 'Resolve conflicts' : 'View changes'}
           </ContextMenuItem>
           {staged ? (
-            <ContextMenuItem onSelect={() => m.unstageFile.mutate(file.path)}>
-              <MinusCircle />
-              Unstage this file
+            <ContextMenuItem
+              disabled={stagePending}
+              onSelect={(e) => {
+                e.preventDefault()
+                m.unstageFile.mutate(file.path)
+              }}
+            >
+              {m.unstageFile.isPending ? <PendingIndicator /> : <MinusCircle />}
+              {m.unstageFile.isPending ? 'Unstaging file…' : 'Unstage this file'}
             </ContextMenuItem>
           ) : (
-            <ContextMenuItem onSelect={() => m.stageFile.mutate(file.path)}>
-              <PlusCircle />
-              Stage this file
+            <ContextMenuItem
+              disabled={stagePending}
+              onSelect={(e) => {
+                e.preventDefault()
+                m.stageFile.mutate(file.path)
+              }}
+            >
+              {m.stageFile.isPending ? <PendingIndicator /> : <PlusCircle />}
+              {m.stageFile.isPending ? 'Staging file…' : 'Stage this file'}
             </ContextMenuItem>
           )}
           {!file.conflicted && (
