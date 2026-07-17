@@ -724,6 +724,19 @@ export type CheckoutOutcome =
  * stash was KEPT as a backup; the working tree has conflict markers.
  */
 "stash_pop_conflict"
+/**
+ * Commit-graph column layout. Column ids are validated on the frontend, so
+ * unknown values here are ignored rather than rejected.
+ */
+export type ColumnLayout = { 
+/**
+ * Column ids in display order.
+ */
+order?: string[]; 
+/**
+ * Column ids the user has hidden.
+ */
+hidden?: string[] }
 export type CommitDetail = { sha: string; summary: string; body: string; author_name: string; author_email: string; time: number; parent_shas: string[]; files: FileChange[] }
 export type CommitEntry = { sha: string; short_sha: string; summary: string; author_name: string; author_email: string; author_initials: string; 
 /**
@@ -953,7 +966,11 @@ active_repo_path?: string | null; recents?: RecentRepo[]; code_folder?: string |
  * Custom system instruction for commit-message generation. None uses the
  * built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).
  */
-ai_instruction?: string | null }
+ai_instruction?: string | null; 
+/**
+ * Commit-graph column order and visibility.
+ */
+column_layout?: ColumnLayout | null }
 export type StashInfo = { index: number; message: string }
 export type StatusCode = "A" | "M" | "D" | "R" | "!"
 export type TagInfo = { name: string }

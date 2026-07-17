@@ -5,11 +5,13 @@ import { GRAPH_ROW_HEIGHT } from '@/lib/gitDisplay'
 import { useCommitLog, useStatus } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
-import { CommitRow, GRAPH_GRID } from '@/components/domain/graph/CommitRow'
+import { CommitRow } from '@/components/domain/graph/CommitRow'
 import { PendingRow } from '@/components/domain/graph/PendingRow'
 import { GraphSvg } from '@/components/domain/graph/GraphSvg'
+import { GraphHeader } from '@/components/domain/graph/GraphHeader'
 import { CommitDrawer } from '@/components/domain/graph/CommitDrawer'
-import { cn } from '@/lib/utils'
+import { graphLeftOffset } from '@/lib/graphColumns'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 /** Sentinel selection value for the synthetic WIP row (not a real commit). */
 const WIP_SHA = '__wip__'
@@ -19,6 +21,9 @@ export function GraphView() {
   const selectedSha = useUiStore((s) => s.selectedSha)
   const selectCommit = useUiStore((s) => s.selectCommit)
   const focusChanges = useUiStore((s) => s.focusChanges)
+  const columnOrder = useWorkspaceStore((s) => s.columnOrder)
+  const hiddenColumns = useWorkspaceStore((s) => s.hiddenColumns)
+  const graphLeft = graphLeftOffset(columnOrder, hiddenColumns)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const log = useCommitLog(repo?.id ?? null)
@@ -86,29 +91,20 @@ export function GraphView() {
 
   return (
     <>
-      <div
-        className={cn(
-          'grid h-[30px] flex-none items-center border-b border-border pl-3 pr-1 text-[10px] font-bold tracking-[.06em] text-muted-foreground',
-          GRAPH_GRID
-        )}
-      >
-        <span>BRANCH / TAG</span>
-        <span>GRAPH</span>
-        <span>COMMIT MESSAGE</span>
-        <span>AUTHOR</span>
-        <span>DATE</span>
-        <span>SHA</span>
-      </div>
+      <GraphHeader />
 
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto pl-3">
         <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
-          <GraphSvg
-            commits={commits}
-            selectedSha={selectedSha}
-            startIndex={startIndex}
-            endIndex={endIndex}
-            pending={pending}
-          />
+          {graphLeft != null && (
+            <GraphSvg
+              commits={commits}
+              selectedSha={selectedSha}
+              startIndex={startIndex}
+              endIndex={endIndex}
+              pending={pending}
+              left={graphLeft}
+            />
+          )}
           {items.map((vi) => {
             const rowStyle: React.CSSProperties = {
               position: 'absolute',

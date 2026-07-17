@@ -42,6 +42,18 @@ fn default_branch_switch_mode() -> BranchSwitchMode {
   BranchSwitchMode::AutoStash
 }
 
+/// Commit-graph column layout. Column ids are validated on the frontend, so
+/// unknown values here are ignored rather than rejected.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ColumnLayout {
+  /// Column ids in display order.
+  #[serde(default)]
+  pub order: Vec<String>,
+  /// Column ids the user has hidden.
+  #[serde(default)]
+  pub hidden: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Settings {
   /// Paths of repos open in tabs, in tab order, so they can be reopened on launch.
@@ -68,6 +80,9 @@ pub struct Settings {
   /// built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).
   #[serde(default)]
   pub ai_instruction: Option<String>,
+  /// Commit-graph column order and visibility.
+  #[serde(default)]
+  pub column_layout: Option<ColumnLayout>,
 }
 
 fn default_update_channel() -> UpdateChannel {
@@ -87,6 +102,7 @@ impl Default for Settings {
       ai_provider: None,
       ai_model: None,
       ai_instruction: None,
+      column_layout: None,
     }
   }
 }

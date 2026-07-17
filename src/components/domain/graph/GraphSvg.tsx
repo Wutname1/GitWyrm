@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { CommitEntry } from '@/lib/bindings'
 import { GRAPH_ROW_HEIGHT, laneColor } from '@/lib/gitDisplay'
+import { GRAPH_COLUMN_WIDTH } from '@/lib/graphColumns'
 
 const X0 = 16
 const LANE_WIDTH = 20
@@ -16,6 +17,8 @@ interface GraphSvgProps {
   endIndex: number
   /** When true, a synthetic WIP row occupies row 0 and commits shift down by one. */
   pending?: boolean
+  /** Left offset (px) of the graph column within the row grid. */
+  left: number
 }
 
 /**
@@ -25,7 +28,7 @@ interface GraphSvgProps {
  * set, a dashed WIP node sits at row 0 in the HEAD commit's lane and a dashed
  * edge links it to HEAD.
  */
-export function GraphSvg({ commits, selectedSha, startIndex, endIndex, pending }: GraphSvgProps) {
+export function GraphSvg({ commits, selectedSha, startIndex, endIndex, pending, left }: GraphSvgProps) {
   const rowOffset = pending ? 1 : 0
   const indexBySha = useMemo(() => {
     const m = new Map<string, number>()
@@ -72,9 +75,10 @@ export function GraphSvg({ commits, selectedSha, startIndex, endIndex, pending }
 
   return (
     <svg
-      width={96}
+      width={GRAPH_COLUMN_WIDTH}
       height={(commits.length + rowOffset) * GRAPH_ROW_HEIGHT}
-      className="pointer-events-none absolute left-[150px] top-0 overflow-visible"
+      style={{ left }}
+      className="pointer-events-none absolute top-0 overflow-visible"
     >
       {edges.map((e, i) => (
         <path
