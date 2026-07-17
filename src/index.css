@@ -591,23 +591,19 @@
   animation: wyrm-drop-target 1.1s ease-in-out infinite;
 }
 
-/* Full-window scrim shown while dragging a ref, so the pulsing targets pop. */
-.wyrm-drag-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  background: rgba(0, 0, 0, 0.55);
-  animation: wyrm-scrim-in 0.14s ease-out;
-  pointer-events: none;
+/* While a ref pill is being dragged (body.wyrm-dragging), the app dims itself
+   region by region instead of using an overlay: a fixed scrim sat above the
+   pills (virtualized rows form their own stacking contexts, so pill z-index
+   can't beat it) and hid the drop targets. Dimming the content directly keeps
+   the pulsing targets fully visible and droppable. */
+body.wyrm-dragging [data-dim-on-drag] {
+  opacity: 0.22;
+  transition: opacity 0.14s ease-out;
 }
 
-@keyframes wyrm-scrim-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+/* Let the pulse glow escape the ref cell's clipping while dragging. */
+body.wyrm-dragging .gw-refs-cell {
+  overflow: visible;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -620,7 +616,6 @@
   .wyrm-ai-spark,
   .wyrm-sync-pulse,
   .wyrm-drop-target,
-  .wyrm-drag-scrim,
   .wyrm-operation-active::after,
   .wyrm-sync-track span {
     animation: none;

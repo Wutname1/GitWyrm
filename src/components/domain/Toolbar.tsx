@@ -96,7 +96,7 @@ export function Toolbar() {
   }
 
   return (
-    <div className="relative flex h-12 flex-none items-center gap-1 border-b border-border bg-panel px-2.5">
+    <div data-dim-on-drag className="relative flex h-12 flex-none items-center gap-1 border-b border-border bg-panel px-2.5">
       <ToolbarButton
         icon={<ArrowDownToLine size={16} strokeWidth={1.9} />}
         label={m.fetch.isPending ? 'Fetching…' : 'Fetch'}

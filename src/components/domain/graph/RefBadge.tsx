@@ -9,11 +9,13 @@ import { useDragStore } from '@/stores/dragStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { RefContextMenu } from './RefContextMenu'
 
+// Every pill shares the accent background so the drag ghost always looks like
+// the thing being dragged, whichever kind of ref it is.
 const styles: Record<RefKind, string> = {
   head: 'bg-primary text-primary-foreground',
-  branch: 'border border-primary text-primary',
-  remote: 'border border-border text-sub',
-  tag: 'bg-modified text-[#1a1400]',
+  branch: 'bg-primary text-primary-foreground',
+  remote: 'bg-primary text-primary-foreground',
+  tag: 'bg-primary text-primary-foreground',
 }
 
 export function RefBadge({ refTag }: { refTag: RefInfo }) {
@@ -58,6 +60,16 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
   const isValidTarget = acceptsDragged(draggingRef)
 
   const onDragStart = (e: DragEvent) => {
+    console.debug('[refdrag] dragstart', {
+      self,
+      branchesLoaded: !!branches.data,
+      locals: branches.data?.local.map((b) => ({
+        name: b.name,
+        upstream: b.upstream,
+        ahead: b.ahead,
+        behind: b.behind,
+      })),
+    })
     e.dataTransfer.setData(REF_DND_MIME, JSON.stringify(self))
     e.dataTransfer.effectAllowed = 'move'
 
@@ -81,15 +93,26 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
     startDrag(self)
   }
 
-  const onDragEnd = () => endDrag()
+  const onDragEnd = () => {
+    console.debug('[refdrag] dragend', self.name)
+    endDrag()
+  }
 
   const onDragOver = (e: DragEvent) => {
     // Only our ref drags carry this MIME type. The payload itself is unreadable
     // during dragover, so accept based on the store's draggingRef; if the store
     // hasn't propagated yet (first event of a drag), accept optimistically so the
     // cursor shows "move" - the drop handler re-validates against the real payload.
-    if (!e.dataTransfer.types.includes(REF_DND_MIME)) return
-    if (draggingRef && !isValidTarget) return
+    if (!e.dataTransfer.types.includes(REF_DND_MIME)) {
+      console.debug('[refdrag] dragover on', self.name, 'rejected: no ref MIME', [
+        ...e.dataTransfer.types,
+      ])
+      return
+    }
+    if (draggingRef && !isValidTarget) {
+      console.debug('[refdrag] dragover on', self.name, 'rejected: not a valid pair for', draggingRef)
+      return
+    }
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
   }
@@ -99,11 +122,13 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
     // correct even if the store lagged during dragover.
     const raw = e.dataTransfer.getData(REF_DND_MIME)
     const dragged = raw ? (JSON.parse(raw) as DraggedRef) : draggingRef
+    console.debug('[refdrag] drop on', self.name, { raw, dragged, accepts: acceptsDragged(dragged) })
     if (!acceptsDragged(dragged) || !dragged) {
       endDrag()
       return
     }
     e.preventDefault()
+    console.debug('[refdrag] opening sync modal', { source: dragged.name, target: refTag.name })
     openRemoteSync(dragged.name, refTag.name)
     endDrag()
   }
@@ -132,10 +157,9 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
           'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-[9.5px] font-semibold leading-[1.4] transition-opacity',
           draggable ? 'wyrm-draggable cursor-grab active:cursor-grabbing' : 'cursor-default',
           styles[refTag.type],
-          // The whole border pulses on a valid target; it and the dragged pill
-          // sit above the dimming scrim so they stay bright.
+          // The whole border pulses on a valid target while everything else
+          // dims (body.wyrm-dragging), so the landing spots stand out.
           isValidTarget && 'wyrm-drop-target',
-          isSource && 'relative z-[60]',
           dragging && !isValidTarget && !isSource && 'opacity-30'
         )}
       >

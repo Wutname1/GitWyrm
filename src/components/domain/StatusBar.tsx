@@ -10,7 +10,7 @@ export function StatusBar() {
   const total = (status.data?.staged.length ?? 0) + (status.data?.unstaged.length ?? 0)
 
   return (
-    <div className="flex h-6 flex-none items-center gap-4 border-t border-border bg-panel2 px-3 font-mono text-[10.5px] text-sub">
+    <div data-dim-on-drag className="flex h-6 flex-none items-center gap-4 border-t border-border bg-panel2 px-3 font-mono text-[10.5px] text-sub">
       {head && (
         <span className="flex items-center gap-[5px]">
           <span className="size-[7px] rounded-[2px] bg-primary" />

@@ -180,7 +180,7 @@ export function LeftPanel() {
   const otherSections = sections.slice(1)
 
   return (
-    <div className="w-60 flex-none overflow-y-auto border-r border-border bg-panel pb-6 pt-1.5">
+    <div data-dim-on-drag className="w-60 flex-none overflow-y-auto border-r border-border bg-panel pb-6 pt-1.5">
       <SidebarSection
         key={localSection.key}
         section={localSection}

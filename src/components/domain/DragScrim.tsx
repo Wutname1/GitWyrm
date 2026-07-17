@@ -1,13 +1,20 @@
+import { useEffect } from 'react'
 import { useDragStore } from '@/stores/dragStore'
 
 /**
- * A full-window dim shown while a ref pill is being dragged. It darkens
- * everything so the pulsing drop targets (which sit above it) stand out. Purely
- * presentational and click-through (pointer-events: none) so it never blocks the
- * drag itself.
+ * Toggles `wyrm-dragging` on <body> while a ref pill is being dragged. CSS then
+ * dims every region marked data-dim-on-drag. We dim the content itself rather
+ * than laying a scrim over it: the virtualized graph rows form their own
+ * stacking contexts, so an overlay always covered the drop targets no matter
+ * their z-index.
  */
 export function DragScrim() {
   const dragging = useDragStore((s) => s.draggingRef !== null)
-  if (!dragging) return null
-  return <div className="wyrm-drag-scrim" />
+
+  useEffect(() => {
+    document.body.classList.toggle('wyrm-dragging', dragging)
+    return () => document.body.classList.remove('wyrm-dragging')
+  }, [dragging])
+
+  return null
 }

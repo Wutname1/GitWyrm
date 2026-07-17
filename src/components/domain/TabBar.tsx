@@ -102,6 +102,7 @@ export function TabBar() {
   return (
     <div
       data-tauri-drag-region
+      data-dim-on-drag
       className="flex h-9 flex-none items-stretch gap-0.5 border-b border-border bg-background pl-2.5"
     >
       <div className="mr-1 flex items-center border-r border-border pr-3">

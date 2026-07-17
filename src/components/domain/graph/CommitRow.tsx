@@ -22,7 +22,7 @@ export const CommitRow = memo(function CommitRow({ commit, selected, onSelect, s
 
   const cell: Record<ColumnId, React.ReactNode> = {
     refs: (
-      <div className="flex items-center gap-1 overflow-hidden pr-1.5">
+      <div className="gw-refs-cell flex items-center gap-1 overflow-hidden pr-1.5">
         {commit.refs.map((r) => (
           <RefBadge key={r.name} refTag={r} />
         ))}
@@ -30,20 +30,20 @@ export const CommitRow = memo(function CommitRow({ commit, selected, onSelect, s
     ),
     graph: <div />,
     message: (
-      <div className="overflow-hidden text-ellipsis whitespace-nowrap pr-2.5 text-foreground">
+      <div data-dim-on-drag className="overflow-hidden text-ellipsis whitespace-nowrap pr-2.5 text-foreground">
         {commit.summary}
       </div>
     ),
     author: (
-      <div className="flex items-center gap-[7px] overflow-hidden">
+      <div data-dim-on-drag className="flex items-center gap-[7px] overflow-hidden">
         <Avatar initials={commit.author_initials} color={color} email={commit.author_email} />
         <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-sub">
           {commit.author_name}
         </span>
       </div>
     ),
-    date: <div className="font-mono text-[11px] text-sub">{formatCommitTime(commit.time)}</div>,
-    sha: <div className="font-mono text-[11px] text-muted-foreground">{commit.short_sha}</div>,
+    date: <div data-dim-on-drag className="font-mono text-[11px] text-sub">{formatCommitTime(commit.time)}</div>,
+    sha: <div data-dim-on-drag className="font-mono text-[11px] text-muted-foreground">{commit.short_sha}</div>,
   }
 
   return (
