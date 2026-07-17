@@ -47,12 +47,15 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
       ? refTag.name.slice(remoteName.length + 1)
       : refTag.name
 
-  // Would this pill accept whatever is currently being dragged?
-  const isValidTarget =
-    !!draggingRef &&
-    draggingRef.name !== refTag.name &&
+  // Would this pill accept the ref currently being dragged? Used both to drive
+  // the highlight and to decide whether to accept the drop.
+  const acceptsDragged = (dragged: DraggedRef | null) =>
+    !!dragged &&
+    dragged.name !== refTag.name &&
     !!branches.data &&
-    !!resolveSyncPair(draggingRef, self, branches.data)
+    !!resolveSyncPair(dragged, self, branches.data)
+
+  const isValidTarget = acceptsDragged(draggingRef)
 
   const onDragStart = (e: DragEvent) => {
     e.dataTransfer.setData(REF_DND_MIME, JSON.stringify(self))
@@ -81,17 +84,27 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
   const onDragEnd = () => endDrag()
 
   const onDragOver = (e: DragEvent) => {
-    // Accept the drop when the live drag forms a valid tracking pair. Calling
-    // preventDefault is what turns the cursor from "no-drop" into "move".
-    if (!isValidTarget) return
+    // Only our ref drags carry this MIME type. The payload itself is unreadable
+    // during dragover, so accept based on the store's draggingRef; if the store
+    // hasn't propagated yet (first event of a drag), accept optimistically so the
+    // cursor shows "move" - the drop handler re-validates against the real payload.
+    if (!e.dataTransfer.types.includes(REF_DND_MIME)) return
+    if (draggingRef && !isValidTarget) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
   }
 
   const onDrop = (e: DragEvent) => {
-    if (!draggingRef || !isValidTarget) return
+    // The payload is readable here; validate against it directly so the drop is
+    // correct even if the store lagged during dragover.
+    const raw = e.dataTransfer.getData(REF_DND_MIME)
+    const dragged = raw ? (JSON.parse(raw) as DraggedRef) : draggingRef
+    if (!acceptsDragged(dragged) || !dragged) {
+      endDrag()
+      return
+    }
     e.preventDefault()
-    openRemoteSync(draggingRef.name, refTag.name)
+    openRemoteSync(dragged.name, refTag.name)
     endDrag()
   }
 
@@ -104,13 +117,20 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
     <RefContextMenu refTag={refTag}>
       <span
         draggable={draggable}
+        // Radix's context-menu triggers wrap this pill and their pointerdown
+        // handling cancels a native drag before it starts. Stop the left-button
+        // press from reaching them (right-click still bubbles, so both context
+        // menus keep working).
+        onPointerDown={(e) => {
+          if (draggable && e.button === 0) e.stopPropagation()
+        }}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
         onDragOver={onDragOver}
         onDrop={onDrop}
         className={cn(
           'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-[9.5px] font-semibold leading-[1.4] transition-opacity',
-          draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-default',
+          draggable ? 'wyrm-draggable cursor-grab active:cursor-grabbing' : 'cursor-default',
           styles[refTag.type],
           // The whole border pulses on a valid target; it and the dragged pill
           // sit above the dimming scrim so they stay bright.
