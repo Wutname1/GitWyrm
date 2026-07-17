@@ -29,6 +29,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::log::get_log,
     commands::status::get_status,
     commands::branch::list_branches,
+    commands::branch::branch_relation,
     commands::branch::list_tags,
     commands::stash::list_stashes,
     commands::diff::get_file_diff,

@@ -266,9 +266,9 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const rebase = useMutation({
-    mutationFn: async (onto: string) => ({
-      onto,
-      result: unwrap(await commands.gitRebase(id, onto)),
+    mutationFn: async (args: { onto: string; branch?: string }) => ({
+      onto: args.onto,
+      result: unwrap(await commands.gitRebase(id, args.onto, args.branch ?? null)),
     }),
     onSuccess: ({ onto, result }) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])

@@ -47,3 +47,33 @@ export function resolveSyncPair(
   const direction: SyncDirection = source.type === 'remote' ? 'incoming' : 'outgoing'
   return { branch, upstream: branch.upstream, direction }
 }
+
+/**
+ * Any valid drop pairing. A local branch and its own upstream form a `tracking`
+ * pair (push / pull / rebase against the cloud copy). Any other ref dropped
+ * onto a LOCAL branch is a `branches` pair: bring the source's work into the
+ * target branch (fast-forward, rebase, or merge). The target must be local -
+ * another branch's cloud copy can't be changed directly.
+ */
+export type DropPair =
+  | ({ kind: 'tracking' } & RefSyncPair)
+  | { kind: 'branches'; source: DraggedRef; target: DraggedRef }
+
+export function resolveDropPair(
+  source: DraggedRef,
+  target: DraggedRef,
+  branches: BranchList
+): DropPair | null {
+  if (source.type === 'tag' || target.type === 'tag') return null
+  if (source.name === target.name) return null
+
+  const tracking = resolveSyncPair(source, target, branches)
+  if (tracking) return { kind: 'tracking', ...tracking }
+
+  const targetIsLocal =
+    (target.type === 'head' || target.type === 'branch') &&
+    branches.local.some((b) => b.name === target.name)
+  if (!targetIsLocal) return null
+
+  return { kind: 'branches', source, target }
+}

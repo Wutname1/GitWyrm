@@ -1,7 +1,7 @@
 import { type DragEvent } from 'react'
 import { cn } from '@/lib/utils'
 import type { RefInfo, RefKind } from '@/lib/bindings'
-import { REF_DND_MIME, resolveSyncPair, type DraggedRef } from '@/lib/refSync'
+import { REF_DND_MIME, resolveDropPair, type DraggedRef } from '@/lib/refSync'
 import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import { useBranches, useRemotes } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
@@ -55,7 +55,7 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
     !!dragged &&
     dragged.name !== refTag.name &&
     !!branches.data &&
-    !!resolveSyncPair(dragged, self, branches.data)
+    !!resolveDropPair(dragged, self, branches.data)
 
   const isValidTarget = acceptsDragged(draggingRef)
 

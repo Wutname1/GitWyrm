@@ -142,6 +142,19 @@ async listBranches(repoId: string) : Promise<Result<BranchList, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Ahead/behind counts between two arbitrary refs (branch, remote branch, tag,
+ * or sha). `ahead` = commits `ours` has that `theirs` doesn't; `behind` = the
+ * reverse. Backs the drag-to-sync analysis for non-tracking branch pairs.
+ */
+async branchRelation(repoId: string, ours: string, theirs: string) : Promise<Result<BranchRelation, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("branch_relation", { repoId, ours, theirs }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listTags(repoId: string) : Promise<Result<TagInfo[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_tags", { repoId }) };
@@ -378,15 +391,16 @@ async gitPushForce(repoId: string) : Promise<Result<null, string>> {
 }
 },
 /**
- * Rebase the current branch onto `onto` (e.g. `origin/main`), replaying local
- * commits on top. A clean rebase returns no conflicts. A rebase that hits
- * conflicts leaves the repo paused (rebase-in-progress) and returns the
- * conflicted paths instead of erroring, so the frontend can guide the user.
- * Refuses to start over a dirty working tree.
+ * Rebase a branch onto `onto` (e.g. `origin/main`), replaying its commits on
+ * top. Rebases the current branch when `branch` is None; otherwise git checks
+ * out `branch` first and leaves HEAD there. A clean rebase returns no
+ * conflicts. A rebase that hits conflicts leaves the repo paused
+ * (rebase-in-progress) and returns the conflicted paths instead of erroring,
+ * so the frontend can guide the user. Refuses to start over a dirty tree.
  */
-async gitRebase(repoId: string, onto: string) : Promise<Result<RebaseResult, string>> {
+async gitRebase(repoId: string, onto: string, branch: string | null) : Promise<Result<RebaseResult, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_rebase", { repoId, onto }) };
+    return { status: "ok", data: await TAURI_INVOKE("git_rebase", { repoId, onto, branch }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -680,6 +694,11 @@ async generateCommitMessage(repoId: string, provider: string, model: string) : P
 export type AiProviderStatus = { id: string; configured: boolean }
 export type BranchInfo = { name: string; is_head: boolean; upstream: string | null; ahead: number; behind: number }
 export type BranchList = { local: BranchInfo[]; remote: string[] }
+/**
+ * How two arbitrary refs relate: commits `ours` has that `theirs` doesn't
+ * (ahead) and commits `theirs` has that `ours` doesn't (behind).
+ */
+export type BranchRelation = { ahead: number; behind: number }
 /**
  * What to do with uncommitted changes when switching branches.
  */

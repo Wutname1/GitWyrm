@@ -93,6 +93,14 @@ pub struct BranchList {
   pub remote: Vec<String>,
 }
 
+/// How two arbitrary refs relate: commits `ours` has that `theirs` doesn't
+/// (ahead) and commits `theirs` has that `ours` doesn't (behind).
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct BranchRelation {
+  pub ahead: u32,
+  pub behind: u32,
+}
+
 /// What happened to uncommitted changes during a branch switch.
 #[derive(Debug, Clone, Copy, Serialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

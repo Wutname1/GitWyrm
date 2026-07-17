@@ -343,11 +343,12 @@ fn conflicted_paths(repo: &git2::Repository) -> Result<Vec<String>, AppError> {
   Ok(paths)
 }
 
-/// Rebase the current branch onto `onto` (e.g. `origin/main`), replaying local
-/// commits on top. A clean rebase returns no conflicts. A rebase that hits
-/// conflicts leaves the repo paused (rebase-in-progress) and returns the
-/// conflicted paths instead of erroring, so the frontend can guide the user.
-/// Refuses to start over a dirty working tree.
+/// Rebase a branch onto `onto` (e.g. `origin/main`), replaying its commits on
+/// top. Rebases the current branch when `branch` is None; otherwise git checks
+/// out `branch` first and leaves HEAD there. A clean rebase returns no
+/// conflicts. A rebase that hits conflicts leaves the repo paused
+/// (rebase-in-progress) and returns the conflicted paths instead of erroring,
+/// so the frontend can guide the user. Refuses to start over a dirty tree.
 #[tauri::command]
 #[specta::specta]
 pub async fn git_rebase(
@@ -355,6 +356,7 @@ pub async fn git_rebase(
   manager: State<'_, RepoManager>,
   repo_id: String,
   onto: String,
+  branch: Option<String>,
 ) -> Result<RebaseResult, AppError> {
   let open = manager.get(&repo_id)?;
   let path = open.path.to_string_lossy().into_owned();
@@ -368,7 +370,12 @@ pub async fn git_rebase(
       }
     }
 
-    match run_streaming(&app, &repo_id, Some(&path), "rebase", &["rebase", "--progress", &onto]) {
+    let mut args = vec!["rebase", "--progress", onto.as_str()];
+    if let Some(b) = branch.as_deref() {
+      args.push(b);
+    }
+
+    match run_streaming(&app, &repo_id, Some(&path), "rebase", &args) {
       Ok(_) => Ok(RebaseResult { conflicts: Vec::new() }),
       Err(e) => {
         // A conflicting rebase exits non-zero but leaves a rebase-in-progress

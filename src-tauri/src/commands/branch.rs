@@ -2,7 +2,9 @@ use git2::{build::CheckoutBuilder, BranchType, Oid, ResetType};
 use tauri::State;
 
 use crate::error::AppError;
-use crate::git::types::{BranchInfo, BranchList, CheckoutOutcome, RefMove, ResetMode, TagInfo};
+use crate::git::types::{
+  BranchInfo, BranchList, BranchRelation, CheckoutOutcome, RefMove, ResetMode, TagInfo,
+};
 use crate::settings::BranchSwitchMode;
 use crate::state::RepoManager;
 
@@ -74,6 +76,29 @@ pub async fn list_branches(
     local.sort_by(|a, b| b.is_head.cmp(&a.is_head).then(a.name.cmp(&b.name)));
     remote.sort();
     Ok(BranchList { local, remote })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Ahead/behind counts between two arbitrary refs (branch, remote branch, tag,
+/// or sha). `ahead` = commits `ours` has that `theirs` doesn't; `behind` = the
+/// reverse. Backs the drag-to-sync analysis for non-tracking branch pairs.
+#[tauri::command]
+#[specta::specta]
+pub async fn branch_relation(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  ours: String,
+  theirs: String,
+) -> Result<BranchRelation, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let our_oid = repo.revparse_single(&ours)?.peel_to_commit()?.id();
+    let their_oid = repo.revparse_single(&theirs)?.peel_to_commit()?.id();
+    let (ahead, behind) = repo.graph_ahead_behind(our_oid, their_oid)?;
+    Ok(BranchRelation { ahead: ahead as u32, behind: behind as u32 })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
