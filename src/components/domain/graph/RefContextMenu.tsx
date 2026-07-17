@@ -44,11 +44,11 @@ export function RefContextMenu({ refTag, children }: RefContextMenuProps) {
         <ContextMenuSeparator />
         <ContextMenuItem disabled={opInProgress} onSelect={() => m.checkout.mutate(refTag.name)}>
           <GitBranch />
-          Checkout {refTag.name}
+          Switch to {refTag.name}
         </ContextMenuItem>
         <ContextMenuItem disabled={opInProgress} onSelect={() => openMerge(refTag.name)}>
           <GitMerge />
-          Merge into current…
+          Combine with this branch…
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

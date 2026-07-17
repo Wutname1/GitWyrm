@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { commands, type Resolution, type SelectedLine } from '@/lib/bindings'
+import { commands, type Resolution, type ResetMode, type SelectedLine } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -151,6 +151,28 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  const mergeDirectional = useMutation({
+    mutationFn: async (args: { target: string; source: string }) => ({
+      ...args,
+      result: unwrap(await commands.mergeDirectional(id, args.target, args.source)),
+    }),
+    onSuccess: ({ target, source, result }) => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      if (result.up_to_date) {
+        toast(`${target} already contains ${source}`)
+      } else if (result.fast_forwarded) {
+        toast(`Fast-forwarded ${target} to ${source}`)
+      } else if (result.conflicts.length > 0) {
+        toast.warning(
+          `Merged ${source} into ${target} with ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'} to resolve`
+        )
+      } else {
+        toast(`Merged ${source} into ${target}`)
+      }
+    },
+    onError,
+  })
+
   const cherryPick = useMutation({
     mutationFn: async (sha: string) => ({
       sha,
@@ -166,6 +188,52 @@ export function useGitMutations(repoId: string | null) {
       } else {
         toast(`Cherry-picked ${short}`)
       }
+    },
+    onError,
+  })
+
+  // After a ref move (reset/move-branch), refresh history and offer an undo
+  // that puts the branch back where it was.
+  const afterRefMove = (previousSha: string, verb: string, undoMode: ResetMode) => {
+    invalidate(qc, id, ['status', 'log', 'branches'])
+    toast(`${verb} ${previousSha.slice(0, 7)}`, {
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          void commands.resetCurrent(id, previousSha, undoMode).then((r) => {
+            if (r.status === 'ok') invalidate(qc, id, ['status', 'log', 'branches'])
+            else toast.error(r.error)
+          })
+        },
+      },
+    })
+  }
+
+  const reset = useMutation({
+    mutationFn: async (args: { sha: string; mode: ResetMode }) => ({
+      mode: args.mode,
+      move: unwrap(await commands.resetCurrent(id, args.sha, args.mode)),
+    }),
+    onSuccess: ({ mode, move }) =>
+      afterRefMove(move.previous_sha, `Rewound ${move.branch} — was at`, mode),
+    onError,
+  })
+
+  const moveBranch = useMutation({
+    mutationFn: async (sha: string) => unwrap(await commands.moveCurrentBranch(id, sha)),
+    onSuccess: (move) => afterRefMove(move.previous_sha, `Moved ${move.branch} — was at`, 'Soft'),
+    onError,
+  })
+
+  const openOnGitHub = useMutation({
+    mutationFn: async (sha: string) => {
+      const url = unwrap(await commands.commitWebUrl(id, sha))
+      if (!url) {
+        toast('This commit is not on a supported remote yet')
+        return
+      }
+      const { openUrl } = await import('@tauri-apps/plugin-opener')
+      await openUrl(url)
     },
     onError,
   })
@@ -242,7 +310,11 @@ export function useGitMutations(repoId: string | null) {
     pull,
     push,
     merge,
+    mergeDirectional,
     cherryPick,
+    reset,
+    moveBranch,
+    openOnGitHub,
     abortMerge,
     resolveConflict,
     commitMerge,
