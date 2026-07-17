@@ -149,7 +149,11 @@ export function Toolbar() {
         <span className="ml-auto rounded border border-border px-1 font-mono text-[10px]">Ctrl+K</span>
       </button>
 
-      <GhostButton icon={<Folder size={16} strokeWidth={1.9} />} title="Show in file explorer" onClick={() => toast('Reveal in explorer (soon)')} />
+      <GhostButton
+        icon={<Folder size={16} strokeWidth={1.9} />}
+        title="Show in file explorer"
+        onClick={requireRepo(() => m.revealInFileManager.mutate())}
+      />
       <GhostButton
         icon={
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
@@ -158,9 +162,13 @@ export function Toolbar() {
           </svg>
         }
         title="Open in VS Code"
-        onClick={() => toast('Open in VS Code (soon)')}
+        onClick={requireRepo(() => m.openInEditor.mutate())}
       />
-      <GhostButton icon={<SquareTerminal size={16} strokeWidth={1.9} />} title="Terminal" onClick={() => toast('Terminal (soon)')} />
+      <GhostButton
+        icon={<SquareTerminal size={16} strokeWidth={1.9} />}
+        title="Open in terminal"
+        onClick={requireRepo(() => m.openInTerminal.mutate())}
+      />
     </div>
   )
 }
