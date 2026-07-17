@@ -14,6 +14,25 @@ view, pulse it) and confirm the outcome when it lands.
 This is the first thing to check in any UI review. A handler that mutates state
 the user can't see is a bug, not a feature.
 
+## Rule #2 - simplify for beginners
+
+**GitWyrm's goal is to make git easy for people who don't know git.** Don't
+expose raw git concepts and options as a checklist. Combine related operations
+into a single, easy-to-understand modal - use arrows, icons, diagrams,
+before/after previews, whatever makes the choice visual instead of verbal.
+If a user has to know what "reflog" or "--force-with-lease" means to use a
+feature, the feature isn't done yet.
+
+All user-facing text - labels, buttons, dialog copy, tooltips, error
+messages - is written in plain language at about a 6th-grade reading level.
+Prefer "Switch branches" over "Checkout ref"; prefer "This will erase your
+changes" over "This operation is destructive and irreversible." Explain what
+will happen in terms of the user's files and work, not git's internal model.
+
+This is the second thing to check in any UI review, right after Rule #1: does
+this screen assume git knowledge the user might not have, and could a picture
+or a plain sentence replace the jargon?
+
 ## What this repo is
 
 GitWyrm - a fast, focused Git client for Windows. Tauri v2 shell, React +
