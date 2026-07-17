@@ -4,7 +4,7 @@ use specta::Type;
 use tauri::State;
 
 use crate::error::AppError;
-use crate::git::types::{CommitDetail, DiffLineEntry, FileChange, FileDiff, StatusCode};
+use crate::git::types::{CommitDetail, DiffLineEntry, FileChange, FileDiff, HunkHeader, StatusCode};
 use crate::state::RepoManager;
 
 #[derive(Debug, Clone, Deserialize, Type)]
@@ -29,9 +29,11 @@ fn build_file_diff(diff: &Diff, path: &str) -> Result<FileDiff, AppError> {
   use std::cell::RefCell;
 
   let lines: RefCell<Vec<DiffLineEntry>> = RefCell::new(Vec::new());
+  let hunks: RefCell<Vec<HunkHeader>> = RefCell::new(Vec::new());
   let additions = RefCell::new(0u32);
   let deletions = RefCell::new(0u32);
   let binary = RefCell::new(false);
+  let old_path: RefCell<Option<String>> = RefCell::new(None);
 
   let matches_path = |delta: &git2::DiffDelta| {
     delta
@@ -43,7 +45,14 @@ fn build_file_diff(diff: &Diff, path: &str) -> Result<FileDiff, AppError> {
 
   diff
     .foreach(
-      &mut |_, _| true,
+      &mut |delta, _| {
+        if matches_path(&delta) && delta.status() == git2::Delta::Renamed {
+          if let Some(old) = delta.old_file().path() {
+            *old_path.borrow_mut() = Some(old.to_string_lossy().into_owned());
+          }
+        }
+        true
+      },
       Some(&mut |delta, _| {
         if matches_path(&delta) {
           *binary.borrow_mut() = true;
@@ -52,11 +61,21 @@ fn build_file_diff(diff: &Diff, path: &str) -> Result<FileDiff, AppError> {
       }),
       Some(&mut |delta, hunk| {
         if matches_path(&delta) {
+          // Push the boundary first so its index equals the new hunk's index.
+          let idx = hunks.borrow().len() as u32;
+          hunks.borrow_mut().push(HunkHeader {
+            old_start: hunk.old_start(),
+            old_lines: hunk.old_lines(),
+            new_start: hunk.new_start(),
+            new_lines: hunk.new_lines(),
+            header: String::from_utf8_lossy(hunk.header()).trim_end().to_string(),
+          });
           lines.borrow_mut().push(DiffLineEntry {
             sign: "@".into(),
             old_no: None,
             new_no: None,
             text: String::from_utf8_lossy(hunk.header()).trim_end().to_string(),
+            hunk_index: idx,
           });
         }
         true
@@ -74,11 +93,14 @@ fn build_file_diff(diff: &Diff, path: &str) -> Result<FileDiff, AppError> {
         } else if origin == '-' {
           *deletions.borrow_mut() += 1;
         }
+        // Lines always follow their hunk boundary, so the current last hunk owns them.
+        let idx = hunks.borrow().len().saturating_sub(1) as u32;
         lines.borrow_mut().push(DiffLineEntry {
           sign: if origin == ' ' { String::new() } else { origin.to_string() },
           old_no: line.old_lineno(),
           new_no: line.new_lineno(),
           text: String::from_utf8_lossy(line.content()).trim_end_matches('\n').to_string(),
+          hunk_index: idx,
         });
         true
       }),
@@ -87,8 +109,10 @@ fn build_file_diff(diff: &Diff, path: &str) -> Result<FileDiff, AppError> {
 
   Ok(FileDiff {
     path: path.to_string(),
+    old_path: old_path.into_inner(),
     additions: additions.into_inner(),
     deletions: deletions.into_inner(),
+    hunks: hunks.into_inner(),
     lines: lines.into_inner(),
     binary: binary.into_inner(),
   })
@@ -112,7 +136,7 @@ pub async fn get_file_diff(
       .show_untracked_content(true)
       .context_lines(3);
 
-    let diff = match &source {
+    let mut diff = match &source {
       DiffSource::Unstaged => repo.diff_index_to_workdir(None, Some(&mut opts))?,
       DiffSource::Staged => {
         let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
@@ -126,6 +150,11 @@ pub async fn get_file_diff(
         repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?
       }
     };
+
+    // Detect renames so `old_path` can be populated for renamed files.
+    let mut find = git2::DiffFindOptions::new();
+    find.renames(true);
+    diff.find_similar(Some(&mut find))?;
 
     build_file_diff(&diff, &path)
   })
@@ -149,7 +178,11 @@ pub async fn get_commit_detail(
     let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
 
     let mut opts = DiffOptions::new();
-    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
+    let mut diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
+
+    let mut find = git2::DiffFindOptions::new();
+    find.renames(true);
+    diff.find_similar(Some(&mut find))?;
 
     // Per-file stats.
     let files: std::cell::RefCell<Vec<FileChange>> = std::cell::RefCell::new(Vec::new());
