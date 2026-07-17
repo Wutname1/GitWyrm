@@ -128,36 +128,37 @@ export function RemoteSyncModal() {
             {!pair && (
               <span className="flex items-center gap-1.5 text-muted-foreground">
                 <AlertTriangle size={12} className="flex-none" />
-                These branches don't track each other, so there's nothing to sync.
+                These two aren't linked, so there's nothing to sync between them.
               </span>
             )}
             {pair && action?.kind === 'up-to-date' && (
               <span className="flex items-center gap-1.5 text-muted-foreground">
-                <Check size={12} className="flex-none" /> Already in sync. Nothing to do.
+                <Check size={12} className="flex-none" /> These already match. Nothing to do.
               </span>
             )}
             {pair && action?.kind === 'fast-forward' && (
               <span className="flex items-center gap-1.5 text-added">
-                <Zap size={12} className="flex-none" /> {pair.branch.name} will catch up to{' '}
-                {pair.upstream} — a clean update, no merge needed.
+                <Zap size={12} className="flex-none" /> The cloud has {pair.branch.behind} newer
+                change{pair.branch.behind === 1 ? '' : 's'}. Get {pair.branch.name} up to date - clean
+                and easy.
               </span>
             )}
             {pair && action?.kind === 'push' && (
               <span className="flex items-center gap-1.5 text-primary">
-                <Cloud size={12} className="flex-none" /> Send your {pair.branch.ahead} new commit
-                {pair.branch.ahead === 1 ? '' : 's'} up to {pair.upstream}.
+                <Cloud size={12} className="flex-none" /> You have {pair.branch.ahead} change
+                {pair.branch.ahead === 1 ? '' : 's'} the cloud doesn't. Send them up.
               </span>
             )}
             {pair && action?.kind === 'diverged-incoming' && (
               <span className="flex items-center gap-1.5 text-modified">
-                <AlertTriangle size={12} className="flex-none" /> You and {pair.upstream} both have
-                new commits. Replay your work on top (Rebase) or combine both (Pull).
+                <AlertTriangle size={12} className="flex-none" /> You both made changes. Stack yours on
+                top of theirs (tidy), or blend them together.
               </span>
             )}
             {pair && action?.kind === 'diverged-outgoing' && (
               <span className="flex items-center gap-1.5 text-modified">
-                <AlertTriangle size={12} className="flex-none" /> Your branch was rewound. Overwrite{' '}
-                {pair.upstream} safely with what you have now.
+                <AlertTriangle size={12} className="flex-none" /> Your history changed. Replace what's
+                in the cloud with what you have now.
               </span>
             )}
           </div>
@@ -175,22 +176,22 @@ export function RemoteSyncModal() {
           )}
           {pair && action?.kind === 'push' && (
             <Button size="sm" disabled={pending} onClick={runPush}>
-              {pending ? 'Pushing…' : 'Push'}
+              {pending ? 'Sending…' : 'Send up'}
             </Button>
           )}
           {pair && action?.kind === 'diverged-incoming' && (
             <>
               <Button variant="secondary" size="sm" disabled={pending} onClick={runPull}>
-                <GitMerge size={13} /> Pull
+                <GitMerge size={13} /> Blend
               </Button>
               <Button size="sm" disabled={pending} onClick={runRebase}>
-                <Repeat2 size={13} /> {pending ? 'Rebasing…' : 'Rebase'}
+                <Repeat2 size={13} /> {pending ? 'Stacking…' : 'Stack on top'}
               </Button>
             </>
           )}
           {pair && action?.kind === 'diverged-outgoing' && (
             <Button size="sm" disabled={pending} onClick={runForcePush}>
-              {pending ? 'Pushing…' : 'Force-push'}
+              {pending ? 'Replacing…' : 'Replace cloud copy'}
             </Button>
           )}
         </div>

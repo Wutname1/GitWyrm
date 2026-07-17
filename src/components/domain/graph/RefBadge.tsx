@@ -57,6 +57,24 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
   const onDragStart = (e: DragEvent) => {
     e.dataTransfer.setData(REF_DND_MIME, JSON.stringify(self))
     e.dataTransfer.effectAllowed = 'move'
+
+    // Build a visible "ghost" under the cursor. Webviews often render no drag
+    // image for a small inline element, so we clone the pill, lift it off-screen,
+    // and hand it to setDragImage, then remove it after the browser snapshots it.
+    const node = e.currentTarget as HTMLElement
+    const ghost = node.cloneNode(true) as HTMLElement
+    ghost.style.position = 'fixed'
+    ghost.style.top = '-1000px'
+    ghost.style.left = '-1000px'
+    ghost.style.margin = '0'
+    ghost.style.opacity = '0.95'
+    ghost.style.transform = 'scale(1.35)'
+    ghost.style.pointerEvents = 'none'
+    ghost.style.boxShadow = '0 6px 16px rgba(0,0,0,0.55)'
+    document.body.appendChild(ghost)
+    e.dataTransfer.setDragImage(ghost, 12, 10)
+    window.setTimeout(() => ghost.remove(), 0)
+
     startDrag(self)
   }
 
@@ -91,12 +109,14 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
         onDragOver={onDragOver}
         onDrop={onDrop}
         className={cn(
-          'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-[9.5px] font-semibold leading-[1.4] transition-[box-shadow,opacity]',
+          'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-[9.5px] font-semibold leading-[1.4] transition-opacity',
           draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-default',
           styles[refTag.type],
-          isValidTarget && 'ring-2 ring-added ring-offset-1 ring-offset-background',
-          dragging && !isValidTarget && !isSource && 'opacity-40',
-          isSource && 'opacity-70'
+          // The whole border pulses on a valid target; it and the dragged pill
+          // sit above the dimming scrim so they stay bright.
+          isValidTarget && 'wyrm-drop-target',
+          isSource && 'relative z-[60]',
+          dragging && !isValidTarget && !isSource && 'opacity-30'
         )}
       >
         {refTag.type === 'remote' && (

@@ -8,6 +8,7 @@ import { RepoPickerModal } from '@/components/modals/RepoPickerModal'
 import { OnboardingModal } from '@/components/modals/OnboardingModal'
 import { DirectionModal } from '@/components/modals/DirectionModal'
 import { RemoteSyncModal } from '@/components/modals/RemoteSyncModal'
+import { DragScrim } from '@/components/domain/DragScrim'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
 import { NewTagModal } from '@/components/modals/NewTagModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
@@ -88,6 +89,7 @@ function AppInner() {
   return (
     <>
       <WorkspaceLayout />
+      <DragScrim />
       <RepoPickerModal />
       <OnboardingModal />
       <DirectionModal />

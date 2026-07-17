@@ -559,6 +559,50 @@
   }
 }
 
+/* A ref pill that will accept the current drag: its whole border pulses so the
+   landing spot is unmistakable. No scale, so surrounding layout stays put. */
+@keyframes wyrm-drop-target {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px var(--gw-accent),
+      0 0 0 4px color-mix(in srgb, var(--gw-accent) 45%, transparent),
+      0 0 12px 2px color-mix(in srgb, var(--gw-accent) 55%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px var(--gw-accent),
+      0 0 0 7px color-mix(in srgb, var(--gw-accent) 0%, transparent),
+      0 0 4px 0 color-mix(in srgb, var(--gw-accent) 20%, transparent);
+  }
+}
+
+.wyrm-drop-target {
+  position: relative;
+  z-index: 60;
+  border-radius: 5px;
+  animation: wyrm-drop-target 1.1s ease-in-out infinite;
+}
+
+/* Full-window scrim shown while dragging a ref, so the pulsing targets pop. */
+.wyrm-drag-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.55);
+  animation: wyrm-scrim-in 0.14s ease-out;
+  pointer-events: none;
+}
+
+@keyframes wyrm-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wyrm-ai-stage,
   .wyrm-ai-logo,
@@ -568,8 +612,16 @@
   .wyrm-ai-trigger-active::after,
   .wyrm-ai-spark,
   .wyrm-sync-pulse,
+  .wyrm-drop-target,
+  .wyrm-drag-scrim,
   .wyrm-operation-active::after,
   .wyrm-sync-track span {
     animation: none;
+  }
+  /* Keep a static ring so reduced-motion users still see the target clearly. */
+  .wyrm-drop-target {
+    box-shadow:
+      0 0 0 2px var(--gw-accent),
+      0 0 10px 2px color-mix(in srgb, var(--gw-accent) 45%, transparent);
   }
 }
