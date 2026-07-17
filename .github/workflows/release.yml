@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "*.*.*"
 
 jobs:
   release:
@@ -13,24 +13,24 @@ jobs:
         include:
           - arch: x86_64
             rust_target: x86_64-pc-windows-msvc
-            tauri_args: ''
+            tauri_args: ""
             bundle_base: src-tauri/target/release/bundle
-            portable_suffix: ''
+            portable_suffix: ""
           - arch: aarch64
             rust_target: aarch64-pc-windows-msvc
-            tauri_args: '--target aarch64-pc-windows-msvc'
+            tauri_args: "--target aarch64-pc-windows-msvc"
             bundle_base: src-tauri/target/aarch64-pc-windows-msvc/release/bundle
-            portable_suffix: '-arm64'
+            portable_suffix: "-arm64"
     runs-on: windows-latest
     permissions:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
@@ -46,15 +46,15 @@ jobs:
         run: npm ci
 
       - name: Build and release (NSIS + updater manifest)
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'GitWyrm ${{ github.ref_name }}'
-          releaseBody: 'See the assets below. The .exe installer auto-updates; gitwyrm-portable.exe does not.'
+          releaseName: "GitWyrm ${{ github.ref_name }}"
+          releaseBody: "See the assets below. The .exe installer auto-updates; gitwyrm-portable.exe does not."
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.tauri_args }}
