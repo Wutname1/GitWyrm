@@ -231,37 +231,263 @@
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
-/* Sweeping shimmer used while the AI generates a commit message. */
-@keyframes wyrm-shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-.wyrm-ai-shimmer {
-  position: relative;
+/* Branded AI commit-message generation state. */
+.wyrm-ai-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  align-items: center;
   overflow: hidden;
+  padding: 6px 38px 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--gw-accent) 24%, transparent);
+  border-radius: var(--radius-md);
+  background:
+    radial-gradient(circle at 48px 50%, rgba(45, 212, 167, 0.11), transparent 68px),
+    color-mix(in srgb, var(--gw-bg) 97%, transparent);
+  pointer-events: none;
+  animation: wyrm-ai-stage-in 220ms ease-out both;
 }
 
-.wyrm-ai-shimmer::after {
+.wyrm-ai-logo-wrap {
+  position: relative;
+  display: grid;
+  width: 76px;
+  height: 76px;
+  place-items: center;
+}
+
+.wyrm-ai-logo {
+  width: 66px;
+  height: 66px;
+  object-fit: contain;
+  animation:
+    wyrm-ai-logo-wake 320ms ease-out both,
+    wyrm-ai-logo-think 2.6s 320ms ease-in-out infinite;
+}
+
+.wyrm-ai-energy-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0 78%,
+    rgba(45, 212, 167, 0.12) 82%,
+    #8fffe2 91%,
+    transparent 98%
+  );
+  mask: radial-gradient(circle, transparent 0 33px, #000 34px 36px, transparent 37px);
+  animation: wyrm-ai-ring-lap 1.5s linear infinite;
+}
+
+.wyrm-ai-eye {
+  position: absolute;
+  top: 23px;
+  width: 6px;
+  height: 2.5px;
+  border-radius: 50%;
+  background: var(--gw-accent);
+  animation: wyrm-ai-eye-pulse 1.8s ease-in-out infinite;
+}
+
+.wyrm-ai-eye-left {
+  left: 25px;
+  transform: rotate(18deg);
+}
+
+.wyrm-ai-eye-right {
+  right: 25px;
+  transform: rotate(-18deg);
+}
+
+.wyrm-ai-graph {
+  position: absolute;
+  top: 34px;
+  left: 22px;
+  width: 32px;
+  height: 23px;
+  overflow: visible;
+}
+
+.wyrm-ai-graph path {
+  fill: none;
+  stroke: rgba(45, 212, 167, 0.3);
+  stroke-width: 2;
+}
+
+.wyrm-ai-graph circle {
+  fill: #13231f;
+  stroke: var(--gw-accent);
+  stroke-width: 1.5;
+}
+
+.wyrm-ai-graph circle:nth-of-type(1) {
+  animation: wyrm-ai-node-light 1.35s 0s ease-in-out infinite;
+}
+
+.wyrm-ai-graph circle:nth-of-type(2) {
+  animation: wyrm-ai-node-light 1.35s 0.32s ease-in-out infinite;
+}
+
+.wyrm-ai-graph circle:nth-of-type(3) {
+  animation: wyrm-ai-node-light 1.35s 0.64s ease-in-out infinite;
+}
+
+.wyrm-ai-stage-copy {
+  min-width: 0;
+}
+
+.wyrm-ai-stage-label {
+  color: var(--gw-accent);
+  font-family: 'Sora', system-ui, sans-serif;
+  font-size: 8.5px;
+  line-height: 1.3;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.wyrm-ai-stage-status {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--gw-text);
+  font-family: 'Sora', system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wyrm-ai-stage-detail {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--gw-muted);
+  font-size: 9.5px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wyrm-ai-trigger-active {
+  border-color: color-mix(in srgb, var(--gw-accent) 38%, transparent);
+  background: color-mix(in srgb, var(--gw-accent) 13%, var(--gw-panel2));
+  color: var(--gw-accent);
+  box-shadow: 0 0 12px rgba(45, 212, 167, 0.14);
+}
+
+.wyrm-ai-trigger-active::after {
   content: '';
   position: absolute;
   inset: 0;
   background: linear-gradient(
-    100deg,
-    transparent 20%,
-    color-mix(in srgb, var(--color-primary) 22%, transparent) 50%,
-    transparent 80%
+    105deg,
+    transparent 15%,
+    rgba(143, 255, 226, 0.25) 48%,
+    transparent 78%
   );
-  animation: wyrm-shimmer 1.15s ease-in-out infinite;
-  pointer-events: none;
+  transform: translateX(-120%);
+  animation: wyrm-ai-button-scan 1.15s 250ms ease-in-out infinite;
+}
+
+.wyrm-ai-spark {
+  position: relative;
+  z-index: 1;
+  animation: wyrm-ai-spark-work 0.95s ease-in-out infinite;
+}
+
+@keyframes wyrm-ai-stage-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes wyrm-ai-logo-wake {
+  from {
+    opacity: 0.2;
+    filter: saturate(0.4) brightness(0.5);
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 0.88;
+    filter: saturate(1.05) brightness(0.95) drop-shadow(0 0 5px rgba(45, 212, 167, 0.2));
+    transform: scale(1);
+  }
+}
+
+@keyframes wyrm-ai-logo-think {
+  0%,
+  100% {
+    transform: rotate(-4deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
+
+@keyframes wyrm-ai-ring-lap {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes wyrm-ai-eye-pulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    box-shadow: 0 0 5px 1px rgba(45, 212, 167, 0.45);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 9px 3px rgba(45, 212, 167, 0.82);
+  }
+}
+
+@keyframes wyrm-ai-node-light {
+  0%,
+  70%,
+  100% {
+    fill: #13231f;
+    filter: none;
+  }
+  25%,
+  48% {
+    fill: #8fffe2;
+    filter: drop-shadow(0 0 4px var(--gw-accent));
+  }
+}
+
+@keyframes wyrm-ai-button-scan {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes wyrm-ai-spark-work {
+  0%,
+  100% {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: rotate(25deg) scale(0.78);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wyrm-ai-shimmer::after {
+  .wyrm-ai-stage,
+  .wyrm-ai-logo,
+  .wyrm-ai-energy-ring,
+  .wyrm-ai-eye,
+  .wyrm-ai-graph circle,
+  .wyrm-ai-trigger-active::after,
+  .wyrm-ai-spark {
     animation: none;
   }
 }
