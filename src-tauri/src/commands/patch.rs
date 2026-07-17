@@ -103,6 +103,65 @@ fn parse_diff(text: &str) -> Result<ParsedDiff, AppError> {
   Ok(ParsedDiff { preamble, hunks })
 }
 
+/// Validate that within each contiguous run of changed lines (a maximal block
+/// of consecutive +/- lines with no context between them), the selection is
+/// all-or-nothing. A partially-selected contiguous replace block cannot be
+/// represented as a patch that git applies to the intended position — the
+/// added lines would land after the unselected deletions. The frontend expands
+/// such selections to whole blocks; this is the backend backstop.
+fn validate_contiguous_blocks(
+  hunk: &RawHunk,
+  hunk_index: u32,
+  selection: &[SelectedLine],
+) -> Result<(), AppError> {
+  let mut old_no = hunk.old_start;
+  let mut new_no = hunk.new_start;
+  // Track selection state within the current contiguous change run.
+  let mut run_len = 0u32;
+  let mut run_selected = 0u32;
+
+  let flush = |len: u32, sel: u32| -> Result<(), AppError> {
+    if len > 1 && sel > 0 && sel < len {
+      return Err(AppError::Other(
+        "cannot stage part of a contiguous change block; select the whole block".into(),
+      ));
+    }
+    Ok(())
+  };
+
+  for raw in &hunk.lines {
+    let sign = raw.as_bytes().first().copied().unwrap_or(b' ');
+    match sign {
+      b'+' => {
+        let sel = selection.iter().any(|s| s.matches(hunk_index, b'+', None, Some(new_no)));
+        run_len += 1;
+        if sel {
+          run_selected += 1;
+        }
+        new_no += 1;
+      }
+      b'-' => {
+        let sel = selection.iter().any(|s| s.matches(hunk_index, b'-', Some(old_no), None));
+        run_len += 1;
+        if sel {
+          run_selected += 1;
+        }
+        old_no += 1;
+      }
+      b'\\' => {}
+      _ => {
+        // Context line ends the run.
+        flush(run_len, run_selected)?;
+        run_len = 0;
+        run_selected = 0;
+        old_no += 1;
+        new_no += 1;
+      }
+    }
+  }
+  flush(run_len, run_selected)
+}
+
 /// Rebuild a hunk keeping only selected changes; unselected changes are demoted
 /// so the patch still applies. Recomputes the `@@` counts. Returns None if the
 /// hunk ends up with no real change (skip it entirely).
@@ -223,6 +282,7 @@ fn build_patch(
 
   let mut any = false;
   for (idx, hunk) in parsed.hunks.iter().enumerate() {
+    validate_contiguous_blocks(hunk, idx as u32, selection)?;
     if let Some(rebuilt) = rebuild_hunk(hunk, idx as u32, selection, reverse) {
       patch.push_str(&rebuilt);
       any = true;
@@ -542,12 +602,14 @@ mod tests {
   /// selected line, which only holds if anchoring agrees.
   #[test]
   fn roundtrip_slidable_block_single_line() {
-    // A file whose insertion point is ambiguous (repeated blank + brace lines).
-    let base = "fn a() {\n}\n\nfn c() {\n}\n";
+    // A file whose insertion point is ambiguous (repeated blank lines) so the
+    // indent heuristic would anchor it differently than libgit2 if not pinned.
+    // Insert exactly ONE line so the single-line selection is a valid, isolated
+    // change (a contiguous multi-line insert would require whole-block staging).
+    let base = "alpha\n\nbeta\n\ngamma\n";
     let Some(dir) = scratch_repo("slidable", base) else { return };
     let dpath = dir.to_string_lossy().into_owned();
-    // Insert a new function b() in the gap.
-    std::fs::write(dir.join("f.txt"), "fn a() {\n}\n\nfn b() {\n}\n\nfn c() {\n}\n").unwrap();
+    std::fs::write(dir.join("f.txt"), "alpha\n\nbeta\ninserted\n\ngamma\n").unwrap();
 
     let dargs = diff_args_for(PatchTarget::Unstaged, "f.txt");
     let dargs_ref: Vec<&str> = dargs.iter().map(String::as_str).collect();
@@ -585,6 +647,25 @@ mod tests {
     let added: u32 = staged_diff.split('\t').next().unwrap_or("0").trim().parse().unwrap_or(99);
     assert_eq!(added, 1, "expected exactly one added line staged, numstat: {staged_diff}");
     let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn partial_contiguous_block_rejected() {
+    // -two -three +TWO +THREE is one contiguous run; selecting only two->TWO
+    // (part of it) must be rejected by the backstop.
+    let d = parse_diff(SAMPLE).unwrap();
+    let selection = vec![sel(0, Some(2), None), sel(0, None, Some(2))];
+    let err = validate_contiguous_blocks(&d.hunks[0], 0, &selection);
+    assert!(err.is_err(), "partial contiguous selection should be rejected");
+
+    // Selecting the WHOLE block is allowed.
+    let whole = vec![
+      sel(0, Some(2), None),
+      sel(0, Some(3), None),
+      sel(0, None, Some(2)),
+      sel(0, None, Some(3)),
+    ];
+    assert!(validate_contiguous_blocks(&d.hunks[0], 0, &whole).is_ok());
   }
 
   #[test]

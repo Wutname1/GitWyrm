@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useFileDiff } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
@@ -36,6 +36,14 @@ export function DiffView() {
   const lines = diff.data?.lines ?? []
   const kind = request?.source.kind
 
+  // Reset selection whenever the viewed file or its source changes; the line
+  // keys are only meaningful for the diff they came from.
+  const sourceKey = request ? `${request.path}::${JSON.stringify(request.source)}` : null
+  useEffect(() => {
+    setSelected(new Set())
+    setAnchor(null)
+  }, [sourceKey])
+
   // Only working-tree diffs are partially stageable; commit diffs are read-only.
   const canPatch = kind === 'staged' || kind === 'unstaged'
 
@@ -56,7 +64,7 @@ export function DiffView() {
 
   const toggleLine = (index: number, shift: boolean) => {
     const line = lines[index]
-    if (!isChanged(line)) return
+    if (!line || !isChanged(line)) return
     setSelected((prev) => {
       const next = new Set(prev)
       if (shift && anchor != null) {
@@ -77,14 +85,40 @@ export function DiffView() {
   const selectionFor = (predicate: (l: DiffLineEntry) => boolean): SelectedLine[] =>
     lines.filter((l) => isChanged(l) && predicate(l)).map(toSelected)
 
+  // A run of consecutive changed lines with no context line between them (e.g.
+  // `-a -b +A +B`) can only be staged as a unit: git apply would misplace an
+  // added line if only part of such a block is selected. So expand any
+  // partially-selected contiguous change run to cover the whole run.
+  const expandedSelection = (keys: Set<string>): SelectedLine[] => {
+    const out: SelectedLine[] = []
+    let i = 0
+    while (i < lines.length) {
+      if (!isChanged(lines[i])) {
+        i++
+        continue
+      }
+      // [i, j) is a maximal contiguous run of changed lines.
+      let j = i
+      let anySelected = false
+      while (j < lines.length && isChanged(lines[j])) {
+        if (keys.has(lineKey(lines[j]))) anySelected = true
+        j++
+      }
+      if (anySelected) {
+        for (let k = i; k < j; k++) out.push(toSelected(lines[k]))
+      }
+      i = j
+    }
+    return out
+  }
+
   const applyHunk = (hunkIndex: number) => {
     const sel = selectionFor((l) => l.hunk_index === hunkIndex)
     runPatch(sel)
   }
 
   const applySelected = () => {
-    const sel = lines.filter((l) => isChanged(l) && selected.has(lineKey(l))).map(toSelected)
-    runPatch(sel)
+    runPatch(expandedSelection(selected))
   }
 
   function runPatch(selection: SelectedLine[]) {
@@ -95,13 +129,14 @@ export function DiffView() {
   }
 
   const discardSelected = () => {
-    const sel = lines.filter((l) => isChanged(l) && selected.has(lineKey(l))).map(toSelected)
+    const sel = expandedSelection(selected)
     if (sel.length === 0) return
     m.discardLines.mutate({ path, selection: sel }, { onSuccess: clearSelection })
   }
 
   const discardHunk = (hunkIndex: number) => {
     const sel = selectionFor((l) => l.hunk_index === hunkIndex)
+    if (sel.length === 0) return
     m.discardLines.mutate({ path, selection: sel }, { onSuccess: clearSelection })
   }
 
