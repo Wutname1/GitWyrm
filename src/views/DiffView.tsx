@@ -5,6 +5,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { FileHeader } from '@/components/domain/diff/FileHeader'
 import { DiffLineRow } from '@/components/domain/diff/DiffLineRow'
+import { DiffLineMenu } from '@/components/domain/diff/DiffLineMenu'
 import { HunkBar } from '@/components/domain/diff/HunkBar'
 import { LineSelectionBar } from '@/components/domain/diff/LineSelectionBar'
 import type { DiffLineEntry, SelectedLine } from '@/lib/bindings'
@@ -32,6 +33,8 @@ export function DiffView() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   // Anchor for shift-click range selection.
   const [anchor, setAnchor] = useState<number | null>(null)
+  // Key of the line whose right-click menu is open (the Semi-Active state).
+  const [contextLine, setContextLine] = useState<string | null>(null)
 
   const lines = diff.data?.lines ?? []
   const kind = request?.source.kind
@@ -42,6 +45,7 @@ export function DiffView() {
   useEffect(() => {
     setSelected(new Set())
     setAnchor(null)
+    setContextLine(null)
   }, [sourceKey])
 
   // Only working-tree diffs are partially stageable; commit diffs are read-only.
@@ -112,6 +116,36 @@ export function DiffView() {
     return out
   }
 
+  // Lines a right-click on `line` acts on: the whole current selection when the
+  // clicked line is part of it, otherwise just that line's contiguous run.
+  const contextTargetCount = (line: DiffLineEntry): number => {
+    if (selected.has(lineKey(line)) && selected.size > 0) {
+      return expandedSelection(selected).length
+    }
+    return expandedSelection(new Set([lineKey(line)])).length
+  }
+
+  const contextSelection = (line: DiffLineEntry): SelectedLine[] => {
+    if (selected.has(lineKey(line)) && selected.size > 0) {
+      return expandedSelection(selected)
+    }
+    return expandedSelection(new Set([lineKey(line)]))
+  }
+
+  const applyLine = (line: DiffLineEntry) => {
+    const sel = contextSelection(line)
+    if (sel.length === 0) return
+    const args = { path, selection: sel }
+    if (kind === 'staged') m.unstageLines.mutate(args, { onSuccess: clearSelection })
+    else m.stageLines.mutate(args, { onSuccess: clearSelection })
+  }
+
+  const discardLine = (line: DiffLineEntry) => {
+    const sel = contextSelection(line)
+    if (sel.length === 0) return
+    m.discardLines.mutate({ path, selection: sel }, { onSuccess: clearSelection })
+  }
+
   const applyHunk = (hunkIndex: number) => {
     const sel = selectionFor((l) => l.hunk_index === hunkIndex)
     runPatch(sel)
@@ -171,14 +205,26 @@ export function DiffView() {
               onApply={() => applyHunk(line.hunk_index)}
               onDiscard={kind === 'unstaged' ? () => discardHunk(line.hunk_index) : undefined}
             />
-          ) : (
-            <DiffLineRow
+          ) : canPatch && !diff.data?.binary && isChanged(line) ? (
+            <DiffLineMenu
               key={i}
-              line={line}
-              selectable={canPatch && !diff.data?.binary && isChanged(line)}
-              selected={selected.has(lineKey(line))}
-              onSelect={(shift) => toggleLine(i, shift)}
-            />
+              kind={kind === 'staged' ? 'staged' : 'unstaged'}
+              count={contextTargetCount(line)}
+              disabled={patchPending}
+              onOpenChange={(open) => setContextLine(open ? lineKey(line) : null)}
+              onApply={() => applyLine(line)}
+              onDiscard={() => discardLine(line)}
+            >
+              <DiffLineRow
+                line={line}
+                selectable
+                selected={selected.has(lineKey(line))}
+                contextActive={contextLine === lineKey(line)}
+                onSelect={(shift) => toggleLine(i, shift)}
+              />
+            </DiffLineMenu>
+          ) : (
+            <DiffLineRow key={i} line={line} />
           )
         )}
       </div>
