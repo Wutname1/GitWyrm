@@ -6,6 +6,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { WorkspaceLayout } from '@/layouts/WorkspaceLayout'
 import { RepoPickerModal } from '@/components/modals/RepoPickerModal'
 import { OnboardingModal } from '@/components/modals/OnboardingModal'
+import { MergeModal } from '@/components/modals/MergeModal'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
@@ -72,6 +73,7 @@ function AppInner() {
       <WorkspaceLayout />
       <RepoPickerModal />
       <OnboardingModal />
+      <MergeModal />
       <Toaster position="bottom-center" />
     </>
   )

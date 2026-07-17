@@ -9,6 +9,8 @@ export const keys = {
   commitDetail: (repoId: string, sha: string) => ['commit', repoId, sha] as const,
   fileDiff: (repoId: string, path: string, source: DiffSource) =>
     ['diff', repoId, path, source] as const,
+  mergeState: (repoId: string) => ['mergeState', repoId] as const,
+  conflict: (repoId: string, path: string) => ['conflict', repoId, path] as const,
 }
 
 /** Unwraps tauri-specta's Result<T, string> into T-or-throw for TanStack Query. */

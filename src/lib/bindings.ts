@@ -251,6 +251,86 @@ async gitClone(url: string, destination: string) : Promise<Result<string, string
     else return { status: "error", error: e  as any };
 }
 },
+async mergeAnalysis(repoId: string, reference: string) : Promise<Result<MergeAnalysis, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("merge_analysis", { repoId, reference }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async mergeBranch(repoId: string, reference: string) : Promise<Result<MergeResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("merge_branch", { repoId, reference }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getMergeState(repoId: string) : Promise<Result<MergeState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_merge_state", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async abortMerge(repoId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("abort_merge", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getConflict(repoId: string, path: string) : Promise<Result<ConflictContent, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_conflict", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async resolveConflict(repoId: string, path: string, resolution: Resolution) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resolve_conflict", { repoId, path, resolution }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async commitMerge(repoId: string, message: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("commit_merge", { repoId, message }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stageLines(repoId: string, path: string, selection: SelectedLine[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stage_lines", { repoId, path, selection }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async unstageLines(repoId: string, path: string, selection: SelectedLine[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("unstage_lines", { repoId, path, selection }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async discardLines(repoId: string, path: string, selection: SelectedLine[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("discard_lines", { repoId, path, selection }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async scanCodeFolder(folder: string) : Promise<Result<ScannedRepo[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("scan_code_folder", { folder }) };
@@ -346,6 +426,30 @@ time: number; lane: number;
  * Lane of each parent edge, aligned with `parent_shas`.
  */
 parent_lanes: number[]; parent_shas: string[]; is_merge: boolean; refs: RefInfo[] }
+/**
+ * The three sides of a conflicted file, as full text.
+ */
+export type ConflictContent = { path: string; 
+/**
+ * Common ancestor version (stage 1); empty if added on both sides.
+ */
+base: string; 
+/**
+ * Our version (stage 2, current branch).
+ */
+ours: string; 
+/**
+ * Their version (stage 3, incoming branch).
+ */
+theirs: string; 
+/**
+ * Working-tree text with conflict markers, for manual editing.
+ */
+merged: string; 
+/**
+ * Any side is binary/undecodable; only ours/theirs whole-file choice is safe.
+ */
+binary: boolean }
 export type DeviceCodeInfo = { device_code: string; user_code: string; verification_uri: string; 
 /**
  * Minimum seconds between polls.
@@ -356,13 +460,82 @@ export type DiffLineEntry = {
 /**
  * "+" added, "-" removed, "" context, "@" hunk header.
  */
-sign: string; old_no: number | null; new_no: number | null; text: string }
+sign: string; old_no: number | null; new_no: number | null; text: string; 
+/**
+ * Index into `FileDiff.hunks` this line belongs to. Hunk-header lines
+ * (`sign == "@"`) also carry the index of the hunk they introduce.
+ */
+hunk_index: number }
 export type DiffSource = { kind: "staged" } | { kind: "unstaged" } | { kind: "commit"; sha: string }
 export type FileChange = { path: string; status: StatusCode; additions: number; deletions: number; conflicted: boolean }
-export type FileDiff = { path: string; additions: number; deletions: number; lines: DiffLineEntry[]; binary: boolean }
+export type FileDiff = { path: string; 
+/**
+ * Rename source path, when the delta is a rename.
+ */
+old_path: string | null; additions: number; deletions: number; hunks: HunkHeader[]; lines: DiffLineEntry[]; binary: boolean }
 export type GeneratedCommitMessage = { summary: string; description: string }
 export type GitProgressPayload = { repo_id: string; operation: string; line: string }
+/**
+ * A `@@ -old_start,old_lines +new_start,new_lines @@` hunk boundary.
+ */
+export type HunkHeader = { old_start: number; old_lines: number; new_start: number; new_lines: number; 
+/**
+ * Raw header text including any trailing section context.
+ */
+header: string }
 export type LogPage = { commits: CommitEntry[]; has_more: boolean }
+/**
+ * What a merge of a given ref into HEAD would do, without performing it.
+ */
+export type MergeAnalysis = { 
+/**
+ * HEAD already contains the target; merging is a no-op.
+ */
+up_to_date: boolean; 
+/**
+ * Merge can fast-forward (no merge commit needed).
+ */
+can_fast_forward: boolean; 
+/**
+ * A real merge commit would be created.
+ */
+normal: boolean; 
+/**
+ * Short sha the target ref resolves to.
+ */
+target_sha: string }
+/**
+ * Outcome of starting a merge.
+ */
+export type MergeResult = { 
+/**
+ * HEAD already contained the target; nothing changed.
+ */
+up_to_date: boolean; 
+/**
+ * HEAD was advanced without a merge commit.
+ */
+fast_forwarded: boolean; 
+/**
+ * Paths left in a conflicted state, needing resolution.
+ */
+conflicts: string[] }
+/**
+ * Current merge-in-progress state of the repo.
+ */
+export type MergeState = { 
+/**
+ * True when a merge is underway (MERGE_HEAD exists).
+ */
+merging: boolean; 
+/**
+ * Branch/ref being merged in, best-effort from MERGE_MSG.
+ */
+incoming_label: string | null; 
+/**
+ * Paths still conflicted.
+ */
+conflicts: string[] }
 export type PollResult = 
 /**
  * Token acquired and saved; sign-in is complete.
@@ -377,11 +550,29 @@ export type RefInfo = { name: string; type: RefKind }
 export type RefKind = "head" | "branch" | "remote" | "tag"
 export type RepoChangedPayload = { repo_id: string }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
+export type Resolution = 
+/**
+ * Keep our side wholesale.
+ */
+{ kind: "ours" } | 
+/**
+ * Keep their side wholesale.
+ */
+{ kind: "theirs" } | 
+/**
+ * Use the provided, hand-edited text.
+ */
+{ kind: "manual"; text: string }
 export type ScannedRepo = { name: string; path: string; 
 /**
  * Current branch parsed from .git/HEAD as text (None when detached/unreadable).
  */
 head_branch: string | null }
+/**
+ * One changed line the caller selected, identified by its diff line numbers.
+ * Added lines carry `new_no`; removed lines carry `old_no`.
+ */
+export type SelectedLine = { hunk_index: number; old_no: number | null; new_no: number | null }
 export type Settings = { 
 /**
  * Paths of repos open in tabs, in tab order, so they can be reopened on launch.

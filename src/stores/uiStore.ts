@@ -2,9 +2,9 @@ import { create } from 'zustand'
 import type { DiffSource } from '@/lib/bindings'
 import type { SectionKey } from '@/lib/types'
 
-export type CenterView = 'graph' | 'diff' | 'settings'
+export type CenterView = 'graph' | 'diff' | 'settings' | 'conflict'
 
-export type ModalKind = 'onboarding' | 'clone' | 'tutorial' | null
+export type ModalKind = 'onboarding' | 'clone' | 'tutorial' | 'merge' | null
 
 export type SettingsSection = 'general' | 'ai' | 'appearance' | 'logs' | 'about'
 
@@ -17,14 +17,20 @@ interface UiState {
   centerView: CenterView
   selectedSha: string | null
   diffRequest: DiffRequest | null
+  conflictPath: string | null
   sectionOpen: Record<SectionKey, boolean>
   activeModal: ModalKind
+  mergeSource: string | null
   settingsSection: SettingsSection
+  changesFocusNonce: number
 
   selectCommit: (sha: string | null) => void
+  focusChanges: () => void
+  openMerge: (source?: string) => void
   openDiff: (request: DiffRequest) => void
   closeDiff: () => void
-  showSettings: () => void
+  openConflict: (path: string) => void
+  showSettings: (section?: SettingsSection) => void
   showGraph: () => void
   toggleSection: (key: SectionKey) => void
   openModal: (kind: Exclude<ModalKind, null>) => void
@@ -36,6 +42,7 @@ export const useUiStore = create<UiState>((set) => ({
   centerView: 'graph',
   selectedSha: null,
   diffRequest: null,
+  conflictPath: null,
   sectionOpen: {
     local: true,
     remote: false,
@@ -46,12 +53,22 @@ export const useUiStore = create<UiState>((set) => ({
     tags: false,
   },
   activeModal: null,
+  mergeSource: null,
   settingsSection: 'general',
+  changesFocusNonce: 0,
 
   selectCommit: (sha) => set({ selectedSha: sha }),
+  focusChanges: () => set((s) => ({ changesFocusNonce: s.changesFocusNonce + 1 })),
+  openMerge: (source) => set({ activeModal: 'merge', mergeSource: source ?? null }),
   openDiff: (request) => set({ diffRequest: request, centerView: 'diff' }),
   closeDiff: () => set({ diffRequest: null, centerView: 'graph' }),
-  showSettings: () => set({ centerView: 'settings', diffRequest: null }),
+  openConflict: (path) => set({ conflictPath: path, centerView: 'conflict' }),
+  showSettings: (section) =>
+    set((s) => ({
+      centerView: 'settings',
+      diffRequest: null,
+      settingsSection: section ?? s.settingsSection,
+    })),
   showGraph: () => set({ centerView: 'graph', diffRequest: null }),
   toggleSection: (key) =>
     set((s) => ({ sectionOpen: { ...s.sectionOpen, [key]: !s.sectionOpen[key] } })),

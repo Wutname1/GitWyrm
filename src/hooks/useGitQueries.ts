@@ -63,3 +63,19 @@ export function useFileDiff(repoId: string | null, path: string | null, source: 
     queryFn: async () => unwrap(await commands.getFileDiff(repoId!, path!, source!)),
   })
 }
+
+export function useMergeState(repoId: string | null) {
+  return useQuery({
+    queryKey: keys.mergeState(repoId ?? 'none'),
+    enabled: repoId != null,
+    queryFn: async () => unwrap(await commands.getMergeState(repoId!)),
+  })
+}
+
+export function useConflict(repoId: string | null, path: string | null) {
+  return useQuery({
+    queryKey: keys.conflict(repoId ?? 'none', path ?? 'none'),
+    enabled: repoId != null && path != null,
+    queryFn: async () => unwrap(await commands.getConflict(repoId!, path!)),
+  })
+}
