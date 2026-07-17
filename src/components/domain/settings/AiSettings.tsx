@@ -9,6 +9,16 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 const selectClass =
   'h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring'
 
+/** Curated providers surfaced at the top of the picker, in display order. */
+const POPULAR_PROVIDER_IDS = [
+  'github-copilot',
+  'anthropic',
+  'openai',
+  'google',
+  'openrouter',
+  'deepseek',
+] as const
+
 export function AiSettings() {
   const catalog = useAiCatalog()
   const configured = useAiConfigured()
@@ -22,6 +32,18 @@ export function AiSettings() {
 
   const providers = catalog.data ?? []
   const provider = providers.find((p) => p.id === aiProvider) ?? null
+
+  // Split the catalog into a curated "Popular" group (fixed order, Copilot
+  // first) and the alphabetical long tail of everything else.
+  const { popular, rest } = useMemo(() => {
+    const byId = new Map(providers.map((p) => [p.id, p]))
+    const popular = POPULAR_PROVIDER_IDS.map((id) => byId.get(id)).filter(
+      (p): p is (typeof providers)[number] => p != null
+    )
+    const popularIds = new Set<string>(POPULAR_PROVIDER_IDS)
+    const rest = providers.filter((p) => !popularIds.has(p.id))
+    return { popular, rest }
+  }, [providers])
   const configuredIds = useMemo(
     () => new Set((configured.data ?? []).map((c) => c.id)),
     [configured.data]
@@ -75,12 +97,22 @@ export function AiSettings() {
             }}
           >
             <option value="">Select a provider…</option>
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {configuredIds.has(p.id) ? ' ✓' : ''}
-              </option>
-            ))}
+            <optgroup label="Popular">
+              {popular.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {configuredIds.has(p.id) ? ' ✓' : ''}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="All providers">
+              {rest.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {configuredIds.has(p.id) ? ' ✓' : ''}
+                </option>
+              ))}
+            </optgroup>
           </select>
 
           {provider && (

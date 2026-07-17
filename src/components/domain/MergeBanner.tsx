@@ -5,9 +5,9 @@ import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
-/** Cleans up MERGE_MSG's first line ("Merge branch 'x'") into just the label. */
+/** Cleans up the state message's first line into just the branch/commit label. */
 function incomingName(label: string | null | undefined): string {
-  if (!label) return 'incoming branch'
+  if (!label) return 'incoming changes'
   const match = label.match(/Merge (?:branch|remote-tracking branch) '([^']+)'/)
   return match ? match[1] : label
 }
@@ -21,12 +21,18 @@ export function MergeBanner() {
   const state = merge.data
   if (!state?.merging) return null
 
+  const isCherryPick = state.operation === 'CherryPick'
+  const verb = isCherryPick ? 'Cherry-picking' : 'Merging'
+  const finishLabel = isCherryPick ? 'Commit pick' : 'Commit merge'
+  const abortTitle = isCherryPick ? 'Abort cherry-pick' : 'Abort merge'
+
   const conflicts = state.conflicts
   const remaining = conflicts.length
   const label = incomingName(state.incoming_label)
 
   const commit = () => {
-    const message = state.incoming_label?.trim() || `Merge ${label}`
+    const fallback = isCherryPick ? label : `Merge ${label}`
+    const message = state.incoming_label?.trim() || fallback
     m.commitMerge.mutate(message)
   }
 
@@ -35,7 +41,7 @@ export function MergeBanner() {
       <GitMerge size={15} className="flex-none text-modified" strokeWidth={2} />
       <div className="min-w-0 flex-1">
         <div className="text-[11.5px] font-semibold text-foreground">
-          Merging <span className="font-mono text-modified">{label}</span>
+          {verb} <span className="font-mono text-modified">{label}</span>
         </div>
         <div className="flex items-center gap-1.5 text-[10.5px] text-sub">
           {remaining > 0 ? (
@@ -64,12 +70,12 @@ export function MergeBanner() {
         onClick={commit}
         className="h-7 flex-none text-[11px]"
       >
-        {m.commitMerge.isPending ? 'Committing…' : 'Commit merge'}
+        {m.commitMerge.isPending ? 'Committing…' : finishLabel}
       </Button>
 
       <button
         onClick={() => m.abortMerge.mutate()}
-        title="Abort merge"
+        title={abortTitle}
         disabled={m.abortMerge.isPending}
         className="flex size-7 flex-none items-center justify-center rounded border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3"
       >

@@ -50,7 +50,7 @@ export function CommitMessageForm() {
 
   const doGenerate = () => {
     if (!aiReady) {
-      showSettings()
+      showSettings('ai')
       return
     }
     if (!repo || stagedCount === 0 || ai.generate.isPending) return
@@ -109,10 +109,10 @@ export function CommitMessageForm() {
       <button
         onClick={doCommit}
         className={cn(
-          'flex h-[34px] w-full items-center justify-center gap-2 rounded-md text-[12.5px] font-semibold',
+          'flex h-[34px] w-full items-center justify-center gap-2 rounded-md border text-[12.5px] font-semibold transition-colors',
           canCommit
-            ? 'cursor-pointer bg-primary text-primary-foreground hover:brightness-110'
-            : 'cursor-not-allowed bg-panel3 text-muted-foreground'
+            ? 'cursor-pointer border-primary/50 bg-soft text-primary hover:border-primary hover:bg-primary hover:text-primary-foreground'
+            : 'cursor-not-allowed border-transparent bg-panel3 text-muted-foreground'
         )}
       >
         <GitCommitHorizontal size={15} strokeWidth={2} />

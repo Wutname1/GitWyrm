@@ -31,12 +31,14 @@ interface SectionItemRowProps {
   item: SectionItem
   isCurrent: boolean
   onClick: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
 }
 
-export function SectionItemRow({ section, item, isCurrent, onClick }: SectionItemRowProps) {
+export function SectionItemRow({ section, item, isCurrent, onClick, onContextMenu }: SectionItemRowProps) {
   return (
     <div
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={cn(
         'flex cursor-pointer items-center gap-2 py-1 pl-6 pr-3 hover:bg-panel2',
         isCurrent && 'bg-soft'

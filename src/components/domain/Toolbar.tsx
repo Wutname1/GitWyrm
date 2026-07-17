@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { Separator } from '@/components/ui/separator'
 import { useBranches, useStashes } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
 interface ToolbarButtonProps {
@@ -61,6 +62,7 @@ export function Toolbar() {
   const branches = useBranches(repo?.id ?? null)
   const stashes = useStashes(repo?.id ?? null)
   const m = useGitMutations(repo?.id ?? null)
+  const openMerge = useUiStore((s) => s.openMerge)
   const head = branches.data?.local.find((b) => b.is_head)
   const currentBranch = head?.name ?? ''
 
@@ -102,7 +104,11 @@ export function Toolbar() {
           if (name?.trim()) m.createBranch.mutate({ name: name.trim(), checkout: true })
         })}
       />
-      <ToolbarButton icon={<GitMerge size={16} strokeWidth={1.9} />} label="Merge" onClick={() => toast('Merge UI is planned')} />
+      <ToolbarButton
+        icon={<GitMerge size={16} strokeWidth={1.9} />}
+        label="Merge"
+        onClick={requireRepo(() => openMerge())}
+      />
       <ToolbarButton
         icon={<Archive size={16} strokeWidth={1.9} />}
         label="Stash"

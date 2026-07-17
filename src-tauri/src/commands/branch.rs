@@ -1,9 +1,29 @@
-use git2::BranchType;
+use git2::{build::CheckoutBuilder, BranchType, Oid, ResetType};
 use tauri::State;
 
 use crate::error::AppError;
-use crate::git::types::{BranchInfo, BranchList, TagInfo};
+use crate::git::types::{BranchInfo, BranchList, CheckoutOutcome, RefMove, ResetMode, TagInfo};
+use crate::settings::BranchSwitchMode;
 use crate::state::RepoManager;
+
+/// Name of the branch HEAD points at, or an error if HEAD is detached.
+fn current_branch_name(repo: &git2::Repository) -> Result<String, AppError> {
+  let head = repo.head()?;
+  if !head.is_branch() {
+    return Err(AppError::Other("HEAD is detached; check out a branch first".into()));
+  }
+  head
+    .shorthand()
+    .map(str::to_string)
+    .ok_or_else(|| AppError::Other("could not read current branch name".into()))
+}
+
+/// True when the working tree has tracked modifications (ignores untracked).
+fn tree_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
+  let mut opts = git2::StatusOptions::new();
+  opts.include_untracked(false);
+  Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -59,37 +79,94 @@ pub async fn list_branches(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Is the working tree dirty (any non-ignored change, including untracked)?
+fn is_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
+  let mut opts = git2::StatusOptions::new();
+  opts.include_untracked(true).recurse_untracked_dirs(true);
+  Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
+}
+
+/// Move HEAD to `name` and update the working tree to its content. Uses a SAFE
+/// checkout, so git refuses to clobber conflicting local changes.
+fn switch_to(repo: &git2::Repository, name: &str) -> Result<(), AppError> {
+  let (object, reference) = repo.revparse_ext(name)?;
+  let mut builder = git2::build::CheckoutBuilder::new();
+  builder.safe();
+  repo.checkout_tree(&object, Some(&mut builder))?;
+  match reference {
+    Some(r) => repo.set_head(r.name().unwrap_or("HEAD"))?,
+    None => repo.set_head_detached(object.id())?,
+  }
+  Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn checkout_branch(
   manager: State<'_, RepoManager>,
   repo_id: String,
   name: String,
-) -> Result<(), AppError> {
+  mode: BranchSwitchMode,
+) -> Result<CheckoutOutcome, AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
+    let mut repo = open.repo.lock().unwrap();
 
-    // Refuse checkout over local modifications: safer default for v1.
-    let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(false);
-    let dirty = repo
-      .statuses(Some(&mut opts))?
-      .iter()
-      .any(|e| !e.status().is_ignored());
-    if dirty {
-      return Err(AppError::Other(
+    if !is_dirty(&repo)? {
+      switch_to(&repo, &name)?;
+      return Ok(CheckoutOutcome::Clean);
+    }
+
+    match mode {
+      BranchSwitchMode::Refuse => Err(AppError::Other(
         "working tree has changes; commit or stash before switching branches".into(),
-      ));
-    }
+      )),
 
-    let (object, reference) = repo.revparse_ext(&name)?;
-    repo.checkout_tree(&object, None)?;
-    match reference {
-      Some(r) => repo.set_head(r.name().unwrap_or("HEAD"))?,
-      None => repo.set_head_detached(object.id())?,
+      // Plain `git checkout`: carry changes across. A safe checkout errors if a
+      // change would be overwritten, so surface a clear message in that case.
+      BranchSwitchMode::Carry => {
+        switch_to(&repo, &name).map_err(|_| {
+          AppError::Other(
+            "your local changes conflict with that branch; commit, stash, or discard them first"
+              .into(),
+          )
+        })?;
+        Ok(CheckoutOutcome::Clean)
+      }
+
+      // Stash, switch, then bring changes back.
+      //
+      // We deliberately use stash_APPLY (not pop) and drop the stash ourselves
+      // only on a clean apply. git2's stash_pop returns Ok even when the apply
+      // conflicts AND drops the stash regardless -- so a naive pop would destroy
+      // the user's backup exactly when they need it. Applying and conditionally
+      // dropping keeps the stash as a backup whenever conflicts remain.
+      BranchSwitchMode::AutoStash => {
+        let signature = repo.signature()?;
+        repo.stash_save(
+          &signature,
+          &format!("gitwyrm: auto-stash before switching to {name}"),
+          Some(git2::StashFlags::INCLUDE_UNTRACKED),
+        )?;
+
+        // If the switch itself fails, restore the stash so nothing is lost.
+        if let Err(e) = switch_to(&repo, &name) {
+          let _ = repo.stash_pop(0, None);
+          return Err(e);
+        }
+
+        repo.stash_apply(0, None)?;
+
+        if repo.index()?.has_conflicts() {
+          // Leave stash@{0} in place as a backup; the working tree has markers.
+          Ok(CheckoutOutcome::StashPopConflict)
+        } else {
+          // Clean apply: drop the now-redundant stash entry.
+          repo.stash_drop(0)?;
+          Ok(CheckoutOutcome::Stashed)
+        }
+      }
     }
-    Ok(())
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

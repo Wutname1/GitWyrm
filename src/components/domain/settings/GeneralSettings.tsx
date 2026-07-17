@@ -1,12 +1,23 @@
 import { Input } from '@/components/ui/input'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useWorkspaceStore, type BranchSwitchMode } from '@/stores/workspaceStore'
 import { FolderSetting, SettingRow } from './SettingRow'
+
+const selectClass =
+  'h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring'
+
+const branchSwitchHints: Record<BranchSwitchMode, string> = {
+  auto_stash: 'Your changes are stashed, then reapplied on the new branch. If they conflict, the stash is kept as a backup.',
+  carry: 'Your changes move to the new branch. The switch is refused if a change would be overwritten.',
+  refuse: 'Switching is blocked while you have uncommitted changes.',
+}
 
 export function GeneralSettings() {
   const codeFolder = useWorkspaceStore((s) => s.codeFolder)
   const setCodeFolder = useWorkspaceStore((s) => s.setCodeFolder)
   const cloneDirectory = useWorkspaceStore((s) => s.cloneDirectory)
   const setCloneDirectory = useWorkspaceStore((s) => s.setCloneDirectory)
+  const branchSwitchMode = useWorkspaceStore((s) => s.branchSwitchMode)
+  const setBranchSwitchMode = useWorkspaceStore((s) => s.setBranchSwitchMode)
 
   return (
     <div>
@@ -25,6 +36,20 @@ export function GeneralSettings() {
           placeholder={codeFolder ?? 'Not set'}
           onCommit={setCloneDirectory}
         />
+      </SettingRow>
+      <SettingRow
+        label="When switching branches"
+        hint={branchSwitchHints[branchSwitchMode]}
+      >
+        <select
+          className={selectClass}
+          value={branchSwitchMode}
+          onChange={(e) => setBranchSwitchMode(e.target.value as BranchSwitchMode)}
+        >
+          <option value="auto_stash">Stash my changes and bring them along</option>
+          <option value="carry">Carry my changes over (like git checkout)</option>
+          <option value="refuse">Don't let me switch with changes</option>
+        </select>
       </SettingRow>
     </div>
   )

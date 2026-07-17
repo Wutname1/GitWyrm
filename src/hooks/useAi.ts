@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { commands } from '@/lib/bindings'
+import { isTauri } from '@/lib/env'
 import { unwrap } from '@/lib/queryKeys'
 
 const catalogKey = ['ai-catalog'] as const
@@ -9,7 +10,7 @@ const configuredKey = ['ai-configured'] as const
 export function useAiCatalog(enabled = true) {
   return useQuery({
     queryKey: catalogKey,
-    enabled,
+    enabled: enabled && isTauri,
     staleTime: 60 * 60 * 1000,
     queryFn: async () => unwrap(await commands.aiGetCatalog()),
   })
@@ -18,6 +19,7 @@ export function useAiCatalog(enabled = true) {
 export function useAiConfigured() {
   return useQuery({
     queryKey: configuredKey,
+    enabled: isTauri,
     queryFn: async () => unwrap(await commands.aiListConfigured()),
   })
 }

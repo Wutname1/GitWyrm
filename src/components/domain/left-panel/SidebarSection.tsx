@@ -8,9 +8,15 @@ interface SidebarSectionProps {
   section: SidebarSectionData
   currentBranch: string
   onItemClick: (section: SidebarSectionData, item: SectionItem) => void
+  onItemContextMenu?: (section: SidebarSectionData, item: SectionItem, e: React.MouseEvent) => void
 }
 
-export function SidebarSection({ section, currentBranch, onItemClick }: SidebarSectionProps) {
+export function SidebarSection({
+  section,
+  currentBranch,
+  onItemClick,
+  onItemContextMenu,
+}: SidebarSectionProps) {
   const open = useUiStore((s) => s.sectionOpen[section.key])
   const toggleSection = useUiStore((s) => s.toggleSection)
 
@@ -37,6 +43,9 @@ export function SidebarSection({ section, currentBranch, onItemClick }: SidebarS
               item={item}
               isCurrent={section.type === 'branch' && item.name === currentBranch}
               onClick={() => onItemClick(section, item)}
+              onContextMenu={
+                onItemContextMenu ? (e) => onItemContextMenu(section, item, e) : undefined
+              }
             />
           ))}
         </div>

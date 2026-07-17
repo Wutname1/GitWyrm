@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { commands, type RepoInfo, type Settings } from '@/lib/bindings'
+import { commands, type BranchSwitchMode, type RepoInfo, type Settings } from '@/lib/bindings'
 import { normalizePath } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
 
@@ -9,6 +9,7 @@ export interface RecentRepo {
 }
 
 export type UpdateChannel = 'stable' | 'beta'
+export type { BranchSwitchMode }
 
 interface WorkspaceState {
   /** Repos currently open in tabs. */
@@ -23,6 +24,8 @@ interface WorkspaceState {
   cloneDirectory: string | null
   /** Release channel used when checking for updates (persisted). */
   updateChannel: UpdateChannel
+  /** What to do with uncommitted changes when switching branches (persisted). */
+  branchSwitchMode: BranchSwitchMode
   /** AI provider id used for commit message generation (persisted). */
   aiProvider: string | null
   /** Model id within the selected AI provider (persisted). */
@@ -36,6 +39,7 @@ interface WorkspaceState {
   setCodeFolder: (path: string | null) => void
   setCloneDirectory: (path: string | null) => void
   setUpdateChannel: (channel: UpdateChannel) => void
+  setBranchSwitchMode: (mode: BranchSwitchMode) => void
   setAiSelection: (provider: string | null, model: string | null) => void
   /** Reads settings.json once and hydrates the store; returns the raw settings for launch-time restore. */
   hydrate: () => Promise<Settings>
@@ -50,6 +54,7 @@ function toSettings(s: WorkspaceState): Settings {
     code_folder: s.codeFolder,
     clone_directory: s.cloneDirectory,
     update_channel: s.updateChannel === 'beta' ? 'beta' : 'stable',
+    branch_switch_mode: s.branchSwitchMode,
     ai_provider: s.aiProvider,
     ai_model: s.aiModel,
   }
@@ -74,6 +79,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   codeFolder: null,
   cloneDirectory: null,
   updateChannel: 'stable',
+  branchSwitchMode: 'auto_stash',
   aiProvider: null,
   aiModel: null,
   hydrated: false,
@@ -116,6 +122,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ updateChannel: channel })
     schedulePersist()
   },
+  setBranchSwitchMode: (mode) => {
+    set({ branchSwitchMode: mode })
+    schedulePersist()
+  },
   setAiSelection: (provider, model) => {
     set({ aiProvider: provider, aiModel: model })
     schedulePersist()
@@ -129,6 +139,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         codeFolder: settings.code_folder ?? null,
         cloneDirectory: settings.clone_directory ?? null,
         updateChannel: settings.update_channel === 'beta' ? 'beta' : 'stable',
+        branchSwitchMode: settings.branch_switch_mode ?? 'auto_stash',
         aiProvider: settings.ai_provider ?? null,
         aiModel: settings.ai_model ?? null,
         hydrated: true,

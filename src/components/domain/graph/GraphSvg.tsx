@@ -6,22 +6,27 @@ const X0 = 16
 const LANE_WIDTH = 20
 
 const laneX = (lane: number) => X0 + lane * LANE_WIDTH
-const rowCenterY = (index: number) => index * GRAPH_ROW_HEIGHT + GRAPH_ROW_HEIGHT / 2
+const rowCenterY = (row: number) => row * GRAPH_ROW_HEIGHT + GRAPH_ROW_HEIGHT / 2
 
 interface GraphSvgProps {
   commits: CommitEntry[]
   selectedSha: string | null
-  /** Virtualized visible window (inclusive indices). */
+  /** Virtualized visible window (inclusive indices, in commit space). */
   startIndex: number
   endIndex: number
+  /** When true, a synthetic WIP row occupies row 0 and commits shift down by one. */
+  pending?: boolean
 }
 
 /**
  * Renders edges from each commit to its parents using the backend-computed
  * lanes. Edge endpoints use the parent's row index (found via sha lookup);
- * parents beyond the loaded pages get a short fading stub.
+ * parents beyond the loaded pages get a short fading stub. When `pending` is
+ * set, a dashed WIP node sits at row 0 in the HEAD commit's lane and a dashed
+ * edge links it to HEAD.
  */
-export function GraphSvg({ commits, selectedSha, startIndex, endIndex }: GraphSvgProps) {
+export function GraphSvg({ commits, selectedSha, startIndex, endIndex, pending }: GraphSvgProps) {
+  const rowOffset = pending ? 1 : 0
   const indexBySha = useMemo(() => {
     const m = new Map<string, number>()
     commits.forEach((c, i) => m.set(c.sha, i))
@@ -37,7 +42,7 @@ export function GraphSvg({ commits, selectedSha, startIndex, endIndex }: GraphSv
       c.parent_shas.forEach((parentSha, pi) => {
         const parentIndex = indexBySha.get(parentSha)
         const x1 = laneX(c.lane)
-        const y1 = rowCenterY(i)
+        const y1 = rowCenterY(i + rowOffset)
         const parentLane = c.parent_lanes[pi] ?? c.lane
         if (parentIndex == null) {
           // Parent not loaded yet: draw a stub downward.
@@ -49,7 +54,7 @@ export function GraphSvg({ commits, selectedSha, startIndex, endIndex }: GraphSv
           return
         }
         const x2 = laneX(commits[parentIndex].lane)
-        const y2 = rowCenterY(parentIndex)
+        const y2 = rowCenterY(parentIndex + rowOffset)
         const d =
           x1 === x2
             ? `M ${x1} ${y1} L ${x2} ${y2}`
@@ -58,12 +63,17 @@ export function GraphSvg({ commits, selectedSha, startIndex, endIndex }: GraphSv
       })
     }
     return out
-  }, [commits, indexBySha, startIndex, endIndex])
+  }, [commits, indexBySha, startIndex, endIndex, rowOffset])
+
+  const head = commits[0]
+  const showPending = pending && head != null && startIndex === 0
+  const headLane = head?.lane ?? 0
+  const pendingColor = laneColor(headLane)
 
   return (
     <svg
       width={96}
-      height={commits.length * GRAPH_ROW_HEIGHT}
+      height={(commits.length + rowOffset) * GRAPH_ROW_HEIGHT}
       className="pointer-events-none absolute left-[150px] top-0 overflow-visible"
     >
       {edges.map((e, i) => (
@@ -77,6 +87,28 @@ export function GraphSvg({ commits, selectedSha, startIndex, endIndex }: GraphSv
           opacity={e.fade ? 0.35 : 1}
         />
       ))}
+      {showPending && (
+        <>
+          <path
+            d={`M ${laneX(headLane)} ${rowCenterY(0)} L ${laneX(headLane)} ${rowCenterY(1)}`}
+            fill="none"
+            stroke={pendingColor}
+            strokeWidth={2.6}
+            strokeLinecap="round"
+            strokeDasharray="2 4"
+            opacity={0.7}
+          />
+          <circle
+            cx={laneX(headLane)}
+            cy={rowCenterY(0)}
+            r={6}
+            fill="var(--gw-bg)"
+            stroke={pendingColor}
+            strokeWidth={2}
+            strokeDasharray="2.5 2.5"
+          />
+        </>
+      )}
       {commits.map((c, i) => {
         if (i < startIndex || i > endIndex) return null
         const sel = selectedSha === c.sha
@@ -85,7 +117,7 @@ export function GraphSvg({ commits, selectedSha, startIndex, endIndex }: GraphSv
           <circle
             key={c.sha}
             cx={laneX(c.lane)}
-            cy={rowCenterY(i)}
+            cy={rowCenterY(i + rowOffset)}
             r={sel ? 7.5 : 6}
             fill={c.is_merge ? 'var(--gw-bg)' : col}
             stroke={sel ? 'var(--gw-text)' : c.is_merge ? col : 'var(--gw-bg)'}

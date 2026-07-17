@@ -51,6 +51,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::merge::get_conflict,
     commands::merge::resolve_conflict,
     commands::merge::commit_merge,
+    commands::merge::cherry_pick,
     commands::patch::stage_lines,
     commands::patch::unstage_lines,
     commands::patch::discard_lines,

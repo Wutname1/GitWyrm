@@ -2,45 +2,57 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { CommitEntry } from '@/lib/bindings'
 import { GRAPH_ROW_HEIGHT } from '@/lib/gitDisplay'
-import { useCommitLog } from '@/hooks/useGitQueries'
+import { useCommitLog, useStatus } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { CommitRow, GRAPH_GRID } from '@/components/domain/graph/CommitRow'
+import { PendingRow } from '@/components/domain/graph/PendingRow'
 import { GraphSvg } from '@/components/domain/graph/GraphSvg'
 import { CommitDrawer } from '@/components/domain/graph/CommitDrawer'
 import { cn } from '@/lib/utils'
+
+/** Sentinel selection value for the synthetic WIP row (not a real commit). */
+const WIP_SHA = '__wip__'
 
 export function GraphView() {
   const repo = useActiveRepo()
   const selectedSha = useUiStore((s) => s.selectedSha)
   const selectCommit = useUiStore((s) => s.selectCommit)
+  const focusChanges = useUiStore((s) => s.focusChanges)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const log = useCommitLog(repo?.id ?? null)
+  const status = useStatus(repo?.id ?? null)
   const commits: CommitEntry[] = useMemo(
     () => log.data?.pages.flatMap((p) => p.commits) ?? [],
     [log.data]
   )
 
+  const stagedCount = status.data?.staged.length ?? 0
+  const unstagedCount = status.data?.unstaged.length ?? 0
+  const pending = commits.length > 0 && stagedCount + unstagedCount > 0
+  const rowOffset = pending ? 1 : 0
+
   const virtualizer = useVirtualizer({
-    count: commits.length,
+    count: commits.length + rowOffset,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => GRAPH_ROW_HEIGHT,
     overscan: 12,
   })
 
   const items = virtualizer.getVirtualItems()
-  const startIndex = items.length ? items[0].index : 0
-  const endIndex = items.length ? items[items.length - 1].index : 0
+  // Convert virtual row indices to commit indices (row 0 is the WIP row when pending).
+  const startIndex = Math.max(0, (items.length ? items[0].index : 0) - rowOffset)
+  const endIndex = Math.max(0, (items.length ? items[items.length - 1].index : 0) - rowOffset)
 
   // Fetch the next page when scrolling nears the end.
   useEffect(() => {
     if (!items.length) return
     const last = items[items.length - 1]
-    if (last.index >= commits.length - 40 && log.hasNextPage && !log.isFetchingNextPage) {
+    if (last.index - rowOffset >= commits.length - 40 && log.hasNextPage && !log.isFetchingNextPage) {
       log.fetchNextPage()
     }
-  }, [items, commits.length, log])
+  }, [items, commits.length, rowOffset, log])
 
   if (!repo) {
     return (
@@ -95,9 +107,32 @@ export function GraphView() {
             selectedSha={selectedSha}
             startIndex={startIndex}
             endIndex={endIndex}
+            pending={pending}
           />
           {items.map((vi) => {
-            const commit = commits[vi.index]
+            const rowStyle: React.CSSProperties = {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              transform: `translateY(${vi.start}px)`,
+            }
+            if (pending && vi.index === 0) {
+              return (
+                <PendingRow
+                  key="__wip"
+                  stagedCount={stagedCount}
+                  unstagedCount={unstagedCount}
+                  selected={selectedSha === WIP_SHA}
+                  onSelect={() => {
+                    selectCommit(WIP_SHA)
+                    focusChanges()
+                  }}
+                  style={rowStyle}
+                />
+              )
+            }
+            const commit = commits[vi.index - rowOffset]
             if (!commit) return null
             const selected = selectedSha === commit.sha
             return (
@@ -106,20 +141,16 @@ export function GraphView() {
                 commit={commit}
                 selected={selected}
                 onSelect={() => selectCommit(selected ? null : commit.sha)}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  transform: `translateY(${vi.start}px)`,
-                }}
+                style={rowStyle}
               />
             )
           })}
         </div>
       </div>
 
-      {selectedSha != null && <CommitDrawer repoId={repo.id} sha={selectedSha} />}
+      {selectedSha != null && selectedSha !== WIP_SHA && (
+        <CommitDrawer repoId={repo.id} sha={selectedSha} />
+      )}
     </>
   )
 }

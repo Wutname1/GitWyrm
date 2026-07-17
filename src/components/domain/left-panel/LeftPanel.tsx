@@ -9,6 +9,7 @@ import { SidebarSection } from './SidebarSection'
 export function LeftPanel() {
   const repo = useActiveRepo()
   const selectCommit = useUiStore((s) => s.selectCommit)
+  const openMerge = useUiStore((s) => s.openMerge)
   const m = useGitMutations(repo?.id ?? null)
 
   const branches = useBranches(repo?.id ?? null)
@@ -84,6 +85,17 @@ export function LeftPanel() {
     }
   }
 
+  const onItemContextMenu = (
+    section: SidebarSectionData,
+    item: SectionItem,
+    e: React.MouseEvent
+  ) => {
+    if ((section.type === 'branch' || section.type === 'remote') && item.name !== currentBranch) {
+      e.preventDefault()
+      openMerge(item.name)
+    }
+  }
+
   if (!repo) {
     return (
       <div className="w-60 flex-none border-r border-border bg-panel p-4 text-xs text-muted-foreground">
@@ -100,6 +112,7 @@ export function LeftPanel() {
           section={section}
           currentBranch={currentBranch}
           onItemClick={onItemClick}
+          onItemContextMenu={onItemContextMenu}
         />
       ))}
     </div>

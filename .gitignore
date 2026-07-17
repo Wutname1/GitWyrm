@@ -1,6 +1,46 @@
-node_modules
-dist
-.env
-.DS_Store
-*.local
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
 *.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Cloudflare Wrangler
+.wrangler/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editors / IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local state
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+
+# Note: Rust / Tauri build artifacts are ignored by nested .gitignore files
+# in src-tauri/ and src-tauri/bootstrapper/

@@ -9,7 +9,9 @@ use specta::Type;
 use tauri::State;
 
 use crate::error::AppError;
-use crate::git::types::{ConflictContent, MergeAnalysis, MergeResult, MergeState};
+use crate::git::types::{
+  ConflictContent, MergeAnalysis, MergeResult, MergeState, OperationKind,
+};
 use crate::state::RepoManager;
 
 /// Resolve a ref name (branch, remote branch, tag, or sha) to an annotated commit.
@@ -27,6 +29,20 @@ fn resolve_annotated<'r>(
   }
   let obj = repo.revparse_single(reference)?;
   Ok(repo.find_annotated_commit(obj.id())?)
+}
+
+/// True when the working tree has tracked modifications (ignores untracked).
+fn working_tree_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
+  let mut opts = git2::StatusOptions::new();
+  opts.include_untracked(false);
+  Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
+}
+
+/// Read a state pointer file (MERGE_HEAD / CHERRY_PICK_HEAD) as an Oid.
+fn read_state_head(repo: &git2::Repository, file: &str) -> Result<Oid, AppError> {
+  let content = std::fs::read_to_string(repo.path().join(file))
+    .map_err(|_| AppError::Other("no operation in progress".into()))?;
+  Oid::from_str(content.trim()).map_err(AppError::Git)
 }
 
 /// List paths currently conflicted in the index.
@@ -131,18 +147,28 @@ pub async fn get_merge_state(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    let merging = repo.state() == git2::RepositoryState::Merge;
-    if !merging {
-      return Ok(MergeState { merging: false, incoming_label: None, conflicts: Vec::new() });
-    }
+    let operation = match repo.state() {
+      git2::RepositoryState::Merge => Some(OperationKind::Merge),
+      git2::RepositoryState::CherryPick => Some(OperationKind::CherryPick),
+      _ => None,
+    };
+    let Some(operation) = operation else {
+      return Ok(MergeState {
+        merging: false,
+        operation: None,
+        incoming_label: None,
+        conflicts: Vec::new(),
+      });
+    };
 
-    // MERGE_MSG's first line reads "Merge branch 'x'" - surface x for the banner.
+    // Both merge and cherry-pick leave the intended message in MERGE_MSG; its
+    // first line is "Merge branch 'x'" for a merge or the picked commit summary.
     let incoming_label = std::fs::read_to_string(repo.path().join("MERGE_MSG"))
       .ok()
       .and_then(|msg| msg.lines().next().map(str::to_string));
 
     let conflicts = conflicted_paths(&repo)?;
-    Ok(MergeState { merging: true, incoming_label, conflicts })
+    Ok(MergeState { merging: true, operation: Some(operation), incoming_label, conflicts })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
@@ -157,7 +183,9 @@ pub async fn abort_merge(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    // Reset hard to HEAD and clear the merge state, mirroring `git merge --abort`.
+    // Reset hard to HEAD and clear the operation state. HEAD hasn't moved for
+    // an in-progress merge or cherry-pick, so this mirrors both
+    // `git merge --abort` and `git cherry-pick --abort`.
     let head_commit = repo
       .head()?
       .peel_to_commit()
@@ -277,32 +305,101 @@ pub async fn commit_merge(
 
     let mut index = repo.index()?;
     if index.has_conflicts() {
-      return Err(AppError::Other("resolve all conflicts before committing the merge".into()));
+      return Err(AppError::Other("resolve all conflicts before committing".into()));
     }
-
-    let merge_head_oid = {
-      let content = std::fs::read_to_string(repo.path().join("MERGE_HEAD"))
-        .map_err(|_| AppError::Other("no merge in progress".into()))?;
-      Oid::from_str(content.trim()).map_err(AppError::Git)?
-    };
 
     let tree_oid = index.write_tree()?;
     let tree = repo.find_tree(tree_oid)?;
-    let sig = repo.signature()?;
+    let committer = repo.signature()?;
     let head_commit = repo.head()?.peel_to_commit()?;
-    let merge_commit = repo.find_commit(merge_head_oid)?;
 
-    let oid = repo.commit(
-      Some("HEAD"),
-      &sig,
-      &sig,
-      &message,
-      &tree,
-      &[&head_commit, &merge_commit],
-    )?;
+    // A cherry-pick produces a single-parent commit that keeps the picked
+    // commit's original author; a merge produces a two-parent merge commit.
+    let oid = match repo.state() {
+      git2::RepositoryState::CherryPick => {
+        let picked_oid = read_state_head(&repo, "CHERRY_PICK_HEAD")?;
+        let picked = repo.find_commit(picked_oid)?;
+        let author = picked.author();
+        repo.commit(
+          Some("HEAD"),
+          &author,
+          &committer,
+          &message,
+          &tree,
+          &[&head_commit],
+        )?
+      }
+      _ => {
+        let merge_head_oid = read_state_head(&repo, "MERGE_HEAD")?;
+        let merge_commit = repo.find_commit(merge_head_oid)?;
+        repo.commit(
+          Some("HEAD"),
+          &committer,
+          &committer,
+          &message,
+          &tree,
+          &[&head_commit, &merge_commit],
+        )?
+      }
+    };
 
     repo.cleanup_state()?;
     Ok(oid.to_string())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Cherry-pick a commit onto the current branch. A clean apply commits
+/// immediately (single-parent, keeping the original author) and returns no
+/// conflicts. A conflicting apply leaves CHERRY_PICK_HEAD and the conflicted
+/// index in place for the operation-aware conflict flow to resolve and finish.
+#[tauri::command]
+#[specta::specta]
+pub async fn cherry_pick(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  sha: String,
+) -> Result<MergeResult, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+
+    if working_tree_dirty(&repo)? {
+      return Err(AppError::Other(
+        "working tree has changes; commit or stash before cherry-picking".into(),
+      ));
+    }
+
+    let oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+    let commit = repo.find_commit(oid)?;
+
+    repo.cherrypick(&commit, None)?;
+
+    let conflicts = conflicted_paths(&repo)?;
+    if !conflicts.is_empty() {
+      return Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts });
+    }
+
+    // Clean apply: commit the picked changes as a single-parent commit that
+    // preserves the original author, then clear the cherry-pick state.
+    let mut index = repo.index()?;
+    let tree_oid = index.write_tree()?;
+    let tree = repo.find_tree(tree_oid)?;
+    let committer = repo.signature()?;
+    let head_commit = repo.head()?.peel_to_commit()?;
+    let message = commit.message().unwrap_or("");
+    repo.commit(
+      Some("HEAD"),
+      &commit.author(),
+      &committer,
+      message,
+      &tree,
+      &[&head_commit],
+    )?;
+    repo.cleanup_state()?;
+
+    Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts: Vec::new() })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

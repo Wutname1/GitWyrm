@@ -2,6 +2,7 @@ import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-q
 import { toast } from 'sonner'
 import { commands, type Resolution, type SelectedLine } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 function invalidate(
   qc: QueryClient,
@@ -64,10 +65,21 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const checkout = useMutation({
-    mutationFn: async (name: string) => unwrap(await commands.checkoutBranch(id, name)),
-    onSuccess: (_d, name) => {
-      invalidate(qc, id, ['status', 'log', 'branches'])
-      toast(`Checked out ${name}`)
+    mutationFn: async (name: string) => {
+      const mode = useWorkspaceStore.getState().branchSwitchMode
+      return { name, outcome: unwrap(await commands.checkoutBranch(id, name, mode)) }
+    },
+    onSuccess: ({ name, outcome }) => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'stashes'])
+      if (outcome === 'stash_pop_conflict') {
+        toast.warning(
+          `Switched to ${name}, but your changes conflict — resolve the markers. Your stash was kept as a backup.`
+        )
+      } else if (outcome === 'stashed') {
+        toast(`Checked out ${name} with your changes`)
+      } else {
+        toast(`Checked out ${name}`)
+      }
     },
     onError,
   })
@@ -139,11 +151,30 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  const cherryPick = useMutation({
+    mutationFn: async (sha: string) => ({
+      sha,
+      result: unwrap(await commands.cherryPick(id, sha)),
+    }),
+    onSuccess: ({ sha, result }) => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      const short = sha.slice(0, 7)
+      if (result.conflicts.length > 0) {
+        toast.warning(
+          `Cherry-pick of ${short} hit ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'} to resolve`
+        )
+      } else {
+        toast(`Cherry-picked ${short}`)
+      }
+    },
+    onError,
+  })
+
   const abortMerge = useMutation({
     mutationFn: async () => unwrap(await commands.abortMerge(id)),
     onSuccess: () => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
-      toast('Merge aborted')
+      toast('Operation aborted')
     },
     onError,
   })
@@ -162,7 +193,7 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async (message: string) => unwrap(await commands.commitMerge(id, message)),
     onSuccess: (sha) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
-      toast(`Merge committed ${sha.slice(0, 7)}`)
+      toast(`Committed ${sha.slice(0, 7)}`)
     },
     onError,
   })
@@ -211,6 +242,7 @@ export function useGitMutations(repoId: string | null) {
     pull,
     push,
     merge,
+    cherryPick,
     abortMerge,
     resolveConflict,
     commitMerge,

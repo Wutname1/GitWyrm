@@ -132,7 +132,7 @@ export function TabBar() {
       <div data-tauri-drag-region className="flex-1" />
 
       <button
-        onClick={showSettings}
+        onClick={() => showSettings()}
         className="flex items-center px-2 text-sub hover:text-foreground"
         title="Settings"
       >

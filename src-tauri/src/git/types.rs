@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -93,6 +93,19 @@ pub struct BranchList {
   pub remote: Vec<String>,
 }
 
+/// What happened to uncommitted changes during a branch switch.
+#[derive(Debug, Clone, Copy, Serialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckoutOutcome {
+  /// Tree was clean, or changes carried over cleanly. Nothing to report.
+  Clean,
+  /// Changes were stashed and popped back successfully.
+  Stashed,
+  /// Changes were stashed, the switch happened, but the pop conflicted. The
+  /// stash was KEPT as a backup; the working tree has conflict markers.
+  StashPopConflict,
+}
+
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct StashInfo {
   pub index: u32,
@@ -175,12 +188,41 @@ pub struct MergeResult {
   pub conflicts: Vec<String>,
 }
 
-/// Current merge-in-progress state of the repo.
+/// A pending index-level operation that can leave conflicts to resolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+pub enum OperationKind {
+  Merge,
+  CherryPick,
+}
+
+/// How far a reset rewinds: ref only, ref+index, or ref+index+working tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub enum ResetMode {
+  /// Move the branch ref only; index and working tree keep the changes.
+  Soft,
+  /// Move the ref and reset the index; working tree keeps the changes.
+  Mixed,
+  /// Move the ref, index, and working tree. Discards uncommitted work.
+  Hard,
+}
+
+/// Where a branch ref pointed before an operation, so it can be undone.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct RefMove {
+  /// The branch that moved.
+  pub branch: String,
+  /// Full sha the branch pointed at before the move.
+  pub previous_sha: String,
+}
+
+/// Current in-progress operation state of the repo (merge or cherry-pick).
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct MergeState {
-  /// True when a merge is underway (MERGE_HEAD exists).
+  /// True when an operation is underway (a merge or cherry-pick is in progress).
   pub merging: bool,
-  /// Branch/ref being merged in, best-effort from MERGE_MSG.
+  /// Which operation is in progress, if any.
+  pub operation: Option<OperationKind>,
+  /// Branch/ref/commit being merged or picked, best-effort from the state files.
   pub incoming_label: Option<String>,
   /// Paths still conflicted.
   pub conflicts: Vec<String>,

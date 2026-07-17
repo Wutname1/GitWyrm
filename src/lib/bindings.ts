@@ -187,9 +187,9 @@ async createCommit(repoId: string, summary: string, description: string) : Promi
     else return { status: "error", error: e  as any };
 }
 },
-async checkoutBranch(repoId: string, name: string) : Promise<Result<null, string>> {
+async checkoutBranch(repoId: string, name: string, mode: BranchSwitchMode) : Promise<Result<CheckoutOutcome, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("checkout_branch", { repoId, name }) };
+    return { status: "ok", data: await TAURI_INVOKE("checkout_branch", { repoId, name, mode }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -307,6 +307,20 @@ async commitMerge(repoId: string, message: string) : Promise<Result<string, stri
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Cherry-pick a commit onto the current branch. A clean apply commits
+ * immediately (single-parent, keeping the original author) and returns no
+ * conflicts. A conflicting apply leaves CHERRY_PICK_HEAD and the conflicted
+ * index in place for the operation-aware conflict flow to resolve and finish.
+ */
+async cherryPick(repoId: string, sha: string) : Promise<Result<MergeResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cherry_pick", { repoId, sha }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async stageLines(repoId: string, path: string, selection: SelectedLine[]) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("stage_lines", { repoId, path, selection }) };
@@ -413,9 +427,44 @@ async generateCommitMessage(repoId: string, provider: string, model: string) : P
 export type AiProviderStatus = { id: string; configured: boolean }
 export type BranchInfo = { name: string; is_head: boolean; upstream: string | null; ahead: number; behind: number }
 export type BranchList = { local: BranchInfo[]; remote: string[] }
+/**
+ * What to do with uncommitted changes when switching branches.
+ */
+export type BranchSwitchMode = 
+/**
+ * Stash before switching, reapply after. A conflicting reapply leaves the
+ * stash intact as a backup. Most protective; the default.
+ */
+"auto_stash" | 
+/**
+ * Plain `git checkout`: carry changes to the new branch, but refuse the
+ * switch if any change would be overwritten.
+ */
+"carry" | 
+/**
+ * Refuse to switch while the working tree is dirty.
+ */
+"refuse"
 export type BuildInfo = { version: string; build_date: string; git_hash: string; debug: boolean }
 export type CatalogModel = { id: string; name: string }
 export type CatalogProvider = { id: string; name: string; base_url: string; dialect: Dialect; models: CatalogModel[] }
+/**
+ * What happened to uncommitted changes during a branch switch.
+ */
+export type CheckoutOutcome = 
+/**
+ * Tree was clean, or changes carried over cleanly. Nothing to report.
+ */
+"clean" | 
+/**
+ * Changes were stashed and popped back successfully.
+ */
+"stashed" | 
+/**
+ * Changes were stashed, the switch happened, but the pop conflicted. The
+ * stash was KEPT as a backup; the working tree has conflict markers.
+ */
+"stash_pop_conflict"
 export type CommitDetail = { sha: string; summary: string; body: string; author_name: string; author_email: string; time: number; parent_shas: string[]; files: FileChange[] }
 export type CommitEntry = { sha: string; short_sha: string; summary: string; author_name: string; author_email: string; author_initials: string; 
 /**
@@ -521,21 +570,29 @@ fast_forwarded: boolean;
  */
 conflicts: string[] }
 /**
- * Current merge-in-progress state of the repo.
+ * Current in-progress operation state of the repo (merge or cherry-pick).
  */
 export type MergeState = { 
 /**
- * True when a merge is underway (MERGE_HEAD exists).
+ * True when an operation is underway (a merge or cherry-pick is in progress).
  */
 merging: boolean; 
 /**
- * Branch/ref being merged in, best-effort from MERGE_MSG.
+ * Which operation is in progress, if any.
+ */
+operation: OperationKind | null; 
+/**
+ * Branch/ref/commit being merged or picked, best-effort from the state files.
  */
 incoming_label: string | null; 
 /**
  * Paths still conflicted.
  */
 conflicts: string[] }
+/**
+ * A pending index-level operation that can leave conflicts to resolve.
+ */
+export type OperationKind = "Merge" | "CherryPick"
 export type PollResult = 
 /**
  * Token acquired and saved; sign-in is complete.
@@ -581,7 +638,7 @@ open_repos?: string[];
 /**
  * Id of the repo that was active when the app last closed.
  */
-active_repo_path?: string | null; recents?: RecentRepo[]; code_folder?: string | null; clone_directory?: string | null; update_channel?: UpdateChannel; ai_provider?: string | null; ai_model?: string | null }
+active_repo_path?: string | null; recents?: RecentRepo[]; code_folder?: string | null; clone_directory?: string | null; update_channel?: UpdateChannel; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null }
 export type StashInfo = { index: number; message: string }
 export type StatusCode = "A" | "M" | "D" | "R" | "!"
 export type TagInfo = { name: string }
