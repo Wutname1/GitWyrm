@@ -87,11 +87,14 @@ export function RepoPickerModal() {
   const [tab, setTab] = useState<Tab>('open')
   const [filter, setFilter] = useState('')
 
-  // Clone state. Destination defaults to the clone-directory setting, then the
-  // code folder; edits are pushed back to the setting (normalized) on use.
-  const defaultDest = cloneDirectory ?? codeFolder ?? ''
+  // Clone state. Destination defaults to the code folder, then the saved
+  // clone-directory setting; edits are pushed back to the setting on use.
+  const defaultDest = codeFolder ?? cloneDirectory ?? ''
   const [url, setUrl] = useState('')
   const [dest, setDest] = useState(defaultDest)
+  // Local folder name. Auto-follows the URL until the user edits it by hand.
+  const [folderName, setFolderName] = useState('')
+  const [folderTouched, setFolderTouched] = useState(false)
   const [cloning, setCloning] = useState(false)
   const [progress, setProgress] = useState('')
 
@@ -134,13 +137,21 @@ export function RepoPickerModal() {
     if (typeof dir === 'string') openRepo.mutate(dir)
   }
 
-  const repoDirName = url.trim().replace(/\/+$/, '').split('/').pop()?.replace(/\.git$/, '')
+  const suggestedName =
+    url.trim().replace(/\/+$/, '').split('/').pop()?.replace(/\.git$/, '') ?? ''
+
+  // Keep the folder name in sync with the URL until the user overrides it.
+  useEffect(() => {
+    if (!folderTouched) setFolderName(suggestedName)
+  }, [suggestedName, folderTouched])
+
+  const finalName = folderName.trim() || suggestedName
 
   const doClone = async () => {
-    if (!url.trim() || !repoDirName || !dest.trim()) return
+    if (!url.trim() || !finalName || !dest.trim()) return
     const base = normalizePath(dest)
     setCloneDirectory(base)
-    const destination = joinPath(base, repoDirName)
+    const destination = joinPath(base, finalName)
     setCloning(true)
     setProgress('Starting clone…')
     try {
@@ -150,6 +161,8 @@ export function RepoPickerModal() {
       toast.success(`Cloned ${repo.name}`)
       closeModal()
       setUrl('')
+      setFolderName('')
+      setFolderTouched(false)
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
@@ -315,12 +328,33 @@ export function RepoPickerModal() {
                   <Folder size={13} />
                 </Button>
               </div>
-              {repoDirName && dest.trim() && (
-                <div className="font-mono text-[10px] text-muted-foreground">
-                  → {joinPath(dest, repoDirName)}
-                </div>
-              )}
             </div>
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-sub">Folder name</label>
+              <Input
+                value={folderName}
+                onChange={(e) => {
+                  setFolderName(e.target.value)
+                  setFolderTouched(true)
+                }}
+                placeholder={suggestedName || 'my-repo'}
+                className="h-8 bg-background font-mono text-xs"
+                disabled={cloning}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                The name of the folder created on your computer. Defaults to the repository name.
+              </p>
+            </div>
+            {finalName && dest.trim() && (
+              <div className="rounded-md border border-border bg-background px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Clones into
+                </div>
+                <div className="mt-0.5 break-all font-mono text-xs text-foreground">
+                  {joinPath(dest, finalName)}
+                </div>
+              </div>
+            )}
             {cloning && (
               <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10.5px] text-muted-foreground">
                 {progress}
@@ -328,7 +362,7 @@ export function RepoPickerModal() {
             )}
             <Button
               size="sm"
-              disabled={!url.trim() || !dest.trim() || cloning}
+              disabled={!url.trim() || !finalName || !dest.trim() || cloning}
               onClick={doClone}
               className="mt-1"
             >

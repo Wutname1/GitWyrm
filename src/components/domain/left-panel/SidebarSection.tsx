@@ -1,4 +1,4 @@
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SidebarSectionData, SectionItem } from '@/lib/types'
 import { useUiStore } from '@/stores/uiStore'
@@ -9,6 +9,9 @@ interface SidebarSectionProps {
   currentBranch: string
   onItemClick: (section: SidebarSectionData, item: SectionItem) => void
   onItemContextMenu?: (section: SidebarSectionData, item: SectionItem, e: React.MouseEvent) => void
+  /** When set, a `+` button appears on hover in the section header. */
+  onAdd?: () => void
+  addLabel?: string
 }
 
 export function SidebarSection({
@@ -16,12 +19,14 @@ export function SidebarSection({
   currentBranch,
   onItemClick,
   onItemContextMenu,
+  onAdd,
+  addLabel,
 }: SidebarSectionProps) {
   const open = useUiStore((s) => s.sectionOpen[section.key])
   const toggleSection = useUiStore((s) => s.toggleSection)
 
   return (
-    <div>
+    <div className="group/section">
       <div
         onClick={() => toggleSection(section.key)}
         className="flex cursor-pointer select-none items-center gap-1.5 py-1.5 pl-2.5 pr-3 hover:bg-panel2"
@@ -32,7 +37,26 @@ export function SidebarSection({
           className={cn('flex-none text-muted-foreground transition-transform duration-100', open && 'rotate-90')}
         />
         <span className="text-[10px] font-bold tracking-[.09em] text-sub">{section.label}</span>
-        <span className="ml-auto font-mono text-[9.5px] text-muted-foreground">{section.items.length}</span>
+        {onAdd && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onAdd()
+            }}
+            title={addLabel ?? 'Add'}
+            className="ml-auto flex size-4 flex-none items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover/section:opacity-100"
+          >
+            <Plus size={12} strokeWidth={2.4} />
+          </button>
+        )}
+        <span
+          className={cn(
+            'font-mono text-[9.5px] text-muted-foreground',
+            onAdd ? 'ml-1.5' : 'ml-auto'
+          )}
+        >
+          {section.items.length}
+        </span>
       </div>
       {open && (
         <div className="pb-1">

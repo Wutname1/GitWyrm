@@ -1,19 +1,22 @@
 import { toast } from 'sonner'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
-import { useBranches, useStashes, useTags } from '@/hooks/useGitQueries'
+import { useBranches, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { SidebarSection } from './SidebarSection'
+import { RemotesSection } from './RemotesSection'
 
 export function LeftPanel() {
   const repo = useActiveRepo()
   const selectCommit = useUiStore((s) => s.selectCommit)
   const openMerge = useUiStore((s) => s.openMerge)
+  const openModal = useUiStore((s) => s.openModal)
   const m = useGitMutations(repo?.id ?? null)
 
   const branches = useBranches(repo?.id ?? null)
   const tags = useTags(repo?.id ?? null)
+  const remotes = useRemotes(repo?.id ?? null)
   const stashes = useStashes(repo?.id ?? null)
 
   const currentBranch =
@@ -31,12 +34,6 @@ export function LeftPanel() {
             ? `${b.ahead ? `↑${b.ahead}` : ''}${b.ahead && b.behind ? ' ' : ''}${b.behind ? `↓${b.behind}` : ''}`
             : undefined,
       })),
-    },
-    {
-      key: 'remote',
-      label: 'REMOTE',
-      type: 'remote',
-      items: (branches.data?.remote ?? []).map((name) => ({ name })),
     },
     {
       key: 'stashes',
@@ -64,6 +61,12 @@ export function LeftPanel() {
     },
   ]
 
+  // Section headers that get a hover `+` action, keyed by section key.
+  const addAction: Partial<Record<string, { run: () => void; label: string }>> = {
+    local: { run: () => openModal('newBranch'), label: 'New branch' },
+    tags: { run: () => toast('Right-click a commit to tag it'), label: 'New tag' },
+  }
+
   const onItemClick = (section: SidebarSectionData, item: SectionItem) => {
     switch (section.type) {
       case 'branch':
@@ -90,7 +93,7 @@ export function LeftPanel() {
     item: SectionItem,
     e: React.MouseEvent
   ) => {
-    if ((section.type === 'branch' || section.type === 'remote') && item.name !== currentBranch) {
+    if (section.type === 'branch' && item.name !== currentBranch) {
       e.preventDefault()
       openMerge(item.name)
     }
@@ -104,15 +107,32 @@ export function LeftPanel() {
     )
   }
 
+  const localSection = sections[0]
+  const otherSections = sections.slice(1)
+
   return (
     <div className="w-60 flex-none overflow-y-auto border-r border-border bg-panel pb-6 pt-1.5">
-      {sections.map((section) => (
+      <SidebarSection
+        key={localSection.key}
+        section={localSection}
+        currentBranch={currentBranch}
+        onItemClick={onItemClick}
+        onItemContextMenu={onItemContextMenu}
+        onAdd={addAction.local?.run}
+        addLabel={addAction.local?.label}
+      />
+
+      <RemotesSection remotes={remotes.data ?? []} onManage={() => openModal('remotes')} />
+
+      {otherSections.map((section) => (
         <SidebarSection
           key={section.key}
           section={section}
           currentBranch={currentBranch}
           onItemClick={onItemClick}
           onItemContextMenu={onItemContextMenu}
+          onAdd={addAction[section.key]?.run}
+          addLabel={addAction[section.key]?.label}
         />
       ))}
     </div>

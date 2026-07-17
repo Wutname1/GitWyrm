@@ -1,11 +1,20 @@
-import { ChevronDown, Clock, Loader2, Plus, Settings, X } from 'lucide-react'
+import { BookOpen, ChevronDown, Clock, Loader2, Plus, RefreshCw, Settings, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { WindowControls } from '@/components/domain/WindowControls'
+import { WyrmExplosion, useWyrmEasterEgg } from '@/components/domain/WyrmEasterEgg'
 import logoUrl from '@/assets/logo.png'
 import { commands } from '@/lib/bindings'
 import { useOpenRepo } from '@/hooks/useRepoActions'
+import { useUpdater } from '@/hooks/useUpdater'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,22 +23,69 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
-const TAB_DOTS = ['var(--gw-accent)', '#38bdf8', '#f59e0b', '#e06b9a', '#a78bfa']
+const DOCS_URL = 'https://github.com/Wutname1/GitWyrm'
 
-function WyrmLogo() {
-  return <img src={logoUrl} alt="GitWyrm" className="size-[18px] flex-none" draggable={false} />
-}
+const TAB_DOTS = ['var(--gw-accent)', '#38bdf8', '#f59e0b', '#e06b9a', '#a78bfa']
 
 function Wordmark() {
   return (
     <span
-      data-tauri-drag-region
       className="text-[13.5px] leading-none"
       style={{ fontFamily: 'var(--font-wordmark)', fontWeight: 600, letterSpacing: '-0.035em' }}
     >
       <span style={{ color: '#D7DEE7' }}>Git</span>
       <span style={{ color: '#2DD4A7' }}>Wyrm</span>
     </span>
+  )
+}
+
+function openDocs() {
+  void import('@tauri-apps/plugin-opener').then(({ openUrl }) => openUrl(DOCS_URL))
+}
+
+function BrandMark() {
+  const showSettings = useUiStore((s) => s.showSettings)
+  const { checkAndInstall } = useUpdater()
+  const { onLogoClick, bounceNonce, blast } = useWyrmEasterEgg()
+
+  return (
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button
+            type="button"
+            onClick={onLogoClick}
+            aria-label="GitWyrm"
+            className="flex items-center gap-[7px] outline-none"
+          >
+            <img
+              key={bounceNonce}
+              src={logoUrl}
+              alt=""
+              draggable={false}
+              className="size-[18px] flex-none wyrm-spring"
+            />
+            <Wordmark />
+          </button>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-48">
+          <ContextMenuItem onSelect={openDocs}>
+            <BookOpen size={13} strokeWidth={2} />
+            Open docs
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => checkAndInstall()}>
+            <RefreshCw size={13} strokeWidth={2} />
+            Check for updates
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => showSettings()}>
+            <Settings size={13} strokeWidth={2} />
+            Settings
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+      <WyrmExplosion blast={blast} />
+    </>
   )
 }
 
@@ -48,12 +104,8 @@ export function TabBar() {
       data-tauri-drag-region
       className="flex h-9 flex-none items-stretch gap-0.5 border-b border-border bg-background pl-2.5"
     >
-      <div
-        data-tauri-drag-region
-        className="mr-1 flex items-center gap-[7px] border-r border-border pr-3"
-      >
-        <WyrmLogo />
-        <Wordmark />
+      <div className="mr-1 flex items-center border-r border-border pr-3">
+        <BrandMark />
       </div>
 
       {openRepos.map((r, i) => (

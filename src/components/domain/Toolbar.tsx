@@ -63,6 +63,7 @@ export function Toolbar() {
   const stashes = useStashes(repo?.id ?? null)
   const m = useGitMutations(repo?.id ?? null)
   const openMerge = useUiStore((s) => s.openMerge)
+  const openModal = useUiStore((s) => s.openModal)
   const head = branches.data?.local.find((b) => b.is_head)
   const currentBranch = head?.name ?? ''
 
@@ -99,10 +100,7 @@ export function Toolbar() {
       <ToolbarButton
         icon={<GitBranch size={16} strokeWidth={1.9} />}
         label="Branch"
-        onClick={requireRepo(() => {
-          const name = window.prompt('New branch name:')
-          if (name?.trim()) m.createBranch.mutate({ name: name.trim(), checkout: true })
-        })}
+        onClick={requireRepo(() => openModal('newBranch'))}
       />
       <ToolbarButton
         icon={<GitMerge size={16} strokeWidth={1.9} />}
