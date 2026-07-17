@@ -93,6 +93,41 @@ pub async fn merge_analysis(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Merge `reference` into the current HEAD. Fast-forwards when possible,
+/// otherwise leaves conflicts in the index for the frontend to resolve.
+fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, AppError> {
+  let annotated = resolve_annotated(repo, reference)?;
+  let (analysis, _pref) = repo.merge_analysis(&[&annotated])?;
+
+  if analysis.is_up_to_date() {
+    return Ok(MergeResult { up_to_date: true, fast_forwarded: false, conflicts: Vec::new() });
+  }
+
+  // Fast-forward: move HEAD and checkout, no merge commit.
+  if analysis.is_fast_forward() {
+    let target_oid = annotated.id();
+    let target = repo.find_object(target_oid, None)?;
+    repo.checkout_tree(&target, Some(CheckoutBuilder::new().safe()))?;
+    match repo.head()?.name() {
+      Some(head_ref) => {
+        repo.reference(head_ref, target_oid, true, "fast-forward merge")?;
+      }
+      None => repo.set_head_detached(target_oid)?,
+    }
+    return Ok(MergeResult { up_to_date: false, fast_forwarded: true, conflicts: Vec::new() });
+  }
+
+  // Normal merge: write conflicts into the working tree/index. The frontend
+  // resolves them and creates the merge commit via the normal commit flow.
+  let mut opts = MergeOptions::new();
+  let mut checkout = CheckoutBuilder::new();
+  checkout.allow_conflicts(true).conflict_style_merge(true);
+  repo.merge(&[&annotated], Some(&mut opts), Some(&mut checkout))?;
+
+  let conflicts = conflicted_paths(repo)?;
+  Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn merge_branch(
@@ -103,36 +138,45 @@ pub async fn merge_branch(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    let annotated = resolve_annotated(&repo, &reference)?;
-    let (analysis, _pref) = repo.merge_analysis(&[&annotated])?;
+    do_merge(&repo, &reference)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
 
-    if analysis.is_up_to_date() {
-      return Ok(MergeResult { up_to_date: true, fast_forwarded: false, conflicts: Vec::new() });
-    }
+/// Merge `source` into `target`, checking out `target` first when it isn't
+/// already HEAD. Refuses to switch branches over a dirty tree so no work is
+/// lost. This backs the direction modal's reverse ("merge current into other").
+#[tauri::command]
+#[specta::specta]
+pub async fn merge_directional(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  target: String,
+  source: String,
+) -> Result<MergeResult, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
 
-    // Fast-forward: move HEAD and checkout, no merge commit.
-    if analysis.is_fast_forward() {
-      let target_oid = annotated.id();
-      let target = repo.find_object(target_oid, None)?;
-      repo.checkout_tree(&target, Some(CheckoutBuilder::new().safe()))?;
-      match repo.head()?.name() {
-        Some(head_ref) => {
-          repo.reference(head_ref, target_oid, true, "fast-forward merge")?;
-        }
-        None => repo.set_head_detached(target_oid)?,
+    let on_target = repo.head().ok().and_then(|h| h.shorthand().map(str::to_string))
+      == Some(target.clone());
+
+    if !on_target {
+      if working_tree_dirty(&repo)? {
+        return Err(AppError::Other(
+          "working tree has changes; commit or stash before switching to merge".into(),
+        ));
       }
-      return Ok(MergeResult { up_to_date: false, fast_forwarded: true, conflicts: Vec::new() });
+      let (object, reference) = repo.revparse_ext(&target)?;
+      repo.checkout_tree(&object, None)?;
+      match reference {
+        Some(r) => repo.set_head(r.name().unwrap_or("HEAD"))?,
+        None => repo.set_head_detached(object.id())?,
+      }
     }
 
-    // Normal merge: write conflicts into the working tree/index. The frontend
-    // resolves them and creates the merge commit via the normal commit flow.
-    let mut opts = MergeOptions::new();
-    let mut checkout = CheckoutBuilder::new();
-    checkout.allow_conflicts(true).conflict_style_merge(true);
-    repo.merge(&[&annotated], Some(&mut opts), Some(&mut checkout))?;
-
-    let conflicts = conflicted_paths(&repo)?;
-    Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts })
+    do_merge(&repo, &source)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

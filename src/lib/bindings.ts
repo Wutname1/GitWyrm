@@ -203,6 +203,45 @@ async createBranch(repoId: string, name: string, checkout: boolean) : Promise<Re
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Reset the current branch to a commit. Hard reset discards uncommitted work,
+ * so it is refused over a dirty tree. Returns where the branch pointed before
+ * the reset, so the caller can offer an undo. Soft/Mixed keep the working tree.
+ */
+async resetCurrent(repoId: string, sha: string, mode: ResetMode) : Promise<Result<RefMove, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reset_current", { repoId, sha, mode }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Move the current branch ref to a commit without touching the working tree
+ * (like `git branch -f <current> <sha>` re-pointing HEAD's branch). Refused
+ * over a dirty tree so the tree never silently diverges from the new tip.
+ */
+async moveCurrentBranch(repoId: string, sha: string) : Promise<Result<RefMove, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("move_current_branch", { repoId, sha }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Resolve the origin remote's web URL for a commit, or None when it can't be
+ * built (no origin, unknown host) or the commit isn't on any remote-tracking
+ * branch yet (so the link would 404). Supports GitHub, GitLab, Bitbucket.
+ */
+async commitWebUrl(repoId: string, sha: string) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("commit_web_url", { repoId, sha }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async stashSave(repoId: string, message: string | null) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("stash_save", { repoId, message }) };
@@ -262,6 +301,19 @@ async mergeAnalysis(repoId: string, reference: string) : Promise<Result<MergeAna
 async mergeBranch(repoId: string, reference: string) : Promise<Result<MergeResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("merge_branch", { repoId, reference }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Merge `source` into `target`, checking out `target` first when it isn't
+ * already HEAD. Refuses to switch branches over a dirty tree so no work is
+ * lost. This backs the direction modal's reverse ("merge current into other").
+ */
+async mergeDirectional(repoId: string, target: string, source: string) : Promise<Result<MergeResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("merge_directional", { repoId, target, source }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -605,8 +657,36 @@ export type PollResult =
 export type RecentRepo = { name: string; path: string }
 export type RefInfo = { name: string; type: RefKind }
 export type RefKind = "head" | "branch" | "remote" | "tag"
+/**
+ * Where a branch ref pointed before an operation, so it can be undone.
+ */
+export type RefMove = { 
+/**
+ * The branch that moved.
+ */
+branch: string; 
+/**
+ * Full sha the branch pointed at before the move.
+ */
+previous_sha: string }
 export type RepoChangedPayload = { repo_id: string }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
+/**
+ * How far a reset rewinds: ref only, ref+index, or ref+index+working tree.
+ */
+export type ResetMode = 
+/**
+ * Move the branch ref only; index and working tree keep the changes.
+ */
+"Soft" | 
+/**
+ * Move the ref and reset the index; working tree keeps the changes.
+ */
+"Mixed" | 
+/**
+ * Move the ref, index, and working tree. Discards uncommitted work.
+ */
+"Hard"
 export type Resolution = 
 /**
  * Keep our side wholesale.

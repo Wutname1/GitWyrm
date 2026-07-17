@@ -221,3 +221,152 @@ pub async fn list_tags(
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
 }
+
+/// Reset the current branch to a commit. Hard reset discards uncommitted work,
+/// so it is refused over a dirty tree. Returns where the branch pointed before
+/// the reset, so the caller can offer an undo. Soft/Mixed keep the working tree.
+#[tauri::command]
+#[specta::specta]
+pub async fn reset_current(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  sha: String,
+  mode: ResetMode,
+) -> Result<RefMove, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let branch = current_branch_name(&repo)?;
+
+    if mode == ResetMode::Hard && tree_dirty(&repo)? {
+      return Err(AppError::Other(
+        "working tree has changes; a hard reset would discard them - commit or stash first".into(),
+      ));
+    }
+
+    let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
+
+    let target_oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+    let target = repo.find_object(target_oid, None)?;
+    let kind = match mode {
+      ResetMode::Soft => ResetType::Soft,
+      ResetMode::Mixed => ResetType::Mixed,
+      ResetMode::Hard => ResetType::Hard,
+    };
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force();
+    let checkout = if mode == ResetMode::Hard { Some(&mut checkout) } else { None };
+    repo.reset(&target, kind, checkout)?;
+
+    Ok(RefMove { branch, previous_sha })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Move the current branch ref to a commit without touching the working tree
+/// (like `git branch -f <current> <sha>` re-pointing HEAD's branch). Refused
+/// over a dirty tree so the tree never silently diverges from the new tip.
+#[tauri::command]
+#[specta::specta]
+pub async fn move_current_branch(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  sha: String,
+) -> Result<RefMove, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let branch = current_branch_name(&repo)?;
+
+    if tree_dirty(&repo)? {
+      return Err(AppError::Other(
+        "working tree has changes; commit or stash before moving the branch".into(),
+      ));
+    }
+
+    let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
+    let target_oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+    // A soft reset re-points the branch ref and updates the index/HEAD tree to
+    // match, keeping the working tree in sync with the new tip.
+    let target = repo.find_object(target_oid, None)?;
+    repo.reset(&target, ResetType::Soft, None)?;
+
+    Ok(RefMove { branch, previous_sha })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Resolve the origin remote's web URL for a commit, or None when it can't be
+/// built (no origin, unknown host) or the commit isn't on any remote-tracking
+/// branch yet (so the link would 404). Supports GitHub, GitLab, Bitbucket.
+#[tauri::command]
+#[specta::specta]
+pub async fn commit_web_url(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  sha: String,
+) -> Result<Option<String>, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+
+    let Ok(remote) = repo.find_remote("origin") else {
+      return Ok(None);
+    };
+    let Some(url) = remote.url() else { return Ok(None) };
+    let Some(base) = web_base_from_remote(url) else { return Ok(None) };
+
+    // Only link commits that are reachable from a remote-tracking branch;
+    // otherwise the host has never seen the sha and the URL would 404.
+    let oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+    if !commit_on_any_remote(&repo, oid)? {
+      return Ok(None);
+    }
+
+    Ok(Some(format!("{base}/commit/{}", oid)))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Normalize a git remote URL (ssh or https) to its web base, e.g.
+/// `git@github.com:o/r.git` / `https://github.com/o/r.git` -> `https://github.com/o/r`.
+fn web_base_from_remote(url: &str) -> Option<String> {
+  let known = ["github.com", "gitlab.com", "bitbucket.org"];
+
+  let (host, path) = if let Some(rest) = url.strip_prefix("git@") {
+    // scp-like: git@host:owner/repo(.git)
+    let (host, path) = rest.split_once(':')?;
+    (host.to_string(), path.to_string())
+  } else if let Some(rest) = url.strip_prefix("ssh://git@") {
+    let (host, path) = rest.split_once('/')?;
+    (host.to_string(), path.to_string())
+  } else if let Some(rest) = url.strip_prefix("https://") {
+    let rest = rest.strip_prefix("git@").unwrap_or(rest);
+    let (host, path) = rest.split_once('/')?;
+    (host.to_string(), path.to_string())
+  } else {
+    return None;
+  };
+
+  if !known.contains(&host.as_str()) {
+    return None;
+  }
+  let path = path.trim_end_matches('/').trim_end_matches(".git");
+  Some(format!("https://{host}/{path}"))
+}
+
+/// True when `oid` is reachable from any `refs/remotes/*` branch tip.
+fn commit_on_any_remote(repo: &git2::Repository, oid: Oid) -> Result<bool, AppError> {
+  let refs = repo.references_glob("refs/remotes/*")?;
+  for r in refs.flatten() {
+    if let Some(tip) = r.target() {
+      if tip == oid || repo.graph_descendant_of(tip, oid).unwrap_or(false) {
+        return Ok(true);
+      }
+    }
+  }
+  Ok(false)
+}
