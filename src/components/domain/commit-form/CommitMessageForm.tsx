@@ -53,7 +53,11 @@ export function CommitMessageForm() {
       showSettings('ai')
       return
     }
-    if (!repo || stagedCount === 0 || ai.generate.isPending) return
+    if (ai.generate.isPending) return
+    if (!repo || stagedCount === 0) {
+      toast('Stage files to generate a message')
+      return
+    }
     ai.generate.mutate(
       { repoId: repo.id, provider: aiProvider!, model: aiModel! },
       {
@@ -77,7 +81,7 @@ export function CommitMessageForm() {
         />
         <button
           onClick={doGenerate}
-          disabled={aiReady && (stagedCount === 0 || ai.generate.isPending)}
+          disabled={ai.generate.isPending}
           title={
             !aiReady
               ? 'Set up an AI provider to generate messages'
@@ -87,9 +91,9 @@ export function CommitMessageForm() {
           }
           className={cn(
             'absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-[5px] text-sub',
-            !aiReady || (stagedCount > 0 && !ai.generate.isPending)
-              ? 'cursor-pointer hover:bg-panel3 hover:text-foreground'
-              : 'cursor-not-allowed opacity-50'
+            ai.generate.isPending
+              ? 'cursor-not-allowed opacity-50'
+              : 'cursor-pointer hover:bg-panel3 hover:text-foreground'
           )}
         >
           {ai.generate.isPending ? (

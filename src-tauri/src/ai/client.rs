@@ -20,11 +20,12 @@ pub struct ChatRequest<'a> {
 }
 
 /// Extra headers some providers require beyond the bearer token.
-fn extra_headers(provider_id: &str, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+pub fn extra_headers(provider_id: &str, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
   match provider_id {
     "github-copilot" => req
       .header("Copilot-Integration-Id", "vscode-chat")
       .header("Editor-Version", "GitWyrm/0.1")
+      .header("X-GitHub-Api-Version", "2025-04-01")
       .header("User-Agent", "GitWyrm"),
     _ => req.header("User-Agent", "GitWyrm"),
   }

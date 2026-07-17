@@ -28,6 +28,10 @@ pub enum Dialect {
 pub struct CatalogModel {
   pub id: String,
   pub name: String,
+  /// Whether the account can actually select this model. Always true for static
+  /// catalog entries; a live Copilot list marks plan-gated models false so the
+  /// picker can show them greyed out instead of hiding them.
+  pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -151,7 +155,7 @@ fn parse(raw: &str) -> Result<Vec<CatalogProvider>, AppError> {
       .models
       .into_values()
       .filter(|m| m.status.as_deref() != Some("deprecated"))
-      .map(|m| CatalogModel { id: m.id, name: m.name })
+      .map(|m| CatalogModel { id: m.id, name: m.name, enabled: true })
       .collect();
     if models.is_empty() {
       continue;

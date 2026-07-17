@@ -1,9 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useAiCatalog, useAiConfigured, useAiMutations, useCopilotSignIn } from '@/hooks/useAi'
+import {
+  useAiCatalog,
+  useAiConfigured,
+  useAiModels,
+  useAiMutations,
+  useCopilotSignIn,
+} from '@/hooks/useAi'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 const selectClass =
@@ -49,6 +55,22 @@ export function AiSettings() {
     [configured.data]
   )
   const isConfigured = aiProvider != null && configuredIds.has(aiProvider)
+
+  const modelsQuery = useAiModels(aiProvider, isConfigured)
+  const models = modelsQuery.data ?? provider?.models ?? []
+
+  // Keep the persisted model valid and usable: if the saved model isn't in the
+  // live list or is disabled (e.g. Copilot plan-gated), fall back to the first
+  // enabled one. Leaves the selection alone when only disabled models exist.
+  useEffect(() => {
+    if (!provider || models.length === 0) return
+    const saved = models.find((mo) => mo.id === aiModel)
+    if (saved?.enabled) return
+    const firstEnabled = models.find((mo) => mo.enabled)
+    if (firstEnabled && firstEnabled.id !== aiModel) {
+      setAiSelection(provider.id, firstEnabled.id)
+    }
+  }, [provider, models, aiModel, setAiSelection])
 
   const saveKey = () => {
     if (!aiProvider || !keyDraft.trim()) return
@@ -209,21 +231,30 @@ export function AiSettings() {
           <div className="w-52 flex-none">
             <div className="text-xs font-semibold text-foreground">Model</div>
             <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-              Used to generate commit messages from your staged changes.
+              {isConfigured
+                ? 'Shows the models your account can use.'
+                : 'Used to generate commit messages from your staged changes.'}
             </div>
           </div>
           <div className="min-w-0 flex-1">
             <select
               className={selectClass}
               value={aiModel ?? ''}
+              disabled={modelsQuery.isLoading}
               onChange={(e) => setAiSelection(provider.id, e.target.value || null)}
             >
-              {provider.models.map((mo) => (
-                <option key={mo.id} value={mo.id}>
+              {models.map((mo) => (
+                <option key={mo.id} value={mo.id} disabled={!mo.enabled}>
                   {mo.name}
+                  {mo.enabled ? '' : ' — needs an active Copilot subscription'}
                 </option>
               ))}
             </select>
+            {modelsQuery.isFetching && (
+              <div className="mt-1 text-[10.5px] text-muted-foreground">
+                Loading your models…
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -6,7 +6,7 @@ use serde::Serialize;
 use specta::Type;
 use tauri::State;
 
-use crate::ai::{auth, catalog, client, copilot};
+use crate::ai::{auth, catalog, client, copilot, models};
 use crate::error::AppError;
 use crate::git::shell::run_git;
 use crate::state::RepoManager;
@@ -50,6 +50,20 @@ pub fn ai_set_api_key(app: tauri::AppHandle, provider: String, key: String) -> R
 #[specta::specta]
 pub fn ai_remove_provider(app: tauri::AppHandle, provider: String) -> Result<(), AppError> {
   auth::remove(&app, &provider)
+}
+
+/// The models the user can actually use for a provider. Asks the provider's
+/// `/models` endpoint when a key is configured (so Copilot reflects plan
+/// entitlements and other providers reflect key access), falling back to the
+/// static catalog list.
+#[tauri::command]
+#[specta::specta]
+pub async fn ai_list_models(
+  app: tauri::AppHandle,
+  provider: String,
+) -> Result<Vec<catalog::CatalogModel>, AppError> {
+  let cat = catalog::find(&app, &provider).await?;
+  Ok(models::list(&app, &cat).await)
 }
 
 #[tauri::command]

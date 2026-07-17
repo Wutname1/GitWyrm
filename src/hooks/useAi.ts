@@ -24,6 +24,21 @@ export function useAiConfigured() {
   })
 }
 
+/**
+ * Models the user can actually use for a provider. Refetches when the
+ * provider's configured state changes so newly-connected keys reveal their
+ * real (e.g. Copilot plan-gated) model list. `configured` is only part of the
+ * key so a fresh sign-in busts the cache.
+ */
+export function useAiModels(providerId: string | null, configured: boolean) {
+  return useQuery({
+    queryKey: ['ai-models', providerId, configured],
+    enabled: isTauri && providerId != null,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => unwrap(await commands.aiListModels(providerId!)),
+  })
+}
+
 export function useAiMutations() {
   const qc = useQueryClient()
   const invalidate = () => qc.invalidateQueries({ queryKey: configuredKey })

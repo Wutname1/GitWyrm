@@ -9,8 +9,10 @@ use specta::Type;
 
 use crate::error::AppError;
 
-/// Public OAuth client id, same one opencode and other Copilot CLIs use.
-const CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
+/// GitWyrm's own GitHub OAuth app client id (device flow enabled). The signed-in
+/// user's GitHub token is used directly as the bearer against api.githubcopilot.com,
+/// which works as long as the account has a Copilot entitlement.
+const CLIENT_ID: &str = "Ov23lipsE56EpgPeKX7O";
 const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 const ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -42,7 +44,7 @@ pub async fn device_start() -> Result<DeviceCodeInfo, AppError> {
     .post(DEVICE_CODE_URL)
     .header("Accept", "application/json")
     .header("User-Agent", "GitWyrm")
-    .json(&serde_json::json!({ "client_id": CLIENT_ID, "scope": "read:user" }))
+    .form(&[("client_id", CLIENT_ID), ("scope", "read:user")])
     .timeout(TIMEOUT)
     .send()
     .await
@@ -70,11 +72,11 @@ pub async fn device_poll(device_code: &str, interval: u32) -> Result<PollOutcome
     .post(ACCESS_TOKEN_URL)
     .header("Accept", "application/json")
     .header("User-Agent", "GitWyrm")
-    .json(&serde_json::json!({
-      "client_id": CLIENT_ID,
-      "device_code": device_code,
-      "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-    }))
+    .form(&[
+      ("client_id", CLIENT_ID),
+      ("device_code", device_code),
+      ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+    ])
     .timeout(TIMEOUT)
     .send()
     .await
