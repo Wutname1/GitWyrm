@@ -77,6 +77,7 @@ export function ChangesList() {
         <FileChangeRow
           key={`s-${f.path}`}
           file={f}
+          menuStaged
           onOpen={() => openDiff({ path: f.path, source: { kind: 'staged' } })}
           action={
             <StageToggle
@@ -113,6 +114,7 @@ export function ChangesList() {
           <FileChangeRow
             key={`u-${f.path}`}
             file={f}
+            menuStaged={false}
             nameClassName="text-removed"
             onOpen={() => openConflict(f.path)}
             action={
@@ -131,6 +133,7 @@ export function ChangesList() {
           <FileChangeRow
             key={`u-${f.path}`}
             file={f}
+            menuStaged={false}
             onOpen={() => openDiff({ path: f.path, source: { kind: 'unstaged' } })}
             action={
               <StageToggle

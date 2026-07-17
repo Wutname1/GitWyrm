@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils'
 import { GRAPH_ROW_HEIGHT } from '@/lib/gitDisplay'
+import { ChangesMenu } from '../commit-form/ChangesMenu'
 import { GRAPH_GRID } from './CommitRow'
 
 interface PendingRowProps {
@@ -13,15 +14,16 @@ interface PendingRowProps {
 export function PendingRow({ stagedCount, unstagedCount, selected, onSelect, style }: PendingRowProps) {
   const total = stagedCount + unstagedCount
   return (
-    <div
-      onClick={onSelect}
-      style={{ height: GRAPH_ROW_HEIGHT, ...style }}
-      className={cn(
-        'grid cursor-pointer items-center pr-1',
-        GRAPH_GRID,
-        selected && 'bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]'
-      )}
-    >
+    <ChangesMenu>
+      <div
+        onClick={onSelect}
+        style={{ height: GRAPH_ROW_HEIGHT, ...style }}
+        className={cn(
+          'grid cursor-pointer items-center pr-1',
+          GRAPH_GRID,
+          selected && 'bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]'
+        )}
+      >
       <div className="flex items-center gap-1 overflow-hidden pr-1.5">
         <span className="flex items-center gap-1 rounded border border-dashed border-primary/50 bg-soft px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-[.04em] text-primary">
           <span className="relative flex size-1.5 items-center justify-center">
@@ -45,6 +47,7 @@ export function PendingRow({ stagedCount, unstagedCount, selected, onSelect, sty
       <div className="font-mono text-[11px] text-muted-foreground">
         {total} file{total === 1 ? '' : 's'}
       </div>
-    </div>
+      </div>
+    </ChangesMenu>
   )
 }

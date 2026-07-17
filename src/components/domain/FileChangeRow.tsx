@@ -2,6 +2,7 @@ import type { MouseEvent, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import type { FileChange } from '@/lib/bindings'
 import { StatusBadge } from './StatusBadge'
+import { FileChangeMenu } from './commit-form/FileChangeMenu'
 
 interface FileChangeRowProps {
   file: FileChange
@@ -9,10 +10,23 @@ interface FileChangeRowProps {
   nameClassName?: string
   onOpen: () => void
   action?: ReactNode
+  /**
+   * When set, wraps the row in a right-click menu with stage/discard actions.
+   * `true` marks the file as staged, `false` as unstaged. Omit for read-only
+   * rows (e.g. a past commit's files) that should have no menu.
+   */
+  menuStaged?: boolean
 }
 
-export function FileChangeRow({ file, mono, nameClassName, onOpen, action }: FileChangeRowProps) {
-  return (
+export function FileChangeRow({
+  file,
+  mono,
+  nameClassName,
+  onOpen,
+  action,
+  menuStaged,
+}: FileChangeRowProps) {
+  const row = (
     <div
       onClick={onOpen}
       className="flex cursor-pointer items-center gap-2 px-3.5 py-1 hover:bg-panel2"
@@ -31,6 +45,14 @@ export function FileChangeRow({ file, mono, nameClassName, onOpen, action }: Fil
       <span className="font-mono text-[10px] text-removed">−{file.deletions}</span>
       {action}
     </div>
+  )
+
+  if (menuStaged === undefined) return row
+
+  return (
+    <FileChangeMenu file={file} staged={menuStaged} onOpen={onOpen}>
+      {row}
+    </FileChangeMenu>
   )
 }
 

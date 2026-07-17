@@ -4,6 +4,7 @@ import { useBranches, useStatus } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { ChangesList } from './commit-form/ChangesList'
+import { ChangesMenu } from './commit-form/ChangesMenu'
 import { CommitMessageForm } from './commit-form/CommitMessageForm'
 
 export function RightPanel() {
@@ -37,20 +38,22 @@ export function RightPanel() {
         flash ? 'border-primary' : 'border-border'
       )}
     >
-      <div
-        ref={headerRef}
-        className={cn(
-          'flex flex-none items-center gap-2 border-b border-border px-3.5 pb-[9px] pt-[11px] transition-colors duration-500',
-          flash && 'bg-soft'
-        )}
-      >
-        <span className="text-[11px] font-bold tracking-[.05em] text-sub">
-          CHANGES{currentBranch ? ` · ${currentBranch}` : ''}
-        </span>
-        <span className="ml-auto rounded-full bg-primary px-[7px] py-px font-mono text-[9px] font-bold text-primary-foreground">
-          {total}
-        </span>
-      </div>
+      <ChangesMenu>
+        <div
+          ref={headerRef}
+          className={cn(
+            'flex flex-none items-center gap-2 border-b border-border px-3.5 pb-[9px] pt-[11px] transition-colors duration-500',
+            flash && 'bg-soft'
+          )}
+        >
+          <span className="text-[11px] font-bold tracking-[.05em] text-sub">
+            CHANGES{currentBranch ? ` · ${currentBranch}` : ''}
+          </span>
+          <span className="ml-auto rounded-full bg-primary px-[7px] py-px font-mono text-[9px] font-bold text-primary-foreground">
+            {total}
+          </span>
+        </div>
+      </ChangesMenu>
       <ChangesList />
       <CommitMessageForm />
     </div>

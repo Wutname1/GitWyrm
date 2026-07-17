@@ -68,6 +68,19 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Suppress the browser's native right-click menu everywhere it isn't wanted.
+  // Our own Radix context menus still open (they handle the event first); text
+  // fields keep their native menu so copy/paste works.
+  useEffect(() => {
+    const onContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      e.preventDefault()
+    }
+    document.addEventListener('contextmenu', onContextMenu)
+    return () => document.removeEventListener('contextmenu', onContextMenu)
+  }, [])
+
   return (
     <>
       <WorkspaceLayout />

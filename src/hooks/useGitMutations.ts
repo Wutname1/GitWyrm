@@ -44,6 +44,27 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  const discardFile = useMutation({
+    mutationFn: async (path: string) => {
+      await unwrap(await commands.discardFile(id, path))
+      return path
+    },
+    onSuccess: (path) => {
+      invalidate(qc, id, ['status'])
+      toast(`Discarded changes in ${path.split('/').pop()}`)
+    },
+    onError,
+  })
+
+  const discardAll = useMutation({
+    mutationFn: async () => unwrap(await commands.discardAll(id)),
+    onSuccess: () => {
+      invalidate(qc, id, ['status'])
+      toast('Discarded all changes')
+    },
+    onError,
+  })
+
   const createCommit = useMutation({
     mutationFn: async (args: { summary: string; description: string }) =>
       unwrap(await commands.createCommit(id, args.summary, args.description)),
@@ -301,6 +322,8 @@ export function useGitMutations(repoId: string | null) {
     unstageFile,
     stageAll,
     unstageAll,
+    discardFile,
+    discardAll,
     createCommit,
     createBranch,
     checkout,
