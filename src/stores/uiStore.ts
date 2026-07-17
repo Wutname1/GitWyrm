@@ -4,7 +4,15 @@ import type { SectionKey } from '@/lib/types'
 
 export type CenterView = 'graph' | 'diff' | 'settings' | 'conflict'
 
-export type ModalKind = 'onboarding' | 'clone' | 'tutorial' | 'merge' | null
+export type ModalKind =
+  | 'onboarding'
+  | 'clone'
+  | 'tutorial'
+  | 'merge'
+  | 'remote-sync'
+  | 'newBranch'
+  | 'remotes'
+  | null
 
 export type SettingsSection = 'general' | 'ai' | 'appearance' | 'logs' | 'about'
 
@@ -21,12 +29,15 @@ interface UiState {
   sectionOpen: Record<SectionKey, boolean>
   activeModal: ModalKind
   mergeSource: string | null
+  syncSource: string | null
+  syncTarget: string | null
   settingsSection: SettingsSection
   changesFocusNonce: number
 
   selectCommit: (sha: string | null) => void
   focusChanges: () => void
   openMerge: (source?: string) => void
+  openRemoteSync: (source: string, target: string) => void
   openDiff: (request: DiffRequest) => void
   closeDiff: () => void
   openConflict: (path: string) => void
@@ -54,12 +65,16 @@ export const useUiStore = create<UiState>((set) => ({
   },
   activeModal: null,
   mergeSource: null,
+  syncSource: null,
+  syncTarget: null,
   settingsSection: 'general',
   changesFocusNonce: 0,
 
   selectCommit: (sha) => set({ selectedSha: sha }),
   focusChanges: () => set((s) => ({ changesFocusNonce: s.changesFocusNonce + 1 })),
   openMerge: (source) => set({ activeModal: 'merge', mergeSource: source ?? null }),
+  openRemoteSync: (source, target) =>
+    set({ activeModal: 'remote-sync', syncSource: source, syncTarget: target }),
   openDiff: (request) => set({ diffRequest: request, centerView: 'diff' }),
   closeDiff: () => set({ diffRequest: null, centerView: 'graph' }),
   openConflict: (path) => set({ conflictPath: path, centerView: 'conflict' }),
@@ -73,6 +88,6 @@ export const useUiStore = create<UiState>((set) => ({
   toggleSection: (key) =>
     set((s) => ({ sectionOpen: { ...s.sectionOpen, [key]: !s.sectionOpen[key] } })),
   openModal: (kind) => set({ activeModal: kind }),
-  closeModal: () => set({ activeModal: null }),
+  closeModal: () => set({ activeModal: null, syncSource: null, syncTarget: null }),
   setSettingsSection: (section) => set({ settingsSection: section }),
 }))

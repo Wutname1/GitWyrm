@@ -117,6 +117,18 @@ pub struct TagInfo {
   pub name: String,
 }
 
+/// A configured remote and the remote-tracking branches under it.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct RemoteInfo {
+  pub name: String,
+  pub url: String,
+  /// Push URL when it differs from the fetch URL, else None.
+  pub push_url: Option<String>,
+  /// Short branch names under this remote (without the `<remote>/` prefix),
+  /// e.g. `main`, `dependabot/npm/foo`. Excludes the symbolic HEAD ref.
+  pub branches: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct CommitDetail {
   pub sha: String,
@@ -185,6 +197,15 @@ pub struct MergeResult {
   /// HEAD was advanced without a merge commit.
   pub fast_forwarded: bool,
   /// Paths left in a conflicted state, needing resolution.
+  pub conflicts: Vec<String>,
+}
+
+/// Outcome of a rebase. A clean rebase returns no conflicts; a paused rebase
+/// (conflicts to resolve) lists the conflicted paths and leaves the repo in its
+/// rebase-in-progress state.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct RebaseResult {
+  /// Paths left in a conflicted state; the rebase is paused until resolved.
   pub conflicts: Vec<String>,
 }
 

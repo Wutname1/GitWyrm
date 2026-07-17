@@ -5,6 +5,7 @@ export const keys = {
   status: (repoId: string) => ['status', repoId] as const,
   branches: (repoId: string) => ['branches', repoId] as const,
   tags: (repoId: string) => ['tags', repoId] as const,
+  remotes: (repoId: string) => ['remotes', repoId] as const,
   stashes: (repoId: string) => ['stashes', repoId] as const,
   commitDetail: (repoId: string, sha: string) => ['commit', repoId, sha] as const,
   fileDiff: (repoId: string, path: string, source: DiffSource) =>

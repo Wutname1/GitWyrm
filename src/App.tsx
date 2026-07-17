@@ -7,6 +7,9 @@ import { WorkspaceLayout } from '@/layouts/WorkspaceLayout'
 import { RepoPickerModal } from '@/components/modals/RepoPickerModal'
 import { OnboardingModal } from '@/components/modals/OnboardingModal'
 import { DirectionModal } from '@/components/modals/DirectionModal'
+import { RemoteSyncModal } from '@/components/modals/RemoteSyncModal'
+import { NewBranchModal } from '@/components/modals/NewBranchModal'
+import { RemotesModal } from '@/components/modals/RemotesModal'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
@@ -87,6 +90,9 @@ function AppInner() {
       <RepoPickerModal />
       <OnboardingModal />
       <DirectionModal />
+      <RemoteSyncModal />
+      <NewBranchModal />
+      <RemotesModal />
       <Toaster position="bottom-center" />
     </>
   )

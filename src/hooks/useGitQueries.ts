@@ -40,6 +40,14 @@ export function useTags(repoId: string | null) {
   })
 }
 
+export function useRemotes(repoId: string | null) {
+  return useQuery({
+    queryKey: keys.remotes(repoId ?? 'none'),
+    enabled: repoId != null,
+    queryFn: async () => unwrap(await commands.listRemotes(repoId!)),
+  })
+}
+
 export function useStashes(repoId: string | null) {
   return useQuery({
     queryKey: keys.stashes(repoId ?? 'none'),

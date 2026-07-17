@@ -294,9 +294,73 @@ async gitPush(repoId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async gitPushForce(repoId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("git_push_force", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async gitRebase(repoId: string, onto: string) : Promise<Result<RebaseResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("git_rebase", { repoId, onto }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async gitClone(url: string, destination: string) : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_clone", { url, destination }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listRemotes(repoId: string) : Promise<Result<RemoteInfo[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_remotes", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async addRemote(repoId: string, name: string, url: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_remote", { repoId, name, url }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async renameRemote(repoId: string, name: string, newName: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rename_remote", { repoId, name, newName }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setRemoteUrl(repoId: string, name: string, url: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_remote_url", { repoId, name, url }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async removeRemote(repoId: string, name: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_remote", { repoId, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setUpstream(repoId: string, remoteBranch: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_upstream", { repoId, remoteBranch }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -449,6 +513,14 @@ async aiRemoveProvider(provider: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async aiListModels(provider: string) : Promise<Result<CatalogModel[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_list_models", { provider }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async aiCopilotDeviceStart() : Promise<Result<DeviceCodeInfo, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("ai_copilot_device_start") };
@@ -510,7 +582,7 @@ export type BranchSwitchMode =
  */
 "refuse"
 export type BuildInfo = { version: string; build_date: string; git_hash: string; debug: boolean }
-export type CatalogModel = { id: string; name: string }
+export type CatalogModel = { id: string; name: string; enabled: boolean }
 export type CatalogProvider = { id: string; name: string; base_url: string; dialect: Dialect; models: CatalogModel[] }
 /**
  * What happened to uncommitted changes during a branch switch.
@@ -634,6 +706,16 @@ fast_forwarded: boolean;
  */
 conflicts: string[] }
 /**
+ * Outcome of a rebase. A clean rebase returns no conflicts; a paused rebase
+ * (conflicts to resolve) lists the conflicted paths and leaves the repo in its
+ * rebase-in-progress state.
+ */
+export type RebaseResult = {
+/**
+ * Paths left in a conflicted state; the rebase is paused until resolved.
+ */
+conflicts: string[] }
+/**
  * Current in-progress operation state of the repo (merge or cherry-pick).
  */
 export type MergeState = { 
@@ -733,6 +815,7 @@ open_repos?: string[];
 active_repo_path?: string | null; recents?: RecentRepo[]; code_folder?: string | null; clone_directory?: string | null; update_channel?: UpdateChannel; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null }
 export type StashInfo = { index: number; message: string }
 export type StatusCode = "A" | "M" | "D" | "R" | "!"
+export type RemoteInfo = { name: string; url: string; push_url: string | null; branches: string[] }
 export type TagInfo = { name: string }
 export type UpdateChannel = "stable" | "beta"
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }

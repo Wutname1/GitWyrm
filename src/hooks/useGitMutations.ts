@@ -7,7 +7,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 function invalidate(
   qc: QueryClient,
   repoId: string,
-  which: Array<'status' | 'log' | 'branches' | 'stashes' | 'tags' | 'mergeState'>
+  which: Array<'status' | 'log' | 'branches' | 'stashes' | 'tags' | 'remotes' | 'mergeState'>
 ) {
   for (const k of which) {
     qc.invalidateQueries({ queryKey: keys[k](repoId) })
@@ -126,8 +126,62 @@ export function useGitMutations(repoId: string | null) {
   const fetch = useMutation({
     mutationFn: async () => unwrap(await commands.gitFetch(id)),
     onSuccess: () => {
-      invalidate(qc, id, ['log', 'branches'])
+      invalidate(qc, id, ['log', 'branches', 'remotes'])
       toast('Fetched all remotes')
+    },
+    onError,
+  })
+
+  const addRemote = useMutation({
+    mutationFn: async (args: { name: string; url: string }) =>
+      unwrap(await commands.addRemote(id, args.name, args.url)),
+    onSuccess: (_d, args) => {
+      invalidate(qc, id, ['remotes'])
+      toast(`Added remote ${args.name}`)
+    },
+    onError,
+  })
+
+  const renameRemote = useMutation({
+    mutationFn: async (args: { name: string; newName: string }) =>
+      unwrap(await commands.renameRemote(id, args.name, args.newName)),
+    onSuccess: (_d, args) => {
+      invalidate(qc, id, ['remotes', 'branches'])
+      toast(`Renamed to ${args.newName}`)
+    },
+    onError,
+  })
+
+  const setRemoteUrl = useMutation({
+    mutationFn: async (args: { name: string; url: string }) =>
+      unwrap(await commands.setRemoteUrl(id, args.name, args.url)),
+    onSuccess: (_d, args) => {
+      invalidate(qc, id, ['remotes'])
+      toast(`Updated ${args.name}`)
+    },
+    onError,
+  })
+
+  const removeRemote = useMutation({
+    mutationFn: async (name: string) => {
+      await unwrap(await commands.removeRemote(id, name))
+      return name
+    },
+    onSuccess: (name) => {
+      invalidate(qc, id, ['remotes', 'branches'])
+      toast(`Removed remote ${name}`)
+    },
+    onError,
+  })
+
+  const setUpstream = useMutation({
+    mutationFn: async (remoteBranch: string) => {
+      await unwrap(await commands.setUpstream(id, remoteBranch))
+      return remoteBranch
+    },
+    onSuccess: (remoteBranch) => {
+      invalidate(qc, id, ['branches'])
+      toast(`Now tracking ${remoteBranch}`)
     },
     onError,
   })
@@ -146,6 +200,33 @@ export function useGitMutations(repoId: string | null) {
     onSuccess: () => {
       invalidate(qc, id, ['log', 'branches'])
       toast('Pushed')
+    },
+    onError,
+  })
+
+  const pushForce = useMutation({
+    mutationFn: async () => unwrap(await commands.gitPushForce(id)),
+    onSuccess: () => {
+      invalidate(qc, id, ['log', 'branches'])
+      toast('Force-pushed')
+    },
+    onError,
+  })
+
+  const rebase = useMutation({
+    mutationFn: async (onto: string) => ({
+      onto,
+      result: unwrap(await commands.gitRebase(id, onto)),
+    }),
+    onSuccess: ({ onto, result }) => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      if (result.conflicts.length > 0) {
+        toast.warning(
+          `Rebase paused on ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'} - resolve them in your editor, then finish the rebase`
+        )
+      } else {
+        toast(`Rebased onto ${onto}`)
+      }
     },
     onError,
   })
@@ -332,6 +413,13 @@ export function useGitMutations(repoId: string | null) {
     fetch,
     pull,
     push,
+    pushForce,
+    rebase,
+    addRemote,
+    renameRemote,
+    setRemoteUrl,
+    removeRemote,
+    setUpstream,
     merge,
     mergeDirectional,
     cherryPick,
