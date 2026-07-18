@@ -40,16 +40,15 @@ function AppInner() {
   // pixel value (unlike a font-size trick), which is what we want for a
   // git client full of fixed-size rows and badges.
   //
-  // The root is also sized to 100/scale of the viewport so that scaling it
-  // lands back at exactly the window height. Without that counter-sizing a
-  // full-height layout overflows the bottom of the window and takes the
-  // status bar (and its zoom control) off-screen with no way back.
+  // The root is sized in percentages, not viewport units: percentages resolve
+  // against the already-zoomed containing block, so the layout still fits the
+  // window exactly at any scale. Viewport units (dvh/vw) do not shrink under
+  // zoom, which overflows the window and pushes the status bar -- and the zoom
+  // control itself -- off-screen with no way back.
   useEffect(() => {
     const root = document.getElementById('root')
     if (!root) return
     root.style.zoom = String(uiScale)
-    root.style.height = `${100 / uiScale}dvh`
-    root.style.width = `${100 / uiScale}vw`
   }, [uiScale])
 
   // On launch: restore every previously-open tab (falling back to the most
