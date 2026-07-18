@@ -34,9 +34,18 @@ pub fn moved_submodules(repo: &git2::Repository) -> HashMap<String, SubmoduleMov
 
     match (recorded, checked_out) {
       (Some(recorded), Some(checked_out)) if recorded != checked_out => {
-        let (ahead, behind) = repo
-          .graph_ahead_behind(checked_out, recorded)
-          .map(|(a, b)| (a as u32, b as u32))
+        // The submodule's commits live in the submodule's own object database,
+        // not the parent's -- so ahead/behind must be computed against the
+        // nested repo. If it can't be opened, fall back to unknown (0/0).
+        let (ahead, behind) = sub
+          .open()
+          .ok()
+          .and_then(|nested| {
+            nested
+              .graph_ahead_behind(checked_out, recorded)
+              .ok()
+              .map(|(a, b)| (a as u32, b as u32))
+          })
           .unwrap_or((0, 0));
         moves.insert(
           path.clone(),

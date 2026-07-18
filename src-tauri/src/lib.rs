@@ -8,6 +8,7 @@ mod watcher;
 
 pub use error::AppError;
 pub use git::graph as git_graph;
+pub use git::submodule as git_submodule;
 
 use state::RepoManager;
 use watcher::WatcherRegistry;

@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import { FileText, MinusCircle, PlusCircle, Trash2 } from 'lucide-react'
+import { Download, FileText, MinusCircle, PlusCircle, RotateCcw, Trash2 } from 'lucide-react'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import type { FileChange } from '@/lib/bindings'
 import {
@@ -27,6 +27,8 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const name = file.path.split('/').pop() ?? file.path
   const stagePending = m.stageFile.isPending || m.unstageFile.isPending
+  const sub = file.submodule
+  const uninitialized = sub != null && !sub.initialized
 
   return (
     <>
@@ -39,7 +41,7 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={onOpen}>
             <FileText />
-            {file.conflicted ? 'Resolve conflicts' : 'View changes'}
+            {file.conflicted ? 'Resolve conflicts' : sub ? 'See what moved' : 'View changes'}
           </ContextMenuItem>
           {staged ? (
             <ContextMenuItem
@@ -64,14 +66,37 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
               {m.stageFile.isPending ? 'Staging file…' : 'Stage this file'}
             </ContextMenuItem>
           )}
-          {!file.conflicted && (
+          {sub ? (
             <>
               <ContextMenuSeparator />
-              <ContextMenuItem variant="destructive" onSelect={() => setConfirmDiscard(true)}>
-                <Trash2 />
-                Discard changes
-              </ContextMenuItem>
+              {uninitialized ? (
+                <ContextMenuItem
+                  disabled={m.updateSubmodule.isPending}
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    m.updateSubmodule.mutate({ path: file.path, init: true })
+                  }}
+                >
+                  {m.updateSubmodule.isPending ? <PendingIndicator /> : <Download />}
+                  {m.updateSubmodule.isPending ? 'Downloading…' : 'Download submodule'}
+                </ContextMenuItem>
+              ) : (
+                <ContextMenuItem variant="destructive" onSelect={() => setConfirmDiscard(true)}>
+                  <RotateCcw />
+                  Reset to recorded commit
+                </ContextMenuItem>
+              )}
             </>
+          ) : (
+            !file.conflicted && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem variant="destructive" onSelect={() => setConfirmDiscard(true)}>
+                  <Trash2 />
+                  Discard changes
+                </ContextMenuItem>
+              </>
+            )
           )}
         </ContextMenuContent>
       </ContextMenu>
@@ -80,16 +105,29 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
         open={confirmDiscard}
         onOpenChange={setConfirmDiscard}
         destructive
-        title={`Discard changes in ${name}?`}
+        title={sub ? `Reset ${name} to the recorded commit?` : `Discard changes in ${name}?`}
         description={
-          <>
-            This throws away your edits to{' '}
-            <span className="font-mono text-foreground">{file.path}</span> and puts the file back to
-            the last commit. This can't be undone.
-          </>
+          sub ? (
+            <>
+              This moves the submodule{' '}
+              <span className="font-mono text-foreground">{file.path}</span> back to the commit this
+              project records for it, dropping any different commit it currently points to. This
+              can't be undone.
+            </>
+          ) : (
+            <>
+              This throws away your edits to{' '}
+              <span className="font-mono text-foreground">{file.path}</span> and puts the file back
+              to the last commit. This can't be undone.
+            </>
+          )
         }
-        confirmLabel="Discard changes"
-        onConfirm={() => m.discardFile.mutate(file.path)}
+        confirmLabel={sub ? 'Reset submodule' : 'Discard changes'}
+        onConfirm={() =>
+          sub
+            ? m.updateSubmodule.mutate({ path: file.path, init: false })
+            : m.discardFile.mutate(file.path)
+        }
       />
     </>
   )

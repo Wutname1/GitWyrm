@@ -2,6 +2,8 @@ import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-q
 import { toast } from 'sonner'
 import { commands, type Resolution, type ResetMode, type SelectedLine } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
+import { classifyError } from '@/lib/errorClass'
+import { log } from '@/lib/log'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 function invalidate(
@@ -14,7 +16,21 @@ function invalidate(
   }
 }
 
-const onError = (e: Error) => toast.error(e.message)
+/**
+ * Every mutation failure flows through here. It logs the raw error to
+ * gitwyrm.log (so there is always a durable trace) and shows the user a
+ * classified, plain-language toast at the right severity -- info for benign
+ * no-ops, warning for recoverable conflicts, error for real failures.
+ */
+const onError = (e: Error) => {
+  const { severity, message, raw } = classifyError(e)
+  log[severity === 'info' ? 'info' : severity === 'warning' ? 'warn' : 'error'](
+    `mutation failed [${severity}]: ${raw}`
+  )
+  if (severity === 'info') toast.info(message)
+  else if (severity === 'warning') toast.warning(message)
+  else toast.error(message)
+}
 
 export function useGitMutations(repoId: string | null) {
   const qc = useQueryClient()
@@ -65,6 +81,21 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Snap a submodule back to the commit the parent repo records, or download it
+  // for the first time when `init` is set.
+  const updateSubmodule = useMutation({
+    mutationFn: async (args: { path: string; init: boolean }) => {
+      await unwrap(await commands.updateSubmodule(id, args.path, args.init))
+      return args
+    },
+    onSuccess: ({ path, init }) => {
+      invalidate(qc, id, ['status', 'log'])
+      const name = path.split('/').pop() ?? path
+      toast(init ? `Downloaded ${name}` : `Reset ${name} to the recorded commit`)
+    },
+    onError,
+  })
+
   const createCommit = useMutation({
     mutationFn: async (args: { summary: string; description: string }) =>
       unwrap(await commands.createCommit(id, args.summary, args.description)),
@@ -76,8 +107,8 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const createBranch = useMutation({
-    mutationFn: async (args: { name: string; checkout: boolean }) =>
-      unwrap(await commands.createBranch(id, args.name, args.checkout)),
+    mutationFn: async (args: { name: string; sha?: string; checkout: boolean }) =>
+      unwrap(await commands.createBranch(id, args.name, args.sha ?? '', args.checkout)),
     onSuccess: (_d, args) => {
       invalidate(qc, id, ['branches', 'log'])
       toast(`Created branch ${args.name}`)
@@ -159,9 +190,13 @@ export function useGitMutations(repoId: string | null) {
 
   const stashSave = useMutation({
     mutationFn: async (message?: string) => unwrap(await commands.stashSave(id, message ?? null)),
-    onSuccess: () => {
+    onSuccess: (outcome) => {
       invalidate(qc, id, ['status', 'stashes'])
-      toast('Stashed changes')
+      if (outcome === 'nothing_to_stash') {
+        toast.info('Nothing to stash -- your working tree is already clean.')
+      } else {
+        toast('Stashed changes')
+      }
     },
     onError,
   })
@@ -392,6 +427,66 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  const copyCommitLink = useMutation({
+    mutationFn: async (sha: string) => {
+      const url = unwrap(await commands.commitWebUrl(id, sha))
+      if (!url) {
+        toast('This commit is not on a supported remote yet')
+        return
+      }
+      await navigator.clipboard.writeText(url)
+      toast('Copied link to commit')
+    },
+    onError,
+  })
+
+  const checkoutCommit = useMutation({
+    mutationFn: async (sha: string) => {
+      unwrap(await commands.checkoutCommit(id, sha))
+      return sha
+    },
+    onSuccess: (sha) => {
+      invalidate(qc, id, ['status', 'log', 'branches'])
+      toast(`Checked out ${sha.slice(0, 7)} — you're not on a branch now`)
+    },
+    onError,
+  })
+
+  const rewordCommit = useMutation({
+    mutationFn: async (args: { sha: string; message: string }) =>
+      unwrap(await commands.rewordCommit(id, args.sha, args.message)),
+    onSuccess: (sha) => {
+      invalidate(qc, id, ['status', 'log', 'branches'])
+      toast(`Updated message — now ${sha.slice(0, 7)}`)
+    },
+    onError,
+  })
+
+  const revertCommit = useMutation({
+    mutationFn: async (sha: string) => ({
+      sha,
+      result: unwrap(await commands.revertCommit(id, sha)),
+    }),
+    onSuccess: ({ sha, result }) => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      const short = sha.slice(0, 7)
+      if (result.conflicts.length > 0) {
+        toast.warning(
+          `Reverting ${short} hit ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'} to resolve`
+        )
+      } else {
+        toast(`Reverted ${short}`)
+      }
+    },
+    onError,
+  })
+
+  const dropCommit = useMutation({
+    mutationFn: async (sha: string) => unwrap(await commands.dropCommit(id, sha)),
+    onSuccess: (move) => afterRefMove(move.previous_sha, `Dropped commit — was at`, 'Hard'),
+    onError,
+  })
+
   const abortMerge = useMutation({
     mutationFn: async () => unwrap(await commands.abortMerge(id)),
     onSuccess: () => {
@@ -457,6 +552,7 @@ export function useGitMutations(repoId: string | null) {
     unstageAll,
     discardFile,
     discardAll,
+    updateSubmodule,
     createCommit,
     createBranch,
     deleteBranch,
@@ -484,6 +580,11 @@ export function useGitMutations(repoId: string | null) {
     reset,
     moveBranch,
     openOnGitHub,
+    copyCommitLink,
+    checkoutCommit,
+    rewordCommit,
+    revertCommit,
+    dropCommit,
     abortMerge,
     resolveConflict,
     commitMerge,

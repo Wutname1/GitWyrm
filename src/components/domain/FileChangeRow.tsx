@@ -1,9 +1,20 @@
 import type { MouseEvent, ReactNode } from 'react'
+import { Package } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { FileChange } from '@/lib/bindings'
 import { StatusBadge } from './StatusBadge'
 import { FileChangeMenu } from './commit-form/FileChangeMenu'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
+
+/** Plain-language note for a moved submodule pointer, e.g. "5 commits ahead". */
+function submoduleNote(sub: NonNullable<FileChange['submodule']>): string {
+  if (!sub.initialized) return 'not downloaded yet'
+  if (sub.ahead > 0 && sub.behind === 0)
+    return `${sub.ahead} commit${sub.ahead === 1 ? '' : 's'} ahead`
+  if (sub.behind > 0 && sub.ahead === 0)
+    return `${sub.behind} commit${sub.behind === 1 ? '' : 's'} behind`
+  return 'points to a different commit'
+}
 
 interface FileChangeRowProps {
   file: FileChange
@@ -27,6 +38,7 @@ export function FileChangeRow({
   action,
   menuStaged,
 }: FileChangeRowProps) {
+  const sub = file.submodule
   const row = (
     <div
       onClick={onOpen}
@@ -35,15 +47,23 @@ export function FileChangeRow({
       <StatusBadge st={file.status} />
       <span
         className={cn(
-          'flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]',
+          'flex flex-1 items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]',
           mono && 'font-mono',
           nameClassName ?? 'text-foreground'
         )}
       >
-        {file.path}
+        {sub && <Package className="size-3 flex-none text-sub" aria-label="Submodule" />}
+        <span className="overflow-hidden text-ellipsis">{file.path}</span>
       </span>
-      <span className="font-mono text-[10px] text-added">+{file.additions}</span>
-      <span className="font-mono text-[10px] text-removed">−{file.deletions}</span>
+      {sub ? (
+        // Line counts are meaningless for a submodule pointer; show what moved.
+        <span className="whitespace-nowrap text-[10px] text-sub">submodule · {submoduleNote(sub)}</span>
+      ) : (
+        <>
+          <span className="font-mono text-[10px] text-added">+{file.additions}</span>
+          <span className="font-mono text-[10px] text-removed">−{file.deletions}</span>
+        </>
+      )}
       {action}
     </div>
   )
