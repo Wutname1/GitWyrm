@@ -111,28 +111,8 @@ fn is_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
   Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
 }
 
-/// True when every dirty entry is a submodule pointer move. Such changes can't
-/// be stashed or discarded by ordinary means, so branch-switch has to guide the
-/// user toward submodule-specific handling rather than the usual stash flow.
-fn only_submodule_changes(repo: &git2::Repository) -> Result<bool, AppError> {
-  let mut opts = git2::StatusOptions::new();
-  opts.include_untracked(true).recurse_untracked_dirs(true);
-  let statuses = repo.statuses(Some(&mut opts))?;
-  let mut saw_change = false;
-  for entry in statuses.iter() {
-    if entry.status().is_ignored() {
-      continue;
-    }
-    saw_change = true;
-    let path = entry.path().unwrap_or("");
-    if repo.find_submodule(path).is_err() {
-      return Ok(false);
-    }
-  }
-  Ok(saw_change)
-}
-
-/// Guidance shown when a branch switch is blocked purely by submodule moves.
+/// Guidance shown when a branch switch is blocked by an un-stashable submodule
+/// move that also collides with the target branch.
 const SUBMODULE_SWITCH_HINT: &str = "a submodule points to a different commit than this branch expects. Commit the submodule change or reset the submodule to its recorded commit, then switch.";
 
 /// Move HEAD to `name` and update the working tree to its content. Uses a SAFE
@@ -166,13 +146,6 @@ pub async fn checkout_branch(
       return Ok(CheckoutOutcome::Clean);
     }
 
-    // A moved submodule pointer can't be stashed or safely carried, so every
-    // mode would otherwise fail with an opaque git2 error. Detect it up front
-    // and give one clear, actionable message.
-    if only_submodule_changes(&repo)? {
-      return Err(AppError::Other(SUBMODULE_SWITCH_HINT.into()));
-    }
-
     match mode {
       BranchSwitchMode::Refuse => Err(AppError::Other(
         "working tree has changes; commit or stash before switching branches".into(),
@@ -190,20 +163,40 @@ pub async fn checkout_branch(
         Ok(CheckoutOutcome::Clean)
       }
 
-      // Stash, switch, then bring changes back.
-      //
-      // We deliberately use stash_APPLY (not pop) and drop the stash ourselves
-      // only on a clean apply. git2's stash_pop returns Ok even when the apply
-      // conflicts AND drops the stash regardless -- so a naive pop would destroy
-      // the user's backup exactly when they need it. Applying and conditionally
-      // dropping keeps the stash as a backup whenever conflicts remain.
+      // Try to carry the changes across with a plain checkout first, exactly
+      // like `git checkout <branch>` does. Git happily brings uncommitted
+      // changes along when they don't collide with the target branch -- and it
+      // handles cases stash can't, like a moved submodule pointer (stashing
+      // that fails with "nothing to stash" and used to leave the user stuck).
+      // Only when git actually refuses do we fall back to stash -> switch ->
+      // reapply.
       BranchSwitchMode::AutoStash => {
+        if switch_to(&repo, &name).is_ok() {
+          return Ok(CheckoutOutcome::Clean);
+        }
+
+        // The plain checkout was refused (a real collision). Stash the changes,
+        // switch, and bring them back.
+        //
+        // We deliberately use stash_APPLY (not pop) and drop the stash ourselves
+        // only on a clean apply. git2's stash_pop returns Ok even when the apply
+        // conflicts AND drops the stash regardless -- so a naive pop would destroy
+        // the user's backup exactly when they need it. Applying and conditionally
+        // dropping keeps the stash as a backup whenever conflicts remain.
         let signature = repo.signature()?;
-        repo.stash_save(
+        if let Err(e) = repo.stash_save(
           &signature,
           &format!("gitwyrm: auto-stash before switching to {name}"),
           Some(git2::StashFlags::INCLUDE_UNTRACKED),
-        )?;
+        ) {
+          // Nothing could be stashed yet the plain switch was refused: the
+          // blocker is un-stashable (e.g. a submodule move that also collides).
+          // Give actionable guidance instead of the raw git2 error.
+          if e.class() == git2::ErrorClass::Stash && e.code() == git2::ErrorCode::NotFound {
+            return Err(AppError::Other(SUBMODULE_SWITCH_HINT.into()));
+          }
+          return Err(e.into());
+        }
 
         // If the switch itself fails, restore the stash so nothing is lost.
         if let Err(e) = switch_to(&repo, &name) {

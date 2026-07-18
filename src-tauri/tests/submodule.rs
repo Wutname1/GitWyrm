@@ -115,3 +115,36 @@ fn is_submodule_recognizes_the_path() {
   assert!(!gitwyrm_lib::git_submodule::is_submodule(&repo, "packages/core/f.txt"));
   assert!(!gitwyrm_lib::git_submodule::is_submodule(&repo, "README.md"));
 }
+
+/// The stuck case: a moved submodule pointer, switching to a branch that pins
+/// the SAME submodule commit. A plain safe checkout must carry it across -- this
+/// is what GitKraken does and what checkout_branch's AutoStash arm now tries
+/// first, instead of stashing (which fails with "nothing to stash").
+#[test]
+fn safe_checkout_carries_a_moved_submodule() {
+  let Some((parent, _recorded, workdir)) = fixture("carry") else { return };
+
+  // Create a second branch that also pins the submodule -- at the moved-to
+  // commit, so switching to it is compatible with the current checkout.
+  let core = parent.join("packages/core");
+  git(&parent, &["checkout", "-qb", "feature"]);
+  git(&core, &["checkout", "-q", &workdir]);
+  git(&parent, &["add", "packages/core"]);
+  git(&parent, &["commit", "-qm", "feature pins core at c2"]);
+
+  // Back on the original branch, move the submodule forward again (dirty state).
+  git(&parent, &["checkout", "-q", "master"]);
+  git(&core, &["checkout", "-q", &workdir]);
+  assert!(!git_out(&parent, &["status", "--short"]).is_empty(), "submodule move should be dirty");
+
+  // A safe checkout to the feature branch should succeed and carry the pointer,
+  // exactly what the command relies on -- no stash involved.
+  let repo = Repository::open(&parent).unwrap();
+  let (object, reference) = repo.revparse_ext("feature").unwrap();
+  let mut builder = git2::build::CheckoutBuilder::new();
+  builder.safe();
+  repo.checkout_tree(&object, Some(&mut builder)).expect("safe checkout should carry the submodule");
+  repo.set_head(reference.unwrap().name().unwrap()).unwrap();
+
+  assert_eq!(git_out(&parent, &["rev-parse", "--abbrev-ref", "HEAD"]), "feature");
+}
