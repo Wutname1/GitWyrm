@@ -194,6 +194,7 @@ pub async fn get_merge_state(
     let operation = match repo.state() {
       git2::RepositoryState::Merge => Some(OperationKind::Merge),
       git2::RepositoryState::CherryPick => Some(OperationKind::CherryPick),
+      git2::RepositoryState::Revert => Some(OperationKind::Revert),
       _ => None,
     };
     let Some(operation) = operation else {
@@ -358,7 +359,8 @@ pub async fn commit_merge(
     let head_commit = repo.head()?.peel_to_commit()?;
 
     // A cherry-pick produces a single-parent commit that keeps the picked
-    // commit's original author; a merge produces a two-parent merge commit.
+    // commit's original author; a revert is single-parent but authored by the
+    // reverter; a merge produces a two-parent merge commit.
     let oid = match repo.state() {
       git2::RepositoryState::CherryPick => {
         let picked_oid = read_state_head(&repo, "CHERRY_PICK_HEAD")?;
@@ -373,6 +375,14 @@ pub async fn commit_merge(
           &[&head_commit],
         )?
       }
+      git2::RepositoryState::Revert => repo.commit(
+        Some("HEAD"),
+        &committer,
+        &committer,
+        &message,
+        &tree,
+        &[&head_commit],
+      )?,
       _ => {
         let merge_head_oid = read_state_head(&repo, "MERGE_HEAD")?;
         let merge_commit = repo.find_commit(merge_head_oid)?;
