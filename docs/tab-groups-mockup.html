@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GitWyrm - Tab groups layout study</title>
+  <style>
+    @font-face { font-family: "Sora"; src: url("../src/assets/fonts/Sora-SemiBold.ttf") format("truetype"); font-weight: 600; }
+    @font-face { font-family: "IBM Plex Sans"; src: url("../src/assets/fonts/IBMPlexSans-VariableFont.ttf") format("truetype"); font-weight: 100 900; }
+
+    :root {
+      --bg: #0b0f14;
+      --panel: #0f151c;
+      --panel-2: #131b24;
+      --panel-3: #1a2430;
+      --border: #1e2833;
+      --border-bright: #2a3745;
+      --text: #d7e0ea;
+      --sub: #8b99a8;
+      --muted: #5d6b7a;
+      --accent: #2dd4a7;
+      --accent-soft: rgba(45, 212, 167, .13);
+      --purple: #a78bfa;
+      --blue: #38bdf8;
+      --amber: #f59e0b;
+      --rose: #f472b6;
+      --red: #f87171;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-width: 760px; min-height: 640px; margin: 0; background: #080b0f; color: var(--text); font-family: "IBM Plex Sans", system-ui, sans-serif; }
+    body { overflow: auto; font-size: 13px; }
+    button, input { color: inherit; font: inherit; }
+    button { border: 0; }
+
+    .page { width: min(1500px, calc(100% - 48px)); margin: 0 auto; padding: 28px 0 40px; }
+    .study-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; margin-bottom: 18px; }
+    .eyebrow { color: var(--accent); font: 600 9.5px/1 "Sora", sans-serif; letter-spacing: .11em; text-transform: uppercase; }
+    h1 { margin: 8px 0 7px; font: 600 25px/1.18 "Sora", sans-serif; letter-spacing: -.035em; }
+    .intro { max-width: 690px; margin: 0; color: var(--sub); font-size: 12.5px; line-height: 1.5; }
+    .mode-switch { display: flex; flex: none; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); }
+    .mode-switch button { display: flex; align-items: center; gap: 7px; min-width: 122px; justify-content: center; padding: 7px 11px; border-radius: 5px; background: transparent; color: var(--sub); cursor: pointer; }
+    .mode-switch button.active { background: var(--panel-3); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-bright); }
+    .mode-switch svg { width: 14px; height: 14px; }
+
+    .demo-shell { overflow: hidden; border: 1px solid var(--border-bright); border-radius: 9px; background: var(--bg); box-shadow: 0 25px 80px rgba(0,0,0,.38); }
+    .caption-bar { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 0 11px 0 14px; border-bottom: 1px solid var(--border); background: #0c1117; }
+    .caption-copy { color: var(--muted); font-size: 10.5px; }
+    .caption-copy b { color: var(--sub); font-weight: 600; }
+    .caption-actions { display: flex; align-items: center; gap: 6px; }
+    .quiet-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 4px; background: transparent; color: var(--sub); cursor: pointer; font-size: 10.5px; }
+    .quiet-btn:hover { background: var(--panel-3); color: var(--text); }
+
+    .app { position: relative; height: 690px; overflow: hidden; background: var(--bg); }
+    .layout { display: none; height: 100%; }
+    .layout.active { display: flex; }
+
+    .brand { display: flex; align-items: center; gap: 7px; min-width: 120px; }
+    .brand img { width: 18px; height: 18px; object-fit: contain; }
+    .wordmark { font: 600 13.5px/1 "Sora", sans-serif; letter-spacing: -.035em; }
+    .wordmark em { color: var(--accent); font-style: normal; }
+    .window-actions { display: flex; align-self: stretch; margin-left: auto; }
+    .window-actions button { width: 42px; background: transparent; color: var(--sub); cursor: pointer; font-size: 12px; }
+    .window-actions button:hover { background: var(--panel-3); color: var(--text); }
+    .window-actions button:last-child:hover { background: #c42b3a; color: white; }
+
+    /* Shared app canvas */
+    .app-main { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
+    .toolbar { display: flex; height: 45px; flex: none; align-items: center; gap: 3px; padding: 0 11px; border-bottom: 1px solid var(--border); background: var(--panel); }
+    .tool { display: flex; height: 30px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; font-size: 11.5px; }
+    .tool:hover { border-color: var(--muted); background: var(--panel-3); }
+    .tool svg { width: 14px; height: 14px; }
+    .tool .badge { margin: -15px -6px 0 -3px; border-radius: 8px; background: var(--accent); color: #04120d; font-size: 8px; font-weight: 700; line-height: 13px; padding: 0 4px; }
+    .divider { width: 1px; height: 20px; margin: 0 4px; background: var(--border); }
+    .branch-pill { display: flex; align-items: center; gap: 7px; height: 30px; margin-left: auto; padding: 0 10px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-2); font-size: 11.5px; }
+    .branch-pill i { width: 7px; height: 7px; border-radius: 2px; background: var(--accent); }
+    .branch-pill small { color: var(--muted); font-family: ui-monospace, monospace; }
+    .work-area { display: grid; min-height: 0; flex: 1; grid-template-columns: 214px minmax(360px, 1fr) 270px; }
+    .side { overflow: hidden; border-right: 1px solid var(--border); background: var(--panel); }
+    .side.right { border-right: 0; border-left: 1px solid var(--border); }
+    .side-head { display: flex; align-items: center; justify-content: space-between; height: 34px; padding: 0 12px; color: var(--muted); font: 600 9px/1 "Sora", sans-serif; letter-spacing: .08em; }
+    .branch-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 13px; color: var(--sub); font-size: 11.5px; }
+    .branch-row.active { background: var(--accent-soft); color: var(--text); }
+    .branch-row i { width: 7px; height: 7px; border: 1px solid var(--muted); border-radius: 50%; }
+    .branch-row.active i { border-color: var(--accent); background: var(--accent); }
+    .graph { min-width: 0; overflow: hidden; background: var(--bg); }
+    .graph-head, .commit { display: grid; grid-template-columns: 72px minmax(220px, 1.7fr) minmax(120px, .8fr) 90px; align-items: center; }
+    .graph-head { height: 31px; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--muted); font: 600 8.5px/1 "Sora", sans-serif; letter-spacing: .075em; }
+    .graph-head span, .commit > span { padding: 0 11px; }
+    .commit { height: 42px; border-bottom: 1px solid rgba(30,40,51,.74); color: var(--sub); font-size: 10.5px; }
+    .commit.active { background: #101921; }
+    .commit strong { display: block; overflow: hidden; color: var(--text); font-size: 11.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+    .commit .lane { position: relative; align-self: stretch; }
+    .lane::before { content: ""; position: absolute; left: 29px; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .65; }
+    .lane::after { content: ""; position: absolute; left: 24px; top: 15px; width: 12px; height: 12px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg); }
+    .commit.active .lane::after { background: var(--accent); box-shadow: 0 0 0 3px rgba(45,212,167,.14); }
+    .author { display: flex; align-items: center; gap: 7px; }
+    .avatar { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: #283646; color: #b8c5d1; font-size: 8px; font-weight: 700; }
+    .time { color: var(--muted); font-family: ui-monospace, monospace; font-size: 9.5px; }
+    .file-list { padding: 0 10px; }
+    .file { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 4px; color: var(--sub); font-size: 10.5px; }
+    .file b { color: #34d399; font-weight: 600; }
+    .file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .commit-box { margin: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+    .commit-box div { height: 46px; color: var(--muted); font-size: 10.5px; }
+    .commit-btn { width: 100%; height: 29px; border-radius: 5px; background: var(--accent); color: #04120d; font-weight: 650; font-size: 11px; }
+    .status { display: flex; height: 22px; flex: none; align-items: center; gap: 14px; padding: 0 10px; border-top: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 9.5px; }
+    .status i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+    /* Vertical tabs */
+    .vertical { flex-direction: column; }
+    .vertical-titlebar { display: flex; height: 38px; flex: none; align-items: center; padding-left: 11px; border-bottom: 1px solid var(--border); background: var(--bg); }
+    .vertical-titlebar .brand { margin-right: 18px; }
+    .active-path { overflow: hidden; color: var(--muted); font-family: ui-monospace, monospace; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .vertical-body { display: flex; min-height: 0; flex: 1; }
+    .tab-rail { display: flex; width: 248px; flex: none; flex-direction: column; border-right: 1px solid var(--border); background: #0d1218; }
+    .rail-top { display: flex; height: 42px; flex: none; align-items: center; justify-content: space-between; padding: 0 9px 0 12px; border-bottom: 1px solid var(--border); }
+    .rail-title { color: var(--sub); font: 600 9px/1 "Sora", sans-serif; letter-spacing: .085em; text-transform: uppercase; }
+    .icon-btn { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 5px; background: transparent; color: var(--sub); cursor: pointer; }
+    .icon-btn:hover { background: var(--panel-3); color: var(--text); }
+    .icon-btn svg { width: 14px; height: 14px; }
+    .rail-list { min-height: 0; flex: 1; overflow: auto; padding: 6px 6px 10px; }
+    .v-group { --group: var(--purple); position: relative; margin-bottom: 5px; padding-left: 3px; }
+    .v-group::before { content: ""; position: absolute; left: 0; top: 5px; bottom: 4px; width: 2px; border-radius: 2px; background: var(--group); opacity: .9; }
+    .v-group.collapsed::before { bottom: 5px; }
+    .v-group-head { display: flex; height: 29px; align-items: center; gap: 7px; width: 100%; padding: 0 7px; border-radius: 5px; background: transparent; color: var(--sub); cursor: pointer; text-align: left; }
+    .v-group-head:hover { background: var(--panel-2); color: var(--text); }
+    .v-group-head.group-drop-target { background: var(--accent-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
+    .chevron { width: 11px; color: var(--group); font-size: 11px; transform: rotate(90deg); transition: transform 140ms ease; }
+    .collapsed .chevron { transform: rotate(0); }
+    .group-name { overflow: hidden; flex: 1; color: var(--text); font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .group-count { color: var(--muted); font: 9px/1 ui-monospace, monospace; }
+    .saved-mark { color: var(--group); font-size: 10px; }
+    .v-tabs { display: grid; gap: 2px; }
+    .collapsed .v-tabs { display: none; }
+    .v-tab { position: relative; display: flex; height: 31px; align-items: center; gap: 8px; min-width: 0; padding: 0 7px 0 20px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--sub); cursor: pointer; transition: margin 160ms cubic-bezier(.2,.8,.2,1), border-color 120ms ease, background 120ms ease; }
+    .v-tab:hover { background: var(--panel-2); color: var(--text); }
+    .v-tab.active { border-color: color-mix(in srgb, var(--group) 28%, var(--border)); background: color-mix(in srgb, var(--group) 10%, var(--panel)); color: var(--text); }
+    .v-tab.drop-target { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px rgba(45,212,167,.13); }
+    .v-tab.insert-before { margin-top: 32px; }
+    .v-tab.insert-after { margin-bottom: 32px; }
+    .v-tab.insert-before::before, .v-tab.insert-after::after { content: "Move here"; position: absolute; left: 8px; right: 4px; display: flex; height: 25px; align-items: center; padding-left: 25px; border: 1px dashed rgba(45,212,167,.62); border-radius: 5px; background: rgba(45,212,167,.08); color: var(--accent); font-size: 9.5px; font-weight: 600; }
+    .v-tab.insert-before::before { top: -29px; }
+    .v-tab.insert-after::after { bottom: -29px; }
+    .repo-dot { width: 7px; height: 7px; flex: none; border-radius: 2px; background: var(--group, var(--muted)); }
+    .repo-name { overflow: hidden; flex: 1; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+    .dirty { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--amber); }
+    .tab-x { display: grid; width: 18px; height: 18px; flex: none; place-items: center; border-radius: 4px; color: var(--muted); opacity: 0; }
+    .v-tab:hover .tab-x, .v-tab.active .tab-x { opacity: 1; }
+    .tab-x:hover { background: var(--panel-3); color: var(--text); }
+    .rail-bottom { display: flex; gap: 5px; padding: 8px; border-top: 1px solid var(--border); }
+    .open-repo { display: flex; height: 31px; flex: 1; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-2); color: var(--text); cursor: pointer; font-size: 11px; }
+    .open-repo:hover { border-color: var(--muted); background: var(--panel-3); }
+    .open-repo svg { width: 13px; height: 13px; }
+
+    /* Horizontal tabs */
+    .horizontal { flex-direction: column; }
+    .top-tabbar { display: flex; height: 39px; flex: none; align-items: stretch; gap: 3px; padding-left: 10px; border-bottom: 1px solid var(--border); background: var(--bg); }
+    .top-tabbar .brand { flex: none; padding-right: 13px; border-right: 1px solid var(--border); }
+    .top-scroll { display: flex; min-width: 0; flex: 1; align-items: stretch; gap: 3px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+    .top-scroll::-webkit-scrollbar { display: none; }
+    .h-group { --group: var(--purple); display: flex; flex: none; align-items: stretch; border-bottom: 2px solid var(--group); background: color-mix(in srgb, var(--group) 5%, transparent); }
+    .h-group.collapsed .h-tab { display: none; }
+    .h-group-head { display: flex; min-width: 31px; align-items: center; gap: 6px; padding: 0 8px; background: color-mix(in srgb, var(--group) 12%, var(--bg)); color: var(--group); cursor: pointer; font-size: 10.5px; font-weight: 650; }
+    .h-group-head:hover { background: color-mix(in srgb, var(--group) 19%, var(--bg)); }
+    .h-group-head.group-drop-target { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .h-group-head .color-orb { width: 7px; height: 7px; border-radius: 50%; background: var(--group); }
+    .h-group-head .h-count { color: color-mix(in srgb, var(--group) 70%, var(--sub)); font: 8.5px/1 ui-monospace, monospace; }
+    .h-tab { position: relative; display: flex; max-width: 150px; min-width: 96px; align-items: center; gap: 7px; padding: 0 9px; border-left: 1px solid color-mix(in srgb, var(--group) 18%, var(--border)); background: transparent; color: var(--sub); cursor: pointer; font-size: 11px; transition: margin 160ms cubic-bezier(.2,.8,.2,1), box-shadow 120ms ease, background 120ms ease; }
+    .top-scroll > .h-tab { border-right: 1px solid var(--border); }
+    .h-tab:hover { background: var(--panel-2); color: var(--text); }
+    .h-tab.active { background: var(--panel); color: var(--text); font-weight: 650; }
+    .h-tab.drop-target { box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); }
+    .h-tab.insert-before { margin-left: 104px; }
+    .h-tab.insert-after { margin-right: 104px; }
+    .h-tab.insert-before::before, .h-tab.insert-after::after { content: "Move here"; position: absolute; top: 4px; bottom: 4px; display: flex; width: 96px; align-items: center; justify-content: center; border: 1px dashed rgba(45,212,167,.62); border-radius: 5px; background: rgba(45,212,167,.08); color: var(--accent); font-size: 9px; font-weight: 600; }
+    .h-tab.insert-before::before { left: -100px; }
+    .h-tab.insert-after::after { right: -100px; }
+    .h-tab .repo-name { max-width: 96px; }
+    .h-tab .tab-x { margin-left: auto; }
+    .h-tab:hover .tab-x, .h-tab.active .tab-x { opacity: 1; }
+    .top-action { width: 30px; flex: none; background: transparent; color: var(--sub); cursor: pointer; font-size: 17px; }
+    .top-action:hover { background: var(--panel-3); color: var(--text); }
+
+    .order-slot { position: relative; flex: none; border-radius: 5px; transition: width 170ms cubic-bezier(.2,.8,.2,1), height 170ms cubic-bezier(.2,.8,.2,1), background 120ms ease; }
+    .v-order-slot { height: 2px; margin: 0 6px; }
+    .h-order-slot { width: 2px; align-self: stretch; }
+    .tab-dragging .v-order-slot { height: 5px; }
+    .tab-dragging .h-order-slot { width: 5px; }
+    .v-order-slot.active { height: 32px; border: 1px dashed rgba(45,212,167,.62); background: rgba(45,212,167,.08); }
+    .h-order-slot.active { width: 104px; margin: 0 2px; border: 1px dashed rgba(45,212,167,.62); background: rgba(45,212,167,.08); }
+    .order-slot.active::after { content: "Move here"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--accent); font-size: 9px; font-weight: 600; white-space: nowrap; }
+
+    /* Menus, modal, feedback */
+    .menu { position: fixed; z-index: 40; display: none; width: 204px; overflow: hidden; padding: 5px; border: 1px solid var(--border-bright); border-radius: 6px; background: #131b24; box-shadow: 0 16px 45px rgba(0,0,0,.46); }
+    .menu.open { display: block; animation: menu-in 110ms ease-out; }
+    .menu button { display: flex; width: 100%; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 4px; background: transparent; color: var(--text); cursor: pointer; text-align: left; font-size: 11.5px; }
+    .menu button:hover { background: var(--panel-3); }
+    .menu button.danger { color: #ff9a9a; }
+    .menu .menu-icon { width: 14px; color: var(--sub); text-align: center; }
+    .menu .arrow { margin-left: auto; color: var(--muted); }
+    .menu hr { height: 1px; margin: 4px 2px; border: 0; background: var(--border); }
+    .menu-label { padding: 5px 8px 3px; color: var(--muted); font: 600 8.5px/1 "Sora", sans-serif; letter-spacing: .08em; }
+    .color-row { display: none; align-items: center; gap: 8px; padding: 7px 8px; }
+    .color-row.open { display: flex; }
+    .swatch { width: 17px; height: 17px; border: 2px solid transparent; border-radius: 50%; cursor: pointer; }
+    .swatch:hover { border-color: white; transform: scale(1.08); }
+
+    .scrim { position: absolute; z-index: 25; inset: 0; display: none; place-items: center; background: rgba(3,6,9,.68); backdrop-filter: blur(2px); }
+    .scrim.open { display: grid; }
+    .dialog { width: min(520px, calc(100% - 40px)); overflow: hidden; border: 1px solid var(--border-bright); border-radius: 8px; background: var(--panel-2); box-shadow: 0 25px 80px rgba(0,0,0,.58); }
+    .dialog-head { padding: 15px 16px 0; border-bottom: 1px solid var(--border); }
+    .dialog-title { font: 600 14px/1 "Sora", sans-serif; }
+    .dialog-tabs { display: flex; gap: 4px; margin-top: 12px; }
+    .dialog-tabs button { display: flex; align-items: center; gap: 6px; padding: 7px 11px; border-radius: 5px 5px 0 0; background: transparent; color: var(--sub); cursor: pointer; font-size: 11.5px; }
+    .dialog-tabs button.active { background: var(--accent-soft); color: var(--accent); }
+    .dialog-body { min-height: 280px; padding: 13px 16px 16px; }
+    .dialog-pane { display: none; }
+    .dialog-pane.active { display: block; }
+    .search-row { display: flex; gap: 8px; }
+    .search-row input { height: 32px; flex: 1; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; outline: 0; background: var(--bg); font-size: 11.5px; }
+    .search-row input:focus { border-color: var(--accent); }
+    .secondary-btn { padding: 0 11px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-3); cursor: pointer; font-size: 11px; }
+    .section-label { margin: 15px 2px 7px; color: var(--muted); font: 600 8.5px/1 "Sora", sans-serif; letter-spacing: .08em; }
+    .repo-row, .saved-row { display: flex; align-items: center; gap: 10px; min-height: 43px; padding: 7px 8px; border-radius: 5px; cursor: pointer; }
+    .repo-row:hover, .saved-row:hover { background: var(--panel-3); }
+    .folder-icon { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); color: var(--accent); }
+    .row-copy { min-width: 0; flex: 1; }
+    .row-copy b { display: block; color: var(--text); font-size: 11.5px; }
+    .row-copy small { display: block; overflow: hidden; margin-top: 2px; color: var(--muted); font-family: ui-monospace, monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .open-count { color: var(--sub); font-size: 10px; }
+    .saved-colors { display: flex; }
+    .saved-colors i { width: 8px; height: 8px; margin-left: -2px; border: 1px solid var(--panel-2); border-radius: 50%; }
+    .primary-btn { height: 29px; padding: 0 12px; border-radius: 5px; background: var(--accent); color: #04120d; cursor: pointer; font-size: 11px; font-weight: 650; }
+    .empty-note { padding: 35px 25px; color: var(--sub); text-align: center; }
+    .empty-note strong { display: block; margin-bottom: 6px; color: var(--text); font: 600 13px/1.2 "Sora", sans-serif; }
+
+    .edit-dialog { position: fixed; z-index: 60; display: none; width: 350px; overflow: hidden; border: 1px solid var(--border-bright); border-radius: 7px; background: var(--panel-2); box-shadow: 0 20px 60px rgba(0,0,0,.55); left: 50%; top: 50%; transform: translate(-50%,-50%); }
+    .edit-dialog.open { display: block; }
+    .edit-dialog h3 { margin: 0; padding: 14px 15px 11px; border-bottom: 1px solid var(--border); font: 600 13px/1 "Sora", sans-serif; }
+    .edit-form { padding: 14px 15px; }
+    .edit-form label { display: block; margin-bottom: 6px; color: var(--sub); font-size: 10.5px; font-weight: 650; }
+    .edit-form input { width: 100%; height: 32px; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; outline: 0; background: var(--bg); font-size: 11.5px; }
+    .edit-form input:focus { border-color: var(--accent); }
+    .edit-actions { display: flex; justify-content: flex-end; gap: 7px; padding: 10px 15px; border-top: 1px solid var(--border); }
+    .toast-stack { position: absolute; z-index: 80; right: 14px; bottom: 32px; display: grid; gap: 7px; pointer-events: none; }
+    .toast { display: flex; align-items: center; gap: 8px; min-width: 235px; padding: 9px 11px; border: 1px solid var(--border-bright); border-radius: 6px; background: #141d26; color: var(--text); box-shadow: 0 13px 35px rgba(0,0,0,.45); font-size: 11px; animation: toast-in 180ms ease-out; }
+    .toast i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px rgba(45,212,167,.55); }
+    .flash { animation: flash 520ms ease-out; }
+
+    .notes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; margin-top: 14px; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--border); }
+    .note { min-height: 88px; padding: 13px 14px; background: var(--panel); }
+    .note b { display: block; margin-bottom: 5px; color: var(--text); font-size: 11.5px; }
+    .note p { margin: 0; color: var(--sub); font-size: 10.5px; line-height: 1.45; }
+    .note .mark { color: var(--accent); font: 600 8.5px/1 "Sora", sans-serif; letter-spacing: .08em; }
+
+    @keyframes menu-in { from { opacity: 0; transform: translateY(-3px) scale(.98); } }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } }
+    @keyframes flash { 0%,100% { box-shadow: none; } 35% { box-shadow: inset 0 0 0 1px var(--accent), 0 0 16px rgba(45,212,167,.2); } }
+    @media (max-width: 1040px) { .work-area { grid-template-columns: 190px minmax(340px, 1fr); } .side.right { display: none; } .page { width: calc(100% - 24px); } .note:nth-child(3) { display: none; } .notes { grid-template-columns: 1fr 1fr; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="study-head">
+      <div>
+        <div class="eyebrow">Workspace study / many repositories</div>
+        <h1>Make twenty open repos feel organized</h1>
+        <p class="intro">The same grouped workspace shown two ways. Groups and loose repos share one order. Drag near a tab edge to open a gap and reorder it; drop over the center to group. Switch layouts, collapse groups, right-click, or open the repository picker to see saved groups.</p>
+      </div>
+      <div class="mode-switch" aria-label="Choose tab layout">
+        <button type="button" class="active" data-layout="vertical" aria-pressed="true">
+          <svg viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2" width="4" height="12" rx="1" stroke="currentColor"/><path d="M7.5 4h7M7.5 8h7M7.5 12h7" stroke="currentColor" stroke-linecap="round"/></svg>
+          Vertical tabs
+        </button>
+        <button type="button" data-layout="horizontal" aria-pressed="false">
+          <svg viewBox="0 0 16 16" fill="none"><rect x="2" y="1.5" width="12" height="4" rx="1" stroke="currentColor"/><path d="M4 7.5v7M8 7.5v7M12 7.5v7" stroke="currentColor" stroke-linecap="round"/></svg>
+          Top tabs
+        </button>
+      </div>
+    </header>
+
+    <section class="demo-shell">
+      <div class="caption-bar">
+        <div class="caption-copy"><b>Live mockup</b> · drag near an edge to reorder, or over the center to group</div>
+        <div class="caption-actions">
+          <button class="quiet-btn" id="open-groups">Saved groups</button>
+          <button class="quiet-btn" id="reset-demo">Reset demo</button>
+        </div>
+      </div>
+      <div class="app" id="app">
+        <div class="layout vertical active" id="vertical-layout"></div>
+        <div class="layout horizontal" id="horizontal-layout"></div>
+        <div class="scrim" id="repo-scrim" aria-hidden="true"></div>
+        <div class="edit-dialog" id="edit-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+          <h3 id="edit-title">Rename group</h3>
+          <form id="edit-form">
+            <div class="edit-form">
+              <label for="edit-input">Group name</label>
+              <input id="edit-input" autocomplete="off" />
+            </div>
+            <div class="edit-actions">
+              <button type="button" class="secondary-btn" id="edit-cancel">Cancel</button>
+              <button type="submit" class="primary-btn">Save</button>
+            </div>
+          </form>
+        </div>
+        <div class="toast-stack" id="toasts" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="notes" aria-label="Design notes">
+      <article class="note"><span class="mark">SCAN</span><b>Color is structure</b><p>A continuous color spine ties each group together. It stays readable when names are similar or the group is collapsed.</p></article>
+      <article class="note"><span class="mark">ORDER</span><b>One strip, with optional groups</b><p>Loose repos stay in the same flow as groups. Ungrouping removes the wrapper without moving those repositories elsewhere.</p></article>
+      <article class="note"><span class="mark">MEMORY</span><b>Open now vs. save for later</b><p>Open groups survive restarts. Saving a group adds a reusable shortcut under Open a repository → Groups.</p></article>
+    </section>
+  </main>
+
+  <div class="menu" id="tab-menu" role="menu"></div>
+  <div class="menu" id="group-menu" role="menu"></div>
+
+  <script>
+    const icon = (name) => {
+      const paths = {
+        plus: '<path d="M8 3v10M3 8h10"/>',
+        fetch: '<path d="M8 2v9m0 0-3-3m3 3 3-3M3 14h10"/>',
+        down: '<path d="M8 2v12m0 0-4-4m4 4 4-4"/>',
+        up: '<path d="M8 14V2m0 0-4 4m4-4 4 4"/>',
+        branch: '<circle cx="5" cy="3" r="1.5"/><circle cx="11" cy="13" r="1.5"/><path d="M5 4.5v3A3.5 3.5 0 0 0 8.5 11H11M11 11V7"/>',
+        search: '<circle cx="7" cy="7" r="4"/><path d="m10 10 3 3"/>',
+        folder: '<path d="M1.5 4.5h5l1.2 1.5h6.8v7.5h-13z"/><path d="M1.5 4.5V3h4l1.2 1.5"/>',
+      }
+      return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`
+    }
+
+    const seed = {
+      active: 'gitwyrm',
+      layout: 'vertical',
+      groups: [
+        { id: 'client', name: 'Client work', color: '#a78bfa', collapsed: false, saved: false, tabs: ['storefront', 'payments-api', 'catalog', 'support-tools', 'admin-portal'] },
+        { id: 'platform', name: 'Platform', color: '#38bdf8', collapsed: false, saved: true, tabs: ['gitwyrm', 'release-service', 'shared-ui', 'docs', 'infra', 'auth-gateway', 'observability'] },
+        { id: 'personal', name: 'Personal', color: '#f59e0b', collapsed: true, saved: false, tabs: ['hearthshelf', 'reading-stats', 'home-lab', 'recipes', 'automations'] },
+      ],
+      order: [
+        { type: 'group', id: 'client' },
+        { type: 'tab', id: 'scratch-api' },
+        { type: 'group', id: 'platform' },
+        { type: 'tab', id: 'design-system' },
+        { type: 'group', id: 'personal' },
+        { type: 'tab', id: 'sandbox' },
+      ],
+      savedGroups: [{ id: 'morning', name: 'Morning stack', color: '#2dd4a7', repos: ['GitWyrm', 'release-service', 'shared-ui', 'docs'] }],
+    }
+    const repoInfo = {
+      storefront: ['storefront-web', 'C:\\work\\storefront-web', true],
+      'payments-api': ['payments-api', 'C:\\work\\payments-api', false],
+      catalog: ['product-catalog', 'C:\\work\\product-catalog', false],
+      'support-tools': ['support-tools', 'C:\\work\\support-tools', false],
+      'admin-portal': ['admin-portal', 'C:\\work\\admin-portal', true],
+      gitwyrm: ['GitWyrm', 'C:\\code\\GitWyrm', true],
+      'release-service': ['release-service', 'C:\\code\\release-service', false],
+      'shared-ui': ['shared-ui', 'C:\\code\\shared-ui', true],
+      docs: ['company-docs', 'C:\\code\\company-docs', false],
+      infra: ['cloud-infra', 'C:\\code\\cloud-infra', false],
+      'auth-gateway': ['auth-gateway', 'C:\\code\\auth-gateway', false],
+      observability: ['observability', 'C:\\code\\observability', true],
+      hearthshelf: ['HearthShelf', 'C:\\code\\HearthShelf', true],
+      'reading-stats': ['reading-stats', 'C:\\code\\reading-stats', false],
+      'home-lab': ['home-lab', 'C:\\code\\home-lab', false],
+      recipes: ['recipe-box', 'C:\\code\\recipe-box', false],
+      automations: ['home-automations', 'C:\\code\\home-automations', false],
+      'scratch-api': ['scratch-api', 'C:\\temp\\scratch-api', false],
+      'design-system': ['design-system', 'C:\\code\\design-system', false],
+      sandbox: ['api-sandbox', 'C:\\temp\\api-sandbox', false],
+    }
+    const cloneSeed = () => JSON.parse(JSON.stringify(seed))
+    let state = cloneSeed()
+    let menuTarget = null
+    let editTarget = null
+    let draggedTab = null
+
+    const esc = (value) => value.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]))
+    const groupForTab = (id) => state.groups.find(group => group.tabs.includes(id))
+    const allTabs = () => state.order.flatMap(item => {
+      if (item.type === 'tab') return [item.id]
+      return state.groups.find(group => group.id === item.id)?.tabs ?? []
+    })
+    const tabLabel = (id) => repoInfo[id]?.[0] ?? id
+
+    function persist() {
+      try { localStorage.setItem('gitwyrm-tab-groups-mockup', JSON.stringify(state)) } catch {}
+    }
+
+    function toast(message) {
+      const node = document.createElement('div')
+      node.className = 'toast'
+      node.innerHTML = `<i></i><span>${esc(message)}</span>`
+      document.querySelector('#toasts').append(node)
+      window.setTimeout(() => node.remove(), 2600)
+    }
+
+    function brand() {
+      return `<div class="brand"><img src="../public/logo.png" alt=""><span class="wordmark">Git<em>Wyrm</em></span></div>`
+    }
+
+    function windowActions() {
+      return '<div class="window-actions"><button title="Minimize">─</button><button title="Maximize">□</button><button title="Close">×</button></div>'
+    }
+
+    function toolbar() {
+      return `<div class="toolbar">
+        <button class="tool">${icon('fetch')}<span class="badge">3</span>Fetch</button>
+        <button class="tool">${icon('down')}<span class="badge">3</span>Pull</button>
+        <button class="tool">${icon('up')}<span class="badge">1</span>Push</button>
+        <span class="divider"></span>
+        <button class="tool">${icon('branch')}Branch</button>
+        <button class="tool">${icon('search')}Search</button>
+        <div class="branch-pill"><i></i><span>main</span><small>↑1 ↓3</small></div>
+      </div>`
+    }
+
+    function workspace() {
+      const commits = [
+        ['Group open repositories', 'Jeremy', '2 min'],
+        ['Keep tab choices after restart', 'Jeremy', '18 min'],
+        ['Show saved groups in the picker', 'Maya', '1 hr'],
+        ['Make repo drag targets visible', 'Jeremy', '3 hr'],
+        ['Improve graph lane spacing', 'Sam', 'Yesterday'],
+        ['Update app settings', 'Maya', 'Yesterday'],
+        ['Handle closed repository tabs', 'Jeremy', '2 days'],
+      ]
+      return `<div class="app-main">${toolbar()}<div class="work-area">
+        <aside class="side"><div class="side-head"><span>LOCAL</span><span>+</span></div><div class="branch-row active"><i></i>main</div><div class="branch-row"><i></i>feature/tab-groups</div><div class="branch-row"><i></i>release/0.2</div><div class="side-head"><span>REMOTE</span></div><div class="branch-row"><i></i>origin/main</div><div class="branch-row"><i></i>origin/dev</div><div class="side-head"><span>STASHES</span><span>2</span></div><div class="branch-row"><i></i>Tab rail experiment</div></aside>
+        <section class="graph"><div class="graph-head"><span>GRAPH</span><span>MESSAGE</span><span>AUTHOR</span><span>DATE</span></div>${commits.map((c,i)=>`<div class="commit ${i===0?'active':''}"><span class="lane"></span><span><strong>${c[0]}</strong>${i===0?'9f3c21a':'a4'+i+'e5d'+i}</span><span class="author"><i class="avatar">${c[1][0]}</i>${c[1]}</span><span class="time">${c[2]}</span></div>`).join('')}</section>
+        <aside class="side right"><div class="side-head"><span>CHANGES</span><span>4</span></div><div class="file-list"><div class="file"><b>M</b><span>src/components/TabBar.tsx</span></div><div class="file"><b>M</b><span>src/stores/workspaceStore.ts</span></div><div class="file"><b>A</b><span>src/components/TabGroup.tsx</span></div><div class="file"><b>A</b><span>src/lib/tabGroups.ts</span></div></div><div class="commit-box"><div>Summarize your changes</div><button class="commit-btn">Commit 4 files</button></div></aside>
+      </div><div class="status"><i></i><span>Watching GitWyrm</span><span>main</span><span>${allTabs().length} repositories open</span></div></div>`
+    }
+
+    function tabHtml(id, vertical, group) {
+      const info = repoInfo[id]
+      const active = id === state.active ? ' active' : ''
+      const dirty = info?.[2] ? '<span class="dirty" title="Has changes"></span>' : ''
+      return `<div class="${vertical?'v-tab':'h-tab'}${active}" draggable="true" data-tab="${id}" data-group="${group?.id ?? ''}" title="${esc(info?.[1] ?? '')}"><span class="repo-dot"></span><span class="repo-name">${esc(tabLabel(id))}</span>${dirty}<span class="tab-x" data-close="${id}" title="Close repository">×</span></div>`
+    }
+
+    function orderSlot(index, vertical) {
+      return `<div class="order-slot ${vertical ? 'v-order-slot' : 'h-order-slot'}" data-order-slot="${index}" aria-hidden="true"></div>`
+    }
+
+    function renderVertical() {
+      const items = state.order.map((item, index) => {
+        const slot = orderSlot(index, true)
+        if (item.type === 'tab') return `${slot}${tabHtml(item.id, true, null)}`
+        const group = state.groups.find(candidate => candidate.id === item.id)
+        if (!group) return slot
+        return `${slot}<section class="v-group ${group.collapsed?'collapsed':''}" style="--group:${group.color}" data-group-wrap="${group.id}">
+          <button class="v-group-head" data-group-head="${group.id}" title="Click to ${group.collapsed?'expand':'collapse'} · right-click for more"><span class="chevron">›</span><span class="group-name">${esc(group.name)}</span>${group.saved?'<span class="saved-mark" title="Saved group">★</span>':''}<span class="group-count">${group.tabs.length}</span></button>
+          <div class="v-tabs">${group.tabs.map(id=>tabHtml(id,true,group)).join('')}</div>
+        </section>`
+      }).join('') + orderSlot(state.order.length, true)
+      document.querySelector('#vertical-layout').innerHTML = `<div class="vertical-titlebar">${brand()}<span class="active-path">${esc(repoInfo[state.active]?.[1] ?? '')}</span>${windowActions()}</div><div class="vertical-body"><aside class="tab-rail"><div class="rail-top"><span class="rail-title">Repositories · ${allTabs().length}</span><button class="icon-btn open-picker" title="Open a repository">${icon('plus')}</button></div><div class="rail-list">${items}</div><div class="rail-bottom"><button class="open-repo open-picker">${icon('folder')}Open a repository</button><button class="icon-btn" title="Tab layout settings">⚙</button></div></aside>${workspace()}</div>`
+    }
+
+    function renderHorizontal() {
+      const items = state.order.map((item, index) => {
+        const slot = orderSlot(index, false)
+        if (item.type === 'tab') return `${slot}${tabHtml(item.id, false, null)}`
+        const group = state.groups.find(candidate => candidate.id === item.id)
+        if (!group) return slot
+        return `${slot}<section class="h-group ${group.collapsed?'collapsed':''}" style="--group:${group.color}" data-group-wrap="${group.id}"><button class="h-group-head" data-group-head="${group.id}" title="Click to ${group.collapsed?'expand':'collapse'} · right-click for more"><span class="color-orb"></span><span>${esc(group.name)}</span>${group.saved?'<span class="saved-mark">★</span>':''}<span class="h-count">${group.tabs.length}</span></button>${group.tabs.map(id=>tabHtml(id,false,group)).join('')}</section>`
+      }).join('') + orderSlot(state.order.length, false)
+      document.querySelector('#horizontal-layout').innerHTML = `<div class="top-tabbar">${brand()}<div class="top-scroll">${items}</div><button class="top-action open-picker" title="Open a repository">+</button>${windowActions()}</div>${workspace()}`
+    }
+
+    function bindRendered() {
+      document.querySelectorAll('[data-layout]').forEach(button => {
+        button.classList.toggle('active', button.dataset.layout === state.layout)
+        button.setAttribute('aria-pressed', String(button.dataset.layout === state.layout))
+      })
+      document.querySelectorAll('.layout').forEach(node => node.classList.toggle('active', node.id === `${state.layout}-layout`))
+      document.querySelectorAll('[data-group-head]').forEach(node => {
+        node.addEventListener('click', () => toggleGroup(node.dataset.groupHead))
+        node.addEventListener('contextmenu', event => openGroupMenu(event, node.dataset.groupHead))
+        node.addEventListener('dragover', event => {
+          if (!draggedTab || groupForTab(draggedTab)?.id === node.dataset.groupHead) return
+          event.preventDefault()
+          clearDragFeedback()
+          node.classList.add('group-drop-target')
+        })
+        node.addEventListener('dragleave', () => node.classList.remove('group-drop-target'))
+        node.addEventListener('drop', event => {
+          if (!draggedTab) return
+          event.preventDefault()
+          node.classList.remove('group-drop-target')
+          addToGroup(draggedTab, node.dataset.groupHead)
+        })
+      })
+      document.querySelectorAll('[data-tab]').forEach(node => {
+        node.addEventListener('click', event => { if (!event.target.closest('[data-close]')) activateTab(node.dataset.tab) })
+        node.addEventListener('contextmenu', event => openTabMenu(event, node.dataset.tab))
+        node.addEventListener('dragstart', event => {
+          draggedTab = node.dataset.tab
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', draggedTab)
+          node.style.opacity = '.45'
+          document.querySelector('#app').classList.add('tab-dragging')
+          toast(`Moving ${tabLabel(draggedTab)} - use an edge to reorder or the center to group`)
+        })
+        node.addEventListener('dragend', () => {
+          draggedTab = null
+          document.querySelector('#app').classList.remove('tab-dragging')
+          clearDragFeedback()
+          render()
+        })
+        node.addEventListener('dragover', event => {
+          if (!draggedTab || draggedTab === node.dataset.tab) return
+          event.preventDefault()
+          clearDragFeedback()
+          const rect = node.getBoundingClientRect()
+          const vertical = node.classList.contains('v-tab')
+          const pointer = vertical ? event.clientY - rect.top : event.clientX - rect.left
+          const ratio = pointer / (vertical ? rect.height : rect.width)
+          node.classList.add(ratio < .3 ? 'insert-before' : ratio > .7 ? 'insert-after' : 'drop-target')
+        })
+        node.addEventListener('dragleave', event => {
+          if (!node.contains(event.relatedTarget)) node.classList.remove('drop-target', 'insert-before', 'insert-after')
+        })
+        node.addEventListener('drop', event => {
+          if (!draggedTab) return
+          event.preventDefault()
+          const placement = node.classList.contains('insert-before') ? 'before' : node.classList.contains('insert-after') ? 'after' : 'group'
+          clearDragFeedback()
+          if (placement === 'group') groupByDrop(draggedTab, node.dataset.tab)
+          else moveTabBeside(draggedTab, node.dataset.tab, placement)
+        })
+      })
+      document.querySelectorAll('[data-order-slot]').forEach(node => {
+        node.addEventListener('dragover', event => {
+          if (!draggedTab) return
+          event.preventDefault()
+          clearDragFeedback()
+          node.classList.add('active')
+        })
+        node.addEventListener('dragleave', () => node.classList.remove('active'))
+        node.addEventListener('drop', event => {
+          if (!draggedTab) return
+          event.preventDefault()
+          const index = Number(node.dataset.orderSlot)
+          clearDragFeedback()
+          moveTabToOrder(draggedTab, index)
+        })
+      })
+      document.querySelectorAll('[data-close]').forEach(node => node.addEventListener('click', event => { event.stopPropagation(); closeTab(node.dataset.close) }))
+      document.querySelectorAll('.open-picker').forEach(node => node.addEventListener('click', () => openRepoPicker('open')))
+    }
+
+    function render() {
+      renderVertical()
+      renderHorizontal()
+      bindRendered()
+      persist()
+    }
+
+    function activateTab(id) {
+      state.active = id
+      render()
+      document.querySelectorAll(`[data-tab="${CSS.escape(id)}"]`).forEach(node => node.classList.add('flash'))
+      toast(`${tabLabel(id)} is now active`)
+    }
+
+    function toggleGroup(id) {
+      const group = state.groups.find(item => item.id === id)
+      if (!group) return
+      group.collapsed = !group.collapsed
+      render()
+      toast(`${group.name} ${group.collapsed ? 'collapsed' : 'expanded'}`)
+    }
+
+    function clearDragFeedback() {
+      document.querySelectorAll('.drop-target, .insert-before, .insert-after, .group-drop-target, .order-slot.active').forEach(node => {
+        node.classList.remove('drop-target', 'insert-before', 'insert-after', 'group-drop-target', 'active')
+      })
+    }
+
+    function removeFromCurrent(id) {
+      state.groups.forEach(group => { group.tabs = group.tabs.filter(tab => tab !== id) })
+      const emptyGroups = new Set(state.groups.filter(group => !group.tabs.length).map(group => group.id))
+      state.groups = state.groups.filter(group => group.tabs.length)
+      state.order = state.order.filter(item => {
+        if (item.type === 'tab') return item.id !== id
+        return !emptyGroups.has(item.id)
+      })
+    }
+
+    function addToGroup(tabId, groupId) {
+      const group = state.groups.find(item => item.id === groupId)
+      if (!group) return
+      removeFromCurrent(tabId)
+      group.tabs.push(tabId)
+      group.collapsed = false
+      render()
+      toast(`${tabLabel(tabId)} added to ${group.name}`)
+    }
+
+    function detachTab(tabId) {
+      const group = groupForTab(tabId)
+      if (!group) return
+      const groupIndex = state.order.findIndex(item => item.type === 'group' && item.id === group.id)
+      const groupWillRemain = group.tabs.length > 1
+      removeFromCurrent(tabId)
+      const insertAt = Math.min(groupIndex + (groupWillRemain ? 1 : 0), state.order.length)
+      state.order.splice(Math.max(0, insertAt), 0, { type: 'tab', id: tabId })
+      render()
+      toast(`${tabLabel(tabId)} removed from ${group.name}`)
+    }
+
+    function createGroup(tabIds, name = 'New group') {
+      const positions = tabIds.map(tabId => state.order.findIndex(item =>
+        (item.type === 'tab' && item.id === tabId) ||
+        (item.type === 'group' && state.groups.find(group => group.id === item.id)?.tabs.includes(tabId))
+      )).filter(index => index >= 0)
+      const insertAt = positions.length ? Math.min(...positions) : state.order.length
+      tabIds.forEach(removeFromCurrent)
+      const id = `group-${Date.now()}`
+      state.groups.push({ id, name, color: '#2dd4a7', collapsed: false, saved: false, tabs: tabIds })
+      state.order.splice(Math.min(insertAt, state.order.length), 0, { type: 'group', id })
+      render()
+      toast(`${name} created with ${tabIds.length} repositories`)
+      openEdit('group', id, name)
+    }
+
+    function moveTabBeside(source, target, placement) {
+      if (!source || !target || source === target) return
+      const targetGroupId = groupForTab(target)?.id ?? null
+      removeFromCurrent(source)
+      if (targetGroupId) {
+        const targetGroup = state.groups.find(group => group.id === targetGroupId)
+        if (!targetGroup) return
+        const targetIndex = targetGroup.tabs.indexOf(target)
+        targetGroup.tabs.splice(targetIndex + (placement === 'after' ? 1 : 0), 0, source)
+        targetGroup.collapsed = false
+        render()
+        return toast(`${tabLabel(source)} moved ${placement} ${tabLabel(target)} in ${targetGroup.name}`)
+      }
+      const targetIndex = state.order.findIndex(item => item.type === 'tab' && item.id === target)
+      if (targetIndex < 0) return
+      state.order.splice(targetIndex + (placement === 'after' ? 1 : 0), 0, { type: 'tab', id: source })
+      render()
+      toast(`${tabLabel(source)} moved ${placement} ${tabLabel(target)}`)
+    }
+
+    function moveTabToOrder(source, requestedIndex) {
+      if (!source || !Number.isFinite(requestedIndex)) return
+      const sourceGroup = groupForTab(source)
+      const sourceOrderIndex = state.order.findIndex(item =>
+        sourceGroup
+          ? item.type === 'group' && item.id === sourceGroup.id
+          : item.type === 'tab' && item.id === source
+      )
+      const removesTopLevelItem = !sourceGroup || sourceGroup.tabs.length === 1
+      let insertAt = requestedIndex
+      if (removesTopLevelItem && sourceOrderIndex >= 0 && sourceOrderIndex < requestedIndex) insertAt -= 1
+      removeFromCurrent(source)
+      insertAt = Math.max(0, Math.min(insertAt, state.order.length))
+      state.order.splice(insertAt, 0, { type: 'tab', id: source })
+      render()
+      toast(`${tabLabel(source)} moved between workspace tabs`)
+    }
+
+    function groupByDrop(source, target) {
+      if (!source || !target || source === target) return
+      const targetGroup = groupForTab(target)
+      if (targetGroup && groupForTab(source)?.id === targetGroup.id) {
+        render()
+        return toast(`${tabLabel(source)} is already in ${targetGroup.name}`)
+      }
+      if (targetGroup) addToGroup(source, targetGroup.id)
+      else createGroup([target, source])
+    }
+
+    function closeTab(id) {
+      removeFromCurrent(id)
+      if (state.active === id) state.active = allTabs()[0] ?? ''
+      render()
+      toast(`${tabLabel(id)} closed`)
+    }
+
+    function closeMenus() {
+      document.querySelectorAll('.menu').forEach(menu => menu.classList.remove('open'))
+      document.querySelectorAll('.color-row').forEach(row => row.classList.remove('open'))
+    }
+
+    function positionMenu(menu, event) {
+      closeMenus()
+      const left = Math.min(event.clientX, window.innerWidth - 220)
+      const top = Math.min(event.clientY, window.innerHeight - 330)
+      menu.style.left = `${left}px`
+      menu.style.top = `${Math.max(6, top)}px`
+      menu.classList.add('open')
+    }
+
+    function openTabMenu(event, id) {
+      event.preventDefault(); event.stopPropagation(); menuTarget = id
+      const group = groupForTab(id)
+      const otherGroups = state.groups.filter(item => item.id !== group?.id)
+      const menu = document.querySelector('#tab-menu')
+      menu.innerHTML = `<div class="menu-label">${esc(tabLabel(id))}</div>
+        <button data-action="rename-tab"><span class="menu-icon">✎</span>Rename tab</button>
+        <hr><button data-action="new-group"><span class="menu-icon">◉</span>Create new group</button>
+        ${otherGroups.length ? `<div class="menu-label">ADD TO GROUP</div>${otherGroups.map(item=>`<button data-add-group="${item.id}"><span class="menu-icon" style="color:${item.color}">●</span>${esc(item.name)}</button>`).join('')}`:''}
+        ${group ? '<button data-action="remove-group"><span class="menu-icon">↗</span>Remove from group</button>' : ''}
+        <hr><button data-action="close-tab"><span class="menu-icon">×</span>Close tab</button>`
+      menu.querySelectorAll('button').forEach(button => button.addEventListener('click', () => handleTabAction(button)))
+      positionMenu(menu, event)
+    }
+
+    function handleTabAction(button) {
+      closeMenus()
+      if (button.dataset.addGroup) return addToGroup(menuTarget, button.dataset.addGroup)
+      if (button.dataset.action === 'new-group') return createGroup([menuTarget])
+      if (button.dataset.action === 'remove-group') return detachTab(menuTarget)
+      if (button.dataset.action === 'close-tab') return closeTab(menuTarget)
+      if (button.dataset.action === 'rename-tab') return openEdit('tab', menuTarget, tabLabel(menuTarget))
+    }
+
+    function openGroupMenu(event, id) {
+      event.preventDefault(); event.stopPropagation(); menuTarget = id
+      const group = state.groups.find(item => item.id === id)
+      const menu = document.querySelector('#group-menu')
+      menu.innerHTML = `<div class="menu-label">${esc(group.name.toUpperCase())} · ${group.tabs.length} REPOS</div>
+        <button data-action="toggle"><span class="menu-icon">${group.collapsed?'▾':'▸'}</span>${group.collapsed?'Expand':'Collapse'} group</button>
+        <button data-action="rename"><span class="menu-icon">✎</span>Rename group</button>
+        <button data-action="color"><span class="menu-icon">●</span>Change color<span class="arrow">›</span></button>
+        <div class="color-row">${['#2dd4a7','#38bdf8','#a78bfa','#f59e0b','#f472b6','#f87171'].map(color=>`<span class="swatch" data-color="${color}" style="background:${color}"></span>`).join('')}</div>
+        <button data-action="save"><span class="menu-icon">★</span>${group.saved?'Update saved group':'Save group'}</button>
+        <hr><button data-action="ungroup"><span class="menu-icon">↗</span>Ungroup</button>
+        <button class="danger" data-action="close"><span class="menu-icon">×</span>Close group</button>`
+      menu.querySelectorAll('button').forEach(button => button.addEventListener('click', () => handleGroupAction(button)))
+      menu.querySelectorAll('[data-color]').forEach(swatch => swatch.addEventListener('click', () => changeGroupColor(swatch.dataset.color)))
+      positionMenu(menu, event)
+    }
+
+    function handleGroupAction(button) {
+      const group = state.groups.find(item => item.id === menuTarget)
+      if (!group) return
+      const action = button.dataset.action
+      if (action === 'color') { document.querySelector('#group-menu .color-row').classList.toggle('open'); return }
+      closeMenus()
+      if (action === 'toggle') return toggleGroup(group.id)
+      if (action === 'rename') return openEdit('group', group.id, group.name)
+      if (action === 'save') {
+        group.saved = true
+        const existing = state.savedGroups.find(item => item.id === group.id)
+        const saved = { id: group.id, name: group.name, color: group.color, repos: group.tabs.map(tabLabel) }
+        if (existing) Object.assign(existing, saved); else state.savedGroups.push(saved)
+        render(); return toast(`${group.name} saved for later`)
+      }
+      if (action === 'ungroup') {
+        const index = state.order.findIndex(item => item.type === 'group' && item.id === group.id)
+        state.order.splice(index, 1, ...group.tabs.map(id => ({ type: 'tab', id })))
+        state.groups = state.groups.filter(item=>item.id!==group.id)
+        render(); return toast(`${group.name} ungrouped - repositories stayed in place`)
+      }
+      if (action === 'close') {
+        state.groups = state.groups.filter(item=>item.id!==group.id)
+        state.order = state.order.filter(item => !(item.type === 'group' && item.id === group.id))
+        if (group.tabs.includes(state.active)) state.active = allTabs()[0] ?? ''
+        render(); return toast(`${group.name} closed with ${group.tabs.length} repositories`)
+      }
+    }
+
+    function changeGroupColor(color) {
+      const group = state.groups.find(item => item.id === menuTarget)
+      if (!group) return
+      group.color = color
+      closeMenus(); render(); toast(`${group.name} color changed`)
+    }
+
+    function openEdit(type, id, value) {
+      editTarget = { type, id }
+      const dialog = document.querySelector('#edit-dialog')
+      document.querySelector('#edit-title').textContent = type === 'group' ? 'Rename group' : 'Rename tab'
+      document.querySelector('.edit-form label').textContent = type === 'group' ? 'Group name' : 'Tab name'
+      document.querySelector('#edit-input').value = value
+      dialog.classList.add('open')
+      window.setTimeout(()=>document.querySelector('#edit-input').select(), 10)
+    }
+
+    function closeEdit() { document.querySelector('#edit-dialog').classList.remove('open'); editTarget = null }
+
+    function repoDialog(activeTab = 'open') {
+      return `<div class="dialog" role="dialog" aria-modal="true" aria-label="Open a repository"><div class="dialog-head"><div class="dialog-title">Open a repository</div><div class="dialog-tabs">
+        <button data-picker-tab="open" class="${activeTab==='open'?'active':''}">▱ Open</button>
+        <button data-picker-tab="clone" class="${activeTab==='clone'?'active':''}">⇩ Clone</button>
+        <button data-picker-tab="groups" class="${activeTab==='groups'?'active':''}">◉ Groups</button>
+      </div></div><div class="dialog-body">
+        <div class="dialog-pane ${activeTab==='open'?'active':''}" data-picker-pane="open"><div class="search-row"><input placeholder="Filter repositories…" autofocus><button class="secondary-btn">Browse…</button></div><div class="section-label">CODE FOLDER · C:\\CODE</div>${['GitWyrm','HearthShelf','shared-ui','company-docs'].map((name,i)=>`<div class="repo-row"><span class="folder-icon">▱</span><span class="row-copy"><b>${name}</b><small>C:\\code\\${name}</small></span>${i<2?'<span class="open-count">open</span>':''}</div>`).join('')}</div>
+        <div class="dialog-pane ${activeTab==='clone'?'active':''}" data-picker-pane="clone"><div class="section-label">REPOSITORY URL</div><div class="search-row"><input placeholder="https://github.com/user/repo.git"></div><div class="section-label">DESTINATION FOLDER</div><div class="search-row"><input value="C:\\code"><button class="secondary-btn">Browse…</button></div><p style="color:var(--muted);font-size:10.5px;line-height:1.5">Clone makes a new local copy, then opens it in a tab.</p></div>
+        <div class="dialog-pane ${activeTab==='groups'?'active':''}" data-picker-pane="groups">${state.savedGroups.length?`<div class="section-label">SAVED GROUPS</div>${state.savedGroups.map(group=>`<div class="saved-row" data-open-saved="${group.id}"><span class="folder-icon" style="color:${group.color}">◉</span><span class="row-copy"><b>${esc(group.name)}</b><small>${esc(group.repos.join(' · '))}</small></span><span class="saved-colors"><i style="background:${group.color}"></i></span><span class="open-count">${group.repos.length} repos</span><button class="primary-btn">Open group</button></div>`).join('')}`:'<div class="empty-note"><strong>No saved groups yet</strong>Right-click an open group and choose Save group.</div>'}</div>
+      </div></div>`
+    }
+
+    function openRepoPicker(tab = 'open') {
+      const scrim = document.querySelector('#repo-scrim')
+      scrim.innerHTML = repoDialog(tab)
+      scrim.classList.add('open'); scrim.setAttribute('aria-hidden','false')
+      scrim.querySelectorAll('[data-picker-tab]').forEach(button => button.addEventListener('click', () => openRepoPicker(button.dataset.pickerTab)))
+      scrim.querySelectorAll('[data-open-saved]').forEach(row => row.addEventListener('click', event => {
+        if (!event.target.closest('.primary-btn') && event.target !== row) return
+        const group = state.savedGroups.find(item=>item.id===row.dataset.openSaved)
+        closeRepoPicker(); toast(`${group.name} opened - ${group.repos.length} repositories ready`)
+      }))
+      scrim.addEventListener('click', event => { if (event.target === scrim) closeRepoPicker() })
+    }
+
+    function closeRepoPicker() {
+      const scrim = document.querySelector('#repo-scrim')
+      scrim.classList.remove('open'); scrim.setAttribute('aria-hidden','true')
+    }
+
+    document.querySelectorAll('[data-layout]').forEach(button => button.addEventListener('click', () => {
+      state.layout = button.dataset.layout
+      render()
+      toast(`${state.layout === 'vertical' ? 'Vertical' : 'Top'} tabs selected`)
+    }))
+    document.querySelector('#reset-demo').addEventListener('click', () => { state = cloneSeed(); render(); toast('Demo reset') })
+    document.querySelector('#open-groups').addEventListener('click', () => openRepoPicker('groups'))
+    document.querySelector('#edit-cancel').addEventListener('click', closeEdit)
+    document.querySelector('#edit-form').addEventListener('submit', event => {
+      event.preventDefault()
+      const value = document.querySelector('#edit-input').value.trim()
+      if (!value || !editTarget) return
+      if (editTarget.type === 'group') {
+        const group = state.groups.find(item=>item.id===editTarget.id); if (group) group.name = value
+      } else if (repoInfo[editTarget.id]) repoInfo[editTarget.id][0] = value
+      const label = editTarget.type === 'group' ? 'Group' : 'Tab'
+      closeEdit(); render(); toast(`${label} renamed to ${value}`)
+    })
+    document.addEventListener('click', event => { if (!event.target.closest('.menu')) closeMenus() })
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeMenus(); closeEdit(); closeRepoPicker() } })
+
+    try {
+      const saved = JSON.parse(localStorage.getItem('gitwyrm-tab-groups-mockup'))
+      if (saved?.groups) {
+        state = saved
+        if (!Array.isArray(state.order)) {
+          const looseTabs = state.ungrouped ?? []
+          state.order = []
+          state.groups.forEach((group, index) => {
+            state.order.push({ type: 'group', id: group.id })
+            if (looseTabs[index]) state.order.push({ type: 'tab', id: looseTabs[index] })
+          })
+          looseTabs.slice(state.groups.length).forEach(id => state.order.push({ type: 'tab', id }))
+          delete state.ungrouped
+        }
+      }
+    } catch {}
+    render()
+  </script>
+</body>
+</html>
