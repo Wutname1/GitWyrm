@@ -31,7 +31,7 @@ export function DiffLineRow({
       data-selected={selected ? '' : undefined}
       data-context-active={contextActive ? '' : undefined}
       className={cn(
-        'group/line relative flex min-w-max items-baseline transition-colors',
+        'group/line relative flex min-w-max items-baseline outline-offset-[-1px] transition-colors duration-75',
         selectable && 'cursor-pointer',
         // Base tint by line kind (Rest state).
         isHunk
@@ -41,17 +41,20 @@ export function DiffLineRow({
             : line.sign === '-'
               ? 'bg-removed/[.07] text-removed'
               : 'text-sub',
-        // Mouseover: lift the row on hover (only for selectable lines), unless
-        // it's already in a stronger state.
-        selectable && !selected && !contextActive && 'hover:bg-foreground/[.06]',
-        // Semi-Active: right-click target — dashed accent outline, distinct from
-        // the solid Active fill so the two never look the same.
+        // Mouseover: a clearly brighter overlay than rest, plus a faint left
+        // marker. Only for selectable lines, and only when not in a stronger
+        // state. Uses a bright white wash so it reads on colored +/- lines too.
+        selectable &&
+          !selected &&
+          !contextActive &&
+          'hover:bg-[rgba(255,255,255,0.1)] hover:shadow-[inset_2px_0_0_var(--gw-sub)]',
+        // Semi-Active: right-click target — dashed accent outline + light accent
+        // fill, distinct from the solid Active fill so the two never look alike.
         contextActive &&
           !selected &&
-          'bg-primary/[.08] outline-dashed -outline-offset-1 outline-1 outline-primary/50',
-        // Active: left-click selected — solid fill + solid ring (wins over hover
-        // and semi-active).
-        selected && 'bg-primary/20 ring-1 ring-inset ring-primary/60'
+          'bg-primary/15 outline outline-1 outline-dashed outline-primary/70',
+        // Active: left-click selected — strong solid fill + solid accent ring.
+        selected && 'bg-primary/25 shadow-[inset_2px_0_0_var(--gw-accent)] ring-1 ring-inset ring-primary/60'
       )}
     >
       <span

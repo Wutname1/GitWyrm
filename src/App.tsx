@@ -9,6 +9,7 @@ import { OnboardingModal } from '@/components/modals/OnboardingModal'
 import { DirectionModal } from '@/components/modals/DirectionModal'
 import { RemoteSyncModal } from '@/components/modals/RemoteSyncModal'
 import { DragScrim } from '@/components/domain/DragScrim'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
 import { NewTagModal } from '@/components/modals/NewTagModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
@@ -31,7 +32,16 @@ const queryClient = new QueryClient({
 function AppInner() {
   useRepoWatcher()
   const openModal = useUiStore((s) => s.openModal)
+  const activeRepoId = useWorkspaceStore((s) => s.activeRepoId)
+  const uiScale = useWorkspaceStore((s) => s.uiScale)
   const launched = useRef(false)
+
+  // Apply the user's zoom to the whole app. `zoom` scales layout and every
+  // pixel value (unlike a font-size trick), which is what we want for a
+  // git client full of fixed-size rows and badges.
+  useEffect(() => {
+    document.documentElement.style.zoom = String(uiScale)
+  }, [uiScale])
 
   // On launch: restore every previously-open tab (falling back to the most
   // recent repo, or onboarding when there is none), then re-select whichever
@@ -73,6 +83,18 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Auto-enable the worktree feature the first time we see a repo that already
+  // has linked worktrees, so existing worktree users get the UI without hunting
+  // for the setting. Never turns it back off; that's the user's choice.
+  useEffect(() => {
+    if (!activeRepoId) return
+    const { enableWorktrees, setEnableWorktrees } = useWorkspaceStore.getState()
+    if (enableWorktrees) return
+    void commands.hasWorktrees(activeRepoId).then((r) => {
+      if (r.status === 'ok' && r.data) setEnableWorktrees(true)
+    })
+  }, [activeRepoId])
+
   // Suppress the browser's native right-click menu everywhere it isn't wanted.
   // Our own Radix context menus still open (they handle the event first); text
   // fields keep their native menu so copy/paste works.
@@ -104,10 +126,12 @@ function AppInner() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider delayDuration={300}>
-        <AppInner />
-      </TooltipProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider delayDuration={300}>
+          <AppInner />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   )
 }
