@@ -151,7 +151,11 @@ fn resolve_switch_target(repo: &git2::Repository, name: &str) -> Result<String, 
 
   let target = remote_branch.get().peel_to_commit()?;
   let mut created = repo.branch(short, &target, false)?;
-  created.set_upstream(Some(name))?;
+  // Best-effort: git can only resolve the upstream when the remote is
+  // configured with a matching refspec. If it can't (stale remote refs, an
+  // unusual refspec), the branch still exists at the right commit -- landing on
+  // it matters more than the tracking link, so don't fail the whole switch.
+  let _ = created.set_upstream(Some(name));
   Ok(short.to_string())
 }
 
