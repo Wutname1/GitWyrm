@@ -1,6 +1,13 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { commands, type Resolution, type ResetMode, type SelectedLine } from '@/lib/bindings'
+import {
+  commands,
+  type PullResult,
+  type PushResult,
+  type Resolution,
+  type ResetMode,
+  type SelectedLine,
+} from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { classifyError } from '@/lib/errorClass'
 import { log } from '@/lib/log'
@@ -30,6 +37,41 @@ const onError = (e: Error) => {
   if (severity === 'info') toast.info(message)
   else if (severity === 'warning') toast.warning(message)
   else toast.error(message)
+}
+
+const commitCount = (n: number) => `${n} commit${n === 1 ? '' : 's'}`
+
+/** The upstream if we know it, else a generic stand-in so copy still reads. */
+const describeTarget = (r: { upstream: string | null }) => r.upstream ?? 'the remote'
+
+/**
+ * Push and pull report what actually moved, measured from the branch's
+ * ahead/behind before and after. A no-op says so plainly rather than claiming
+ * work happened -- the user asked for the truth of what the operation did.
+ */
+function describePush(r: PushResult): string {
+  if (r.pushed === 0) {
+    return r.branch
+      ? `Nothing to send - ${describeTarget(r)} already matches ${r.branch}`
+      : 'Nothing to send - the remote is already up to date'
+  }
+  return `Sent ${commitCount(r.pushed)} to ${describeTarget(r)}`
+}
+
+function describePull(r: PullResult): string {
+  if (r.received === 0) {
+    const base = r.branch
+      ? `Nothing new to get - ${r.branch} already matches ${describeTarget(r)}`
+      : 'Nothing new to get - you are already up to date'
+    // Checked for incoming work but still have outgoing work of our own.
+    return r.ahead_after > 0
+      ? `${base}. You still have ${commitCount(r.ahead_after)} to send.`
+      : base
+  }
+  const base = `Got ${commitCount(r.received)} from ${describeTarget(r)}`
+  return r.ahead_after > 0
+    ? `${base}. You still have ${commitCount(r.ahead_after)} to send.`
+    : base
 }
 
 export function useGitMutations(repoId: string | null) {
@@ -275,27 +317,31 @@ export function useGitMutations(repoId: string | null) {
 
   const pull = useMutation({
     mutationFn: async () => unwrap(await commands.gitPull(id)),
-    onSuccess: () => {
+    onSuccess: (result) => {
       invalidate(qc, id, ['status', 'log', 'branches'])
-      toast('Pulled')
+      toast(describePull(result))
     },
     onError,
   })
 
   const push = useMutation({
     mutationFn: async () => unwrap(await commands.gitPush(id)),
-    onSuccess: () => {
+    onSuccess: (result) => {
       invalidate(qc, id, ['log', 'branches'])
-      toast('Pushed')
+      toast(describePush(result))
     },
     onError,
   })
 
   const pushForce = useMutation({
     mutationFn: async () => unwrap(await commands.gitPushForce(id)),
-    onSuccess: () => {
+    onSuccess: (result) => {
       invalidate(qc, id, ['log', 'branches'])
-      toast('Force-pushed')
+      toast(
+        result.pushed === 0
+          ? `Force-push finished - ${describeTarget(result)} already matched`
+          : `Force-pushed ${commitCount(result.pushed)} to ${describeTarget(result)}`
+      )
     },
     onError,
   })

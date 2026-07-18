@@ -238,6 +238,30 @@ pub struct MergeResult {
   pub conflicts: Vec<String>,
 }
 
+/// Outcome of a push. Measured from the branch's ahead/behind against its
+/// upstream before and after, so the report reflects what actually moved rather
+/// than what git printed.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct PushResult {
+  /// The branch that was pushed, if HEAD was on one.
+  pub branch: Option<String>,
+  /// Its upstream, e.g. `origin/main`.
+  pub upstream: Option<String>,
+  /// Commits handed to the remote. Zero means the remote already matched.
+  pub pushed: u32,
+}
+
+/// Outcome of a pull, measured the same way as `PushResult`.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct PullResult {
+  pub branch: Option<String>,
+  pub upstream: Option<String>,
+  /// Commits brought in from the remote. Zero means there was nothing new.
+  pub received: u32,
+  /// The pull left the branch with commits still to push.
+  pub ahead_after: u32,
+}
+
 /// Outcome of a rebase. A clean rebase returns no conflicts; a paused rebase
 /// (conflicts to resolve) lists the conflicted paths and leaves the repo in its
 /// rebase-in-progress state.

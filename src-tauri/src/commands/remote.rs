@@ -9,8 +9,49 @@ use specta::Type;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
-use crate::git::types::{RebaseResult, RemoteInfo};
+use crate::git::types::{PullResult, PushResult, RebaseResult, RemoteInfo};
 use crate::state::RepoManager;
+
+/// The current branch, its upstream, and how far apart they are. Returns `None`
+/// for the pair when HEAD is detached or the branch has no upstream, so callers
+/// can still report something sensible. Mirrors the ahead/behind calculation in
+/// `commands::branch::list_branches`.
+struct TrackingState {
+  branch: Option<String>,
+  upstream: Option<String>,
+  ahead: u32,
+  behind: u32,
+}
+
+fn tracking_state(repo: &git2::Repository) -> TrackingState {
+  let none = TrackingState { branch: None, upstream: None, ahead: 0, behind: 0 };
+
+  let Ok(head) = repo.head() else { return none };
+  if !head.is_branch() {
+    return none;
+  }
+  let Some(name) = head.shorthand().map(str::to_string) else { return none };
+  let Ok(branch) = repo.find_branch(&name, git2::BranchType::Local) else { return none };
+
+  let upstream = branch.upstream().ok().and_then(|u| u.name().ok().flatten().map(str::to_string));
+
+  let (ahead, behind) = match (&upstream, branch.get().target()) {
+    (Some(up), Some(local_oid)) => {
+      let up_oid =
+        repo.find_branch(up, git2::BranchType::Remote).ok().and_then(|b| b.get().target());
+      match up_oid {
+        Some(up_oid) => repo
+          .graph_ahead_behind(local_oid, up_oid)
+          .map(|(a, b)| (a as u32, b as u32))
+          .unwrap_or((0, 0)),
+        None => (0, 0),
+      }
+    }
+    _ => (0, 0),
+  };
+
+  TrackingState { branch: Some(name), upstream, ahead, behind }
+}
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -20,6 +61,42 @@ pub struct GitProgressPayload {
   pub repo_id: String,
   pub operation: String,
   pub line: String,
+}
+
+/// git writes progress, informational notes, and real errors all to stderr, so
+/// the last line is often counting objects or a credential-helper note rather
+/// than the cause of the failure. Prefer lines git itself marks as errors, then
+/// fall back to the last line that isn't obvious progress noise.
+fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
+  let is_noise = |l: &str| {
+    let low = l.to_lowercase();
+    low.starts_with("remote:")
+      || low.contains('%')
+      || low.starts_with("counting objects")
+      || low.starts_with("compressing objects")
+      || low.starts_with("writing objects")
+      || low.starts_with("receiving objects")
+      || low.starts_with("resolving deltas")
+      || low.starts_with("enumerating objects")
+      || low.starts_with("everything up-to-date")
+      || low.starts_with("already up to date")
+  };
+
+  // Lines git explicitly tags are the real cause when present.
+  let tagged = stderr_lines.iter().rev().find(|l| {
+    let low = l.to_lowercase();
+    low.starts_with("error:") || low.starts_with("fatal:") || low.starts_with("hint:")
+  });
+  if let Some(line) = tagged {
+    return line.clone();
+  }
+
+  stderr_lines
+    .iter()
+    .rev()
+    .find(|l| !is_noise(l))
+    .cloned()
+    .unwrap_or_else(|| stdout.trim().to_string())
 }
 
 fn run_streaming(
@@ -79,8 +156,7 @@ fn run_streaming(
   let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
 
   if !output.status.success() {
-    let detail = stderr_lines.last().cloned().unwrap_or_else(|| stdout.trim().to_string());
-    return Err(AppError::Other(format!("git {operation} failed: {detail}")));
+    return Err(AppError::Other(format!("git {operation} failed: {}", failure_detail(&stderr_lines, &stdout))));
   }
   Ok(stdout)
 }
@@ -108,12 +184,23 @@ pub async fn git_pull(
   app: AppHandle,
   manager: State<'_, RepoManager>,
   repo_id: String,
-) -> Result<(), AppError> {
+) -> Result<PullResult, AppError> {
   let open = manager.get(&repo_id)?;
   let path = open.path.to_string_lossy().into_owned();
   tauri::async_runtime::spawn_blocking(move || {
+    let before = { tracking_state(&open.repo.lock().unwrap()) };
     run_streaming(&app, &repo_id, Some(&path), "pull", &["pull", "--progress"])?;
-    Ok(())
+    let after = { tracking_state(&open.repo.lock().unwrap()) };
+
+    // Commits we were behind by and no longer are is what the pull brought in.
+    let received = before.behind.saturating_sub(after.behind);
+
+    Ok(PullResult {
+      branch: after.branch.or(before.branch),
+      upstream: after.upstream.or(before.upstream),
+      received,
+      ahead_after: after.ahead,
+    })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
@@ -125,12 +212,22 @@ pub async fn git_push(
   app: AppHandle,
   manager: State<'_, RepoManager>,
   repo_id: String,
-) -> Result<(), AppError> {
+) -> Result<PushResult, AppError> {
   let open = manager.get(&repo_id)?;
   let path = open.path.to_string_lossy().into_owned();
   tauri::async_runtime::spawn_blocking(move || {
+    let before = { tracking_state(&open.repo.lock().unwrap()) };
     run_streaming(&app, &repo_id, Some(&path), "push", &["push", "--progress"])?;
-    Ok(())
+    let after = { tracking_state(&open.repo.lock().unwrap()) };
+
+    // Commits we were ahead by and no longer are is what the remote took.
+    let pushed = before.ahead.saturating_sub(after.ahead);
+
+    Ok(PushResult {
+      branch: after.branch.or(before.branch),
+      upstream: after.upstream.or(before.upstream),
+      pushed,
+    })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
@@ -295,10 +392,11 @@ pub async fn git_push_force(
   app: AppHandle,
   manager: State<'_, RepoManager>,
   repo_id: String,
-) -> Result<(), AppError> {
+) -> Result<PushResult, AppError> {
   let open = manager.get(&repo_id)?;
   let path = open.path.to_string_lossy().into_owned();
   tauri::async_runtime::spawn_blocking(move || {
+    let before = { tracking_state(&open.repo.lock().unwrap()) };
     run_streaming(
       &app,
       &repo_id,
@@ -306,7 +404,13 @@ pub async fn git_push_force(
       "push",
       &["push", "--force-with-lease", "--progress"],
     )?;
-    Ok(())
+    let after = { tracking_state(&open.repo.lock().unwrap()) };
+
+    Ok(PushResult {
+      branch: after.branch.or(before.branch),
+      upstream: after.upstream.or(before.upstream),
+      pushed: before.ahead.saturating_sub(after.ahead),
+    })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

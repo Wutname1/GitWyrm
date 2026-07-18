@@ -457,7 +457,7 @@ async gitFetch(repoId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async gitPull(repoId: string) : Promise<Result<null, string>> {
+async gitPull(repoId: string) : Promise<Result<PullResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_pull", { repoId }) };
 } catch (e) {
@@ -465,7 +465,7 @@ async gitPull(repoId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async gitPush(repoId: string) : Promise<Result<null, string>> {
+async gitPush(repoId: string) : Promise<Result<PushResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_push", { repoId }) };
 } catch (e) {
@@ -478,7 +478,7 @@ async gitPush(repoId: string) : Promise<Result<null, string>> {
  * Lease-based so it refuses to clobber remote commits the user hasn't fetched;
  * used after a local rewind/rebase leaves the branch diverged from its upstream.
  */
-async gitPushForce(repoId: string) : Promise<Result<null, string>> {
+async gitPushForce(repoId: string) : Promise<Result<PushResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_push_force", { repoId }) };
 } catch (e) {
@@ -995,6 +995,36 @@ export type PollResult =
  * User has not finished authorizing yet; poll again after `interval`.
  */
 { status: "pending"; interval: number }
+/**
+ * Outcome of a pull, measured the same way as `PushResult`.
+ */
+export type PullResult = { branch: string | null; upstream: string | null; 
+/**
+ * Commits brought in from the remote. Zero means there was nothing new.
+ */
+received: number; 
+/**
+ * The pull left the branch with commits still to push.
+ */
+ahead_after: number }
+/**
+ * Outcome of a push. Measured from the branch's ahead/behind against its
+ * upstream before and after, so the report reflects what actually moved rather
+ * than what git printed.
+ */
+export type PushResult = { 
+/**
+ * The branch that was pushed, if HEAD was on one.
+ */
+branch: string | null; 
+/**
+ * Its upstream, e.g. `origin/main`.
+ */
+upstream: string | null; 
+/**
+ * Commits handed to the remote. Zero means the remote already matched.
+ */
+pushed: number }
 /**
  * Outcome of a rebase. A clean rebase returns no conflicts; a paused rebase
  * (conflicts to resolve) lists the conflicted paths and leaves the repo in its
