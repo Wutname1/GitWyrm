@@ -123,7 +123,7 @@
     .v-group { --group: var(--purple); position: relative; margin-bottom: 5px; padding-left: 3px; }
     .v-group::before { content: ""; position: absolute; left: 0; top: 5px; bottom: 4px; width: 2px; border-radius: 2px; background: var(--group); opacity: .9; }
     .v-group.collapsed::before { bottom: 5px; }
-    .v-group-head { display: flex; height: 29px; align-items: center; gap: 7px; width: 100%; padding: 0 7px; border-radius: 5px; background: transparent; color: var(--sub); cursor: pointer; text-align: left; }
+    .v-group-head { display: flex; height: 29px; align-items: center; gap: 7px; width: 100%; padding: 0 7px; border-radius: 5px; background: transparent; color: var(--sub); cursor: grab; text-align: left; }
     .v-group-head:hover { background: var(--panel-2); color: var(--text); }
     .v-group-head.group-drop-target { background: var(--accent-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
     .chevron { width: 11px; color: var(--group); font-size: 11px; transform: rotate(90deg); transition: transform 140ms ease; }
@@ -161,7 +161,7 @@
     .top-scroll::-webkit-scrollbar { display: none; }
     .h-group { --group: var(--purple); display: flex; flex: none; align-items: stretch; border-bottom: 2px solid var(--group); background: color-mix(in srgb, var(--group) 5%, transparent); }
     .h-group.collapsed .h-tab { display: none; }
-    .h-group-head { display: flex; min-width: 31px; align-items: center; gap: 6px; padding: 0 8px; background: color-mix(in srgb, var(--group) 12%, var(--bg)); color: var(--group); cursor: pointer; font-size: 10.5px; font-weight: 650; }
+    .h-group-head { display: flex; min-width: 31px; align-items: center; gap: 6px; padding: 0 8px; background: color-mix(in srgb, var(--group) 12%, var(--bg)); color: var(--group); cursor: grab; font-size: 10.5px; font-weight: 650; }
     .h-group-head:hover { background: color-mix(in srgb, var(--group) 19%, var(--bg)); }
     .h-group-head.group-drop-target { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
     .h-group-head .color-orb { width: 7px; height: 7px; border-radius: 50%; background: var(--group); }
@@ -189,7 +189,9 @@
     .tab-dragging .h-order-slot { width: 5px; }
     .v-order-slot.active { height: 32px; border: 1px dashed rgba(45,212,167,.62); background: rgba(45,212,167,.08); }
     .h-order-slot.active { width: 104px; margin: 0 2px; border: 1px dashed rgba(45,212,167,.62); background: rgba(45,212,167,.08); }
-    .order-slot.active::after { content: "Move here"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--accent); font-size: 9px; font-weight: 600; white-space: nowrap; }
+    .order-slot.active::after { content: attr(data-label); position: absolute; inset: 0; display: grid; place-items: center; color: var(--accent); font-size: 9px; font-weight: 600; white-space: nowrap; }
+    .v-group, .h-group { transition: opacity 130ms ease; }
+    .group-is-dragging { opacity: .38; }
 
     /* Menus, modal, feedback */
     .menu { position: fixed; z-index: 40; display: none; width: 204px; overflow: hidden; padding: 5px; border: 1px solid var(--border-bright); border-radius: 6px; background: #131b24; box-shadow: 0 16px 45px rgba(0,0,0,.46); }
@@ -267,7 +269,7 @@
       <div>
         <div class="eyebrow">Workspace study / many repositories</div>
         <h1>Make twenty open repos feel organized</h1>
-        <p class="intro">The same grouped workspace shown two ways. Groups and loose repos share one order. Drag near a tab edge to open a gap and reorder it; drop over the center to group. Switch layouts, collapse groups, right-click, or open the repository picker to see saved groups.</p>
+        <p class="intro">The same grouped workspace shown two ways. Groups and loose repos share one order. Drag near a tab edge to reorder it, drop over the center to group, or drag a group header to move the whole group. Switch layouts, collapse groups, right-click, or open the repository picker to see saved groups.</p>
       </div>
       <div class="mode-switch" aria-label="Choose tab layout">
         <button type="button" class="active" data-layout="vertical" aria-pressed="true">
@@ -283,7 +285,7 @@
 
     <section class="demo-shell">
       <div class="caption-bar">
-        <div class="caption-copy"><b>Live mockup</b> · drag near an edge to reorder, or over the center to group</div>
+        <div class="caption-copy"><b>Live mockup</b> · tabs and whole groups can be reordered</div>
         <div class="caption-actions">
           <button class="quiet-btn" id="open-groups">Saved groups</button>
           <button class="quiet-btn" id="reset-demo">Reset demo</button>
@@ -379,6 +381,8 @@
     let menuTarget = null
     let editTarget = null
     let draggedTab = null
+    let draggedGroup = null
+    let suppressGroupClick = null
 
     const esc = (value) => value.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]))
     const groupForTab = (id) => state.groups.find(group => group.tabs.includes(id))
@@ -455,7 +459,7 @@
         const group = state.groups.find(candidate => candidate.id === item.id)
         if (!group) return slot
         return `${slot}<section class="v-group ${group.collapsed?'collapsed':''}" style="--group:${group.color}" data-group-wrap="${group.id}">
-          <button class="v-group-head" data-group-head="${group.id}" title="Click to ${group.collapsed?'expand':'collapse'} · right-click for more"><span class="chevron">›</span><span class="group-name">${esc(group.name)}</span>${group.saved?'<span class="saved-mark" title="Saved group">★</span>':''}<span class="group-count">${group.tabs.length}</span></button>
+          <button class="v-group-head" draggable="true" data-group-head="${group.id}" title="Click to ${group.collapsed?'expand':'collapse'} · drag to reorder · right-click for more"><span class="chevron">›</span><span class="group-name">${esc(group.name)}</span>${group.saved?'<span class="saved-mark" title="Saved group">★</span>':''}<span class="group-count">${group.tabs.length}</span></button>
           <div class="v-tabs">${group.tabs.map(id=>tabHtml(id,true,group)).join('')}</div>
         </section>`
       }).join('') + orderSlot(state.order.length, true)
@@ -468,7 +472,7 @@
         if (item.type === 'tab') return `${slot}${tabHtml(item.id, false, null)}`
         const group = state.groups.find(candidate => candidate.id === item.id)
         if (!group) return slot
-        return `${slot}<section class="h-group ${group.collapsed?'collapsed':''}" style="--group:${group.color}" data-group-wrap="${group.id}"><button class="h-group-head" data-group-head="${group.id}" title="Click to ${group.collapsed?'expand':'collapse'} · right-click for more"><span class="color-orb"></span><span>${esc(group.name)}</span>${group.saved?'<span class="saved-mark">★</span>':''}<span class="h-count">${group.tabs.length}</span></button>${group.tabs.map(id=>tabHtml(id,false,group)).join('')}</section>`
+        return `${slot}<section class="h-group ${group.collapsed?'collapsed':''}" style="--group:${group.color}" data-group-wrap="${group.id}"><button class="h-group-head" draggable="true" data-group-head="${group.id}" title="Click to ${group.collapsed?'expand':'collapse'} · drag to reorder · right-click for more"><span class="color-orb"></span><span>${esc(group.name)}</span>${group.saved?'<span class="saved-mark">★</span>':''}<span class="h-count">${group.tabs.length}</span></button>${group.tabs.map(id=>tabHtml(id,false,group)).join('')}</section>`
       }).join('') + orderSlot(state.order.length, false)
       document.querySelector('#horizontal-layout').innerHTML = `<div class="top-tabbar">${brand()}<div class="top-scroll">${items}</div><button class="top-action open-picker" title="Open a repository">+</button>${windowActions()}</div>${workspace()}`
     }
@@ -480,8 +484,35 @@
       })
       document.querySelectorAll('.layout').forEach(node => node.classList.toggle('active', node.id === `${state.layout}-layout`))
       document.querySelectorAll('[data-group-head]').forEach(node => {
-        node.addEventListener('click', () => toggleGroup(node.dataset.groupHead))
+        node.addEventListener('click', () => {
+          if (suppressGroupClick === node.dataset.groupHead) {
+            suppressGroupClick = null
+            return
+          }
+          toggleGroup(node.dataset.groupHead)
+        })
         node.addEventListener('contextmenu', event => openGroupMenu(event, node.dataset.groupHead))
+        node.addEventListener('dragstart', event => {
+          draggedGroup = node.dataset.groupHead
+          draggedTab = null
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', `group:${draggedGroup}`)
+          node.closest('[data-group-wrap]')?.classList.add('group-is-dragging')
+          document.querySelector('#app').classList.add('tab-dragging')
+          const group = state.groups.find(item => item.id === draggedGroup)
+          toast(`Moving ${group?.name ?? 'group'} - drop it into an open gap`)
+        })
+        node.addEventListener('dragend', () => {
+          const finishedGroup = draggedGroup
+          suppressGroupClick = finishedGroup
+          window.setTimeout(() => {
+            if (suppressGroupClick === finishedGroup) suppressGroupClick = null
+          }, 250)
+          draggedGroup = null
+          document.querySelector('#app').classList.remove('tab-dragging')
+          clearDragFeedback()
+          render()
+        })
         node.addEventListener('dragover', event => {
           if (!draggedTab || groupForTab(draggedTab)?.id === node.dataset.groupHead) return
           event.preventDefault()
@@ -501,6 +532,7 @@
         node.addEventListener('contextmenu', event => openTabMenu(event, node.dataset.tab))
         node.addEventListener('dragstart', event => {
           draggedTab = node.dataset.tab
+          draggedGroup = null
           event.dataTransfer.effectAllowed = 'move'
           event.dataTransfer.setData('text/plain', draggedTab)
           node.style.opacity = '.45'
@@ -537,18 +569,20 @@
       })
       document.querySelectorAll('[data-order-slot]').forEach(node => {
         node.addEventListener('dragover', event => {
-          if (!draggedTab) return
+          if (!draggedTab && !draggedGroup) return
           event.preventDefault()
           clearDragFeedback()
+          node.dataset.label = draggedGroup ? 'Move group here' : 'Move here'
           node.classList.add('active')
         })
         node.addEventListener('dragleave', () => node.classList.remove('active'))
         node.addEventListener('drop', event => {
-          if (!draggedTab) return
+          if (!draggedTab && !draggedGroup) return
           event.preventDefault()
           const index = Number(node.dataset.orderSlot)
           clearDragFeedback()
-          moveTabToOrder(draggedTab, index)
+          if (draggedGroup) moveGroupToOrder(draggedGroup, index)
+          else moveTabToOrder(draggedTab, index)
         })
       })
       document.querySelectorAll('[data-close]').forEach(node => node.addEventListener('click', event => { event.stopPropagation(); closeTab(node.dataset.close) }))
@@ -666,6 +700,19 @@
       state.order.splice(insertAt, 0, { type: 'tab', id: source })
       render()
       toast(`${tabLabel(source)} moved between workspace tabs`)
+    }
+
+    function moveGroupToOrder(groupId, requestedIndex) {
+      const fromIndex = state.order.findIndex(item => item.type === 'group' && item.id === groupId)
+      const group = state.groups.find(item => item.id === groupId)
+      if (fromIndex < 0 || !group || !Number.isFinite(requestedIndex)) return
+      let insertAt = requestedIndex
+      if (fromIndex < requestedIndex) insertAt -= 1
+      const [groupItem] = state.order.splice(fromIndex, 1)
+      insertAt = Math.max(0, Math.min(insertAt, state.order.length))
+      state.order.splice(insertAt, 0, groupItem)
+      render()
+      toast(`${group.name} moved with all ${group.tabs.length} repositories`)
     }
 
     function groupByDrop(source, target) {

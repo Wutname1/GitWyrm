@@ -1,4 +1,4 @@
-import { TabBar } from '@/components/domain/TabBar'
+import { TabBar, VerticalTabRail } from '@/components/domain/TabBar'
 import { Toolbar } from '@/components/domain/Toolbar'
 import { MergeBanner } from '@/components/domain/MergeBanner'
 import { LeftPanel } from '@/components/domain/left-panel/LeftPanel'
@@ -9,6 +9,7 @@ import { DiffView } from '@/views/DiffView'
 import { SettingsView } from '@/views/SettingsView'
 import { ConflictView } from '@/views/ConflictView'
 import { useUiStore } from '@/stores/uiStore'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 function CenterView() {
   const view = useUiStore((s) => s.centerView)
@@ -19,9 +20,10 @@ function CenterView() {
 }
 
 export function WorkspaceLayout() {
-  return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
-      <TabBar />
+  const tabLayout = useWorkspaceStore((state) => state.tabLayout)
+
+  const workspaceBody = (
+    <>
       <Toolbar />
       <MergeBanner />
       <div className="flex min-h-0 flex-1">
@@ -32,6 +34,20 @@ export function WorkspaceLayout() {
         <RightPanel />
       </div>
       <StatusBar />
+    </>
+  )
+
+  return (
+    <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
+      <TabBar />
+      {tabLayout === 'vertical' ? (
+        <div className="flex min-h-0 flex-1">
+          <VerticalTabRail />
+          <div className="flex min-w-0 flex-1 flex-col">
+            {workspaceBody}
+          </div>
+        </div>
+      ) : workspaceBody}
     </div>
   )
 }

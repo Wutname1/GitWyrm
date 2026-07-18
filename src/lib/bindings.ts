@@ -1110,7 +1110,25 @@ ui_scale?: number | null;
 /**
  * Custom tab names, keyed by repo path. Absent paths use the repo folder name.
  */
-tab_aliases?: Partial<{ [key in string]: string }> }
+tab_aliases?: Partial<{ [key in string]: string }>; 
+/**
+ * "horizontal" or "vertical". Unknown values fall back to horizontal on
+ * the frontend so older and hand-edited settings remain safe.
+ */
+tab_layout?: string | null; 
+/**
+ * Open tab groups. These disappear when their last repository is closed.
+ */
+tab_groups?: TabGroupSetting[]; 
+/**
+ * The shared order of loose repositories and groups. Group entries use a
+ * `group:<id>` marker; every other entry is a repository path.
+ */
+tab_order?: string[]; 
+/**
+ * Reusable group snapshots shown in Open a repository > Groups.
+ */
+saved_tab_groups?: TabGroupSetting[] }
 export type StashInfo = { index: number; message: string }
 /**
  * Result of a stash-save attempt. A clean working tree is a no-op, not an error.
@@ -1143,6 +1161,11 @@ behind: number;
  * False when the submodule has not been checked out (needs init).
  */
 initialized: boolean }
+/**
+ * A named set of repository tabs. Repository paths are stable across app
+ * restarts, unlike the in-memory repo ids assigned when a repository opens.
+ */
+export type TabGroupSetting = { id: string; name: string; color: string; collapsed?: boolean; repo_paths?: string[] }
 export type TagInfo = { name: string }
 export type UpdateChannel = "stable" | "beta"
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }

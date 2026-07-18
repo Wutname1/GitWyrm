@@ -60,7 +60,7 @@ function AppInner() {
     launched.current = true
 
     void (async () => {
-      const { hydrate, addRepo, setActiveRepo } = useWorkspaceStore.getState()
+      const { hydrate, addRepo, setActiveRepo, finishRepoRestore } = useWorkspaceStore.getState()
       const settings = await hydrate()
 
       const openReposList = settings.open_repos ?? []
@@ -87,6 +87,7 @@ function AppInner() {
           toast.error(`Failed to reopen ${path}: ${(e as Error).message}`)
         }
       }
+      finishRepoRestore()
       if (lastOpenedId) setActiveRepo(lastOpenedId)
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps

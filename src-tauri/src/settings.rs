@@ -55,6 +55,19 @@ pub struct ColumnLayout {
   pub hidden: Vec<String>,
 }
 
+/// A named set of repository tabs. Repository paths are stable across app
+/// restarts, unlike the in-memory repo ids assigned when a repository opens.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct TabGroupSetting {
+  pub id: String,
+  pub name: String,
+  pub color: String,
+  #[serde(default)]
+  pub collapsed: bool,
+  #[serde(default)]
+  pub repo_paths: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Settings {
   /// Paths of repos open in tabs, in tab order, so they can be reopened on launch.
@@ -99,6 +112,20 @@ pub struct Settings {
   /// Custom tab names, keyed by repo path. Absent paths use the repo folder name.
   #[serde(default)]
   pub tab_aliases: HashMap<String, String>,
+  /// "horizontal" or "vertical". Unknown values fall back to horizontal on
+  /// the frontend so older and hand-edited settings remain safe.
+  #[serde(default)]
+  pub tab_layout: Option<String>,
+  /// Open tab groups. These disappear when their last repository is closed.
+  #[serde(default)]
+  pub tab_groups: Vec<TabGroupSetting>,
+  /// The shared order of loose repositories and groups. Group entries use a
+  /// `group:<id>` marker; every other entry is a repository path.
+  #[serde(default)]
+  pub tab_order: Vec<String>,
+  /// Reusable group snapshots shown in Open a repository > Groups.
+  #[serde(default)]
+  pub saved_tab_groups: Vec<TabGroupSetting>,
 }
 
 fn default_update_channel() -> UpdateChannel {
@@ -123,6 +150,10 @@ impl Default for Settings {
       enable_worktrees: false,
       ui_scale: None,
       tab_aliases: HashMap::new(),
+      tab_layout: None,
+      tab_groups: Vec::new(),
+      tab_order: Vec::new(),
+      saved_tab_groups: Vec::new(),
     }
   }
 }
@@ -153,4 +184,45 @@ pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), Ap
   let json = serde_json::to_string_pretty(&settings).map_err(|e| AppError::Other(e.to_string()))?;
   fs::write(path, json)?;
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn older_settings_default_tab_group_fields() {
+    let settings: Settings = serde_json::from_str("{}").expect("empty settings should load");
+
+    assert!(settings.tab_layout.is_none());
+    assert!(settings.tab_groups.is_empty());
+    assert!(settings.tab_order.is_empty());
+    assert!(settings.saved_tab_groups.is_empty());
+  }
+
+  #[test]
+  fn tab_groups_round_trip_through_settings_json() {
+    let mut settings = Settings {
+      tab_layout: Some("vertical".to_string()),
+      tab_order: vec!["group:work".to_string(), "C:\\code\\loose".to_string()],
+      ..Settings::default()
+    };
+    settings.tab_groups.push(TabGroupSetting {
+      id: "work".to_string(),
+      name: "Work".to_string(),
+      color: "#2dd4bf".to_string(),
+      collapsed: true,
+      repo_paths: vec!["C:\\code\\GitWyrm".to_string()],
+    });
+    settings.saved_tab_groups = settings.tab_groups.clone();
+
+    let json = serde_json::to_string(&settings).expect("settings should serialize");
+    let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
+
+    assert_eq!(restored.tab_layout.as_deref(), Some("vertical"));
+    assert_eq!(restored.tab_order, settings.tab_order);
+    assert_eq!(restored.tab_groups[0].name, "Work");
+    assert!(restored.tab_groups[0].collapsed);
+    assert_eq!(restored.saved_tab_groups[0].repo_paths, vec!["C:\\code\\GitWyrm"]);
+  }
 }

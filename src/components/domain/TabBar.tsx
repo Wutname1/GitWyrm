@@ -1,20 +1,19 @@
-import { useEffect, useState } from 'react'
-import { BookOpen, ChevronDown, Clock, Loader2, Pencil, Plus, RefreshCw, Settings, X } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import type { RepoInfo } from '@/lib/bindings'
+  BookOpen,
+  ChevronDown,
+  Clock,
+  Columns3,
+  Loader2,
+  PanelLeft,
+  Plus,
+  RefreshCw,
+  Settings,
+} from 'lucide-react'
+import { toast } from 'sonner'
 import { WindowControls } from '@/components/domain/WindowControls'
+import { RepositoryTabs } from '@/components/domain/RepositoryTabs'
 import { WyrmExplosion, useWyrmEasterEgg } from '@/components/domain/WyrmEasterEgg'
 import logoUrl from '@/assets/logo.png'
-import { commands } from '@/lib/bindings'
 import { useOpenRepo } from '@/hooks/useRepoActions'
 import { useUpdater } from '@/hooks/useUpdater'
 import { useUiStore } from '@/stores/uiStore'
@@ -33,10 +32,14 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Tooltip,
+  TooltipButton,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 const DOCS_URL = 'https://github.com/Wutname1/GitWyrm'
-
-const TAB_DOTS = ['var(--gw-accent)', '#38bdf8', '#f59e0b', '#e06b9a', '#a78bfa']
 
 function Wordmark() {
   return (
@@ -55,7 +58,7 @@ function openDocs() {
 }
 
 function BrandMark() {
-  const showSettings = useUiStore((s) => s.showSettings)
+  const showSettings = useUiStore((state) => state.showSettings)
   const { checkAndInstall } = useUpdater()
   const { onLogoClick, bounceNonce, blast } = useWyrmEasterEgg()
 
@@ -100,90 +103,91 @@ function BrandMark() {
   )
 }
 
-/** Renames a tab. An empty name clears the alias, restoring the folder name. */
-function RenameTabDialog({
-  repo,
-  currentName,
-  onOpenChange,
-  onConfirm,
-}: {
-  repo: RepoInfo
-  currentName: string
-  onOpenChange: (open: boolean) => void
-  onConfirm: (alias: string) => void
-}) {
-  const [value, setValue] = useState(currentName)
-
-  useEffect(() => {
-    setValue(currentName)
-  }, [currentName])
-
-  const submit = () => onConfirm(value)
+function RecentRepositories() {
+  const recents = useWorkspaceStore((state) => state.recents)
+  const openRepo = useOpenRepo()
 
   return (
-    <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
-        <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
-          <DialogTitle className="flex items-center gap-2 text-sm">
-            <Pencil size={15} strokeWidth={1.9} />
-            Rename tab
-          </DialogTitle>
-        </DialogHeader>
+    <Tooltip>
+      <DropdownMenu>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="Recent repositories"
+              className="flex items-center px-2 text-sub hover:text-foreground"
+            >
+              <ChevronDown size={14} strokeWidth={2} />
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Recent repositories</TooltipContent>
+        <DropdownMenuContent align="start" className="w-[300px] p-2">
+          <DropdownMenuLabel className="px-1.5 py-1 text-[9.5px] font-semibold tracking-[.09em] text-muted-foreground">
+            RECENT
+          </DropdownMenuLabel>
+          {recents.length === 0 && (
+            <div className="px-1.5 py-2 text-xs text-muted-foreground">No recent repositories</div>
+          )}
+          {recents.map((repo) => (
+            <DropdownMenuItem
+              key={repo.path}
+              className="gap-2 text-xs text-sub"
+              onClick={() => openRepo.mutate(repo.path)}
+            >
+              <Clock size={13} strokeWidth={2} />
+              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{repo.name}</span>
+              <span className="font-mono text-[9px] text-muted-foreground">{repo.path}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </Tooltip>
+  )
+}
 
-        <div className="grid gap-1.5 px-4 py-4">
-          <label className="text-[11px] font-semibold text-sub">Tab name</label>
-          <Input
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit()
-            }}
-            placeholder={repo.name}
-            className="h-auto bg-background py-1.5 text-xs"
-            autoFocus
-          />
-          <p className="text-[10.5px] text-muted-foreground">Leave blank to use the folder name.</p>
-        </div>
-
-        <DialogFooter className="flex justify-end gap-2 border-t border-border px-4 py-3">
-          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={submit}>
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
+  const openModal = useUiStore((state) => state.openModal)
+  const openRepo = useOpenRepo()
+  return (
+    <TooltipButton
+      onClick={() => openModal('clone')}
+      className={compact
+        ? 'flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground'
+        : 'flex items-center px-2 text-sub hover:text-foreground'}
+      tooltip="Open or clone a repository"
+      disabled={openRepo.isPending}
+    >
+      {openRepo.isPending
+        ? <Loader2 size={15} strokeWidth={2} className="animate-spin text-primary" />
+        : <Plus size={15} strokeWidth={2} />}
+    </TooltipButton>
   )
 }
 
 export function TabBar() {
-  const openRepos = useWorkspaceStore((s) => s.openRepos)
-  const activeRepoId = useWorkspaceStore((s) => s.activeRepoId)
-  const setActiveRepo = useWorkspaceStore((s) => s.setActiveRepo)
-  const removeRepo = useWorkspaceStore((s) => s.removeRepo)
-  const recents = useWorkspaceStore((s) => s.recents)
-  const tabAliases = useWorkspaceStore((s) => s.tabAliases)
-  const setTabAlias = useWorkspaceStore((s) => s.setTabAlias)
-  const showSettings = useUiStore((s) => s.showSettings)
-  const openModal = useUiStore((s) => s.openModal)
-  const openRepo = useOpenRepo()
-  const [renaming, setRenaming] = useState<RepoInfo | null>(null)
+  const tabLayout = useWorkspaceStore((state) => state.tabLayout)
+  const activeRepoId = useWorkspaceStore((state) => state.activeRepoId)
+  const activeRepo = useWorkspaceStore((state) => state.openRepos.find((repo) => repo.id === activeRepoId))
+  const setTabLayout = useWorkspaceStore((state) => state.setTabLayout)
+  const showSettings = useUiStore((state) => state.showSettings)
 
-  const closeTab = (id: string) => {
-    commands.closeRepo(id)
-    removeRepo(id)
+  if (tabLayout === 'vertical') {
+    return (
+      <div
+        data-tauri-drag-region
+        data-dim-on-drag
+        className="flex h-9 flex-none items-center border-b border-border bg-background pl-2.5"
+      >
+        <div className="mr-4 flex items-center">
+          <BrandMark />
+        </div>
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[9.5px] text-muted-foreground">
+          {activeRepo?.path ?? ''}
+        </span>
+        <WindowControls />
+      </div>
+    )
   }
-  const closeOthers = (keepId: string) => {
-    for (const r of openRepos) if (r.id !== keepId) closeTab(r.id)
-  }
-  const closeToRight = (id: string) => {
-    const idx = openRepos.findIndex((r) => r.id === id)
-    if (idx === -1) return
-    for (const r of openRepos.slice(idx + 1)) closeTab(r.id)
-  }
-  const tabName = (r: RepoInfo) => tabAliases[r.path] ?? r.name
 
   return (
     <div
@@ -194,127 +198,73 @@ export function TabBar() {
       <div className="mr-1 flex items-center border-r border-border pr-3">
         <BrandMark />
       </div>
-
-      {openRepos.map((r, i) => (
-        <ContextMenu key={r.id}>
-          <ContextMenuTrigger asChild>
-            <div
-              onClick={() => setActiveRepo(r.id)}
-              className={cn(
-                'group flex cursor-pointer items-center gap-[7px] border-r border-border border-t-2 px-3 text-xs',
-                r.id === activeRepoId
-                  ? 'border-t-primary bg-panel font-semibold text-foreground'
-                  : 'border-t-transparent text-sub'
-              )}
-            >
-              <span
-                className="size-[7px] flex-none rounded-[2px]"
-                style={{ background: TAB_DOTS[i % TAB_DOTS.length] }}
-              />
-              <span className="whitespace-nowrap">{tabName(r)}</span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  closeTab(r.id)
-                }}
-                className="ml-0.5 flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground group-hover:opacity-100"
-                title="Close repository"
-              >
-                <X size={11} />
-              </button>
-            </div>
-          </ContextMenuTrigger>
-          <ContextMenuContent className="w-48">
-            <ContextMenuItem onSelect={() => setRenaming(r)}>
-              <Pencil size={13} strokeWidth={2} />
-              Rename tab
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-            <ContextMenuItem onSelect={() => closeTab(r.id)}>
-              <X size={13} strokeWidth={2} />
-              Close tab
-            </ContextMenuItem>
-            <ContextMenuItem
-              disabled={openRepos.length <= 1}
-              onSelect={() => closeOthers(r.id)}
-            >
-              Close other tabs
-            </ContextMenuItem>
-            <ContextMenuItem
-              disabled={i === openRepos.length - 1}
-              onSelect={() => closeToRight(r.id)}
-            >
-              Close tabs to the right
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
-      ))}
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button className="flex items-center px-2 text-sub hover:text-foreground" title="Recent repositories">
-            <ChevronDown size={14} strokeWidth={2} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-[300px] p-2">
-          <DropdownMenuLabel className="px-1.5 py-1 text-[9.5px] font-semibold tracking-[.09em] text-muted-foreground">
-            RECENT
-          </DropdownMenuLabel>
-          {recents.length === 0 && (
-            <div className="px-1.5 py-2 text-xs text-muted-foreground">No recent repositories</div>
-          )}
-          {recents.map((r) => (
-            <DropdownMenuItem
-              key={r.path}
-              className="gap-2 text-xs text-sub"
-              onClick={() => openRepo.mutate(r.path)}
-            >
-              <Clock size={13} strokeWidth={2} />
-              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{r.name}</span>
-              <span className="font-mono text-[9px] text-muted-foreground">{r.path}</span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <button
-        onClick={() => openModal('clone')}
+      <RepositoryTabs orientation="horizontal" />
+      <RecentRepositories />
+      <OpenRepositoryButton />
+      <div data-tauri-drag-region className="min-w-3 flex-1" />
+      <TooltipButton
+        onClick={() => {
+          setTabLayout('vertical')
+          toast.success('Repository tabs moved to the left side')
+        }}
         className="flex items-center px-2 text-sub hover:text-foreground"
-        title="Open or clone a repository"
-        disabled={openRepo.isPending}
+        tooltip="Use vertical tabs"
       >
-        {openRepo.isPending ? (
-          <Loader2 size={15} strokeWidth={2} className="animate-spin text-primary" />
-        ) : (
-          <Plus size={15} strokeWidth={2} />
-        )}
-      </button>
-
-      <div data-tauri-drag-region className="flex-1" />
-
-      <button
+        <PanelLeft size={15} strokeWidth={1.9} />
+      </TooltipButton>
+      <TooltipButton
         onClick={() => showSettings()}
         className="flex items-center px-2 text-sub hover:text-foreground"
-        title="Settings"
+        tooltip="Settings"
       >
         <Settings size={15} strokeWidth={1.9} />
-      </button>
-
+      </TooltipButton>
       <WindowControls />
-
-      {renaming && (
-        <RenameTabDialog
-          repo={renaming}
-          currentName={tabAliases[renaming.path] ?? ''}
-          onOpenChange={(open) => {
-            if (!open) setRenaming(null)
-          }}
-          onConfirm={(alias) => {
-            setTabAlias(renaming.path, alias)
-            setRenaming(null)
-          }}
-        />
-      )}
     </div>
+  )
+}
+
+export function VerticalTabRail() {
+  const openRepos = useWorkspaceStore((state) => state.openRepos)
+  const setTabLayout = useWorkspaceStore((state) => state.setTabLayout)
+  const showSettings = useUiStore((state) => state.showSettings)
+
+  return (
+    <aside className="flex w-[248px] flex-none flex-col border-r border-border bg-[color:#0d1218]">
+      <div className="flex h-[42px] flex-none items-center justify-between border-b border-border px-2.5 pl-3">
+        <span className="font-wordmark text-[9px] font-semibold tracking-[.085em] text-sub">
+          REPOSITORIES · {openRepos.length}
+        </span>
+        <OpenRepositoryButton compact />
+      </div>
+      <RepositoryTabs orientation="vertical" />
+      <div className="flex flex-none gap-1.5 border-t border-border p-2">
+        <button
+          type="button"
+          onClick={() => useUiStore.getState().openModal('clone')}
+          className="flex h-[31px] flex-1 items-center justify-center gap-1.5 rounded-[5px] border border-border bg-panel2 text-[11px] text-foreground hover:border-muted-foreground hover:bg-panel3"
+        >
+          <Plus size={13} />
+          Open a repository
+        </button>
+        <TooltipButton
+          onClick={() => {
+            setTabLayout('horizontal')
+            toast.success('Repository tabs moved to the top')
+          }}
+          className="flex size-[31px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
+          tooltip="Use top tabs"
+        >
+          <Columns3 size={14} />
+        </TooltipButton>
+        <TooltipButton
+          onClick={() => showSettings()}
+          className="flex size-[31px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
+          tooltip="Settings"
+        >
+          <Settings size={14} />
+        </TooltipButton>
+      </div>
+    </aside>
   )
 }

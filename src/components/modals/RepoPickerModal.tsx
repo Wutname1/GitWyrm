@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Clock, Download, Folder, FolderGit2, FolderSearch, RefreshCw } from 'lucide-react'
+import { Clock, Download, Folder, FolderGit2, FolderSearch, Layers3, Loader2, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { listen } from '@tauri-apps/api/event'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { TooltipButton } from '@/components/ui/tooltip'
 import { commands } from '@/lib/bindings'
 import { joinPath, normalizePath } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
@@ -64,7 +65,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-type Tab = 'open' | 'clone'
+type Tab = 'open' | 'clone' | 'groups'
 
 export function RepoPickerModal() {
   const open = useUiStore((s) => s.activeModal === 'clone')
@@ -80,6 +81,8 @@ export function RepoPickerModal() {
   const cloneDirectory = useWorkspaceStore((s) => s.cloneDirectory)
   const setCloneDirectory = useWorkspaceStore((s) => s.setCloneDirectory)
   const addRepo = useWorkspaceStore((s) => s.addRepo)
+  const savedTabGroups = useWorkspaceStore((s) => s.savedTabGroups)
+  const deleteSavedTabGroup = useWorkspaceStore((s) => s.deleteSavedTabGroup)
 
   const scanned = useCodeFolderRepos()
   const openRepo = useOpenRepo()
@@ -97,6 +100,7 @@ export function RepoPickerModal() {
   const [folderTouched, setFolderTouched] = useState(false)
   const [cloning, setCloning] = useState(false)
   const [progress, setProgress] = useState('')
+  const [openingGroupId, setOpeningGroupId] = useState<string | null>(null)
 
   useEffect(() => {
     setDest(defaultDest)
@@ -171,6 +175,51 @@ export function RepoPickerModal() {
     }
   }
 
+  const openSavedGroup = async (groupId: string) => {
+    const group = savedTabGroups.find((candidate) => candidate.id === groupId)
+    if (!group || openingGroupId) return
+    setOpeningGroupId(groupId)
+    const toastId = toast.loading(`Opening ${group.name}…`)
+    const openedPaths: string[] = []
+    const failures: string[] = []
+    try {
+      for (const path of group.repoPaths) {
+        const alreadyOpen = useWorkspaceStore.getState().openRepos.find(
+          (repo) => normalizePath(repo.path).toLowerCase() === normalizePath(path).toLowerCase(),
+        )
+        if (alreadyOpen) {
+          openedPaths.push(alreadyOpen.path)
+          continue
+        }
+        try {
+          const repo = unwrap(await commands.openRepo(path))
+          addRepo(repo)
+          openedPaths.push(repo.path)
+        } catch {
+          failures.push(path)
+        }
+      }
+      if (openedPaths.length > 0) {
+        useWorkspaceStore.getState().createTabGroup(openedPaths, {
+          id: group.id,
+          name: group.name,
+          color: group.color,
+        })
+        closeModal()
+      }
+      if (failures.length === 0) {
+        toast.success(`Opened ${group.name} with ${openedPaths.length} repositories`)
+      } else if (openedPaths.length > 0) {
+        toast.warning(`Opened ${group.name}, but ${failures.length} ${failures.length === 1 ? 'repository was' : 'repositories were'} unavailable`)
+      } else {
+        toast.error(`None of the repositories in ${group.name} could be opened`)
+      }
+    } finally {
+      toast.dismiss(toastId)
+      setOpeningGroupId(null)
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !cloning && closeModal()}>
       <DialogContent className="gap-0 p-0 sm:max-w-lg" aria-describedby={undefined}>
@@ -181,6 +230,7 @@ export function RepoPickerModal() {
               [
                 ['open', 'Open', <FolderGit2 key="i" size={13} />],
                 ['clone', 'Clone', <Download key="i" size={13} />],
+                ['groups', 'Groups', <Layers3 key="i" size={13} />],
               ] as [Tab, string, React.ReactNode][]
             ).map(([key, label, icon]) => (
               <button
@@ -368,6 +418,65 @@ export function RepoPickerModal() {
             >
               {cloning ? 'Cloning…' : 'Clone repository'}
             </Button>
+          </div>
+        )}
+
+        {tab === 'groups' && (
+          <div className="max-h-[420px] min-h-48 overflow-y-auto px-1.5 pb-3">
+            <SectionLabel>SAVED GROUPS</SectionLabel>
+            {savedTabGroups.length === 0 ? (
+              <div className="mx-2.5 mt-2 rounded-md border border-dashed border-border px-5 py-8 text-center">
+                <Layers3 size={22} strokeWidth={1.5} className="mx-auto mb-2 text-muted-foreground" />
+                <div className="text-xs font-semibold text-foreground">No saved groups yet</div>
+                <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                  Right-click an open group and choose Save group.
+                </p>
+              </div>
+            ) : savedTabGroups.map((group) => {
+              const opening = openingGroupId === group.id
+              return (
+                <div
+                  key={group.id}
+                  className="group/saved flex items-center gap-2.5 rounded-md px-2.5 py-2 hover:bg-panel3"
+                >
+                  <span
+                    className="grid size-8 flex-none place-items-center rounded-md border border-border bg-background"
+                    style={{ color: group.color }}
+                  >
+                    <Layers3 size={15} strokeWidth={1.9} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-semibold text-foreground">{group.name}</span>
+                    <span className="block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[9.5px] text-muted-foreground">
+                      {group.repoPaths.map((path) => path.split('\\').pop() ?? path).join(' · ')}
+                    </span>
+                  </span>
+                  <span className="flex-none text-[10px] text-sub">
+                    {group.repoPaths.length} {group.repoPaths.length === 1 ? 'repo' : 'repos'}
+                  </span>
+                  <TooltipButton
+                    tooltip={`Delete ${group.name}`}
+                    onClick={() => {
+                      deleteSavedTabGroup(group.id)
+                      toast.success(`${group.name} removed from saved groups`)
+                    }}
+                    disabled={openingGroupId != null}
+                    className="grid size-7 flex-none place-items-center rounded-[5px] text-muted-foreground opacity-0 hover:bg-background hover:text-removed group-hover/saved:opacity-100"
+                  >
+                    <Trash2 size={12} />
+                  </TooltipButton>
+                  <Button
+                    size="sm"
+                    className="h-7 min-w-20 gap-1.5 text-[11px]"
+                    disabled={openingGroupId != null}
+                    onClick={() => void openSavedGroup(group.id)}
+                  >
+                    {opening ? <Loader2 size={12} className="animate-spin" /> : null}
+                    {opening ? 'Opening…' : 'Open group'}
+                  </Button>
+                </div>
+              )
+            })}
           </div>
         )}
       </DialogContent>

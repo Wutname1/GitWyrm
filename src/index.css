@@ -26,6 +26,18 @@
   app-region: no-drag;
 }
 
+.gw-tab-scroll {
+  scrollbar-width: none;
+}
+
+.gw-tab-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.gw-tab-group {
+  --tab-group-color: var(--gw-accent);
+}
+
 :root {
   /* GitWyrm design tokens (from GitWyrmFinal design) */
   --gw-bg: #0b0f14;

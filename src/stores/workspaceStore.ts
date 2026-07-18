@@ -11,6 +11,29 @@ export interface RecentRepo {
 
 export type UpdateChannel = 'stable' | 'beta'
 export type CommitButtonMode = 'commit' | 'commit_push'
+export type TabLayout = 'horizontal' | 'vertical'
+export type TabDropPlacement = 'before' | 'after'
+
+export interface TabGroup {
+  id: string
+  name: string
+  color: string
+  collapsed: boolean
+  repoPaths: string[]
+}
+
+export interface SavedTabGroup {
+  id: string
+  name: string
+  color: string
+  repoPaths: string[]
+}
+
+export type TabOrderItem =
+  | { type: 'repo'; path: string }
+  | { type: 'group'; id: string }
+
+export const TAB_GROUP_COLORS = ['#2dd4a7', '#38bdf8', '#a78bfa', '#f59e0b', '#f472b6', '#f87171'] as const
 export type { BranchSwitchMode }
 
 /** Whole-app zoom limits and step, shared by the store and the status-bar control. */
@@ -24,6 +47,120 @@ export function clampUiScale(scale: number): number {
   if (!Number.isFinite(scale)) return DEFAULT_UI_SCALE
   const clamped = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, scale))
   return Math.round(clamped * 100) / 100
+}
+
+function pathKey(path: string): string {
+  return normalizePath(path).toLowerCase()
+}
+
+function samePath(left: string, right: string): boolean {
+  return pathKey(left) === pathKey(right)
+}
+
+function groupMarker(groupId: string): string {
+  return `group:${groupId}`
+}
+
+function groupForPath(groups: TabGroup[], path: string): TabGroup | undefined {
+  return groups.find((group) => group.repoPaths.some((candidate) => samePath(candidate, path)))
+}
+
+function orderedRepoPaths(state: Pick<WorkspaceState, 'tabGroups' | 'tabOrder'>): string[] {
+  return state.tabOrder.flatMap((item) => {
+    if (item.type === 'repo') return [item.path]
+    return state.tabGroups.find((group) => group.id === item.id)?.repoPaths ?? []
+  })
+}
+
+function serializeTabOrder(order: TabOrderItem[]): string[] {
+  return order.map((item) => item.type === 'group' ? groupMarker(item.id) : item.path)
+}
+
+interface StoredTabGroup {
+  id: string
+  name: string
+  color: string
+  collapsed?: boolean
+  repo_paths?: string[]
+}
+
+function deserializeTabGroups(groups: StoredTabGroup[] | undefined): TabGroup[] {
+  const seen = new Set<string>()
+  const result: TabGroup[] = []
+  for (const group of groups ?? []) {
+    if (!group.id || seen.has(group.id)) continue
+    const repoPaths = [...new Map((group.repo_paths ?? []).map((path) => [pathKey(path), normalizePath(path)])).values()]
+    if (repoPaths.length === 0) continue
+    seen.add(group.id)
+    result.push({
+      id: group.id,
+      name: group.name.trim() || 'New group',
+      color: group.color || TAB_GROUP_COLORS[0],
+      collapsed: group.collapsed ?? false,
+      repoPaths,
+    })
+  }
+  return result
+}
+
+function deserializeSavedTabGroups(groups: StoredTabGroup[] | undefined): SavedTabGroup[] {
+  return deserializeTabGroups(groups).map(({ id, name, color, repoPaths }) => ({ id, name, color, repoPaths }))
+}
+
+function deserializeTabOrder(order: string[] | undefined, groups: TabGroup[]): TabOrderItem[] {
+  const result: TabOrderItem[] = []
+  const seenGroups = new Set<string>()
+  const seenRepos = new Set<string>()
+  const groupedPaths = new Set(groups.flatMap((group) => group.repoPaths.map(pathKey)))
+  const groupIds = new Set(groups.map((group) => group.id))
+
+  for (const value of order ?? []) {
+    if (value.startsWith('group:')) {
+      const id = value.slice('group:'.length)
+      if (groupIds.has(id) && !seenGroups.has(id)) {
+        seenGroups.add(id)
+        result.push({ type: 'group', id })
+      }
+      continue
+    }
+    const normalized = normalizePath(value)
+    const key = pathKey(normalized)
+    if (!groupedPaths.has(key) && !seenRepos.has(key)) {
+      seenRepos.add(key)
+      result.push({ type: 'repo', path: normalized })
+    }
+  }
+  for (const group of groups) {
+    if (!seenGroups.has(group.id)) result.push({ type: 'group', id: group.id })
+  }
+  return result
+}
+
+function removePathFromWorkspace(
+  groups: TabGroup[],
+  order: TabOrderItem[],
+  repoPath: string,
+): { groups: TabGroup[]; order: TabOrderItem[] } {
+  const nextGroups = groups
+    .map((group) => ({ ...group, repoPaths: group.repoPaths.filter((path) => !samePath(path, repoPath)) }))
+    .filter((group) => group.repoPaths.length > 0)
+  const survivingGroups = new Set(nextGroups.map((group) => group.id))
+  const nextOrder = order.filter((item) => {
+    if (item.type === 'repo') return !samePath(item.path, repoPath)
+    return survivingGroups.has(item.id)
+  })
+  return { groups: nextGroups, order: nextOrder }
+}
+
+function workspaceIndexForPath(groups: TabGroup[], order: TabOrderItem[], repoPath: string): number {
+  const group = groupForPath(groups, repoPath)
+  return order.findIndex((item) => group
+    ? item.type === 'group' && item.id === group.id
+    : item.type === 'repo' && samePath(item.path, repoPath))
+}
+
+function newGroupId(): string {
+  return `group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
 interface WorkspaceState {
@@ -59,6 +196,14 @@ interface WorkspaceState {
   uiScale: number
   /** Custom tab names, keyed by repo path. Missing paths use the repo folder name (persisted). */
   tabAliases: Record<string, string>
+  /** Whether repository tabs run across the top or down the left side (persisted). */
+  tabLayout: TabLayout
+  /** Groups that currently wrap open repository tabs (persisted while open). */
+  tabGroups: TabGroup[]
+  /** Shared order of loose repository tabs and complete groups (persisted). */
+  tabOrder: TabOrderItem[]
+  /** Reusable group snapshots available from the repository picker (persisted). */
+  savedTabGroups: SavedTabGroup[]
   /** True once settings.json has been read on launch. */
   hydrated: boolean
 
@@ -73,10 +218,26 @@ interface WorkspaceState {
   setAiInstruction: (instruction: string | null) => void
   setCommitButtonMode: (mode: CommitButtonMode) => void
   setEnableWorktrees: (enabled: boolean) => void
+  setTabLayout: (layout: TabLayout) => void
   /** Set the whole-app zoom factor (clamped to the supported range). */
   setUiScale: (scale: number) => void
   /** Rename a tab by repo path. An empty/blank alias clears it (back to the folder name). */
   setTabAlias: (path: string, alias: string) => void
+  createTabGroup: (repoPaths: string[], options?: { name?: string; color?: string; id?: string }) => string
+  addRepoToGroup: (repoPath: string, groupId: string) => void
+  removeRepoFromGroup: (repoPath: string) => void
+  renameTabGroup: (groupId: string, name: string) => void
+  setTabGroupColor: (groupId: string, color: string) => void
+  toggleTabGroup: (groupId: string) => void
+  ungroupTabGroup: (groupId: string) => void
+  removeTabGroup: (groupId: string) => void
+  saveTabGroup: (groupId: string) => void
+  deleteSavedTabGroup: (groupId: string) => void
+  moveRepoBeside: (sourcePath: string, targetPath: string, placement: TabDropPlacement) => void
+  moveRepoToOrder: (repoPath: string, orderIndex: number) => void
+  moveGroupToOrder: (groupId: string, orderIndex: number) => void
+  /** Removes paths that failed to reopen after launch. */
+  finishRepoRestore: () => void
   /** Move a column to a new index in the display order. */
   reorderColumn: (id: ColumnId, toIndex: number) => void
   /** Show or hide a column. */
@@ -90,7 +251,7 @@ interface WorkspaceState {
 /** Fields persisted to settings.json (excludes in-memory-only state like openRepos handles). */
 function toSettings(s: WorkspaceState): Settings {
   return {
-    open_repos: s.openRepos.map((r) => r.path),
+    open_repos: orderedRepoPaths(s).filter((path) => s.openRepos.some((repo) => samePath(repo.path, path))),
     active_repo_path: s.openRepos.find((r) => r.id === s.activeRepoId)?.path ?? null,
     recents: s.recents.map((r) => ({ name: r.name, path: r.path })),
     code_folder: s.codeFolder,
@@ -105,6 +266,22 @@ function toSettings(s: WorkspaceState): Settings {
     enable_worktrees: s.enableWorktrees,
     ui_scale: s.uiScale,
     tab_aliases: s.tabAliases,
+    tab_layout: s.tabLayout,
+    tab_groups: s.tabGroups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      color: group.color,
+      collapsed: group.collapsed,
+      repo_paths: group.repoPaths,
+    })),
+    tab_order: serializeTabOrder(s.tabOrder),
+    saved_tab_groups: s.savedTabGroups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      color: group.color,
+      collapsed: false,
+      repo_paths: group.repoPaths,
+    })),
   }
 }
 
@@ -180,27 +357,50 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   enableWorktrees: false,
   uiScale: DEFAULT_UI_SCALE,
   tabAliases: {},
+  tabLayout: 'horizontal',
+  tabGroups: [],
+  tabOrder: [],
+  savedTabGroups: [],
   hydrated: false,
 
   addRepo: (repo) => {
     set((s) => {
-      const openRepos = s.openRepos.some((r) => r.id === repo.id)
+      const openRepos = s.openRepos.some((r) => r.id === repo.id || samePath(r.path, repo.path))
         ? s.openRepos
         : [...s.openRepos, repo]
+      const represented = s.tabOrder.some((item) => item.type === 'repo' && samePath(item.path, repo.path))
+        || groupForPath(s.tabGroups, repo.path) != null
+      const tabOrder = represented ? s.tabOrder : [...s.tabOrder, { type: 'repo' as const, path: repo.path }]
       const recents = [
         { name: repo.name, path: repo.path },
         ...s.recents.filter((r) => r.path !== repo.path),
       ].slice(0, 10)
-      return { openRepos, activeRepoId: repo.id, recents }
+      return { openRepos, activeRepoId: repo.id, recents, tabOrder }
     })
     schedulePersist()
   },
   removeRepo: (id) => {
     set((s) => {
+      const removed = s.openRepos.find((repo) => repo.id === id)
       const openRepos = s.openRepos.filter((r) => r.id !== id)
+      const workspace = removed
+        ? removePathFromWorkspace(s.tabGroups, s.tabOrder, removed.path)
+        : { groups: s.tabGroups, order: s.tabOrder }
+      const orderedRemaining = workspace.order.flatMap((item) => {
+        if (item.type === 'repo') return [item.path]
+        return workspace.groups.find((group) => group.id === item.id)?.repoPaths ?? []
+      })
+      const nextActivePath = orderedRemaining.find((path) => openRepos.some((repo) => samePath(repo.path, path)))
       const activeRepoId =
-        s.activeRepoId === id ? (openRepos[0]?.id ?? null) : s.activeRepoId
-      return { openRepos, activeRepoId }
+        s.activeRepoId === id
+          ? (openRepos.find((repo) => nextActivePath && samePath(repo.path, nextActivePath))?.id ?? openRepos[0]?.id ?? null)
+          : s.activeRepoId
+      return {
+        openRepos,
+        activeRepoId,
+        tabGroups: workspace.groups,
+        tabOrder: workspace.order,
+      }
     })
     schedulePersist()
   },
@@ -240,6 +440,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ enableWorktrees: enabled })
     schedulePersist()
   },
+  setTabLayout: (layout) => {
+    set({ tabLayout: layout })
+    schedulePersist()
+  },
   setUiScale: (scale) => {
     set({ uiScale: clampUiScale(scale) })
     schedulePersist()
@@ -251,6 +455,232 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       if (trimmed) next[path] = trimmed
       else delete next[path]
       return { tabAliases: next }
+    })
+    schedulePersist()
+  },
+  createTabGroup: (repoPaths, options) => {
+    const existingIds = new Set(get().tabGroups.map((group) => group.id))
+    const requestedId = options?.id
+    const id = requestedId && !existingIds.has(requestedId) ? requestedId : newGroupId()
+    set((s) => {
+      const paths = [...new Map(repoPaths
+        .filter((path) => s.openRepos.some((repo) => samePath(repo.path, path)))
+        .map((path) => [pathKey(path), normalizePath(path)])).values()]
+      if (paths.length === 0) return s
+      const positions = paths
+        .map((path) => workspaceIndexForPath(s.tabGroups, s.tabOrder, path))
+        .filter((index) => index >= 0)
+      const insertionIndex = positions.length > 0 ? Math.min(...positions) : s.tabOrder.length
+      let groups = s.tabGroups
+      let order = s.tabOrder
+      for (const path of paths) {
+        const next = removePathFromWorkspace(groups, order, path)
+        groups = next.groups
+        order = next.order
+      }
+      const group: TabGroup = {
+        id,
+        name: options?.name?.trim() || 'New group',
+        color: options?.color || TAB_GROUP_COLORS[groups.length % TAB_GROUP_COLORS.length],
+        collapsed: false,
+        repoPaths: paths,
+      }
+      groups = [...groups, group]
+      order = [...order]
+      order.splice(Math.min(insertionIndex, order.length), 0, { type: 'group', id })
+      return { tabGroups: groups, tabOrder: order }
+    })
+    schedulePersist()
+    return id
+  },
+  addRepoToGroup: (repoPath, groupId) => {
+    set((s) => {
+      const currentGroup = groupForPath(s.tabGroups, repoPath)
+      if (currentGroup?.id === groupId) return s
+      const workspace = removePathFromWorkspace(s.tabGroups, s.tabOrder, repoPath)
+      const target = workspace.groups.find((group) => group.id === groupId)
+      if (!target) return s
+      return {
+        tabGroups: workspace.groups.map((group) => group.id === groupId
+          ? { ...group, collapsed: false, repoPaths: [...group.repoPaths, normalizePath(repoPath)] }
+          : group),
+        tabOrder: workspace.order,
+      }
+    })
+    schedulePersist()
+  },
+  removeRepoFromGroup: (repoPath) => {
+    set((s) => {
+      const group = groupForPath(s.tabGroups, repoPath)
+      if (!group) return s
+      const groupIndex = s.tabOrder.findIndex((item) => item.type === 'group' && item.id === group.id)
+      const groupWillRemain = group.repoPaths.length > 1
+      const workspace = removePathFromWorkspace(s.tabGroups, s.tabOrder, repoPath)
+      const order = [...workspace.order]
+      order.splice(Math.max(0, Math.min(groupIndex + (groupWillRemain ? 1 : 0), order.length)), 0, {
+        type: 'repo',
+        path: normalizePath(repoPath),
+      })
+      return { tabGroups: workspace.groups, tabOrder: order }
+    })
+    schedulePersist()
+  },
+  renameTabGroup: (groupId, name) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    set((s) => ({
+      tabGroups: s.tabGroups.map((group) => group.id === groupId ? { ...group, name: trimmed } : group),
+    }))
+    schedulePersist()
+  },
+  setTabGroupColor: (groupId, color) => {
+    set((s) => ({
+      tabGroups: s.tabGroups.map((group) => group.id === groupId ? { ...group, color } : group),
+    }))
+    schedulePersist()
+  },
+  toggleTabGroup: (groupId) => {
+    set((s) => ({
+      tabGroups: s.tabGroups.map((group) => group.id === groupId
+        ? { ...group, collapsed: !group.collapsed }
+        : group),
+    }))
+    schedulePersist()
+  },
+  ungroupTabGroup: (groupId) => {
+    set((s) => {
+      const group = s.tabGroups.find((candidate) => candidate.id === groupId)
+      const groupIndex = s.tabOrder.findIndex((item) => item.type === 'group' && item.id === groupId)
+      if (!group || groupIndex < 0) return s
+      const order = [...s.tabOrder]
+      order.splice(groupIndex, 1, ...group.repoPaths.map((path) => ({ type: 'repo' as const, path })))
+      return {
+        tabGroups: s.tabGroups.filter((candidate) => candidate.id !== groupId),
+        tabOrder: order,
+      }
+    })
+    schedulePersist()
+  },
+  removeTabGroup: (groupId) => {
+    set((s) => {
+      const group = s.tabGroups.find((candidate) => candidate.id === groupId)
+      if (!group) return s
+      const closedKeys = new Set(group.repoPaths.map(pathKey))
+      const openRepos = s.openRepos.filter((repo) => !closedKeys.has(pathKey(repo.path)))
+      const activeRepoId = openRepos.some((repo) => repo.id === s.activeRepoId)
+        ? s.activeRepoId
+        : (openRepos[0]?.id ?? null)
+      return {
+        openRepos,
+        activeRepoId,
+        tabGroups: s.tabGroups.filter((candidate) => candidate.id !== groupId),
+        tabOrder: s.tabOrder.filter((item) => !(item.type === 'group' && item.id === groupId)),
+      }
+    })
+    schedulePersist()
+  },
+  saveTabGroup: (groupId) => {
+    set((s) => {
+      const group = s.tabGroups.find((candidate) => candidate.id === groupId)
+      if (!group) return s
+      const saved: SavedTabGroup = {
+        id: group.id,
+        name: group.name,
+        color: group.color,
+        repoPaths: [...group.repoPaths],
+      }
+      return {
+        savedTabGroups: [...s.savedTabGroups.filter((candidate) => candidate.id !== groupId), saved],
+      }
+    })
+    schedulePersist()
+  },
+  deleteSavedTabGroup: (groupId) => {
+    set((s) => ({ savedTabGroups: s.savedTabGroups.filter((group) => group.id !== groupId) }))
+    schedulePersist()
+  },
+  moveRepoBeside: (sourcePath, targetPath, placement) => {
+    if (samePath(sourcePath, targetPath)) return
+    set((s) => {
+      const targetGroupId = groupForPath(s.tabGroups, targetPath)?.id ?? null
+      const workspace = removePathFromWorkspace(s.tabGroups, s.tabOrder, sourcePath)
+      if (targetGroupId) {
+        const target = workspace.groups.find((group) => group.id === targetGroupId)
+        if (!target) return s
+        const targetIndex = target.repoPaths.findIndex((path) => samePath(path, targetPath))
+        const groups = workspace.groups.map((group) => {
+          if (group.id !== targetGroupId) return group
+          const repoPaths = [...group.repoPaths]
+          repoPaths.splice(targetIndex + (placement === 'after' ? 1 : 0), 0, normalizePath(sourcePath))
+          return { ...group, collapsed: false, repoPaths }
+        })
+        return { tabGroups: groups, tabOrder: workspace.order }
+      }
+      const targetIndex = workspace.order.findIndex((item) => item.type === 'repo' && samePath(item.path, targetPath))
+      if (targetIndex < 0) return s
+      const order = [...workspace.order]
+      order.splice(targetIndex + (placement === 'after' ? 1 : 0), 0, {
+        type: 'repo',
+        path: normalizePath(sourcePath),
+      })
+      return { tabGroups: workspace.groups, tabOrder: order }
+    })
+    schedulePersist()
+  },
+  moveRepoToOrder: (repoPath, requestedIndex) => {
+    set((s) => {
+      const sourceGroup = groupForPath(s.tabGroups, repoPath)
+      const sourceIndex = workspaceIndexForPath(s.tabGroups, s.tabOrder, repoPath)
+      const removesOrderItem = !sourceGroup || sourceGroup.repoPaths.length === 1
+      let insertAt = requestedIndex
+      if (removesOrderItem && sourceIndex >= 0 && sourceIndex < requestedIndex) insertAt -= 1
+      const workspace = removePathFromWorkspace(s.tabGroups, s.tabOrder, repoPath)
+      const order = [...workspace.order]
+      order.splice(Math.max(0, Math.min(insertAt, order.length)), 0, {
+        type: 'repo',
+        path: normalizePath(repoPath),
+      })
+      return { tabGroups: workspace.groups, tabOrder: order }
+    })
+    schedulePersist()
+  },
+  moveGroupToOrder: (groupId, requestedIndex) => {
+    set((s) => {
+      const fromIndex = s.tabOrder.findIndex((item) => item.type === 'group' && item.id === groupId)
+      if (fromIndex < 0) return s
+      let insertAt = requestedIndex
+      if (fromIndex < requestedIndex) insertAt -= 1
+      const order = [...s.tabOrder]
+      const [item] = order.splice(fromIndex, 1)
+      if (!item) return s
+      order.splice(Math.max(0, Math.min(insertAt, order.length)), 0, item)
+      return { tabOrder: order }
+    })
+    schedulePersist()
+  },
+  finishRepoRestore: () => {
+    set((s) => {
+      const openKeys = new Set(s.openRepos.map((repo) => pathKey(repo.path)))
+      const tabGroups = s.tabGroups
+        .map((group) => ({ ...group, repoPaths: group.repoPaths.filter((path) => openKeys.has(pathKey(path))) }))
+        .filter((group) => group.repoPaths.length > 0)
+      const groupIds = new Set(tabGroups.map((group) => group.id))
+      const represented = new Set(tabGroups.flatMap((group) => group.repoPaths.map(pathKey)))
+      const tabOrder = s.tabOrder.filter((item) => {
+        if (item.type === 'group') return groupIds.has(item.id)
+        const key = pathKey(item.path)
+        if (!openKeys.has(key) || represented.has(key)) return false
+        represented.add(key)
+        return true
+      })
+      for (const repo of s.openRepos) {
+        const key = pathKey(repo.path)
+        if (!represented.has(key)) {
+          represented.add(key)
+          tabOrder.push({ type: 'repo', path: repo.path })
+        }
+      }
+      return { tabGroups, tabOrder }
     })
     schedulePersist()
   },
@@ -281,6 +711,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   hydrate: async () => {
     const settings = unwrap(await commands.getSettings())
     if (!get().hydrated) {
+      const tabGroups = deserializeTabGroups(settings.tab_groups)
       set({
         recents: settings.recents ?? [],
         codeFolder: settings.code_folder ?? null,
@@ -296,6 +727,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         enableWorktrees: settings.enable_worktrees ?? false,
         uiScale: settings.ui_scale != null ? clampUiScale(settings.ui_scale) : DEFAULT_UI_SCALE,
         tabAliases: normalizeAliases(settings.tab_aliases),
+        tabLayout: settings.tab_layout === 'vertical' ? 'vertical' : 'horizontal',
+        tabGroups,
+        tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),
+        savedTabGroups: deserializeSavedTabGroups(settings.saved_tab_groups),
         hydrated: true,
       })
     }

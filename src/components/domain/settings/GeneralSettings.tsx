@@ -3,6 +3,7 @@ import {
   useWorkspaceStore,
   type BranchSwitchMode,
   type CommitButtonMode,
+  type TabLayout,
 } from '@/stores/workspaceStore'
 import { FolderSetting, SettingRow } from './SettingRow'
 
@@ -31,6 +32,8 @@ export function GeneralSettings() {
   const setCommitButtonMode = useWorkspaceStore((s) => s.setCommitButtonMode)
   const enableWorktrees = useWorkspaceStore((s) => s.enableWorktrees)
   const setEnableWorktrees = useWorkspaceStore((s) => s.setEnableWorktrees)
+  const tabLayout = useWorkspaceStore((s) => s.tabLayout)
+  const setTabLayout = useWorkspaceStore((s) => s.setTabLayout)
 
   return (
     <div>
@@ -72,6 +75,19 @@ export function GeneralSettings() {
         >
           <option value="commit">Commit only</option>
           <option value="commit_push">Commit and push</option>
+        </select>
+      </SettingRow>
+      <SettingRow
+        label="Repository tabs"
+        hint="Put repository tabs across the top or in a scrollable list on the left. Groups work in both layouts."
+      >
+        <select
+          className={selectClass}
+          value={tabLayout}
+          onChange={(event) => setTabLayout(event.target.value as TabLayout)}
+        >
+          <option value="horizontal">Across the top</option>
+          <option value="vertical">Down the left side</option>
         </select>
       </SettingRow>
       <SettingRow
