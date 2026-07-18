@@ -36,11 +36,20 @@ function AppInner() {
   const uiScale = useWorkspaceStore((s) => s.uiScale)
   const launched = useRef(false)
 
-  // Apply the user's zoom to the whole app. `zoom` scales layout and every
+  // Apply the user's zoom to the app root. `zoom` scales layout and every
   // pixel value (unlike a font-size trick), which is what we want for a
   // git client full of fixed-size rows and badges.
+  //
+  // The root is also sized to 100/scale of the viewport so that scaling it
+  // lands back at exactly the window height. Without that counter-sizing a
+  // full-height layout overflows the bottom of the window and takes the
+  // status bar (and its zoom control) off-screen with no way back.
   useEffect(() => {
-    document.documentElement.style.zoom = String(uiScale)
+    const root = document.getElementById('root')
+    if (!root) return
+    root.style.zoom = String(uiScale)
+    root.style.height = `${100 / uiScale}dvh`
+    root.style.width = `${100 / uiScale}vw`
   }, [uiScale])
 
   // On launch: restore every previously-open tab (falling back to the most

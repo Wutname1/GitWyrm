@@ -20,7 +20,7 @@ function CenterView() {
 
 export function WorkspaceLayout() {
   return (
-    <div className="flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
       <TabBar />
       <Toolbar />
       <MergeBanner />
