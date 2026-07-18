@@ -255,9 +255,13 @@ async checkoutBranch(repoId: string, name: string, mode: BranchSwitchMode) : Pro
     else return { status: "error", error: e  as any };
 }
 },
-async createBranch(repoId: string, name: string, checkout: boolean) : Promise<Result<null, string>> {
+/**
+ * Create a branch. `sha` names the commit to branch from; empty means the
+ * current HEAD. When `checkout` is set, HEAD moves onto the new branch.
+ */
+async createBranch(repoId: string, name: string, sha: string, checkout: boolean) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_branch", { repoId, name, checkout }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_branch", { repoId, name, sha, checkout }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -325,6 +329,72 @@ async moveCurrentBranch(repoId: string, sha: string) : Promise<Result<RefMove, s
 }
 },
 /**
+ * Check out a commit directly, leaving HEAD detached (not on any branch).
+ * Refused over a dirty tree so no uncommitted work is clobbered. The frontend
+ * warns that new commits here won't belong to a branch until one is made.
+ */
+async checkoutCommit(repoId: string, sha: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("checkout_commit", { repoId, sha }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reword a commit's message. Only the tip commit (HEAD) is supported: it is
+ * amended in place, keeping its tree, parent, and original author. Rewording
+ * an older commit would rewrite history below it (a rebase) and is refused.
+ */
+async rewordCommit(repoId: string, sha: string, message: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reword_commit", { repoId, sha, message }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Revert a commit: apply the inverse of its changes as a new commit on top of
+ * HEAD, so history is preserved. A clean revert commits immediately and
+ * returns no conflicts. A conflicting revert leaves REVERT_HEAD and the
+ * conflicted index for the shared conflict flow to resolve and finish.
+ */
+async revertCommit(repoId: string, sha: string) : Promise<Result<MergeResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("revert_commit", { repoId, sha }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Drop a commit from the current branch: replay every commit after it onto its
+ * parent, removing just that one. Only works on a clean linear stretch (no
+ * merge commits above the target). A conflict during replay aborts the whole
+ * operation and restores the branch, so the branch is never left half-rebased.
+ */
+async dropCommit(repoId: string, sha: string) : Promise<Result<RefMove, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("drop_commit", { repoId, sha }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * True when the repo has at least one linked worktree. Backs the auto-enable
+ * of the worktree feature so users who already work with worktrees see the UI.
+ */
+async hasWorktrees(repoId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("has_worktrees", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Resolve the origin remote's web URL for a commit, or None when it can't be
  * built (no origin, unknown host) or the commit isn't on any remote-tracking
  * branch yet (so the link would 404). Supports GitHub, GitLab, Bitbucket.
@@ -337,7 +407,7 @@ async commitWebUrl(repoId: string, sha: string) : Promise<Result<string | null, 
     else return { status: "error", error: e  as any };
 }
 },
-async stashSave(repoId: string, message: string | null) : Promise<Result<null, string>> {
+async stashSave(repoId: string, message: string | null) : Promise<Result<StashOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("stash_save", { repoId, message }) };
 } catch (e) {
@@ -348,6 +418,32 @@ async stashSave(repoId: string, message: string | null) : Promise<Result<null, s
 async stashPop(repoId: string, index: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("stash_pop", { repoId, index }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Every submodule whose checked-out commit differs from the commit the parent
+ * repo pins (plus uninitialized ones). Empty when all submodules are in sync.
+ */
+async listSubmodules(repoId: string) : Promise<Result<SubmoduleMove[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_submodules", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Snap a submodule back to the commit the parent repo records -- the submodule
+ * equivalent of discarding changes. `init` also checks out an uninitialized
+ * submodule for the first time. The recorded commit is fetched only if it is
+ * not already present locally.
+ */
+async updateSubmodule(repoId: string, path: string, init: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_submodule", { repoId, path, init }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -807,7 +903,13 @@ sign: string; old_no: number | null; new_no: number | null; text: string;
  */
 hunk_index: number }
 export type DiffSource = { kind: "staged" } | { kind: "unstaged" } | { kind: "commit"; sha: string }
-export type FileChange = { path: string; status: StatusCode; additions: number; deletions: number; conflicted: boolean }
+export type FileChange = { path: string; status: StatusCode; additions: number; deletions: number; conflicted: boolean; 
+/**
+ * Set when this path is a submodule whose pinned commit moved. Ordinary file
+ * actions (stash, discard-by-checkout) can't touch it; the UI must offer
+ * submodule-specific handling instead.
+ */
+submodule: SubmoduleMove | null }
 export type FileDiff = { path: string; 
 /**
  * Rename source path, when the delta is a rename.
@@ -883,7 +985,7 @@ conflicts: string[] }
 /**
  * A pending index-level operation that can leave conflicts to resolve.
  */
-export type OperationKind = "Merge" | "CherryPick"
+export type OperationKind = "Merge" | "CherryPick" | "Revert"
 export type PollResult = 
 /**
  * Token acquired and saved; sign-in is complete.
@@ -994,9 +1096,44 @@ column_layout?: ColumnLayout | null;
  * Default action for the commit button: "commit" or "commit_push". None
  * falls back to plain commit. Validated on the frontend.
  */
-commit_button_mode?: string | null }
+commit_button_mode?: string | null; 
+/**
+ * Show worktree actions and the worktree sidebar section. Off by default;
+ * the frontend auto-enables it when a repo already has extra worktrees.
+ */
+enable_worktrees?: boolean }
 export type StashInfo = { index: number; message: string }
+/**
+ * Result of a stash-save attempt. A clean working tree is a no-op, not an error.
+ */
+export type StashOutcome = "stashed" | "nothing_to_stash"
 export type StatusCode = "A" | "M" | "D" | "R" | "!"
+/**
+ * How a submodule's checked-out commit differs from the commit its parent repo
+ * pins. `ahead`/`behind` are the workdir commit's position relative to the
+ * recorded one.
+ */
+export type SubmoduleMove = { path: string; 
+/**
+ * Commit the parent repo records for this submodule.
+ */
+recorded_sha: string; 
+/**
+ * Commit the submodule is actually checked out at, if initialized.
+ */
+workdir_sha: string | null; 
+/**
+ * Commits the workdir is ahead of the recorded commit.
+ */
+ahead: number; 
+/**
+ * Commits the workdir is behind the recorded commit.
+ */
+behind: number; 
+/**
+ * False when the submodule has not been checked out (needs init).
+ */
+initialized: boolean }
 export type TagInfo = { name: string }
 export type UpdateChannel = "stable" | "beta"
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }

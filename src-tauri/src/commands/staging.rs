@@ -3,6 +3,7 @@ use std::path::Path;
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git::submodule::is_submodule;
 use crate::state::RepoManager;
 
 #[tauri::command]
@@ -101,6 +102,15 @@ pub async fn discard_file(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
+    // A submodule pointer can't be reset by checking out the parent's tree --
+    // that leaves the nested checkout untouched and the "change" persists. Snap
+    // the submodule back to its recorded commit instead, which is what discard
+    // means for it.
+    if is_submodule(&repo, &path) {
+      let mut sub = repo.find_submodule(&path)?;
+      sub.update(false, None)?;
+      return Ok(());
+    }
     let mut builder = git2::build::CheckoutBuilder::new();
     builder.path(&path).force().remove_untracked(true);
     repo.checkout_head(Some(&mut builder))?;

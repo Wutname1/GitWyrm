@@ -48,9 +48,16 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::branch::delete_tag,
     commands::branch::reset_current,
     commands::branch::move_current_branch,
+    commands::branch::checkout_commit,
+    commands::branch::reword_commit,
+    commands::branch::revert_commit,
+    commands::branch::drop_commit,
+    commands::branch::has_worktrees,
     commands::branch::commit_web_url,
     commands::stash::stash_save,
     commands::stash::stash_pop,
+    commands::submodule::list_submodules,
+    commands::submodule::update_submodule,
     commands::remote::git_fetch,
     commands::remote::git_pull,
     commands::remote::git_push,
@@ -91,6 +98,35 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
 }
 
 pub fn run() {
+  // Route panics through the logger so a backend crash lands in gitwyrm.log
+  // (with location + payload) instead of only the detached dev terminal.
+  let default_hook = std::panic::take_hook();
+  std::panic::set_hook(Box::new(move |info| {
+    let location = info
+      .location()
+      .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+      .unwrap_or_else(|| "unknown".into());
+    let payload = info
+      .payload()
+      .downcast_ref::<&str>()
+      .map(|s| s.to_string())
+      .or_else(|| info.payload().downcast_ref::<String>().cloned())
+      .unwrap_or_else(|| "<non-string panic payload>".into());
+    let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+    // Write synchronously to a dedicated file next to the exe. The async log
+    // plugin can be killed before it flushes when a spawn_blocking thread
+    // aborts the process, so bypass it entirely for panics.
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+      .create(true)
+      .append(true)
+      .open("gitwyrm-panic.log")
+    {
+      let _ = writeln!(f, "PANIC [thread {thread}] at {location}: {payload}");
+    }
+    default_hook(info);
+  }));
+
   let builder = specta_builder();
 
   #[cfg(debug_assertions)]

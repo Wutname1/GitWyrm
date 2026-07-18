@@ -111,6 +111,30 @@ fn is_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
   Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
 }
 
+/// True when every dirty entry is a submodule pointer move. Such changes can't
+/// be stashed or discarded by ordinary means, so branch-switch has to guide the
+/// user toward submodule-specific handling rather than the usual stash flow.
+fn only_submodule_changes(repo: &git2::Repository) -> Result<bool, AppError> {
+  let mut opts = git2::StatusOptions::new();
+  opts.include_untracked(true).recurse_untracked_dirs(true);
+  let statuses = repo.statuses(Some(&mut opts))?;
+  let mut saw_change = false;
+  for entry in statuses.iter() {
+    if entry.status().is_ignored() {
+      continue;
+    }
+    saw_change = true;
+    let path = entry.path().unwrap_or("");
+    if repo.find_submodule(path).is_err() {
+      return Ok(false);
+    }
+  }
+  Ok(saw_change)
+}
+
+/// Guidance shown when a branch switch is blocked purely by submodule moves.
+const SUBMODULE_SWITCH_HINT: &str = "a submodule points to a different commit than this branch expects. Commit the submodule change or reset the submodule to its recorded commit, then switch.";
+
 /// Move HEAD to `name` and update the working tree to its content. Uses a SAFE
 /// checkout, so git refuses to clobber conflicting local changes.
 fn switch_to(repo: &git2::Repository, name: &str) -> Result<(), AppError> {
@@ -140,6 +164,13 @@ pub async fn checkout_branch(
     if !is_dirty(&repo)? {
       switch_to(&repo, &name)?;
       return Ok(CheckoutOutcome::Clean);
+    }
+
+    // A moved submodule pointer can't be stashed or safely carried, so every
+    // mode would otherwise fail with an opaque git2 error. Detect it up front
+    // and give one clear, actionable message.
+    if only_submodule_changes(&repo)? {
+      return Err(AppError::Other(SUBMODULE_SWITCH_HINT.into()));
     }
 
     match mode {
@@ -197,22 +228,30 @@ pub async fn checkout_branch(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Create a branch. `sha` names the commit to branch from; empty means the
+/// current HEAD. When `checkout` is set, HEAD moves onto the new branch.
 #[tauri::command]
 #[specta::specta]
 pub async fn create_branch(
   manager: State<'_, RepoManager>,
   repo_id: String,
   name: String,
+  sha: String,
   checkout: bool,
 ) -> Result<(), AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    let head = repo
-      .head()?
-      .peel_to_commit()
-      .map_err(|_| AppError::Other("repository has no commits yet".into()))?;
-    repo.branch(&name, &head, false)?;
+    let target = if sha.trim().is_empty() {
+      repo
+        .head()?
+        .peel_to_commit()
+        .map_err(|_| AppError::Other("repository has no commits yet".into()))?
+    } else {
+      let oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+      repo.find_commit(oid)?
+    };
+    repo.branch(&name, &target, false)?;
     if checkout {
       let refname = format!("refs/heads/{name}");
       let object = repo.revparse_single(&refname)?;
@@ -406,6 +445,268 @@ pub async fn move_current_branch(
     repo.reset(&target, ResetType::Soft, None)?;
 
     Ok(RefMove { branch, previous_sha })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Check out a commit directly, leaving HEAD detached (not on any branch).
+/// Refused over a dirty tree so no uncommitted work is clobbered. The frontend
+/// warns that new commits here won't belong to a branch until one is made.
+#[tauri::command]
+#[specta::specta]
+pub async fn checkout_commit(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  sha: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+
+    if is_dirty(&repo)? {
+      return Err(AppError::Other(
+        "working tree has changes; commit or stash before checking out a commit".into(),
+      ));
+    }
+
+    let oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+    let object = repo.find_object(oid, None)?;
+    repo.checkout_tree(&object, Some(CheckoutBuilder::new().safe()))?;
+    repo.set_head_detached(oid)?;
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Reword a commit's message. Only the tip commit (HEAD) is supported: it is
+/// amended in place, keeping its tree, parent, and original author. Rewording
+/// an older commit would rewrite history below it (a rebase) and is refused.
+#[tauri::command]
+#[specta::specta]
+pub async fn reword_commit(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  sha: String,
+  message: String,
+) -> Result<String, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+
+    let head = repo
+      .head()?
+      .peel_to_commit()
+      .map_err(|_| AppError::Other("repository has no commits yet".into()))?;
+    let target_oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+    if head.id() != target_oid {
+      return Err(AppError::Other(
+        "only the latest commit's message can be edited right now".into(),
+      ));
+    }
+
+    let message = message.trim();
+    if message.is_empty() {
+      return Err(AppError::Other("a commit message is required".into()));
+    }
+
+    // Amend keeps the tree and parent; pass the original author so only the
+    // message (and committer) change.
+    let new_oid = head.amend(Some("HEAD"), Some(&head.author()), None, None, Some(message), None)?;
+    Ok(new_oid.to_string())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Revert a commit: apply the inverse of its changes as a new commit on top of
+/// HEAD, so history is preserved. A clean revert commits immediately and
+/// returns no conflicts. A conflicting revert leaves REVERT_HEAD and the
+/// conflicted index for the shared conflict flow to resolve and finish.
+#[tauri::command]
+#[specta::specta]
+pub async fn revert_commit(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  sha: String,
+) -> Result<crate::git::types::MergeResult, AppError> {
+  use crate::git::types::MergeResult;
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+
+    if tree_dirty(&repo)? {
+      return Err(AppError::Other(
+        "working tree has changes; commit or stash before reverting".into(),
+      ));
+    }
+
+    let oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+    let commit = repo.find_commit(oid)?;
+    if commit.parent_count() > 1 {
+      return Err(AppError::Other(
+        "that is a merge commit; reverting merges is not supported yet".into(),
+      ));
+    }
+
+    repo.revert(&commit, None)?;
+
+    let conflicts = conflicted_index_paths(&repo)?;
+    if !conflicts.is_empty() {
+      return Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts });
+    }
+
+    // Clean revert: commit the inverse as a single-parent commit.
+    let mut index = repo.index()?;
+    let tree_oid = index.write_tree()?;
+    let tree = repo.find_tree(tree_oid)?;
+    let signature = repo.signature()?;
+    let head_commit = repo.head()?.peel_to_commit()?;
+    let summary = commit.summary().unwrap_or("commit");
+    let message = format!("Revert \"{summary}\"\n\nThis reverts commit {oid}.");
+    repo.commit(Some("HEAD"), &signature, &signature, &message, &tree, &[&head_commit])?;
+    repo.cleanup_state()?;
+
+    Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts: Vec::new() })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Drop a commit from the current branch: replay every commit after it onto its
+/// parent, removing just that one. Only works on a clean linear stretch (no
+/// merge commits above the target). A conflict during replay aborts the whole
+/// operation and restores the branch, so the branch is never left half-rebased.
+#[tauri::command]
+#[specta::specta]
+pub async fn drop_commit(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  sha: String,
+) -> Result<RefMove, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let branch = current_branch_name(&repo)?;
+
+    if tree_dirty(&repo)? {
+      return Err(AppError::Other(
+        "working tree has changes; commit or stash before dropping a commit".into(),
+      ));
+    }
+
+    let target_oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+    let target = repo.find_commit(target_oid)?;
+    if target.parent_count() != 1 {
+      return Err(AppError::Other(
+        "only commits with a single parent can be dropped".into(),
+      ));
+    }
+    let parent = target.parent(0)?;
+    let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
+
+    // Collect the commits from HEAD down to (not including) the target, newest
+    // first, so we can replay them oldest-first onto the target's parent.
+    let head_oid = repo.head()?.peel_to_commit()?.id();
+    let mut to_replay = Vec::new();
+    let mut walk = repo.revwalk()?;
+    walk.push(head_oid)?;
+    let mut found = false;
+    for step in walk {
+      let step_oid = step?;
+      if step_oid == target_oid {
+        found = true;
+        break;
+      }
+      let c = repo.find_commit(step_oid)?;
+      if c.parent_count() > 1 {
+        return Err(AppError::Other(
+          "there is a merge commit above this one; can't drop it safely".into(),
+        ));
+      }
+      to_replay.push(c);
+    }
+    if !found {
+      return Err(AppError::Other("that commit is not on the current branch".into()));
+    }
+    to_replay.reverse();
+
+    // Cherry-pick each later commit onto the growing new tip. Any conflict
+    // aborts: reset back to where we started so nothing is left half-done.
+    let signature = repo.signature()?;
+    let mut new_tip = parent;
+    for commit in to_replay {
+      let mut index = repo
+        .cherrypick_commit(&commit, &new_tip, 0, None)
+        .map_err(AppError::Git)?;
+      if index.has_conflicts() {
+        let start_oid = Oid::from_str(&previous_sha).map_err(AppError::Git)?;
+        let head_obj = repo.find_object(start_oid, None)?;
+        repo.reset(&head_obj, ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
+        return Err(AppError::Other(
+          "dropping this commit causes conflicts in a later commit; nothing was changed".into(),
+        ));
+      }
+      let tree_oid = index.write_tree_to(&repo)?;
+      let tree = repo.find_tree(tree_oid)?;
+      let message = commit.message().unwrap_or("");
+      let new_oid = repo.commit(
+        None,
+        &commit.author(),
+        &signature,
+        message,
+        &tree,
+        &[&new_tip],
+      )?;
+      new_tip = repo.find_commit(new_oid)?;
+    }
+
+    // Point the branch at the rebuilt tip and sync the working tree.
+    repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
+
+    Ok(RefMove { branch, previous_sha })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Paths currently conflicted in the index (used by revert's conflict path).
+fn conflicted_index_paths(repo: &git2::Repository) -> Result<Vec<String>, AppError> {
+  let index = repo.index()?;
+  if !index.has_conflicts() {
+    return Ok(Vec::new());
+  }
+  let mut paths = Vec::new();
+  for entry in index.conflicts()? {
+    let entry = entry?;
+    let raw = entry
+      .our
+      .as_ref()
+      .or(entry.their.as_ref())
+      .or(entry.ancestor.as_ref())
+      .map(|e| e.path.clone());
+    if let Some(bytes) = raw {
+      paths.push(String::from_utf8_lossy(&bytes).into_owned());
+    }
+  }
+  paths.sort();
+  paths.dedup();
+  Ok(paths)
+}
+
+/// True when the repo has at least one linked worktree. Backs the auto-enable
+/// of the worktree feature so users who already work with worktrees see the UI.
+#[tauri::command]
+#[specta::specta]
+pub async fn has_worktrees(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+) -> Result<bool, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    Ok(!repo.worktrees()?.is_empty())
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
