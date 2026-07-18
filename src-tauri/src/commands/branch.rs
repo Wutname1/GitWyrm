@@ -115,6 +115,46 @@ fn is_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
 /// move that also collides with the target branch.
 const SUBMODULE_SWITCH_HINT: &str = "a submodule points to a different commit than this branch expects. Commit the submodule change or reset the submodule to its recorded commit, then switch.";
 
+/// Resolve the branch a switch should actually land on.
+///
+/// Checking out a remote-tracking ref like `origin/feature` directly would
+/// detach HEAD, which is never what someone picking a branch from the UI wants.
+/// So when `name` names a remote branch (and not a local one), point the switch
+/// at a local branch instead: reuse an existing one by the same short name, or
+/// create it at the remote tip and set the remote as its upstream.
+///
+/// Returns the name to switch to. Anything that isn't a remote branch -- local
+/// branches, tags, shas -- passes through untouched.
+fn resolve_switch_target(repo: &git2::Repository, name: &str) -> Result<String, AppError> {
+  if repo.find_branch(name, BranchType::Local).is_ok() {
+    return Ok(name.to_string());
+  }
+
+  let Ok(remote_branch) = repo.find_branch(name, BranchType::Remote) else {
+    return Ok(name.to_string());
+  };
+
+  // Strip the remote prefix: `origin/feature/x` -> `feature/x`. A remote branch
+  // name always carries one, but guard anyway rather than panic.
+  let Some((_, short)) = name.split_once('/') else {
+    return Ok(name.to_string());
+  };
+  if short.is_empty() {
+    return Ok(name.to_string());
+  }
+
+  // A local branch by that name already exists (it just wasn't what was
+  // clicked). Switch to it rather than trying to create a duplicate.
+  if repo.find_branch(short, BranchType::Local).is_ok() {
+    return Ok(short.to_string());
+  }
+
+  let target = remote_branch.get().peel_to_commit()?;
+  let mut created = repo.branch(short, &target, false)?;
+  created.set_upstream(Some(name))?;
+  Ok(short.to_string())
+}
+
 /// Move HEAD to `name` and update the working tree to its content. Uses a SAFE
 /// checkout, so git refuses to clobber conflicting local changes.
 fn switch_to(repo: &git2::Repository, name: &str) -> Result<(), AppError> {
@@ -140,6 +180,9 @@ pub async fn checkout_branch(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let mut repo = open.repo.lock().unwrap();
+
+    // Picking a remote branch lands on a local tracking branch, not detached HEAD.
+    let name = resolve_switch_target(&repo, &name)?;
 
     if !is_dirty(&repo)? {
       switch_to(&repo, &name)?;
