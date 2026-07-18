@@ -1,46 +1,25 @@
 use std::collections::HashMap;
 
-use git2::{BranchType, Oid, Sort};
+use git2::{Oid, Sort};
 use tauri::State;
 
 use crate::error::AppError;
 use crate::git::graph::{initials, LaneState};
+use crate::git::refs;
 use crate::git::types::{CommitEntry, LogPage, RefInfo, RefKind};
 use crate::state::RepoManager;
 
 fn collect_refs(repo: &git2::Repository) -> HashMap<Oid, Vec<RefInfo>> {
   let mut map: HashMap<Oid, Vec<RefInfo>> = HashMap::new();
-  let head_oid = repo.head().ok().and_then(|h| h.target());
-  let head_name = repo
-    .head()
-    .ok()
-    .filter(|h| h.is_branch())
-    .and_then(|h| h.shorthand().map(str::to_string));
 
-  if let Ok(branches) = repo.branches(Some(BranchType::Local)) {
-    for (branch, _) in branches.flatten() {
-      if let (Some(name), Some(oid)) = (branch.name().ok().flatten(), branch.get().target()) {
-        let kind = if Some(oid) == head_oid && Some(name.to_string()) == head_name {
-          RefKind::Head
-        } else {
-          RefKind::Branch
-        };
-        map.entry(oid).or_default().push(RefInfo { name: name.to_string(), ref_type: kind });
-      }
-    }
-  }
-  if let Ok(branches) = repo.branches(Some(BranchType::Remote)) {
-    for (branch, _) in branches.flatten() {
-      if let (Some(name), Some(oid)) = (branch.name().ok().flatten(), branch.get().target()) {
-        if name.ends_with("/HEAD") {
-          continue;
-        }
-        map
-          .entry(oid)
-          .or_default()
-          .push(RefInfo { name: name.to_string(), ref_type: RefKind::Remote });
-      }
-    }
+  for rec in refs::walk_branches(repo).unwrap_or_default() {
+    let Some(oid) = rec.tip else { continue };
+    let ref_type = match (rec.is_remote, rec.is_head) {
+      (true, _) => RefKind::Remote,
+      (false, true) => RefKind::Head,
+      (false, false) => RefKind::Branch,
+    };
+    map.entry(oid).or_default().push(RefInfo { name: rec.name, ref_type });
   }
   let _ = repo.tag_foreach(|oid, name| {
     let name = String::from_utf8_lossy(name);
@@ -71,13 +50,13 @@ pub async fn get_log(
 
     let mut walk = repo.revwalk()?;
     walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    // Include all local branch heads so side branches appear in the graph.
+    // Push every branch tip, local and remote, so side branches and remote-only
+    // work both appear in the graph. Remote tips were previously omitted, which
+    // hid any branch that had not been checked out locally.
     walk.push_head().ok();
-    if let Ok(branches) = repo.branches(Some(BranchType::Local)) {
-      for (branch, _) in branches.flatten() {
-        if let Some(oid) = branch.get().target() {
-          walk.push(oid).ok();
-        }
+    for rec in refs::walk_branches(&repo).unwrap_or_default() {
+      if let Some(oid) = rec.tip {
+        walk.push(oid).ok();
       }
     }
 

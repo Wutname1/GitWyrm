@@ -25,6 +25,21 @@ export function authorColor(key: string): string {
   return AUTHOR_PALETTE[Math.abs(hash) % AUTHOR_PALETTE.length]
 }
 
+/** Short relative age: "just now", "4h ago", "3d ago", "2mo ago". */
+export function formatRelativeTime(epochSeconds: number, now = Date.now()): string {
+  const secs = Math.max(0, Math.floor(now / 1000 - epochSeconds))
+  if (secs < 60) return 'just now'
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  return `${Math.floor(months / 12)}y ago`
+}
+
 /** "Jul 16 14:22" style, matching the design. */
 export function formatCommitTime(epochSeconds: number): string {
   const d = new Date(epochSeconds * 1000)

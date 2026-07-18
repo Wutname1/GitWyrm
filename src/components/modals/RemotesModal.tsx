@@ -16,8 +16,8 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
-import type { RemoteInfo } from '@/lib/bindings'
-import { buildBranchTree, type BranchTreeNode } from '@/lib/branchTree'
+import type { RemoteBranchInfo, RemoteInfo } from '@/lib/bindings'
+import { buildBranchTreeFrom, type BranchTreeNode } from '@/lib/branchTree'
 import { useRemotes } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
@@ -30,7 +30,7 @@ function BranchNode({
   upstreamPending,
   upstreamTarget,
 }: {
-  node: BranchTreeNode
+  node: BranchTreeNode<RemoteBranchInfo>
   depth: number
   onSetUpstream: (branch: string) => void
   upstreamPending: boolean
@@ -113,7 +113,10 @@ function RemoteRow({
   upstreamTarget?: string
 }) {
   const [open, setOpen] = useState(true)
-  const tree = useMemo(() => buildBranchTree(remote.branches), [remote.branches])
+  const tree = useMemo(
+    () => buildBranchTreeFrom(remote.branches, (b) => b.name),
+    [remote.branches]
+  )
   const provider = detectProvider(remote.url)
 
   return (

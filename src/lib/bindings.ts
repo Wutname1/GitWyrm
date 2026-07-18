@@ -788,7 +788,19 @@ async generateCommitMessage(repoId: string, provider: string, model: string) : P
 /** user-defined types **/
 
 export type AiProviderStatus = { id: string; configured: boolean }
-export type BranchInfo = { name: string; is_head: boolean; upstream: string | null; ahead: number; behind: number }
+export type BranchInfo = { name: string; is_head: boolean; upstream: string | null; ahead: number; behind: number; 
+/**
+ * Richer reading of the same relationship; prefer this over the raw counts.
+ */
+sync: SyncState; 
+/**
+ * Commit time of the branch tip, seconds since epoch.
+ */
+time: number | null; 
+/**
+ * Abbreviated tip sha, for display.
+ */
+tip: string | null }
 export type BranchList = { local: BranchInfo[]; remote: string[] }
 /**
  * How two arbitrary refs relate: commits `ours` has that `theirs` doesn't
@@ -1051,6 +1063,45 @@ branch: string;
  */
 previous_sha: string }
 /**
+ * How a remote-tracking branch relates to the local repo. This is what makes a
+ * remote branch legible without checking it out.
+ */
+export type RemoteBranchInfo = { 
+/**
+ * Short name, `<remote>/` prefix stripped: `main`, `claude/foo`.
+ */
+name: string; 
+/**
+ * Abbreviated tip sha.
+ */
+tip: string | null; 
+/**
+ * Commit time of the tip, seconds since epoch.
+ */
+time: number | null; 
+/**
+ * Summary line of the tip commit.
+ */
+summary: string | null; 
+/**
+ * Name of the local branch this was compared against, when one exists.
+ */
+local_counterpart: string | null; 
+/**
+ * Commits this remote branch has that the local counterpart lacks. When
+ * there is no counterpart, commits it has that HEAD lacks.
+ */
+ahead_of_local: number; 
+/**
+ * Commits the local counterpart has that this remote branch lacks.
+ */
+behind_local: number; 
+/**
+ * True when no local branch of this name exists - work that is not on this
+ * machine in any form.
+ */
+local_only_missing: boolean }
+/**
  * A configured remote and the remote-tracking branches under it.
  */
 export type RemoteInfo = { name: string; url: string; 
@@ -1059,10 +1110,14 @@ export type RemoteInfo = { name: string; url: string;
  */
 push_url: string | null; 
 /**
- * Short branch names under this remote (without the `<remote>/` prefix),
- * e.g. `main`, `dependabot/npm/foo`. Excludes the symbolic HEAD ref.
+ * Branches under this remote, with sync detail relative to the local repo.
+ * Names have the `<remote>/` prefix stripped. Excludes the symbolic HEAD ref.
  */
-branches: string[] }
+branches: RemoteBranchInfo[]; 
+/**
+ * How many of `branches` have no local counterpart at all.
+ */
+missing_locally: number }
 export type RepoChangedPayload = { repo_id: string }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
 /**
@@ -1191,6 +1246,29 @@ behind: number;
  * False when the submodule has not been checked out (needs init).
  */
 initialized: boolean }
+/**
+ * How a branch stands against the remote. Distinguishes the three cases the
+ * old `(0, 0)` collapsed together: genuinely in sync, no upstream configured,
+ * and an upstream whose ref could not be resolved.
+ */
+export type SyncState = 
+/**
+ * Tracking an upstream, tips match.
+ */
+{ kind: "in_sync" } | 
+/**
+ * Tracking an upstream and diverged. At least one of the counts is non-zero.
+ */
+{ kind: "diverged"; ahead: number; behind: number } | 
+/**
+ * No upstream configured. The branch has never been pushed anywhere.
+ */
+{ kind: "never_pushed" } | 
+/**
+ * An upstream is configured but its ref is missing, e.g. the remote branch
+ * was deleted and the stale tracking ref has since been pruned.
+ */
+{ kind: "upstream_gone" }
 /**
  * A named set of repository tabs. Repository paths are stable across app
  * restarts, unlike the in-memory repo ids assigned when a repository opens.

@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react'
 import { ChevronRight, Folder, GitBranch, Plus } from 'lucide-react'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { cn } from '@/lib/utils'
-import type { RemoteInfo } from '@/lib/bindings'
-import { buildBranchTree, type BranchTreeNode } from '@/lib/branchTree'
+import type { RemoteBranchInfo, RemoteInfo } from '@/lib/bindings'
+import { buildBranchTreeFrom, type BranchTreeNode } from '@/lib/branchTree'
+import { formatRelativeTime } from '@/lib/gitDisplay'
 import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import {
   ContextMenu,
@@ -19,7 +20,33 @@ import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { TooltipButton } from '@/components/ui/tooltip'
 
-function BranchNode({ node, depth }: { node: BranchTreeNode; depth: number }) {
+/** Plain-language summary of what a remote branch means for the user. */
+function branchTooltip(b: RemoteBranchInfo): string {
+  const when = b.time ? ` Last updated ${formatRelativeTime(b.time)}.` : ''
+  const tip = b.summary ? ` Latest: "${b.summary}"` : ''
+  if (b.local_only_missing) {
+    const n = b.ahead_of_local
+    const lead =
+      n > 0
+        ? `Not on your computer yet - ${n} commit${n === 1 ? '' : 's'} you don't have.`
+        : "Not on your computer yet."
+    return `${lead}${when}${tip}`
+  }
+  if (b.ahead_of_local > 0 && b.behind_local > 0) {
+    return `You and this branch have both moved on: ${b.ahead_of_local} to get, ${b.behind_local} to send.${when}${tip}`
+  }
+  if (b.ahead_of_local > 0) {
+    const n = b.ahead_of_local
+    return `${n} commit${n === 1 ? '' : 's'} here you don't have yet. Pull to get ${n === 1 ? 'it' : 'them'}.${when}${tip}`
+  }
+  if (b.behind_local > 0) {
+    const n = b.behind_local
+    return `You have ${n} commit${n === 1 ? '' : 's'} not sent here yet. Push to share.${when}${tip}`
+  }
+  return `Up to date with your copy.${when}${tip}`
+}
+
+function BranchNode({ node, depth }: { node: BranchTreeNode<RemoteBranchInfo>; depth: number }) {
   const [open, setOpen] = useState(true)
   const pad = 24 + depth * 12
 
@@ -43,13 +70,43 @@ function BranchNode({ node, depth }: { node: BranchTreeNode; depth: number }) {
     )
   }
 
+  const b = node.data
+  const hasIncoming = !!b && b.ahead_of_local > 0
+
   return (
     <div
       style={{ paddingLeft: pad + 14 }}
       className="flex items-center gap-1.5 py-0.5 pr-3 hover:bg-panel2"
+      title={b ? branchTooltip(b) : undefined}
     >
-      <GitBranch size={10} className="flex-none text-muted-foreground" />
-      <span className="truncate font-mono text-[11px] text-sub">{node.name}</span>
+      <GitBranch
+        size={10}
+        className={cn('flex-none', hasIncoming ? 'text-[var(--gw-green)]' : 'text-muted-foreground')}
+      />
+      <span
+        className={cn(
+          'truncate font-mono text-[11px]',
+          hasIncoming ? 'text-foreground' : 'text-sub'
+        )}
+      >
+        {node.name}
+      </span>
+
+      {b?.local_only_missing && (
+        <span className="flex-none rounded-sm bg-panel3 px-1 text-[8.5px] uppercase tracking-wide text-muted-foreground">
+          not here
+        </span>
+      )}
+
+      <span className="ml-auto flex flex-none items-center gap-1 pl-1.5 font-mono text-[9px]">
+        {!!b && b.ahead_of_local > 0 && (
+          <span className="text-[var(--gw-green)]">↓{b.ahead_of_local}</span>
+        )}
+        {!!b && b.behind_local > 0 && <span className="text-[var(--gw-amber)]">↑{b.behind_local}</span>}
+        {!!b?.time && (
+          <span className="text-muted-foreground">{formatRelativeTime(b.time)}</span>
+        )}
+      </span>
     </div>
   )
 }
@@ -64,8 +121,15 @@ function RemoteNode({
   const [open, setOpen] = useState(true)
   const repo = useActiveRepo()
   const m = useGitMutations(repo?.id ?? null)
-  const tree = useMemo(() => buildBranchTree(remote.branches), [remote.branches])
+  const tree = useMemo(
+    () => buildBranchTreeFrom(remote.branches, (b) => b.name),
+    [remote.branches]
+  )
   const provider = detectProvider(remote.url)
+  const incoming = useMemo(
+    () => remote.branches.filter((b) => b.ahead_of_local > 0).length,
+    [remote.branches]
+  )
 
   return (
     <div>
@@ -81,7 +145,17 @@ function RemoteNode({
             />
             <RemoteIcon provider={provider} width={12} height={12} className="flex-none text-sub" />
             <span className="truncate text-[11.5px] text-foreground">{remote.name}</span>
-            <span className="ml-auto pl-1.5 font-mono text-[9px] text-muted-foreground">
+            {incoming > 0 && (
+              <span
+                title={`${incoming} branch${incoming === 1 ? '' : 'es'} here ${incoming === 1 ? 'has' : 'have'} work you don't have yet`}
+                className="ml-auto flex-none rounded-sm bg-[var(--gw-green)]/15 px-1 font-mono text-[9px] text-[var(--gw-green)]"
+              >
+                {incoming} new
+              </span>
+            )}
+            <span
+              className={cn('pl-1.5 font-mono text-[9px] text-muted-foreground', incoming === 0 && 'ml-auto')}
+            >
               {remote.branches.length}
             </span>
           </button>
@@ -97,7 +171,7 @@ function RemoteNode({
             disabled={remote.branches.length === 0 || m.setUpstream.isPending}
             onSelect={(e) => {
               e.preventDefault()
-              m.setUpstream.mutate(`${remote.name}/${remote.branches[0]}`)
+              m.setUpstream.mutate(`${remote.name}/${remote.branches[0].name}`)
             }}
           >
             {m.setUpstream.isPending ? <PendingIndicator /> : <Target />}

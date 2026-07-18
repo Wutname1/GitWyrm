@@ -170,13 +170,13 @@ function BranchSwitcher() {
                   r.branches.map((b) => {
                     // Already checked out locally under the same short name, so
                     // there is nothing to switch to.
-                    const isCurrent = b === currentBranch
+                    const isCurrent = b.name === currentBranch
                     return (
                       <DropdownMenuItem
-                        key={b}
+                        key={b.name}
                         className="gap-2 text-xs text-sub"
                         onClick={() =>
-                          isCurrent ? reveal(b) : switchTo(`${r.name}/${b}`)
+                          isCurrent ? reveal(b.name) : switchTo(`${r.name}/${b.name}`)
                         }
                       >
                         <span
@@ -191,8 +191,18 @@ function BranchSwitcher() {
                             isCurrent && 'font-semibold text-foreground'
                           )}
                         >
-                          {b}
+                          {b.name}
                         </span>
+                        {b.ahead_of_local > 0 && (
+                          <span className="flex-none font-mono text-[9px] text-[var(--gw-green)]">
+                            ↓{b.ahead_of_local}
+                          </span>
+                        )}
+                        {b.local_only_missing && (
+                          <span className="flex-none text-[8.5px] uppercase tracking-wide text-muted-foreground">
+                            not here
+                          </span>
+                        )}
                       </DropdownMenuItem>
                     )
                   })

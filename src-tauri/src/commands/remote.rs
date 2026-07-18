@@ -9,7 +9,8 @@ use specta::Type;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
-use crate::git::types::{PullResult, PushResult, RebaseResult, RemoteInfo};
+use crate::git::refs;
+use crate::git::types::{PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo};
 use crate::state::RepoManager;
 
 /// The current branch, its upstream, and how far apart they are. Returns `None`
@@ -244,6 +245,9 @@ pub async fn list_remotes(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
+    let records = refs::walk_branches(&repo)?;
+    let locals = refs::local_tips(&records);
+    let head_oid = repo.head().ok().and_then(|h| h.target());
     let mut remotes = Vec::new();
 
     for name in repo.remotes()?.iter().flatten() {
@@ -251,19 +255,43 @@ pub async fn list_remotes(
       let url = remote.url().unwrap_or("").to_string();
       let push_url = remote.pushurl().map(str::to_string).filter(|p| *p != url);
 
-      // Remote-tracking branches live under refs/remotes/<name>/*. Strip the
-      // `<name>/` prefix and skip the symbolic HEAD ref.
-      let prefix = format!("{name}/");
-      let mut branches: Vec<String> = repo
-        .branches(Some(git2::BranchType::Remote))?
-        .flatten()
-        .filter_map(|(b, _)| b.name().ok().flatten().map(str::to_string))
-        .filter(|full| full.starts_with(&prefix) && !full.ends_with("/HEAD"))
-        .map(|full| full[prefix.len()..].to_string())
-        .collect();
-      branches.sort();
+      let mut branches: Vec<RemoteBranchInfo> = records
+        .iter()
+        .filter(|r| r.remote_name() == Some(name))
+        .map(|rec| {
+          let short = rec.short_name().to_string();
 
-      remotes.push(RemoteInfo { name: name.to_string(), url, push_url, branches });
+          // Compare against the same-named local branch when there is one. When
+          // there isn't, compare against HEAD so the row can still answer "is
+          // there work here I don't have?" - which is the whole point.
+          let counterpart = locals.get(short.as_str()).map(|&oid| (short.clone(), oid));
+          let local_only_missing = counterpart.is_none();
+          let baseline = counterpart.as_ref().map(|(_, oid)| *oid).or(head_oid);
+
+          let (ahead_of_local, behind_local) = match (rec.tip, baseline) {
+            (Some(remote_oid), Some(base_oid)) => {
+              refs::ahead_behind(&repo, remote_oid, base_oid).unwrap_or((0, 0))
+            }
+            _ => (0, 0),
+          };
+
+          let commit = rec.tip.and_then(|oid| repo.find_commit(oid).ok());
+          RemoteBranchInfo {
+            name: short,
+            tip: rec.tip.map(|oid| format!("{:.7}", oid)),
+            time: rec.time.map(|t| t as f64),
+            summary: commit.as_ref().and_then(|c| c.summary()).map(str::to_string),
+            local_counterpart: counterpart.map(|(n, _)| n),
+            ahead_of_local,
+            behind_local,
+            local_only_missing,
+          }
+        })
+        .collect();
+      branches.sort_by(|a, b| a.name.cmp(&b.name));
+
+      let missing_locally = branches.iter().filter(|b| b.local_only_missing).count() as u32;
+      remotes.push(RemoteInfo { name: name.to_string(), url, push_url, branches, missing_locally });
     }
 
     remotes.sort_by(|a, b| a.name.cmp(&b.name));

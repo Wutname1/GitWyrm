@@ -2,8 +2,9 @@ use git2::{build::CheckoutBuilder, BranchType, Oid, ResetType};
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git::refs;
 use crate::git::types::{
-  BranchInfo, BranchList, BranchRelation, CheckoutOutcome, RefMove, ResetMode, TagInfo,
+  BranchInfo, BranchList, BranchRelation, CheckoutOutcome, RefMove, ResetMode, SyncState, TagInfo,
 };
 use crate::settings::BranchSwitchMode;
 use crate::state::RepoManager;
@@ -36,41 +37,43 @@ pub async fn list_branches(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
+    let records = refs::walk_branches(&repo)?;
+    let tips = refs::remote_tips(&records);
+
     let mut local = Vec::new();
     let mut remote = Vec::new();
 
-    for (branch, _) in repo.branches(Some(BranchType::Local))?.flatten() {
-      let Some(name) = branch.name().ok().flatten().map(str::to_string) else { continue };
-      let is_head = branch.is_head();
-      let upstream = branch
-        .upstream()
-        .ok()
-        .and_then(|u| u.name().ok().flatten().map(str::to_string));
-      let (ahead, behind) = match (&upstream, branch.get().target()) {
-        (Some(up), Some(local_oid)) => {
-          let up_oid = repo
-            .find_branch(up, BranchType::Remote)
-            .ok()
-            .and_then(|b| b.get().target());
-          match up_oid {
-            Some(up_oid) => repo
-              .graph_ahead_behind(local_oid, up_oid)
-              .map(|(a, b)| (a as u32, b as u32))
-              .unwrap_or((0, 0)),
-            None => (0, 0),
-          }
-        }
-        _ => (0, 0),
-      };
-      local.push(BranchInfo { name, is_head, upstream, ahead, behind });
-    }
-
-    for (branch, _) in repo.branches(Some(BranchType::Remote))?.flatten() {
-      if let Some(name) = branch.name().ok().flatten() {
-        if !name.ends_with("/HEAD") {
-          remote.push(name.to_string());
-        }
+    for rec in &records {
+      if rec.is_remote {
+        remote.push(rec.name.clone());
+        continue;
       }
+
+      // Three distinct outcomes, where the old code returned (0, 0) for all of
+      // them: no upstream at all, an upstream whose ref is gone, and a real
+      // comparison.
+      let sync = match (&rec.upstream, rec.tip) {
+        (Some(up), Some(local_oid)) => match tips.get(up.as_str()) {
+          Some(&up_oid) => refs::ahead_behind(&repo, local_oid, up_oid)
+            .map(|(a, b)| SyncState::from_counts(a, b))
+            .unwrap_or(SyncState::UpstreamGone),
+          None => SyncState::UpstreamGone,
+        },
+        (Some(_), None) => SyncState::UpstreamGone,
+        (None, _) => SyncState::NeverPushed,
+      };
+      let (ahead, behind) = sync.counts();
+
+      local.push(BranchInfo {
+        name: rec.name.clone(),
+        is_head: rec.is_head,
+        upstream: rec.upstream.clone(),
+        ahead,
+        behind,
+        sync,
+        time: rec.time.map(|t| t as f64),
+        tip: rec.tip.map(|oid| format!("{:.7}", oid)),
+      });
     }
 
     local.sort_by(|a, b| b.is_head.cmp(&a.is_head).then(a.name.cmp(&b.name)));

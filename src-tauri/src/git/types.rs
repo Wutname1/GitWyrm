@@ -100,6 +100,43 @@ pub struct WorkingStatus {
   pub unstaged: Vec<FileChange>,
 }
 
+/// How a branch stands against the remote. Distinguishes the three cases the
+/// old `(0, 0)` collapsed together: genuinely in sync, no upstream configured,
+/// and an upstream whose ref could not be resolved.
+#[derive(Debug, Clone, Copy, Serialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum SyncState {
+  /// Tracking an upstream, tips match.
+  InSync,
+  /// Tracking an upstream and diverged. At least one of the counts is non-zero.
+  Diverged { ahead: u32, behind: u32 },
+  /// No upstream configured. The branch has never been pushed anywhere.
+  NeverPushed,
+  /// An upstream is configured but its ref is missing, e.g. the remote branch
+  /// was deleted and the stale tracking ref has since been pruned.
+  UpstreamGone,
+}
+
+impl SyncState {
+  /// Build from resolved counts. Collapses (0, 0) to `InSync` so `Diverged`
+  /// always carries a real delta.
+  pub fn from_counts(ahead: u32, behind: u32) -> Self {
+    if ahead == 0 && behind == 0 {
+      SyncState::InSync
+    } else {
+      SyncState::Diverged { ahead, behind }
+    }
+  }
+
+  /// Counts for callers that just want numbers. Non-diverged states are zero.
+  pub fn counts(&self) -> (u32, u32) {
+    match self {
+      SyncState::Diverged { ahead, behind } => (*ahead, *behind),
+      _ => (0, 0),
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct BranchInfo {
   pub name: String,
@@ -107,12 +144,42 @@ pub struct BranchInfo {
   pub upstream: Option<String>,
   pub ahead: u32,
   pub behind: u32,
+  /// Richer reading of the same relationship; prefer this over the raw counts.
+  pub sync: SyncState,
+  /// Commit time of the branch tip, seconds since epoch.
+  pub time: Option<f64>,
+  /// Abbreviated tip sha, for display.
+  pub tip: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct BranchList {
   pub local: Vec<BranchInfo>,
   pub remote: Vec<String>,
+}
+
+/// How a remote-tracking branch relates to the local repo. This is what makes a
+/// remote branch legible without checking it out.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct RemoteBranchInfo {
+  /// Short name, `<remote>/` prefix stripped: `main`, `claude/foo`.
+  pub name: String,
+  /// Abbreviated tip sha.
+  pub tip: Option<String>,
+  /// Commit time of the tip, seconds since epoch.
+  pub time: Option<f64>,
+  /// Summary line of the tip commit.
+  pub summary: Option<String>,
+  /// Name of the local branch this was compared against, when one exists.
+  pub local_counterpart: Option<String>,
+  /// Commits this remote branch has that the local counterpart lacks. When
+  /// there is no counterpart, commits it has that HEAD lacks.
+  pub ahead_of_local: u32,
+  /// Commits the local counterpart has that this remote branch lacks.
+  pub behind_local: u32,
+  /// True when no local branch of this name exists - work that is not on this
+  /// machine in any form.
+  pub local_only_missing: bool,
 }
 
 /// How two arbitrary refs relate: commits `ours` has that `theirs` doesn't
@@ -162,9 +229,11 @@ pub struct RemoteInfo {
   pub url: String,
   /// Push URL when it differs from the fetch URL, else None.
   pub push_url: Option<String>,
-  /// Short branch names under this remote (without the `<remote>/` prefix),
-  /// e.g. `main`, `dependabot/npm/foo`. Excludes the symbolic HEAD ref.
-  pub branches: Vec<String>,
+  /// Branches under this remote, with sync detail relative to the local repo.
+  /// Names have the `<remote>/` prefix stripped. Excludes the symbolic HEAD ref.
+  pub branches: Vec<RemoteBranchInfo>,
+  /// How many of `branches` have no local counterpart at all.
+  pub missing_locally: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
