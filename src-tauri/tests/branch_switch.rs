@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use git2::{build::CheckoutBuilder, Repository, Signature, StashFlags};
+use git2::{build::CheckoutBuilder, BranchType, Repository, Signature, StashFlags};
 
 fn scratch_repo_named(tag: &str) -> (PathBuf, Repository) {
   let dir = std::env::temp_dir().join(format!("gitwyrm-bswitch-{}-{tag}", std::process::id()));
@@ -162,5 +162,147 @@ fn git2_stash_pop_drops_stash_on_conflict() {
   })
   .unwrap();
   assert_eq!(count, 0, "git2 stash_pop drops the stash on conflict (the pitfall)");
+  let _ = fs::remove_dir_all(&dir);
+}
+
+/// Mirror of checkout_branch's resolve_switch_target: map a remote-tracking ref
+/// onto a local branch so a switch never detaches HEAD.
+fn resolve_switch_target(repo: &Repository, name: &str) -> Result<String, git2::Error> {
+  if repo.find_branch(name, BranchType::Local).is_ok() {
+    return Ok(name.to_string());
+  }
+  let Ok(remote_branch) = repo.find_branch(name, BranchType::Remote) else {
+    return Ok(name.to_string());
+  };
+  let Some((_, short)) = name.split_once('/') else {
+    return Ok(name.to_string());
+  };
+  if short.is_empty() {
+    return Ok(name.to_string());
+  }
+  if repo.find_branch(short, BranchType::Local).is_ok() {
+    return Ok(short.to_string());
+  }
+  let target = remote_branch.get().peel_to_commit()?;
+  let mut created = repo.branch(short, &target, false)?;
+  // Best-effort, matching the command: a missing/unusual refspec must not fail
+  // the switch after the branch already exists.
+  let _ = created.set_upstream(Some(name));
+  Ok(short.to_string())
+}
+
+/// Fabricate a remote-tracking ref without needing a real remote.
+fn add_remote_ref(repo: &Repository, full: &str, oid: git2::Oid) {
+  repo.reference(&format!("refs/remotes/{full}"), oid, true, "test").unwrap();
+}
+
+/// The bug this resolution exists to prevent: checking out `origin/x` directly
+/// leaves HEAD detached. If git2 ever changes that, we want to know.
+#[test]
+fn raw_remote_ref_checkout_detaches_head() {
+  const TAG: &str = "remote_detach";
+  let (dir, repo) = scratch_repo_named(TAG);
+  fs::write(dir.join("a.txt"), "base\n").unwrap();
+  commit_all(&repo, "init");
+  let tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+  add_remote_ref(&repo, "origin/feature", tip);
+
+  switch_to(&repo, "origin/feature").unwrap();
+  assert!(repo.head_detached().unwrap(), "raw remote checkout detaches HEAD");
+  let _ = fs::remove_dir_all(&dir);
+}
+
+/// Picking a remote branch creates a local branch tracking it and stays attached.
+/// Uses a properly configured remote, so the upstream link is exercised for real.
+#[test]
+fn remote_branch_resolves_to_new_tracking_branch() {
+  const TAG: &str = "remote_track";
+  let (dir, repo) = scratch_repo_named(TAG);
+  fs::write(dir.join("a.txt"), "base\n").unwrap();
+  commit_all(&repo, "init");
+  let tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+  // A refspec-carrying remote is what lets git resolve the upstream.
+  repo.remote("origin", "https://example.invalid/repo.git").unwrap();
+  add_remote_ref(&repo, "origin/feature", tip);
+
+  let target = resolve_switch_target(&repo, "origin/feature").unwrap();
+  assert_eq!(target, "feature", "should resolve to the short local name");
+
+  switch_to(&repo, &target).unwrap();
+  assert!(!repo.head_detached().unwrap(), "HEAD must stay on a branch");
+  assert_eq!(repo.head().unwrap().shorthand().unwrap(), "feature");
+
+  let branch = repo.find_branch("feature", BranchType::Local).unwrap();
+  let upstream = branch.upstream().expect("upstream should be set for a configured remote");
+  assert_eq!(upstream.name().unwrap().unwrap(), "origin/feature");
+  let _ = fs::remove_dir_all(&dir);
+}
+
+/// Without a configured remote, git can't resolve the upstream -- the switch
+/// must still succeed and land on the branch rather than erroring out.
+#[test]
+fn remote_branch_switches_even_when_upstream_cannot_be_set() {
+  const TAG: &str = "remote_no_upstream";
+  let (dir, repo) = scratch_repo_named(TAG);
+  fs::write(dir.join("a.txt"), "base\n").unwrap();
+  commit_all(&repo, "init");
+  let tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+  // Stale remote-tracking ref with no matching remote configured.
+  add_remote_ref(&repo, "origin/feature", tip);
+
+  let target = resolve_switch_target(&repo, "origin/feature").expect("must not fail the switch");
+  assert_eq!(target, "feature");
+  switch_to(&repo, &target).unwrap();
+  assert!(!repo.head_detached().unwrap(), "HEAD must stay on a branch");
+  assert_eq!(repo.head().unwrap().shorthand().unwrap(), "feature");
+  let _ = fs::remove_dir_all(&dir);
+}
+
+/// A local branch already exists for that short name: reuse it, don't duplicate.
+#[test]
+fn remote_branch_reuses_existing_local_branch() {
+  const TAG: &str = "remote_reuse";
+  let (dir, repo) = scratch_repo_named(TAG);
+  fs::write(dir.join("a.txt"), "base\n").unwrap();
+  commit_all(&repo, "init");
+  let tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+  repo.branch("feature", &repo.find_commit(tip).unwrap(), false).unwrap();
+  add_remote_ref(&repo, "origin/feature", tip);
+
+  let target = resolve_switch_target(&repo, "origin/feature").unwrap();
+  assert_eq!(target, "feature");
+  switch_to(&repo, &target).unwrap();
+  assert_eq!(repo.head().unwrap().shorthand().unwrap(), "feature");
+  let _ = fs::remove_dir_all(&dir);
+}
+
+/// Nested remote branch names keep every path segment after the remote.
+#[test]
+fn remote_branch_with_slashes_keeps_full_short_name() {
+  const TAG: &str = "remote_nested";
+  let (dir, repo) = scratch_repo_named(TAG);
+  fs::write(dir.join("a.txt"), "base\n").unwrap();
+  commit_all(&repo, "init");
+  let tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+  add_remote_ref(&repo, "origin/feature/nested", tip);
+
+  let target = resolve_switch_target(&repo, "origin/feature/nested").unwrap();
+  assert_eq!(target, "feature/nested", "only the remote prefix is stripped");
+  switch_to(&repo, &target).unwrap();
+  assert_eq!(repo.head().unwrap().shorthand().unwrap(), "feature/nested");
+  let _ = fs::remove_dir_all(&dir);
+}
+
+/// Local branches and non-branch refs pass through untouched.
+#[test]
+fn local_and_unknown_names_pass_through() {
+  const TAG: &str = "passthrough";
+  let (dir, repo) = scratch_repo_named(TAG);
+  fs::write(dir.join("a.txt"), "base\n").unwrap();
+  commit_all(&repo, "init");
+  let head = repo.head().unwrap().shorthand().unwrap().to_string();
+
+  assert_eq!(resolve_switch_target(&repo, &head).unwrap(), head);
+  assert_eq!(resolve_switch_target(&repo, "nope/missing").unwrap(), "nope/missing");
   let _ = fs::remove_dir_all(&dir);
 }
