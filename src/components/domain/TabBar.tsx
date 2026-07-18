@@ -1,5 +1,16 @@
-import { BookOpen, ChevronDown, Clock, Loader2, Plus, RefreshCw, Settings, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { BookOpen, ChevronDown, Clock, Loader2, Pencil, Plus, RefreshCw, Settings, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import type { RepoInfo } from '@/lib/bindings'
 import { WindowControls } from '@/components/domain/WindowControls'
 import { WyrmExplosion, useWyrmEasterEgg } from '@/components/domain/WyrmEasterEgg'
 import logoUrl from '@/assets/logo.png'
@@ -89,15 +100,90 @@ function BrandMark() {
   )
 }
 
+/** Renames a tab. An empty name clears the alias, restoring the folder name. */
+function RenameTabDialog({
+  repo,
+  currentName,
+  onOpenChange,
+  onConfirm,
+}: {
+  repo: RepoInfo
+  currentName: string
+  onOpenChange: (open: boolean) => void
+  onConfirm: (alias: string) => void
+}) {
+  const [value, setValue] = useState(currentName)
+
+  useEffect(() => {
+    setValue(currentName)
+  }, [currentName])
+
+  const submit = () => onConfirm(value)
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
+        <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
+          <DialogTitle className="flex items-center gap-2 text-sm">
+            <Pencil size={15} strokeWidth={1.9} />
+            Rename tab
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="grid gap-1.5 px-4 py-4">
+          <label className="text-[11px] font-semibold text-sub">Tab name</label>
+          <Input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submit()
+            }}
+            placeholder={repo.name}
+            className="h-auto bg-background py-1.5 text-xs"
+            autoFocus
+          />
+          <p className="text-[10.5px] text-muted-foreground">Leave blank to use the folder name.</p>
+        </div>
+
+        <DialogFooter className="flex justify-end gap-2 border-t border-border px-4 py-3">
+          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={submit}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function TabBar() {
   const openRepos = useWorkspaceStore((s) => s.openRepos)
   const activeRepoId = useWorkspaceStore((s) => s.activeRepoId)
   const setActiveRepo = useWorkspaceStore((s) => s.setActiveRepo)
   const removeRepo = useWorkspaceStore((s) => s.removeRepo)
   const recents = useWorkspaceStore((s) => s.recents)
+  const tabAliases = useWorkspaceStore((s) => s.tabAliases)
+  const setTabAlias = useWorkspaceStore((s) => s.setTabAlias)
   const showSettings = useUiStore((s) => s.showSettings)
   const openModal = useUiStore((s) => s.openModal)
   const openRepo = useOpenRepo()
+  const [renaming, setRenaming] = useState<RepoInfo | null>(null)
+
+  const closeTab = (id: string) => {
+    commands.closeRepo(id)
+    removeRepo(id)
+  }
+  const closeOthers = (keepId: string) => {
+    for (const r of openRepos) if (r.id !== keepId) closeTab(r.id)
+  }
+  const closeToRight = (id: string) => {
+    const idx = openRepos.findIndex((r) => r.id === id)
+    if (idx === -1) return
+    for (const r of openRepos.slice(idx + 1)) closeTab(r.id)
+  }
+  const tabName = (r: RepoInfo) => tabAliases[r.path] ?? r.name
 
   return (
     <div
@@ -110,36 +196,58 @@ export function TabBar() {
       </div>
 
       {openRepos.map((r, i) => (
-        <div
-          key={r.id}
-          onClick={() => setActiveRepo(r.id)}
-          className={cn(
-            'group flex cursor-pointer items-center gap-[7px] border-r border-border border-t-2 px-3 text-xs',
-            r.id === activeRepoId
-              ? 'border-t-primary bg-panel font-semibold text-foreground'
-              : 'border-t-transparent text-sub'
-          )}
-        >
-          <span
-            className="size-[7px] flex-none rounded-[2px]"
-            style={{ background: TAB_DOTS[i % TAB_DOTS.length] }}
-          />
-          <span className="whitespace-nowrap">{r.name}</span>
-          {r.head_branch && (
-            <span className="font-mono text-[10px] text-muted-foreground">{r.head_branch}</span>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              commands.closeRepo(r.id)
-              removeRepo(r.id)
-            }}
-            className="ml-0.5 flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground group-hover:opacity-100"
-            title="Close repository"
-          >
-            <X size={11} />
-          </button>
-        </div>
+        <ContextMenu key={r.id}>
+          <ContextMenuTrigger asChild>
+            <div
+              onClick={() => setActiveRepo(r.id)}
+              className={cn(
+                'group flex cursor-pointer items-center gap-[7px] border-r border-border border-t-2 px-3 text-xs',
+                r.id === activeRepoId
+                  ? 'border-t-primary bg-panel font-semibold text-foreground'
+                  : 'border-t-transparent text-sub'
+              )}
+            >
+              <span
+                className="size-[7px] flex-none rounded-[2px]"
+                style={{ background: TAB_DOTS[i % TAB_DOTS.length] }}
+              />
+              <span className="whitespace-nowrap">{tabName(r)}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  closeTab(r.id)
+                }}
+                className="ml-0.5 flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground group-hover:opacity-100"
+                title="Close repository"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-48">
+            <ContextMenuItem onSelect={() => setRenaming(r)}>
+              <Pencil size={13} strokeWidth={2} />
+              Rename tab
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => closeTab(r.id)}>
+              <X size={13} strokeWidth={2} />
+              Close tab
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={openRepos.length <= 1}
+              onSelect={() => closeOthers(r.id)}
+            >
+              Close other tabs
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={i === openRepos.length - 1}
+              onSelect={() => closeToRight(r.id)}
+            >
+              Close tabs to the right
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       ))}
 
       <DropdownMenu>
@@ -193,6 +301,20 @@ export function TabBar() {
       </button>
 
       <WindowControls />
+
+      {renaming && (
+        <RenameTabDialog
+          repo={renaming}
+          currentName={tabAliases[renaming.path] ?? ''}
+          onOpenChange={(open) => {
+            if (!open) setRenaming(null)
+          }}
+          onConfirm={(alias) => {
+            setTabAlias(renaming.path, alias)
+            setRenaming(null)
+          }}
+        />
+      )}
     </div>
   )
 }
