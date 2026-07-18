@@ -74,7 +74,7 @@ export function DiffLineRow({
           line.sign === '+' ? 'text-added' : line.sign === '-' ? 'text-removed' : 'text-muted-foreground'
         )}
       >
-        {line.sign === '-' ? '−' : isHunk ? '' : line.sign}
+        {line.sign === '-' ? '-' : isHunk ? '' : line.sign}
       </span>
       <span className="whitespace-pre pr-5">{line.text}</span>
       {children}

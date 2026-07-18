@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { TooltipButton } from '@/components/ui/tooltip'
 import { authorColor, formatCommitTime } from '@/lib/gitDisplay'
 import { useCommitDetail } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
@@ -68,18 +69,18 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
         >
           Copy SHA
         </Button>
-        <button
+        <TooltipButton
           onClick={() => selectCommit(null)}
-          title="Close"
+          tooltip="Close"
           className="flex size-6 flex-none items-center justify-center rounded-[5px] border border-border bg-panel2 text-xs text-sub hover:border-muted-foreground hover:bg-panel3"
         >
           <X size={12} />
-        </button>
+        </TooltipButton>
       </div>
       <div className="flex flex-none items-center gap-3.5 border-b border-border px-3.5 py-[5px] text-[10.5px] text-sub">
         <span className="font-semibold">{d.files.length} files changed</span>
         <span className="font-mono text-added">+{adds}</span>
-        <span className="font-mono text-removed">−{dels}</span>
+        <span className="font-mono text-removed">-{dels}</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
         {d.files.map((f) => (

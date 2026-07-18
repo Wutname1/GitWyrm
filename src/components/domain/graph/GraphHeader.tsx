@@ -16,6 +16,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 
 /**
  * Commit-graph column header. Right-click any header cell for a menu to show or
@@ -55,31 +56,34 @@ export function GraphHeader() {
           style={{ gridTemplateColumns: gridTemplate(order, hidden) }}
         >
           {visible.map((id) => (
-            <span
+            <TooltipHint
               key={id}
-              draggable
-              onDragStart={() => setDragId(id)}
-              onDragEnd={() => {
-                setDragId(null)
-                setOverId(null)
-              }}
-              onDragOver={(e) => {
-                e.preventDefault()
-                if (id !== overId) setOverId(id)
-              }}
-              onDrop={(e) => {
-                e.preventDefault()
-                handleDrop(id)
-              }}
-              className={cn(
-                'flex h-full cursor-grab select-none items-center active:cursor-grabbing',
-                dragId === id && 'opacity-40',
-                overId === id && dragId && dragId !== id && 'bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]'
-              )}
-              title="Drag to reorder, right-click to show or hide columns"
+              label="Drag to reorder. Right-click to show or hide columns."
             >
-              {COLUMNS[id].label}
-            </span>
+              <span
+                draggable
+                onDragStart={() => setDragId(id)}
+                onDragEnd={() => {
+                  setDragId(null)
+                  setOverId(null)
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  if (id !== overId) setOverId(id)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  handleDrop(id)
+                }}
+                className={cn(
+                  'flex h-full cursor-grab select-none items-center active:cursor-grabbing',
+                  dragId === id && 'opacity-40',
+                  overId === id && dragId && dragId !== id && 'bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]'
+                )}
+              >
+                {COLUMNS[id].label}
+              </span>
+            </TooltipHint>
           ))}
         </div>
       </ContextMenuTrigger>

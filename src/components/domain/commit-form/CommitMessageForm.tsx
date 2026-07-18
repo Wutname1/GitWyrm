@@ -6,6 +6,12 @@ import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  Tooltip,
+  TooltipButton,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
@@ -122,11 +128,11 @@ export function CommitMessageForm() {
               generating && 'opacity-[0.18] saturate-[0.35]'
             )}
           />
-          <button
+          <TooltipButton
             onClick={doGenerate}
             disabled={generating}
             aria-label={generating ? 'Generating commit message' : 'Generate commit message with AI'}
-            title={
+            tooltip={
               generating
                 ? 'Generating commit message'
                 : !aiReady
@@ -149,7 +155,7 @@ export function CommitMessageForm() {
             ) : (
               <Sparkles size={13} className={cn(generating && 'wyrm-ai-spark')} />
             )}
-          </button>
+          </TooltipButton>
         </div>
         <Textarea
           value={generating ? '' : desc}
@@ -215,41 +221,45 @@ export function CommitMessageForm() {
               ? `Commit & push to ${currentBranch}`
               : `Commit ${stagedCount} file${stagedCount === 1 ? '' : 's'} to ${currentBranch}`}
         </button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              aria-label="Change default commit action"
-              title="Change default commit action"
-              className={cn(
-                'flex w-[30px] items-center justify-center border-l transition-colors',
-                canCommit
-                  ? 'cursor-pointer border-primary/40 hover:bg-primary hover:text-primary-foreground'
-                  : 'cursor-pointer border-border/60 text-sub hover:bg-panel2 hover:text-foreground'
-              )}
-            >
-              <ChevronDown size={14} strokeWidth={2.2} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel className="text-xs text-sub">
-              Default commit button action
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuRadioGroup
-              value={commitButtonMode}
-              onValueChange={(v) => setCommitButtonMode(v as CommitButtonMode)}
-            >
-              <DropdownMenuRadioItem value="commit" className="text-xs">
-                <GitCommitHorizontal size={13} className="text-current" />
-                Commit only
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="commit_push" className="text-xs">
-                <Upload size={13} className="text-current" />
-                Commit & push
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Tooltip>
+          <DropdownMenu>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button
+                  aria-label="Change default commit action"
+                  className={cn(
+                    'flex w-[30px] items-center justify-center border-l transition-colors',
+                    canCommit
+                      ? 'cursor-pointer border-primary/40 hover:bg-primary hover:text-primary-foreground'
+                      : 'cursor-pointer border-border/60 text-sub hover:bg-panel2 hover:text-foreground'
+                  )}
+                >
+                  <ChevronDown size={14} strokeWidth={2.2} />
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Change default commit action</TooltipContent>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-xs text-sub">
+                Default commit button action
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuRadioGroup
+                value={commitButtonMode}
+                onValueChange={(v) => setCommitButtonMode(v as CommitButtonMode)}
+              >
+                <DropdownMenuRadioItem value="commit" className="text-xs">
+                  <GitCommitHorizontal size={13} className="text-current" />
+                  Commit only
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="commit_push" className="text-xs">
+                  <Upload size={13} className="text-current" />
+                  Commit & push
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </Tooltip>
       </div>
     </div>
   )

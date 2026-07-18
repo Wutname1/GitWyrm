@@ -4,6 +4,7 @@ import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
+import { TooltipButton } from '@/components/ui/tooltip'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -79,9 +80,9 @@ function BranchNode({
     >
       <GitBranch size={11} className="flex-none text-muted-foreground" />
       <span className="truncate font-mono text-[11px] text-foreground">{node.name}</span>
-      <button
+      <TooltipButton
         onClick={() => node.branch && onSetUpstream(node.branch)}
-        title="Track this branch"
+        tooltip="Track this branch"
         disabled={upstreamPending}
         className={cn(
           'ml-auto flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:text-primary disabled:pointer-events-none group-hover/branch:opacity-100',
@@ -89,7 +90,7 @@ function BranchNode({
         )}
       >
         {upstreamTarget === node.branch ? <PendingIndicator className="size-3" /> : <Target size={12} />}
-      </button>
+      </TooltipButton>
     </div>
   )
 }
@@ -140,22 +141,22 @@ function RemoteRow({
                 {remote.branches.length}
               </span>
             </button>
-            <button
+            <TooltipButton
               onClick={onEdit}
-              title="Edit remote"
+              tooltip="Edit remote"
               disabled={upstreamPending}
               className="flex-none rounded p-1 text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
             >
               <Pencil size={12} />
-            </button>
-            <button
+            </TooltipButton>
+            <TooltipButton
               onClick={onDelete}
-              title="Delete remote"
+              tooltip="Delete remote"
               disabled={upstreamPending}
               className="flex-none rounded p-1 text-muted-foreground hover:text-removed disabled:pointer-events-none disabled:opacity-40"
             >
               <Trash2 size={12} />
-            </button>
+            </TooltipButton>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48">

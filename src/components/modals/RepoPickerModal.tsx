@@ -279,13 +279,13 @@ export function RepoPickerModal() {
                 </SectionLabel>
                 <div className="flex-1" />
                 {codeFolder && (
-                  <button
+                  <TooltipButton
                     onClick={() => scanned.refetch()}
-                    title="Rescan"
+                    tooltip="Rescan"
                     className="mr-2 mt-2 rounded p-1 text-muted-foreground hover:bg-panel3 hover:text-foreground"
                   >
                     <RefreshCw size={11} className={cn(scanned.isFetching && 'animate-spin')} />
-                  </button>
+                  </TooltipButton>
                 )}
                 <button
                   onClick={pickCodeFolder}
@@ -367,7 +367,7 @@ export function RepoPickerModal() {
                   variant="secondary"
                   size="sm"
                   className="h-8 flex-none"
-                  title="Browse for folder"
+                  tooltip="Browse for folder"
                   disabled={cloning}
                   onClick={async () => {
                     const { open: openDialog } = await import('@tauri-apps/plugin-dialog')

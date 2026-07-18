@@ -15,6 +15,7 @@ import {
 import { toast } from 'sonner'
 import { Separator } from '@/components/ui/separator'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
+import { TooltipButton } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,9 +42,9 @@ interface ToolbarButtonProps {
 
 function ToolbarButton({ icon, label, badge, onClick, disabled, pending }: ToolbarButtonProps) {
   return (
-    <button
+    <TooltipButton
       onClick={onClick}
-      title={label}
+      tooltip={label}
       disabled={disabled}
       aria-busy={pending || undefined}
       className={cn(
@@ -61,7 +62,7 @@ function ToolbarButton({ icon, label, badge, onClick, disabled, pending }: Toolb
         )}
       </span>
       <span className="text-[11.5px] font-medium">{label}</span>
-    </button>
+    </TooltipButton>
   )
 }
 
@@ -205,15 +206,15 @@ function BranchSwitcher() {
   )
 }
 
-function GhostButton({ icon, title, onClick }: { icon: ReactNode; title: string; onClick: () => void }) {
+function GhostButton({ icon, tooltip, onClick }: { icon: ReactNode; tooltip: string; onClick: () => void }) {
   return (
-    <button
+    <TooltipButton
       onClick={onClick}
-      title={title}
+      tooltip={tooltip}
       className="flex h-[30px] w-8 items-center justify-center rounded-md border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3"
     >
       {icon}
-    </button>
+    </TooltipButton>
   )
 }
 
@@ -339,7 +340,7 @@ export function Toolbar() {
 
       <GhostButton
         icon={<Folder size={16} strokeWidth={1.9} />}
-        title="Show in file explorer"
+        tooltip="Show in file explorer"
         onClick={requireRepo(() => m.revealInFileManager.mutate())}
       />
       <GhostButton
@@ -349,12 +350,12 @@ export function Toolbar() {
             <path d="M17 3v18M8 11L3 8v8l5-3z" />
           </svg>
         }
-        title="Open in VS Code"
+        tooltip="Open in VS Code"
         onClick={requireRepo(() => m.openInEditor.mutate())}
       />
       <GhostButton
         icon={<SquareTerminal size={16} strokeWidth={1.9} />}
-        title="Open in terminal"
+        tooltip="Open in terminal"
         onClick={requireRepo(() => m.openInTerminal.mutate())}
       />
     </div>

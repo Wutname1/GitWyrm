@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Copy, Minus, Square, X } from 'lucide-react'
+import { TooltipButton } from '@/components/ui/tooltip'
 
 const inTauri = '__TAURI_INTERNALS__' in window
 
@@ -26,27 +27,27 @@ export function WindowControls() {
 
   return (
     <div className="titlebar-no-drag -mr-2 flex h-full items-stretch">
-      <button
+      <TooltipButton
         onClick={() => getCurrentWindow().minimize().catch(() => {})}
-        title="Minimize"
+        tooltip="Minimize"
         className={btn}
       >
         <Minus size={14} />
-      </button>
-      <button
+      </TooltipButton>
+      <TooltipButton
         onClick={() => getCurrentWindow().toggleMaximize().catch(() => {})}
-        title={isMax ? 'Restore' : 'Maximize'}
+        tooltip={isMax ? 'Restore' : 'Maximize'}
         className={btn}
       >
         {isMax ? <Copy size={12} className="rotate-90" /> : <Square size={12} />}
-      </button>
-      <button
+      </TooltipButton>
+      <TooltipButton
         onClick={() => getCurrentWindow().close().catch(() => {})}
-        title="Close"
+        tooltip="Close"
         className="inline-flex h-full w-11 flex-none items-center justify-center text-sub transition-colors hover:bg-red-600 hover:text-white"
       >
         <X size={14} />
-      </button>
+      </TooltipButton>
     </div>
   )
 }

@@ -152,7 +152,7 @@ export function AiSettings() {
                     variant="ghost"
                     size="sm"
                     className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                    title="Remove API key"
+                    tooltip="Remove API key"
                     disabled={m.removeProvider.isPending}
                     aria-busy={m.removeProvider.isPending || undefined}
                     onClick={() =>

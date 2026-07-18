@@ -17,6 +17,7 @@ import { Pencil, Target, Trash2 } from 'lucide-react'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
+import { TooltipButton } from '@/components/ui/tooltip'
 
 function BranchNode({ node, depth }: { node: BranchTreeNode; depth: number }) {
   const [open, setOpen] = useState(true)
@@ -147,16 +148,16 @@ export function RemotesSection({
           )}
         />
         <span className="text-[10px] font-bold tracking-[.09em] text-sub">REMOTES</span>
-        <button
+        <TooltipButton
           onClick={(e) => {
             e.stopPropagation()
             onManage()
           }}
-          title="Manage remotes"
+          tooltip="Manage remotes"
           className="ml-auto flex size-4 flex-none items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover/section:opacity-100"
         >
           <Plus size={12} strokeWidth={2.4} />
-        </button>
+        </TooltipButton>
         <span className="ml-1.5 font-mono text-[9.5px] text-muted-foreground">{remotes.length}</span>
       </div>
       {open && (

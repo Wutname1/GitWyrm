@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 function ZoomControl() {
   const uiScale = useWorkspaceStore((s) => s.uiScale)
@@ -18,63 +19,68 @@ function ZoomControl() {
   const percent = Math.round(uiScale * 100)
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          title="App zoom"
-          className="titlebar-no-drag flex items-center gap-1 rounded px-1 text-sub hover:text-text"
-        >
-          <Search className="size-3" />
-          <span>{percent}%</span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" side="top" className="w-56">
-        <div className="flex flex-col gap-3 text-text">
-          <div className="flex items-center justify-between text-sm font-medium">
-            <span>Zoom</span>
-            <span className="font-mono text-sub">{percent}%</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              onClick={() => setUiScale(uiScale - UI_SCALE_STEP)}
-              disabled={uiScale <= MIN_UI_SCALE}
-              aria-label="Zoom out"
+    <Tooltip>
+      <Popover>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-label="App zoom"
+              className="titlebar-no-drag flex items-center gap-1 rounded px-1 text-sub hover:text-text"
             >
-              <Minus />
-            </Button>
-            <Slider
-              value={[percent]}
-              min={MIN_UI_SCALE * 100}
-              max={MAX_UI_SCALE * 100}
-              step={UI_SCALE_STEP * 100}
-              onValueChange={([v]) => setUiScale(v / 100)}
-              className="flex-1"
-              aria-label="Zoom level"
-            />
+              <Search className="size-3" />
+              <span>{percent}%</span>
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">App zoom</TooltipContent>
+        <PopoverContent align="end" side="top" collisionPadding={8} className="w-56">
+          <div className="flex flex-col gap-3 text-text">
+            <div className="flex items-center justify-between text-sm font-medium">
+              <span>Zoom</span>
+              <span className="font-mono text-sub">{percent}%</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={() => setUiScale(uiScale - UI_SCALE_STEP)}
+                disabled={uiScale <= MIN_UI_SCALE}
+                aria-label="Zoom out"
+              >
+                <Minus />
+              </Button>
+              <Slider
+                value={[percent]}
+                min={MIN_UI_SCALE * 100}
+                max={MAX_UI_SCALE * 100}
+                step={UI_SCALE_STEP * 100}
+                onValueChange={([v]) => setUiScale(v / 100)}
+                className="flex-1"
+                aria-label="Zoom level"
+              />
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={() => setUiScale(uiScale + UI_SCALE_STEP)}
+                disabled={uiScale >= MAX_UI_SCALE}
+                aria-label="Zoom in"
+              >
+                <Plus />
+              </Button>
+            </div>
             <Button
-              variant="outline"
-              size="icon-sm"
-              onClick={() => setUiScale(uiScale + UI_SCALE_STEP)}
-              disabled={uiScale >= MAX_UI_SCALE}
-              aria-label="Zoom in"
+              variant="ghost"
+              size="sm"
+              onClick={() => setUiScale(DEFAULT_UI_SCALE)}
+              disabled={uiScale === DEFAULT_UI_SCALE}
             >
-              <Plus />
+              Reset to 100%
             </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setUiScale(DEFAULT_UI_SCALE)}
-            disabled={uiScale === DEFAULT_UI_SCALE}
-          >
-            Reset to 100%
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+        </PopoverContent>
+      </Popover>
+    </Tooltip>
   )
 }
 

@@ -5,6 +5,7 @@ import type { FileChange } from '@/lib/bindings'
 import { StatusBadge } from './StatusBadge'
 import { FileChangeMenu } from './commit-form/FileChangeMenu'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
+import { TooltipButton } from '@/components/ui/tooltip'
 
 /** Plain-language note for a moved submodule pointer, e.g. "5 commits ahead". */
 function submoduleNote(sub: NonNullable<FileChange['submodule']>): string {
@@ -61,7 +62,7 @@ export function FileChangeRow({
       ) : (
         <>
           <span className="font-mono text-[10px] text-added">+{file.additions}</span>
-          <span className="font-mono text-[10px] text-removed">−{file.deletions}</span>
+          <span className="font-mono text-[10px] text-removed">-{file.deletions}</span>
         </>
       )}
       {action}
@@ -86,18 +87,18 @@ interface StageToggleProps {
 
 export function StageToggle({ direction, onToggle, disabled, pending }: StageToggleProps) {
   return (
-    <button
+    <TooltipButton
       onClick={onToggle}
       disabled={disabled}
       aria-busy={pending || undefined}
-      title={pending ? (direction === 'stage' ? 'Staging file' : 'Unstaging file') : direction === 'stage' ? 'Stage' : 'Unstage'}
+      tooltip={pending ? (direction === 'stage' ? 'Staging file' : 'Unstaging file') : direction === 'stage' ? 'Stage' : 'Unstage'}
       className={cn(
         'flex size-[18px] flex-none items-center justify-center rounded border border-border bg-panel2 p-0 text-[13px] leading-none hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none disabled:opacity-40',
         direction === 'stage' ? 'text-added' : 'text-sub',
         pending && 'border-primary/50 bg-soft !text-primary !opacity-100'
       )}
     >
-      {pending ? <PendingIndicator className="size-3" /> : direction === 'stage' ? '+' : '−'}
-    </button>
+      {pending ? <PendingIndicator className="size-3" /> : direction === 'stage' ? '+' : '-'}
+    </TooltipButton>
   )
 }

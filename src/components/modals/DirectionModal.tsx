@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowRight, GitMerge, Repeat, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TooltipButton } from '@/components/ui/tooltip'
 import { commands, type MergeAnalysis } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { useBranches } from '@/hooks/useGitQueries'
@@ -138,14 +139,14 @@ export function DirectionModal() {
                 into
               </span>
             </div>
-            <button
+            <TooltipButton
               onClick={() => setReversed((r) => !r)}
               disabled={!other}
-              title="Swap direction"
+              tooltip="Swap direction"
               className="ml-1 flex size-7 flex-none items-center justify-center rounded border border-border bg-panel text-sub hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Repeat size={13} />
-            </button>
+            </TooltipButton>
           </div>
 
           <div className="grid gap-1.5">

@@ -6,6 +6,7 @@ import { GeneralSettings } from '@/components/domain/settings/GeneralSettings'
 import { LogsSettings } from '@/components/domain/settings/LogsSettings'
 import { SettingsNav } from '@/components/domain/settings/SettingsNav'
 import { Separator } from '@/components/ui/separator'
+import { TooltipButton } from '@/components/ui/tooltip'
 import type { SettingsSection } from '@/stores/uiStore'
 import { useUiStore } from '@/stores/uiStore'
 
@@ -37,13 +38,13 @@ export function SettingsView() {
       <div className="flex h-10 flex-none items-center gap-2.5 border-b border-border bg-panel px-3.5">
         <span className="text-xs font-bold tracking-[.05em] text-sub">SETTINGS</span>
         <div className="flex-1" />
-        <button
+        <TooltipButton
           onClick={showGraph}
-          title="Back to graph"
+          tooltip="Back to graph"
           className="flex size-6 flex-none items-center justify-center rounded-[5px] border border-border bg-panel2 text-xs text-sub hover:border-muted-foreground hover:bg-panel3"
         >
           <X size={12} />
-        </button>
+        </TooltipButton>
       </div>
       <div className="flex min-h-0 flex-1">
         <SettingsNav active={settingsSection} onSelect={setSettingsSection} />

@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
+import { TooltipButton } from '@/components/ui/tooltip'
 
 function markerStyle(section: SidebarSectionData, item: SectionItem, isCurrent: boolean): CSSProperties {
   switch (section.type) {
@@ -87,19 +88,19 @@ export function SectionItemRow({
         </span>
       )}
       {hoverAction && !pending && (
-        <button
+        <TooltipButton
           onClick={(e) => {
             e.stopPropagation()
             hoverAction.onClick()
           }}
-          title={hoverAction.title}
+          tooltip={hoverAction.title}
           className={cn(
             'flex size-4 flex-none items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover/row:opacity-100',
             item.meta ? 'ml-1.5' : 'ml-auto'
           )}
         >
           {hoverAction.icon}
-        </button>
+        </TooltipButton>
       )}
     </div>
   )

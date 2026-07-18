@@ -3,6 +3,7 @@ import { ChevronRight, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SidebarSectionData, SectionItem } from '@/lib/types'
 import { useUiStore } from '@/stores/uiStore'
+import { TooltipButton } from '@/components/ui/tooltip'
 import { SectionItemRow } from './SectionItemRow'
 
 interface SidebarSectionProps {
@@ -59,16 +60,16 @@ export function SidebarSection({
         />
         <span className="text-[10px] font-bold tracking-[.09em] text-sub">{section.label}</span>
         {onAdd && (
-          <button
+          <TooltipButton
             onClick={(e) => {
               e.stopPropagation()
               onAdd()
             }}
-            title={addLabel ?? 'Add'}
+            tooltip={addLabel ?? 'Add'}
             className="ml-auto flex size-4 flex-none items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover/section:opacity-100"
           >
             <Plus size={12} strokeWidth={2.4} />
-          </button>
+          </TooltipButton>
         )}
         <span
           className={cn(

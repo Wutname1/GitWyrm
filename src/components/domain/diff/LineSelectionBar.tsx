@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { TooltipButton } from '@/components/ui/tooltip'
 
 interface LineSelectionBarProps {
   count: number
@@ -45,13 +46,13 @@ export function LineSelectionBar({
         >
           {applyLabel}
         </Button>
-        <button
+        <TooltipButton
           onClick={onClear}
-          title="Clear selection"
+          tooltip="Clear selection"
           className="flex size-6 items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:bg-panel3"
         >
           <X size={12} />
-        </button>
+        </TooltipButton>
       </div>
     </div>
   )

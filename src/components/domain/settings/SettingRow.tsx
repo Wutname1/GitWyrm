@@ -57,7 +57,7 @@ export function FolderSetting({
         variant="secondary"
         size="sm"
         className="h-8 flex-none"
-        title="Browse for folder"
+        tooltip="Browse for folder"
         onClick={async () => {
           const { open: openDialog } = await import('@tauri-apps/plugin-dialog')
           const dir = await openDialog({ directory: true, title: 'Select folder' })

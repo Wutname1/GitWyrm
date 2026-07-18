@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { TooltipButton } from '@/components/ui/tooltip'
 
 interface HunkBarProps {
   text: string
@@ -32,14 +33,14 @@ export function HunkBar({ text, canPatch, kind, disabled, onApply, onDiscard }: 
             {applyLabel}
           </button>
           {onDiscard && (
-            <button
+            <TooltipButton
               disabled={disabled}
               onClick={onDiscard}
-              title="Discard this hunk from the working tree"
+              tooltip="Discard this hunk from the working tree"
               className="rounded border border-border bg-panel3 px-1.5 py-px text-[10px] font-semibold text-removed hover:border-removed/60 hover:bg-removed/10 disabled:opacity-50"
             >
               Discard
-            </button>
+            </TooltipButton>
           )}
         </div>
       )}
