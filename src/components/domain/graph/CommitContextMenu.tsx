@@ -1,5 +1,18 @@
 import { type ReactNode, useState } from 'react'
-import { Copy, ExternalLink, GitBranchPlus, Info, MoveVertical, RotateCcw, Tag } from 'lucide-react'
+import {
+  Copy,
+  ExternalLink,
+  GitBranchPlus,
+  Info,
+  Link as LinkIcon,
+  LogIn,
+  MoveVertical,
+  Pencil,
+  RotateCcw,
+  Tag,
+  Trash2,
+  Undo2,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import type { CommitEntry, ResetMode } from '@/lib/bindings'
 import {
@@ -15,8 +28,9 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { RewordDialog } from '@/components/modals/RewordDialog'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
-import { useBranches, useMergeState } from '@/hooks/useGitQueries'
+import { useBranches, useCommitDetail, useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
@@ -27,7 +41,13 @@ interface CommitContextMenuProps {
   children: ReactNode
 }
 
-type Pending = { kind: 'reset'; mode: ResetMode } | { kind: 'move' } | null
+type Pending =
+  | { kind: 'reset'; mode: ResetMode }
+  | { kind: 'move' }
+  | { kind: 'checkout' }
+  | { kind: 'drop' }
+  | { kind: 'reword' }
+  | null
 
 export function CommitContextMenu({ commit, onViewDetails, children }: CommitContextMenuProps) {
   const repo = useActiveRepo()
@@ -35,16 +55,29 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
   const mergeState = useMergeState(repo?.id ?? null)
   const m = useGitMutations(repo?.id ?? null)
   const openNewTag = useUiStore((s) => s.openNewTag)
+  const openNewBranch = useUiStore((s) => s.openNewBranch)
   const [pending, setPending] = useState<Pending>(null)
+
+  // Only fetched when the reword dialog opens, so most right-clicks cost nothing.
+  const detail = useCommitDetail(repo?.id ?? null, pending?.kind === 'reword' ? commit.sha : null)
 
   const current = branches.data?.local.find((b) => b.is_head)
   const branchName = current?.name ?? 'current'
   const opInProgress = mergeState.data?.merging ?? false
   const isHead = commit.refs.some((r) => r.type === 'head')
-  const historyPending = m.cherryPick.isPending || m.reset.isPending || m.moveBranch.isPending
+  const historyPending =
+    m.cherryPick.isPending ||
+    m.reset.isPending ||
+    m.moveBranch.isPending ||
+    m.revertCommit.isPending ||
+    m.dropCommit.isPending
   const canCherryPick = !opInProgress && !isHead && !historyPending
   // Moving/resetting to where the branch already is would be a no-op.
   const canRetarget = !opInProgress && !isHead && current != null && !historyPending
+  // Revert applies on top of HEAD, so it works on any commit including HEAD.
+  const canRevert = !opInProgress && current != null && !historyPending
+  // Dropping rewrites history below the commit; needs a branch and a clean-ish state.
+  const canDrop = !opInProgress && current != null && !historyPending
 
   const copySha = () => {
     void navigator.clipboard
@@ -64,7 +97,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
     <>
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-        <ContextMenuContent className="w-60">
+        <ContextMenuContent className="w-64">
           <ContextMenuLabel className="font-mono text-[11px] text-sub">
             {commit.short_sha}
           </ContextMenuLabel>
@@ -73,18 +106,52 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
             <Info />
             View details
           </ContextMenuItem>
-          <ContextMenuItem onSelect={copySha}>
-            <Copy />
-            Copy SHA
-            <ContextMenuShortcut className="font-mono">{commit.short_sha}</ContextMenuShortcut>
+          <ContextMenuItem onSelect={() => setPending({ kind: 'checkout' })}>
+            <LogIn />
+            Check out this commit
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => m.openOnGitHub.mutate(commit.sha)}>
-            <ExternalLink />
-            Open on GitHub
+          <ContextMenuItem onSelect={() => openNewBranch(commit.sha)}>
+            <GitBranchPlus />
+            Create branch here
           </ContextMenuItem>
           <ContextMenuItem onSelect={() => openNewTag(commit.sha)}>
             <Tag />
             Tag this commit
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            disabled={!isHead || m.rewordCommit.isPending}
+            onSelect={(e) => {
+              e.preventDefault()
+              setPending({ kind: 'reword' })
+            }}
+          >
+            <Pencil />
+            Edit commit message
+            {!isHead && (
+              <ContextMenuShortcut className="text-[9px] normal-case">latest only</ContextMenuShortcut>
+            )}
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!canRevert}
+            onSelect={(e) => {
+              e.preventDefault()
+              m.revertCommit.mutate(commit.sha)
+            }}
+          >
+            {m.revertCommit.isPending ? <PendingIndicator /> : <Undo2 />}
+            {m.revertCommit.isPending ? 'Undoing…' : 'Undo this commit (revert)'}
+          </ContextMenuItem>
+          <ContextMenuItem
+            variant="destructive"
+            disabled={!canDrop}
+            onSelect={(e) => {
+              e.preventDefault()
+              setPending({ kind: 'drop' })
+            }}
+          >
+            <Trash2 />
+            Drop this commit
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
@@ -148,8 +215,79 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
               </ContextMenuItem>
             </ContextMenuSubContent>
           </ContextMenuSub>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={copySha}>
+            <Copy />
+            Copy SHA
+            <ContextMenuShortcut className="font-mono">{commit.short_sha}</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => m.copyCommitLink.mutate(commit.sha)}>
+            <LinkIcon />
+            Copy link to commit
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => m.openOnGitHub.mutate(commit.sha)}>
+            <ExternalLink />
+            Open on GitHub
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+
+      <ConfirmDialog
+        open={pending?.kind === 'checkout'}
+        onOpenChange={(o) => !o && setPending(null)}
+        title="Check out this commit?"
+        description={
+          <>
+            This puts your files at <span className="font-mono text-foreground">{commit.short_sha}</span>{' '}
+            but leaves you off any branch (a "detached" state). New commits here won't belong to a
+            branch until you make one. To get back, switch to a branch like{' '}
+            <span className="font-mono text-foreground">{branchName}</span>.
+          </>
+        }
+        confirmLabel="Check out commit"
+        pending={m.checkoutCommit.isPending}
+        pendingLabel="Checking out…"
+        keepOpenOnConfirm
+        onConfirm={() =>
+          m.checkoutCommit.mutate(commit.sha, { onSuccess: () => setPending(null) })
+        }
+      />
+
+      <ConfirmDialog
+        open={pending?.kind === 'drop'}
+        onOpenChange={(o) => !o && setPending(null)}
+        destructive
+        title="Drop this commit?"
+        description={
+          <>
+            This removes <span className="font-mono text-foreground">{commit.short_sha}</span> from{' '}
+            <span className="font-mono text-foreground">{branchName}</span> and replays the commits
+            after it on top of its parent. If a later commit depended on this one you may hit
+            conflicts, in which case nothing is changed. You can undo this right after.
+          </>
+        }
+        confirmLabel="Drop commit"
+        pending={m.dropCommit.isPending}
+        pendingLabel="Dropping…"
+        keepOpenOnConfirm
+        onConfirm={() =>
+          m.dropCommit.mutate(commit.sha, { onSuccess: () => setPending(null) })
+        }
+      />
+
+      <RewordDialog
+        open={pending?.kind === 'reword'}
+        onOpenChange={(o) => !o && setPending(null)}
+        initialSummary={detail.data?.summary ?? commit.summary}
+        initialBody={detail.data?.body ?? ''}
+        pending={m.rewordCommit.isPending}
+        onConfirm={(message) =>
+          m.rewordCommit.mutate(
+            { sha: commit.sha, message },
+            { onSuccess: () => setPending(null) }
+          )
+        }
+      />
 
       <ConfirmDialog
         open={pending?.kind === 'reset'}

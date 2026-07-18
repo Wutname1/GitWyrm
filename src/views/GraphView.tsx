@@ -21,6 +21,7 @@ export function GraphView() {
   const selectedSha = useUiStore((s) => s.selectedSha)
   const selectCommit = useUiStore((s) => s.selectCommit)
   const focusChanges = useUiStore((s) => s.focusChanges)
+  const revealRef = useUiStore((s) => s.revealRef)
   const columnOrder = useWorkspaceStore((s) => s.columnOrder)
   const hiddenColumns = useWorkspaceStore((s) => s.hiddenColumns)
   const graphLeft = graphLeftOffset(columnOrder, hiddenColumns)
@@ -50,14 +51,36 @@ export function GraphView() {
   const startIndex = Math.max(0, (items.length ? items[0].index : 0) - rowOffset)
   const endIndex = Math.max(0, (items.length ? items[items.length - 1].index : 0) - rowOffset)
 
-  // Fetch the next page when scrolling nears the end.
+  // Fetch the next page when scrolling nears the end. Depend only on stable
+  // primitives: `items` and `log` get fresh identities every render, so
+  // including them would re-run this effect on every render and could spin
+  // fetchNextPage in a loop.
+  const lastVisibleIndex = items.length ? items[items.length - 1].index : 0
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = log
   useEffect(() => {
-    if (!items.length) return
-    const last = items[items.length - 1]
-    if (last.index - rowOffset >= commits.length - 40 && log.hasNextPage && !log.isFetchingNextPage) {
-      log.fetchNextPage()
+    if (lastVisibleIndex - rowOffset >= commits.length - 40 && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage()
     }
-  }, [items, commits.length, rowOffset, log])
+  }, [lastVisibleIndex, commits.length, rowOffset, hasNextPage, isFetchingNextPage, fetchNextPage])
+
+  // Reveal a branch/tag in the graph: scroll its tip commit into view and select
+  // it. If the tip isn't in a loaded page yet, keep pulling pages until it turns
+  // up or history is exhausted. `revealRef.nonce` re-triggers on repeat clicks.
+  const revealNonce = revealRef?.nonce
+  const revealName = revealRef?.name
+  useEffect(() => {
+    if (!revealName) return
+    const index = commits.findIndex((c) => c.refs.some((r) => r.name === revealName))
+    if (index >= 0) {
+      selectCommit(commits[index].sha)
+      virtualizer.scrollToIndex(index + rowOffset, { align: 'center' })
+    } else if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage()
+    }
+    // Depend on the nonce (repeat clicks) and on commits growing (so a pending
+    // fetch that lands the tip re-runs this and scrolls once it's loaded).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealNonce, revealName, commits.length])
 
   if (!repo) {
     return (

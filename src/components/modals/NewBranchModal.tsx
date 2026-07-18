@@ -14,6 +14,7 @@ const INVALID = /[\s~^:?*[\\\]]|\.\.|@\{|^\/|\/$|\/\/|\.$/
 export function NewBranchModal() {
   const open = useUiStore((s) => s.activeModal === 'newBranch')
   const closeModal = useUiStore((s) => s.closeModal)
+  const targetSha = useUiStore((s) => s.branchTargetSha)
 
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
@@ -50,7 +51,7 @@ export function NewBranchModal() {
   const create = () => {
     if (!canCreate) return
     m.createBranch.mutate(
-      { name: trimmed, checkout },
+      { name: trimmed, sha: targetSha ?? undefined, checkout },
       { onSuccess: () => closeModal() }
     )
   }
@@ -91,10 +92,16 @@ export function NewBranchModal() {
             Switch to it after creating
           </label>
 
-          {current && (
+          {targetSha ? (
             <p className="text-[10.5px] text-muted-foreground">
-              Branches off <span className="font-mono text-sub">{current}</span>.
+              Branches off commit <span className="font-mono text-sub">{targetSha.slice(0, 7)}</span>.
             </p>
+          ) : (
+            current && (
+              <p className="text-[10.5px] text-muted-foreground">
+                Branches off <span className="font-mono text-sub">{current}</span>.
+              </p>
+            )
           )}
         </div>
 
