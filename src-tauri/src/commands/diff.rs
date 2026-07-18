@@ -195,6 +195,7 @@ pub async fn get_commit_detail(
             additions: 0,
             deletions: 0,
             conflicted: false,
+            submodule: None,
           });
         }
         true

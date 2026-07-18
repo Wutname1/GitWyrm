@@ -70,6 +70,28 @@ pub struct FileChange {
   pub additions: u32,
   pub deletions: u32,
   pub conflicted: bool,
+  /// Set when this path is a submodule whose pinned commit moved. Ordinary file
+  /// actions (stash, discard-by-checkout) can't touch it; the UI must offer
+  /// submodule-specific handling instead.
+  pub submodule: Option<SubmoduleMove>,
+}
+
+/// How a submodule's checked-out commit differs from the commit its parent repo
+/// pins. `ahead`/`behind` are the workdir commit's position relative to the
+/// recorded one.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct SubmoduleMove {
+  pub path: String,
+  /// Commit the parent repo records for this submodule.
+  pub recorded_sha: String,
+  /// Commit the submodule is actually checked out at, if initialized.
+  pub workdir_sha: Option<String>,
+  /// Commits the workdir is ahead of the recorded commit.
+  pub ahead: u32,
+  /// Commits the workdir is behind the recorded commit.
+  pub behind: u32,
+  /// False when the submodule has not been checked out (needs init).
+  pub initialized: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -118,6 +140,14 @@ pub enum CheckoutOutcome {
 pub struct StashInfo {
   pub index: u32,
   pub message: String,
+}
+
+/// Result of a stash-save attempt. A clean working tree is a no-op, not an error.
+#[derive(Debug, Clone, Copy, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum StashOutcome {
+  Stashed,
+  NothingToStash,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -222,6 +252,7 @@ pub struct RebaseResult {
 pub enum OperationKind {
   Merge,
   CherryPick,
+  Revert,
 }
 
 /// How far a reset rewinds: ref only, ref+index, or ref+index+working tree.

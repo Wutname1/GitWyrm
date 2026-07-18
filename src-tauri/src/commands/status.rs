@@ -4,6 +4,7 @@ use git2::{Delta, DiffOptions, Status, StatusOptions};
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git::submodule::moved_submodules;
 use crate::git::types::{FileChange, StatusCode, WorkingStatus};
 use crate::state::RepoManager;
 
@@ -70,6 +71,11 @@ pub async fn get_status(
       .map(|d| line_stats(&d))
       .unwrap_or_default();
 
+    // Submodule pointer moves, keyed by path. A submodule shows up as a plain
+    // WT_MODIFIED entry here; we tag those so the frontend can treat them
+    // differently (ordinary discard/stash can't move a submodule pointer).
+    let submodules = moved_submodules(&repo);
+
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
 
@@ -84,6 +90,7 @@ pub async fn get_status(
           additions: 0,
           deletions: 0,
           conflicted: true,
+          submodule: None,
         });
         continue;
       }
@@ -101,7 +108,14 @@ pub async fn get_status(
           StatusCode::Modified
         };
         let (a, d) = staged_stats.get(&path).copied().unwrap_or((0, 0));
-        staged.push(FileChange { path: path.clone(), status: code, additions: a, deletions: d, conflicted: false });
+        staged.push(FileChange {
+          path: path.clone(),
+          status: code,
+          additions: a,
+          deletions: d,
+          conflicted: false,
+          submodule: submodules.get(&path).cloned(),
+        });
       }
 
       if st.intersects(
@@ -115,7 +129,15 @@ pub async fn get_status(
           StatusCode::Modified
         };
         let (a, d) = unstaged_stats.get(&path).copied().unwrap_or((0, 0));
-        unstaged.push(FileChange { path, status: code, additions: a, deletions: d, conflicted: false });
+        let submodule = submodules.get(&path).cloned();
+        unstaged.push(FileChange {
+          path,
+          status: code,
+          additions: a,
+          deletions: d,
+          conflicted: false,
+          submodule,
+        });
       }
     }
 
