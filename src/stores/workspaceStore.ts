@@ -13,6 +13,19 @@ export type UpdateChannel = 'stable' | 'beta'
 export type CommitButtonMode = 'commit' | 'commit_push'
 export type { BranchSwitchMode }
 
+/** Whole-app zoom limits and step, shared by the store and the status-bar control. */
+export const MIN_UI_SCALE = 0.5
+export const MAX_UI_SCALE = 2.0
+export const UI_SCALE_STEP = 0.1
+export const DEFAULT_UI_SCALE = 1.0
+
+/** Clamps a scale into the supported range and rounds to whole percent. */
+export function clampUiScale(scale: number): number {
+  if (!Number.isFinite(scale)) return DEFAULT_UI_SCALE
+  const clamped = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, scale))
+  return Math.round(clamped * 100) / 100
+}
+
 interface WorkspaceState {
   /** Repos currently open in tabs. */
   openRepos: RepoInfo[]
@@ -40,6 +53,12 @@ interface WorkspaceState {
   hiddenColumns: ColumnId[]
   /** Default action for the commit button (persisted). */
   commitButtonMode: CommitButtonMode
+  /** Show worktree actions and the worktree sidebar section (persisted). */
+  enableWorktrees: boolean
+  /** Whole-app zoom factor, 1.0 = 100% (persisted). */
+  uiScale: number
+  /** Custom tab names, keyed by repo path. Missing paths use the repo folder name (persisted). */
+  tabAliases: Record<string, string>
   /** True once settings.json has been read on launch. */
   hydrated: boolean
 
@@ -53,6 +72,11 @@ interface WorkspaceState {
   setAiSelection: (provider: string | null, model: string | null) => void
   setAiInstruction: (instruction: string | null) => void
   setCommitButtonMode: (mode: CommitButtonMode) => void
+  setEnableWorktrees: (enabled: boolean) => void
+  /** Set the whole-app zoom factor (clamped to the supported range). */
+  setUiScale: (scale: number) => void
+  /** Rename a tab by repo path. An empty/blank alias clears it (back to the folder name). */
+  setTabAlias: (path: string, alias: string) => void
   /** Move a column to a new index in the display order. */
   reorderColumn: (id: ColumnId, toIndex: number) => void
   /** Show or hide a column. */
@@ -78,6 +102,9 @@ function toSettings(s: WorkspaceState): Settings {
     ai_instruction: s.aiInstruction,
     column_layout: { order: s.columnOrder, hidden: s.hiddenColumns },
     commit_button_mode: s.commitButtonMode,
+    enable_worktrees: s.enableWorktrees,
+    ui_scale: s.uiScale,
+    tab_aliases: s.tabAliases,
   }
 }
 
@@ -112,6 +139,18 @@ function isColumnId(id: string): id is ColumnId {
   return KNOWN_COLUMNS.has(id as ColumnId)
 }
 
+/**
+ * Settings map values arrive as `string | undefined` (a Rust HashMap maps to a
+ * Partial record). Drop the empty entries so the store holds a plain map.
+ */
+function normalizeAliases(aliases: Partial<Record<string, string>> | undefined): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [path, alias] of Object.entries(aliases ?? {})) {
+    if (alias) out[path] = alias
+  }
+  return out
+}
+
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 
 /** Debounced write-through to settings.json; skipped until hydration completes. */
@@ -138,6 +177,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   columnOrder: DEFAULT_COLUMN_ORDER,
   hiddenColumns: [],
   commitButtonMode: 'commit',
+  enableWorktrees: false,
+  uiScale: DEFAULT_UI_SCALE,
+  tabAliases: {},
   hydrated: false,
 
   addRepo: (repo) => {
@@ -194,6 +236,24 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ commitButtonMode: mode })
     schedulePersist()
   },
+  setEnableWorktrees: (enabled) => {
+    set({ enableWorktrees: enabled })
+    schedulePersist()
+  },
+  setUiScale: (scale) => {
+    set({ uiScale: clampUiScale(scale) })
+    schedulePersist()
+  },
+  setTabAlias: (path, alias) => {
+    set((s) => {
+      const next = { ...s.tabAliases }
+      const trimmed = alias.trim()
+      if (trimmed) next[path] = trimmed
+      else delete next[path]
+      return { tabAliases: next }
+    })
+    schedulePersist()
+  },
   reorderColumn: (id, toIndex) => {
     set((s) => {
       const from = s.columnOrder.indexOf(id)
@@ -233,6 +293,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         columnOrder: normalizeOrder(settings.column_layout?.order),
         hiddenColumns: normalizeHidden(settings.column_layout?.hidden),
         commitButtonMode: settings.commit_button_mode === 'commit_push' ? 'commit_push' : 'commit',
+        enableWorktrees: settings.enable_worktrees ?? false,
+        uiScale: settings.ui_scale != null ? clampUiScale(settings.ui_scale) : DEFAULT_UI_SCALE,
+        tabAliases: normalizeAliases(settings.tab_aliases),
         hydrated: true,
       })
     }

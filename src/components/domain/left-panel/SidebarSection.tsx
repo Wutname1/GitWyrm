@@ -9,6 +9,7 @@ interface SidebarSectionProps {
   section: SidebarSectionData
   currentBranch: string
   onItemClick: (section: SidebarSectionData, item: SectionItem) => void
+  onItemDoubleClick?: (section: SidebarSectionData, item: SectionItem) => void
   onItemContextMenu?: (section: SidebarSectionData, item: SectionItem, e: React.MouseEvent) => void
   /** Wraps a row in a right-click menu. Return null for items with no actions. */
   renderItemMenu?: (
@@ -22,12 +23,17 @@ interface SidebarSectionProps {
   isItemPending?: (section: SidebarSectionData, item: SectionItem) => boolean
   isItemDisabled?: (section: SidebarSectionData, item: SectionItem) => boolean
   getPendingLabel?: (section: SidebarSectionData, item: SectionItem) => string
+  getHoverAction?: (
+    section: SidebarSectionData,
+    item: SectionItem
+  ) => { icon: ReactNode; title: string; onClick: () => void } | undefined
 }
 
 export function SidebarSection({
   section,
   currentBranch,
   onItemClick,
+  onItemDoubleClick,
   onItemContextMenu,
   renderItemMenu,
   onAdd,
@@ -35,6 +41,7 @@ export function SidebarSection({
   isItemPending,
   isItemDisabled,
   getPendingLabel,
+  getHoverAction,
 }: SidebarSectionProps) {
   const open = useUiStore((s) => s.sectionOpen[section.key])
   const toggleSection = useUiStore((s) => s.toggleSection)
@@ -81,6 +88,10 @@ export function SidebarSection({
                 item={item}
                 isCurrent={section.type === 'branch' && item.name === currentBranch}
                 onClick={() => onItemClick(section, item)}
+                onDoubleClick={
+                  onItemDoubleClick ? () => onItemDoubleClick(section, item) : undefined
+                }
+                hoverAction={getHoverAction?.(section, item)}
                 pending={isItemPending?.(section, item)}
                 disabled={isItemDisabled?.(section, item)}
                 pendingLabel={getPendingLabel?.(section, item)}

@@ -1101,7 +1101,16 @@ commit_button_mode?: string | null;
  * Show worktree actions and the worktree sidebar section. Off by default;
  * the frontend auto-enables it when a repo already has extra worktrees.
  */
-enable_worktrees?: boolean }
+enable_worktrees?: boolean; 
+/**
+ * Whole-app zoom factor (1.0 = 100%). None uses the default of 1.0.
+ * Clamped on the frontend before display.
+ */
+ui_scale?: number | null; 
+/**
+ * Custom tab names, keyed by repo path. Absent paths use the repo folder name.
+ */
+tab_aliases?: Partial<{ [key in string]: string }> }
 export type StashInfo = { index: number; message: string }
 /**
  * Result of a stash-save attempt. A clean working tree is a no-op, not an error.

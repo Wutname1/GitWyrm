@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
@@ -32,10 +32,13 @@ interface SectionItemRowProps {
   item: SectionItem
   isCurrent: boolean
   onClick: () => void
+  onDoubleClick?: () => void
   onContextMenu?: (e: React.MouseEvent) => void
   disabled?: boolean
   pending?: boolean
   pendingLabel?: string
+  /** Action shown on the right of the row on hover (e.g. a quick-switch icon). */
+  hoverAction?: { icon: ReactNode; title: string; onClick: () => void }
 }
 
 export function SectionItemRow({
@@ -43,19 +46,22 @@ export function SectionItemRow({
   item,
   isCurrent,
   onClick,
+  onDoubleClick,
   onContextMenu,
   disabled,
   pending,
   pendingLabel,
+  hoverAction,
 }: SectionItemRowProps) {
   return (
     <div
       onClick={disabled ? undefined : onClick}
+      onDoubleClick={disabled ? undefined : onDoubleClick}
       onContextMenu={onContextMenu}
       aria-disabled={disabled || undefined}
       aria-busy={pending || undefined}
       className={cn(
-        'flex cursor-pointer items-center gap-2 py-1 pl-6 pr-3 transition-colors hover:bg-panel2',
+        'group/row flex cursor-pointer items-center gap-2 py-1 pl-6 pr-3 transition-colors hover:bg-panel2',
         isCurrent && 'bg-soft',
         disabled && !pending && 'cursor-wait opacity-40',
         pending && 'cursor-wait bg-soft text-primary'
@@ -79,6 +85,21 @@ export function SectionItemRow({
         <span className="ml-auto whitespace-nowrap pl-1.5 font-mono text-[9.5px] text-muted-foreground">
           {item.meta}
         </span>
+      )}
+      {hoverAction && !pending && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            hoverAction.onClick()
+          }}
+          title={hoverAction.title}
+          className={cn(
+            'flex size-4 flex-none items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover/row:opacity-100',
+            item.meta ? 'ml-1.5' : 'ml-auto'
+          )}
+        >
+          {hoverAction.icon}
+        </button>
       )}
     </div>
   )

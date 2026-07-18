@@ -2,6 +2,7 @@
 //! repos and other UI preferences, so they survive relaunch. Mirrors the
 //! `ai::auth` module's pattern (plain JSON, no encryption needed here).
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -87,6 +88,17 @@ pub struct Settings {
   /// falls back to plain commit. Validated on the frontend.
   #[serde(default)]
   pub commit_button_mode: Option<String>,
+  /// Show worktree actions and the worktree sidebar section. Off by default;
+  /// the frontend auto-enables it when a repo already has extra worktrees.
+  #[serde(default)]
+  pub enable_worktrees: bool,
+  /// Whole-app zoom factor (1.0 = 100%). None uses the default of 1.0.
+  /// Clamped on the frontend before display.
+  #[serde(default)]
+  pub ui_scale: Option<f64>,
+  /// Custom tab names, keyed by repo path. Absent paths use the repo folder name.
+  #[serde(default)]
+  pub tab_aliases: HashMap<String, String>,
 }
 
 fn default_update_channel() -> UpdateChannel {
@@ -108,6 +120,9 @@ impl Default for Settings {
       ai_instruction: None,
       column_layout: None,
       commit_button_mode: None,
+      enable_worktrees: false,
+      ui_scale: None,
+      tab_aliases: HashMap::new(),
     }
   }
 }

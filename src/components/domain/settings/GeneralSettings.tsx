@@ -29,6 +29,8 @@ export function GeneralSettings() {
   const setBranchSwitchMode = useWorkspaceStore((s) => s.setBranchSwitchMode)
   const commitButtonMode = useWorkspaceStore((s) => s.commitButtonMode)
   const setCommitButtonMode = useWorkspaceStore((s) => s.setCommitButtonMode)
+  const enableWorktrees = useWorkspaceStore((s) => s.enableWorktrees)
+  const setEnableWorktrees = useWorkspaceStore((s) => s.setEnableWorktrees)
 
   return (
     <div>
@@ -71,6 +73,20 @@ export function GeneralSettings() {
           <option value="commit">Commit only</option>
           <option value="commit_push">Commit and push</option>
         </select>
+      </SettingRow>
+      <SettingRow
+        label="Worktrees"
+        hint="Worktrees let you check out more than one branch at once, each in its own folder. An advanced feature, off by default. Turns on by itself if this repo already uses them."
+      >
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+          <input
+            type="checkbox"
+            checked={enableWorktrees}
+            onChange={(e) => setEnableWorktrees(e.target.checked)}
+            className="size-3.5 accent-[var(--gw-accent)]"
+          />
+          Enable worktrees
+        </label>
       </SettingRow>
     </div>
   )

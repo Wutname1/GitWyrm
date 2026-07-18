@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import {
   ArchiveRestore,
   Archive,
   ArrowDown,
   ArrowDownToLine,
   ArrowUp,
+  ChevronDown,
   Folder,
   GitBranch,
   GitMerge,
@@ -14,8 +15,17 @@ import {
 import { toast } from 'sonner'
 import { Separator } from '@/components/ui/separator'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import { cn } from '@/lib/utils'
-import { useBranches, useStashes } from '@/hooks/useGitQueries'
+import { useBranches, useRemotes, useStashes } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
@@ -55,6 +65,146 @@ function ToolbarButton({ icon, label, badge, onClick, disabled, pending }: Toolb
   )
 }
 
+/**
+ * The current-branch pill by the search box, doubling as a hover dropdown of
+ * every branch. Clicking any branch switches to it; picking a remote one lands
+ * on a local branch tracking it.
+ */
+function BranchSwitcher() {
+  const repo = useActiveRepo()
+  const branches = useBranches(repo?.id ?? null)
+  const remotes = useRemotes(repo?.id ?? null)
+  const revealRefInGraph = useUiStore((s) => s.revealRefInGraph)
+  const m = useGitMutations(repo?.id ?? null)
+  const [open, setOpen] = useState(false)
+
+  const locals = branches.data?.local ?? []
+  const head = locals.find((b) => b.is_head)
+  const currentBranch = head?.name ?? ''
+  if (!currentBranch) return null
+
+  const remoteList = remotes.data ?? []
+
+  const switchTo = (name: string) => {
+    if (name === currentBranch || m.checkout.isPending) return
+    m.checkout.mutate(name)
+    setOpen(false)
+  }
+
+  const reveal = (name: string) => {
+    revealRefInGraph(name)
+    setOpen(false)
+  }
+
+  return (
+    <div
+      className="mr-1.5"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button className="flex h-[30px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-[11px] hover:border-muted-foreground hover:bg-panel3">
+            <span className="size-2 rounded-[2px] bg-primary" />
+            <span className="text-[11.5px] font-medium text-foreground">{currentBranch}</span>
+            {(head?.ahead || head?.behind) ? (
+              <span className="font-mono text-[10.5px] text-muted-foreground">
+                {head.ahead ? `↑${head.ahead}` : ''}
+                {head.ahead && head.behind ? ' ' : ''}
+                {head.behind ? `↓${head.behind}` : ''}
+              </span>
+            ) : null}
+            <ChevronDown size={13} strokeWidth={2} className="text-muted-foreground" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="max-h-[70vh] w-[240px]">
+          <DropdownMenuLabel className="px-2 py-1 text-[9.5px] font-semibold tracking-[.09em] text-muted-foreground">
+            LOCAL
+          </DropdownMenuLabel>
+          {locals.map((b) => {
+            const isCurrent = b.name === currentBranch
+            return (
+              <DropdownMenuItem
+                key={b.name}
+                className="gap-2 text-xs"
+                onClick={() => (isCurrent ? reveal(b.name) : switchTo(b.name))}
+              >
+                <span
+                  className={cn(
+                    'size-2 flex-none rounded-full',
+                    isCurrent ? 'bg-primary' : 'border border-muted-foreground'
+                  )}
+                />
+                <span
+                  className={cn(
+                    'flex-1 overflow-hidden text-ellipsis whitespace-nowrap',
+                    isCurrent ? 'font-semibold text-foreground' : 'text-sub'
+                  )}
+                >
+                  {b.name}
+                </span>
+                {(b.ahead || b.behind) ? (
+                  <span className="font-mono text-[9.5px] text-muted-foreground">
+                    {b.ahead ? `↑${b.ahead}` : ''}
+                    {b.ahead && b.behind ? ' ' : ''}
+                    {b.behind ? `↓${b.behind}` : ''}
+                  </span>
+                ) : null}
+              </DropdownMenuItem>
+            )
+          })}
+
+          {remoteList.map((r) => {
+            const provider = detectProvider(r.url)
+            return (
+              <div key={r.name}>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="flex items-center gap-1.5 px-2 py-1 text-[9.5px] font-semibold tracking-[.09em] text-muted-foreground">
+                  <RemoteIcon provider={provider} width={10} height={10} className="flex-none" />
+                  {r.name.toUpperCase()}
+                </DropdownMenuLabel>
+                {r.branches.length === 0 ? (
+                  <div className="px-2 py-1 text-[11px] text-muted-foreground">No branches</div>
+                ) : (
+                  r.branches.map((b) => {
+                    // Already checked out locally under the same short name, so
+                    // there is nothing to switch to.
+                    const isCurrent = b === currentBranch
+                    return (
+                      <DropdownMenuItem
+                        key={b}
+                        className="gap-2 text-xs text-sub"
+                        onClick={() =>
+                          isCurrent ? reveal(b) : switchTo(`${r.name}/${b}`)
+                        }
+                      >
+                        <span
+                          className={cn(
+                            'size-2 flex-none rounded-full',
+                            isCurrent ? 'bg-primary' : 'border border-sub'
+                          )}
+                        />
+                        <span
+                          className={cn(
+                            'flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono',
+                            isCurrent && 'font-semibold text-foreground'
+                          )}
+                        >
+                          {b}
+                        </span>
+                      </DropdownMenuItem>
+                    )
+                  })
+                )}
+              </div>
+            )
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
 function GhostButton({ icon, title, onClick }: { icon: ReactNode; title: string; onClick: () => void }) {
   return (
     <button
@@ -75,7 +225,6 @@ export function Toolbar() {
   const openMerge = useUiStore((s) => s.openMerge)
   const openModal = useUiStore((s) => s.openModal)
   const head = branches.data?.local.find((b) => b.is_head)
-  const currentBranch = head?.name ?? ''
   const syncAction = m.fetch.isPending
     ? 'fetch'
     : m.pull.isPending
@@ -177,19 +326,7 @@ export function Toolbar() {
 
       <div className="flex-1" />
 
-      {currentBranch && (
-        <div className="mr-1.5 flex h-[30px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-[11px]">
-          <span className="size-2 rounded-[2px] bg-primary" />
-          <span className="text-[11.5px] font-medium text-foreground">{currentBranch}</span>
-          {(head?.ahead || head?.behind) ? (
-            <span className="font-mono text-[10.5px] text-muted-foreground">
-              {head.ahead ? `↑${head.ahead}` : ''}
-              {head.ahead && head.behind ? ' ' : ''}
-              {head.behind ? `↓${head.behind}` : ''}
-            </span>
-          ) : null}
-        </div>
-      )}
+      <BranchSwitcher />
 
       <button
         onClick={() => toast('Command palette · Ctrl+K')}

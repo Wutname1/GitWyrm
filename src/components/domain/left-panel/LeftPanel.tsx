@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import { GitMerge, Tag, Trash2 } from 'lucide-react'
+import { ArrowLeftRight, GitMerge, Tag, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { useBranches, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
@@ -20,6 +20,7 @@ import { RemotesSection } from './RemotesSection'
 export function LeftPanel() {
   const repo = useActiveRepo()
   const selectCommit = useUiStore((s) => s.selectCommit)
+  const revealRefInGraph = useUiStore((s) => s.revealRefInGraph)
   const openMerge = useUiStore((s) => s.openMerge)
   const openNewTag = useUiStore((s) => s.openNewTag)
   const openModal = useUiStore((s) => s.openModal)
@@ -94,12 +95,20 @@ export function LeftPanel() {
   const getPendingLabel = (section: SidebarSectionData, item: SectionItem) =>
     section.type === 'branch' ? `Switching to ${item.name}…` : 'Restoring stash…'
 
+  // Switch to a branch. Guards against re-checking out the current branch and
+  // against firing mid-checkout.
+  const switchToBranch = (name: string) => {
+    if (name === currentBranch || m.checkout.isPending) return
+    selectCommit(null)
+    m.checkout.mutate(name)
+  }
+
+  // Single click reveals a branch in the graph (scroll to and highlight its
+  // tip); double click or the hover swap icon switches to it.
   const onItemClick = (section: SidebarSectionData, item: SectionItem) => {
     switch (section.type) {
       case 'branch':
-        if (item.name === currentBranch) return
-        selectCommit(null)
-        m.checkout.mutate(item.name)
+        revealRefInGraph(item.name)
         break
       case 'stash': {
         const idx = (stashes.data ?? []).findIndex((s) => s.message === item.name)
@@ -114,6 +123,20 @@ export function LeftPanel() {
         toast(item.name)
     }
   }
+
+  const onItemDoubleClick = (section: SidebarSectionData, item: SectionItem) => {
+    if (section.type === 'branch') switchToBranch(item.name)
+  }
+
+  // A quick-switch icon appears on hover for branches other than the current one.
+  const getHoverAction = (section: SidebarSectionData, item: SectionItem) =>
+    section.type === 'branch' && item.name !== currentBranch
+      ? {
+          icon: <ArrowLeftRight size={12} strokeWidth={2.2} />,
+          title: `Switch to ${item.name}`,
+          onClick: () => switchToBranch(item.name),
+        }
+      : undefined
 
   // Right-click menus for branch and tag rows. Other section types have none.
   const renderItemMenu = (
@@ -186,12 +209,14 @@ export function LeftPanel() {
         section={localSection}
         currentBranch={currentBranch}
         onItemClick={onItemClick}
+        onItemDoubleClick={onItemDoubleClick}
         renderItemMenu={renderItemMenu}
         onAdd={addAction.local?.run}
         addLabel={addAction.local?.label}
         isItemPending={isItemPending}
         isItemDisabled={isItemDisabled}
         getPendingLabel={getPendingLabel}
+        getHoverAction={getHoverAction}
       />
 
       <RemotesSection remotes={remotes.data ?? []} onManage={() => openModal('remotes')} />
@@ -202,12 +227,14 @@ export function LeftPanel() {
           section={section}
           currentBranch={currentBranch}
           onItemClick={onItemClick}
+          onItemDoubleClick={onItemDoubleClick}
           renderItemMenu={renderItemMenu}
           onAdd={addAction[section.key]?.run}
           addLabel={addAction[section.key]?.label}
           isItemPending={isItemPending}
           isItemDisabled={isItemDisabled}
           getPendingLabel={getPendingLabel}
+          getHoverAction={getHoverAction}
         />
       ))}
 
