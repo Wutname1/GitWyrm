@@ -14,6 +14,7 @@ import {
   Undo2,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import type { CommitEntry, ResetMode } from '@/lib/bindings'
 import {
   ContextMenu,
@@ -92,12 +93,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
     )
     .filter(hasRemoteItems)
 
-  const copySha = () => {
-    void navigator.clipboard
-      .writeText(commit.sha)
-      .then(() => toast(`Copied ${commit.short_sha}`))
-      .catch(() => toast.error('Could not copy SHA'))
-  }
+  const copySha = () => void copyToClipboard(commit.sha, `Copied ${commit.short_sha}`)
 
   const runReset = (mode: ResetMode) => {
     // Soft/Mixed keep the working tree, so they run without a gate. Hard

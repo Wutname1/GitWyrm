@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Copy, Eraser, FolderOpen, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
@@ -99,10 +100,8 @@ export function LogsModal({ open, onClose }: { open: boolean; onClose: () => voi
     }
   }
 
-  const copyView = async () => {
-    await navigator.clipboard.writeText(filtered.map((e) => e.text).join('\n'))
-    toast('Copied to clipboard')
-  }
+  const copyView = () =>
+    void copyToClipboard(filtered.map((e) => e.text).join('\n'), 'Copied to clipboard')
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>

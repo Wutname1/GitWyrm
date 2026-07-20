@@ -10,6 +10,7 @@ import {
 } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { classifyError } from '@/lib/errorClass'
+import { copyToClipboard } from '@/lib/clipboard'
 import { log } from '@/lib/log'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -532,8 +533,9 @@ export function useGitMutations(repoId: string | null) {
         toast('This commit is not on a supported remote yet')
         return
       }
-      await navigator.clipboard.writeText(url)
-      toast('Copied link to commit')
+      // Reports its own success/failure, so a clipboard problem is not
+      // classified as a git error by onError.
+      await copyToClipboard(url, 'Copied link to commit')
     },
     onError,
   })

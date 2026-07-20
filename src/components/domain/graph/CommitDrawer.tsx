@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { TooltipButton } from '@/components/ui/tooltip'
 import { authorColor, formatCommitTime } from '@/lib/gitDisplay'
@@ -62,10 +63,7 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
           variant="secondary"
           size="sm"
           className="h-auto rounded border-border bg-panel3 px-[7px] py-0.5 text-[10px] text-sub"
-          onClick={() => {
-            navigator.clipboard?.writeText(d.sha)
-            toast(`Copied ${d.sha.slice(0, 7)}`)
-          }}
+          onClick={() => void copyToClipboard(d.sha, `Copied ${d.sha.slice(0, 7)}`)}
         >
           Copy SHA
         </Button>

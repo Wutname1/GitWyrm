@@ -30,6 +30,7 @@ import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { RenameBranchDialog } from '@/components/modals/RenameBranchDialog'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { branchActions, branchSync } from '@/lib/branchActions'
+import { copyToClipboard } from '@/lib/clipboard'
 import { BranchRemoteItems, hasRemoteItems } from '@/components/domain/branch/BranchRemoteItems'
 import { SidebarSection } from './SidebarSection'
 import { RemotesSection } from './RemotesSection'
@@ -50,13 +51,6 @@ export function LeftPanel() {
 
   const [toDelete, setToDelete] = useState<{ kind: 'branch' | 'tag'; name: string } | null>(null)
   const [toRename, setToRename] = useState<string | null>(null)
-
-  const copyText = (text: string, message: string) => {
-    void navigator.clipboard
-      .writeText(text)
-      .then(() => toast(message))
-      .catch(() => toast.error('Could not copy'))
-  }
 
   const currentBranch =
     branches.data?.local.find((b) => b.is_head)?.name ?? repo?.head_branch ?? ''
@@ -215,12 +209,12 @@ export function LeftPanel() {
                 Copy
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="w-52">
-                <ContextMenuItem onSelect={() => copyText(item.name, `Copied ${item.name}`)}>
+                <ContextMenuItem onSelect={() => void copyToClipboard(item.name, `Copied ${item.name}`)}>
                   Branch name
                 </ContextMenuItem>
                 {branch?.tip && (
                   <ContextMenuItem
-                    onSelect={() => copyText(branch.tip ?? '', `Copied ${branch.tip}`)}
+                    onSelect={() => void copyToClipboard(branch.tip ?? '', `Copied ${branch.tip}`)}
                   >
                     Latest commit ID
                     <ContextMenuShortcut className="font-mono">{branch.tip}</ContextMenuShortcut>
@@ -228,7 +222,7 @@ export function LeftPanel() {
                 )}
                 {branch?.upstream && (
                   <ContextMenuItem
-                    onSelect={() => copyText(branch.upstream ?? '', 'Copied remote branch name')}
+                    onSelect={() => void copyToClipboard(branch.upstream ?? '', 'Copied remote branch name')}
                   >
                     Remote branch name
                   </ContextMenuItem>
