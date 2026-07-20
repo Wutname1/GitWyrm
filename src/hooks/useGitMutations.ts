@@ -329,10 +329,15 @@ export function useGitMutations(repoId: string | null) {
   const pull = useMutation({
     mutationFn: async () => unwrap(await commands.gitPull(id)),
     onSuccess: (result) => {
-      invalidate(qc, id, ['status', 'log', 'branches'])
       toast(describePull(result))
     },
     onError,
+    // A conflicting pull exits as an error but leaves a merge or rebase in
+    // progress, so merge state must refresh on both outcomes for the banner
+    // and conflict view to appear.
+    onSettled: () => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+    },
   })
 
   const push = useMutation({
@@ -409,7 +414,7 @@ export function useGitMutations(repoId: string | null) {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
       if (result.conflicts.length > 0) {
         toast.warning(
-          `Rebase paused on ${plural(result.conflicts.length, 'conflict')} - resolve them in your editor, then finish the rebase`
+          `Rebase paused on ${plural(result.conflicts.length, 'conflict')} - resolve them, then continue the rebase`
         )
       } else {
         toast(`Rebased onto ${onto}`)
@@ -588,6 +593,30 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  const rebaseContinue = useMutation({
+    mutationFn: async () => unwrap(await commands.rebaseContinue(id)),
+    onSuccess: (result) => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      if (result.conflicts.length > 0) {
+        toast.warning(
+          `The next step hit ${plural(result.conflicts.length, 'conflict')} - resolve them to keep going`
+        )
+      } else {
+        toast('Rebase finished')
+      }
+    },
+    onError,
+  })
+
+  const rebaseAbort = useMutation({
+    mutationFn: async () => unwrap(await commands.rebaseAbort(id)),
+    onSuccess: () => {
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      toast('Rebase abandoned - your branch is back where it started')
+    },
+    onError,
+  })
+
   const abortMerge = useMutation({
     mutationFn: async () => unwrap(await commands.abortMerge(id)),
     onSuccess: () => {
@@ -691,6 +720,8 @@ export function useGitMutations(repoId: string | null) {
     revertCommit,
     dropCommit,
     abortMerge,
+    rebaseContinue,
+    rebaseAbort,
     resolveConflict,
     commitMerge,
     stageLines,

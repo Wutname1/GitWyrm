@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, FileWarning } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -13,10 +13,12 @@ function SidePanel({
   title,
   tone,
   text,
+  deleted,
 }: {
   title: string
   tone: 'ours' | 'theirs'
   text: string
+  deleted: boolean
 }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-border last:border-r-0">
@@ -29,7 +31,13 @@ function SidePanel({
         {title}
       </div>
       <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-[1.7] text-sub">
-        {text || <span className="italic text-muted-foreground">(empty)</span>}
+        {deleted ? (
+          <span className="italic text-removed">
+            This side deleted the file. Choosing it removes the file.
+          </span>
+        ) : (
+          text || <span className="italic text-muted-foreground">(empty)</span>
+        )}
       </pre>
     </div>
   )
@@ -48,9 +56,14 @@ export function ConflictView() {
   const conflicts = merge.data?.conflicts ?? []
   const [draft, setDraft] = useState('')
 
-  // Load the working-tree (marker) text into the editable draft on file change.
+  // Load the marker text into the editable draft only when the shown file
+  // changes, so a background refetch never wipes in-progress hand edits.
+  const loadedPath = useRef<string | null>(null)
   useEffect(() => {
-    if (conflict.data) setDraft(conflict.data.merged)
+    if (conflict.data && conflict.data.path !== loadedPath.current) {
+      loadedPath.current = conflict.data.path
+      setDraft(conflict.data.merged)
+    }
   }, [conflict.data])
 
   // When no path is selected but conflicts exist, jump to the first one.
@@ -64,16 +77,25 @@ export function ConflictView() {
       { path, resolution },
       {
         onSuccess: () => {
-          // Advance to the next unresolved file, or back to the graph.
-          const next = conflicts.find((c) => c !== path)
-          if (next) openConflict(next)
-          else showGraph()
+          // Advance to the file after this one (wrapping), or back to the graph.
+          const remaining = conflicts.filter((c) => c !== path)
+          if (remaining.length === 0) {
+            showGraph()
+            return
+          }
+          const idx = conflicts.indexOf(path)
+          const next = remaining.find((c) => conflicts.indexOf(c) > idx) ?? remaining[0]
+          openConflict(next)
         },
       }
     )
   }
 
   if (!repo) return null
+
+  // Merge state not known yet: render nothing rather than flashing the
+  // "no conflicts" screen for a repo that may be mid-operation.
+  if (merge.isLoading) return null
 
   if (conflicts.length === 0) {
     return (
@@ -139,7 +161,11 @@ export function ConflictView() {
             onClick={() => resolveWith({ kind: 'ours' })}
           >
             {activeResolution === 'ours' && <PendingIndicator />}
-            {activeResolution === 'ours' ? 'Using ours…' : 'Use ours'}
+            {activeResolution === 'ours'
+              ? 'Using ours…'
+              : data?.ours_deleted
+                ? 'Use ours (delete)'
+                : 'Use ours'}
           </Button>
           <Button
             size="sm"
@@ -149,12 +175,16 @@ export function ConflictView() {
             onClick={() => resolveWith({ kind: 'theirs' })}
           >
             {activeResolution === 'theirs' && <PendingIndicator />}
-            {activeResolution === 'theirs' ? 'Using theirs…' : 'Use theirs'}
+            {activeResolution === 'theirs'
+              ? 'Using theirs…'
+              : data?.theirs_deleted
+                ? 'Use theirs (delete)'
+                : 'Use theirs'}
           </Button>
           <Button
             size="sm"
             className="h-7 gap-1.5 text-[11px]"
-            disabled={m.resolveConflict.isPending || !data}
+            disabled={m.resolveConflict.isPending || !data || data.binary}
             onClick={() => resolveWith({ kind: 'manual', text: draft })}
           >
             {activeResolution === 'manual' ? <PendingIndicator /> : <Check size={13} />}
@@ -170,7 +200,8 @@ export function ConflictView() {
         )}
         {data?.binary && (
           <div className="p-4 text-xs text-muted-foreground">
-            Binary file — choose “Use ours” or “Use theirs”.
+            This file isn't text, so it can't be edited here — pick “Use ours” or “Use
+            theirs” to keep one whole version.
           </div>
         )}
 
@@ -178,8 +209,18 @@ export function ConflictView() {
           <div className="flex min-h-0 flex-1 flex-col">
             {/* Ours / Theirs reference panes */}
             <div className="flex min-h-0 flex-1 border-b border-border">
-              <SidePanel title="OURS (current)" tone="ours" text={data.ours} />
-              <SidePanel title="THEIRS (incoming)" tone="theirs" text={data.theirs} />
+              <SidePanel
+                title="OURS (current)"
+                tone="ours"
+                text={data.ours}
+                deleted={data.ours_deleted}
+              />
+              <SidePanel
+                title="THEIRS (incoming)"
+                tone="theirs"
+                text={data.theirs}
+                deleted={data.theirs_deleted}
+              />
             </div>
             {/* Editable merged result */}
             <div className="flex min-h-0 flex-[1.2] flex-col">

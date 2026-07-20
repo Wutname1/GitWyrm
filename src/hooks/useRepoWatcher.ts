@@ -19,6 +19,9 @@ export function useRepoWatcher() {
       queryClient.invalidateQueries({ queryKey: keys.branches(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.stashes(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.tags(repoId) })
+      queryClient.invalidateQueries({ queryKey: keys.mergeState(repoId) })
+      // Prefix match: refreshes every open conflict file for this repo.
+      queryClient.invalidateQueries({ queryKey: ['conflict', repoId] })
     })
     return () => {
       unlisten.then((fn) => fn())
