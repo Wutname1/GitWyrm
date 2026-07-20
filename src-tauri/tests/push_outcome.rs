@@ -275,6 +275,49 @@ fn diverged_branch_refuses_to_fast_forward() {
 }
 
 #[test]
+fn pruned_upstream_is_distinguishable_from_being_in_sync() {
+  let (root, work) = scratch("prunedupstream");
+
+  git(&work, &["checkout", "-qb", "feature"]);
+  git(&work, &["push", "-q", "-u", "origin", "feature"]);
+  fs::write(work.join("b.txt"), "b\n").unwrap();
+  git(&work, &["add", "."]);
+  git(&work, &["commit", "-qm", "b"]);
+  git(&work, &["push", "-q"]);
+  git(&work, &["checkout", "-q", "main"]);
+
+  let repo = Repository::open(&work).unwrap();
+  // In sync: upstream resolves, counts are zero.
+  assert_eq!(branch_ahead_behind(&repo, "feature"), Some((0, 0)));
+  assert!(
+    repo.find_branch("origin/feature", BranchType::Remote).is_ok(),
+    "upstream ref should resolve while it exists"
+  );
+
+  // Someone deletes the branch on the remote; we prune the stale tracking ref.
+  let other = other_clone(&root, "main");
+  git(&other, &["push", "-q", "origin", "--delete", "feature"]);
+  git(&work, &["fetch", "-q", "--prune"]);
+
+  // The config still names the upstream...
+  let local = repo.find_branch("feature", BranchType::Local).unwrap();
+  assert!(
+    local.upstream().is_err(),
+    "the tracking ref is gone, so upstream() no longer resolves"
+  );
+  // ...but the remote-tracking ref is gone. This is the state that used to be
+  // indistinguishable from "in sync", making push report zero commits.
+  assert!(repo.find_branch("origin/feature", BranchType::Remote).is_err());
+  assert_eq!(
+    branch_ahead_behind(&repo, "feature"),
+    None,
+    "a pruned upstream must not report (0, 0) like an in-sync branch"
+  );
+
+  let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn pull_reports_commits_actually_received() {
   let (root, work) = scratch("pull");
   let repo = Repository::open(&work).unwrap();

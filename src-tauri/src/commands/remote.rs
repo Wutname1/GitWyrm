@@ -22,6 +22,10 @@ struct TrackingState {
   upstream: Option<String>,
   ahead: u32,
   behind: u32,
+  /// Set when an upstream is configured but its ref could not be resolved --
+  /// usually a remote branch that was deleted and pruned. The counts are
+  /// meaningless in that case and must not be read as "in sync".
+  upstream_gone: bool,
 }
 
 fn tracking_state(repo: &git2::Repository) -> TrackingState {
@@ -31,7 +35,8 @@ fn tracking_state(repo: &git2::Repository) -> TrackingState {
 /// Tracking state for a named local branch, or for HEAD when `branch_name` is
 /// `None`. Used by push to report on a branch that is not checked out.
 fn branch_tracking_state(repo: &git2::Repository, branch_name: Option<&str>) -> TrackingState {
-  let none = TrackingState { branch: None, upstream: None, ahead: 0, behind: 0 };
+  let none =
+    TrackingState { branch: None, upstream: None, ahead: 0, behind: 0, upstream_gone: false };
 
   let name = match branch_name {
     Some(n) => n.to_string(),
@@ -48,22 +53,27 @@ fn branch_tracking_state(repo: &git2::Repository, branch_name: Option<&str>) -> 
 
   let upstream = branch.upstream().ok().and_then(|u| u.name().ok().flatten().map(str::to_string));
 
-  let (ahead, behind) = match (&upstream, branch.get().target()) {
+  // An upstream whose ref will not resolve is reported separately: its counts
+  // are (0, 0), which would otherwise be indistinguishable from a branch that
+  // genuinely matches its upstream -- and push would report "sent 0 commits"
+  // after successfully sending them.
+  let (ahead, behind, upstream_gone) = match (&upstream, branch.get().target()) {
     (Some(up), Some(local_oid)) => {
       let up_oid =
         repo.find_branch(up, git2::BranchType::Remote).ok().and_then(|b| b.get().target());
       match up_oid {
         Some(up_oid) => repo
           .graph_ahead_behind(local_oid, up_oid)
-          .map(|(a, b)| (a as u32, b as u32))
-          .unwrap_or((0, 0)),
-        None => (0, 0),
+          .map(|(a, b)| (a as u32, b as u32, false))
+          .unwrap_or((0, 0, true)),
+        None => (0, 0, true),
       }
     }
-    _ => (0, 0),
+    (Some(_), None) => (0, 0, true),
+    _ => (0, 0, false),
   };
 
-  TrackingState { branch: Some(name), upstream, ahead, behind }
+  TrackingState { branch: Some(name), upstream, ahead, behind, upstream_gone }
 }
 
 #[cfg(windows)]
@@ -279,7 +289,9 @@ pub async fn git_push_branch(
     // happens to be checked out.
     let refspec = format!("refs/heads/{branch}");
     let mut args: Vec<&str> = vec!["push", "--progress"];
-    if !had_upstream {
+    // Re-link on a first publish, and also when the upstream ref went missing:
+    // the config still names it, but the tracking ref needs recreating.
+    if !had_upstream || before.upstream_gone {
       args.push("--set-upstream");
     }
     args.push(&remote);
@@ -288,7 +300,11 @@ pub async fn git_push_branch(
     run_streaming(&app, &repo_id, Some(&path), "push", &args)?;
     let after = { branch_tracking_state(&open.repo.lock().unwrap(), Some(&branch)) };
 
-    let pushed = if had_upstream {
+    // A branch whose upstream ref was pruned has no usable "before" count --
+    // it reads (0, 0) exactly like a branch that matches -- so subtracting
+    // would report zero after a successful push. It is recreating the remote
+    // branch, so count it the same way as a first publish.
+    let pushed = if had_upstream && !before.upstream_gone {
       // Commits we were ahead by and no longer are is what the remote took.
       before.ahead.saturating_sub(after.ahead)
     } else {
