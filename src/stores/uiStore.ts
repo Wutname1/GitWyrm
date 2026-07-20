@@ -34,6 +34,9 @@ interface UiState {
   syncTarget: string | null
   tagTargetSha: string | null
   branchTargetSha: string | null
+  /** Branch pending a rename / delete confirm, set from any branch menu. */
+  branchToRename: string | null
+  branchToDelete: string | null
   settingsSection: SettingsSection
   changesFocusNonce: number
   /** Ref (branch/tag) the graph should scroll to and highlight; bumped nonce re-triggers. */
@@ -45,6 +48,8 @@ interface UiState {
   openMerge: (source?: string) => void
   openNewTag: (sha?: string) => void
   openNewBranch: (sha?: string) => void
+  renameBranchPrompt: (name: string | null) => void
+  deleteBranchPrompt: (name: string | null) => void
   openRemoteSync: (source: string, target: string) => void
   openDiff: (request: DiffRequest) => void
   closeDiff: () => void
@@ -77,6 +82,8 @@ export const useUiStore = create<UiState>((set) => ({
   syncTarget: null,
   tagTargetSha: null,
   branchTargetSha: null,
+  branchToRename: null,
+  branchToDelete: null,
   settingsSection: 'general',
   changesFocusNonce: 0,
   revealRef: null,
@@ -92,6 +99,8 @@ export const useUiStore = create<UiState>((set) => ({
   openMerge: (source) => set({ activeModal: 'merge', mergeSource: source ?? null }),
   openNewTag: (sha) => set({ activeModal: 'newTag', tagTargetSha: sha ?? null }),
   openNewBranch: (sha) => set({ activeModal: 'newBranch', branchTargetSha: sha ?? null }),
+  renameBranchPrompt: (name) => set({ branchToRename: name }),
+  deleteBranchPrompt: (name) => set({ branchToDelete: name }),
   openRemoteSync: (source, target) =>
     set({ activeModal: 'remote-sync', syncSource: source, syncTarget: target }),
   openDiff: (request) => set({ diffRequest: request, centerView: 'diff' }),

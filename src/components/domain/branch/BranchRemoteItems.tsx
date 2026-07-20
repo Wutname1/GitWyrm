@@ -13,11 +13,11 @@ interface BranchRemoteItemsProps {
 }
 
 /**
- * The push/pull menu entries for one branch. Every menu that acts on a branch
- * renders this rather than its own copy, so the wording, the pending states and
- * the rules for when an action applies stay identical wherever you right-click.
+ * Just the push/pull entries for a branch, for menus that are already long.
  *
- * Renders nothing when the branch has nothing to send or get.
+ * The commit menu carries fifteen commit actions of its own, so a branch at a
+ * commit gets only the two that matter there. Every other surface renders the
+ * full [`BranchMenu`] instead.
  */
 export function BranchRemoteItems({ branch, repoId, opInProgress }: BranchRemoteItemsProps) {
   const m = useGitMutations(repoId)

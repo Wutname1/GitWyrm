@@ -18,6 +18,7 @@ import { Pencil, Target, Trash2 } from 'lucide-react'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
+import { BranchMenu } from '@/components/domain/branch/BranchMenu'
 import { TooltipButton } from '@/components/ui/tooltip'
 
 /** Plain-language summary of what a remote branch means for the user. */
@@ -73,7 +74,11 @@ function BranchNode({ node, depth }: { node: BranchTreeNode<RemoteBranchInfo>; d
   const b = node.data
   const hasIncoming = !!b && b.ahead_of_local > 0
 
-  return (
+  // A remote branch's actions are its local counterpart's: right-clicking
+  // origin/main offers to send the commits sitting on local main. Without a
+  // local copy there is nothing local to act on, and BranchMenu renders
+  // nothing.
+  const row = (
     <div
       style={{ paddingLeft: pad + 14 }}
       className="flex items-center gap-1.5 py-0.5 pr-3 hover:bg-panel2"
@@ -108,6 +113,21 @@ function BranchNode({ node, depth }: { node: BranchTreeNode<RemoteBranchInfo>; d
         )}
       </span>
     </div>
+  )
+
+  if (!b?.local_counterpart) return row
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+      <ContextMenuContent className="w-60">
+        <ContextMenuLabel className="font-mono text-[11px] text-sub">
+          {b.local_counterpart}
+        </ContextMenuLabel>
+        <ContextMenuSeparator />
+        <BranchMenu branch={b.local_counterpart} />
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 

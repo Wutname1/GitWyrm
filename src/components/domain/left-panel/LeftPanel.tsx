@@ -1,14 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import {
-  ArrowLeftRight,
-  Copy,
-  GitMerge,
-  GitPullRequestArrow,
-  Link2,
-  PenLine,
-  Tag,
-  Trash2,
-} from 'lucide-react'
+import { ArrowLeftRight, Tag, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { useBranches, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
@@ -20,18 +11,12 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuShortcut,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { RenameBranchDialog } from '@/components/modals/RenameBranchDialog'
-import { PendingIndicator } from '@/components/ui/pending-indicator'
-import { branchActions, branchSync } from '@/lib/branchActions'
-import { copyToClipboard } from '@/lib/clipboard'
-import { BranchRemoteItems, hasRemoteItems } from '@/components/domain/branch/BranchRemoteItems'
+import { branchSync } from '@/lib/branchActions'
+import { BranchMenu } from '@/components/domain/branch/BranchMenu'
 import { SidebarSection } from './SidebarSection'
 import { RemotesSection } from './RemotesSection'
 
@@ -50,7 +35,10 @@ export function LeftPanel() {
   const stashes = useStashes(repo?.id ?? null)
 
   const [toDelete, setToDelete] = useState<{ kind: 'branch' | 'tag'; name: string } | null>(null)
-  const [toRename, setToRename] = useState<string | null>(null)
+  const branchToRename = useUiStore((s) => s.branchToRename)
+  const branchToDelete = useUiStore((s) => s.branchToDelete)
+  const renameBranchPrompt = useUiStore((s) => s.renameBranchPrompt)
+  const deleteBranchPrompt = useUiStore((s) => s.deleteBranchPrompt)
 
   const currentBranch =
     branches.data?.local.find((b) => b.is_head)?.name ?? repo?.head_branch ?? ''
@@ -161,84 +149,11 @@ export function LeftPanel() {
     row: ReactNode
   ): ReactNode => {
     if (section.type === 'branch') {
-      const isCurrent = item.name === currentBranch
-      // The sidebar row carries only a display string, so read the branch's
-      // real sync state from the query to decide which actions apply.
-      const branch = branches.data?.local.find((b) => b.name === item.name)
-      const actions = branch ? branchActions(branch) : null
       return (
         <ContextMenu>
           <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-          <ContextMenuContent className="w-56">
-            {branch && <BranchRemoteItems branch={branch} repoId={repo?.id ?? null} />}
-            {actions?.setUpstream.show && (
-              <ContextMenuItem
-                disabled={m.reconnectBranch.isPending}
-                onSelect={(e) => {
-                  e.preventDefault()
-                  m.reconnectBranch.mutate(item.name)
-                }}
-              >
-                <Link2 />
-                {actions.setUpstream.label}
-              </ContextMenuItem>
-            )}
-            {((branch && hasRemoteItems(branch)) || actions?.setUpstream.show) && (
-              <ContextMenuSeparator />
-            )}
-
-            <ContextMenuItem disabled={isCurrent} onSelect={() => openMerge(item.name)}>
-              <GitMerge />
-              Merge into {currentBranch || 'current'}
-            </ContextMenuItem>
-            {/* TODO(github): needs the GitHub integration before it can run. */}
-            <ContextMenuItem onSelect={() => toast('GitHub integration is planned')}>
-              <GitPullRequestArrow />
-              Start a pull request
-              <ContextMenuShortcut className="text-[10px]">soon</ContextMenuShortcut>
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-
-            <ContextMenuItem onSelect={() => setToRename(item.name)}>
-              <PenLine />
-              Rename branch…
-            </ContextMenuItem>
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>
-                <Copy />
-                Copy
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="w-52">
-                <ContextMenuItem onSelect={() => void copyToClipboard(item.name, `Copied ${item.name}`)}>
-                  Branch name
-                </ContextMenuItem>
-                {branch?.tip && (
-                  <ContextMenuItem
-                    onSelect={() => void copyToClipboard(branch.tip ?? '', `Copied ${branch.tip}`)}
-                  >
-                    Latest commit ID
-                    <ContextMenuShortcut className="font-mono">{branch.tip}</ContextMenuShortcut>
-                  </ContextMenuItem>
-                )}
-                {branch?.upstream && (
-                  <ContextMenuItem
-                    onSelect={() => void copyToClipboard(branch.upstream ?? '', 'Copied remote branch name')}
-                  >
-                    Remote branch name
-                  </ContextMenuItem>
-                )}
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            <ContextMenuSeparator />
-
-            <ContextMenuItem
-              variant="destructive"
-              disabled={isCurrent}
-              onSelect={() => setToDelete({ kind: 'branch', name: item.name })}
-            >
-              <Trash2 />
-              Delete branch
-            </ContextMenuItem>
+          <ContextMenuContent className="w-60">
+            <BranchMenu branch={item.name} />
           </ContextMenuContent>
         </ContextMenu>
       )
@@ -315,35 +230,35 @@ export function LeftPanel() {
       ))}
 
       <ConfirmDialog
-        open={toDelete?.kind === 'branch'}
-        onOpenChange={(o) => !o && setToDelete(null)}
+        open={branchToDelete !== null}
+        onOpenChange={(o) => !o && deleteBranchPrompt(null)}
         destructive
         title="Delete this branch?"
         description={
           <>
             This deletes the local branch{' '}
-            <span className="font-mono text-foreground">{toDelete?.name}</span>. Any commits only on
+            <span className="font-mono text-foreground">{branchToDelete}</span>. Any commits only on
             it may become hard to find.
           </>
         }
         confirmLabel="Delete branch"
-        onConfirm={() => toDelete && m.deleteBranch.mutate(toDelete.name)}
+        onConfirm={() => branchToDelete && m.deleteBranch.mutate(branchToDelete)}
       />
 
       <RenameBranchDialog
-        open={toRename !== null}
-        onOpenChange={(o) => !o && setToRename(null)}
-        currentName={toRename ?? ''}
+        open={branchToRename !== null}
+        onOpenChange={(o) => !o && renameBranchPrompt(null)}
+        currentName={branchToRename ?? ''}
         existingNames={(branches.data?.local ?? []).map((b) => b.name)}
         hasUpstream={
-          (branches.data?.local ?? []).find((b) => b.name === toRename)?.upstream != null
+          (branches.data?.local ?? []).find((b) => b.name === branchToRename)?.upstream != null
         }
         pending={m.renameBranch.isPending}
         onConfirm={(newName) =>
-          toRename &&
+          branchToRename &&
           m.renameBranch.mutate(
-            { name: toRename, newName },
-            { onSuccess: () => setToRename(null) }
+            { name: branchToRename, newName },
+            { onSuccess: () => renameBranchPrompt(null) }
           )
         }
       />

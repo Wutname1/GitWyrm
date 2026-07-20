@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import {
   ArchiveRestore,
   Archive,
@@ -80,6 +80,24 @@ function BranchSwitcher() {
   const revealRefInGraph = useUiStore((s) => s.revealRefInGraph)
   const m = useGitMutations(repo?.id ?? null)
   const [open, setOpen] = useState(false)
+  const closeTimer = useRef<number | null>(null)
+
+  // The menu content is portalled to document.body, outside this component's
+  // DOM, so leaving the trigger for the menu fires mouseleave. Closing on a
+  // short delay that the menu itself cancels lets the cursor cross the gap
+  // without the menu flickering shut and reopening.
+  const cancelClose = () => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current)
+      closeTimer.current = null
+    }
+    setOpen(true)
+  }
+  const scheduleClose = () => {
+    cancelClose()
+    closeTimer.current = window.setTimeout(() => setOpen(false), 180)
+  }
+  useEffect(() => () => cancelClose(), [])
 
   const locals = branches.data?.local ?? []
   const head = locals.find((b) => b.is_head)
@@ -100,11 +118,7 @@ function BranchSwitcher() {
   }
 
   return (
-    <div
-      className="mr-1.5"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
+    <div className="mr-1.5" onMouseEnter={cancelClose} onMouseLeave={scheduleClose}>
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button className="flex h-[30px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-[11px] hover:border-muted-foreground hover:bg-panel3">
@@ -114,7 +128,12 @@ function BranchSwitcher() {
             <ChevronDown size={13} strokeWidth={2} className="text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="max-h-[70vh] w-[240px]">
+        <DropdownMenuContent
+          align="end"
+          className="max-h-[70vh] w-[240px]"
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+        >
           <DropdownMenuLabel className="px-2 py-1 text-[9.5px] font-semibold tracking-[.09em] text-muted-foreground">
             LOCAL
           </DropdownMenuLabel>
