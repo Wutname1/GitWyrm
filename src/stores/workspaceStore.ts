@@ -3,6 +3,7 @@ import { commands, type BranchSwitchMode, type RepoInfo, type Settings } from '@
 import { normalizePath } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
 import { DEFAULT_COLUMN_ORDER, type ColumnId } from '@/lib/graphColumns'
+import { useUiStore } from '@/stores/uiStore'
 
 export interface RecentRepo {
   name: string
@@ -737,6 +738,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     return settings
   },
 }))
+
+// Commit selection, open diffs and conflicts all belong to one repo. Whenever the
+// active repo changes - tab click, close, group close - drop them so the graph
+// never queries the new repo for the old repo's objects.
+useWorkspaceStore.subscribe((s, prev) => {
+  if (s.activeRepoId !== prev.activeRepoId) useUiStore.getState().resetForRepoSwitch()
+})
 
 export function useActiveRepo(): RepoInfo | null {
   const openRepos = useWorkspaceStore((s) => s.openRepos)

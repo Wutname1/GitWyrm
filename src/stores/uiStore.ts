@@ -43,6 +43,8 @@ interface UiState {
   revealRef: { name: string; nonce: number } | null
 
   selectCommit: (sha: string | null) => void
+  /** Drop view state tied to one repo. Call when the active repo changes. */
+  resetForRepoSwitch: () => void
   focusChanges: () => void
   revealRefInGraph: (name: string) => void
   openMerge: (source?: string) => void
@@ -89,6 +91,14 @@ export const useUiStore = create<UiState>((set) => ({
   revealRef: null,
 
   selectCommit: (sha) => set({ selectedSha: sha }),
+  resetForRepoSwitch: () =>
+    set((s) => ({
+      selectedSha: null,
+      diffRequest: null,
+      conflictPath: null,
+      revealRef: null,
+      centerView: s.centerView === 'diff' || s.centerView === 'conflict' ? 'graph' : s.centerView,
+    })),
   focusChanges: () => set((s) => ({ changesFocusNonce: s.changesFocusNonce + 1 })),
   revealRefInGraph: (name) =>
     set((s) => ({
