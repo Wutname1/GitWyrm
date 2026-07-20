@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { shortSha } from '@/lib/gitDisplay'
 import { TooltipButton } from '@/components/ui/tooltip'
 import { useUiStore, type DiffRequest } from '@/stores/uiStore'
 

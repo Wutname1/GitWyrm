@@ -4,7 +4,7 @@ import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { cn } from '@/lib/utils'
 import type { RemoteBranchInfo, RemoteInfo } from '@/lib/bindings'
 import { buildBranchTreeFrom, type BranchTreeNode } from '@/lib/branchTree'
-import { formatRelativeTime } from '@/lib/gitDisplay'
+import { formatRelativeTime, plural } from '@/lib/gitDisplay'
 import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import {
   ContextMenu,
