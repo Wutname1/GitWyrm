@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { commands } from '@/lib/bindings'
 import { isTauri } from '@/lib/env'
 import { unwrap } from '@/lib/queryKeys'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 const catalogKey = ['ai-catalog'] as const
 const configuredKey = ['ai-configured'] as const
@@ -107,6 +108,10 @@ export function useCopilotSignIn() {
         if (poll.status === 'complete') {
           setStatus({ state: 'idle' })
           qc.invalidateQueries({ queryKey: configuredKey })
+          // Signing in is an unambiguous choice of provider. Claim the empty
+          // selection so the picker doesn't sit on "Select a provider…".
+          const { aiProvider, setAiSelection } = useWorkspaceStore.getState()
+          if (aiProvider == null) setAiSelection('github-copilot', null)
           return
         }
         interval = Math.max(poll.interval, 5)

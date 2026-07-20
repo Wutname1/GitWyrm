@@ -59,6 +59,15 @@ export function AiSettings() {
   )
   const isConfigured = aiProvider != null && configuredIds.has(aiProvider)
 
+  // Credentials without a selection reads as "not set up". When there's only
+  // one configured provider the intent is unambiguous, so adopt it. The model
+  // is left null for the repair effect below to fill from the live list.
+  useEffect(() => {
+    if (aiProvider != null || configured.data == null) return
+    if (configured.data.length !== 1) return
+    setAiSelection(configured.data[0].id, null)
+  }, [aiProvider, configured.data, setAiSelection])
+
   const modelsQuery = useAiModels(aiProvider, isConfigured)
   const models = modelsQuery.data ?? provider?.models ?? []
 
