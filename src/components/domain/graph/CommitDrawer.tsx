@@ -38,7 +38,7 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
   const d = detail.data
   const color = authorColor(d.author_name)
   const parents = d.parent_shas.length
-    ? d.parent_shas.map((p) => p.slice(0, 7)).join(', ')
+    ? d.parent_shas.map((p) => shortSha(p)).join(', ')
     : '(root)'
   const adds = d.files.reduce((a, f) => a + f.additions, 0)
   const dels = d.files.reduce((a, f) => a + f.deletions, 0)
@@ -57,13 +57,13 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
           </div>
         </div>
         <span className="rounded-[5px] border border-border bg-panel2 px-2 py-[3px] font-mono text-[10.5px] text-sub">
-          {d.sha.slice(0, 7)}
+          {shortSha(d.sha)}
         </span>
         <Button
           variant="secondary"
           size="sm"
           className="h-auto rounded border-border bg-panel3 px-[7px] py-0.5 text-[10px] text-sub"
-          onClick={() => void copyToClipboard(d.sha, `Copied ${d.sha.slice(0, 7)}`)}
+          onClick={() => void copyToClipboard(d.sha, `Copied ${shortSha(d.sha)}`)}
         >
           Copy SHA
         </Button>

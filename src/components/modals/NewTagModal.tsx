@@ -94,7 +94,7 @@ export function NewTagModal() {
             Tags{' '}
             {targetSha ? (
               <>
-                the commit <span className="font-mono text-sub">{targetSha.slice(0, 7)}</span>.
+                the commit <span className="font-mono text-sub">{shortSha(targetSha)}</span>.
               </>
             ) : (
               'the latest commit on this branch.'

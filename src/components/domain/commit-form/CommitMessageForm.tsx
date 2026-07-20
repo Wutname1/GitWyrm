@@ -11,6 +11,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { plural } from '@/lib/gitDisplay'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -219,7 +220,7 @@ export function CommitMessageForm() {
             ? 'Pushing…'
             : commitButtonMode === 'commit_push'
               ? `Commit & push to ${currentBranch}`
-              : `Commit ${stagedCount} file${stagedCount === 1 ? '' : 's'} to ${currentBranch}`}
+              : `Commit ${plural(stagedCount, 'file')} to ${currentBranch}`}
         </button>
         <Tooltip>
           <DropdownMenu>

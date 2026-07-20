@@ -11,6 +11,7 @@ import {
 import { keys, unwrap } from '@/lib/queryKeys'
 import { classifyError } from '@/lib/errorClass'
 import { copyToClipboard } from '@/lib/clipboard'
+import { plural, shortSha } from '@/lib/gitDisplay'
 import { log } from '@/lib/log'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -49,7 +50,7 @@ const onError = (e: Error) => {
   else toast.error(message)
 }
 
-const commitCount = (n: number) => `${n} commit${n === 1 ? '' : 's'}`
+const commitCount = (n: number) => plural(n, 'commit')
 
 /** The upstream if we know it, else a generic stand-in so copy still reads. */
 const describeTarget = (r: { upstream: string | null }) => r.upstream ?? 'the remote'
@@ -153,7 +154,7 @@ export function useGitMutations(repoId: string | null) {
       unwrap(await commands.createCommit(id, args.summary, args.description)),
     onSuccess: (sha) => {
       invalidate(qc, id, ['status', 'log', 'branches'])
-      toast(`Committed ${sha.slice(0, 7)}`)
+      toast(`Committed ${shortSha(sha)}`)
     },
     onError,
   })
@@ -408,7 +409,7 @@ export function useGitMutations(repoId: string | null) {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
       if (result.conflicts.length > 0) {
         toast.warning(
-          `Rebase paused on ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'} - resolve them in your editor, then finish the rebase`
+          `Rebase paused on ${plural(result.conflicts.length, 'conflict')} - resolve them in your editor, then finish the rebase`
         )
       } else {
         toast(`Rebased onto ${onto}`)
@@ -430,7 +431,7 @@ export function useGitMutations(repoId: string | null) {
         toast(`Fast-forwarded to ${reference}`)
       } else if (result.conflicts.length > 0) {
         toast.warning(
-          `Merged ${reference} with ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'} to resolve`
+          `Merged ${reference} with ${plural(result.conflicts.length, 'conflict')} to resolve`
         )
       } else {
         toast(`Merged ${reference}`)
@@ -452,7 +453,7 @@ export function useGitMutations(repoId: string | null) {
         toast(`Fast-forwarded ${target} to ${source}`)
       } else if (result.conflicts.length > 0) {
         toast.warning(
-          `Merged ${source} into ${target} with ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'} to resolve`
+          `Merged ${source} into ${target} with ${plural(result.conflicts.length, 'conflict')} to resolve`
         )
       } else {
         toast(`Merged ${source} into ${target}`)
@@ -468,10 +469,10 @@ export function useGitMutations(repoId: string | null) {
     }),
     onSuccess: ({ sha, result }) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
-      const short = sha.slice(0, 7)
+      const short = shortSha(sha)
       if (result.conflicts.length > 0) {
         toast.warning(
-          `Cherry-pick of ${short} hit ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'} to resolve`
+          `Cherry-pick of ${short} hit ${plural(result.conflicts.length, 'conflict')} to resolve`
         )
       } else {
         toast(`Cherry-picked ${short}`)
@@ -484,7 +485,7 @@ export function useGitMutations(repoId: string | null) {
   // that puts the branch back where it was.
   const afterRefMove = (previousSha: string, verb: string, undoMode: ResetMode) => {
     invalidate(qc, id, ['status', 'log', 'branches'])
-    toast(`${verb} ${previousSha.slice(0, 7)}`, {
+    toast(`${verb} ${shortSha(previousSha)}`, {
       action: {
         label: 'Undo',
         onClick: () => {
@@ -547,7 +548,7 @@ export function useGitMutations(repoId: string | null) {
     },
     onSuccess: (sha) => {
       invalidate(qc, id, ['status', 'log', 'branches'])
-      toast(`Checked out ${sha.slice(0, 7)} — you're not on a branch now`)
+      toast(`Checked out ${shortSha(sha)} — you're not on a branch now`)
     },
     onError,
   })
@@ -557,7 +558,7 @@ export function useGitMutations(repoId: string | null) {
       unwrap(await commands.rewordCommit(id, args.sha, args.message)),
     onSuccess: (sha) => {
       invalidate(qc, id, ['status', 'log', 'branches'])
-      toast(`Updated message — now ${sha.slice(0, 7)}`)
+      toast(`Updated message — now ${shortSha(sha)}`)
     },
     onError,
   })
@@ -569,10 +570,10 @@ export function useGitMutations(repoId: string | null) {
     }),
     onSuccess: ({ sha, result }) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
-      const short = sha.slice(0, 7)
+      const short = shortSha(sha)
       if (result.conflicts.length > 0) {
         toast.warning(
-          `Reverting ${short} hit ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'} to resolve`
+          `Reverting ${short} hit ${plural(result.conflicts.length, 'conflict')} to resolve`
         )
       } else {
         toast(`Reverted ${short}`)
@@ -610,7 +611,7 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async (message: string) => unwrap(await commands.commitMerge(id, message)),
     onSuccess: (sha) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
-      toast(`Committed ${sha.slice(0, 7)}`)
+      toast(`Committed ${shortSha(sha)}`)
     },
     onError,
   })

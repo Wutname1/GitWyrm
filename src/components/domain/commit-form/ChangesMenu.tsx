@@ -13,6 +13,7 @@ import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { useStatus } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useActiveRepo } from '@/stores/workspaceStore'
+import { plural } from '@/lib/gitDisplay'
 
 interface ChangesMenuProps {
   children: ReactNode
@@ -40,7 +41,7 @@ export function ChangesMenu({ children, asChild = true }: ChangesMenuProps) {
         <ContextMenuTrigger asChild={asChild}>{children}</ContextMenuTrigger>
         <ContextMenuContent className="w-52">
           <ContextMenuLabel className="text-[11px] text-sub">
-            {hasChanges ? `${total} changed file${total === 1 ? '' : 's'}` : 'No changes'}
+            {hasChanges ? `${plural(total, 'changed file')}` : 'No changes'}
           </ContextMenuLabel>
           <ContextMenuSeparator />
           <ContextMenuItem

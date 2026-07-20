@@ -18,7 +18,7 @@ export function FileHeader({ request, additions, deletions }: FileHeaderProps) {
       ? 'staged'
       : request.source.kind === 'unstaged'
         ? 'working tree'
-        : `commit ${request.source.sha.slice(0, 7)}`
+        : `commit ${shortSha(request.source.sha)}`
 
   return (
     <div className="flex h-10 flex-none items-center gap-2.5 border-b border-border bg-panel px-3.5">

@@ -85,7 +85,7 @@ export function NewBranchModal() {
 
           {targetSha ? (
             <p className="text-[10.5px] text-muted-foreground">
-              Branches off commit <span className="font-mono text-sub">{targetSha.slice(0, 7)}</span>.
+              Branches off commit <span className="font-mono text-sub">{shortSha(targetSha)}</span>.
             </p>
           ) : (
             current && (

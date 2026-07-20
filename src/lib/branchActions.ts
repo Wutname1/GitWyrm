@@ -1,6 +1,8 @@
 import type { BranchInfo } from '@/lib/bindings'
 
-const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`
+import { plural } from '@/lib/gitDisplay'
+
+const commits = (n: number) => plural(n, 'commit')
 
 /**
  * How a branch's relationship to its remote should read in the UI.

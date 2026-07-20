@@ -48,3 +48,16 @@ export function formatCommitTime(epochSeconds: number): string {
   const mm = String(d.getMinutes()).padStart(2, '0')
   return `${month} ${d.getDate()} ${hh}:${mm}`
 }
+
+/**
+ * "1 commit" / "2 commits". Pass `many` for irregular plurals
+ * (`plural(n, 'repository', 'repositories')`).
+ */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
+/** A commit id shortened for display, matching the 7 chars git uses. */
+export function shortSha(sha: string): string {
+  return sha.slice(0, 7)
+}

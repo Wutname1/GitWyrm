@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Copy, Eraser, FolderOpen, RefreshCw } from 'lucide-react'
+import { Copy, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
+import { ClearLogsButton, OpenLogsFolderButton, useClearLogs } from '@/components/domain/settings/LogActions'
 
 type Level = 'all' | 'warn' | 'error'
 
@@ -40,7 +41,7 @@ export function LogsModal({ open, onClose }: { open: boolean; onClose: () => voi
   const [loading, setLoading] = useState(false)
   const [level, setLevel] = useState<Level>('all')
   const [search, setSearch] = useState('')
-  const [clearing, setClearing] = useState(false)
+  const { clearing, clearLogs } = useClearLogs(() => setRaw(''))
 
   const load = async () => {
     setLoading(true)
@@ -86,19 +87,6 @@ export function LogsModal({ open, onClose }: { open: boolean; onClose: () => voi
   }, [events, level, search])
 
   const errorCount = useMemo(() => events.filter((e) => e.level === 'ERROR').length, [events])
-
-  const clearLogs = async () => {
-    setClearing(true)
-    try {
-      unwrap(await commands.clearLog())
-      setRaw('')
-      toast('Logs cleared')
-    } catch (e) {
-      toast.error(`Could not clear logs: ${(e as Error).message}`)
-    } finally {
-      setClearing(false)
-    }
-  }
 
   const copyView = () =>
     void copyToClipboard(filtered.map((e) => e.text).join('\n'), 'Copied to clipboard')
@@ -161,31 +149,13 @@ export function LogsModal({ open, onClose }: { open: boolean; onClose: () => voi
         </div>
 
         <div className="flex flex-none items-center gap-2 border-t border-border px-4 py-2.5">
-          <Button
-            variant="secondary"
-            size="sm"
-            className="h-7 gap-1.5 text-xs"
-            onClick={() => commands.openLogsFolder()}
-          >
-            <FolderOpen size={12} />
-            Open folder
-          </Button>
+          <OpenLogsFolderButton />
           <Button variant="secondary" size="sm" className="h-7 gap-1.5 text-xs" onClick={copyView}>
             <Copy size={12} />
             Copy view
           </Button>
           <div className="flex-1" />
-          <Button
-            variant="secondary"
-            size="sm"
-            className="h-7 gap-1.5 text-xs"
-            onClick={clearLogs}
-            disabled={clearing}
-            aria-busy={clearing || undefined}
-          >
-            {clearing ? <PendingIndicator /> : <Eraser size={12} />}
-            {clearing ? 'Clearing…' : 'Clear logs'}
-          </Button>
+          <ClearLogsButton clearing={clearing} onClear={clearLogs} />
         </div>
       </DialogContent>
     </Dialog>

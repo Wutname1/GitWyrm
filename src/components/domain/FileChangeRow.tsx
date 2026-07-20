@@ -1,5 +1,6 @@
 import type { MouseEvent, ReactNode } from 'react'
 import { Package } from 'lucide-react'
+import { plural } from '@/lib/gitDisplay'
 import { cn } from '@/lib/utils'
 import type { FileChange } from '@/lib/bindings'
 import { StatusBadge } from './StatusBadge'
@@ -11,9 +12,9 @@ import { TooltipButton } from '@/components/ui/tooltip'
 function submoduleNote(sub: NonNullable<FileChange['submodule']>): string {
   if (!sub.initialized) return 'not downloaded yet'
   if (sub.ahead > 0 && sub.behind === 0)
-    return `${sub.ahead} commit${sub.ahead === 1 ? '' : 's'} ahead`
+    return `${plural(sub.ahead, 'commit')} ahead`
   if (sub.behind > 0 && sub.ahead === 0)
-    return `${sub.behind} commit${sub.behind === 1 ? '' : 's'} behind`
+    return `${plural(sub.behind, 'commit')} behind`
   return 'points to a different commit'
 }
 

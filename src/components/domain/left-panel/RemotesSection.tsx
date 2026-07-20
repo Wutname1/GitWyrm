@@ -29,7 +29,7 @@ function branchTooltip(b: RemoteBranchInfo): string {
     const n = b.ahead_of_local
     const lead =
       n > 0
-        ? `Not on your computer yet - ${n} commit${n === 1 ? '' : 's'} you don't have.`
+        ? `Not on your computer yet - ${plural(n, 'commit')} you don't have.`
         : "Not on your computer yet."
     return `${lead}${when}${tip}`
   }
@@ -38,11 +38,11 @@ function branchTooltip(b: RemoteBranchInfo): string {
   }
   if (b.ahead_of_local > 0) {
     const n = b.ahead_of_local
-    return `${n} commit${n === 1 ? '' : 's'} here you don't have yet. Pull to get ${n === 1 ? 'it' : 'them'}.${when}${tip}`
+    return `${plural(n, 'commit')} here you don't have yet. Pull to get ${n === 1 ? 'it' : 'them'}.${when}${tip}`
   }
   if (b.behind_local > 0) {
     const n = b.behind_local
-    return `You have ${n} commit${n === 1 ? '' : 's'} not sent here yet. Push to share.${when}${tip}`
+    return `You have ${plural(n, 'commit')} not sent here yet. Push to share.${when}${tip}`
   }
   return `Up to date with your copy.${when}${tip}`
 }
