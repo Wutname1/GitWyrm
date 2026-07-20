@@ -30,6 +30,7 @@ import {
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { RewordDialog } from '@/components/modals/RewordDialog'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
+import { BranchRemoteItems, hasRemoteItems } from '@/components/domain/branch/BranchRemoteItems'
 import { useBranches, useCommitDetail, useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
@@ -79,6 +80,18 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
   // Dropping rewrites history below the commit; needs a branch and a clean-ish state.
   const canDrop = !opInProgress && current != null && !historyPending
 
+  // A commit can be the tip of more than one branch. Offer remote actions for
+  // each that has something to send or get, so the common case -- right-clicking
+  // the newest commit -- reaches push without hunting for the branch chip.
+  // The checked-out branch's ref is tagged `head`, not `branch`, so match both
+  // or the current branch -- the one most likely to have commits to send -- is
+  // the only one that never gets these actions.
+  const tipBranches = (branches.data?.local ?? [])
+    .filter((b) =>
+      commit.refs.some((r) => (r.type === 'branch' || r.type === 'head') && r.name === b.name)
+    )
+    .filter(hasRemoteItems)
+
   const copySha = () => {
     void navigator.clipboard
       .writeText(commit.sha)
@@ -102,6 +115,15 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
             {commit.short_sha}
           </ContextMenuLabel>
           <ContextMenuSeparator />
+          {tipBranches.map((branch) => (
+            <BranchRemoteItems
+              key={branch.name}
+              branch={branch}
+              repoId={repo?.id ?? null}
+              opInProgress={opInProgress}
+            />
+          ))}
+          {tipBranches.length > 0 && <ContextMenuSeparator />}
           <ContextMenuItem onSelect={onViewDetails}>
             <Info />
             View details

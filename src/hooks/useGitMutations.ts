@@ -333,6 +333,49 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Push a branch by name, which may not be the one checked out. A branch with
+  // no upstream gets published and tracked in the same step.
+  const pushBranch = useMutation({
+    mutationFn: async (branch: string) => unwrap(await commands.gitPushBranch(id, branch)),
+    onSuccess: (result) => {
+      invalidate(qc, id, ['log', 'branches'])
+      toast(describePush(result))
+    },
+    onError,
+  })
+
+  // Bring a branch up to date without checking it out. Only fast-forwards; a
+  // diverged branch is refused with an explanation.
+  const pullBranch = useMutation({
+    mutationFn: async (branch: string) => unwrap(await commands.gitPullBranch(id, branch)),
+    onSuccess: (result) => {
+      invalidate(qc, id, ['status', 'log', 'branches'])
+      toast(describePull(result))
+    },
+    onError,
+  })
+
+  const renameBranch = useMutation({
+    mutationFn: async (v: { name: string; newName: string }) =>
+      unwrap(await commands.renameBranch(id, v.name, v.newName)),
+    onSuccess: (_r, v) => {
+      invalidate(qc, id, ['log', 'branches'])
+      toast(`Renamed to ${v.newName}`)
+    },
+    onError,
+  })
+
+  // Distinct from `setUpstream`, which points HEAD at a remote branch the user
+  // picked. This links a named branch to the remote branch of the same name.
+  const reconnectBranch = useMutation({
+    mutationFn: async (branch: string) => unwrap(await commands.setBranchUpstream(id, branch, null)),
+    onSuccess: (upstream) => {
+      invalidate(qc, id, ['branches'])
+      toast(`Now linked to ${upstream}`)
+    },
+    onError,
+  })
+
   const pushForce = useMutation({
     mutationFn: async () => unwrap(await commands.gitPushForce(id)),
     onSuccess: (result) => {
@@ -613,6 +656,10 @@ export function useGitMutations(repoId: string | null) {
     fetch,
     pull,
     push,
+    pushBranch,
+    pullBranch,
+    renameBranch,
+    reconnectBranch,
     pushForce,
     rebase,
     addRemote,

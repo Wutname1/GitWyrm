@@ -279,6 +279,19 @@ async deleteBranch(repoId: string, name: string) : Promise<Result<null, string>>
 }
 },
 /**
+ * Rename a local branch. Safe on the branch you are currently on, unlike
+ * delete: git moves HEAD along with the ref. The upstream link is preserved,
+ * so a renamed branch still pushes where it did before.
+ */
+async renameBranch(repoId: string, name: string, newName: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rename_branch", { repoId, name, newName }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Create a tag. `sha` is the commit to tag (empty = current HEAD). When
  * `message` is non-empty the tag is annotated (carries author + message);
  * otherwise it is a lightweight tag pointing straight at the commit.
@@ -468,6 +481,48 @@ async gitPull(repoId: string) : Promise<Result<PullResult, string>> {
 async gitPush(repoId: string) : Promise<Result<PushResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_push", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Push a named local branch, which need not be the one checked out. A branch
+ * with no upstream is published to the default remote and tracked from then
+ * on, so the next push needs no extra decision.
+ */
+async gitPushBranch(repoId: string, branch: string) : Promise<Result<PushResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("git_push_branch", { repoId, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Bring a branch up to date with its upstream without checking it out.
+ * 
+ * A branch that is only behind fast-forwards cleanly. One that has also moved
+ * locally cannot: combining the two histories is a merge, which needs a
+ * working tree, so this reports that rather than guessing. Pulling the branch
+ * you are on goes through `git_pull` instead.
+ */
+async gitPullBranch(repoId: string, branch: string) : Promise<Result<PullResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("git_pull_branch", { repoId, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Link a local branch to a remote branch of the same name, so push and pull
+ * know where it belongs. Used to repair a branch whose remote branch was
+ * deleted; publishing a brand-new branch happens through `git_push_branch`.
+ */
+async setBranchUpstream(repoId: string, branch: string, remote: string | null) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_branch_upstream", { repoId, branch, remote }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

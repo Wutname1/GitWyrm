@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { forwardRef, type ComponentPropsWithoutRef, type CSSProperties, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
@@ -28,13 +28,12 @@ function markerStyle(section: SidebarSectionData, item: SectionItem, isCurrent: 
   }
 }
 
-interface SectionItemRowProps {
+interface SectionItemRowProps extends Omit<ComponentPropsWithoutRef<'div'>, 'onClick' | 'onDoubleClick'> {
   section: SidebarSectionData
   item: SectionItem
   isCurrent: boolean
   onClick: () => void
   onDoubleClick?: () => void
-  onContextMenu?: (e: React.MouseEvent) => void
   disabled?: boolean
   pending?: boolean
   pendingLabel?: string
@@ -42,30 +41,41 @@ interface SectionItemRowProps {
   hoverAction?: { icon: ReactNode; title: string; onClick: () => void }
 }
 
-export function SectionItemRow({
-  section,
-  item,
-  isCurrent,
-  onClick,
-  onDoubleClick,
-  onContextMenu,
-  disabled,
-  pending,
-  pendingLabel,
-  hoverAction,
-}: SectionItemRowProps) {
+/**
+ * A row in the left panel. Forwards its ref and any extra props to the root
+ * div so a Radix `asChild` trigger (the right-click menu) can attach its own
+ * handlers -- without that, the menu silently never opens.
+ */
+export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(function SectionItemRow(
+  {
+    section,
+    item,
+    isCurrent,
+    onClick,
+    onDoubleClick,
+    disabled,
+    pending,
+    pendingLabel,
+    hoverAction,
+    className,
+    ...rest
+  },
+  ref
+) {
   return (
     <div
+      ref={ref}
+      {...rest}
       onClick={disabled ? undefined : onClick}
       onDoubleClick={disabled ? undefined : onDoubleClick}
-      onContextMenu={onContextMenu}
       aria-disabled={disabled || undefined}
       aria-busy={pending || undefined}
       className={cn(
         'group/row flex cursor-pointer items-center gap-2 py-1 pl-6 pr-3 transition-colors hover:bg-panel2',
         isCurrent && 'bg-soft',
         disabled && !pending && 'cursor-wait opacity-40',
-        pending && 'cursor-wait bg-soft text-primary'
+        pending && 'cursor-wait bg-soft text-primary',
+        className
       )}
     >
       {pending ? (
@@ -104,4 +114,4 @@ export function SectionItemRow({
       )}
     </div>
   )
-}
+})

@@ -25,13 +25,25 @@ struct TrackingState {
 }
 
 fn tracking_state(repo: &git2::Repository) -> TrackingState {
+  branch_tracking_state(repo, None)
+}
+
+/// Tracking state for a named local branch, or for HEAD when `branch_name` is
+/// `None`. Used by push to report on a branch that is not checked out.
+fn branch_tracking_state(repo: &git2::Repository, branch_name: Option<&str>) -> TrackingState {
   let none = TrackingState { branch: None, upstream: None, ahead: 0, behind: 0 };
 
-  let Ok(head) = repo.head() else { return none };
-  if !head.is_branch() {
-    return none;
-  }
-  let Some(name) = head.shorthand().map(str::to_string) else { return none };
+  let name = match branch_name {
+    Some(n) => n.to_string(),
+    None => {
+      let Ok(head) = repo.head() else { return none };
+      if !head.is_branch() {
+        return none;
+      }
+      let Some(name) = head.shorthand().map(str::to_string) else { return none };
+      name
+    }
+  };
   let Ok(branch) = repo.find_branch(&name, git2::BranchType::Local) else { return none };
 
   let upstream = branch.upstream().ok().and_then(|u| u.name().ok().flatten().map(str::to_string));
@@ -232,6 +244,207 @@ pub async fn git_push(
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Push a named local branch, which need not be the one checked out. A branch
+/// with no upstream is published to the default remote and tracked from then
+/// on, so the next push needs no extra decision.
+#[tauri::command]
+#[specta::specta]
+pub async fn git_push_branch(
+  app: AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  branch: String,
+) -> Result<PushResult, AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    let (before, had_upstream, remote) = {
+      let repo = open.repo.lock().unwrap();
+      let state = branch_tracking_state(&repo, Some(&branch));
+      let had_upstream = state.upstream.is_some();
+      // The remote is needed either way: naming it is what lets the push
+      // target a branch other than the checked-out one.
+      let remote = match &state.upstream {
+        // `origin/main` -> `origin`; the remote owns everything before the
+        // first slash, and branch names may contain further slashes.
+        Some(up) => up.split_once('/').map(|(r, _)| r.to_string()).unwrap_or(default_remote(&repo)?),
+        None => default_remote(&repo)?,
+      };
+      (state, had_upstream, remote)
+    };
+
+    // Name the branch explicitly, so the push does not depend on which branch
+    // happens to be checked out.
+    let refspec = format!("refs/heads/{branch}");
+    let mut args: Vec<&str> = vec!["push", "--progress"];
+    if !had_upstream {
+      args.push("--set-upstream");
+    }
+    args.push(&remote);
+    args.push(&refspec);
+
+    run_streaming(&app, &repo_id, Some(&path), "push", &args)?;
+    let after = { branch_tracking_state(&open.repo.lock().unwrap(), Some(&branch)) };
+
+    let pushed = if had_upstream {
+      // Commits we were ahead by and no longer are is what the remote took.
+      before.ahead.saturating_sub(after.ahead)
+    } else {
+      // A freshly published branch: everything it holds over the new upstream's
+      // merge base went across, which `published_count` reads back.
+      published_count(&open.repo.lock().unwrap(), &branch)
+    };
+
+    Ok(PushResult {
+      branch: after.branch.or(before.branch).or(Some(branch)),
+      upstream: after.upstream.or(before.upstream),
+      pushed,
+    })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// How many commits a freshly published branch handed to the remote. Its new
+/// upstream now matches it exactly, so counting against that yields zero;
+/// count against the other remote-tracking branches instead, which is what the
+/// remote did not already have.
+fn published_count(repo: &git2::Repository, branch: &str) -> u32 {
+  let Ok(local) = repo.find_branch(branch, git2::BranchType::Local) else { return 0 };
+  let Some(tip) = local.get().target() else { return 0 };
+  let Some(upstream) = local.upstream().ok().and_then(|u| u.get().target()) else { return 0 };
+
+  let mut walk = match repo.revwalk() {
+    Ok(w) => w,
+    Err(_) => return 0,
+  };
+  if walk.push(tip).is_err() {
+    return 0;
+  }
+  // Hide every other remote-tracking branch: what remains is unique to this one.
+  if let Ok(branches) = repo.branches(Some(git2::BranchType::Remote)) {
+    for (remote_branch, _) in branches.flatten() {
+      if let Some(oid) = remote_branch.get().target() {
+        if oid != upstream {
+          let _ = walk.hide(oid);
+        }
+      }
+    }
+  }
+  walk.count() as u32
+}
+
+/// Link a local branch to a remote branch of the same name, so push and pull
+/// know where it belongs. Used to repair a branch whose remote branch was
+/// deleted; publishing a brand-new branch happens through `git_push_branch`.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_branch_upstream(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  branch: String,
+  remote: Option<String>,
+) -> Result<String, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let remote = match remote {
+      Some(r) => r,
+      None => default_remote(&repo)?,
+    };
+    let upstream = format!("{remote}/{branch}");
+    // The remote-tracking ref must exist, else the link would point nowhere
+    // and push/pull would fail later with a much worse message.
+    if repo.find_branch(&upstream, git2::BranchType::Remote).is_err() {
+      return Err(AppError::Other(format!(
+        "{upstream} doesn't exist. Send this branch to the remote first."
+      )));
+    }
+    let mut local = repo.find_branch(&branch, git2::BranchType::Local)?;
+    local.set_upstream(Some(&upstream))?;
+    Ok(upstream)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Bring a branch up to date with its upstream without checking it out.
+///
+/// A branch that is only behind fast-forwards cleanly. One that has also moved
+/// locally cannot: combining the two histories is a merge, which needs a
+/// working tree, so this reports that rather than guessing. Pulling the branch
+/// you are on goes through `git_pull` instead.
+#[tauri::command]
+#[specta::specta]
+pub async fn git_pull_branch(
+  app: AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  branch: String,
+) -> Result<PullResult, AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    let (before, remote) = {
+      let repo = open.repo.lock().unwrap();
+      let state = branch_tracking_state(&repo, Some(&branch));
+      let Some(upstream) = state.upstream.clone() else {
+        return Err(AppError::Other(format!(
+          "{branch} isn't linked to a remote branch yet, so there's nothing to get."
+        )));
+      };
+      let remote =
+        upstream.split_once('/').map(|(r, _)| r.to_string()).unwrap_or(default_remote(&repo)?);
+      (state, remote)
+    };
+
+    if before.ahead > 0 {
+      return Err(AppError::Other(format!(
+        "{branch} has its own commits as well as new ones on the remote. Switch to it to combine them."
+      )));
+    }
+    if before.behind == 0 {
+      return Ok(PullResult {
+        branch: Some(branch),
+        upstream: before.upstream,
+        received: 0,
+        ahead_after: before.ahead,
+      });
+    }
+
+    // `<branch>:<branch>` updates the local ref directly. git refuses this
+    // when it would not be a fast-forward, which is the guard we want.
+    let refspec = format!("{branch}:{branch}");
+    run_streaming(&app, &repo_id, Some(&path), "fetch", &["fetch", "--progress", &remote, &refspec])?;
+
+    let after = { branch_tracking_state(&open.repo.lock().unwrap(), Some(&branch)) };
+    Ok(PullResult {
+      branch: after.branch.or(Some(branch)),
+      upstream: after.upstream.or(before.upstream),
+      received: before.behind.saturating_sub(after.behind),
+      ahead_after: after.ahead,
+    })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// The remote to publish a new branch to: the only one configured, or
+/// `origin` when there are several.
+fn default_remote(repo: &git2::Repository) -> Result<String, AppError> {
+  let remotes = repo.remotes().map_err(AppError::Git)?;
+  let names: Vec<String> = remotes.iter().flatten().map(str::to_string).collect();
+  match names.len() {
+    0 => Err(AppError::Other("This repository has no remote to push to.".into())),
+    1 => Ok(names[0].clone()),
+    _ => names
+      .iter()
+      .find(|n| *n == "origin")
+      .cloned()
+      .ok_or_else(|| AppError::Other("Several remotes are set up. Pick one in Remotes first.".into())),
+  }
 }
 
 /// List configured remotes with their URLs and remote-tracking branches.

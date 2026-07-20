@@ -417,6 +417,37 @@ pub async fn delete_branch(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Rename a local branch. Safe on the branch you are currently on, unlike
+/// delete: git moves HEAD along with the ref. The upstream link is preserved,
+/// so a renamed branch still pushes where it did before.
+#[tauri::command]
+#[specta::specta]
+pub async fn rename_branch(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  name: String,
+  new_name: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let new_name = new_name.trim();
+    if new_name.is_empty() {
+      return Err(AppError::Other("Enter a name for the branch.".into()));
+    }
+    if repo.find_branch(new_name, BranchType::Local).is_ok() {
+      return Err(AppError::Other(format!("A branch named {new_name} already exists.")));
+    }
+    let mut branch = repo.find_branch(name.trim(), BranchType::Local)?;
+    // `force = false`: never clobber an existing ref, checked above for a
+    // clearer message than git2's.
+    branch.rename(new_name, false)?;
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// Reset the current branch to a commit. Hard reset discards uncommitted work,
 /// so it is refused over a dirty tree. Returns where the branch pointed before
 /// the reset, so the caller can offer an undo. Soft/Mixed keep the working tree.

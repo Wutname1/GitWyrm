@@ -165,3 +165,40 @@ fn tag_and_branch_delete_cycle() {
 
   let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn rename_branch_moves_the_ref_and_refuses_an_existing_name() {
+  let (dir, repo) = scratch_repo_named("rename");
+
+  // A fresh repo has no HEAD ref until something is committed.
+  fs::write(dir.join("f.txt"), "one\n").unwrap();
+  let head_commit = {
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("f.txt")).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let oid = repo.commit(Some("HEAD"), &sig(), &sig(), "initial", &tree, &[]).unwrap();
+    repo.find_commit(oid).unwrap()
+  };
+  repo.branch("old-name", &head_commit, false).unwrap();
+  repo.branch("taken", &head_commit, false).unwrap();
+
+  let mut branch = repo.find_branch("old-name", git2::BranchType::Local).unwrap();
+  branch.rename("new-name", false).unwrap();
+
+  assert!(repo.find_branch("new-name", git2::BranchType::Local).is_ok());
+  assert!(repo.find_branch("old-name", git2::BranchType::Local).is_err());
+
+  // `force = false` is what stops a rename from clobbering another branch;
+  // the command checks for the collision first to give a clearer message.
+  let mut again = repo.find_branch("new-name", git2::BranchType::Local).unwrap();
+  assert!(again.rename("taken", false).is_err(), "rename must not overwrite an existing branch");
+
+  // Renaming the checked-out branch is allowed: git carries HEAD along.
+  let current = repo.head().unwrap().shorthand().unwrap().to_string();
+  let mut current_branch = repo.find_branch(&current, git2::BranchType::Local).unwrap();
+  current_branch.rename("renamed-head", false).unwrap();
+  assert_eq!(repo.head().unwrap().shorthand().unwrap(), "renamed-head");
+
+  let _ = fs::remove_dir_all(&dir);
+}
