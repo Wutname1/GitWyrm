@@ -673,13 +673,6 @@ pub async fn git_push_force(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// True when the working tree has tracked modifications (ignores untracked).
-fn tree_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
-  let mut opts = git2::StatusOptions::new();
-  opts.include_untracked(false);
-  Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
-}
-
 /// Rebase a branch onto `onto` (e.g. `origin/main`), replaying its commits on
 /// top. Rebases the current branch when `branch` is None; otherwise git checks
 /// out `branch` first and leaves HEAD there. A clean rebase returns no
@@ -700,7 +693,7 @@ pub async fn git_rebase(
   tauri::async_runtime::spawn_blocking(move || {
     {
       let repo = open.repo.lock().unwrap();
-      if tree_dirty(&repo)? {
+      if refs::tracked_changes_present(&repo)? {
         return Err(AppError::Other(
           "working tree has changes; commit or stash before rebasing".into(),
         ));

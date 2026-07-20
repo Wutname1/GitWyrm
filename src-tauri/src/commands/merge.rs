@@ -32,13 +32,6 @@ fn resolve_annotated<'r>(
   Ok(repo.find_annotated_commit(obj.id())?)
 }
 
-/// True when the working tree has tracked modifications (ignores untracked).
-fn working_tree_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
-  let mut opts = git2::StatusOptions::new();
-  opts.include_untracked(false);
-  Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
-}
-
 /// Read a state pointer file (MERGE_HEAD / CHERRY_PICK_HEAD) as an Oid.
 fn read_state_head(repo: &git2::Repository, file: &str) -> Result<Oid, AppError> {
   let content = std::fs::read_to_string(repo.path().join(file))
@@ -139,7 +132,7 @@ pub async fn merge_directional(
       == Some(target.clone());
 
     if !on_target {
-      if working_tree_dirty(&repo)? {
+      if refs::tracked_changes_present(&repo)? {
         return Err(AppError::Other(
           "working tree has changes; commit or stash before switching to merge".into(),
         ));
@@ -395,7 +388,7 @@ pub async fn cherry_pick(
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
 
-    if working_tree_dirty(&repo)? {
+    if refs::tracked_changes_present(&repo)? {
       return Err(AppError::Other(
         "working tree has changes; commit or stash before cherry-picking".into(),
       ));

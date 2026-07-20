@@ -40,13 +40,6 @@ fn validate_ref_name(name: &str, prefix: &str, kind: &str) -> Result<(), AppErro
   Ok(())
 }
 
-/// True when the working tree has tracked modifications (ignores untracked).
-fn tree_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
-  let mut opts = git2::StatusOptions::new();
-  opts.include_untracked(false);
-  Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
-}
-
 #[tauri::command]
 #[specta::specta]
 pub async fn list_branches(
@@ -126,13 +119,6 @@ pub async fn branch_relation(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// Is the working tree dirty (any non-ignored change, including untracked)?
-fn is_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
-  let mut opts = git2::StatusOptions::new();
-  opts.include_untracked(true).recurse_untracked_dirs(true);
-  Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
-}
-
 /// Guidance shown when a branch switch is blocked by an un-stashable submodule
 /// move that also collides with the target branch.
 const SUBMODULE_SWITCH_HINT: &str = "a submodule points to a different commit than this branch expects. Commit the submodule change or reset the submodule to its recorded commit, then switch.";
@@ -210,7 +196,7 @@ pub async fn checkout_branch(
     // Picking a remote branch lands on a local tracking branch, not detached HEAD.
     let name = resolve_switch_target(&repo, &name)?;
 
-    if !is_dirty(&repo)? {
+    if !refs::any_changes_present(&repo)? {
       switch_to(&repo, &name)?;
       return Ok(CheckoutOutcome::Clean);
     }
@@ -481,7 +467,7 @@ pub async fn reset_current(
     let repo = open.repo.lock().unwrap();
     let branch = current_branch_name(&repo)?;
 
-    if mode == ResetMode::Hard && tree_dirty(&repo)? {
+    if mode == ResetMode::Hard && refs::tracked_changes_present(&repo)? {
       return Err(AppError::Other(
         "working tree has changes; a hard reset would discard them - commit or stash first".into(),
       ));
@@ -522,7 +508,7 @@ pub async fn move_current_branch(
     let repo = open.repo.lock().unwrap();
     let branch = current_branch_name(&repo)?;
 
-    if tree_dirty(&repo)? {
+    if refs::tracked_changes_present(&repo)? {
       return Err(AppError::Other(
         "working tree has changes; commit or stash before moving the branch".into(),
       ));
@@ -555,7 +541,7 @@ pub async fn checkout_commit(
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
 
-    if is_dirty(&repo)? {
+    if refs::any_changes_present(&repo)? {
       return Err(AppError::Other(
         "working tree has changes; commit or stash before checking out a commit".into(),
       ));
@@ -627,7 +613,7 @@ pub async fn revert_commit(
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
 
-    if tree_dirty(&repo)? {
+    if refs::tracked_changes_present(&repo)? {
       return Err(AppError::Other(
         "working tree has changes; commit or stash before reverting".into(),
       ));
@@ -681,7 +667,7 @@ pub async fn drop_commit(
     let repo = open.repo.lock().unwrap();
     let branch = current_branch_name(&repo)?;
 
-    if tree_dirty(&repo)? {
+    if refs::tracked_changes_present(&repo)? {
       return Err(AppError::Other(
         "working tree has changes; commit or stash before dropping a commit".into(),
       ));

@@ -108,6 +108,27 @@ pub fn local_tips(records: &[RefRecord]) -> HashMap<&str, Oid> {
     .collect()
 }
 
+/// Whether the working tree has changes to tracked files. Untracked files are
+/// ignored, so an operation that only rewrites tracked content is not blocked
+/// by a stray build artifact.
+///
+/// Use [`any_changes_present`] instead for anything that checks out a
+/// different tree: checkout can overwrite an untracked file that the target
+/// tree also contains, so those paths must count untracked files as dirty.
+pub fn tracked_changes_present(repo: &Repository) -> Result<bool, AppError> {
+  let mut opts = git2::StatusOptions::new();
+  opts.include_untracked(false);
+  Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
+}
+
+/// Whether the working tree has any non-ignored change at all, untracked files
+/// included. The stricter check, used by the checkout paths.
+pub fn any_changes_present(repo: &Repository) -> Result<bool, AppError> {
+  let mut opts = git2::StatusOptions::new();
+  opts.include_untracked(true).recurse_untracked_dirs(true);
+  Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
+}
+
 /// Paths currently conflicted in the index, sorted and deduplicated.
 ///
 /// A conflict records up to three sides; the path is the same for all of them
