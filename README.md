@@ -59,7 +59,7 @@ Then: push a `v*` tag. `.github/workflows/release.yml` builds the installer, the
 - [x] Fetch / pull / push / clone via system git with streamed progress
 - [x] External-change file watcher
 - [x] Auto-updater wiring (needs signing key)
-- [ ] Merge UI, conflict resolution
+- [x] Merge UI, conflict resolution (merge, cherry-pick, revert, rebase; binary and delete conflicts)
 - [ ] Command palette (Ctrl+K)
 - [ ] GitHub PRs/issues integration
 - [ ] Worktrees
