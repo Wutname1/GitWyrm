@@ -119,7 +119,12 @@ function BranchSwitcher() {
 
   return (
     <div className="mr-1.5" onMouseEnter={cancelClose} onMouseLeave={scheduleClose}>
-      <DropdownMenu open={open} onOpenChange={setOpen}>
+      {/* Not modal: a modal dropdown sets pointer-events:none on the rest of
+          the page while open, so the trigger underneath stops receiving them.
+          The browser then reports the cursor as having left the button, which
+          closed the menu, which restored pointer events, which re-hovered the
+          button -- the flicker. */}
+      <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
         <DropdownMenuTrigger asChild>
           <button className="flex h-[30px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-[11px] hover:border-muted-foreground hover:bg-panel3">
             <span className="size-2 rounded-[2px] bg-primary" />
