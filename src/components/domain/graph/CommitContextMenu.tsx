@@ -31,6 +31,7 @@ import {
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { RewordDialog } from '@/components/modals/RewordDialog'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
+import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { BranchRemoteItems, hasRemoteItems } from '@/components/domain/branch/BranchRemoteItems'
 import { useBranches, useCommitDetail, useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
@@ -150,16 +151,14 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
               <ContextMenuShortcut className="text-[9px] normal-case">latest only</ContextMenuShortcut>
             )}
           </ContextMenuItem>
-          <ContextMenuItem
+          <PendingMenuItem
+            icon={<Undo2 />}
+            label="Undo this commit (revert)"
+            pendingLabel="Undoing…"
+            pending={m.revertCommit.isPending}
             disabled={!canRevert}
-            onSelect={(e) => {
-              e.preventDefault()
-              m.revertCommit.mutate(commit.sha)
-            }}
-          >
-            {m.revertCommit.isPending ? <PendingIndicator /> : <Undo2 />}
-            {m.revertCommit.isPending ? 'Undoing…' : 'Undo this commit (revert)'}
-          </ContextMenuItem>
+            onRun={() => m.revertCommit.mutate(commit.sha)}
+          />
           <ContextMenuItem
             variant="destructive"
             disabled={!canDrop}
@@ -172,16 +171,14 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
             Drop this commit
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem
+          <PendingMenuItem
+            icon={<GitBranchPlus />}
+            label={`Cherry-pick onto ${branchName}`}
+            pendingLabel="Adding commit…"
+            pending={m.cherryPick.isPending}
             disabled={!canCherryPick || m.cherryPick.isPending}
-            onSelect={(e) => {
-              e.preventDefault()
-              m.cherryPick.mutate(commit.sha)
-            }}
-          >
-            {m.cherryPick.isPending ? <PendingIndicator /> : <GitBranchPlus />}
-            {m.cherryPick.isPending ? 'Adding commit…' : `Cherry-pick onto ${branchName}`}
-          </ContextMenuItem>
+            onRun={() => m.cherryPick.mutate(commit.sha)}
+          />
           <ContextMenuItem disabled={!canRetarget} onSelect={() => setPending({ kind: 'move' })}>
             <MoveVertical />
             Move {branchName} to this commit

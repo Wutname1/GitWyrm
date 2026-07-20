@@ -1,7 +1,6 @@
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import type { BranchInfo } from '@/lib/bindings'
-import { ContextMenuItem } from '@/components/ui/context-menu'
-import { PendingIndicator } from '@/components/ui/pending-indicator'
+import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { branchActions } from '@/lib/branchActions'
 
@@ -30,28 +29,24 @@ export function BranchRemoteItems({ branch, repoId, opInProgress }: BranchRemote
   return (
     <>
       {actions.push.show && (
-        <ContextMenuItem
+        <PendingMenuItem
+          icon={<ArrowUp />}
+          label={actions.push.label}
+          pendingLabel="Sending…"
+          pending={isPushing}
           disabled={opInProgress || busy}
-          onSelect={(e) => {
-            e.preventDefault()
-            m.pushBranch.mutate(branch.name)
-          }}
-        >
-          {isPushing ? <PendingIndicator /> : <ArrowUp />}
-          {isPushing ? 'Sending…' : actions.push.label}
-        </ContextMenuItem>
+          onRun={() => m.pushBranch.mutate(branch.name)}
+        />
       )}
       {actions.pull.show && (
-        <ContextMenuItem
+        <PendingMenuItem
+          icon={<ArrowDown />}
+          label={actions.pull.label}
+          pendingLabel="Getting…"
+          pending={isPulling}
           disabled={opInProgress || busy}
-          onSelect={(e) => {
-            e.preventDefault()
-            m.pullBranch.mutate(branch.name)
-          }}
-        >
-          {isPulling ? <PendingIndicator /> : <ArrowDown />}
-          {isPulling ? 'Getting…' : actions.pull.label}
-        </ContextMenuItem>
+          onRun={() => m.pullBranch.mutate(branch.name)}
+        />
       )}
     </>
   )

@@ -10,6 +10,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useActiveRepo } from '@/stores/workspaceStore'
@@ -44,42 +45,36 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
             {file.conflicted ? 'Resolve conflicts' : sub ? 'See what moved' : 'View changes'}
           </ContextMenuItem>
           {staged ? (
-            <ContextMenuItem
+            <PendingMenuItem
+              icon={<MinusCircle />}
+              label="Unstage this file"
+              pendingLabel="Unstaging file…"
+              pending={m.unstageFile.isPending}
               disabled={stagePending}
-              onSelect={(e) => {
-                e.preventDefault()
-                m.unstageFile.mutate(file.path)
-              }}
-            >
-              {m.unstageFile.isPending ? <PendingIndicator /> : <MinusCircle />}
-              {m.unstageFile.isPending ? 'Unstaging file…' : 'Unstage this file'}
-            </ContextMenuItem>
+              onRun={() => m.unstageFile.mutate(file.path)}
+            />
           ) : (
-            <ContextMenuItem
+            <PendingMenuItem
+              icon={<PlusCircle />}
+              label="Stage this file"
+              pendingLabel="Staging file…"
+              pending={m.stageFile.isPending}
               disabled={stagePending}
-              onSelect={(e) => {
-                e.preventDefault()
-                m.stageFile.mutate(file.path)
-              }}
-            >
-              {m.stageFile.isPending ? <PendingIndicator /> : <PlusCircle />}
-              {m.stageFile.isPending ? 'Staging file…' : 'Stage this file'}
-            </ContextMenuItem>
+              onRun={() => m.stageFile.mutate(file.path)}
+            />
           )}
           {sub ? (
             <>
               <ContextMenuSeparator />
               {uninitialized ? (
-                <ContextMenuItem
+                <PendingMenuItem
+                  icon={<Download />}
+                  label="Download submodule"
+                  pendingLabel="Downloading…"
+                  pending={m.updateSubmodule.isPending}
                   disabled={m.updateSubmodule.isPending}
-                  onSelect={(e) => {
-                    e.preventDefault()
-                    m.updateSubmodule.mutate({ path: file.path, init: true })
-                  }}
-                >
-                  {m.updateSubmodule.isPending ? <PendingIndicator /> : <Download />}
-                  {m.updateSubmodule.isPending ? 'Downloading…' : 'Download submodule'}
-                </ContextMenuItem>
+                  onRun={() => m.updateSubmodule.mutate({ path: file.path, init: true })}
+                />
               ) : (
                 <ContextMenuItem variant="destructive" onSelect={() => setConfirmDiscard(true)}>
                   <RotateCcw />

@@ -19,7 +19,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
 } from '@/components/ui/context-menu'
-import { PendingIndicator } from '@/components/ui/pending-indicator'
+import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { branchActions } from '@/lib/branchActions'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -70,54 +70,46 @@ export function BranchMenuItems({
   return (
     <>
       {actions.push.show && (
-        <ContextMenuItem
+        <PendingMenuItem
+          icon={<ArrowUp />}
+          label={actions.push.label}
+          pendingLabel="Sending…"
+          pending={isPushing}
           disabled={opInProgress || busy}
-          onSelect={(e) => {
-            e.preventDefault()
-            m.pushBranch.mutate(branch.name)
-          }}
-        >
-          {isPushing ? <PendingIndicator /> : <ArrowUp />}
-          {isPushing ? 'Sending…' : actions.push.label}
-        </ContextMenuItem>
+          onRun={() => m.pushBranch.mutate(branch.name)}
+        />
       )}
       {actions.pull.show && (
-        <ContextMenuItem
+        <PendingMenuItem
+          icon={<ArrowDown />}
+          label={actions.pull.label}
+          pendingLabel="Getting…"
+          pending={isPulling}
           disabled={opInProgress || busy}
-          onSelect={(e) => {
-            e.preventDefault()
-            m.pullBranch.mutate(branch.name)
-          }}
-        >
-          {isPulling ? <PendingIndicator /> : <ArrowDown />}
-          {isPulling ? 'Getting…' : actions.pull.label}
-        </ContextMenuItem>
+          onRun={() => m.pullBranch.mutate(branch.name)}
+        />
       )}
       {actions.setUpstream.show && (
-        <ContextMenuItem
+        <PendingMenuItem
+          icon={<Link2 />}
+          label={actions.setUpstream.label}
+          pendingLabel="Reconnecting…"
+          pending={m.reconnectBranch.isPending}
           disabled={m.reconnectBranch.isPending}
-          onSelect={(e) => {
-            e.preventDefault()
-            m.reconnectBranch.mutate(branch.name)
-          }}
-        >
-          <Link2 />
-          {actions.setUpstream.label}
-        </ContextMenuItem>
+          onRun={() => m.reconnectBranch.mutate(branch.name)}
+        />
       )}
       {hasRemoteAction && <ContextMenuSeparator />}
 
       {!isCurrent && (
-        <ContextMenuItem
+        <PendingMenuItem
+          icon={<GitBranch />}
+          label={`Switch to ${branch.name}`}
+          pendingLabel={`Switching to ${branch.name}…`}
+          pending={isSwitching}
           disabled={opInProgress || m.checkout.isPending}
-          onSelect={(e) => {
-            e.preventDefault()
-            m.checkout.mutate(branch.name)
-          }}
-        >
-          {isSwitching ? <PendingIndicator /> : <GitBranch />}
-          {isSwitching ? `Switching to ${branch.name}…` : `Switch to ${branch.name}`}
-        </ContextMenuItem>
+          onRun={() => m.checkout.mutate(branch.name)}
+        />
       )}
       <ContextMenuItem disabled={isCurrent} onSelect={() => handlers.onMerge(branch.name)}>
         <GitMerge />
