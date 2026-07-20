@@ -346,6 +346,7 @@ pub enum OperationKind {
   Merge,
   CherryPick,
   Revert,
+  Rebase,
 }
 
 /// How far a reset rewinds: ref only, ref+index, or ref+index+working tree.
@@ -377,6 +378,9 @@ pub struct MergeState {
   pub operation: Option<OperationKind>,
   /// Branch/ref/commit being merged or picked, best-effort from the state files.
   pub incoming_label: Option<String>,
+  /// Full prepared commit message (MERGE_MSG), used when finishing the
+  /// operation so multi-line messages survive intact. None during a rebase.
+  pub full_message: Option<String>,
   /// Paths still conflicted.
   pub conflicts: Vec<String>,
 }
@@ -395,4 +399,8 @@ pub struct ConflictContent {
   pub merged: String,
   /// Any side is binary/undecodable; only ours/theirs whole-file choice is safe.
   pub binary: bool,
+  /// Our side deleted the file; choosing ours removes it.
+  pub ours_deleted: bool,
+  /// Their side deleted the file; choosing theirs removes it.
+  pub theirs_deleted: bool,
 }

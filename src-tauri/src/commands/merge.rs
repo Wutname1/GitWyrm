@@ -1,14 +1,11 @@
 //! Merge and conflict resolution. Uses git2 for the local index work; a merge
 //! never touches the network, so no shell-out is required here.
 
-use std::path::Path;
-
 use git2::{build::CheckoutBuilder, MergeOptions, Oid, ResetType};
-use serde::Deserialize;
-use specta::Type;
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git::merge_ops::{self, Resolution};
 use crate::git::refs;
 use crate::git::types::{
   ConflictContent, MergeAnalysis, MergeResult, MergeState, OperationKind,
@@ -70,6 +67,14 @@ fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, App
 
   if analysis.is_up_to_date() {
     return Ok(MergeResult { up_to_date: true, fast_forwarded: false, conflicts: Vec::new() });
+  }
+
+  // Anything past this point rewrites the working tree; refuse over
+  // uncommitted work so a half-applied merge can't eat local changes.
+  if refs::tracked_changes_present(repo)? {
+    return Err(AppError::Other(
+      "working tree has changes; commit or stash before merging".into(),
+    ));
   }
 
   // Fast-forward: move HEAD and checkout, no merge commit.
@@ -162,8 +167,15 @@ pub async fn get_merge_state(
     let repo = open.repo.lock().unwrap();
     let operation = match repo.state() {
       git2::RepositoryState::Merge => Some(OperationKind::Merge),
-      git2::RepositoryState::CherryPick => Some(OperationKind::CherryPick),
-      git2::RepositoryState::Revert => Some(OperationKind::Revert),
+      git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence => {
+        Some(OperationKind::CherryPick)
+      }
+      git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence => {
+        Some(OperationKind::Revert)
+      }
+      git2::RepositoryState::Rebase
+      | git2::RepositoryState::RebaseMerge
+      | git2::RepositoryState::RebaseInteractive => Some(OperationKind::Rebase),
       _ => None,
     };
     let Some(operation) = operation else {
@@ -171,18 +183,41 @@ pub async fn get_merge_state(
         merging: false,
         operation: None,
         incoming_label: None,
+        full_message: None,
         conflicts: Vec::new(),
       });
     };
 
-    // Both merge and cherry-pick leave the intended message in MERGE_MSG; its
-    // first line is "Merge branch 'x'" for a merge or the picked commit summary.
-    let incoming_label = std::fs::read_to_string(repo.path().join("MERGE_MSG"))
-      .ok()
-      .and_then(|msg| msg.lines().next().map(str::to_string));
+    let (incoming_label, full_message) = if operation == OperationKind::Rebase {
+      // The message of the commit the rebase stopped on, else the branch being
+      // rebased. Finishing a rebase reuses each commit's message, so there is
+      // no full_message to carry.
+      let label = std::fs::read_to_string(repo.path().join("rebase-merge/message"))
+        .ok()
+        .and_then(|msg| msg.lines().next().map(str::to_string))
+        .or_else(|| {
+          std::fs::read_to_string(repo.path().join("rebase-merge/head-name"))
+            .ok()
+            .map(|name| name.trim().trim_start_matches("refs/heads/").to_string())
+        });
+      (label, None)
+    } else {
+      // Merge, cherry-pick, and revert leave the intended message in
+      // MERGE_MSG; its first line is the display label, the whole file is the
+      // message to commit with.
+      let msg = std::fs::read_to_string(repo.path().join("MERGE_MSG")).ok();
+      let label = msg.as_deref().and_then(|m| m.lines().next().map(str::to_string));
+      (label, msg.map(|m| m.trim_end().to_string()))
+    };
 
     let conflicts = refs::conflicted_paths(&repo)?;
-    Ok(MergeState { merging: true, operation: Some(operation), incoming_label, conflicts })
+    Ok(MergeState {
+      merging: true,
+      operation: Some(operation),
+      incoming_label,
+      full_message,
+      conflicts,
+    })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
@@ -197,6 +232,16 @@ pub async fn abort_merge(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
+    if matches!(
+      repo.state(),
+      git2::RepositoryState::Rebase
+        | git2::RepositoryState::RebaseMerge
+        | git2::RepositoryState::RebaseInteractive
+    ) {
+      return Err(AppError::Other(
+        "a rebase is in progress; abort the rebase instead".into(),
+      ));
+    }
     // Reset hard to HEAD and clear the operation state. HEAD hasn't moved for
     // an in-progress merge or cherry-pick, so this mirrors both
     // `git merge --abort` and `git cherry-pick --abort`.
@@ -212,23 +257,6 @@ pub async fn abort_merge(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// Read one index stage's blob for a path as UTF-8 text (empty if absent/binary).
-fn stage_text(repo: &git2::Repository, index: &git2::Index, path: &str, stage: i32) -> (String, bool) {
-  let Some(entry) = index.get_path(Path::new(path), stage) else {
-    return (String::new(), false);
-  };
-  match repo.find_blob(entry.id) {
-    Ok(blob) => {
-      if blob.is_binary() {
-        (String::new(), true)
-      } else {
-        (String::from_utf8_lossy(blob.content()).into_owned(), false)
-      }
-    }
-    Err(_) => (String::new(), false),
-  }
-}
-
 #[tauri::command]
 #[specta::specta]
 pub async fn get_conflict(
@@ -240,37 +268,10 @@ pub async fn get_conflict(
   let workdir = open.path.clone();
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    let index = repo.index()?;
-
-    let (base, b_bin) = stage_text(&repo, &index, &path, 1);
-    let (ours, o_bin) = stage_text(&repo, &index, &path, 2);
-    let (theirs, t_bin) = stage_text(&repo, &index, &path, 3);
-
-    // Working-tree copy carries the conflict markers for manual editing.
-    let merged = std::fs::read_to_string(workdir.join(&path)).unwrap_or_default();
-
-    Ok(ConflictContent {
-      path,
-      base,
-      ours,
-      theirs,
-      merged,
-      binary: b_bin || o_bin || t_bin,
-    })
+    merge_ops::conflict_content(&repo, &workdir, &path)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
-}
-
-#[derive(Debug, Clone, Deserialize, Type)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum Resolution {
-  /// Keep our side wholesale.
-  Ours,
-  /// Keep their side wholesale.
-  Theirs,
-  /// Use the provided, hand-edited text.
-  Manual { text: String },
 }
 
 #[tauri::command]
@@ -285,22 +286,7 @@ pub async fn resolve_conflict(
   let workdir = open.path.clone();
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    let mut index = repo.index()?;
-    let rel = Path::new(&path);
-
-    // Decide the resolved bytes.
-    let text = match &resolution {
-      Resolution::Ours => stage_text(&repo, &index, &path, 2).0,
-      Resolution::Theirs => stage_text(&repo, &index, &path, 3).0,
-      Resolution::Manual { text } => text.clone(),
-    };
-
-    // Write to the working tree, then clear the conflict and stage the result.
-    std::fs::write(workdir.join(rel), text.as_bytes()).map_err(AppError::Io)?;
-    index.remove_path(rel)?;
-    index.add_path(rel)?;
-    index.write()?;
-    Ok(())
+    merge_ops::apply_resolution(&repo, &workdir, &path, &resolution)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
@@ -316,6 +302,17 @@ pub async fn commit_merge(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
+
+    if matches!(
+      repo.state(),
+      git2::RepositoryState::Rebase
+        | git2::RepositoryState::RebaseMerge
+        | git2::RepositoryState::RebaseInteractive
+    ) {
+      return Err(AppError::Other(
+        "a rebase is in progress; continue the rebase instead of committing".into(),
+      ));
+    }
 
     let mut index = repo.index()?;
     if index.has_conflicts() {
