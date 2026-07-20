@@ -23,13 +23,7 @@ import {
 } from '@/stores/workspaceStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { FormDialog } from '@/components/ui/form-dialog'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -82,47 +76,40 @@ function RenameDialog({
   const title = target.type === 'group' ? 'Rename group' : 'Rename tab'
   const label = target.type === 'group' ? 'Group name' : 'Tab name'
 
+  const canSave = target.type !== 'group' || value.trim() !== ''
+  const save = () => {
+    if (canSave) onSave(value)
+  }
+
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
-        <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
-          <DialogTitle className="flex items-center gap-2 text-sm">
-            <Pencil size={15} strokeWidth={1.9} />
-            {title}
-          </DialogTitle>
-        </DialogHeader>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            onSave(value)
+    <FormDialog
+      open
+      onOpenChange={(open) => !open && onClose()}
+      icon={<Pencil size={15} strokeWidth={1.9} />}
+      title={title}
+      submitLabel="Save"
+      canSubmit={canSave}
+      onSubmit={save}
+    >
+      <div className="grid gap-1.5">
+        <label className="text-[11px] font-semibold text-sub">{label}</label>
+        <Input
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') save()
           }}
-        >
-          <div className="grid gap-1.5 px-4 py-4">
-            <label className="text-[11px] font-semibold text-sub">{label}</label>
-            <Input
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-              placeholder={target.fallback}
-              className="h-auto bg-background py-1.5 text-xs"
-              autoFocus
-            />
-            {target.type === 'tab' && (
-              <p className="text-[10.5px] text-muted-foreground">
-                Leave blank to use the folder name.
-              </p>
-            )}
-          </div>
-          <DialogFooter className="flex justify-end gap-2 border-t border-border px-4 py-3">
-            <Button type="button" variant="secondary" size="sm" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" disabled={target.type === 'group' && !value.trim()}>
-              Save
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          placeholder={target.fallback}
+          className="h-auto bg-background py-1.5 text-xs"
+          autoFocus
+        />
+        {target.type === 'tab' && (
+          <p className="text-[10.5px] text-muted-foreground">
+            Leave blank to use the folder name.
+          </p>
+        )}
+      </div>
+    </FormDialog>
   )
 }
 

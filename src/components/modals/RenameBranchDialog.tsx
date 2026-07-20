@@ -1,16 +1,8 @@
 import { useEffect, useState } from 'react'
 import { PenLine } from 'lucide-react'
 import { refNameError } from '@/lib/refName'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { PendingIndicator } from '@/components/ui/pending-indicator'
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { FormDialog } from '@/components/ui/form-dialog'
 
 interface RenameBranchDialogProps {
   open: boolean
@@ -57,55 +49,38 @@ export function RenameBranchDialog({
   }
 
   return (
-    <Dialog
+    <FormDialog
       open={open}
-      onOpenChange={(next) => {
-        if (!next && pending) return
-        onOpenChange(next)
-      }}
+      onOpenChange={onOpenChange}
+      icon={<PenLine size={15} strokeWidth={1.9} />}
+      title="Rename branch"
+      submitLabel="Rename branch"
+      pendingLabel="Renaming…"
+      canSubmit={ready}
+      pending={pending}
+      onSubmit={submit}
     >
-      <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
-        <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
-          <DialogTitle className="flex items-center gap-2 text-sm">
-            <PenLine size={15} strokeWidth={1.9} />
-            Rename branch
-          </DialogTitle>
-        </DialogHeader>
+      <div className="grid gap-1.5">
+        <label className="text-[11px] font-semibold text-sub">New name</label>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+          placeholder={currentName}
+          className="h-auto bg-background py-1.5 font-mono text-xs"
+          autoFocus
+        />
+      </div>
 
-        <div className="grid gap-3 px-4 py-4">
-          <div className="grid gap-1.5">
-            <label className="text-[11px] font-semibold text-sub">New name</label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submit()
-              }}
-              placeholder={currentName}
-              className="h-auto bg-background py-1.5 font-mono text-xs"
-              autoFocus
-            />
-          </div>
-
-          {error && <p className="text-[10.5px] text-destructive">{error}</p>}
-          {hasUpstream && !error && (
-            <p className="text-[10.5px] text-muted-foreground">
-              This renames your copy only. The branch on the remote keeps its old name until you
-              send this one.
-            </p>
-          )}
-        </div>
-
-        <DialogFooter className="flex justify-end gap-2 border-t border-border px-4 py-3">
-          <Button variant="secondary" size="sm" disabled={pending} onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button size="sm" disabled={!ready} aria-busy={pending || undefined} onClick={submit}>
-            {pending && <PendingIndicator />}
-            {pending ? 'Renaming…' : 'Rename branch'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {error && <p className="text-[10.5px] text-destructive">{error}</p>}
+      {hasUpstream && !error && (
+        <p className="text-[10.5px] text-muted-foreground">
+          This renames your copy only. The branch on the remote keeps its old name until you send
+          this one.
+        </p>
+      )}
+    </FormDialog>
   )
 }

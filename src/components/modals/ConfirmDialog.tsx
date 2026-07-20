@@ -1,16 +1,8 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { PendingIndicator } from '@/components/ui/pending-indicator'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { DialogDescription } from '@/components/ui/dialog'
+import { FormDialog } from '@/components/ui/form-dialog'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -49,61 +41,39 @@ export function ConfirmDialog({
   const ready = !confirmPhrase || typed.trim() === confirmPhrase
 
   return (
-    <Dialog
+    <FormDialog
       open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen && pending) return
-        onOpenChange(nextOpen)
+      onOpenChange={onOpenChange}
+      icon={destructive ? <AlertTriangle size={15} className="text-removed" strokeWidth={2} /> : undefined}
+      title={title}
+      submitLabel={confirmLabel}
+      pendingLabel={pendingLabel ?? 'Working…'}
+      canSubmit={ready}
+      pending={pending}
+      destructive={destructive}
+      onSubmit={() => {
+        onConfirm()
+        if (!keepOpenOnConfirm) onOpenChange(false)
       }}
     >
-      <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
-        <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
-          <DialogTitle className="flex items-center gap-2 text-sm">
-            {destructive && <AlertTriangle size={15} className="text-removed" strokeWidth={2} />}
-            {title}
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="grid gap-3 px-4 py-4">
-          <DialogDescription className="text-[12px] leading-relaxed text-sub">
-            {description}
-          </DialogDescription>
-          {confirmPhrase && (
-            <div className="grid gap-1.5">
-              <label className="text-[11px] text-muted-foreground">
-                Type <span className="font-mono text-foreground">{confirmPhrase}</span> to confirm
-              </label>
-              <Input
-                value={typed}
-                onChange={(e) => setTyped(e.target.value)}
-                placeholder={confirmPhrase}
-                className="h-auto bg-background py-1.5 font-mono text-xs"
-                autoFocus
-                disabled={pending}
-              />
-            </div>
-          )}
+      <DialogDescription className="text-[12px] leading-relaxed text-sub">
+        {description}
+      </DialogDescription>
+      {confirmPhrase && (
+        <div className="grid gap-1.5">
+          <label className="text-[11px] text-muted-foreground">
+            Type <span className="font-mono text-foreground">{confirmPhrase}</span> to confirm
+          </label>
+          <Input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder={confirmPhrase}
+            className="h-auto bg-background py-1.5 font-mono text-xs"
+            autoFocus
+            disabled={pending}
+          />
         </div>
-
-        <DialogFooter className="flex justify-end gap-2 border-t border-border px-4 py-3">
-          <Button variant="secondary" size="sm" disabled={pending} onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            variant={destructive ? 'destructive' : 'default'}
-            disabled={!ready || pending}
-            aria-busy={pending || undefined}
-            onClick={() => {
-              onConfirm()
-              if (!keepOpenOnConfirm) onOpenChange(false)
-            }}
-          >
-            {pending && <PendingIndicator />}
-            {pending ? pendingLabel ?? 'Working…' : confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      )}
+    </FormDialog>
   )
 }
