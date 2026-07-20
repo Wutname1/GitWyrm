@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { PenLine } from 'lucide-react'
+import { refNameError } from '@/lib/refName'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
@@ -43,11 +44,12 @@ export function RenameBranchDialog({
 
   const trimmed = name.trim()
   const unchanged = trimmed === currentName
-  const taken = !unchanged && existingNames.includes(trimmed)
-  // git rejects these outright; catching them here explains why rather than
-  // surfacing a raw git error after the fact.
-  const malformed = /[~^:?*[\]\\]|\.\.|@\{|^\/|\/$|\/\/|^\.|\.$/.test(trimmed)
-  const ready = trimmed !== '' && !taken && !malformed && !unchanged && !pending
+  // Renaming to the current name is a no-op, not a collision, so the branch's
+  // own name is excluded before the taken check.
+  const error = unchanged
+    ? null
+    : refNameError(trimmed, existingNames.filter((n) => n !== currentName), 'branch')
+  const ready = trimmed !== '' && !error && !unchanged && !pending
 
   const submit = () => {
     if (!ready) return
@@ -85,18 +87,8 @@ export function RenameBranchDialog({
             />
           </div>
 
-          {taken && (
-            <p className="text-[10.5px] text-destructive">
-              There's already a branch called{' '}
-              <span className="font-mono">{trimmed}</span>.
-            </p>
-          )}
-          {malformed && !taken && (
-            <p className="text-[10.5px] text-destructive">
-              That name has characters git won't accept. Try letters, numbers, dashes and slashes.
-            </p>
-          )}
-          {hasUpstream && !taken && !malformed && (
+          {error && <p className="text-[10.5px] text-destructive">{error}</p>}
+          {hasUpstream && !error && (
             <p className="text-[10.5px] text-muted-foreground">
               This renames your copy only. The branch on the remote keeps its old name until you
               send this one.

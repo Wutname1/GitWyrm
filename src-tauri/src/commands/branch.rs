@@ -21,6 +21,25 @@ fn current_branch_name(repo: &git2::Repository) -> Result<String, AppError> {
     .ok_or_else(|| AppError::Other("could not read current branch name".into()))
 }
 
+/// Reject a ref name git would refuse, before handing it to git2.
+///
+/// The frontend checks the common mistakes so it can explain them, but it
+/// cannot be the boundary: commands are callable regardless, and git's rules
+/// (control characters, reserved sequences) are wider than a regex worth
+/// maintaining twice. `is_valid_name` wants the full refname, not the
+/// shorthand.
+fn validate_ref_name(name: &str, prefix: &str, kind: &str) -> Result<(), AppError> {
+  if name.is_empty() {
+    return Err(AppError::Other(format!("Enter a name for the {kind}.")));
+  }
+  if !git2::Reference::is_valid_name(&format!("{prefix}{name}")) {
+    return Err(AppError::Other(format!(
+      "\"{name}\" isn't a name git accepts. Try letters, numbers, dashes and slashes."
+    )));
+  }
+  Ok(())
+}
+
 /// True when the working tree has tracked modifications (ignores untracked).
 fn tree_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
   let mut opts = git2::StatusOptions::new();
@@ -285,6 +304,8 @@ pub async fn create_branch(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
+    let name = name.trim();
+    validate_ref_name(name, "refs/heads/", "branch")?;
     let target = if sha.trim().is_empty() {
       repo
         .head()?
@@ -346,9 +367,7 @@ pub async fn create_tag(
     let repo = open.repo.lock().unwrap();
 
     let name = name.trim();
-    if name.is_empty() {
-      return Err(AppError::Other("tag name is required".into()));
-    }
+    validate_ref_name(name, "refs/tags/", "tag")?;
 
     // Resolve the target commit: an explicit sha, or HEAD when none is given.
     let target = if sha.trim().is_empty() {
@@ -432,9 +451,7 @@ pub async fn rename_branch(
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
     let new_name = new_name.trim();
-    if new_name.is_empty() {
-      return Err(AppError::Other("Enter a name for the branch.".into()));
-    }
+    validate_ref_name(new_name, "refs/heads/", "branch")?;
     if repo.find_branch(new_name, BranchType::Local).is_ok() {
       return Err(AppError::Other(format!("A branch named {new_name} already exists.")));
     }

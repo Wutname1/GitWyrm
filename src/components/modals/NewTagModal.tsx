@@ -5,11 +5,9 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useTags } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { refNameError } from '@/lib/refName'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
-
-/** Characters git refuses in a ref name, plus whitespace and a few others. */
-const INVALID = /[\s~^:?*[\\\]]|\.\.|@\{|^\/|\/$|\/\/|\.$/
 
 export function NewTagModal() {
   const open = useUiStore((s) => s.activeModal === 'newTag')
@@ -36,14 +34,7 @@ export function NewTagModal() {
   )
 
   const trimmed = name.trim()
-  const error =
-    trimmed === ''
-      ? null
-      : existing.has(trimmed)
-        ? 'A tag with that name already exists.'
-        : INVALID.test(trimmed)
-          ? 'That name has characters git does not allow. Try letters, numbers, . - or /.'
-          : null
+  const error = refNameError(trimmed, [...existing], 'tag')
 
   const canCreate = trimmed !== '' && !error && !m.createTag.isPending
 

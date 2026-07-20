@@ -202,3 +202,34 @@ fn rename_branch_moves_the_ref_and_refuses_an_existing_name() {
 
   let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn ref_name_validation_matches_git_rules() {
+  // The command builds the full refname before checking: `is_valid_name`
+  // rejects a bare shorthand like "main", so passing the short name would
+  // refuse every branch.
+  assert!(git2::Reference::is_valid_name("refs/heads/main"));
+  assert!(!git2::Reference::is_valid_name("main"), "shorthand is not a valid refname");
+  assert!(git2::Reference::is_valid_name("refs/heads/@"), "a lone @ is legal once prefixed");
+
+  let valid = ["feature/x", "release-1.2", "a_b", "fix.thing"];
+  for name in valid {
+    assert!(
+      git2::Reference::is_valid_name(&format!("refs/heads/{name}")),
+      "{name} should be accepted"
+    );
+  }
+
+  // The cases the frontend regex screens, confirmed against git's own rules.
+  // Probed against git2 directly: every one of these is refused. A lone `@` is
+  // NOT here -- git accepts refs/heads/@, so the frontend regex must not
+  // reject it either.
+  let invalid =
+    ["my branch", "a..b", "a~b", "a^b", "a:b", "a?b", "a*b", "a[b", "a//b", "a/", ".hidden", "a.lock"];
+  for name in invalid {
+    assert!(
+      !git2::Reference::is_valid_name(&format!("refs/heads/{name}")),
+      "{name} should be rejected"
+    );
+  }
+}
