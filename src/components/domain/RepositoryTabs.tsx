@@ -1,6 +1,7 @@
-import { Fragment, useRef, useState, type CSSProperties, type DragEvent } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type DragEvent } from 'react'
 import {
   Check,
+  ChevronLeft,
   ChevronRight,
   Layers3,
   Pencil,
@@ -137,6 +138,71 @@ function DropGap({ orientation, active, label }: {
   )
 }
 
+function useScrollEdges(enabled: boolean) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [edges, setEdges] = useState({ start: false, end: false })
+
+  const measure = useCallback(() => {
+    const node = ref.current
+    if (!node) return
+    const max = node.scrollWidth - node.clientWidth
+    setEdges((current) => {
+      const next = { start: node.scrollLeft > 1, end: node.scrollLeft < max - 1 }
+      return current.start === next.start && current.end === next.end ? current : next
+    })
+  }, [])
+
+  useEffect(() => {
+    const node = ref.current
+    if (!enabled || !node) {
+      setEdges({ start: false, end: false })
+      return
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    for (const child of Array.from(node.children)) observer.observe(child)
+    const mutation = new MutationObserver(measure)
+    mutation.observe(node, { childList: true })
+    node.addEventListener('scroll', measure, { passive: true })
+    return () => {
+      observer.disconnect()
+      mutation.disconnect()
+      node.removeEventListener('scroll', measure)
+    }
+  }, [enabled, measure])
+
+  const scrollBy = (direction: -1 | 1) => {
+    const node = ref.current
+    if (!node) return
+    node.scrollBy({ left: direction * Math.max(160, node.clientWidth * 0.7), behavior: 'smooth' })
+  }
+
+  return { ref, edges, scrollBy }
+}
+
+function ScrollArrow({ side, show, onClick }: {
+  side: 'left' | 'right'
+  show: boolean
+  onClick: () => void
+}) {
+  if (!show) return null
+  return (
+    <TooltipButton
+      onClick={onClick}
+      className={cn(
+        'flex h-full w-5 flex-none items-center justify-center bg-background text-sub hover:bg-panel2 hover:text-foreground',
+        side === 'left' ? 'border-r border-border' : 'border-l border-border',
+      )}
+      tooltip={side === 'left' ? 'Scroll tabs left' : 'Scroll tabs right'}
+    >
+      {side === 'left'
+        ? <ChevronLeft size={13} strokeWidth={2.2} />
+        : <ChevronRight size={13} strokeWidth={2.2} />}
+    </TooltipButton>
+  )
+}
+
 function findRepo(openRepos: RepoInfo[], path: string): RepoInfo | undefined {
   return openRepos.find((repo) => samePath(repo.path, path))
 }
@@ -158,6 +224,7 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
   const [dragItem, setDragItem] = useState<DragItem | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const draggedGroupRef = useRef<string | null>(null)
+  const { ref: scrollRef, edges, scrollBy } = useScrollEdges(orientation === 'horizontal')
 
   const repoName = (repo: RepoInfo) => tabAliases[repo.path] ?? repo.name
   const isSaved = (groupId: string) => savedTabGroups.some((group) => group.id === groupId)
@@ -300,7 +367,7 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
     return (
       <div
         key={repo.path}
-        className={cn('flex flex-none', orientation === 'horizontal' ? 'h-full flex-row' : 'w-full flex-col')}
+        className={cn(orientation === 'horizontal' ? 'flex h-full max-w-52 flex-none flex-row' : 'flex w-full flex-none flex-col')}
         onDragOver={(event) => {
           if (dragItem?.type !== 'repo' || samePath(dragItem.path, repo.path)) return
           event.preventDefault()
@@ -335,10 +402,10 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
               onDragEnd={finishDrag}
               onClick={() => useWorkspaceStore.getState().setActiveRepo(repo.id)}
               className={cn(
-                'group/repo relative flex flex-none cursor-pointer items-center gap-[7px] text-xs transition-[border-color,background-color,color]',
+                'group/repo relative flex cursor-pointer items-center gap-[7px] text-xs transition-[border-color,background-color,color]',
                 orientation === 'horizontal'
-                  ? 'h-full min-w-24 max-w-40 border-l px-2.5'
-                  : 'h-[31px] w-full rounded-[5px] border px-2 pl-5',
+                  ? 'h-full min-w-0 flex-none border-l px-2.5'
+                  : 'h-[31px] w-full flex-none rounded-[5px] border px-2 pl-5',
                 inGroup && orientation === 'horizontal' ? 'border-[color:color-mix(in_srgb,var(--tab-group-color)_20%,var(--gw-border))]' : 'border-border',
                 active
                   ? inGroup
@@ -363,7 +430,11 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
                   event.stopPropagation()
                   closeRepo(repo)
                 }}
-                className="ml-auto flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground group-hover/repo:opacity-100"
+                className={cn(
+                  'ml-auto flex flex-none items-center justify-center overflow-hidden rounded text-muted-foreground transition-[width,opacity,margin] duration-150 hover:bg-panel3 hover:text-foreground',
+                  'w-0 opacity-0 group-hover/repo:w-[15px] group-hover/repo:opacity-100 group-focus-within/repo:w-[15px] group-focus-within/repo:opacity-100',
+                  orientation === 'horizontal' && '-ml-[7px] group-hover/repo:ml-0 group-focus-within/repo:ml-0',
+                )}
                 tooltip="Close repository"
               >
                 <X size={11} />
@@ -445,10 +516,11 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
           <section
             data-tab-group={group.id}
             className={cn(
-              'gw-tab-group flex flex-none border-[color:var(--tab-group-color)] transition-opacity',
+              'gw-tab-group flex border-[color:var(--tab-group-color)] transition-opacity',
               orientation === 'horizontal'
-                ? 'h-full flex-row border-b-2 bg-[color:color-mix(in_srgb,var(--tab-group-color)_5%,transparent)]'
-                : 'relative w-full flex-col border-l-2 pl-[3px]',
+                ? 'h-full min-w-0 flex-row border-b-2 bg-[color:color-mix(in_srgb,var(--tab-group-color)_5%,transparent)]'
+                : 'relative w-full flex-none flex-col border-l-2 pl-[3px]',
+              orientation === 'horizontal' && 'flex-none',
               dragItem?.type === 'group' && dragItem.id === group.id && 'opacity-35',
             )}
             style={groupStyle(group.color)}
@@ -508,7 +580,7 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
               <span className="font-mono text-[9px] opacity-65">{group.repoPaths.length}</span>
             </button>
             {!group.collapsed && (
-              <div className={cn('flex', orientation === 'horizontal' ? 'h-full flex-row' : 'w-full flex-col gap-0.5')}>
+              <div className={cn('flex', orientation === 'horizontal' ? 'h-full flex-none flex-row' : 'w-full flex-col gap-0.5')}>
                 {group.repoPaths.map((path) => {
                   const repo = findRepo(openRepos, path)
                   return repo ? renderRepoTab(repo, group) : null
@@ -602,7 +674,7 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
           orientation === 'horizontal'
             ? active
               ? 'mx-0.5 h-full w-24 border border-primary/60 bg-soft'
-              : dragItem ? 'h-full w-1.5' : 'h-full w-0.5'
+              : dragItem ? 'h-full w-1.5' : index === 0 ? 'h-full w-0' : 'h-full w-0.5'
             : active
               ? 'my-0.5 h-8 w-full border border-primary/60 bg-soft'
               : dragItem ? 'h-1.5 w-full' : 'h-0.5 w-full',
@@ -615,12 +687,16 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
 
   return (
     <>
+      {orientation === 'horizontal' && (
+        <ScrollArrow side="left" show={edges.start} onClick={() => scrollBy(-1)} />
+      )}
       <div
+        ref={scrollRef}
         data-dim-on-drag
         className={cn(
           'gw-repository-tabs flex min-h-0 min-w-0',
           orientation === 'horizontal'
-            ? 'gw-tab-scroll h-full flex-1 flex-row items-stretch overflow-x-auto overflow-y-hidden'
+            ? 'gw-tab-scroll h-full flex-initial flex-row items-stretch overflow-x-auto overflow-y-hidden'
             : 'w-full flex-1 flex-col overflow-y-auto overflow-x-hidden px-1.5 py-1',
         )}
         onDragEnd={finishDrag}
@@ -641,6 +717,9 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
         ))}
         {renderOrderGap(tabOrder.length)}
       </div>
+      {orientation === 'horizontal' && (
+        <ScrollArrow side="right" show={edges.end} onClick={() => scrollBy(1)} />
+      )}
 
       {renaming && (
         <RenameDialog
