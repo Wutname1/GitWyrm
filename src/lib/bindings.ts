@@ -557,6 +557,32 @@ async gitRebase(repoId: string, onto: string, branch: string | null) : Promise<R
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Resume a paused rebase after its conflicts were resolved and staged. The
+ * next step may conflict again, in which case the returned paths are the new
+ * round to resolve. `core.editor=true` keeps git from opening an editor for
+ * the replayed commit messages.
+ */
+async rebaseContinue(repoId: string) : Promise<Result<RebaseResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rebase_continue", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Abandon a paused rebase, restoring the branch to where it was before the
+ * rebase started.
+ */
+async rebaseAbort(repoId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rebase_abort", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async gitClone(url: string, destination: string) : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_clone", { url, destination }) };
@@ -952,7 +978,15 @@ merged: string;
 /**
  * Any side is binary/undecodable; only ours/theirs whole-file choice is safe.
  */
-binary: boolean }
+binary: boolean; 
+/**
+ * Our side deleted the file; choosing ours removes it.
+ */
+ours_deleted: boolean; 
+/**
+ * Their side deleted the file; choosing theirs removes it.
+ */
+theirs_deleted: boolean }
 export type DeviceCodeInfo = { device_code: string; user_code: string; verification_uri: string; 
 /**
  * Minimum seconds between polls.
@@ -1046,13 +1080,18 @@ operation: OperationKind | null;
  */
 incoming_label: string | null; 
 /**
+ * Full prepared commit message (MERGE_MSG), used when finishing the
+ * operation so multi-line messages survive intact. None during a rebase.
+ */
+full_message: string | null; 
+/**
  * Paths still conflicted.
  */
 conflicts: string[] }
 /**
  * A pending index-level operation that can leave conflicts to resolve.
  */
-export type OperationKind = "Merge" | "CherryPick" | "Revert"
+export type OperationKind = "Merge" | "CherryPick" | "Revert" | "Rebase"
 export type PollResult = 
 /**
  * Token acquired and saved; sign-in is complete.

@@ -705,24 +705,79 @@ pub async fn git_rebase(
       args.push(b);
     }
 
-    match run_streaming(&app, &repo_id, Some(&path), "rebase", &args) {
-      Ok(_) => Ok(RebaseResult { conflicts: Vec::new() }),
-      Err(e) => {
-        // A conflicting rebase exits non-zero but leaves a rebase-in-progress
-        // state under .git. If that's what happened, report the conflicts
-        // rather than the raw error; a real failure (no rebase state) errors.
-        let repo = open.repo.lock().unwrap();
-        let git_dir = repo.path();
-        let in_progress =
-          git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists();
-        if in_progress {
-          let conflicts = refs::conflicted_paths(&repo)?;
-          Ok(RebaseResult { conflicts })
-        } else {
-          Err(e)
-        }
+    rebase_outcome(run_streaming(&app, &repo_id, Some(&path), "rebase", &args), &open)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Interpret a rebase command's exit. A conflicting step exits non-zero but
+/// leaves a rebase-in-progress state under .git; report the conflicts rather
+/// than the raw error. A real failure (no rebase state left) errors.
+fn rebase_outcome(
+  run: Result<String, AppError>,
+  open: &crate::state::OpenRepo,
+) -> Result<RebaseResult, AppError> {
+  match run {
+    Ok(_) => Ok(RebaseResult { conflicts: Vec::new() }),
+    Err(e) => {
+      let repo = open.repo.lock().unwrap();
+      let git_dir = repo.path();
+      let in_progress =
+        git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists();
+      if in_progress {
+        let conflicts = refs::conflicted_paths(&repo)?;
+        Ok(RebaseResult { conflicts })
+      } else {
+        Err(e)
       }
     }
+  }
+}
+
+/// Resume a paused rebase after its conflicts were resolved and staged. The
+/// next step may conflict again, in which case the returned paths are the new
+/// round to resolve. `core.editor=true` keeps git from opening an editor for
+/// the replayed commit messages.
+#[tauri::command]
+#[specta::specta]
+pub async fn rebase_continue(
+  app: AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+) -> Result<RebaseResult, AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    {
+      let repo = open.repo.lock().unwrap();
+      if repo.index()?.has_conflicts() {
+        return Err(AppError::Other(
+          "resolve all conflicts before continuing the rebase".into(),
+        ));
+      }
+    }
+    let args = ["-c", "core.editor=true", "rebase", "--continue"];
+    rebase_outcome(run_streaming(&app, &repo_id, Some(&path), "rebase", &args), &open)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Abandon a paused rebase, restoring the branch to where it was before the
+/// rebase started.
+#[tauri::command]
+#[specta::specta]
+pub async fn rebase_abort(
+  app: AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    run_streaming(&app, &repo_id, Some(&path), "rebase", &["rebase", "--abort"])?;
+    Ok(())
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

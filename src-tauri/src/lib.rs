@@ -8,6 +8,8 @@ mod watcher;
 
 pub use error::AppError;
 pub use git::graph as git_graph;
+pub use git::merge_ops as git_merge_ops;
+pub use git::types as git_types;
 pub use git::refs as git_refs;
 pub use git::submodule as git_submodule;
 
@@ -69,6 +71,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::remote::set_branch_upstream,
     commands::remote::git_push_force,
     commands::remote::git_rebase,
+    commands::remote::rebase_continue,
+    commands::remote::rebase_abort,
     commands::remote::git_clone,
     commands::remote::list_remotes,
     commands::remote::add_remote,
