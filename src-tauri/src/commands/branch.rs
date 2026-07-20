@@ -301,7 +301,7 @@ pub async fn create_branch(
       let oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
       repo.find_commit(oid)?
     };
-    repo.branch(&name, &target, false)?;
+    repo.branch(name, &target, false)?;
     if checkout {
       let refname = format!("refs/heads/{name}");
       let object = repo.revparse_single(&refname)?;
