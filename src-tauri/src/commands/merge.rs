@@ -9,6 +9,7 @@ use specta::Type;
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git::refs;
 use crate::git::types::{
   ConflictContent, MergeAnalysis, MergeResult, MergeState, OperationKind,
 };
@@ -43,31 +44,6 @@ fn read_state_head(repo: &git2::Repository, file: &str) -> Result<Oid, AppError>
   let content = std::fs::read_to_string(repo.path().join(file))
     .map_err(|_| AppError::Other("no operation in progress".into()))?;
   Oid::from_str(content.trim()).map_err(AppError::Git)
-}
-
-/// List paths currently conflicted in the index.
-fn conflicted_paths(repo: &git2::Repository) -> Result<Vec<String>, AppError> {
-  let index = repo.index()?;
-  if !index.has_conflicts() {
-    return Ok(Vec::new());
-  }
-  let mut paths = Vec::new();
-  for entry in index.conflicts()? {
-    let entry = entry?;
-    // Prefer our side path, then theirs, then ancestor.
-    let raw = entry
-      .our
-      .as_ref()
-      .or(entry.their.as_ref())
-      .or(entry.ancestor.as_ref())
-      .map(|e| e.path.clone());
-    if let Some(bytes) = raw {
-      paths.push(String::from_utf8_lossy(&bytes).into_owned());
-    }
-  }
-  paths.sort();
-  paths.dedup();
-  Ok(paths)
 }
 
 #[tauri::command]
@@ -124,7 +100,7 @@ fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, App
   checkout.allow_conflicts(true).conflict_style_merge(true);
   repo.merge(&[&annotated], Some(&mut opts), Some(&mut checkout))?;
 
-  let conflicts = conflicted_paths(repo)?;
+  let conflicts = refs::conflicted_paths(repo)?;
   Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts })
 }
 
@@ -212,7 +188,7 @@ pub async fn get_merge_state(
       .ok()
       .and_then(|msg| msg.lines().next().map(str::to_string));
 
-    let conflicts = conflicted_paths(&repo)?;
+    let conflicts = refs::conflicted_paths(&repo)?;
     Ok(MergeState { merging: true, operation: Some(operation), incoming_label, conflicts })
   })
   .await
@@ -430,7 +406,7 @@ pub async fn cherry_pick(
 
     repo.cherrypick(&commit, None)?;
 
-    let conflicts = conflicted_paths(&repo)?;
+    let conflicts = refs::conflicted_paths(&repo)?;
     if !conflicts.is_empty() {
       return Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts });
     }

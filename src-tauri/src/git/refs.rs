@@ -108,6 +108,34 @@ pub fn local_tips(records: &[RefRecord]) -> HashMap<&str, Oid> {
     .collect()
 }
 
+/// Paths currently conflicted in the index, sorted and deduplicated.
+///
+/// A conflict records up to three sides; the path is the same for all of them
+/// except in a rename conflict, so read whichever side is present, preferring
+/// ours.
+pub fn conflicted_paths(repo: &Repository) -> Result<Vec<String>, AppError> {
+  let index = repo.index()?;
+  if !index.has_conflicts() {
+    return Ok(Vec::new());
+  }
+  let mut paths = Vec::new();
+  for entry in index.conflicts()? {
+    let entry = entry?;
+    let raw = entry
+      .our
+      .as_ref()
+      .or(entry.their.as_ref())
+      .or(entry.ancestor.as_ref())
+      .map(|e| e.path.clone());
+    if let Some(bytes) = raw {
+      paths.push(String::from_utf8_lossy(&bytes).into_owned());
+    }
+  }
+  paths.sort();
+  paths.dedup();
+  Ok(paths)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

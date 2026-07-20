@@ -664,30 +664,6 @@ fn tree_dirty(repo: &git2::Repository) -> Result<bool, AppError> {
   Ok(repo.statuses(Some(&mut opts))?.iter().any(|e| !e.status().is_ignored()))
 }
 
-/// Paths currently conflicted in the index (both sides of a paused rebase).
-fn conflicted_paths(repo: &git2::Repository) -> Result<Vec<String>, AppError> {
-  let index = repo.index()?;
-  if !index.has_conflicts() {
-    return Ok(Vec::new());
-  }
-  let mut paths = Vec::new();
-  for entry in index.conflicts()? {
-    let entry = entry?;
-    let raw = entry
-      .our
-      .as_ref()
-      .or(entry.their.as_ref())
-      .or(entry.ancestor.as_ref())
-      .map(|e| e.path.clone());
-    if let Some(bytes) = raw {
-      paths.push(String::from_utf8_lossy(&bytes).into_owned());
-    }
-  }
-  paths.sort();
-  paths.dedup();
-  Ok(paths)
-}
-
 /// Rebase a branch onto `onto` (e.g. `origin/main`), replaying its commits on
 /// top. Rebases the current branch when `branch` is None; otherwise git checks
 /// out `branch` first and leaves HEAD there. A clean rebase returns no
@@ -731,7 +707,7 @@ pub async fn git_rebase(
         let in_progress =
           git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists();
         if in_progress {
-          let conflicts = conflicted_paths(&repo)?;
+          let conflicts = refs::conflicted_paths(&repo)?;
           Ok(RebaseResult { conflicts })
         } else {
           Err(e)

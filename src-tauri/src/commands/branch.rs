@@ -626,7 +626,7 @@ pub async fn revert_commit(
 
     repo.revert(&commit, None)?;
 
-    let conflicts = conflicted_index_paths(&repo)?;
+    let conflicts = refs::conflicted_paths(&repo)?;
     if !conflicts.is_empty() {
       return Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts });
     }
@@ -743,30 +743,6 @@ pub async fn drop_commit(
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
-}
-
-/// Paths currently conflicted in the index (used by revert's conflict path).
-fn conflicted_index_paths(repo: &git2::Repository) -> Result<Vec<String>, AppError> {
-  let index = repo.index()?;
-  if !index.has_conflicts() {
-    return Ok(Vec::new());
-  }
-  let mut paths = Vec::new();
-  for entry in index.conflicts()? {
-    let entry = entry?;
-    let raw = entry
-      .our
-      .as_ref()
-      .or(entry.their.as_ref())
-      .or(entry.ancestor.as_ref())
-      .map(|e| e.path.clone());
-    if let Some(bytes) = raw {
-      paths.push(String::from_utf8_lossy(&bytes).into_owned());
-    }
-  }
-  paths.sort();
-  paths.dedup();
-  Ok(paths)
 }
 
 /// True when the repo has at least one linked worktree. Backs the auto-enable
