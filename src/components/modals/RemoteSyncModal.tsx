@@ -8,6 +8,7 @@ import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { resolveDropPair, type DropPair } from '@/lib/refSync'
 import { useBranches } from '@/hooks/useGitQueries'
+import { branchSync } from '@/lib/branchActions'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
@@ -46,19 +47,38 @@ type Action =
   | { kind: 'push' }
   | { kind: 'diverged-incoming' }
   | { kind: 'diverged-outgoing' }
+  | { kind: 'upstream-gone' }
   | { kind: 'same-point' }
   | { kind: 'contains' }
   | { kind: 'ff-branch' }
   | { kind: 'diverged-branches' }
 
+/**
+ * Reads `sync`, not the raw counts. `SyncState::counts()` reports (0, 0) for a
+ * branch whose upstream ref is gone, which is indistinguishable from a branch
+ * that matches -- so the raw counts would call a stale branch "up to date".
+ */
 function chooseTrackingAction(pair: Extract<DropPair, { kind: 'tracking' }>): Action {
-  const { ahead, behind } = pair.branch
-  if (ahead === 0 && behind === 0) return { kind: 'up-to-date' }
-  if (behind > 0 && ahead === 0) return { kind: 'fast-forward' }
-  if (ahead > 0 && behind === 0) return { kind: 'push' }
-  return pair.direction === 'outgoing'
-    ? { kind: 'diverged-outgoing' }
-    : { kind: 'diverged-incoming' }
+  const sync = pair.branch.sync
+  switch (sync.kind) {
+    case 'in_sync':
+      return { kind: 'up-to-date' }
+    case 'upstream_gone':
+      return { kind: 'upstream-gone' }
+    // A pair only resolves when the branch has an upstream configured, so a
+    // never-pushed branch cannot reach here -- it is filtered by
+    // resolveSyncPair. Kept explicit so the switch stays exhaustive.
+    case 'never_pushed':
+      return { kind: 'up-to-date' }
+    case 'diverged': {
+      const { ahead, behind } = sync
+      if (behind > 0 && ahead === 0) return { kind: 'fast-forward' }
+      if (ahead > 0 && behind === 0) return { kind: 'push' }
+      return pair.direction === 'outgoing'
+        ? { kind: 'diverged-outgoing' }
+        : { kind: 'diverged-incoming' }
+    }
+  }
 }
 
 /** relation = target vs source: ahead = target-only commits, behind = source-only. */
@@ -118,6 +138,11 @@ export function RemoteSyncModal() {
   const srcName = pair?.kind === 'tracking' ? pair.upstream : (branchPair?.source.name ?? '')
   const tgtName = pair?.kind === 'tracking' ? pair.branch.name : (branchPair?.target.name ?? '')
 
+  // Counts for the copy below. Only meaningful for a diverged tracking pair,
+  // which is the only state that reaches the messages using them.
+  const trackingSync =
+    pair?.kind === 'tracking' ? branchSync(pair.branch) : { ahead: 0, behind: 0 }
+
   // The chips show where commits will actually flow, which may be the reverse
   // of the drag: dropping origin/main onto main while you're ahead means a
   // push, so the picture reads main -> origin/main.
@@ -132,6 +157,7 @@ export function RemoteSyncModal() {
   const pending =
     m.pull.isPending ||
     m.push.isPending ||
+    m.pushBranch.isPending ||
     m.pushForce.isPending ||
     m.rebase.isPending ||
     m.mergeDirectional.isPending
@@ -143,6 +169,13 @@ export function RemoteSyncModal() {
 
   const runPull = () => m.pull.mutate(undefined, { onSuccess: () => closeModal() })
   const runPush = () => m.push.mutate(undefined, { onSuccess: () => closeModal() })
+  // Republishing a branch whose cloud copy was deleted: the branch need not be
+  // the checked-out one, so this goes through the branch-aware push, which also
+  // re-links the upstream.
+  const runRepublish = () => {
+    if (pair?.kind !== 'tracking') return
+    m.pushBranch.mutate(pair.branch.name, { onSuccess: () => closeModal() })
+  }
   const runForcePush = () => m.pushForce.mutate(undefined, { onSuccess: () => closeModal() })
   const runRebaseOntoUpstream = () => {
     if (pair?.kind !== 'tracking') return
@@ -216,15 +249,21 @@ export function RemoteSyncModal() {
             )}
             {pair?.kind === 'tracking' && action?.kind === 'fast-forward' && (
               <span className="flex items-center gap-1.5 text-added">
-                <Zap size={12} className="flex-none" /> The cloud has {pair.branch.behind} newer
-                change{pair.branch.behind === 1 ? '' : 's'}. Get {tgtName} up to date - clean and
+                <Zap size={12} className="flex-none" /> The cloud has {trackingSync.behind} newer
+                change{trackingSync.behind === 1 ? '' : 's'}. Get {tgtName} up to date - clean and
                 easy.
               </span>
             )}
             {pair?.kind === 'tracking' && action?.kind === 'push' && (
               <span className="flex items-center gap-1.5 text-primary">
-                <Cloud size={12} className="flex-none" /> You have {pair.branch.ahead} change
-                {pair.branch.ahead === 1 ? '' : 's'} the cloud doesn't. Send them up.
+                <Cloud size={12} className="flex-none" /> You have {trackingSync.ahead} change
+                {trackingSync.ahead === 1 ? '' : 's'} the cloud doesn't. Send them up.
+              </span>
+            )}
+            {action?.kind === 'upstream-gone' && (
+              <span className="flex items-center gap-1.5 text-modified">
+                <AlertTriangle size={12} className="flex-none" /> The cloud copy of this branch is
+                gone. Send {tgtName} back up to recreate it.
               </span>
             )}
             {action?.kind === 'diverged-incoming' && (
@@ -285,6 +324,11 @@ export function RemoteSyncModal() {
           )}
           {action?.kind === 'push' && (
             <Button size="sm" disabled={pending} onClick={runPush}>
+              {pending ? 'Sending…' : 'Send up'}
+            </Button>
+          )}
+          {action?.kind === 'upstream-gone' && (
+            <Button size="sm" disabled={pending} onClick={runRepublish}>
               {pending ? 'Sending…' : 'Send up'}
             </Button>
           )}
