@@ -13,11 +13,20 @@ import { classifyError } from '@/lib/errorClass'
 import { log } from '@/lib/log'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
-function invalidate(
-  qc: QueryClient,
-  repoId: string,
-  which: Array<'status' | 'log' | 'branches' | 'stashes' | 'tags' | 'remotes' | 'mergeState'>
-) {
+type QueryName = 'status' | 'log' | 'branches' | 'stashes' | 'tags' | 'remotes' | 'mergeState'
+
+/**
+ * Named sets for the invalidations that are easy to get wrong.
+ *
+ * The graph draws its ref pills from the log query (`collect_refs` in
+ * commands/log.rs), not from the branch list -- so anything that adds,
+ * removes or renames a ref has to refresh `log` too, or the pill lingers
+ * in the graph after the branch is gone.
+ */
+const REFS: QueryName[] = ['branches', 'log']
+const REMOTE_REFS: QueryName[] = ['remotes', 'branches', 'log']
+
+function invalidate(qc: QueryClient, repoId: string, which: QueryName[]) {
   for (const k of which) {
     qc.invalidateQueries({ queryKey: keys[k](repoId) })
   }
@@ -152,7 +161,7 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async (args: { name: string; sha?: string; checkout: boolean }) =>
       unwrap(await commands.createBranch(id, args.name, args.sha ?? '', args.checkout)),
     onSuccess: (_d, args) => {
-      invalidate(qc, id, ['branches', 'log'])
+      invalidate(qc, id, REFS)
       toast(`Created branch ${args.name}`)
     },
     onError,
@@ -164,7 +173,7 @@ export function useGitMutations(repoId: string | null) {
       return name
     },
     onSuccess: (name) => {
-      invalidate(qc, id, ['branches'])
+      invalidate(qc, id, REFS)
       toast(`Deleted branch ${name}`)
     },
     onError,
@@ -275,7 +284,7 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async (args: { name: string; newName: string }) =>
       unwrap(await commands.renameRemote(id, args.name, args.newName)),
     onSuccess: (_d, args) => {
-      invalidate(qc, id, ['remotes', 'branches'])
+      invalidate(qc, id, REMOTE_REFS)
       toast(`Renamed to ${args.newName}`)
     },
     onError,
@@ -297,7 +306,7 @@ export function useGitMutations(repoId: string | null) {
       return name
     },
     onSuccess: (name) => {
-      invalidate(qc, id, ['remotes', 'branches'])
+      invalidate(qc, id, REMOTE_REFS)
       toast(`Removed remote ${name}`)
     },
     onError,
@@ -327,7 +336,7 @@ export function useGitMutations(repoId: string | null) {
   const push = useMutation({
     mutationFn: async () => unwrap(await commands.gitPush(id)),
     onSuccess: (result) => {
-      invalidate(qc, id, ['log', 'branches'])
+      invalidate(qc, id, REFS)
       toast(describePush(result))
     },
     onError,
@@ -338,7 +347,7 @@ export function useGitMutations(repoId: string | null) {
   const pushBranch = useMutation({
     mutationFn: async (branch: string) => unwrap(await commands.gitPushBranch(id, branch)),
     onSuccess: (result) => {
-      invalidate(qc, id, ['log', 'branches'])
+      invalidate(qc, id, REFS)
       toast(describePush(result))
     },
     onError,
@@ -359,7 +368,7 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async (v: { name: string; newName: string }) =>
       unwrap(await commands.renameBranch(id, v.name, v.newName)),
     onSuccess: (_r, v) => {
-      invalidate(qc, id, ['log', 'branches'])
+      invalidate(qc, id, REFS)
       toast(`Renamed to ${v.newName}`)
     },
     onError,
@@ -379,7 +388,7 @@ export function useGitMutations(repoId: string | null) {
   const pushForce = useMutation({
     mutationFn: async () => unwrap(await commands.gitPushForce(id)),
     onSuccess: (result) => {
-      invalidate(qc, id, ['log', 'branches'])
+      invalidate(qc, id, REFS)
       toast(
         result.pushed === 0
           ? `Force-push finished - ${describeTarget(result)} already matched`
