@@ -29,7 +29,7 @@ import {
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { RenameBranchDialog } from '@/components/modals/RenameBranchDialog'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
-import { branchActions } from '@/lib/branchActions'
+import { branchActions, branchSync } from '@/lib/branchActions'
 import { BranchRemoteItems, hasRemoteItems } from '@/components/domain/branch/BranchRemoteItems'
 import { SidebarSection } from './SidebarSection'
 import { RemotesSection } from './RemotesSection'
@@ -66,13 +66,10 @@ export function LeftPanel() {
       key: 'local',
       label: 'LOCAL',
       type: 'branch',
-      items: (branches.data?.local ?? []).map((b) => ({
-        name: b.name,
-        meta:
-          b.ahead || b.behind
-            ? `${b.ahead ? `↑${b.ahead}` : ''}${b.ahead && b.behind ? ' ' : ''}${b.behind ? `↓${b.behind}` : ''}`
-            : undefined,
-      })),
+      items: (branches.data?.local ?? []).map((b) => {
+        const sync = branchSync(b)
+        return { name: b.name, meta: sync.text ?? undefined, metaTitle: sync.title ?? undefined }
+      }),
     },
     {
       key: 'stashes',

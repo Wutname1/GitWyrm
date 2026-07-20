@@ -7,6 +7,8 @@ export type SectionType = 'branch' | 'remote' | 'tree' | 'stash' | 'pr' | 'issue
 export interface SectionItem {
   name: string
   meta?: string
+  /** Tooltip for `meta`, when the short form needs explaining. */
+  metaTitle?: string
   state?: 'open' | 'draft' | 'merged'
 }
 

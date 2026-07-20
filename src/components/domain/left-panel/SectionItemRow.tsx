@@ -93,7 +93,17 @@ export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(fu
         {pending ? pendingLabel ?? 'Working…' : item.name}
       </span>
       {item.meta && (
-        <span className="ml-auto whitespace-nowrap pl-1.5 font-mono text-[9.5px] text-muted-foreground">
+        <span
+          title={item.metaTitle}
+          className={cn(
+            'ml-auto whitespace-nowrap pl-1.5 font-mono text-[9.5px]',
+            // Word markers ("new", "gone") are states, not counts -- give them
+            // their own weight so they don't read as an ahead/behind number.
+            /^[↑↓]/.test(item.meta)
+              ? 'text-muted-foreground'
+              : 'font-semibold uppercase tracking-wide text-primary/80'
+          )}
+        >
           {item.meta}
         </span>
       )}

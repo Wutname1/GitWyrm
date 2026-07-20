@@ -1,6 +1,7 @@
 import { Minus, Plus, Search } from 'lucide-react'
 import { useBranches, useStatus } from '@/hooks/useGitQueries'
 import { useActiveRepo } from '@/stores/workspaceStore'
+import { branchSync } from '@/lib/branchActions'
 import {
   DEFAULT_UI_SCALE,
   MAX_UI_SCALE,
@@ -90,17 +91,12 @@ export function StatusBar() {
   const branches = useBranches(repo?.id ?? null)
 
   const head = branches.data?.local.find((b) => b.is_head)
+  const sync = head ? branchSync(head) : null
   const total = (status.data?.staged.length ?? 0) + (status.data?.unstaged.length ?? 0)
 
   return (
     <div data-dim-on-drag className="flex h-6 flex-none items-center gap-4 border-t border-border bg-panel2 px-3 font-mono text-[10.5px] text-sub">
-      {(head?.ahead || head?.behind) ? (
-        <span>
-          {head.ahead ? `↑${head.ahead}` : ''}
-          {head.ahead && head.behind ? ' ' : ''}
-          {head.behind ? `↓${head.behind}` : ''}
-        </span>
-      ) : null}
+      {sync?.text ? <span title={sync.title ?? undefined}>{sync.text}</span> : null}
       <span className="text-muted-foreground">{total} changes</span>
       <div className="flex-1" />
       {repo && <span className="text-muted-foreground">{repo.path}</span>}

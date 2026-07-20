@@ -2,6 +2,65 @@ import type { BranchInfo } from '@/lib/bindings'
 
 const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`
 
+/**
+ * How a branch's relationship to its remote should read in the UI.
+ *
+ * `ahead`/`behind` are only meaningful when the branch is tracking something
+ * -- see the note on `branchSync` for why the raw counts on `BranchInfo`
+ * cannot carry this on their own.
+ */
+export interface BranchSync {
+  ahead: number
+  behind: number
+  /** Set when the branch's state is not a simple count. */
+  marker: 'new' | 'gone' | null
+  /** Short text for a badge, or null when there is nothing to report. */
+  text: string | null
+  /** Longer wording for a tooltip. */
+  title: string | null
+}
+
+/**
+ * The single reading of a branch's sync state for display.
+ *
+ * `BranchInfo.ahead`/`behind` come from `SyncState::counts()` in Rust, which
+ * reports (0, 0) for every state except `diverged`. So a branch with five
+ * unpushed commits and a branch that exactly matches its upstream are
+ * numerically identical, and anything reading the raw counts shows nothing
+ * for both. Read `sync` instead, which keeps them apart.
+ */
+export function branchSync(branch: BranchInfo): BranchSync {
+  const none: BranchSync = { ahead: 0, behind: 0, marker: null, text: null, title: null }
+
+  switch (branch.sync.kind) {
+    case 'diverged': {
+      const { ahead, behind } = branch.sync
+      const text = `${ahead ? `↑${ahead}` : ''}${ahead && behind ? ' ' : ''}${behind ? `↓${behind}` : ''}`
+      const parts = [
+        ahead ? `${commits(ahead)} to send` : '',
+        behind ? `${commits(behind)} to get` : '',
+      ].filter(Boolean)
+      return { ahead, behind, marker: null, text: text || null, title: parts.join(', ') || null }
+    }
+    case 'never_pushed':
+      return {
+        ...none,
+        marker: 'new',
+        text: 'new',
+        title: 'Not sent to the remote yet',
+      }
+    case 'upstream_gone':
+      return {
+        ...none,
+        marker: 'gone',
+        text: 'gone',
+        title: 'The branch this tracked is no longer on the remote',
+      }
+    case 'in_sync':
+      return none
+  }
+}
+
 export interface BranchActions {
   /** Send local commits, or publish a branch the remote has never seen. */
   push: { show: boolean; label: string }

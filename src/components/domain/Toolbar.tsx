@@ -26,6 +26,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import { cn } from '@/lib/utils'
+import { branchSync } from '@/lib/branchActions'
+import { SyncBadge } from '@/components/domain/branch/SyncBadge'
 import { useBranches, useRemotes, useStashes } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
@@ -108,13 +110,7 @@ function BranchSwitcher() {
           <button className="flex h-[30px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-[11px] hover:border-muted-foreground hover:bg-panel3">
             <span className="size-2 rounded-[2px] bg-primary" />
             <span className="text-[11.5px] font-medium text-foreground">{currentBranch}</span>
-            {(head?.ahead || head?.behind) ? (
-              <span className="font-mono text-[10.5px] text-muted-foreground">
-                {head.ahead ? `↑${head.ahead}` : ''}
-                {head.ahead && head.behind ? ' ' : ''}
-                {head.behind ? `↓${head.behind}` : ''}
-              </span>
-            ) : null}
+            {head && <SyncBadge branch={head} />}
             <ChevronDown size={13} strokeWidth={2} className="text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
@@ -144,13 +140,7 @@ function BranchSwitcher() {
                 >
                   {b.name}
                 </span>
-                {(b.ahead || b.behind) ? (
-                  <span className="font-mono text-[9.5px] text-muted-foreground">
-                    {b.ahead ? `↑${b.ahead}` : ''}
-                    {b.ahead && b.behind ? ' ' : ''}
-                    {b.behind ? `↓${b.behind}` : ''}
-                  </span>
-                ) : null}
+                <SyncBadge branch={b} className="text-[9.5px]" />
               </DropdownMenuItem>
             )
           })}
@@ -244,6 +234,12 @@ export function Toolbar() {
         ? 'push'
         : null
   const syncPending = syncAction !== null
+  // A branch that has never been sent has no count to show -- there is nothing
+  // to be ahead of -- but it still has work to push, so mark the button rather
+  // than leaving it looking as settled as a branch that matches its remote.
+  const headSync = head ? branchSync(head) : null
+  const pushBadge =
+    headSync?.marker === 'new' ? '•' : headSync?.ahead ? String(headSync.ahead) : undefined
   const stashAction = m.stashSave.isPending ? 'stash' : m.stashPop.isPending ? 'pop' : null
   const stashPending = stashAction !== null
 
@@ -267,7 +263,7 @@ export function Toolbar() {
       <ToolbarButton
         icon={<ArrowDown size={16} strokeWidth={1.9} />}
         label={m.pull.isPending ? 'Pulling…' : 'Pull'}
-        badge={head?.behind ? String(head.behind) : undefined}
+        badge={headSync?.behind ? String(headSync.behind) : undefined}
         onClick={requireRepo(() => m.pull.mutate())}
         disabled={syncPending}
         pending={m.pull.isPending}
@@ -275,7 +271,7 @@ export function Toolbar() {
       <ToolbarButton
         icon={<ArrowUp size={16} strokeWidth={1.9} />}
         label={m.push.isPending ? 'Pushing…' : 'Push'}
-        badge={head?.ahead ? String(head.ahead) : undefined}
+        badge={pushBadge}
         onClick={requireRepo(() => m.push.mutate())}
         disabled={syncPending}
         pending={m.push.isPending}
