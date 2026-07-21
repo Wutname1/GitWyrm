@@ -3,7 +3,8 @@ name: Release
 on:
   push:
     tags:
-      - "*.*.*"
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+"
 
 jobs:
   release:
@@ -27,6 +28,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+
+      # A -beta.N tag ships as a GitHub prerelease. The updater reads
+      # /releases/latest, which skips prereleases, so betas never get offered
+      # to people on the stable channel.
+      - name: Determine channel
+        id: channel
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_name }}" == *"-beta."* ]]; then
+            echo "is_beta=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_beta=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-node@v7
         with:
@@ -102,7 +116,7 @@ jobs:
           # arch's installer is attached. The publish job below flips it once
           # every leg has succeeded.
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ steps.channel.outputs.is_beta }}
           args: ${{ matrix.tauri_args }}
 
       # Upload the backend debug symbols to Sentry (gitwyrm-backend project) so
@@ -162,9 +176,15 @@ jobs:
             SUFFIX="-ARM64"
           fi
           # Stable "latest" path the bootstrapper and download buttons point at.
-          aws s3 cp "$NSIS_EXE" "s3://gitwyrm-cdn/GitWyrm-Setup${SUFFIX}.exe" \
-            --endpoint-url "$R2_ENDPOINT" \
-            --cache-control "no-cache, no-store"
+          # Betas must never land here, or everyone downloading GitWyrm-Setup.exe
+          # gets a prerelease.
+          if [ "${{ steps.channel.outputs.is_beta }}" = "true" ]; then
+            echo "Beta build - leaving the latest path untouched"
+          else
+            aws s3 cp "$NSIS_EXE" "s3://gitwyrm-cdn/GitWyrm-Setup${SUFFIX}.exe" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --cache-control "no-cache, no-store"
+          fi
           # Immutable per-version copy, so a specific build stays fetchable after
           # the latest path moves on. Useful for pinned corporate deployments.
           aws s3 cp "$NSIS_EXE" \
