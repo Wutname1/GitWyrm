@@ -1,4 +1,5 @@
 import { type DragEvent } from 'react'
+import { Check, Laptop, Tag } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { RefInfo, RefKind } from '@/lib/bindings'
 import { REF_DND_MIME, resolveDropPair, type DraggedRef } from '@/lib/refSync'
@@ -163,9 +164,12 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
           dragging && !isValidTarget && !isSource && 'opacity-30'
         )}
       >
+        {refTag.type === 'head' && <Check aria-hidden className="size-2.5 flex-none stroke-[2.5]" />}
+        {refTag.type === 'branch' && <Laptop aria-hidden className="size-2.5 flex-none" />}
         {refTag.type === 'remote' && (
-          <RemoteIcon provider={provider} width={9} height={9} className="flex-none" />
+          <RemoteIcon aria-hidden provider={provider} width={10} height={10} className="flex-none" />
         )}
+        {refTag.type === 'tag' && <Tag aria-hidden className="size-2.5 flex-none" />}
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
       </span>
     </RefContextMenu>

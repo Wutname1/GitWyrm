@@ -44,11 +44,12 @@ const DOCS_URL = 'https://github.com/Wutname1/GitWyrm'
 function Wordmark() {
   return (
     <span
+      data-tauri-drag-region
       className="text-[0.84375rem] leading-none"
       style={{ fontFamily: 'var(--font-wordmark)', fontWeight: 600, letterSpacing: '-0.035em' }}
     >
-      <span style={{ color: '#D7DEE7' }}>Git</span>
-      <span style={{ color: '#2DD4A7' }}>Wyrm</span>
+      <span data-tauri-drag-region style={{ color: '#D7DEE7' }}>Git</span>
+      <span data-tauri-drag-region style={{ color: '#2DD4A7' }}>Wyrm</span>
     </span>
   )
 }
@@ -70,6 +71,7 @@ function BrandMark() {
             type="button"
             onClick={onLogoClick}
             aria-label="GitWyrm"
+            data-tauri-drag-region
             className="flex items-center gap-[7px] outline-none"
           >
             <img
@@ -77,6 +79,7 @@ function BrandMark() {
               src={logoUrl}
               alt=""
               draggable={false}
+              data-tauri-drag-region
               className="size-[18px] flex-none wyrm-spring"
             />
             <Wordmark />
@@ -178,7 +181,7 @@ export function TabBar() {
         data-dim-on-drag
         className="flex h-9 flex-none items-center border-b border-border bg-background pl-2.5"
       >
-        <div className="mr-4 flex items-center">
+        <div data-tauri-drag-region className="mr-4 flex items-center">
           <BrandMark />
         </div>
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-muted-foreground">
@@ -195,7 +198,7 @@ export function TabBar() {
       data-dim-on-drag
       className="flex h-9 flex-none items-stretch gap-0.5 border-b border-border bg-background pl-2.5"
     >
-      <div className="flex items-center border-r border-border pr-3">
+      <div data-tauri-drag-region className="flex items-center border-r border-border pr-3">
         <BrandMark />
       </div>
       <RepositoryTabs orientation="horizontal" />

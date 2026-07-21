@@ -6,6 +6,7 @@ import { gridTemplate, visibleColumns, type ColumnId } from '@/lib/graphColumns'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { Avatar } from './Avatar'
 import { RefBadge } from './RefBadge'
+import { RefStack } from './RefStack'
 import { CommitContextMenu } from './CommitContextMenu'
 
 interface CommitRowProps {
@@ -23,9 +24,11 @@ export const CommitRow = memo(function CommitRow({ commit, selected, onSelect, s
   const cell: Record<ColumnId, React.ReactNode> = {
     refs: (
       <div className="gw-refs-cell flex items-center gap-1 overflow-hidden pr-1.5">
-        {commit.refs.map((r) => (
-          <RefBadge key={r.name} refTag={r} />
-        ))}
+        {commit.refs.length > 1 ? (
+          <RefStack refs={commit.refs} />
+        ) : (
+          commit.refs.map((r) => <RefBadge key={`${r.type}:${r.name}`} refTag={r} />)
+        )}
       </div>
     ),
     graph: <div />,

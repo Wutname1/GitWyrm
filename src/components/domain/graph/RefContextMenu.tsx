@@ -36,7 +36,7 @@ export function RefContextMenu({ refTag, children }: RefContextMenuProps) {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-60">
+      <ContextMenuContent className="z-[70] w-60">
         <ContextMenuLabel className="font-mono text-2xs text-sub">{refTag.name}</ContextMenuLabel>
         <ContextMenuSeparator />
         <BranchMenu branch={refTag.name} opInProgress={opInProgress} />
