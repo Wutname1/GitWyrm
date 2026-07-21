@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { log, describeError } from '../lib/log'
+import { Sentry } from '../lib/sentry'
 
 interface Props {
   children: ReactNode
@@ -29,6 +30,9 @@ export class ErrorBoundary extends Component<Props, State> {
     // Surface to the backend log too, so a crash leaves a durable trace.
     console.error('UI crashed:', error, info.componentStack)
     log.error(`UI crashed: ${describeError(error)}\n${info.componentStack ?? ''}`)
+    Sentry.captureException(error, {
+      contexts: { react: { componentStack: info.componentStack } },
+    })
   }
 
   /** Format the crash as a markdown bug report ready to paste into an issue. */

@@ -107,7 +107,41 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
   .typ::<commands::remote::GitProgressPayload>()
 }
 
+const SENTRY_DSN: &str = "https://5cb301777a6d45efd4ddba81136bc6c9@o4511760444686336.ingest.us.sentry.io/4511760446717952";
+
+/// Starts crash reporting and observability. The returned guard flushes pending
+/// events on drop, so it has to stay alive for the whole process. Debug builds
+/// are skipped so local crashes stay local.
+///
+/// During the alpha this mirrors the frontend `initSentry`: everything on, full
+/// sampling, even the paid-tier features. `traces_sample_rate` is the dial to
+/// turn down once the free-plan quota gets tight. See the `ALPHA:` comments.
+fn init_sentry() -> Option<sentry::ClientInitGuard> {
+  if cfg!(debug_assertions) {
+    return None;
+  }
+  Some(sentry::init((
+    SENTRY_DSN,
+    sentry::ClientOptions {
+      release: Some(env!("CARGO_PKG_VERSION").into()),
+      environment: Some("alpha".into()),
+      // Repo paths and branch names reach Sentry through panic messages, so
+      // keep the extra user identifiers off.
+      send_default_pii: false,
+      // Report every panic as a Sentry event, not just the process-fatal ones.
+      attach_stacktrace: true,
+      // ALPHA: trace 100% of transactions. Drop toward 0.1-0.2 before launch,
+      // or the free-plan performance quota burns out fast.
+      traces_sample_rate: 1.0,
+      max_breadcrumbs: 100,
+      ..Default::default()
+    },
+  )))
+}
+
 pub fn run() {
+  let _sentry = init_sentry();
+
   // Route panics through the logger so a backend crash lands in gitwyrm.log
   // (with location + payload) instead of only the detached dev terminal.
   let default_hook = std::panic::take_hook();

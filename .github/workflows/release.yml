@@ -51,6 +51,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Lets the Sentry vite plugin upload JS source maps during the frontend
+          # build (gitwyrm-frontend project). Absent token = upload silently skipped.
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "GitWyrm ${{ github.ref_name }}"
@@ -58,6 +61,29 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.tauri_args }}
+
+      # Upload the backend debug symbols to Sentry (gitwyrm-backend project) so
+      # Rust panics get readable stack traces. During alpha we ship the binary
+      # unstripped (Cargo `strip = false`) so every build -- installer, portable,
+      # and CDN copy -- symbolicates consistently. Revisit stripping for size at
+      # beta, when it'd have to happen before the NSIS bundle is signed.
+      - name: Upload Rust debug symbols to Sentry
+        shell: pwsh
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: gitwyrm
+          SENTRY_PROJECT: gitwyrm-backend
+        run: |
+          # Point at the release dir so the upload grabs both the exe and its
+          # .pdb -- the PDB is what gives line numbers, not just function names.
+          # The x86_64 leg builds with no --target flag, so it lands in the plain
+          # target/release; the aarch64 leg uses a target-specific dir. Match how
+          # the portable-exe step below picks its path.
+          $dir = "src-tauri/target/${{ matrix.rust_target }}/release"
+          if (-not (Test-Path "$dir/gitwyrm.exe")) {
+            $dir = "src-tauri/target/release"
+          }
+          npx @sentry/cli debug-files upload --include-sources "$dir"
 
       - name: Attach portable exe
         shell: pwsh
