@@ -70,7 +70,7 @@ pub async fn ai_list_models(
 #[tauri::command]
 #[specta::specta]
 pub async fn ai_copilot_device_start() -> Result<copilot::DeviceCodeInfo, AppError> {
-  copilot::device_start().await
+  copilot::device_start("read:user").await
 }
 
 /// One poll pass; the frontend loops on Pending so sign-in stays cancellable.

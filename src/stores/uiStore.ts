@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { DiffSource } from '@/lib/bindings'
 import type { SectionKey } from '@/lib/types'
 
-export type CenterView = 'graph' | 'diff' | 'settings' | 'conflict'
+export type CenterView = 'graph' | 'diff' | 'settings' | 'conflict' | 'github'
 
 export type ModalKind =
   | 'onboarding'
@@ -13,7 +13,13 @@ export type ModalKind =
   | 'newBranch'
   | 'newTag'
   | 'remotes'
+  | 'githubConnect'
   | null
+
+export interface GithubItemRef {
+  kind: 'pr' | 'issue'
+  number: number
+}
 
 export type SettingsSection = 'general' | 'ai' | 'appearance' | 'logs' | 'about'
 
@@ -41,6 +47,8 @@ interface UiState {
   changesFocusNonce: number
   /** Ref (branch/tag) the graph should scroll to and highlight; bumped nonce re-triggers. */
   revealRef: { name: string; nonce: number } | null
+  /** PR or issue shown in the center view and the actions panel. */
+  githubItem: GithubItemRef | null
 
   selectCommit: (sha: string | null) => void
   /** Drop view state tied to one repo. Call when the active repo changes. */
@@ -58,6 +66,8 @@ interface UiState {
   openConflict: (path: string) => void
   showSettings: (section?: SettingsSection) => void
   showGraph: () => void
+  openGithubItem: (kind: 'pr' | 'issue', number: number) => void
+  closeGithubItem: () => void
   toggleSection: (key: SectionKey) => void
   openModal: (kind: Exclude<ModalKind, null>) => void
   closeModal: () => void
@@ -89,6 +99,7 @@ export const useUiStore = create<UiState>((set) => ({
   settingsSection: 'general',
   changesFocusNonce: 0,
   revealRef: null,
+  githubItem: null,
 
   selectCommit: (sha) => set({ selectedSha: sha }),
   resetForRepoSwitch: () =>
@@ -97,7 +108,11 @@ export const useUiStore = create<UiState>((set) => ({
       diffRequest: null,
       conflictPath: null,
       revealRef: null,
-      centerView: s.centerView === 'diff' || s.centerView === 'conflict' ? 'graph' : s.centerView,
+      githubItem: null,
+      centerView:
+        s.centerView === 'diff' || s.centerView === 'conflict' || s.centerView === 'github'
+          ? 'graph'
+          : s.centerView,
     })),
   focusChanges: () => set((s) => ({ changesFocusNonce: s.changesFocusNonce + 1 })),
   revealRefInGraph: (name) =>
@@ -123,6 +138,9 @@ export const useUiStore = create<UiState>((set) => ({
       settingsSection: section ?? s.settingsSection,
     })),
   showGraph: () => set({ centerView: 'graph', diffRequest: null }),
+  openGithubItem: (kind, number) =>
+    set({ centerView: 'github', githubItem: { kind, number }, diffRequest: null }),
+  closeGithubItem: () => set({ centerView: 'graph', githubItem: null }),
   toggleSection: (key) =>
     set((s) => ({ sectionOpen: { ...s.sectionOpen, [key]: !s.sectionOpen[key] } })),
   openModal: (kind) => set({ activeModal: kind }),

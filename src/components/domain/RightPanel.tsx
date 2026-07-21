@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { useBranches, useStatus } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
+import { GithubContextPanel } from './github/GithubContextPanel'
 import { ChangesList } from './commit-form/ChangesList'
 import { ChangesMenu } from './commit-form/ChangesMenu'
 import { CommitMessageForm } from './commit-form/CommitMessageForm'
@@ -39,6 +40,7 @@ export function RightPanel() {
         flash ? 'border-primary' : 'border-border'
       )}
     >
+      <GithubContextPanel />
       <ChangesMenu>
         <div
           ref={headerRef}

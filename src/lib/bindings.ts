@@ -855,6 +855,125 @@ async generateCommitMessage(repoId: string, provider: string, model: string) : P
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async githubDeviceStart() : Promise<Result<DeviceCodeInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_device_start") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * One poll pass; the frontend loops on Pending so sign-in stays cancellable.
+ */
+async githubDevicePoll(deviceCode: string, interval: number) : Promise<Result<PollResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_device_poll", { deviceCode, interval }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async githubSignOut() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_sign_out") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The signed-in login, or None when no token is stored or the token no
+ * longer works (so the UI falls back to the connect prompt).
+ */
+async githubAuthStatus() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_auth_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The GitHub owner/repo behind the origin remote, or None when origin is
+ * missing or not hosted on github.com.
+ */
+async githubRepoSlug(repoId: string) : Promise<Result<GithubRepoRef | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_repo_slug", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async githubListPrs(owner: string, repo: string) : Promise<Result<PrSummary[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_list_prs", { owner, repo }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async githubListIssues(owner: string, repo: string) : Promise<Result<IssueSummary[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_list_issues", { owner, repo }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async githubPrDetail(owner: string, repo: string, number: number) : Promise<Result<PrDetail, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_pr_detail", { owner, repo, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async githubIssueDetail(owner: string, repo: string, number: number) : Promise<Result<IssueDetail, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_issue_detail", { owner, repo, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Posts a comment on an issue or pull request (GitHub uses the issues
+ * endpoint for both) and returns it for optimistic display.
+ */
+async githubComment(owner: string, repo: string, number: number, body: string) : Promise<Result<GithubComment, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_comment", { owner, repo, number, body }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async githubApprovePr(owner: string, repo: string, number: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_approve_pr", { owner, repo, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async githubMergePr(owner: string, repo: string, number: number, method: MergeMethod) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_merge_pr", { owner, repo, number, method }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async githubCloseIssue(owner: string, repo: string, number: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_close_issue", { owner, repo, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -1018,6 +1137,8 @@ export type FileDiff = { path: string;
 old_path: string | null; additions: number; deletions: number; hunks: HunkHeader[]; lines: DiffLineEntry[]; binary: boolean }
 export type GeneratedCommitMessage = { summary: string; description: string }
 export type GitProgressPayload = { repo_id: string; operation: string; line: string }
+export type GithubComment = { author: string; author_is_bot: boolean; body: string; created_at: string }
+export type GithubRepoRef = { owner: string; repo: string }
 /**
  * A `@@ -old_start,old_lines +new_start,new_lines @@` hunk boundary.
  */
@@ -1026,6 +1147,8 @@ export type HunkHeader = { old_start: number; old_lines: number; new_start: numb
  * Raw header text including any trailing section context.
  */
 header: string }
+export type IssueDetail = { number: number; title: string; body: string; author: string; state: string; labels: string[]; assignee: string | null; comments: GithubComment[]; html_url: string; created_at: string; updated_at: string }
+export type IssueSummary = { number: number; title: string; author: string; labels: string[]; assignee: string | null; comments: number; updated_at: string; html_url: string }
 export type LogPage = { commits: CommitEntry[]; has_more: boolean }
 /**
  * What a merge of a given ref into HEAD would do, without performing it.
@@ -1047,6 +1170,7 @@ normal: boolean;
  * Short sha the target ref resolves to.
  */
 target_sha: string }
+export type MergeMethod = "merge" | "squash" | "rebase"
 /**
  * Outcome of starting a merge.
  */
@@ -1101,6 +1225,8 @@ export type PollResult =
  * User has not finished authorizing yet; poll again after `interval`.
  */
 { status: "pending"; interval: number }
+export type PrDetail = { number: number; title: string; body: string; author: string; author_is_bot: boolean; state: string; draft: boolean; merged: boolean; mergeable: boolean | null; head_ref: string; base_ref: string; additions: number; deletions: number; changed_files: number; comments: GithubComment[]; html_url: string; created_at: string; updated_at: string }
+export type PrSummary = { number: number; title: string; author: string; author_is_bot: boolean; draft: boolean; head_ref: string; base_ref: string; updated_at: string; html_url: string }
 /**
  * Outcome of a pull, measured the same way as `PushResult`.
  */

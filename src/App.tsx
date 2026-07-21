@@ -13,6 +13,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
 import { NewTagModal } from '@/components/modals/NewTagModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
+import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
@@ -130,6 +131,7 @@ function AppInner() {
       <NewBranchModal />
       <NewTagModal />
       <RemotesModal />
+      <GithubConnectModal />
       <Toaster position="bottom-center" />
     </>
   )

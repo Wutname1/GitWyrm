@@ -39,12 +39,14 @@ fn client() -> reqwest::Client {
   reqwest::Client::new()
 }
 
-pub async fn device_start() -> Result<DeviceCodeInfo, AppError> {
+/// Starts a device-code sign-in asking for `scope`. Copilot uses `read:user`;
+/// the GitHub integration asks for `repo` so it can read and act on PRs/issues.
+pub async fn device_start(scope: &str) -> Result<DeviceCodeInfo, AppError> {
   let res = client()
     .post(DEVICE_CODE_URL)
     .header("Accept", "application/json")
     .header("User-Agent", "GitWyrm")
-    .form(&[("client_id", CLIENT_ID), ("scope", "read:user")])
+    .form(&[("client_id", CLIENT_ID), ("scope", scope)])
     .timeout(TIMEOUT)
     .send()
     .await

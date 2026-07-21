@@ -10,6 +10,8 @@ export interface SectionItem {
   /** Tooltip for `meta`, when the short form needs explaining. */
   metaTitle?: string
   state?: 'open' | 'draft' | 'merged'
+  /** GitHub PR or issue number, for pr/issue rows. */
+  id?: number
 }
 
 export interface SidebarSectionData {

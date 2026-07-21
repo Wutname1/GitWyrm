@@ -1,0 +1,2066 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GitWyrm - GitHub pull requests and issues mockup</title>
+  <style>
+    @font-face {
+      font-family: "Sora";
+      font-weight: 600;
+      font-display: swap;
+      src: url("../src/assets/fonts/Sora-SemiBold.ttf") format("truetype");
+    }
+
+    @font-face {
+      font-family: "IBM Plex Sans";
+      font-weight: 100 900;
+      font-display: swap;
+      src: url("../src/assets/fonts/IBMPlexSans-VariableFont.ttf") format("truetype");
+    }
+
+    :root {
+      --bg: #0b0f14;
+      --panel: #0f151c;
+      --panel-2: #131b24;
+      --panel-3: #1a2430;
+      --border: #1e2833;
+      --border-strong: #2d3b49;
+      --text: #d7e0ea;
+      --sub: #8b99a8;
+      --muted: #5d6b7a;
+      --accent: #2dd4a7;
+      --accent-fg: #04120d;
+      --accent-soft: rgba(45, 212, 167, 0.13);
+      --green: #34d399;
+      --red: #f87171;
+      --amber: #fbbf24;
+      --blue: #38bdf8;
+      --violet: #a78bfa;
+      --shadow: 0 22px 70px rgba(0, 0, 0, 0.48);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 17% 0%, rgba(45, 212, 167, 0.08), transparent 28rem),
+        #070a0e;
+      color: var(--text);
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 13px;
+      user-select: none;
+    }
+
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+
+    button:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .page {
+      width: min(1560px, 100%);
+      margin: 0 auto;
+      padding: 22px clamp(12px, 2.2vw, 34px) 30px;
+    }
+
+    .study-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 28px;
+      margin: 0 auto 14px;
+    }
+
+    .study-title { min-width: 0; }
+
+    .eyebrow {
+      color: var(--accent);
+      font-family: "Sora", sans-serif;
+      font-size: 9px;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 6px 0 4px;
+      font-family: "Sora", sans-serif;
+      font-size: clamp(22px, 3vw, 34px);
+      font-weight: 600;
+      letter-spacing: -.035em;
+    }
+
+    .study-title p {
+      max-width: 690px;
+      margin: 0;
+      color: var(--sub);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .study-note {
+      display: flex;
+      flex: none;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--sub);
+      font-size: 10.5px;
+    }
+
+    .study-note svg { width: 14px; height: 14px; color: var(--accent); }
+
+    .app-window {
+      position: relative;
+      min-width: 960px;
+      height: min(820px, calc(100vh - 132px));
+      min-height: 650px;
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      border-radius: 9px;
+      background: var(--bg);
+      box-shadow: var(--shadow);
+    }
+
+    .titlebar {
+      display: flex;
+      height: 37px;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      background: #0d1218;
+    }
+
+    .brand {
+      display: flex;
+      width: 238px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 11px;
+      color: var(--text);
+      font-family: "Sora", sans-serif;
+      font-size: 11.5px;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 17px;
+      height: 17px;
+      border: 2px solid var(--accent);
+      border-radius: 50% 50% 48% 52%;
+      transform: rotate(-18deg);
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      position: absolute;
+      content: "";
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .brand-mark::before { width: 3px; height: 3px; top: 2px; left: 3px; }
+    .brand-mark::after { width: 5px; height: 2px; right: -4px; bottom: 1px; transform: rotate(25deg); }
+
+    .repo-tabs {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      align-self: stretch;
+      align-items: end;
+      gap: 1px;
+    }
+
+    .repo-tab {
+      display: flex;
+      width: 220px;
+      height: 31px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-bottom: 0;
+      border-radius: 6px 6px 0 0;
+      background: var(--panel);
+      color: var(--text);
+    }
+
+    .repo-tab .dot { width: 7px; height: 7px; border-radius: 2px; background: var(--accent); }
+    .repo-tab small { margin-left: auto; color: var(--muted); }
+
+    .new-tab {
+      display: grid;
+      width: 29px;
+      height: 29px;
+      place-items: center;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 18px;
+    }
+
+    .new-tab:hover { color: var(--text); }
+
+    .window-actions {
+      display: flex;
+      margin-left: auto;
+      align-self: stretch;
+    }
+
+    .window-actions button {
+      display: grid;
+      width: 43px;
+      place-items: center;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .window-actions button:hover { background: var(--panel-3); color: var(--text); }
+    .window-actions button:last-child:hover { background: #b63838; color: white; }
+
+    .toolbar {
+      position: relative;
+      display: flex;
+      height: 48px;
+      align-items: center;
+      gap: 4px;
+      padding: 0 10px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .tool-button,
+    .ghost-button,
+    .branch-pill,
+    .search-box {
+      height: 30px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text);
+    }
+
+    .tool-button {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px;
+      cursor: pointer;
+      font-size: 11.5px;
+      font-weight: 500;
+    }
+
+    .tool-button:hover { border-color: var(--muted); background: var(--panel-3); }
+    .tool-button:active { background: var(--accent-soft); color: var(--accent); }
+    .tool-button svg, .ghost-button svg, .mode-title svg { width: 15px; height: 15px; }
+    .tool-button.sync svg { color: var(--sub); }
+
+    .tool-divider { width: 1px; height: 25px; margin: 0 5px; background: var(--border); }
+    .toolbar-spacer { flex: 1; }
+
+    .branch-pill {
+      display: flex;
+      min-width: 125px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px;
+      border-color: var(--border);
+      background: var(--panel-2);
+      cursor: pointer;
+      font-size: 11.5px;
+    }
+
+    .branch-pill .branch-dot { width: 7px; height: 7px; border-radius: 2px; background: var(--accent); }
+    .branch-pill strong { max-width: 125px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; white-space: nowrap; }
+    .branch-pill .chev { margin-left: auto; color: var(--muted); }
+    .branch-pill.flash { animation: branch-flash 900ms ease-out; }
+
+    .search-box {
+      display: flex;
+      width: 205px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 9px;
+      border-color: var(--border);
+      background: var(--panel-2);
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11.5px;
+    }
+
+    .search-box kbd {
+      margin-left: auto;
+      padding: 1px 4px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 9px;
+    }
+
+    .ghost-button {
+      display: grid;
+      width: 31px;
+      place-items: center;
+      border-color: var(--border);
+      background: var(--panel-2);
+      color: var(--sub);
+      cursor: pointer;
+    }
+
+    .ghost-button:hover { border-color: var(--muted); background: var(--panel-3); color: var(--text); }
+
+    .workspace {
+      display: grid;
+      height: calc(100% - 107px);
+      grid-template-columns: 238px minmax(480px, 1fr) 338px;
+    }
+
+    .sidebar {
+      overflow: auto;
+      border-right: 1px solid var(--border);
+      background: var(--panel);
+      padding: 7px 0 24px;
+    }
+
+    .side-section { margin-bottom: 2px; }
+
+    .side-head {
+      display: flex;
+      height: 27px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 11px;
+      color: var(--muted);
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .side-head .chevron { font-size: 9px; }
+    .side-head .side-count { margin-left: auto; color: var(--sub); font-family: "Segoe UI", sans-serif; letter-spacing: 0; }
+
+    .side-row {
+      position: relative;
+      display: flex;
+      width: calc(100% - 10px);
+      min-height: 27px;
+      align-items: center;
+      gap: 8px;
+      margin: 0 5px;
+      padding: 4px 8px 4px 19px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--sub);
+      cursor: pointer;
+      text-align: left;
+      font-size: 11.5px;
+    }
+
+    .side-row:hover { background: var(--panel-3); color: var(--text); }
+    .side-row.active { background: var(--accent-soft); color: var(--text); box-shadow: inset 2px 0 var(--accent); }
+    .side-row .marker { width: 7px; height: 7px; flex: none; border: 1px solid var(--muted); border-radius: 2px; }
+    .side-row .marker.current { border: 0; background: var(--accent); }
+    .side-row .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .side-row .meta { margin-left: auto; color: var(--muted); font-size: 9.5px; }
+    .side-row.active .meta { color: var(--accent); }
+
+    .github-row svg { width: 13px; height: 13px; flex: none; color: var(--sub); }
+    .side-row.active svg { color: var(--accent); }
+
+    .content {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      background: var(--bg);
+    }
+
+    .content-head {
+      display: flex;
+      min-height: 72px;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 21, 28, .7);
+    }
+
+    .mode-title {
+      display: flex;
+      min-width: 175px;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .mode-icon {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      flex: none;
+      place-items: center;
+      border: 1px solid rgba(45, 212, 167, .28);
+      border-radius: 7px;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .mode-title h2 { margin: 0; font-family: "Sora", sans-serif; font-size: 14px; font-weight: 600; }
+    .mode-title p { margin: 3px 0 0; color: var(--muted); font-size: 10.5px; }
+
+    .filters {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+    }
+
+    .filter-btn {
+      height: 27px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 10.5px;
+    }
+
+    .filter-btn:hover { color: var(--text); }
+    .filter-btn.active { background: var(--panel-3); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
+    .filter-btn b { margin-left: 5px; color: var(--accent); font-size: 9px; }
+
+    .head-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+    .quiet-button,
+    .primary-button,
+    .danger-button {
+      display: inline-flex;
+      height: 30px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-2);
+      color: var(--sub);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .quiet-button:hover { border-color: var(--muted); background: var(--panel-3); color: var(--text); }
+    .quiet-button:disabled { cursor: default; opacity: .55; }
+    .quiet-button:disabled:hover { border-color: var(--border); background: var(--panel-2); color: var(--sub); }
+
+    .primary-button {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: var(--accent-fg);
+    }
+
+    .primary-button:hover { filter: brightness(1.08); }
+    .primary-button:disabled { cursor: default; filter: grayscale(.2); opacity: .55; }
+    .danger-button { border-color: rgba(248,113,113,.42); color: var(--red); }
+
+    .spin { animation: spin .7s linear infinite; }
+
+    .list-head {
+      display: grid;
+      height: 30px;
+      grid-template-columns: minmax(230px, 1fr) 95px 96px 76px;
+      align-items: center;
+      padding: 0 13px 0 17px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+
+    .item-list { min-height: 0; flex: 1; overflow: auto; }
+
+    .group-label {
+      display: flex;
+      height: 28px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px;
+      border-bottom: 1px solid rgba(30,40,51,.7);
+      background: rgba(19,27,36,.46);
+      color: var(--muted);
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .group-label span { color: var(--accent); }
+
+    .work-row {
+      display: grid;
+      width: 100%;
+      min-height: 66px;
+      grid-template-columns: minmax(230px, 1fr) 95px 96px 76px;
+      align-items: center;
+      padding: 8px 13px 8px 15px;
+      border: 0;
+      border-bottom: 1px solid rgba(30,40,51,.72);
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .work-row:hover { background: rgba(19,27,36,.72); }
+    .work-row.active { background: var(--accent-soft); box-shadow: inset 2px 0 var(--accent); }
+    .work-row.changed { animation: row-change 800ms ease-out; }
+
+    .work-main { display: flex; min-width: 0; align-items: center; gap: 10px; padding-right: 14px; }
+
+    .state-mark {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      flex: none;
+      place-items: center;
+      border: 1px solid rgba(52,211,153,.35);
+      border-radius: 50%;
+      color: var(--green);
+    }
+
+    .state-mark.issue { border-radius: 6px; color: var(--violet); border-color: rgba(167,139,250,.38); }
+    .state-mark svg { width: 14px; height: 14px; }
+
+    .work-copy { min-width: 0; }
+    .work-title { display: block; overflow: hidden; color: var(--text); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .work-sub { display: block; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+
+    .person { display: flex; align-items: center; gap: 6px; color: var(--sub); font-size: 10.5px; }
+
+    .avatar {
+      display: grid;
+      width: 21px;
+      height: 21px;
+      flex: none;
+      place-items: center;
+      border-radius: 50%;
+      background: #27384a;
+      color: #b8d3eb;
+      font-family: "Segoe UI", sans-serif;
+      font-size: 8px;
+      font-weight: 700;
+    }
+
+    .avatar.amber { background: #443719; color: #f9d976; }
+    .avatar.violet { background: #352a50; color: #c9b8ff; }
+    .avatar.green { background: #173b33; color: #8fffe2; }
+    .avatar.bot { border: 1px solid #405363; background: #1b2732; color: #b9c8d5; font-size: 7px; }
+
+    .review-state { color: var(--sub); font-size: 10.5px; }
+    .review-state strong { display: block; margin-bottom: 2px; font-weight: 600; }
+    .review-state.ready strong { color: var(--green); }
+    .review-state.waiting strong { color: var(--amber); }
+    .review-state.draft strong { color: var(--violet); }
+
+    .updated { color: var(--muted); font-family: "Segoe UI", sans-serif; font-size: 10px; }
+
+    .detail {
+      position: relative;
+      min-width: 0;
+      overflow: auto;
+      border-left: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .detail-inner { padding: 15px 15px 24px; }
+    .detail-inner.pulse { animation: detail-pulse 520ms ease-out; }
+
+    .provider-line {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .provider-line svg { width: 13px; height: 13px; }
+    .provider-line .number { margin-left: auto; font-family: "Segoe UI", sans-serif; }
+
+    .detail h3 {
+      margin: 10px 0 8px;
+      color: var(--text);
+      font-family: "Sora", sans-serif;
+      font-size: 17px;
+      font-weight: 600;
+      line-height: 1.35;
+      letter-spacing: -.02em;
+      user-select: text;
+    }
+
+    .detail-byline { display: flex; align-items: center; gap: 7px; color: var(--sub); font-size: 10.5px; }
+    .status-pill { margin-left: auto; padding: 3px 7px; border-radius: 9px; background: rgba(52,211,153,.12); color: var(--green); font-size: 9px; font-weight: 700; }
+    .status-pill.violet { background: rgba(167,139,250,.13); color: var(--violet); }
+
+    .summary-card {
+      margin: 0 0 10px;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: rgba(11,15,20,.5);
+    }
+
+    .summary-card h4 { display: flex; margin: 0 0 7px; align-items: center; gap: 7px; color: var(--text); font-size: 10.5px; font-weight: 700; }
+    .summary-card p { margin: 0; color: var(--sub); font-size: 10.5px; line-height: 1.5; user-select: text; }
+
+    .checks { display: grid; gap: 7px; }
+    .check-line { display: flex; align-items: center; gap: 8px; color: var(--sub); font-size: 10.5px; }
+    .check-icon { display: grid; width: 16px; height: 16px; place-items: center; border-radius: 50%; background: rgba(52,211,153,.12); color: var(--green); font-size: 9px; }
+    .check-line small { margin-left: auto; color: var(--muted); font-size: 9.5px; }
+
+    .branch-route {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--sub);
+      font-family: "Segoe UI", sans-serif;
+      font-size: 9.5px;
+    }
+
+    .branch-route code { padding: 3px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); color: var(--text); font-family: inherit; }
+    .branch-route svg { width: 12px; height: 12px; color: var(--accent); }
+
+    .detail-actions { display: flex; gap: 6px; margin: 11px 0 14px; }
+    .detail-actions .primary-button { flex: 1; }
+
+    .comment-title { margin: 16px 0 7px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+
+    .comment {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr);
+      gap: 8px;
+      padding: 9px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .comment .avatar { width: 24px; height: 24px; }
+    .comment strong { color: var(--text); font-size: 10.5px; }
+    .comment time { margin-left: 5px; color: var(--muted); font-size: 9px; }
+    .comment p { margin: 3px 0 0; color: var(--sub); font-size: 10.5px; line-height: 1.45; user-select: text; }
+
+    .comment-box { margin-top: 8px; }
+    .comment-box textarea {
+      width: 100%;
+      min-height: 58px;
+      resize: vertical;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 10.5px;
+      user-select: text;
+    }
+
+    .comment-box textarea::placeholder { color: var(--muted); }
+    .comment-box .quiet-button { float: right; margin-top: 5px; }
+
+    .statusbar {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 4;
+      display: flex;
+      height: 22px;
+      align-items: center;
+      gap: 14px;
+      padding: 0 9px;
+      border-top: 1px solid var(--border);
+      background: #0c1117;
+      color: var(--muted);
+      font-size: 9.5px;
+    }
+
+    .statusbar .connected { display: flex; align-items: center; gap: 5px; color: var(--sub); }
+    .statusbar .connected i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+    .statusbar .right { margin-left: auto; }
+
+    .toast-stack {
+      position: absolute;
+      right: 16px;
+      bottom: 34px;
+      z-index: 20;
+      display: grid;
+      width: 290px;
+      gap: 7px;
+      pointer-events: none;
+    }
+
+    .toast {
+      display: flex;
+      min-height: 44px;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 11px;
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      background: #151e28;
+      color: var(--text);
+      box-shadow: 0 12px 28px rgba(0,0,0,.42);
+      animation: toast-in 220ms ease-out;
+      font-size: 11px;
+    }
+
+    .toast.good::before { color: var(--green); content: "✓"; font-weight: 800; }
+    .toast.info::before { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); content: ""; }
+    .toast.out { animation: toast-out 180ms ease-in forwards; }
+
+    .modal-scrim {
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      display: none;
+      place-items: center;
+      background: rgba(3,6,9,.7);
+      backdrop-filter: blur(2px);
+    }
+
+    .modal-scrim.open { display: grid; animation: fade-in 130ms ease-out; }
+
+    .modal {
+      width: 420px;
+      padding: 17px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 22px 60px rgba(0,0,0,.65);
+    }
+
+    .modal h3 { margin: 0; font-family: "Sora", sans-serif; font-size: 15px; }
+    .modal p { margin: 8px 0 15px; color: var(--sub); font-size: 11px; line-height: 1.5; }
+
+    .before-after {
+      display: grid;
+      grid-template-columns: 1fr 24px 1fr;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 15px;
+    }
+
+    .before-after > div:not(.arrow) { min-width: 0; padding: 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); }
+    .before-after label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 8.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+    .before-after strong { display: block; overflow: hidden; color: var(--text); font-family: "Segoe UI", sans-serif; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .before-after .arrow { color: var(--accent); text-align: center; }
+
+    .field-label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+    .modal input {
+      width: 100%;
+      height: 34px;
+      padding: 0 9px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", sans-serif;
+      font-size: 11px;
+      user-select: text;
+    }
+
+    .modal-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 16px; }
+
+    .review-banner {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 10px;
+      padding: 9px 10px;
+      border: 1px solid rgba(52,211,153,.35);
+      border-radius: 6px;
+      background: rgba(52,211,153,.08);
+      color: var(--green);
+      font-size: 10.5px;
+      animation: fade-in 180ms ease-out;
+    }
+
+    .review-banner.show { display: flex; }
+
+    .merged-state {
+      display: none;
+      place-items: center;
+      min-height: 190px;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .merged-state.show { display: grid; }
+    .merged-state .merge-icon { display: grid; width: 44px; height: 44px; margin: 0 auto 10px; place-items: center; border-radius: 50%; background: rgba(167,139,250,.13); color: var(--violet); font-size: 21px; }
+    .merged-state strong { display: block; color: var(--text); font-family: "Sora", sans-serif; font-size: 13px; }
+    .merged-state p { max-width: 230px; margin: 6px auto 0; color: var(--sub); font-size: 10.5px; line-height: 1.45; }
+
+    /* GitHub items use the same center surface as the commit graph. The left
+       panel chooses work; the right panel remains the local commit workspace. */
+    .workspace { grid-template-columns: 238px minmax(560px, 1fr) 304px; }
+
+    .github-connection { margin-bottom: 3px; color: var(--sub); }
+    .github-connection svg { width: 12px; height: 12px; color: var(--accent); }
+    .github-mode-head { color: var(--text); }
+
+    .github-items {
+      display: grid;
+      gap: 1px;
+      padding-bottom: 3px;
+    }
+
+    .github-item {
+      display: grid;
+      width: calc(100% - 10px);
+      min-height: 42px;
+      grid-template-columns: 14px minmax(0, 1fr);
+      gap: 7px;
+      margin: 0 5px;
+      padding: 6px 7px 6px 17px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--sub);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .github-item:hover { background: var(--panel-3); color: var(--text); }
+    .github-item.active { background: var(--accent-soft); color: var(--text); box-shadow: inset 2px 0 var(--accent); }
+    .github-item svg { width: 13px; height: 13px; margin-top: 2px; color: var(--muted); }
+    .github-item.active svg { color: var(--accent); }
+    .github-item-copy { min-width: 0; }
+    .github-item-title { display: block; overflow: hidden; font-size: 10.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .github-item-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+    .content-head { min-height: 58px; padding: 9px 15px; }
+    .mode-title { min-width: 0; }
+    .mode-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mode-title p { color: var(--sub); }
+
+    .center-scroll {
+      min-height: 0;
+      flex: 1;
+      overflow-x: hidden;
+      overflow-y: scroll;
+      scrollbar-color: var(--border-strong) var(--panel);
+      scrollbar-gutter: stable;
+      background:
+        linear-gradient(90deg, transparent, rgba(45,212,167,.025) 50%, transparent),
+        var(--bg);
+    }
+
+    .sidebar {
+      overflow-y: scroll;
+      scrollbar-color: var(--border-strong) var(--panel);
+      scrollbar-gutter: stable;
+    }
+
+    .center-scroll::-webkit-scrollbar,
+    .sidebar::-webkit-scrollbar { width: 10px; }
+    .center-scroll::-webkit-scrollbar-track,
+    .sidebar::-webkit-scrollbar-track { background: var(--panel); }
+    .center-scroll::-webkit-scrollbar-thumb,
+    .sidebar::-webkit-scrollbar-thumb { border: 3px solid var(--panel); border-radius: 8px; background: var(--border-strong); }
+
+    .center-detail {
+      width: min(780px, calc(100% - 42px));
+      margin: 0 auto;
+      padding: 25px 0 80px;
+    }
+
+    .center-detail .provider-line { font-size: 10.5px; }
+    .center-detail h3 {
+      max-width: 720px;
+      margin: 12px 0 10px;
+      font-size: clamp(22px, 2.25vw, 30px);
+      line-height: 1.22;
+      letter-spacing: -.035em;
+    }
+
+    .center-detail .detail-byline { padding-bottom: 17px; border-bottom: 1px solid var(--border); font-size: 11px; }
+
+    .article-layout { min-width: 0; }
+    .article-main { min-width: 0; }
+
+    .action-status {
+      display: inline-flex;
+      height: 22px;
+      align-items: center;
+      gap: 5px;
+      padding: 0 7px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel-2);
+      color: var(--sub);
+    }
+
+    .action-status.good { border-color: rgba(45,212,167,.24); color: var(--accent); }
+    .action-status.waiting { border-color: rgba(251,191,36,.32); background: rgba(251,191,36,.08); color: var(--amber); }
+    .action-status code { color: var(--text); font-family: "Segoe UI", sans-serif; font-size: 9px; }
+
+    .merge-control { position: relative; }
+
+    .merge-split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 31px;
+      overflow: hidden;
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      background: var(--accent);
+    }
+
+    .merge-split button {
+      height: 32px;
+      border: 0;
+      background: transparent;
+      color: var(--accent-fg);
+      cursor: pointer;
+      font-size: 10.5px;
+      font-weight: 700;
+    }
+
+    .merge-split button:hover { background: rgba(255,255,255,.12); }
+    .merge-split button:disabled { cursor: default; opacity: .55; }
+    .merge-split .merge-menu-button { border-left: 1px solid rgba(4,18,13,.24); font-size: 13px; }
+    .merge-split.blocked { border-color: var(--border-strong); background: var(--panel-2); }
+    .merge-split.blocked button { color: var(--muted); opacity: 1; }
+    .merge-split.blocked .merge-menu-button { border-left-color: var(--border-strong); }
+
+    .merge-method-menu {
+      position: absolute;
+      top: 38px;
+      right: 0;
+      z-index: 12;
+      display: none;
+      width: 258px;
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      background: #151e28;
+      box-shadow: 0 14px 34px rgba(0,0,0,.52);
+    }
+
+    .merge-method-menu.open { display: block; animation: fade-in 120ms ease-out; }
+
+    .merge-method-option {
+      display: grid;
+      width: 100%;
+      grid-template-columns: 15px minmax(0, 1fr);
+      gap: 8px;
+      padding: 9px 10px;
+      border: 0;
+      border-bottom: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .merge-method-option:last-child { border-bottom: 0; }
+    .merge-method-option:hover { background: var(--panel-3); }
+    .merge-method-option .method-check { color: transparent; font-size: 11px; }
+    .merge-method-option.active .method-check { color: var(--accent); }
+    .merge-method-option strong { display: block; font-size: 10.5px; }
+    .merge-method-option small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; line-height: 1.3; }
+
+    .dependabot-actions {
+      margin-top: 2px;
+      overflow: hidden;
+      border: 1px solid #354451;
+      border-radius: 7px;
+      background: #111a22;
+    }
+
+    .dependabot-head {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      font-size: 10.5px;
+      font-weight: 700;
+    }
+
+    .dependabot-head .avatar { width: 20px; height: 20px; }
+    .dependabot-intro { margin: 0; padding: 8px 10px 2px; color: var(--muted); font-size: 9.5px; line-height: 1.4; }
+    .dependabot-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; padding: 8px; }
+
+    .dependabot-button {
+      display: grid;
+      width: 100%;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 8px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-2);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .dependabot-button:hover { border-color: var(--muted); background: var(--panel-3); }
+    .dependabot-button:active { border-color: var(--accent); background: var(--accent-soft); }
+    .dependabot-button strong { display: block; font-size: 10px; font-weight: 650; }
+    .dependabot-button small { display: block; margin-top: 2px; color: var(--muted); font-size: 8.5px; line-height: 1.25; }
+    .dependabot-button code { color: var(--sub); font-family: "Segoe UI", sans-serif; font-size: 8px; }
+    .dependabot-button.warning:hover { border-color: rgba(251,191,36,.5); }
+
+    .github-context-panel .dependabot-head { padding-block: 7px; }
+    .github-context-panel .dependabot-intro { display: none; }
+    .github-context-panel .dependabot-button { display: flex; min-height: 31px; justify-content: center; padding: 6px 4px; text-align: center; }
+    .github-context-panel .dependabot-button small,
+    .github-context-panel .dependabot-button code { display: none; }
+
+    .dependabot-feedback {
+      display: none;
+      margin: 0 8px 8px;
+      padding: 7px 8px;
+      border: 1px solid rgba(45,212,167,.3);
+      border-radius: 5px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 9.5px;
+      line-height: 1.35;
+    }
+
+    .dependabot-feedback.show { display: block; animation: fade-in 150ms ease-out; }
+
+    .body-block,
+    .conversation-block {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: rgba(15,21,28,.72);
+    }
+
+    .body-block-head,
+    .conversation-head {
+      display: flex;
+      min-height: 38px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 13px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .body-block-head .avatar { width: 22px; height: 22px; }
+    .body-block-head time { margin-left: auto; color: var(--muted); font-size: 9.5px; font-weight: 400; }
+
+    .body-copy {
+      padding: 15px 16px 18px;
+      color: var(--text);
+      font-size: 12.5px;
+      line-height: 1.65;
+      user-select: text;
+    }
+
+    .body-copy p { margin: 0 0 12px; }
+    .body-copy p:last-child { margin-bottom: 0; }
+
+    .acceptance-list { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+    .acceptance-list li { display: flex; align-items: flex-start; gap: 8px; }
+    .acceptance-list i { display: grid; width: 17px; height: 17px; flex: none; place-items: center; border: 1px solid rgba(45,212,167,.35); border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: 9px; font-style: normal; }
+
+    .center-detail .summary-card { margin: 0; background: var(--panel-2); }
+
+    .conversation-block { margin-top: 16px; }
+    .conversation-head span { margin-left: auto; color: var(--muted); font-size: 9.5px; font-weight: 400; }
+    .conversation-body { padding: 0 15px 14px; }
+    .center-detail .comment { grid-template-columns: 29px minmax(0, 1fr); padding: 14px 0; }
+    .center-detail .comment .avatar { width: 29px; height: 29px; }
+    .center-detail .comment strong { font-size: 11.5px; }
+    .center-detail .comment p { color: var(--text); font-size: 12px; line-height: 1.6; }
+    .center-detail .comment p code,
+    .dependabot-feedback code,
+    .modal .summary-card code { color: var(--accent); font-family: "Segoe UI", sans-serif; font-size: 10px; user-select: text; }
+    .center-detail .comment-box { display: flow-root; }
+    .center-detail .comment-box textarea { min-height: 78px; padding: 10px 11px; font-size: 11.5px; }
+
+    .local-panel {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      overflow: hidden;
+      border-left: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .github-context-panel {
+      display: grid;
+      flex: none;
+      gap: 8px;
+      padding: 11px 12px 12px;
+      border-bottom: 1px solid var(--border-strong);
+      background: #101820;
+    }
+
+    .github-context-head { display: flex; align-items: center; gap: 7px; }
+    .github-context-head svg { width: 14px; height: 14px; color: var(--accent); }
+    .github-context-head strong { color: var(--text); font-size: 11px; }
+    .github-context-head span:last-child { margin-left: auto; color: var(--muted); font-size: 9px; }
+    .github-context-note { color: var(--sub); font-size: 9.5px; line-height: 1.4; }
+    .github-context-note.waiting { color: var(--amber); }
+    .github-context-panel .merge-control { width: 100%; }
+    .github-context-panel > .primary-button,
+    .github-context-panel > .quiet-button,
+    .github-context-panel > .danger-button { width: 100%; height: 32px; }
+    .github-context-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .github-context-grid > button { width: 100%; min-width: 0; height: 30px; padding-inline: 6px; }
+    .github-context-checks { display: flex; flex-wrap: wrap; gap: 5px; }
+
+    .local-panel-head {
+      display: flex;
+      height: 35px;
+      flex: none;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px 0 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--sub);
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .local-count { display: grid; min-width: 17px; height: 17px; place-items: center; border-radius: 9px; background: var(--panel-3); color: var(--muted); font-size: 9px; }
+    .local-panel-head button { margin-left: auto; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+    .local-panel-head button:hover { color: var(--text); }
+
+    .local-empty {
+      display: grid;
+      flex: 1;
+      place-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .local-empty-icon { display: grid; width: 34px; height: 34px; margin: 0 auto 10px; place-items: center; border: 1px solid rgba(45,212,167,.3); border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+    .local-empty-icon svg { width: 17px; height: 17px; }
+    .local-empty strong { color: var(--text); font-size: 11.5px; }
+    .local-empty p { max-width: 210px; margin: 6px auto 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+
+    .commit-dock { display: grid; gap: 5px; padding: 12px; border-top: 1px solid var(--border); background: #0c1117; }
+    .commit-dock label { color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    .commit-dock input, .commit-dock textarea { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--muted); font-size: 10.5px; }
+    .commit-dock textarea { height: 54px; resize: none; }
+    .commit-dock button { height: 31px; margin-top: 4px; border: 0; border-radius: 5px; background: var(--panel-3); color: var(--muted); font-size: 10.5px; font-weight: 700; }
+    .commit-dock button:not(:disabled) { background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+
+    .local-files { min-height: 0; flex: 1; overflow-y: auto; padding: 5px 0 12px; }
+    .local-group-head { display: flex; height: 25px; align-items: center; padding: 0 11px; color: var(--muted); font-size: 8.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .local-group-head span { margin-left: auto; color: var(--sub); }
+    .local-file { display: grid; min-height: 31px; grid-template-columns: 16px minmax(0,1fr) 18px; align-items: center; gap: 6px; padding: 4px 10px; color: var(--sub); font-size: 10px; }
+    .local-file:hover { background: var(--panel-3); color: var(--text); }
+    .local-file .file-state { display: grid; width: 14px; height: 14px; place-items: center; border-radius: 3px; background: rgba(251,191,36,.12); color: var(--amber); font-size: 8px; font-weight: 700; }
+    .local-file .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .local-file .stage-mark { color: var(--accent); text-align: center; }
+
+    .commit-for-item { border-color: rgba(45,212,167,.34); color: var(--accent); }
+    .commit-for-item:hover { border-color: var(--accent); background: var(--accent-soft); }
+    .commit-for-item svg { width: 13px; height: 13px; }
+
+    .item-context-menu {
+      position: absolute;
+      z-index: 40;
+      display: none;
+      width: 250px;
+      padding: 4px;
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      background: #151e28;
+      box-shadow: 0 16px 38px rgba(0,0,0,.58);
+    }
+
+    .item-context-menu.open { display: block; animation: fade-in 100ms ease-out; }
+    .item-context-menu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--text); cursor: pointer; text-align: left; font-size: 10.5px; }
+    .item-context-menu button:hover { background: var(--panel-3); }
+    .item-context-menu button svg { width: 14px; height: 14px; color: var(--accent); }
+    .item-context-menu small { display: block; margin-top: 2px; color: var(--muted); font-size: 8.5px; }
+
+    .modal.commit-modal { width: min(650px, calc(100% - 34px)); max-height: calc(100% - 38px); overflow-y: auto; }
+    .commit-modal-section { margin-top: 15px; }
+    .commit-modal-section h4 { margin: 0 0 7px; color: var(--sub); font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .commit-choice-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+    .commit-choice { display: grid; min-height: 76px; grid-template-columns: 15px minmax(0,1fr); align-content: start; gap: 7px; padding: 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--sub); cursor: pointer; text-align: left; }
+    .commit-choice:hover { border-color: var(--muted); }
+    .commit-choice.active { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+    .choice-dot { width: 13px; height: 13px; margin-top: 1px; border: 1px solid var(--muted); border-radius: 50%; }
+    .commit-choice.active .choice-dot { border: 4px solid var(--accent); }
+    .commit-choice strong { display: block; color: var(--text); font-size: 10.5px; }
+    .commit-choice small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+
+    .file-picker { display: none; margin-top: 8px; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; }
+    .file-picker.show { display: block; animation: fade-in 120ms ease-out; }
+    .file-picker label { display: grid; grid-template-columns: 16px 16px minmax(0,1fr); align-items: center; gap: 7px; padding: 7px 9px; border-bottom: 1px solid var(--border); color: var(--sub); cursor: pointer; font-size: 10px; }
+    .file-picker label:last-child { border-bottom: 0; }
+    .file-picker label:hover { background: var(--panel-3); color: var(--text); }
+    .file-picker input { width: 13px; height: 13px; accent-color: var(--accent); }
+    .file-picker .file-state { color: var(--amber); font-size: 8px; font-weight: 700; }
+
+    .link-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .link-choice { padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--sub); cursor: pointer; text-align: left; }
+    .link-choice:hover { border-color: var(--muted); }
+    .link-choice.active { border-color: var(--accent); background: var(--accent-soft); }
+    .link-choice strong { display: block; color: var(--text); font-size: 10.5px; }
+    .link-choice small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+
+    .ai-context { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 1px solid rgba(167,139,250,.3); border-radius: 6px; background: rgba(167,139,250,.08); color: var(--sub); font-size: 9.5px; line-height: 1.4; }
+    .ai-context input { width: 14px; height: 14px; accent-color: var(--violet); }
+    .ai-context strong { display: block; color: #c9b8ff; font-size: 10px; }
+
+    .commit-preview { padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); user-select: text; }
+    .commit-preview strong { display: block; color: var(--text); font-family: "Segoe UI", sans-serif; font-size: 11px; }
+    .commit-preview pre { margin: 7px 0 0; color: var(--sub); font-family: "Segoe UI", sans-serif; font-size: 9.5px; line-height: 1.45; white-space: pre-wrap; }
+
+    @media (max-width: 1220px) {
+      .center-detail { width: calc(100% - 34px); }
+      .dependabot-grid { grid-template-columns: 1fr; }
+    }
+
+    @keyframes toast-in { from { opacity: 0; transform: translateY(7px) scale(.98); } }
+    @keyframes toast-out { to { opacity: 0; transform: translateY(5px) scale(.98); } }
+    @keyframes fade-in { from { opacity: 0; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes branch-flash { 0%, 100% { box-shadow: none; } 25%, 65% { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); } }
+    @keyframes detail-pulse { 0% { background: rgba(45,212,167,.13); } 100% { background: transparent; } }
+    @keyframes row-change { 0%, 55% { background: rgba(52,211,153,.18); } }
+
+    @media (max-width: 1120px) {
+      .page { overflow-x: auto; }
+      .study-head, .app-window { width: 1040px; }
+      .workspace { grid-template-columns: 210px minmax(460px, 1fr) 320px; }
+      .brand { width: 210px; }
+      .tool-button { padding: 0 8px; }
+      .search-box { width: 180px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="study-head">
+      <div class="study-title">
+        <div class="eyebrow">Product mockup / GitHub work</div>
+        <h1>Issues become work you can follow</h1>
+        <p>The full GitHub body and conversation take over GitWyrm's center workspace. Pick another item from the left without giving up the familiar local Changes panel.</p>
+      </div>
+      <div class="study-note"><span data-icon="github"></span><span>Pull requests and issues stay visible together</span></div>
+    </header>
+
+    <section class="app-window" aria-label="Interactive GitWyrm GitHub integration mockup">
+      <div class="titlebar">
+        <div class="brand"><span class="brand-mark"></span><span>GitWyrm</span></div>
+        <div class="repo-tabs">
+          <div class="repo-tab"><span class="dot"></span><span>GitWyrm</span><small>×</small></div>
+          <button class="new-tab" type="button" data-action="new-tab" aria-label="Open another repository">+</button>
+        </div>
+        <div class="window-actions"><button type="button" data-action="minimize" aria-label="Minimize">―</button><button type="button" data-action="maximize" aria-label="Maximize">□</button><button type="button" data-action="close-window" aria-label="Close">×</button></div>
+      </div>
+
+      <div class="toolbar">
+        <button class="tool-button sync" type="button" data-action="fetch"><span data-icon="download"></span><span>Fetch</span></button>
+        <button class="tool-button sync" type="button" data-action="pull"><span data-icon="arrow-down"></span><span>Pull</span></button>
+        <button class="tool-button sync" type="button" data-action="push"><span data-icon="arrow-up"></span><span>Push</span></button>
+        <span class="tool-divider"></span>
+        <button class="tool-button" type="button" data-action="branch"><span data-icon="branch"></span><span>Branch</span></button>
+        <button class="tool-button" type="button" data-action="merge"><span data-icon="merge"></span><span>Merge</span></button>
+        <button class="tool-button" type="button" data-action="stash"><span data-icon="archive"></span><span>Stash</span></button>
+        <div class="toolbar-spacer"></div>
+        <button class="branch-pill" type="button" data-action="branch-picker"><span class="branch-dot"></span><strong id="current-branch">main</strong><span class="chev">⌄</span></button>
+        <button class="search-box" type="button" data-action="search"><span data-icon="search"></span><span>Search commits, files…</span><kbd>Ctrl+K</kbd></button>
+        <button class="ghost-button" type="button" data-action="folder" aria-label="Show in file explorer"><span data-icon="folder"></span></button>
+        <button class="ghost-button" type="button" data-action="terminal" aria-label="Open in terminal"><span data-icon="terminal"></span></button>
+      </div>
+
+      <div class="workspace">
+        <aside class="sidebar" aria-label="Repository navigation">
+          <section class="side-section">
+            <div class="side-head"><span class="chevron">⌄</span><span>Local</span><span class="side-count">3</span></div>
+            <button class="side-row" type="button" data-action="branch-row"><span class="marker current"></span><span class="label">main</span><span class="meta">up to date</span></button>
+            <button class="side-row" type="button" data-action="branch-row"><span class="marker"></span><span class="label">feature/github-work</span><span class="meta">↑2</span></button>
+            <button class="side-row" type="button" data-action="branch-row"><span class="marker"></span><span class="label">fix/drag-preview</span></button>
+          </section>
+          <section class="side-section">
+            <div class="side-head"><span class="chevron">›</span><span>Origin</span><span class="side-count" data-icon="github"></span></div>
+          </section>
+          <section class="side-section">
+            <div class="side-head"><span class="chevron">›</span><span>Stashes</span><span class="side-count">1</span></div>
+          </section>
+          <section class="side-section github-section">
+            <div class="side-head github-connection"><span data-icon="github"></span><span>GitHub</span><span class="side-count">Connected</span></div>
+            <div class="side-head github-mode-head"><span class="chevron">⌄</span><span>Pull requests</span><span class="side-count">7</span></div>
+            <div class="github-items" id="pr-list"></div>
+            <div class="side-head github-mode-head"><span class="chevron">⌄</span><span>Issues</span><span class="side-count">8</span></div>
+            <div class="github-items" id="issue-list"></div>
+          </section>
+          <section class="side-section">
+            <div class="side-head"><span class="chevron">›</span><span>Tags</span><span class="side-count">6</span></div>
+          </section>
+        </aside>
+
+        <section class="content" aria-live="polite">
+          <header class="content-head">
+            <div class="mode-title">
+              <span class="mode-icon" data-role="mode-icon"></span>
+              <div><h2 data-role="mode-heading">Pull request #142</h2><p data-role="mode-subtitle">Open · ready for your review</p></div>
+            </div>
+            <div class="head-actions">
+              <button class="quiet-button" id="refresh-button" type="button" data-action="refresh"><span data-icon="refresh"></span><span>Refresh</span></button>
+            </div>
+          </header>
+          <div class="center-scroll">
+            <article class="detail-inner center-detail" id="detail-inner"></article>
+          </div>
+        </section>
+
+        <aside class="local-panel" id="local-panel" aria-label="GitHub actions and local changes"></aside>
+      </div>
+
+      <footer class="statusbar">
+        <span class="connected"><i></i>GitHub connected as jeremy</span>
+        <span>main</span><span id="changed-file-status">0 changed files</span>
+        <span class="right" id="updated-status">Checked just now</span>
+      </footer>
+
+      <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+      <div class="item-context-menu" id="item-context-menu" role="menu"></div>
+
+      <div class="modal-scrim" id="modal-scrim" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal" id="modal-content"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const icons = {
+      "pull-request": '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M6 9v11M18 15v5M15 18l3 3 3-3M18 15V9a3 3 0 0 0-3-3h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      issue: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="1" fill="currentColor"/></svg>',
+      github: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8Z"/></svg>',
+      download: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      "arrow-down": '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4v15m0 0-5-5m5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      "arrow-up": '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 20V5m0 0-5 5m5-5 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      branch: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="5" r="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="7" r="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="6" cy="19" r="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M6 7.5v9M8.5 12h3A6.5 6.5 0 0 0 18 9.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      merge: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="5" r="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="6" cy="19" r="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="19" r="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M6 7.5v9M18 16.5V13a5 5 0 0 0-5-5H9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      archive: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 8h16v12H4V8Zm-1-4h18v4H3V4Zm6 8h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      search: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      folder: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3V6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+      terminal: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="m7 9 3 3-3 3m6 0h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      refresh: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 8.2A7 7 0 0 1 18.7 7M5.3 17A7 7 0 0 0 17.9 15.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      external: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M19 14v5H5V5h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      commit: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12h6m6 0h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/></svg>',
+      arrow: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    }
+
+    const pullRequests = [
+      { id: 145, title: 'Bump react from 19.1.0 to 19.2.0', sub: 'dependabot/npm_and_yarn/react-19.2.0 → main · 2 files · +9 −9', initials: 'DB', person: 'Dependabot', tone: 'bot', state: 'Approval needed', stateClass: 'waiting', detail: '1 approval required', updated: '4 min', bot: true, requiresApproval: true },
+      { id: 142, title: 'Keep tabs in view when the window is narrow', sub: 'feature/tab-scroll → main · 4 files · +118 −24', initials: 'MK', person: 'Maya', tone: 'violet', state: 'Ready to review', stateClass: 'ready', detail: 'All checks passed', updated: '8 min' },
+      { id: 139, title: 'Explain why a branch cannot be deleted', sub: 'fix/branch-delete-copy → main · 2 files · +41 −12', initials: 'JL', person: 'Jon', tone: 'amber', state: 'Needs your reply', stateClass: 'waiting', detail: '1 new comment', updated: '26 min' },
+      { id: 137, title: 'Add keyboard shortcuts to the changes list', sub: 'feature/change-keys → main · 7 files · +203 −31', initials: 'AR', person: 'Ari', tone: 'green', state: 'Draft', stateClass: 'draft', detail: 'Still in progress', updated: '2 hr' },
+      { id: 134, title: 'Keep the graph steady after staging a file', sub: 'fix/graph-refresh → main · 3 files · +56 −18', initials: 'MK', person: 'Maya', tone: 'violet', state: 'Ready to add', stateClass: 'ready', detail: 'Approved', updated: '1 day' },
+      { id: 131, title: 'Show the repository name in error reports', sub: 'fix/error-repository → main · 2 files · +34 −8', initials: 'CM', person: 'Casey', tone: 'green', state: 'Ready to review', stateClass: 'ready', detail: 'All checks passed', updated: '1 day' },
+      { id: 126, title: 'Keep branch menus inside the window', sub: 'fix/branch-menu-edge → main · 5 files · +77 −19', initials: 'JL', person: 'Jon', tone: 'amber', state: 'Needs your reply', stateClass: 'waiting', detail: '2 new comments', updated: '3 days' }
+    ]
+
+    const issues = [
+      { id: 218, title: 'Drag preview can cover the branch name', sub: 'Bug · Windows 11 · picked for you', initials: 'CM', person: 'Casey', tone: 'green', state: 'Ready to start', stateClass: 'ready', detail: 'No one is working on it', updated: '12 min' },
+      { id: 211, title: 'Search should include changed file names', sub: 'Improvement · search · picked for you', initials: 'JL', person: 'Jon', tone: 'amber', state: 'In progress', stateClass: 'waiting', detail: 'Maya is working on it', updated: '3 hr' },
+      { id: 204, title: 'Show when a remote branch was removed', sub: 'Bug · branches', initials: 'AR', person: 'Ari', tone: 'violet', state: 'Needs details', stateClass: 'draft', detail: 'Waiting for a reply', updated: '1 day' },
+      { id: 197, title: 'Remember the last open repository group', sub: 'Improvement · tabs', initials: 'CM', person: 'Casey', tone: 'green', state: 'Ready to start', stateClass: 'ready', detail: 'No one is working on it', updated: '2 days' },
+      { id: 192, title: 'Commit message field loses focus after staging', sub: 'Bug · commits', initials: 'MK', person: 'Maya', tone: 'violet', state: 'Ready to start', stateClass: 'ready', detail: 'No one is working on it', updated: '3 days' },
+      { id: 188, title: 'Add a clearer empty state for new repositories', sub: 'Improvement · onboarding', initials: 'JL', person: 'Jon', tone: 'amber', state: 'Needs details', stateClass: 'draft', detail: 'Waiting for a reply', updated: '4 days' },
+      { id: 181, title: 'Long tag names push dates out of the graph', sub: 'Bug · graph', initials: 'AR', person: 'Ari', tone: 'violet', state: 'In progress', stateClass: 'waiting', detail: 'Casey is working on it', updated: '5 days' },
+      { id: 176, title: 'Warn before closing with an unfinished merge', sub: 'Improvement · merge', initials: 'CM', person: 'Casey', tone: 'green', state: 'Ready to start', stateClass: 'ready', detail: 'No one is working on it', updated: '1 week' }
+    ]
+
+    const initialMode = new URLSearchParams(window.location.search).get('mode') === 'issues' ? 'issues' : 'prs'
+    const mergeMethods = {
+      merge: { label: 'Merge pull request', description: 'Keep every commit and add a merge commit to main.', confirm: 'Merge pull request', done: 'merged' },
+      squash: { label: 'Squash and merge', description: 'Combine all commits into one commit on main.', confirm: 'Squash and merge', done: 'squashed and merged' },
+      rebase: { label: 'Rebase and merge', description: 'Replay each commit on main without a merge commit.', confirm: 'Rebase and merge', done: 'rebased and merged' }
+    }
+    const state = {
+      mode: initialMode,
+      selected: { prs: 145, issues: 218 },
+      approvedPr: null,
+      mergedPr: null,
+      startedIssue: null,
+      startedBranch: null,
+      closedIssues: [],
+      dependabotCommand: null,
+      mergeMethod: 'merge',
+      mergeMenuOpen: false,
+      aiEnabled: true,
+      pendingFiles: [
+        { path: 'package.json', staged: true, selected: true },
+        { path: 'package-lock.json', staged: true, selected: true },
+        { path: 'src/components/domain/DragScrim.tsx', staged: false, selected: false }
+      ],
+      commitScope: 'staged',
+      commitLink: 'related',
+      commitUseAi: true
+    }
+
+    const prList = document.getElementById('pr-list')
+    const issueList = document.getElementById('issue-list')
+    const detailInner = document.getElementById('detail-inner')
+    const localPanel = document.getElementById('local-panel')
+    const itemContextMenu = document.getElementById('item-context-menu')
+    const modalScrim = document.getElementById('modal-scrim')
+    const modalContent = document.getElementById('modal-content')
+
+    function injectIcons(root = document) {
+      root.querySelectorAll('[data-icon]').forEach((node) => {
+        const icon = icons[node.dataset.icon]
+        if (icon) node.innerHTML = icon
+      })
+    }
+
+    function avatar(item) {
+      return `<span class="avatar ${item.tone}">${item.initials}</span>`
+    }
+
+    function hasPendingChanges() {
+      return state.pendingFiles.length > 0
+    }
+
+    function rowMarkup(item, type) {
+      const mode = type === 'issue' ? 'issues' : 'prs'
+      const selected = state.mode === mode && state.selected[mode] === item.id
+      const displayState = mode === 'issues' && state.closedIssues.includes(item.id)
+        ? 'Closed'
+        : mode === 'prs' && state.mergedPr === item.id
+          ? 'Added'
+        : mode === 'prs' && item.requiresApproval && state.approvedPr === item.id
+          ? 'Ready to add'
+          : item.state
+      return `<button class="github-item${selected ? ' active' : ''}" type="button" data-item-id="${item.id}" data-item-mode="${mode}">
+        <span>${icons[type === 'issue' ? 'issue' : 'pull-request']}</span>
+        <span class="github-item-copy"><span class="github-item-title">${item.title}</span><span class="github-item-meta">#${item.id} · ${displayState}</span></span>
+      </button>`
+    }
+
+    function renderLists() {
+      prList.innerHTML = pullRequests.map((item) => rowMarkup(item, 'pr')).join('')
+      issueList.innerHTML = issues.map((item) => rowMarkup(item, 'issue')).join('')
+      document.querySelectorAll('[data-item-id]').forEach((row) => row.addEventListener('click', () => {
+        state.mode = row.dataset.itemMode
+        state.selected[state.mode] = Number(row.dataset.itemId)
+        state.mergeMenuOpen = false
+        renderLists()
+        renderDetail(true)
+        renderLocalPanel()
+        document.querySelector('.center-scroll').scrollTop = 0
+      }))
+      document.querySelectorAll('[data-item-id]').forEach((row) => row.addEventListener('contextmenu', (event) => openItemContext(event, row)))
+    }
+
+    function commitForItemAction(kind, item) {
+      if (!hasPendingChanges()) return ''
+      const count = state.pendingFiles.length
+      return `<button class="quiet-button commit-for-item" type="button" data-action="commit-for-item" title="Choose from ${count} changed files and link the commit to ${kind} #${item.id}">${icons.commit}<span>Commit changes</span></button>`
+    }
+
+    function dependabotActionsMarkup(item) {
+      if (!item.bot) return ''
+      const botCommand = state.dependabotCommand?.prId === item.id ? state.dependabotCommand : null
+      return `<section class="dependabot-actions">
+        <div class="dependabot-head"><span class="avatar bot">DB</span><span>Dependabot actions</span></div>
+        <div class="dependabot-grid">
+          <button class="dependabot-button" type="button" data-action="dependabot-rebase" title="Bring this update onto the latest main"><span><strong>Rebase</strong><small>Bring it onto the latest main</small></span><code>rebase</code></button>
+          <button class="dependabot-button" type="button" data-action="dependabot-recreate" title="Replace edits and start this pull request again"><span><strong>Recreate</strong><small>Replace edits and start fresh</small></span><code>recreate</code></button>
+          <button class="dependabot-button warning" type="button" data-action="dependabot-ignore" title="Close this pull request and skip React 19.2"><span><strong>Ignore 19.2</strong><small>Close and skip React 19.2</small></span><code>ignore</code></button>
+        </div>
+        <div class="dependabot-feedback${botCommand ? ' show' : ''}">${botCommand ? `Sent <code>${botCommand.command}</code><br>${botCommand.status}` : ''}</div>
+      </section>`
+    }
+
+    function openItemContext(event, row) {
+      event.preventDefault()
+      state.mode = row.dataset.itemMode
+      state.selected[state.mode] = Number(row.dataset.itemId)
+      state.mergeMenuOpen = false
+      renderLists()
+      renderDetail(true)
+      renderLocalPanel()
+      if (!hasPendingChanges()) {
+        showToast('No changes are waiting to be committed', 'info')
+        return
+      }
+      const source = state.mode === 'prs' ? pullRequests : issues
+      const item = source.find((entry) => entry.id === state.selected[state.mode]) || source[0]
+      const kind = state.mode === 'prs' ? 'pull request' : 'issue'
+      const windowRect = document.querySelector('.app-window').getBoundingClientRect()
+      itemContextMenu.innerHTML = `<button type="button" data-context-action="commit">${icons.commit}<span><strong>Commit changes for this ${kind}</strong><small>Link the commit to #${item.id}</small></span></button>`
+      itemContextMenu.style.left = `${Math.max(8, Math.min(event.clientX - windowRect.left, windowRect.width - 265))}px`
+      itemContextMenu.style.top = `${Math.max(8, Math.min(event.clientY - windowRect.top, windowRect.height - 78))}px`
+      itemContextMenu.classList.add('open')
+      itemContextMenu.querySelector('[data-context-action="commit"]').addEventListener('click', () => {
+        itemContextMenu.classList.remove('open')
+        openCommitForItemModal()
+      })
+    }
+
+    function prDetail(item) {
+      const bodies = {
+        145: '<p>Bumps <strong>react</strong> from <strong>19.1.0</strong> to <strong>19.2.0</strong>. The release includes activity APIs, performance updates, and bug fixes.</p><p>The lockfile was updated with no other dependency changes.</p>',
+        142: '<p>This keeps repository tabs usable when they no longer fit across the window. Small arrows appear at each edge only when more tabs are hidden.</p><p>The selected tab always stays in view, including after you open a repository or switch tab groups.</p>',
+        139: '<p>This replaces the short delete warning with a plain explanation of which work could become hard to find.</p><p>The dialog now names the branch and shows whether its commits exist anywhere else before the delete button becomes available.</p>',
+        137: '<p>This adds keyboard shortcuts for moving through changed files and staging the current selection.</p><p>The same shortcuts appear beside their matching actions so people can learn them gradually.</p>'
+      }
+      const body = bodies[item.id] || `<p>This update addresses <strong>${item.title.toLowerCase()}</strong> while keeping the rest of the repository workflow unchanged.</p><p>The pull request includes the focused fix and tests for the reported case.</p>`
+      const approved = state.approvedPr === item.id
+      const merged = state.mergedPr === item.id
+      const botCommand = state.dependabotCommand?.prId === item.id ? state.dependabotCommand : null
+      const reviewState = approved ? '<div class="review-banner show">✓ You approved these changes. The author can see your review.</div>' : ''
+      const mergedState = merged ? '<div class="review-banner show">✓ Added to main. Pull when you are ready to update your local files.</div>' : ''
+      const conversation = item.bot
+        ? `<div class="comment"><span class="avatar bot">DB</span><div><strong>Dependabot</strong><time>4 min ago</time><p>I will resolve any conflicts with the base branch unless you ask me to rebase, recreate, or ignore this update.</p></div></div>
+          ${botCommand ? `<div class="comment"><span class="avatar green">JE</span><div><strong>You</strong><time>now</time><p><code>${botCommand.command}</code></p></div></div><div class="comment"><span class="avatar bot">DB</span><div><strong>Dependabot</strong><time>now</time><p>${botCommand.response}</p></div></div>` : ''}`
+        : `<div class="comment"><span class="avatar violet">MK</span><div><strong>${item.person}</strong><time>8 min ago</time><p>I kept the arrows in the tab bar so they stay easy to find. They also disappear as soon as every tab fits again.</p></div></div>
+          <div class="comment"><span class="avatar green">JE</span><div><strong>You</strong><time>3 min ago</time><p>Nice. Does the selected tab scroll back into view after reopening the app?</p></div></div>
+          <div class="comment"><span class="avatar violet">MK</span><div><strong>${item.person}</strong><time>1 min ago</time><p>Yes. The active tab is restored first, then the tab strip moves just enough to reveal it. I added that case to the tests.</p></div></div>`
+      return `<div class="provider-line"><span data-icon="github"></span><span>Pull request</span><span class="number">#${item.id}</span></div>
+        <h3>${item.title}</h3>
+        <div class="detail-byline">${avatar(item)}<span>${item.person} opened this for review · updated ${item.updated} ago</span><span class="status-pill">${merged ? 'Added' : 'Open'}</span></div>
+        ${reviewState}
+        ${mergedState}
+        <div class="article-layout">
+          <div class="article-main">
+            <section class="body-block">
+              <div class="body-block-head">${avatar(item)}<span>${item.person} wrote</span><time>${item.updated} ago</time></div>
+              <div class="body-copy">${body}</div>
+            </section>
+            <section class="conversation-block">
+              <div class="conversation-head">Conversation <span>${item.bot ? (botCommand ? '3' : '1') : '3'} messages</span></div>
+              <div class="conversation-body">
+                ${conversation}
+                <div class="comment-box"><textarea id="comment-text" placeholder="Write a reply…"></textarea><button class="quiet-button" type="button" data-action="comment">Send reply</button></div>
+              </div>
+            </section>
+          </div>
+        </div>`
+    }
+
+    function issueDetail(item) {
+      const started = state.startedIssue === item.id
+      const closed = state.closedIssues.includes(item.id)
+      const bodies = {
+        218: '<p>While a branch is being dragged, its preview can sit on top of the branch name. This makes it hard to see where the branch will land.</p><p>It happens most often when the left panel is narrow.</p>',
+        211: '<p>Search finds commit messages, but it misses the names of changed files. Searching for a file such as <strong>TabBar.tsx</strong> should show commits that changed it.</p>',
+        204: '<p>A remote branch can disappear after a fetch with no clear explanation. Keep the row visible long enough to explain that it was removed from the remote.</p>'
+      }
+      const body = bodies[item.id] || `<p>${item.title}. The report includes steps to reproduce the problem and the result the user expected to see.</p>`
+      return `<div class="provider-line"><span data-icon="github"></span><span>Issue</span><span class="number">#${item.id}</span></div>
+        <h3>${item.title}</h3>
+        <div class="detail-byline">${avatar(item)}<span>${item.person} reported this problem · updated ${item.updated} ago</span><span class="status-pill violet">${closed ? 'Closed' : started ? 'In progress' : 'Open'}</span></div>
+        ${started ? `<div class="review-banner show">✓ Work started on <strong>${state.startedBranch}</strong>.</div>` : ''}
+        <div class="article-layout">
+          <div class="article-main">
+            <section class="body-block">
+              <div class="body-block-head">${avatar(item)}<span>${item.person} wrote</span><time>${item.updated} ago</time></div>
+              <div class="body-copy">${body}<p><strong>Done when</strong></p><ul class="acceptance-list"><li><i>✓</i><span>The branch name stays readable while dragging</span></li><li><i>✓</i><span>The drop target still flashes clearly</span></li></ul></div>
+            </section>
+            <section class="conversation-block">
+              <div class="conversation-head">Conversation <span>2 messages</span></div>
+              <div class="conversation-body">
+                <div class="comment"><span class="avatar green">CM</span><div><strong>${item.person}</strong><time>12 min ago</time><p>I added a screenshot from a narrow window. The branch name disappears as soon as the drag preview crosses the left panel.</p></div></div>
+                <div class="comment"><span class="avatar green">JE</span><div><strong>You</strong><time>5 min ago</time><p>Thanks. I can reproduce it when the panel is under 240 pixels wide.</p></div></div>
+                <div class="comment-box"><textarea id="comment-text" placeholder="Ask for more details…"></textarea><button class="quiet-button" type="button" data-action="comment">Send reply</button></div>
+              </div>
+            </section>
+          </div>
+        </div>`
+    }
+
+    function renderDetail(pulse = false) {
+      const source = state.mode === 'prs' ? pullRequests : issues
+      const item = source.find((entry) => entry.id === state.selected[state.mode]) || source[0]
+      document.querySelector('[data-role="mode-icon"]').innerHTML = icons[state.mode === 'prs' ? 'pull-request' : 'issue']
+      document.querySelector('[data-role="mode-heading"]').textContent = `${state.mode === 'prs' ? 'Pull request' : 'Issue'} #${item.id}`
+      const displayState = state.mode === 'issues' && state.closedIssues.includes(item.id) ? 'Closed' : item.state
+      const visibleState = state.mode === 'prs' && state.mergedPr === item.id
+        ? 'Added'
+        : state.mode === 'prs' && item.requiresApproval && state.approvedPr === item.id
+          ? 'Ready to add'
+          : displayState
+      document.querySelector('[data-role="mode-subtitle"]').textContent = `${visibleState} · updated ${item.updated} ago`
+      detailInner.innerHTML = state.mode === 'prs' ? prDetail(item) : issueDetail(item)
+      injectIcons(detailInner)
+      if (pulse) {
+        detailInner.classList.remove('pulse')
+        void detailInner.offsetWidth
+        detailInner.classList.add('pulse')
+      }
+      bindDetailActions()
+    }
+
+    function localFileRows(files) {
+      return files.map((file) => `<div class="local-file"><span class="file-state">M</span><span class="file-name" title="${file.path}">${file.path}</span><span class="stage-mark">${file.staged ? '✓' : ''}</span></div>`).join('')
+    }
+
+    function mergeControlMarkup(item) {
+      const approved = state.approvedPr === item.id
+      const merged = state.mergedPr === item.id
+      const approvalBlocked = Boolean(item.requiresApproval && !approved && !merged)
+      const selectedMerge = mergeMethods[state.mergeMethod]
+      return `<div class="merge-control">
+        <div class="merge-split${approvalBlocked ? ' blocked' : ''}">
+          <button type="button" data-action="merge-pr" ${merged || approvalBlocked ? 'disabled' : ''}>${merged ? 'Pull request merged' : approvalBlocked ? 'Waiting for approval' : selectedMerge.label}</button>
+          <button class="merge-menu-button" type="button" data-action="toggle-merge-methods" ${merged || approvalBlocked ? 'disabled' : ''} aria-label="Choose merge method">⌄</button>
+        </div>
+        <div class="merge-method-menu${state.mergeMenuOpen ? ' open' : ''}">
+          ${Object.entries(mergeMethods).map(([key, method]) => `<button class="merge-method-option${state.mergeMethod === key ? ' active' : ''}" type="button" data-action="choose-merge-method" data-method="${key}"><span class="method-check">✓</span><span><strong>${method.label}</strong><small>${method.description}</small></span></button>`).join('')}
+        </div>
+      </div>`
+    }
+
+    function githubContextPanelMarkup() {
+      const item = currentGithubItem()
+      if (state.mode === 'prs') {
+        const approved = state.approvedPr === item.id
+        const merged = state.mergedPr === item.id
+        const approvalBlocked = Boolean(item.requiresApproval && !approved && !merged)
+        const fileCount = item.sub.match(/(\d+) files?/)?.[1] || '4'
+        const approveButton = `<button class="${approvalBlocked ? 'primary-button' : 'quiet-button'}" type="button" data-action="approve" ${approved || merged ? 'disabled' : ''}>${approved ? 'Approved ✓' : approvalBlocked ? 'Approve to enable merge' : 'Approve'}</button>`
+        return `<section class="github-context-panel" aria-label="Pull request actions">
+          <div class="github-context-head">${icons['pull-request']}<strong>Pull request #${item.id}</strong><span>${merged ? 'Merged' : approvalBlocked ? 'Blocked' : 'Open'}</span></div>
+          <div class="github-context-note${approvalBlocked ? ' waiting' : ''}">${merged ? 'This pull request was added to main.' : approvalBlocked ? 'GitHub requires one approving review before this can merge.' : approved ? 'Approved and ready to merge.' : 'Ready for review.'}</div>
+          ${approvalBlocked ? approveButton : mergeControlMarkup(item)}
+          ${approvalBlocked ? mergeControlMarkup(item) : approveButton}
+          <div class="github-context-grid">
+            <button class="quiet-button" type="button" data-action="review-files">Review ${fileCount} files</button>
+            ${commitForItemAction('pull request', item)}
+            <button class="quiet-button" type="button" data-action="checkout">Use branch</button>
+            <button class="quiet-button" type="button" data-action="open-github">Open on GitHub</button>
+          </div>
+          <div class="github-context-checks"><span class="action-status good">✓ Checks passed</span><span class="action-status good">✓ No conflicts</span></div>
+          ${dependabotActionsMarkup(item)}
+        </section>`
+      }
+
+      const started = state.startedIssue === item.id
+      const closed = state.closedIssues.includes(item.id)
+      return `<section class="github-context-panel" aria-label="Issue actions">
+        <div class="github-context-head">${icons.issue}<strong>Issue #${item.id}</strong><span>${closed ? 'Closed' : started ? 'In progress' : 'Open'}</span></div>
+        <div class="github-context-note">${closed ? 'This issue can still be read and reopened.' : started ? `You are working on ${state.startedBranch}.` : 'No one is working on this issue yet.'}</div>
+        <button class="primary-button" type="button" data-action="start-work" ${started || closed ? 'disabled' : ''}>${closed ? 'Issue closed' : started ? 'Work started' : 'Start work'}</button>
+        <div class="github-context-grid">
+          ${commitForItemAction('issue', item)}
+          <button class="quiet-button" type="button" data-action="open-github">Open on GitHub</button>
+        </div>
+        ${closed ? '' : '<button class="danger-button" type="button" data-action="close-issue">Close issue</button>'}
+      </section>`
+    }
+
+    function renderLocalPanel() {
+      const files = state.pendingFiles
+      const staged = files.filter((file) => file.staged)
+      const unstaged = files.filter((file) => !file.staged)
+      const githubActions = githubContextPanelMarkup()
+      document.getElementById('changed-file-status').textContent = `${files.length} changed ${files.length === 1 ? 'file' : 'files'}`
+      if (files.length === 0) {
+        localPanel.innerHTML = `${githubActions}<div class="local-panel-head"><span>Changes</span><span class="local-count">0</span><button type="button" data-action="changes-menu" aria-label="Changes menu">•••</button></div>
+          <div class="local-empty"><span class="local-empty-icon">${icons.check}</span><strong>No local changes</strong><p>Your working files are clean.</p></div>
+          <div class="commit-dock"><label>Commit summary</label><input placeholder="Describe your changes" disabled><label>More details</label><textarea placeholder="Optional" disabled></textarea><button type="button" disabled>Commit 0 files</button></div>`
+      } else {
+        localPanel.innerHTML = `${githubActions}<div class="local-panel-head"><span>Changes</span><span class="local-count">${files.length}</span><button type="button" data-action="changes-menu" aria-label="Changes menu">•••</button></div>
+          <div class="local-files">
+            ${staged.length ? `<div class="local-group-head">Staged<span>${staged.length}</span></div>${localFileRows(staged)}` : ''}
+            ${unstaged.length ? `<div class="local-group-head">Not staged<span>${unstaged.length}</span></div>${localFileRows(unstaged)}` : ''}
+          </div>
+          <div class="commit-dock"><label for="commit-summary">Commit summary</label><input id="commit-summary" placeholder="Describe your changes"><label for="commit-description">More details</label><textarea id="commit-description" placeholder="Optional"></textarea><button type="button" data-action="standard-commit" ${staged.length === 0 ? 'disabled' : ''}>Commit ${staged.length} staged ${staged.length === 1 ? 'file' : 'files'}</button></div>`
+      }
+      localPanel.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => handleAction(button.dataset.action, button)))
+    }
+
+    function bindDetailActions() {
+      detailInner.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => handleAction(button.dataset.action, button)))
+    }
+
+    function showToast(message, type = 'good') {
+      const toast = document.createElement('div')
+      toast.className = `toast ${type}`
+      toast.textContent = message
+      document.getElementById('toast-stack').appendChild(toast)
+      window.setTimeout(() => toast.classList.add('out'), 2800)
+      window.setTimeout(() => toast.remove(), 3050)
+    }
+
+    function closeModal() {
+      modalScrim.classList.remove('open')
+      modalContent.innerHTML = ''
+      modalContent.className = 'modal'
+    }
+
+    function currentGithubItem() {
+      const source = state.mode === 'prs' ? pullRequests : issues
+      return source.find((entry) => entry.id === state.selected[state.mode]) || source[0]
+    }
+
+    function filesForCommit() {
+      if (state.commitScope === 'all') return state.pendingFiles
+      if (state.commitScope === 'choose') return state.pendingFiles.filter((file) => file.selected)
+      return state.pendingFiles.filter((file) => file.staged)
+    }
+
+    function commitMessageFor(item) {
+      const issue = state.mode === 'issues'
+      const fixes = issue && state.commitLink === 'fixes'
+      const summary = state.commitUseAi
+        ? issue ? `${fixes ? 'fixes' : 'improved'}: ${item.title}` : `improved: Update work for #${item.id}`
+        : `Update work for #${item.id}`
+      const reference = fixes ? `Fixes #${item.id}\n${item.title}` : `#${item.id} ${item.title}`
+      return { summary, reference }
+    }
+
+    function renderCommitForItemModal() {
+      const item = currentGithubItem()
+      const issue = state.mode === 'issues'
+      const kind = issue ? 'issue' : 'pull request'
+      const stagedCount = state.pendingFiles.filter((file) => file.staged).length
+      const selectedCount = filesForCommit().length
+      const message = commitMessageFor(item)
+      modalContent.className = 'modal commit-modal'
+      modalContent.innerHTML = `<h3 id="modal-title">Commit changes for ${kind} #${item.id}</h3><p>Choose the files that belong to this work. GitWyrm will add the GitHub reference to the commit message.</p>
+        <section class="commit-modal-section"><h4>Which changes belong?</h4>
+          <div class="commit-choice-grid">
+            <button class="commit-choice${state.commitScope === 'staged' ? ' active' : ''}" type="button" data-commit-scope="staged"><span class="choice-dot"></span><span><strong>Use staged changes</strong><small>${stagedCount} files are already staged</small></span></button>
+            <button class="commit-choice${state.commitScope === 'all' ? ' active' : ''}" type="button" data-commit-scope="all"><span class="choice-dot"></span><span><strong>Include all changes</strong><small>Stage all ${state.pendingFiles.length} changed files</small></span></button>
+            <button class="commit-choice${state.commitScope === 'choose' ? ' active' : ''}" type="button" data-commit-scope="choose"><span class="choice-dot"></span><span><strong>Choose files</strong><small>Pick only the files for this ${kind}</small></span></button>
+          </div>
+          <div class="file-picker${state.commitScope === 'choose' ? ' show' : ''}">${state.pendingFiles.map((file, index) => `<label><input type="checkbox" data-file-index="${index}" ${file.selected ? 'checked' : ''}><span class="file-state">M</span><span>${file.path}</span></label>`).join('')}</div>
+        </section>
+        ${issue ? `<section class="commit-modal-section"><h4>How should GitHub link it?</h4><div class="link-choice-grid">
+          <button class="link-choice${state.commitLink === 'related' ? ' active' : ''}" type="button" data-commit-link="related"><strong>This commit is related</strong><small>Adds #${item.id} and the issue title without closing it</small></button>
+          <button class="link-choice${state.commitLink === 'fixes' ? ' active' : ''}" type="button" data-commit-link="fixes"><strong>This commit fixes it</strong><small>Adds Fixes #${item.id}. The issue closes when the commit reaches main on GitHub.</small></button>
+        </div></section>` : `<section class="commit-modal-section"><h4>GitHub link</h4><div class="summary-card"><p>This commit will reference pull request <strong>#${item.id} ${item.title}</strong>.</p></div></section>`}
+        ${state.aiEnabled ? `<section class="commit-modal-section"><label class="ai-context"><input id="commit-use-ai" type="checkbox" ${state.commitUseAi ? 'checked' : ''}><span><strong>Use AI for the commit message</strong>AI receives the selected file changes plus #${item.id} and its title.</span></label></section>` : ''}
+        <section class="commit-modal-section"><h4>Commit preview</h4><div class="commit-preview"><strong>${message.summary}</strong><pre>${message.reference}</pre></div></section>
+        <div class="modal-actions"><button class="quiet-button" type="button" data-modal="cancel">Cancel</button><button class="primary-button" type="button" data-modal="commit-for-item" ${selectedCount === 0 ? 'disabled' : ''}>Commit ${selectedCount} ${selectedCount === 1 ? 'file' : 'files'}</button></div>`
+
+      modalContent.querySelectorAll('[data-commit-scope]').forEach((button) => button.addEventListener('click', () => {
+        state.commitScope = button.dataset.commitScope
+        renderCommitForItemModal()
+      }))
+      modalContent.querySelectorAll('[data-file-index]').forEach((checkbox) => checkbox.addEventListener('change', () => {
+        state.pendingFiles[Number(checkbox.dataset.fileIndex)].selected = checkbox.checked
+        renderCommitForItemModal()
+      }))
+      modalContent.querySelectorAll('[data-commit-link]').forEach((button) => button.addEventListener('click', () => {
+        state.commitLink = button.dataset.commitLink
+        renderCommitForItemModal()
+      }))
+      const aiToggle = modalContent.querySelector('#commit-use-ai')
+      if (aiToggle) aiToggle.addEventListener('change', () => {
+        state.commitUseAi = aiToggle.checked
+        renderCommitForItemModal()
+      })
+      modalContent.querySelector('[data-modal="cancel"]').addEventListener('click', () => { closeModal(); showToast('No commit was created', 'info') })
+      modalContent.querySelector('[data-modal="commit-for-item"]').addEventListener('click', (event) => {
+        const committedFiles = filesForCommit()
+        event.currentTarget.disabled = true
+        event.currentTarget.textContent = state.commitUseAi ? 'Writing and committing…' : 'Creating commit…'
+        window.setTimeout(() => {
+          const committedPaths = new Set(committedFiles.map((file) => file.path))
+          state.pendingFiles = state.pendingFiles.filter((file) => !committedPaths.has(file.path))
+          const fixes = issue && state.commitLink === 'fixes'
+          closeModal()
+          renderLocalPanel()
+          renderLists()
+          renderDetail(true)
+          showToast(fixes ? `Committed ${committedFiles.length} files. Issue #${item.id} will close when this reaches main.` : `Committed ${committedFiles.length} files for ${kind} #${item.id}`)
+        }, 850)
+      })
+    }
+
+    function openCommitForItemModal() {
+      if (!hasPendingChanges()) {
+        showToast('No changes are waiting to be committed', 'info')
+        return
+      }
+      const stagedCount = state.pendingFiles.filter((file) => file.staged).length
+      state.commitScope = stagedCount > 0 ? 'staged' : state.pendingFiles.length > 1 ? 'choose' : 'all'
+      state.commitLink = 'related'
+      state.commitUseAi = state.aiEnabled
+      modalScrim.classList.add('open')
+      renderCommitForItemModal()
+    }
+
+    function openCloseIssueModal() {
+      const issue = issues.find((item) => item.id === state.selected.issues) || issues[0]
+      modalContent.innerHTML = `<h3 id="modal-title">Close issue #${issue.id}?</h3><p>This marks <strong>${issue.title}</strong> as closed. People can still read it, comment on it, and reopen it later.</p>
+        <div class="modal-actions"><button class="quiet-button" type="button" data-modal="cancel">Keep open</button><button class="danger-button" type="button" data-modal="close-issue">Close issue</button></div>`
+      modalScrim.classList.add('open')
+      modalContent.querySelector('[data-modal="cancel"]').addEventListener('click', () => { closeModal(); showToast('Issue left open', 'info') })
+      modalContent.querySelector('[data-modal="close-issue"]').addEventListener('click', (event) => {
+        event.currentTarget.disabled = true
+        event.currentTarget.textContent = 'Closing issue…'
+        window.setTimeout(() => {
+          if (!state.closedIssues.includes(issue.id)) state.closedIssues.push(issue.id)
+          closeModal()
+          renderLists()
+          renderDetail(true)
+          renderLocalPanel()
+          showToast(`Issue #${issue.id} closed`)
+        }, 650)
+      })
+    }
+
+    function openStartWorkModal() {
+      const issueId = state.selected.issues
+      const suggestedNames = { 218: 'fix/drag-preview', 211: 'feature/search-file-names', 204: 'fix/removed-remote-branch' }
+      const suggestedName = suggestedNames[issueId] || `issue/${issueId}`
+      modalContent.innerHTML = `<h3 id="modal-title">Start work on issue #${issueId}</h3><p>GitWyrm will make a branch for this issue and switch to it. Your files will stay as they are.</p>
+        <div class="before-after"><div><label>Now</label><strong>main</strong></div><div class="arrow">→</div><div><label>Next</label><strong>${suggestedName}</strong></div></div>
+        <label class="field-label" for="branch-name">Branch name</label><input id="branch-name" value="${suggestedName}" spellcheck="false">
+        <div class="modal-actions"><button class="quiet-button" type="button" data-modal="cancel">Cancel</button><button class="primary-button" type="button" data-modal="start">Create branch and start</button></div>`
+      modalScrim.classList.add('open')
+      modalContent.querySelector('[data-modal="cancel"]').addEventListener('click', () => { closeModal(); showToast('Kept you on main', 'info') })
+      modalContent.querySelector('[data-modal="start"]').addEventListener('click', (event) => {
+        const name = document.getElementById('branch-name').value.trim() || suggestedName
+        event.currentTarget.disabled = true
+        event.currentTarget.textContent = 'Creating branch…'
+        window.setTimeout(() => {
+          state.startedIssue = issueId
+          state.startedBranch = name
+          closeModal()
+          setCurrentBranch(name)
+          renderLists()
+          renderDetail(true)
+          renderLocalPanel()
+          showToast(`Started issue #${issueId} on ${name}`)
+        }, 720)
+      })
+    }
+
+    function openMergeModal() {
+      const pullRequest = pullRequests.find((item) => item.id === state.selected.prs) || pullRequests[0]
+      const branchName = pullRequest.sub.split(' → ')[0]
+      const method = mergeMethods[state.mergeMethod]
+      state.mergeMenuOpen = false
+      if (pullRequest.requiresApproval && state.approvedPr !== pullRequest.id) {
+        renderLocalPanel()
+        showToast('Approval is required before this can merge', 'info')
+        return
+      }
+      modalContent.innerHTML = `<h3 id="modal-title">${method.label}?</h3><p>${method.description} GitHub will close pull request #${pullRequest.id} after the merge finishes.</p>
+        <div class="before-after"><div><label>From</label><strong>${branchName}</strong></div><div class="arrow">→</div><div><label>Into</label><strong>main</strong></div></div>
+        <div class="modal-actions"><button class="quiet-button" type="button" data-modal="cancel">Not yet</button><button class="primary-button" type="button" data-modal="merge">${method.confirm}</button></div>`
+      modalScrim.classList.add('open')
+      modalContent.querySelector('[data-modal="cancel"]').addEventListener('click', () => { closeModal(); showToast('Pull request left open', 'info') })
+      modalContent.querySelector('[data-modal="merge"]').addEventListener('click', (event) => {
+        event.currentTarget.disabled = true
+        event.currentTarget.textContent = 'Adding to main…'
+        window.setTimeout(() => {
+          state.mergedPr = state.selected.prs
+          closeModal()
+          renderLists()
+          renderDetail(true)
+          renderLocalPanel()
+          showToast(`Pull request #${pullRequest.id} was ${method.done}`)
+        }, 850)
+      })
+    }
+
+    function sendDependabotCommand(command, status, response) {
+      state.dependabotCommand = { prId: state.selected.prs, command, status, response }
+      renderDetail(false)
+      renderLocalPanel()
+      showToast(`Posted ${command}`)
+    }
+
+    function openDependabotConfirm(kind) {
+      const recreate = kind === 'recreate'
+      const command = recreate ? '@dependabot recreate' : '@dependabot ignore this minor version'
+      const title = recreate ? 'Recreate this pull request?' : 'Ignore React 19.2?'
+      const description = recreate
+        ? 'Dependabot will replace this pull request and overwrite any edits made to its branch.'
+        : 'Dependabot will close this pull request and stop opening updates for this minor version.'
+      const confirmLabel = recreate ? 'Recreate pull request' : 'Ignore React 19.2'
+      modalContent.innerHTML = `<h3 id="modal-title">${title}</h3><p>${description}</p>
+        <div class="summary-card"><h4>Command GitHub will receive</h4><p><code>${command}</code></p></div>
+        <div class="modal-actions"><button class="quiet-button" type="button" data-modal="cancel">Cancel</button><button class="${recreate ? 'primary-button' : 'danger-button'}" type="button" data-modal="dependabot-confirm">${confirmLabel}</button></div>`
+      modalScrim.classList.add('open')
+      modalContent.querySelector('[data-modal="cancel"]').addEventListener('click', () => { closeModal(); showToast('Nothing sent to Dependabot', 'info') })
+      modalContent.querySelector('[data-modal="dependabot-confirm"]').addEventListener('click', () => {
+        closeModal()
+        sendDependabotCommand(
+          command,
+          recreate ? 'Dependabot is rebuilding the pull request.' : 'Dependabot will close and ignore this update.',
+          recreate ? 'Okay, I will recreate this pull request now.' : 'Okay, I will close this pull request and ignore this minor version.'
+        )
+      })
+    }
+
+    function setCurrentBranch(name) {
+      const branch = document.getElementById('current-branch')
+      branch.textContent = name
+      const pill = branch.closest('.branch-pill')
+      pill.classList.remove('flash')
+      void pill.offsetWidth
+      pill.classList.add('flash')
+    }
+
+    function handleAction(action, button) {
+      const simple = {
+        'new-tab': 'Repository picker opened', minimize: 'Window minimized in the real app', maximize: 'Window size changed in the real app', 'close-window': 'Mockup kept open',
+        branch: 'New branch window opened', merge: 'Merge window opened', stash: 'Saved your changes for later',
+        search: 'Search is ready', folder: 'Opened GitWyrm in File Explorer', terminal: 'Opened a terminal here', 'branch-picker': 'Branch list opened',
+        'branch-row': 'Branch highlighted in the graph', 'open-github': 'Opened this item on GitHub', 'changes-menu': 'Local changes menu opened', 'pull-latest': 'Pulling the merged work into main…'
+      }
+      if (action === 'fetch' || action === 'pull' || action === 'push') {
+        const original = button.innerHTML
+        button.style.color = 'var(--accent)'
+        button.querySelector('span:last-child').textContent = `${action[0].toUpperCase() + action.slice(1)}ing…`
+        window.setTimeout(() => { button.innerHTML = original; button.style.color = ''; showToast(`${action[0].toUpperCase() + action.slice(1)} complete`) }, 780)
+        return
+      }
+      if (action === 'refresh') {
+        const icon = button.querySelector('svg')
+        icon.classList.add('spin')
+        button.querySelector('span:last-child').textContent = 'Checking…'
+        window.setTimeout(() => {
+          icon.classList.remove('spin')
+          button.querySelector('span:last-child').textContent = 'Refresh'
+          document.getElementById('updated-status').textContent = 'Checked just now'
+          showToast('GitHub work is up to date')
+        }, 900)
+        return
+      }
+      if (action === 'checkout') {
+        const pullRequest = pullRequests.find((item) => item.id === state.selected.prs) || pullRequests[0]
+        const branchName = pullRequest.sub.split(' → ')[0]
+        button.disabled = true
+        button.textContent = 'Switching…'
+        window.setTimeout(() => { setCurrentBranch(branchName); button.textContent = 'Using branch'; showToast(`Switched to ${branchName}`) }, 720)
+        return
+      }
+      if (action === 'review-files') {
+        const pullRequest = pullRequests.find((item) => item.id === state.selected.prs) || pullRequests[0]
+        const fileCount = pullRequest.sub.match(/(\d+) files?/)?.[1] || '4'
+        showToast(`Opened ${fileCount} changed files`, 'info')
+        return
+      }
+      if (action === 'approve') {
+        const pullRequest = pullRequests.find((item) => item.id === state.selected.prs) || pullRequests[0]
+        const enablesMerge = Boolean(pullRequest.requiresApproval && state.approvedPr !== pullRequest.id)
+        state.approvedPr = state.selected.prs
+        state.mergeMenuOpen = false
+        renderLists()
+        renderDetail(true)
+        renderLocalPanel()
+        showToast(enablesMerge ? 'Approved. Merge is now available.' : `Review approved and shared with ${pullRequest.person}`)
+        return
+      }
+      if (action === 'toggle-merge-methods') {
+        state.mergeMenuOpen = !state.mergeMenuOpen
+        renderLocalPanel()
+        return
+      }
+      if (action === 'choose-merge-method') {
+        state.mergeMethod = button.dataset.method
+        state.mergeMenuOpen = false
+        renderLocalPanel()
+        showToast(`${mergeMethods[state.mergeMethod].label} selected`, 'info')
+        return
+      }
+      if (action === 'dependabot-rebase') {
+        sendDependabotCommand('@dependabot rebase', 'Dependabot is updating the branch.', 'Sure, I will rebase this pull request now.')
+        return
+      }
+      if (action === 'dependabot-recreate') { openDependabotConfirm('recreate'); return }
+      if (action === 'dependabot-ignore') { openDependabotConfirm('ignore'); return }
+      if (action === 'merge-pr') { openMergeModal(); return }
+      if (action === 'start-work') { openStartWorkModal(); return }
+      if (action === 'commit-for-item') { openCommitForItemModal(); return }
+      if (action === 'close-issue') { openCloseIssueModal(); return }
+      if (action === 'standard-commit') {
+        const summary = document.getElementById('commit-summary').value.trim()
+        if (!summary) {
+          document.getElementById('commit-summary').focus()
+          showToast('Add a commit summary first', 'info')
+          return
+        }
+        const committedCount = state.pendingFiles.filter((file) => file.staged).length
+        button.disabled = true
+        button.textContent = 'Creating commit…'
+        window.setTimeout(() => {
+          state.pendingFiles = state.pendingFiles.filter((file) => !file.staged)
+          renderLocalPanel()
+          renderLists()
+          renderDetail(true)
+          showToast(`Committed ${committedCount} staged ${committedCount === 1 ? 'file' : 'files'}`)
+        }, 700)
+        return
+      }
+      if (action === 'comment') {
+        const input = document.getElementById('comment-text')
+        if (!input.value.trim()) { input.focus(); showToast('Write a reply first', 'info'); return }
+        const comment = document.createElement('div')
+        comment.className = 'comment'
+        comment.innerHTML = '<span class="avatar green">JE</span><div><strong>You</strong><time>now</time><p></p></div>'
+        comment.querySelector('p').textContent = input.value.trim()
+        input.closest('.comment-box').before(comment)
+        input.value = ''
+        showToast('Reply posted on GitHub')
+        return
+      }
+      showToast(simple[action] || 'Action complete', 'info')
+    }
+
+    document.querySelectorAll('.toolbar [data-action], .titlebar [data-action], .content-head [data-action], .local-panel [data-action], .side-section:not(.github-section) [data-action]').forEach((button) => {
+      button.addEventListener('click', () => handleAction(button.dataset.action, button))
+    })
+
+    modalScrim.addEventListener('click', (event) => {
+      if (event.target === modalScrim) { closeModal(); showToast('Nothing changed', 'info') }
+    })
+
+    document.addEventListener('click', (event) => {
+      if (!itemContextMenu.contains(event.target)) itemContextMenu.classList.remove('open')
+    })
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && modalScrim.classList.contains('open')) { closeModal(); showToast('Nothing changed', 'info') }
+    })
+
+    injectIcons()
+    renderLists()
+    renderDetail()
+    renderLocalPanel()
+  </script>
+</body>
+</html>

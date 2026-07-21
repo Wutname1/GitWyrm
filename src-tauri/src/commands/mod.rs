@@ -4,6 +4,7 @@ pub mod branch;
 pub mod commit;
 pub mod diff;
 pub mod external;
+pub mod github;
 pub mod log;
 pub mod merge;
 pub mod patch;

@@ -8,6 +8,7 @@ import { GraphView } from '@/views/GraphView'
 import { DiffView } from '@/views/DiffView'
 import { SettingsView } from '@/views/SettingsView'
 import { ConflictView } from '@/views/ConflictView'
+import { GithubView } from '@/views/GithubView'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -16,6 +17,7 @@ function CenterView() {
   if (view === 'diff') return <DiffView />
   if (view === 'settings') return <SettingsView />
   if (view === 'conflict') return <ConflictView />
+  if (view === 'github') return <GithubView />
   return <GraphView />
 }
 

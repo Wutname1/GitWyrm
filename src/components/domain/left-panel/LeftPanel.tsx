@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { useBranches, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { useGithubAuth, useGithubIssues, useGithubPrs, useGithubSlug } from '@/hooks/useGithub'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import {
@@ -34,6 +35,13 @@ export function LeftPanel() {
   const remotes = useRemotes(repo?.id ?? null)
   const stashes = useStashes(repo?.id ?? null)
 
+  const githubSlug = useGithubSlug(repo?.id ?? null)
+  const githubAuth = useGithubAuth()
+  const githubConnected = githubAuth.data != null
+  const prs = useGithubPrs(githubSlug.data, githubConnected)
+  const issues = useGithubIssues(githubSlug.data, githubConnected)
+  const openGithubItem = useUiStore((s) => s.openGithubItem)
+
   const [toDelete, setToDelete] = useState<{ kind: 'branch' | 'tag'; name: string } | null>(null)
   const branchToRename = useUiStore((s) => s.branchToRename)
   const branchToDelete = useUiStore((s) => s.branchToDelete)
@@ -59,18 +67,37 @@ export function LeftPanel() {
       type: 'stash',
       items: (stashes.data ?? []).map((s) => ({ name: s.message })),
     },
-    {
-      key: 'prs',
-      label: 'PULL REQUESTS',
-      type: 'pr',
-      items: [{ name: 'Connect GitHub (soon)' }],
-    },
-    {
-      key: 'issues',
-      label: 'ISSUES',
-      type: 'issue',
-      items: [{ name: 'Connect GitHub (soon)' }],
-    },
+    // PR and issue sections only exist for repos hosted on github.com.
+    ...(githubSlug.data == null
+      ? []
+      : ([
+          {
+            key: 'prs',
+            label: 'PULL REQUESTS',
+            type: 'pr',
+            items: githubConnected
+              ? (prs.data ?? []).map((p) => ({
+                  name: p.title,
+                  meta: `#${p.number}`,
+                  metaTitle: `#${p.number} by ${p.author}${p.draft ? ' · draft' : ''}`,
+                  id: p.number,
+                }))
+              : [{ name: 'Connect GitHub' }],
+          },
+          {
+            key: 'issues',
+            label: 'ISSUES',
+            type: 'issue',
+            items: githubConnected
+              ? (issues.data ?? []).map((i) => ({
+                  name: i.title,
+                  meta: `#${i.number}`,
+                  metaTitle: `#${i.number} by ${i.author}`,
+                  id: i.number,
+                }))
+              : [{ name: 'Connect GitHub' }],
+          },
+        ] satisfies SidebarSectionData[])),
     {
       key: 'tags',
       label: 'TAGS',
@@ -121,7 +148,8 @@ export function LeftPanel() {
       }
       case 'pr':
       case 'issue':
-        toast('GitHub integration is planned')
+        if (item.id == null) openModal('githubConnect')
+        else openGithubItem(section.type === 'pr' ? 'pr' : 'issue', item.id)
         break
       default:
         toast(item.name)

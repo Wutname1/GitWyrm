@@ -102,6 +102,19 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::ai::ai_copilot_device_start,
     commands::ai::ai_copilot_device_poll,
     commands::ai::generate_commit_message,
+    commands::github::github_device_start,
+    commands::github::github_device_poll,
+    commands::github::github_sign_out,
+    commands::github::github_auth_status,
+    commands::github::github_repo_slug,
+    commands::github::github_list_prs,
+    commands::github::github_list_issues,
+    commands::github::github_pr_detail,
+    commands::github::github_issue_detail,
+    commands::github::github_comment,
+    commands::github::github_approve_pr,
+    commands::github::github_merge_pr,
+    commands::github::github_close_issue,
   ])
   .typ::<watcher::RepoChangedPayload>()
   .typ::<commands::remote::GitProgressPayload>()
