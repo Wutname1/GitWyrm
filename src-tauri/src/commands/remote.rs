@@ -10,7 +10,9 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
 use crate::git::refs;
-use crate::git::types::{PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo};
+use crate::git::types::{
+  PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo, RemoteTagInfo, UnpushedTag,
+};
 use crate::state::RepoManager;
 
 /// The current branch, its upstream, and how far apart they are. Returns `None`
@@ -461,6 +463,185 @@ fn default_remote(repo: &git2::Repository) -> Result<String, AppError> {
       .cloned()
       .ok_or_else(|| AppError::Other("Several remotes are set up. Pick one in Remotes first.".into())),
   }
+}
+
+/// The remote a tag operation should target: the caller's choice when given,
+/// otherwise the repository's default remote.
+fn resolve_remote(repo: &git2::Repository, remote: &str) -> Result<String, AppError> {
+  let remote = remote.trim();
+  if remote.is_empty() {
+    default_remote(repo)
+  } else {
+    Ok(remote.to_string())
+  }
+}
+
+/// Parse `git ls-remote --tags` output into tag names and the objects they
+/// point at. Annotated tags also produce a `^{}` line naming the commit they
+/// peel to; those carry no new name, so they are dropped.
+fn parse_ls_remote_tags(stdout: &str) -> Vec<RemoteTagInfo> {
+  let mut tags = Vec::new();
+  for line in stdout.lines() {
+    let Some((sha, refname)) = line.split_once('\t') else { continue };
+    let Some(name) = refname.strip_prefix("refs/tags/") else { continue };
+    if name.ends_with("^{}") {
+      continue;
+    }
+    tags.push(RemoteTagInfo { name: name.to_string(), sha: sha.trim().to_string() });
+  }
+  tags
+}
+
+/// Tags the named remote already has. Hits the network via `git ls-remote`, so
+/// callers should cache the result rather than polling it.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_remote_tags(
+  app: AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  remote: String,
+) -> Result<Vec<RemoteTagInfo>, AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    let remote = { resolve_remote(&open.repo.lock().unwrap(), &remote)? };
+    let stdout = run_streaming(
+      &app,
+      &repo_id,
+      Some(&path),
+      "ls-remote",
+      &["ls-remote", "--tags", &remote],
+    )?;
+    let mut tags = parse_ls_remote_tags(&stdout);
+    tags.sort_by(|a, b| b.name.cmp(&a.name));
+    Ok(tags)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Local tags the remote is missing. `commit_on_remote` distinguishes tags that
+/// can be pushed on their own from those whose commit hasn't been sent yet.
+#[tauri::command]
+#[specta::specta]
+pub async fn unpushed_tags(
+  app: AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  remote: String,
+) -> Result<Vec<UnpushedTag>, AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    let remote = { resolve_remote(&open.repo.lock().unwrap(), &remote)? };
+    let stdout = run_streaming(
+      &app,
+      &repo_id,
+      Some(&path),
+      "ls-remote",
+      &["ls-remote", "--tags", &remote],
+    )?;
+    let on_remote: std::collections::HashSet<String> =
+      parse_ls_remote_tags(&stdout).into_iter().map(|t| t.name).collect();
+
+    let repo = open.repo.lock().unwrap();
+
+    // Tips of this remote's tracking branches. A tagged commit reachable from
+    // any of them is already on the remote, so its tag can be pushed alone.
+    let prefix = format!("{remote}/");
+    let mut remote_tips = Vec::new();
+    if let Ok(branches) = repo.branches(Some(git2::BranchType::Remote)) {
+      for (branch, _) in branches.flatten() {
+        let Ok(Some(name)) = branch.name() else { continue };
+        if name.starts_with(&prefix) {
+          if let Some(oid) = branch.get().target() {
+            remote_tips.push(oid);
+          }
+        }
+      }
+    }
+
+    let mut missing = Vec::new();
+    for name in repo.tag_names(None)?.iter().flatten() {
+      if on_remote.contains(name) {
+        continue;
+      }
+      let Ok(reference) = repo.find_reference(&format!("refs/tags/{name}")) else { continue };
+      let Ok(commit) = reference.peel_to_commit() else { continue };
+      let oid = commit.id();
+      let commit_on_remote = remote_tips
+        .iter()
+        .any(|tip| *tip == oid || repo.graph_descendant_of(*tip, oid).unwrap_or(false));
+      missing.push(UnpushedTag {
+        name: name.to_string(),
+        target_sha: oid.to_string(),
+        commit_on_remote,
+      });
+    }
+    missing.sort_by(|a, b| b.name.cmp(&a.name));
+    Ok(missing)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Push one tag to a remote. Never force-updates: a tag the remote already has
+/// under a different object fails rather than silently moving it.
+#[tauri::command]
+#[specta::specta]
+pub async fn push_tag(
+  app: AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  name: String,
+  remote: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    let remote = { resolve_remote(&open.repo.lock().unwrap(), &remote)? };
+    let refspec = format!("refs/tags/{}", name.trim());
+    run_streaming(
+      &app,
+      &repo_id,
+      Some(&path),
+      "push",
+      &["push", "--progress", &remote, &refspec],
+    )?;
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Delete a tag from a remote. The local tag is left alone, so a tag can be
+/// un-published without losing the local copy.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_remote_tag(
+  app: AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  name: String,
+  remote: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    let remote = { resolve_remote(&open.repo.lock().unwrap(), &remote)? };
+    let refspec = format!("refs/tags/{}", name.trim());
+    run_streaming(
+      &app,
+      &repo_id,
+      Some(&path),
+      "push",
+      &["push", "--progress", "--delete", &remote, &refspec],
+    )?;
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// List configured remotes with their URLs and remote-tracking branches.

@@ -9,11 +9,13 @@ import {
   type SelectedLine,
 } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
+import { useHostResolver } from '@/hooks/useGitQueries'
 import { classifyError } from '@/lib/errorClass'
 import { copyToClipboard } from '@/lib/clipboard'
 import { plural, shortSha } from '@/lib/gitDisplay'
 import { log } from '@/lib/log'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useUiStore } from '@/stores/uiStore'
 
 type QueryName = 'status' | 'log' | 'branches' | 'stashes' | 'tags' | 'remotes' | 'mergeState'
 
@@ -52,34 +54,42 @@ const onError = (e: Error) => {
 
 const commitCount = (n: number) => plural(n, 'commit')
 
-/** The upstream if we know it, else a generic stand-in so copy still reads. */
-const describeTarget = (r: { upstream: string | null }) => r.upstream ?? 'the remote'
+/**
+ * Where the commits went, named the way the user thinks of it: the upstream
+ * branch plus the host it lives on ("origin/main on GitHub"). `host` is null
+ * for self-hosted or unrecognized remotes, which drop back to the branch name
+ * alone, and to a generic stand-in when even that is unknown.
+ */
+const describeTarget = (r: { upstream: string | null }, host: string | null) => {
+  if (!r.upstream) return host ?? 'the remote'
+  return host ? `${r.upstream} on ${host}` : r.upstream
+}
 
 /**
  * Push and pull report what actually moved, measured from the branch's
  * ahead/behind before and after. A no-op says so plainly rather than claiming
  * work happened -- the user asked for the truth of what the operation did.
  */
-function describePush(r: PushResult): string {
+function describePush(r: PushResult, host: string | null): string {
   if (r.pushed === 0) {
     return r.branch
-      ? `Nothing to send - ${describeTarget(r)} already matches ${r.branch}`
-      : 'Nothing to send - the remote is already up to date'
+      ? `Nothing to send - ${describeTarget(r, host)} already matches ${r.branch}`
+      : `Nothing to send - ${host ?? 'the remote'} is already up to date`
   }
-  return `Sent ${commitCount(r.pushed)} to ${describeTarget(r)}`
+  return `Sent ${commitCount(r.pushed)} to ${describeTarget(r, host)}`
 }
 
-function describePull(r: PullResult): string {
+function describePull(r: PullResult, host: string | null): string {
   if (r.received === 0) {
     const base = r.branch
-      ? `Nothing new to get - ${r.branch} already matches ${describeTarget(r)}`
+      ? `Nothing new to get - ${r.branch} already matches ${describeTarget(r, host)}`
       : 'Nothing new to get - you are already up to date'
     // Checked for incoming work but still have outgoing work of our own.
     return r.ahead_after > 0
       ? `${base}. You still have ${commitCount(r.ahead_after)} to send.`
       : base
   }
-  const base = `Got ${commitCount(r.received)} from ${describeTarget(r)}`
+  const base = `Got ${commitCount(r.received)} from ${describeTarget(r, host)}`
   return r.ahead_after > 0
     ? `${base}. You still have ${commitCount(r.ahead_after)} to send.`
     : base
@@ -88,6 +98,40 @@ function describePull(r: PullResult): string {
 export function useGitMutations(repoId: string | null) {
   const qc = useQueryClient()
   const id = repoId ?? ''
+  const hostOf = useHostResolver(repoId)
+  const tagPushDefault = useWorkspaceStore((s) => s.tagPushDefault)
+  const promptPushTags = useUiStore((s) => s.promptPushTags)
+
+  /**
+   * After a push, deal with tags the remote still lacks.
+   *
+   * Every local-only tag is offered, including ones pointing at commits that
+   * were never pushed -- git sends those commits along with the tag, so the
+   * push does work. The prompt flags them so that isn't invisible.
+   *
+   * The remembered choice decides whether we send silently, stay quiet, or ask.
+   * Runs after the push has already reported success, so a failure here is
+   * logged and dropped rather than turning a good push into an error.
+   */
+  const handleTagsAfterPush = async () => {
+    if (tagPushDefault === 'never') return
+    try {
+      const pending = unwrap(await commands.unpushedTags(id, ''))
+      if (pending.length === 0) return
+
+      if (tagPushDefault === 'always') {
+        for (const tag of pending) {
+          await unwrap(await commands.pushTag(id, tag.name, ''))
+        }
+        qc.invalidateQueries({ queryKey: ['remoteTags', id] })
+        toast(`Sent ${plural(pending.length, 'tag')}`)
+        return
+      }
+      promptPushTags(pending.map((t) => ({ name: t.name, carriesCommits: !t.commit_on_remote })))
+    } catch (e) {
+      log.warn(`could not check for unsent tags: ${String(e)}`)
+    }
+  }
 
   const stageFile = useMutation({
     mutationFn: async (path: string) => unwrap(await commands.stageFile(id, path)),
@@ -182,13 +226,19 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const createTag = useMutation({
-    mutationFn: async (args: { name: string; sha: string; message: string }) => {
+    mutationFn: async (args: { name: string; sha: string; message: string; push?: boolean }) => {
       await unwrap(await commands.createTag(id, args.name, args.sha, args.message))
-      return args.name
+      // Push inside the same mutation so the two never drift apart in the UI:
+      // one action, one toast, one settled state.
+      if (args.push) {
+        await unwrap(await commands.pushTag(id, args.name, ''))
+      }
+      return args
     },
-    onSuccess: (name) => {
+    onSuccess: (args) => {
       invalidate(qc, id, ['tags', 'log'])
-      toast(`Created tag ${name}`)
+      if (args.push) qc.invalidateQueries({ queryKey: ['remoteTags', id] })
+      toast(args.push ? `Created and sent tag ${args.name}` : `Created tag ${args.name}`)
     },
     onError,
   })
@@ -201,6 +251,36 @@ export function useGitMutations(repoId: string | null) {
     onSuccess: (name) => {
       invalidate(qc, id, ['tags', 'log'])
       toast(`Deleted tag ${name}`)
+    },
+    onError,
+  })
+
+  /** Send one tag to a remote. Empty `remote` targets the default one. */
+  const pushTag = useMutation({
+    mutationFn: async (args: { name: string; remote?: string }) => {
+      await unwrap(await commands.pushTag(id, args.name, args.remote ?? ''))
+      return args.name
+    },
+    onSuccess: (name) => {
+      invalidate(qc, id, ['tags'])
+      qc.invalidateQueries({ queryKey: ['remoteTags', id] })
+      toast(`Sent tag ${name}`)
+    },
+    onError,
+  })
+
+  /**
+   * Remove a tag from the remote. The local copy is untouched, so a tag can be
+   * un-published without losing it here.
+   */
+  const deleteRemoteTag = useMutation({
+    mutationFn: async (args: { name: string; remote?: string }) => {
+      await unwrap(await commands.deleteRemoteTag(id, args.name, args.remote ?? ''))
+      return args.name
+    },
+    onSuccess: (name) => {
+      qc.invalidateQueries({ queryKey: ['remoteTags', id] })
+      toast(`Removed tag ${name} from the remote`)
     },
     onError,
   })
@@ -329,7 +409,7 @@ export function useGitMutations(repoId: string | null) {
   const pull = useMutation({
     mutationFn: async () => unwrap(await commands.gitPull(id)),
     onSuccess: (result) => {
-      toast(describePull(result))
+      toast(describePull(result, hostOf(result.upstream)))
     },
     onError,
     // A conflicting pull exits as an error but leaves a merge or rebase in
@@ -344,7 +424,8 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async () => unwrap(await commands.gitPush(id)),
     onSuccess: (result) => {
       invalidate(qc, id, REFS)
-      toast(describePush(result))
+      toast(describePush(result, hostOf(result.upstream)))
+      void handleTagsAfterPush()
     },
     onError,
   })
@@ -355,7 +436,8 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async (branch: string) => unwrap(await commands.gitPushBranch(id, branch)),
     onSuccess: (result) => {
       invalidate(qc, id, REFS)
-      toast(describePush(result))
+      toast(describePush(result, hostOf(result.upstream)))
+      void handleTagsAfterPush()
     },
     onError,
   })
@@ -366,7 +448,7 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async (branch: string) => unwrap(await commands.gitPullBranch(id, branch)),
     onSuccess: (result) => {
       invalidate(qc, id, ['status', 'log', 'branches'])
-      toast(describePull(result))
+      toast(describePull(result, hostOf(result.upstream)))
     },
     onError,
   })
@@ -396,10 +478,11 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async () => unwrap(await commands.gitPushForce(id)),
     onSuccess: (result) => {
       invalidate(qc, id, REFS)
+      const host = hostOf(result.upstream)
       toast(
         result.pushed === 0
-          ? `Force-push finished - ${describeTarget(result)} already matched`
-          : `Force-pushed ${commitCount(result.pushed)} to ${describeTarget(result)}`
+          ? `Force-push finished - ${describeTarget(result, host)} already matched`
+          : `Force-pushed ${commitCount(result.pushed)} to ${describeTarget(result, host)}`
       )
     },
     onError,
@@ -688,6 +771,8 @@ export function useGitMutations(repoId: string | null) {
     deleteBranch,
     createTag,
     deleteTag,
+    pushTag,
+    deleteRemoteTag,
     revealInFileManager,
     openInEditor,
     openInTerminal,

@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { commands, type DiffSource } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
@@ -41,6 +42,27 @@ export function useTags(repoId: string | null) {
   })
 }
 
+/**
+ * Tags the remote already has. This is a network call, so it is not part of
+ * `useTags` and does not refetch on focus -- the sidebar only needs it fresh
+ * enough to tell local-only tags apart, and a stale answer is better than a
+ * lookup on every window switch. Pass an empty remote to use the default one.
+ *
+ * While it is loading or after it fails, callers get no data at all rather
+ * than an empty list, so a tag is never mislabelled "not sent" just because
+ * we are offline or have not checked yet.
+ */
+export function useRemoteTags(repoId: string | null, remote = '', enabled = true) {
+  return useQuery({
+    queryKey: keys.remoteTags(repoId ?? 'none', remote),
+    enabled: repoId != null && enabled,
+    queryFn: async () => unwrap(await commands.listRemoteTags(repoId!, remote)),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  })
+}
+
 export function useRemotes(repoId: string | null) {
   return useQuery({
     queryKey: keys.remotes(repoId ?? 'none'),
@@ -50,19 +72,33 @@ export function useRemotes(repoId: string | null) {
 }
 
 /**
- * The brand name of the host a branch pushes to -- "GitHub", "GitLab" -- so
- * menus can name the destination instead of saying "the remote".
+ * Resolves an upstream ref ("origin/main") to the brand name of the host it
+ * lives on -- "GitHub", "GitLab" -- so the UI can name the destination
+ * instead of saying "the remote".
  *
- * Falls back to the first remote for a branch with no upstream yet (the case
- * where the menu offers to publish it), and to null when the host is
- * self-hosted or the repo has no remotes at all.
+ * Returns a function rather than a value because push and pull only learn
+ * which upstream they touched from the result, after the call.
+ *
+ * Falls back to the first remote when the upstream is unknown (a branch not
+ * yet published), and to null for self-hosted or unrecognized hosts and for
+ * repos with no remotes at all.
  */
-export function useBranchHost(repoId: string | null, upstream: string | null): string | null {
+export function useHostResolver(repoId: string | null): (upstream: string | null) => string | null {
   const { data: remotes } = useRemotes(repoId)
-  if (!remotes?.length) return null
-  const name = upstream?.split('/')[0]
-  const remote = (name && remotes.find((r) => r.name === name)) || remotes[0]
-  return providerLabel(detectProvider(remote.url))
+  return useCallback(
+    (upstream: string | null) => {
+      if (!remotes?.length) return null
+      const name = upstream?.split('/')[0]
+      const remote = (name && remotes.find((r) => r.name === name)) || remotes[0]
+      return providerLabel(detectProvider(remote.url))
+    },
+    [remotes]
+  )
+}
+
+/** The host a single branch pushes to. See [`useHostResolver`]. */
+export function useBranchHost(repoId: string | null, upstream: string | null): string | null {
+  return useHostResolver(repoId)(upstream)
 }
 
 export function useStashes(repoId: string | null) {

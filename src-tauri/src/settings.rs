@@ -126,6 +126,13 @@ pub struct Settings {
   /// Reusable group snapshots shown in Open a repository > Groups.
   #[serde(default)]
   pub saved_tab_groups: Vec<TabGroupSetting>,
+  /// What to do about local-only tags after a push: "ask", "always", "never".
+  /// None means ask. Validated on the frontend.
+  #[serde(default)]
+  pub tag_push_default: Option<String>,
+  /// Whether the New Tag dialog's "send it to the remote" box starts checked.
+  #[serde(default)]
+  pub tag_push_on_create: bool,
 }
 
 fn default_update_channel() -> UpdateChannel {
@@ -154,6 +161,8 @@ impl Default for Settings {
       tab_groups: Vec::new(),
       tab_order: Vec::new(),
       saved_tab_groups: Vec::new(),
+      tag_push_default: None,
+      tag_push_on_create: false,
     }
   }
 }

@@ -12,6 +12,9 @@ export interface RecentRepo {
 
 export type UpdateChannel = 'stable' | 'beta'
 export type CommitButtonMode = 'commit' | 'commit_push'
+
+/** What to do about local-only tags after a push. */
+export type TagPushDefault = 'ask' | 'always' | 'never'
 export type TabLayout = 'horizontal' | 'vertical'
 export type TabDropPlacement = 'before' | 'after'
 
@@ -191,6 +194,10 @@ interface WorkspaceState {
   hiddenColumns: ColumnId[]
   /** Default action for the commit button (persisted). */
   commitButtonMode: CommitButtonMode
+  /** Whether a push offers to send local-only tags too (persisted). */
+  tagPushDefault: TagPushDefault
+  /** Whether the New Tag dialog's send-to-remote box starts checked (persisted). */
+  tagPushOnCreate: boolean
   /** Show worktree actions and the worktree sidebar section (persisted). */
   enableWorktrees: boolean
   /** Whole-app zoom factor, 1.0 = 100% (persisted). */
@@ -220,6 +227,8 @@ interface WorkspaceState {
   setAiSelection: (provider: string | null, model: string | null) => void
   setAiInstruction: (instruction: string | null) => void
   setCommitButtonMode: (mode: CommitButtonMode) => void
+  setTagPushDefault: (mode: TagPushDefault) => void
+  setTagPushOnCreate: (enabled: boolean) => void
   setEnableWorktrees: (enabled: boolean) => void
   setTabLayout: (layout: TabLayout) => void
   /** Set the whole-app zoom factor (clamped to the supported range). */
@@ -266,6 +275,8 @@ function toSettings(s: WorkspaceState): Settings {
     ai_instruction: s.aiInstruction,
     column_layout: { order: s.columnOrder, hidden: s.hiddenColumns },
     commit_button_mode: s.commitButtonMode,
+    tag_push_default: s.tagPushDefault,
+    tag_push_on_create: s.tagPushOnCreate,
     enable_worktrees: s.enableWorktrees,
     ui_scale: s.uiScale,
     tab_aliases: s.tabAliases,
@@ -319,6 +330,11 @@ function isColumnId(id: string): id is ColumnId {
   return KNOWN_COLUMNS.has(id as ColumnId)
 }
 
+/** Unknown or missing values fall back to asking, the safest of the three. */
+function normalizeTagPushDefault(mode: string | null | undefined): TagPushDefault {
+  return mode === 'always' || mode === 'never' ? mode : 'ask'
+}
+
 /**
  * Settings map values arrive as `string | undefined` (a Rust HashMap maps to a
  * Partial record). Drop the empty entries so the store holds a plain map.
@@ -357,6 +373,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   columnOrder: DEFAULT_COLUMN_ORDER,
   hiddenColumns: [],
   commitButtonMode: 'commit',
+  tagPushDefault: 'ask',
+  tagPushOnCreate: false,
   enableWorktrees: false,
   uiScale: DEFAULT_UI_SCALE,
   tabAliases: {},
@@ -458,6 +476,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setCommitButtonMode: (mode) => {
     set({ commitButtonMode: mode })
+    schedulePersist()
+  },
+  setTagPushDefault: (mode) => {
+    set({ tagPushDefault: mode })
+    schedulePersist()
+  },
+  setTagPushOnCreate: (enabled) => {
+    set({ tagPushOnCreate: enabled })
     schedulePersist()
   },
   setEnableWorktrees: (enabled) => {
@@ -748,6 +774,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         columnOrder: normalizeOrder(settings.column_layout?.order),
         hiddenColumns: normalizeHidden(settings.column_layout?.hidden),
         commitButtonMode: settings.commit_button_mode === 'commit_push' ? 'commit_push' : 'commit',
+        tagPushDefault: normalizeTagPushDefault(settings.tag_push_default),
+        tagPushOnCreate: settings.tag_push_on_create ?? false,
         enableWorktrees: settings.enable_worktrees ?? false,
         uiScale: settings.ui_scale != null ? clampUiScale(settings.ui_scale) : DEFAULT_UI_SCALE,
         tabAliases: normalizeAliases(settings.tab_aliases),

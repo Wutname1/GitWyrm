@@ -23,6 +23,16 @@ export interface GithubItemRef {
 
 export type SettingsSection = 'general' | 'ai' | 'appearance' | 'logs' | 'about'
 
+/** A local-only tag offered after a push. */
+export interface PendingTag {
+  name: string
+  /**
+   * True when the tagged commit isn't on the remote yet, so sending the tag
+   * also sends the commits behind it. Worth saying out loud in the prompt.
+   */
+  carriesCommits: boolean
+}
+
 export interface DiffRequest {
   path: string
   source: DiffSource
@@ -40,6 +50,11 @@ interface UiState {
   syncTarget: string | null
   tagTargetSha: string | null
   branchTargetSha: string | null
+  /**
+   * Local-only tags a finished push left behind, prompting to send them too.
+   * Null when there is nothing to ask about.
+   */
+  tagsToPush: PendingTag[] | null
   /** Branch pending a rename / delete confirm, set from any branch menu. */
   branchToRename: string | null
   branchToDelete: string | null
@@ -58,6 +73,8 @@ interface UiState {
   openMerge: (source?: string) => void
   openNewTag: (sha?: string) => void
   openNewBranch: (sha?: string) => void
+  /** Ask whether to send these local-only tags; empty list closes the prompt. */
+  promptPushTags: (tags: PendingTag[]) => void
   renameBranchPrompt: (name: string | null) => void
   deleteBranchPrompt: (name: string | null) => void
   openRemoteSync: (source: string, target: string) => void
@@ -94,6 +111,7 @@ export const useUiStore = create<UiState>((set) => ({
   syncTarget: null,
   tagTargetSha: null,
   branchTargetSha: null,
+  tagsToPush: null,
   branchToRename: null,
   branchToDelete: null,
   settingsSection: 'general',
@@ -124,6 +142,7 @@ export const useUiStore = create<UiState>((set) => ({
   openMerge: (source) => set({ activeModal: 'merge', mergeSource: source ?? null }),
   openNewTag: (sha) => set({ activeModal: 'newTag', tagTargetSha: sha ?? null }),
   openNewBranch: (sha) => set({ activeModal: 'newBranch', branchTargetSha: sha ?? null }),
+  promptPushTags: (tags) => set({ tagsToPush: tags.length > 0 ? tags : null }),
   renameBranchPrompt: (name) => set({ branchToRename: name }),
   deleteBranchPrompt: (name) => set({ branchToDelete: name }),
   openRemoteSync: (source, target) =>

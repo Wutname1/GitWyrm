@@ -12,6 +12,7 @@ import { DragScrim } from '@/components/domain/DragScrim'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
 import { NewTagModal } from '@/components/modals/NewTagModal'
+import { PushTagsModal } from '@/components/modals/PushTagsModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
@@ -130,6 +131,7 @@ function AppInner() {
       <RemoteSyncModal />
       <NewBranchModal />
       <NewTagModal />
+      <PushTagsModal />
       <RemotesModal />
       <GithubConnectModal />
       <Toaster position="bottom-center" />

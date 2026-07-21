@@ -636,6 +636,54 @@ async listRemotes(repoId: string) : Promise<Result<RemoteInfo[], string>> {
 }
 },
 /**
+ * Tags the named remote already has. Hits the network via `git ls-remote`, so
+ * callers should cache the result rather than polling it.
+ */
+async listRemoteTags(repoId: string, remote: string) : Promise<Result<RemoteTagInfo[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_remote_tags", { repoId, remote }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Local tags the remote is missing. `commit_on_remote` distinguishes tags that
+ * can be pushed on their own from those whose commit hasn't been sent yet.
+ */
+async unpushedTags(repoId: string, remote: string) : Promise<Result<UnpushedTag[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("unpushed_tags", { repoId, remote }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Push one tag to a remote. Never force-updates: a tag the remote already has
+ * under a different object fails rather than silently moving it.
+ */
+async pushTag(repoId: string, name: string, remote: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("push_tag", { repoId, name, remote }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a tag from a remote. The local tag is left alone, so a tag can be
+ * un-published without losing the local copy.
+ */
+async deleteRemoteTag(repoId: string, name: string, remote: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_remote_tag", { repoId, name, remote }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Add a new remote. Fails if the name is already in use.
  */
 async addRemote(repoId: string, name: string, url: string) : Promise<Result<null, string>> {
@@ -1379,6 +1427,15 @@ branches: RemoteBranchInfo[];
  * How many of `branches` have no local counterpart at all.
  */
 missing_locally: number }
+/**
+ * A tag on a remote, as reported by `git ls-remote --tags`.
+ */
+export type RemoteTagInfo = { name: string; 
+/**
+ * The object the remote's ref points at. For an annotated tag this is the
+ * tag object, not the commit, so it need not match `TagInfo::target_sha`.
+ */
+sha: string }
 export type RepoChangedPayload = { repo_id: string }
 export type RepoIcon = { source_path: string; label: string; data_url: string; custom: boolean }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
@@ -1475,7 +1532,16 @@ tab_order?: string[];
 /**
  * Reusable group snapshots shown in Open a repository > Groups.
  */
-saved_tab_groups?: TabGroupSetting[] }
+saved_tab_groups?: TabGroupSetting[]; 
+/**
+ * What to do about local-only tags after a push: "ask", "always", "never".
+ * None means ask. Validated on the frontend.
+ */
+tag_push_default?: string | null; 
+/**
+ * Whether the New Tag dialog's "send it to the remote" box starts checked.
+ */
+tag_push_on_create?: boolean }
 export type StashInfo = { index: number; message: string }
 /**
  * Result of a stash-save attempt. A clean working tree is a no-op, not an error.
@@ -1536,7 +1602,26 @@ export type SyncState =
  * restarts, unlike the in-memory repo ids assigned when a repository opens.
  */
 export type TabGroupSetting = { id: string; name: string; color: string; collapsed?: boolean; repo_paths?: string[] }
-export type TagInfo = { name: string }
+export type TagInfo = { name: string; 
+/**
+ * Commit the tag points at, after peeling an annotated tag's wrapper object.
+ */
+target_sha: string; 
+/**
+ * Annotated tags carry an author and message; lightweight ones don't.
+ */
+annotated: boolean }
+/**
+ * A local tag the given remote does not have, along with whether the remote
+ * already holds the commit it points at. Tags on commits the remote lacks
+ * cannot be pushed on their own, so they are reported separately.
+ */
+export type UnpushedTag = { name: string; target_sha: string; 
+/**
+ * True when the tagged commit is already reachable from a remote-tracking
+ * ref, so pushing the tag alone will succeed.
+ */
+commit_on_remote: boolean }
 export type UpdateChannel = "stable" | "beta"
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }
 

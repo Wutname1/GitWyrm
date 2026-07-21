@@ -220,6 +220,31 @@ pub enum StashOutcome {
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct TagInfo {
   pub name: String,
+  /// Commit the tag points at, after peeling an annotated tag's wrapper object.
+  pub target_sha: String,
+  /// Annotated tags carry an author and message; lightweight ones don't.
+  pub annotated: bool,
+}
+
+/// A tag on a remote, as reported by `git ls-remote --tags`.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct RemoteTagInfo {
+  pub name: String,
+  /// The object the remote's ref points at. For an annotated tag this is the
+  /// tag object, not the commit, so it need not match `TagInfo::target_sha`.
+  pub sha: String,
+}
+
+/// A local tag the given remote does not have, along with whether the remote
+/// already holds the commit it points at. Tags on commits the remote lacks
+/// cannot be pushed on their own, so they are reported separately.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct UnpushedTag {
+  pub name: String,
+  pub target_sha: String,
+  /// True when the tagged commit is already reachable from a remote-tracking
+  /// ref, so pushing the tag alone will succeed.
+  pub commit_on_remote: bool,
 }
 
 /// A configured remote and the remote-tracking branches under it.

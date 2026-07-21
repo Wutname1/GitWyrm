@@ -327,7 +327,14 @@ pub async fn list_tags(
     let mut tags: Vec<TagInfo> = names
       .iter()
       .flatten()
-      .map(|n| TagInfo { name: n.to_string() })
+      .filter_map(|n| {
+        // Peel to the commit so annotated and lightweight tags both report the
+        // commit they mark, not the intermediate tag object.
+        let reference = repo.find_reference(&format!("refs/tags/{n}")).ok()?;
+        let target_sha = reference.peel_to_commit().ok()?.id().to_string();
+        let annotated = reference.peel_to_tag().is_ok();
+        Some(TagInfo { name: n.to_string(), target_sha, annotated })
+      })
       .collect();
     tags.sort_by(|a, b| b.name.cmp(&a.name));
     Ok(tags)

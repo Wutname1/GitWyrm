@@ -1,9 +1,10 @@
 import { type ReactNode, useState } from 'react'
-import { ArrowLeftRight, Tag, Trash2 } from 'lucide-react'
+import { ArrowLeftRight, CloudOff, Tag, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { useBranches, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { useTagSync } from '@/hooks/useTagSync'
 import { useGithubAuth, useGithubIssues, useGithubPrs, useGithubSlug } from '@/hooks/useGithub'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
@@ -32,6 +33,10 @@ export function LeftPanel() {
 
   const branches = useBranches(repo?.id ?? null)
   const tags = useTags(repo?.id ?? null)
+  // The tag section is collapsed by default; don't reach for the network until
+  // the user actually opens it.
+  const tagsOpen = useUiStore((s) => s.sectionOpen.tags)
+  const tagSync = useTagSync(repo?.id ?? null, tagsOpen)
   const remotes = useRemotes(repo?.id ?? null)
   const stashes = useStashes(repo?.id ?? null)
 
@@ -43,6 +48,8 @@ export function LeftPanel() {
   const openGithubItem = useUiStore((s) => s.openGithubItem)
 
   const [toDelete, setToDelete] = useState<{ kind: 'branch' | 'tag'; name: string } | null>(null)
+  /** Tag pending a remote-only delete; the local copy is untouched. */
+  const [toRemoveFromRemote, setToRemoveFromRemote] = useState<string | null>(null)
   const branchToRename = useUiStore((s) => s.branchToRename)
   const branchToDelete = useUiStore((s) => s.branchToDelete)
   const renameBranchPrompt = useUiStore((s) => s.renameBranchPrompt)
@@ -102,7 +109,14 @@ export function LeftPanel() {
       key: 'tags',
       label: 'TAGS',
       type: 'tag',
-      items: (tags.data ?? []).map((t) => ({ name: t.name })),
+      // Only tags we have actually checked get the "not sent" marker; an
+      // unknown status stays unmarked rather than guessing.
+      items: (tags.data ?? []).map((t) => ({
+        name: t.name,
+        ...(tagSync.stateOf(t.name) === 'local'
+          ? { meta: 'not sent', metaTitle: `Only on your computer. Send it to ${tagSync.hostLabel}.` }
+          : {}),
+      })),
     },
   ]
 
@@ -195,7 +209,22 @@ export function LeftPanel() {
               <Tag />
               New tag
             </ContextMenuItem>
+            {tagSync.hasRemote && tagSync.stateOf(item.name) === 'local' && (
+              <ContextMenuItem onSelect={() => m.pushTag.mutate({ name: item.name })}>
+                <Upload />
+                Send to {tagSync.hostLabel}
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator />
+            {tagSync.hasRemote && tagSync.stateOf(item.name) === 'synced' && (
+              <ContextMenuItem
+                variant="destructive"
+                onSelect={() => setToRemoveFromRemote(item.name)}
+              >
+                <CloudOff />
+                Remove from {tagSync.hostLabel}
+              </ContextMenuItem>
+            )}
             <ContextMenuItem
               variant="destructive"
               onSelect={() => setToDelete({ kind: 'tag', name: item.name })}
@@ -305,6 +334,26 @@ export function LeftPanel() {
         }
         confirmLabel="Delete tag"
         onConfirm={() => toDelete && m.deleteTag.mutate(toDelete.name)}
+      />
+
+      <ConfirmDialog
+        open={toRemoveFromRemote != null}
+        onOpenChange={(o) => !o && setToRemoveFromRemote(null)}
+        destructive
+        title={`Remove this tag from ${tagSync.hostLabel}?`}
+        description={
+          <>
+            This removes <span className="font-mono text-foreground">{toRemoveFromRemote}</span> from{' '}
+            {tagSync.hostLabel}, where anyone else using this project will lose it. Your own copy
+            stays.
+          </>
+        }
+        confirmLabel="Remove it"
+        pending={m.deleteRemoteTag.isPending}
+        pendingLabel="Removing…"
+        onConfirm={() =>
+          toRemoveFromRemote && m.deleteRemoteTag.mutate({ name: toRemoveFromRemote })
+        }
       />
     </div>
   )
