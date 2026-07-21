@@ -100,17 +100,10 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "GitWyrm ${{ github.ref_name }}"
-          releaseBody: |
-            ## Download
-
-            **Most people want [GitWyrm-Setup.exe](https://cdn.gitwyrm.com/GitWyrm-Setup.exe)** - it always
-            installs the newest version and keeps itself up to date.
-
-            The installers attached below are pinned to this specific version. `gitwyrm-portable.exe`
-            needs no install but does not auto-update.
-
-            Deploying across a company? See the
-            [enterprise deployment guide](https://docs.gitwyrm.com/guide/enterprise-deployment).
+          # Placeholder only. The publish job overwrites this body with the
+          # generated changelog before the release goes public, so whatever a
+          # matrix leg writes here is never what users end up reading.
+          releaseBody: "Release notes are generated when this release is published."
           # Stays a draft here on purpose: both matrix legs share one release,
           # and publishing from a leg would make it public before the other
           # arch's installer is attached. The publish job below flips it once
@@ -203,7 +196,13 @@ jobs:
       contents: write
 
     steps:
-      - name: Verify assets and publish release
+      # Full history + tags: the changelog range is prev-tag..this-tag, which a
+      # shallow clone cannot resolve.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -228,5 +227,65 @@ jobs:
             exit 1
           fi
 
-          gh release edit "$TAG" --draft=false
+      # Publish the structured changelog to gitwyrm.com and render the same
+      # items to CHANGELOG.md. Without CHANGELOG_API_KEY the upload is skipped
+      # and only the render below runs, so the GitHub Release still gets notes.
+      - name: Publish changelog to gitwyrm.com
+        env:
+          CHANGELOG_API_KEY: ${{ secrets.CHANGELOG_API_KEY }}
+          CHANGELOG_API_URL: https://gitwyrm.com/api/v1/changelogs
+          PRODUCT: GitWyrm
+          RELEASE_VERSION: ${{ github.ref_name }}
+          DOWNLOAD_URL: https://cdn.gitwyrm.com/releases/${{ github.ref_name }}/GitWyrm-Setup.exe
+        run: |
+          chmod +x .github/scripts/*.sh
+          .github/scripts/upload-changelog.sh
+
+      # Build the release body: generated notes on top, download guidance below.
+      # render-changelog.sh regenerates from the same commit range, so the body
+      # matches what the website received even when the upload was skipped.
+      - name: Build release body
+        env:
+          PRODUCT: GitWyrm
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          chmod +x .github/scripts/*.sh
+          .github/scripts/render-changelog.sh CHANGELOG.md >/dev/null
+
+          {
+            if [ -s CHANGELOG.md ]; then
+              cat CHANGELOG.md
+            else
+              echo "Maintenance release - no user-facing changes."
+              echo
+            fi
+            cat <<'EOF'
+          ---
+
+          ## Download
+
+          **Most people want [GitWyrm-Setup.exe](https://cdn.gitwyrm.com/GitWyrm-Setup.exe)** - it always
+          installs the newest version and keeps itself up to date.
+
+          The installers attached below are pinned to this specific version. `gitwyrm-portable.exe`
+          needs no install but does not auto-update.
+
+          Deploying across a company? See the
+          [enterprise deployment guide](https://docs.gitwyrm.com/guide/enterprise-deployment).
+
+          See every release on the [changelog](https://gitwyrm.com/changelog).
+          EOF
+          } > RELEASE_BODY.md
+
+          cat RELEASE_BODY.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --notes-file RELEASE_BODY.md --draft=false
           echo "Published $TAG"
