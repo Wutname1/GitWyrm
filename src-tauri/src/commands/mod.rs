@@ -11,6 +11,7 @@ pub mod merge;
 pub mod patch;
 pub mod remote;
 pub mod repo;
+pub mod repo_icon;
 pub mod scan;
 pub mod staging;
 pub mod stash;

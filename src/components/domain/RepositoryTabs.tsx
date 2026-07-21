@@ -3,6 +3,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ImageIcon,
   Layers3,
   Pencil,
   Save,
@@ -37,6 +38,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { TooltipButton } from '@/components/ui/tooltip'
+import { RepoIconDialog } from '@/components/domain/RepoIconDialog'
 
 export type TabOrientation = 'horizontal' | 'vertical'
 
@@ -213,6 +215,44 @@ function orderedPaths(order: TabOrderItem[], groups: TabGroup[]): string[] {
     : groups.find((group) => group.id === item.id)?.repoPaths ?? [])
 }
 
+function RepoTabIcon({ repoPath, color, revision }: {
+  repoPath: string
+  color: string
+  revision: number
+}) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    commands.getRepoIcon(repoPath)
+      .then((result) => {
+        if (active) setDataUrl(result.status === 'ok' ? result.data?.data_url ?? null : null)
+      })
+      .catch(() => {
+        if (active) setDataUrl(null)
+      })
+    return () => { active = false }
+  }, [repoPath, revision])
+
+  if (!dataUrl) {
+    return <span className="size-[7px] flex-none rounded-[2px]" style={{ background: color }} />
+  }
+
+  return (
+    <span
+      className="grid size-4 flex-none place-items-center overflow-hidden rounded-[4px] bg-background"
+      style={{ boxShadow: `0 0 0 1px ${color}` }}
+    >
+      <img
+        src={dataUrl}
+        alt=""
+        className="size-full object-cover"
+        onError={() => setDataUrl(null)}
+      />
+    </span>
+  )
+}
+
 export function RepositoryTabs({ orientation }: { orientation: TabOrientation }) {
   const openRepos = useWorkspaceStore((state) => state.openRepos)
   const activeRepoId = useWorkspaceStore((state) => state.activeRepoId)
@@ -221,6 +261,8 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
   const tabOrder = useWorkspaceStore((state) => state.tabOrder)
   const savedTabGroups = useWorkspaceStore((state) => state.savedTabGroups)
   const [renaming, setRenaming] = useState<RenameTarget | null>(null)
+  const [iconRepo, setIconRepo] = useState<RepoInfo | null>(null)
+  const [iconRevisions, setIconRevisions] = useState<Record<string, number>>({})
   const [dragItem, setDragItem] = useState<DragItem | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const draggedGroupRef = useRef<string | null>(null)
@@ -417,9 +459,10 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
               style={group ? groupStyle(group.color) : undefined}
               title={repo.path}
             >
-              <span
-                className="size-[7px] flex-none rounded-[2px]"
-                style={{ background: group?.color ?? 'var(--gw-accent)' }}
+              <RepoTabIcon
+                repoPath={repo.path}
+                color={group?.color ?? 'var(--gw-accent)'}
+                revision={iconRevisions[pathKey(repo.path)] ?? 0}
               />
               <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
                 {repoName(repo)}
@@ -450,6 +493,10 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
             })}>
               <Pencil size={13} strokeWidth={2} />
               Rename tab
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => setIconRepo(repo)}>
+              <ImageIcon size={13} strokeWidth={2} />
+              Set icon
             </ContextMenuItem>
             <ContextMenuItem onSelect={() => createGroup([repo.path])}>
               <Layers3 size={13} strokeWidth={2} />
@@ -736,6 +783,20 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
               toast.success(`Group renamed to ${value.trim()}`)
             }
             setRenaming(null)
+          }}
+        />
+      )}
+      {iconRepo && (
+        <RepoIconDialog
+          key={iconRepo.path}
+          repo={iconRepo}
+          open
+          onOpenChange={(open) => {
+            if (!open) setIconRepo(null)
+          }}
+          onIconChanged={() => {
+            const key = pathKey(iconRepo.path)
+            setIconRevisions((current) => ({ ...current, [key]: (current[key] ?? 0) + 1 }))
           }}
         />
       )}

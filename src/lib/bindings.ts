@@ -118,6 +118,38 @@ async gitAvailable() : Promise<Result<boolean, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async getRepoIcon(repoPath: string) : Promise<Result<RepoIcon | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_repo_icon", { repoPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async findRepoIcons(repoPath: string) : Promise<Result<RepoIcon[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("find_repo_icons", { repoPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setRepoIcon(repoPath: string, sourcePath: string) : Promise<Result<RepoIcon, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_repo_icon", { repoPath, sourcePath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async clearRepoIcon(repoPath: string) : Promise<Result<RepoIcon | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_repo_icon", { repoPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getLog(repoId: string, skip: number, limit: number) : Promise<Result<LogPage, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_log", { repoId, skip, limit }) };
@@ -1348,6 +1380,7 @@ branches: RemoteBranchInfo[];
  */
 missing_locally: number }
 export type RepoChangedPayload = { repo_id: string }
+export type RepoIcon = { source_path: string; label: string; data_url: string; custom: boolean }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
 /**
  * How far a reset rewinds: ref only, ref+index, or ref+index+working tree.
