@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GitWyrm change size - story row direction</title>
+  <link rel="stylesheet" href="change-size-mockup.css" />
+</head>
+<body data-mode="story">
+  <main class="study-page">
+    <header class="study-head">
+      <div>
+        <div class="eyebrow">Change size exploration · Direction B</div>
+        <h1>Change size becomes part of the commit story</h1>
+        <p class="study-copy">A taller row puts a quiet change bar and file count directly under each message. Separate staged and unstaged trees preserve both folder context and partial staging.</p>
+      </div>
+      <nav class="switcher" aria-label="Mockup direction">
+        <a href="change-size-column-mockup.html">A · Changes column</a>
+        <a href="change-size-story-mockup.html" aria-current="page">B · Story rows</a>
+      </nav>
+    </header>
+
+    <section class="app-window story-mode exact-off line-counts-off" aria-label="GitWyrm commit story row mockup">
+      <div class="titlebar">
+        <div class="brand"><img src="../src/assets/logo.png" alt="" /><strong>GitWyrm</strong><span>History</span></div>
+        <div class="repo-tabs"><div class="repo-tab active"><i class="dot"></i><span>GitWyrm</span><span class="close">×</span></div></div>
+        <div class="title-actions"><button class="small-btn">Fetch <span style="color:var(--muted)">2m ago</span></button><button class="icon-btn" aria-label="App menu">•••</button></div>
+      </div>
+      <div class="app-body">
+        <aside class="sidebar">
+          <div class="side-title">BRANCHES <span class="plus">+</span></div>
+          <div class="side-row active"><span class="branch-mark">⑂</span>main<span class="count">12</span></div>
+          <div class="side-row"><span class="branch-mark">⑂</span>release<span class="count">3</span></div>
+          <div class="side-row"><span class="branch-mark">⑂</span>design-pass<span class="count">1</span></div>
+          <div class="side-divider"></div>
+          <div class="side-title">REMOTE BRANCHES</div>
+          <div class="side-row"><span class="branch-mark">⌁</span>origin/main</div>
+          <div class="side-row"><span class="branch-mark">⌁</span>origin/release</div>
+          <div class="side-divider"></div>
+          <div class="side-title">TAGS</div>
+          <div class="side-row"><span style="color:var(--blue)">◇</span>0.0.1</div>
+        </aside>
+
+        <section class="workspace">
+          <div class="toolbar">
+            <button class="branch-button"><b>⑂</b> main <span style="color:var(--muted)">⌄</span></button>
+            <label class="search"><input aria-label="Search commits" placeholder="Search commits" /><kbd>Ctrl K</kbd></label>
+            <div class="size-key">
+              <button class="small-btn" aria-expanded="false">Change display</button>
+              <div class="key-popover display-options" role="dialog" aria-label="Change display options">
+                <strong>Change display</strong><p>Choose what appears beside each commit.</p>
+                <div class="setting-row"><span class="setting-copy"><b>Show change indicator</b><span>File count and change bar</span></span><button class="setting-switch" data-indicator-setting aria-label="Show change indicator" aria-pressed="true"><i></i></button></div>
+                <div class="setting-row"><span class="setting-copy"><b>Show line counts</b><span>Exact added and removed lines</span></span><button class="setting-switch" data-line-setting aria-label="Show line counts" aria-pressed="false"><i></i></button></div>
+                <div class="live-example"><div class="example-head">LIVE EXAMPLE <span class="example-state">Bars only</span></div><div class="example-row"><span class="example-title">Update the commit graph</span><span class="file-count">12</span></div><div class="example-detail"><span class="change-bar"><i class="plus" style="width:72%"></i><i class="minus" style="width:28%"></i></span><span class="numbers"><b class="adds">+142</b><b class="deletes">-55</b></span></div><p class="example-help">Longer bars mean more lines changed. Green was added and red was removed.</p></div>
+              </div>
+            </div>
+          </div>
+          <div class="graph-shell">
+            <div class="graph-head"><span>BRANCH / TAG</span><span>GRAPH</span><span data-message-head>COMMIT MESSAGE · SIZE</span><span class="author-head">AUTHOR</span><span>DATE</span><span>SHA</span></div>
+            <div class="rows"></div>
+            <div class="toast" role="status" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <aside class="right-panel">
+          <div class="right-head">CHANGES · MAIN <span class="view-kind">TREE</span></div>
+          <div class="tree" role="tree" aria-label="Changed files">
+            <section class="tree-section">
+              <div class="file-group" data-group-header="staged">STAGED <span class="group-count" data-count>3</span></div>
+              <div data-file-group="staged">
+                <div class="tree-branch">
+                  <div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="staged-src" style="--depth:0"><span class="twisty">⌄</span><span class="tree-name">src</span><span></span></div>
+                  <div class="tree-children" role="group">
+                    <div class="tree-branch">
+                      <div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="staged-components" style="--depth:1"><span class="twisty">⌄</span><span class="tree-name">components</span><span></span></div>
+                      <div class="tree-children" role="group">
+                        <div class="tree-branch">
+                          <div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="staged-graph" style="--depth:2"><span class="twisty">⌄</span><span class="tree-name">graph</span><span></span></div>
+                          <div class="tree-children tree-files" role="group" data-tree-files="src-components-graph">
+                            <div class="tree-row file-node" role="treeitem" data-file-path="src/components/graph/CommitRow.tsx" data-path-key="src-components-graph" style="--depth:3"><span></span><span class="tree-name"><span class="status">M</span>CommitRow.tsx</span><span class="line-stat"><b class="adds">+10</b><b class="deletes">-2</b></span><button class="stage-toggle" data-stage-toggle data-file-name="CommitRow.tsx" data-direction="unstage" aria-label="Unstage CommitRow.tsx">-</button></div>
+                            <div class="tree-row file-node" role="treeitem" data-file-path="src/components/graph/index.ts" data-path-key="src-components-graph" style="--depth:3"><span></span><span class="tree-name"><span class="status">M</span>index.ts</span><span class="line-stat"><b class="adds">+4</b><b class="deletes">-1</b></span><button class="stage-toggle" data-stage-toggle data-file-name="index.ts" data-direction="unstage" aria-label="Unstage index.ts">-</button></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="tree-branch">
+                      <div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="staged-lib" style="--depth:1"><span class="twisty">⌄</span><span class="tree-name">lib</span><span></span></div>
+                      <div class="tree-children tree-files" role="group" data-tree-files="src-lib">
+                        <div class="tree-row file-node" role="treeitem" data-file-path="src/lib/graphColumns.ts" data-path-key="src-lib" style="--depth:2"><span></span><span class="tree-name"><span class="status">M</span>graphColumns.ts</span><span class="line-stat"><b class="adds">+8</b><b class="deletes">-2</b></span><button class="stage-toggle" data-stage-toggle data-file-name="graphColumns.ts" data-direction="unstage" aria-label="Unstage graphColumns.ts">-</button></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="tree-branch">
+                  <div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="staged-tauri" style="--depth:0"><span class="twisty">⌄</span><span class="tree-name">src-tauri</span><span></span></div>
+                  <div class="tree-children" role="group"><div class="tree-branch"><div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="staged-tauri-src" style="--depth:1"><span class="twisty">⌄</span><span class="tree-name">src</span><span></span></div><div class="tree-children" role="group"><div class="tree-branch"><div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="staged-git" style="--depth:2"><span class="twisty">⌄</span><span class="tree-name">git</span><span></span></div><div class="tree-children tree-files" role="group" data-tree-files="tauri-git"></div></div></div></div></div>
+                </div>
+              </div>
+            </section>
+            <section class="tree-section">
+              <div class="file-group" data-group-header="unstaged">UNSTAGED <span class="group-count" data-count>3</span></div>
+              <div data-file-group="unstaged">
+                <div class="tree-branch">
+                  <div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="unstaged-src" style="--depth:0"><span class="twisty">⌄</span><span class="tree-name">src</span><span></span></div>
+                  <div class="tree-children" role="group">
+                    <div class="tree-branch">
+                      <div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="unstaged-components" style="--depth:1"><span class="twisty">⌄</span><span class="tree-name">components</span><span></span></div>
+                      <div class="tree-children" role="group"><div class="tree-branch"><div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="unstaged-graph" style="--depth:2"><span class="twisty">⌄</span><span class="tree-name">graph</span><span></span></div><div class="tree-children tree-files" role="group" data-tree-files="src-components-graph"><div class="tree-row file-node" role="treeitem" data-file-path="src/components/graph/CommitRow.tsx" data-path-key="src-components-graph" style="--depth:3"><span></span><span class="tree-name"><span class="status">M</span>CommitRow.tsx</span><span class="line-stat"><b class="adds">+6</b><b class="deletes">-1</b></span><button class="stage-toggle" data-stage-toggle data-file-name="CommitRow.tsx" data-direction="stage" aria-label="Stage CommitRow.tsx">+</button></div></div></div></div>
+                    </div>
+                    <div class="tree-branch">
+                      <div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="unstaged-lib" style="--depth:1"><span class="twisty">⌄</span><span class="tree-name">lib</span><span></span></div>
+                      <div class="tree-children tree-files" role="group" data-tree-files="src-lib"><div class="tree-row file-node" role="treeitem" data-file-path="src/lib/index.ts" data-path-key="src-lib" style="--depth:2"><span></span><span class="tree-name"><span class="status">M</span>index.ts</span><span class="line-stat"><b class="adds">+6</b><b class="deletes">-2</b></span><button class="stage-toggle" data-stage-toggle data-file-name="index.ts" data-direction="stage" aria-label="Stage index.ts">+</button></div></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="tree-branch">
+                  <div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="unstaged-tauri" style="--depth:0"><span class="twisty">⌄</span><span class="tree-name">src-tauri</span><span></span></div>
+                  <div class="tree-children" role="group"><div class="tree-branch"><div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="unstaged-tauri-src" style="--depth:1"><span class="twisty">⌄</span><span class="tree-name">src</span><span></span></div><div class="tree-children" role="group"><div class="tree-branch"><div class="tree-row folder" role="treeitem" aria-expanded="true" data-folder="unstaged-git" style="--depth:2"><span class="twisty">⌄</span><span class="tree-name">git</span><span></span></div><div class="tree-children tree-files" role="group" data-tree-files="tauri-git"><div class="tree-row file-node" role="treeitem" data-file-path="src-tauri/src/git/types.rs" data-path-key="tauri-git" style="--depth:3"><span></span><span class="tree-name"><span class="status">M</span>types.rs</span><span class="line-stat"><b class="adds">+4</b><b class="deletes">-0</b></span><button class="stage-toggle" data-stage-toggle data-file-name="types.rs" data-direction="stage" aria-label="Stage types.rs">+</button></div></div></div></div></div></div>
+                </div>
+              </div>
+            </section>
+            <div class="tree-summary"><span>5 files</span><span class="adds">+38</span><span class="deletes">-8</span><span class="change-bar"><i class="plus" style="width:83%"></i><i class="minus" style="width:17%"></i></span></div>
+          </div>
+          <div class="commit-form"><label>COMMIT MESSAGE</label><textarea>Show change size in the commit graph</textarea><button>Commit 5 files</button></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+  <script src="change-size-mockup.js"></script>
+</body>
+</html>

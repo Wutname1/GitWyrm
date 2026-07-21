@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GitWyrm change size - column direction</title>
+  <link rel="stylesheet" href="change-size-mockup.css" />
+</head>
+<body data-mode="column">
+  <main class="study-page">
+    <header class="study-head">
+      <div>
+        <div class="eyebrow">Change size exploration · Direction A</div>
+        <h1>Exact changes, built into the table</h1>
+        <p class="study-copy">A dedicated column keeps the current compact rows and makes change size easy to compare. The file list keeps staged and unstaged work separate and gives every file a prominent parent path.</p>
+      </div>
+      <nav class="switcher" aria-label="Mockup direction">
+        <a href="change-size-column-mockup.html" aria-current="page">A · Changes column</a>
+        <a href="change-size-story-mockup.html">B · Story rows</a>
+      </nav>
+    </header>
+
+    <section class="app-window column-mode line-counts-off" aria-label="GitWyrm changes column mockup">
+      <div class="titlebar">
+        <div class="brand"><img src="../src/assets/logo.png" alt="" /><strong>GitWyrm</strong><span>History</span></div>
+        <div class="repo-tabs"><div class="repo-tab active"><i class="dot"></i><span>GitWyrm</span><span class="close">×</span></div></div>
+        <div class="title-actions"><button class="small-btn">Fetch <span style="color:var(--muted)">2m ago</span></button><button class="icon-btn" aria-label="App menu">•••</button></div>
+      </div>
+      <div class="app-body">
+        <aside class="sidebar">
+          <div class="side-title">BRANCHES <span class="plus">+</span></div>
+          <div class="side-row active"><span class="branch-mark">⑂</span>main<span class="count">12</span></div>
+          <div class="side-row"><span class="branch-mark">⑂</span>release<span class="count">3</span></div>
+          <div class="side-row"><span class="branch-mark">⑂</span>design-pass<span class="count">1</span></div>
+          <div class="side-divider"></div>
+          <div class="side-title">REMOTE BRANCHES</div>
+          <div class="side-row"><span class="branch-mark">⌁</span>origin/main</div>
+          <div class="side-row"><span class="branch-mark">⌁</span>origin/release</div>
+          <div class="side-divider"></div>
+          <div class="side-title">TAGS</div>
+          <div class="side-row"><span style="color:var(--blue)">◇</span>0.0.1</div>
+        </aside>
+
+        <section class="workspace">
+          <div class="toolbar">
+            <button class="branch-button"><b>⑂</b> main <span style="color:var(--muted)">⌄</span></button>
+            <label class="search"><input aria-label="Search commits" placeholder="Search commits" /><kbd>Ctrl K</kbd></label>
+            <div class="size-key">
+              <button class="small-btn" aria-expanded="false">Change display</button>
+              <div class="key-popover display-options" role="dialog" aria-label="Change display options">
+                <strong>Change display</strong><p>Choose what appears beside each commit.</p>
+                <div class="setting-row"><span class="setting-copy"><b>Show change indicator</b><span>File count and change bar</span></span><button class="setting-switch" data-indicator-setting aria-label="Show change indicator" aria-pressed="true"><i></i></button></div>
+                <div class="setting-row"><span class="setting-copy"><b>Show line counts</b><span>Exact added and removed lines</span></span><button class="setting-switch" data-line-setting aria-label="Show line counts" aria-pressed="false"><i></i></button></div>
+                <div class="live-example"><div class="example-head">LIVE EXAMPLE <span class="example-state">Bars only</span></div><div class="example-row"><span class="example-title">Update the commit graph</span><span class="file-count">12</span></div><div class="example-detail"><span class="change-bar"><i class="plus" style="width:72%"></i><i class="minus" style="width:28%"></i></span><span class="numbers"><b class="adds">+142</b><b class="deletes">-55</b></span></div><p class="example-help">Longer bars mean more lines changed. Green was added and red was removed.</p></div>
+              </div>
+            </div>
+          </div>
+          <div class="graph-shell">
+            <div class="graph-head"><span>BRANCH / TAG</span><span>GRAPH</span><span>COMMIT MESSAGE</span><span class="author-head">AUTHOR</span><button class="head-button changes-head" data-sort><span class="sort-label">CHANGES</span><span class="sort-arrow">↕</span></button><span>DATE</span><span>SHA</span></div>
+            <div class="rows"></div>
+            <div class="toast" role="status" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <aside class="right-panel">
+          <div class="right-head">CHANGES · MAIN <span class="view-kind">LIST</span></div>
+          <div class="file-list">
+            <div class="file-group" data-group-header="staged">STAGED <span class="group-count" data-count>3</span></div>
+            <div data-file-group="staged">
+              <div class="file" data-file-path="src/components/graph/CommitRow.tsx"><span class="status">M</span><span class="file-copy"><span class="file-name">CommitRow.tsx</span><span class="path">src/components/graph/</span></span><span class="line-stat"><b class="adds">+10</b><b class="deletes">-2</b></span><button class="stage-toggle" data-stage-toggle data-file-name="CommitRow.tsx" data-direction="unstage" aria-label="Unstage CommitRow.tsx">-</button></div>
+              <div class="file" data-file-path="src/components/graph/index.ts"><span class="status">M</span><span class="file-copy"><span class="file-name">index.ts</span><span class="path">src/components/graph/</span></span><span class="line-stat"><b class="adds">+4</b><b class="deletes">-1</b></span><button class="stage-toggle" data-stage-toggle data-file-name="index.ts" data-direction="unstage" aria-label="Unstage index.ts">-</button></div>
+              <div class="file" data-file-path="src/lib/graphColumns.ts"><span class="status">M</span><span class="file-copy"><span class="file-name">graphColumns.ts</span><span class="path">src/lib/</span></span><span class="line-stat"><b class="adds">+8</b><b class="deletes">-2</b></span><button class="stage-toggle" data-stage-toggle data-file-name="graphColumns.ts" data-direction="unstage" aria-label="Unstage graphColumns.ts">-</button></div>
+            </div>
+            <div class="file-group" data-group-header="unstaged">UNSTAGED <span class="group-count" data-count>3</span></div>
+            <div data-file-group="unstaged">
+              <div class="file" data-file-path="src/components/graph/CommitRow.tsx"><span class="status">M</span><span class="file-copy"><span class="file-name">CommitRow.tsx</span><span class="path">src/components/graph/</span></span><span class="line-stat"><b class="adds">+6</b><b class="deletes">-1</b></span><button class="stage-toggle" data-stage-toggle data-file-name="CommitRow.tsx" data-direction="stage" aria-label="Stage CommitRow.tsx">+</button></div>
+              <div class="file" data-file-path="src/lib/index.ts"><span class="status">M</span><span class="file-copy"><span class="file-name">index.ts</span><span class="path">src/lib/</span></span><span class="line-stat"><b class="adds">+6</b><b class="deletes">-2</b></span><button class="stage-toggle" data-stage-toggle data-file-name="index.ts" data-direction="stage" aria-label="Stage index.ts">+</button></div>
+              <div class="file" data-file-path="src-tauri/src/git/types.rs"><span class="status">M</span><span class="file-copy"><span class="file-name">types.rs</span><span class="path">src-tauri/src/git/</span></span><span class="line-stat"><b class="adds">+4</b><b class="deletes">-0</b></span><button class="stage-toggle" data-stage-toggle data-file-name="types.rs" data-direction="stage" aria-label="Stage types.rs">+</button></div>
+            </div>
+          </div>
+          <div class="commit-form"><label>COMMIT MESSAGE</label><textarea>Show change size in the commit graph</textarea><button>Commit 5 files</button></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+  <script src="change-size-mockup.js"></script>
+</body>
+</html>
