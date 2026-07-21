@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Clock, Download, Folder, FolderGit2, FolderSearch, Layers3, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { Clock, CornerUpRight, Download, Folder, FolderGit2, FolderSearch, Layers3, ListChecks, Loader2, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { listen } from '@tauri-apps/api/event'
 import { cn } from '@/lib/utils'
@@ -10,7 +10,7 @@ import { TooltipButton } from '@/components/ui/tooltip'
 import { commands } from '@/lib/bindings'
 import { joinPath, normalizePath } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
-import { useCodeFolderRepos, useOpenRepo } from '@/hooks/useRepoActions'
+import { useCodeFolderRepos, useOpenRepo, useOpenRepos } from '@/hooks/useRepoActions'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -27,6 +27,11 @@ function RepoRow({
   meta,
   onClick,
   disabled,
+  selectable,
+  selected,
+  onSelectedChange,
+  alreadyOpen,
+  onJumpToTab,
 }: {
   icon: React.ReactNode
   name: string
@@ -34,26 +39,62 @@ function RepoRow({
   meta?: string
   onClick: () => void
   disabled?: boolean
+  /** Shows a checkbox and makes the row toggle selection instead of opening. */
+  selectable?: boolean
+  selected?: boolean
+  onSelectedChange?: (selected: boolean) => void
+  /** Already open in a tab: not selectable, and offers a jump instead of an open. */
+  alreadyOpen?: boolean
+  onJumpToTab?: () => void
 }) {
+  // An open repo can't be opened again, so its checkbox is inert and the whole
+  // row dims to explain why. Jumping to its tab stays available.
+  const inert = disabled || (selectable && alreadyOpen)
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left hover:bg-panel3 disabled:opacity-50"
-    >
-      <span className="flex-none text-sub">{icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium text-foreground">
-          {name}
-        </span>
-        {detail && (
-          <span className="block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[9.5px] text-muted-foreground">
-            {detail}
-          </span>
+    <div className="group/row flex w-full items-center rounded-md pr-1.5 hover:bg-panel3">
+      <button
+        onClick={() => (selectable ? onSelectedChange?.(!selected) : onClick())}
+        disabled={inert}
+        aria-pressed={selectable && !alreadyOpen ? selected : undefined}
+        className={cn(
+          'flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left',
+          inert ? 'cursor-default opacity-45' : 'disabled:opacity-50',
         )}
-      </span>
-      {meta && <span className="flex-none font-mono text-[9.5px] text-primary">{meta}</span>}
-    </button>
+      >
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected ?? false}
+            disabled={alreadyOpen}
+            readOnly
+            tabIndex={-1}
+            aria-hidden
+            className="pointer-events-none size-3.5 flex-none accent-[var(--gw-accent)]"
+          />
+        )}
+        <span className="flex-none text-sub">{icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium text-foreground">
+            {name}
+          </span>
+          {detail && (
+            <span className="block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[9.5px] text-muted-foreground">
+              {detail}
+            </span>
+          )}
+        </span>
+        {meta && <span className="flex-none font-mono text-[9.5px] text-primary">{meta}</span>}
+      </button>
+      {alreadyOpen && onJumpToTab && (
+        <button
+          onClick={onJumpToTab}
+          className="flex flex-none items-center gap-1 rounded-[5px] px-1.5 py-1 text-[10px] font-medium text-primary hover:bg-soft"
+        >
+          <CornerUpRight size={11} />
+          Jump to tab
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -72,8 +113,9 @@ export function RepoPickerModal() {
   const closeModal = useUiStore((s) => s.closeModal)
   const recents = useWorkspaceStore((s) => s.recents)
   const openRepos = useWorkspaceStore((s) => s.openRepos)
-  const openRepoIds = useMemo(
-    () => new Set(openRepos.map((r) => r.path.toLowerCase())),
+  /** Open repos keyed by lowercase path, so rows can show "open" and jump to the tab. */
+  const openByPath = useMemo(
+    () => new Map(openRepos.map((r) => [r.path.toLowerCase(), r])),
     [openRepos]
   )
   const codeFolder = useWorkspaceStore((s) => s.codeFolder)
@@ -86,9 +128,30 @@ export function RepoPickerModal() {
 
   const scanned = useCodeFolderRepos()
   const openRepo = useOpenRepo()
+  const openRepos_ = useOpenRepos()
 
   const [tab, setTab] = useState<Tab>('open')
   const [filter, setFilter] = useState('')
+  /** Paths ticked for a batch open, keyed by lowercase path. */
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  /** Checkbox mode. Off by default so a single click still opens one repo. */
+  const [selectionMode, setSelectionMode] = useState(false)
+
+  const busy = openRepo.isPending || openRepos_.isPending
+
+  const jumpToTab = (repoId: string) => {
+    useWorkspaceStore.getState().setActiveRepo(repoId)
+    closeModal()
+  }
+
+  const toggleSelected = (path: string, isSelected: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (isSelected) next.add(path.toLowerCase())
+      else next.delete(path.toLowerCase())
+      return next
+    })
+  }
 
   // Clone state. Destination defaults to the code folder, then the saved
   // clone-directory setting; edits are pushed back to the setting on use.
@@ -137,8 +200,24 @@ export function RepoPickerModal() {
 
   const browseForRepo = async () => {
     const { open: openDialog } = await import('@tauri-apps/plugin-dialog')
-    const dir = await openDialog({ directory: true, title: 'Open repository' })
-    if (typeof dir === 'string') openRepo.mutate(dir)
+    const dir = await openDialog({ directory: true, multiple: true, title: 'Open repositories' })
+    const paths = Array.isArray(dir) ? dir : typeof dir === 'string' ? [dir] : []
+    if (paths.length === 1) openRepo.mutate(paths[0])
+    else if (paths.length > 1) openRepos_.mutate(paths)
+  }
+
+  const openSelected = () => {
+    const wanted = new Set(selected)
+    const paths = [...filteredScanned, ...filteredRecents]
+      .map((r) => r.path)
+      .filter((path) => wanted.has(path.toLowerCase()) && !openByPath.has(path.toLowerCase()))
+    if (paths.length === 0) return
+    openRepos_.mutate(paths, {
+      onSuccess: () => {
+        setSelected(new Set())
+        setSelectionMode(false)
+      },
+    })
   }
 
   const suggestedName =
@@ -261,11 +340,24 @@ export function RepoPickerModal() {
                 autoFocus
               />
               <Button
+                variant={selectionMode ? 'default' : 'secondary'}
+                size="sm"
+                className="h-8 flex-none gap-1.5 text-xs"
+                onClick={() => {
+                  setSelectionMode((on) => !on)
+                  setSelected(new Set())
+                }}
+                disabled={busy}
+              >
+                <ListChecks size={13} />
+                {selectionMode ? 'Cancel' : 'Select'}
+              </Button>
+              <Button
                 variant="secondary"
                 size="sm"
                 className="h-8 flex-none gap-1.5 text-xs"
                 onClick={browseForRepo}
-                disabled={openRepo.isPending}
+                disabled={busy}
               >
                 <FolderSearch size={13} />
                 Browse…
@@ -308,34 +400,72 @@ export function RepoPickerModal() {
                   {(scanned.error as Error).message}
                 </div>
               )}
-              {filteredScanned.map((r) => (
-                <RepoRow
-                  key={r.path}
-                  icon={<FolderGit2 size={15} strokeWidth={1.8} />}
-                  name={r.name}
-                  detail={r.path}
-                  meta={openRepoIds.has(r.path.toLowerCase()) ? 'open' : (r.head_branch ?? undefined)}
-                  onClick={() => openRepo.mutate(r.path)}
-                  disabled={openRepo.isPending}
-                />
-              ))}
+              {filteredScanned.map((r) => {
+                const already = openByPath.get(r.path.toLowerCase())
+                return (
+                  <RepoRow
+                    key={r.path}
+                    icon={<FolderGit2 size={15} strokeWidth={1.8} />}
+                    name={r.name}
+                    detail={r.path}
+                    meta={already ? 'open' : (r.head_branch ?? undefined)}
+                    onClick={() => (already ? jumpToTab(already.id) : openRepo.mutate(r.path))}
+                    disabled={busy}
+                    selectable={selectionMode}
+                    selected={selected.has(r.path.toLowerCase())}
+                    onSelectedChange={(next) => toggleSelected(r.path, next)}
+                    alreadyOpen={already != null}
+                    onJumpToTab={already ? () => jumpToTab(already.id) : undefined}
+                  />
+                )
+              })}
 
               {filteredRecents.length > 0 && (
                 <>
                   <SectionLabel>RECENT</SectionLabel>
-                  {filteredRecents.map((r) => (
-                    <RepoRow
-                      key={r.path}
-                      icon={<Clock size={14} strokeWidth={1.8} />}
-                      name={r.name}
-                      detail={r.path}
-                      onClick={() => openRepo.mutate(r.path)}
-                      disabled={openRepo.isPending}
-                    />
-                  ))}
+                  {filteredRecents.map((r) => {
+                    const already = openByPath.get(r.path.toLowerCase())
+                    return (
+                      <RepoRow
+                        key={r.path}
+                        icon={<Clock size={14} strokeWidth={1.8} />}
+                        name={r.name}
+                        detail={r.path}
+                        meta={already ? 'open' : undefined}
+                        onClick={() => (already ? jumpToTab(already.id) : openRepo.mutate(r.path))}
+                        disabled={busy}
+                        selectable={selectionMode}
+                        selected={selected.has(r.path.toLowerCase())}
+                        onSelectedChange={(next) => toggleSelected(r.path, next)}
+                        alreadyOpen={already != null}
+                        onJumpToTab={already ? () => jumpToTab(already.id) : undefined}
+                      />
+                    )
+                  })}
                 </>
               )}
             </div>
+
+            {selectionMode && (
+              <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
+                <span className="text-[11px] text-muted-foreground">
+                  {selected.size === 0
+                    ? 'Tick the repositories you want to open.'
+                    : `${selected.size} selected`}
+                </span>
+                <div className="flex-1" />
+                <Button
+                  size="sm"
+                  className="h-7 gap-1.5 text-[11px]"
+                  disabled={selected.size === 0 || busy}
+                  onClick={openSelected}
+                >
+                  {openRepos_.isPending && <Loader2 size={12} className="animate-spin" />}
+                  Open {selected.size > 0 ? selected.size : ''}{' '}
+                  {selected.size === 1 ? 'repository' : 'repositories'}
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

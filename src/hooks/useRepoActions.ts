@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { commands } from '@/lib/bindings'
+import { commands, type RepoInfo } from '@/lib/bindings'
 import { normalizePath } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
 import { useUiStore } from '@/stores/uiStore'
@@ -37,6 +37,50 @@ export function useOpenRepo() {
       addRepo(repo)
       closeModal()
       toast.success(`Opened ${repo.name}`)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+/**
+ * Opens several repos as tabs in one go. Failures are collected rather than
+ * aborting the batch, so one unreadable folder cannot block the rest.
+ */
+export function useOpenRepos() {
+  const addReposInBackground = useWorkspaceStore((s) => s.addReposInBackground)
+  const closeModal = useUiStore((s) => s.closeModal)
+
+  return useMutation({
+    mutationFn: async (rawPaths: string[]) => {
+      const toastId = toast.loading(
+        `Opening ${rawPaths.length} ${rawPaths.length === 1 ? 'repository' : 'repositories'}…`
+      )
+      try {
+        const opened: RepoInfo[] = []
+        const failed: string[] = []
+        for (const rawPath of rawPaths) {
+          const path = normalizePath(rawPath)
+          try {
+            opened.push(unwrap(await commands.openRepo(path)))
+          } catch {
+            failed.push(path.split('\\').pop() ?? path)
+          }
+        }
+        return { opened, failed }
+      } finally {
+        toast.dismiss(toastId)
+      }
+    },
+    onSuccess: ({ opened, failed }) => {
+      addReposInBackground(opened)
+      if (opened.length > 0) closeModal()
+      if (failed.length === 0) {
+        toast.success(`Opened ${opened.length} ${opened.length === 1 ? 'repository' : 'repositories'}`)
+      } else if (opened.length > 0) {
+        toast.warning(`Opened ${opened.length}, but couldn't open ${failed.join(', ')}`)
+      } else {
+        toast.error(`Couldn't open ${failed.join(', ')}`)
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   })

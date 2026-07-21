@@ -209,6 +209,8 @@ interface WorkspaceState {
   hydrated: boolean
 
   addRepo: (repo: RepoInfo) => void
+  /** Opens several repos as tabs at once without changing which tab is active. */
+  addReposInBackground: (repos: RepoInfo[]) => void
   removeRepo: (id: string) => void
   setActiveRepo: (id: string) => void
   setCodeFolder: (path: string | null) => void
@@ -377,6 +379,27 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ...s.recents.filter((r) => r.path !== repo.path),
       ].slice(0, 10)
       return { openRepos, activeRepoId: repo.id, recents, tabOrder }
+    })
+    schedulePersist()
+  },
+  addReposInBackground: (repos) => {
+    if (repos.length === 0) return
+    set((s) => {
+      let openRepos = s.openRepos
+      let tabOrder = s.tabOrder
+      let recents = s.recents
+      for (const repo of repos) {
+        if (openRepos.some((r) => r.id === repo.id || samePath(r.path, repo.path))) continue
+        openRepos = [...openRepos, repo]
+        const represented = tabOrder.some((item) => item.type === 'repo' && samePath(item.path, repo.path))
+          || groupForPath(s.tabGroups, repo.path) != null
+        if (!represented) tabOrder = [...tabOrder, { type: 'repo' as const, path: repo.path }]
+        recents = [{ name: repo.name, path: repo.path }, ...recents.filter((r) => !samePath(r.path, repo.path))]
+      }
+      // activeRepoId is deliberately untouched: a batch open must not steal focus.
+      // With no tab open yet there is nothing to steal, so focus the first one.
+      const activeRepoId = s.activeRepoId ?? openRepos[0]?.id ?? null
+      return { openRepos, activeRepoId, recents: recents.slice(0, 10), tabOrder }
     })
     schedulePersist()
   },
