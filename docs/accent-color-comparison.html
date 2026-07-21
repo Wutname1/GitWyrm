@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GitWyrm accent color comparison</title>
+  <style>
+    @font-face {
+      font-family: "IBM Plex Sans Variable";
+      src: url("../src/assets/fonts/IBMPlexSans-VariableFont.ttf") format("truetype");
+      font-style: normal;
+      font-weight: 100 700;
+      font-display: swap;
+    }
+
+    :root {
+      color-scheme: dark;
+      --page: #080c11;
+      --bg: #0b0f14;
+      --panel: #0f151c;
+      --panel-2: #131b24;
+      --panel-3: #1a2430;
+      --border: #1e2833;
+      --border-strong: #2b3947;
+      --text: #d7e0ea;
+      --sub: #8b99a8;
+      --muted: #5d6b7a;
+      --amber: #fbbf24;
+      --red: #f87171;
+      --accent: #478c83;
+      --accent-rgb: 71, 140, 131;
+      --accent-fg: #04120d;
+      --accent-soft-alpha: .18;
+      --display: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+      --body: "IBM Plex Sans Variable", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+      --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      --ui-base-size: 13px;
+      --ui-label-size: 12px;
+      --ui-small-size: 9px;
+      --ui-default-weight: 400;
+      --ui-strong-weight: 650;
+      --ui-row-height: 34px;
+      --ui-commit-height: 66px;
+      --mini-label-size: 10px;
+      --mini-small-size: 7.5px;
+      --mini-strong-weight: 650;
+      --mini-row-height: 30px;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+
+    html { background: var(--page); }
+
+    body {
+      min-width: 1040px;
+      margin: 0;
+      background:
+        radial-gradient(circle at 14% -10%, rgba(71,140,131,.12), transparent 31rem),
+        var(--page);
+      color: var(--text);
+      font-family: var(--body);
+      font-size: 14px;
+    }
+
+    button { font: inherit; }
+
+    .page {
+      width: min(1500px, calc(100% - 56px));
+      margin: 0 auto;
+      padding: 34px 0 72px;
+    }
+
+    .page-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 30px;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow {
+      margin: 0 0 7px;
+      color: #6fa99d;
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-family: var(--display);
+      font-size: clamp(31px, 4vw, 54px);
+      line-height: .98;
+      letter-spacing: -.045em;
+    }
+
+    .intro {
+      max-width: 760px;
+      margin: 13px 0 0;
+      color: var(--sub);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: auto auto;
+      gap: 5px 14px;
+      padding: 11px 13px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(15,21,28,.8);
+      color: var(--sub);
+      font-size: 11px;
+    }
+
+    .legend strong { color: var(--text); font-weight: 650; }
+
+    .control-axis { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 12px; margin-bottom: 8px; }
+    .axis-label { color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+
+    .picker {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .picker-button {
+      display: grid;
+      min-height: 62px;
+      grid-template-columns: 27px minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--panel);
+      color: var(--sub);
+      cursor: pointer;
+      text-align: left;
+      transition: border-color 130ms ease, background 130ms ease, transform 130ms ease;
+    }
+
+    .picker-button:hover { border-color: var(--border-strong); background: var(--panel-2); }
+    .picker-button:active { transform: translateY(1px); }
+    .picker-button.active { border-color: var(--candidate); background: rgba(var(--candidate-rgb), .12); box-shadow: inset 0 0 0 1px rgba(var(--candidate-rgb), .24); }
+    .picker-button:focus-visible { outline: 2px solid var(--candidate); outline-offset: 2px; }
+    .picker-button .swatch { width: 27px; height: 27px; border-radius: 6px; background: var(--candidate); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+    .picker-button strong { display: block; color: var(--text); font-size: 12px; }
+    .picker-button small { display: block; margin-top: 3px; color: var(--muted); font-family: var(--mono); font-size: 9.5px; }
+
+    .type-picker { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .type-picker-button {
+      display: grid;
+      min-height: 60px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--panel);
+      color: var(--sub);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .type-picker-button:hover { border-color: var(--border-strong); background: var(--panel-2); }
+    .type-picker-button.active { border-color: var(--accent); background: rgba(var(--accent-rgb), .1); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .18); }
+    .type-picker-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .type-picker-button strong { display: block; color: var(--text); font-size: 12px; }
+    .type-picker-button small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .type-picker-button code { color: var(--accent); font-family: var(--mono); font-size: 10px; }
+
+    .hero-shell {
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      border-radius: 11px;
+      background: var(--bg);
+      box-shadow: 0 26px 70px rgba(0,0,0,.42);
+    }
+
+    .hero-meta {
+      display: flex;
+      min-height: 54px;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .hero-meta .hero-swatch { width: 22px; height: 22px; border-radius: 5px; background: var(--accent); }
+    .hero-meta strong { font-size: 14px; }
+    .hero-meta code { color: var(--sub); font-family: var(--mono); font-size: 11px; }
+    .hero-meta .recommendation { margin-left: auto; padding: 4px 7px; border: 1px solid rgba(var(--accent-rgb), .36); border-radius: 999px; background: rgba(var(--accent-rgb), .12); color: var(--accent); font-size: 10px; font-weight: 700; }
+
+    .contrast-readout { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+    .contrast-readout b { color: var(--text); font-family: var(--mono); font-size: 10px; }
+
+    .app-crop {
+      --soft: rgba(var(--accent-rgb), var(--accent-soft-alpha));
+      display: grid;
+      height: 510px;
+      grid-template-rows: 44px minmax(0, 1fr);
+      background: var(--bg);
+      font-size: var(--ui-base-size);
+      font-weight: var(--ui-default-weight);
+    }
+
+    .app-topbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 13px;
+      border-bottom: 1px solid var(--border);
+      background: #0d1218;
+      font-size: var(--ui-label-size);
+    }
+
+    .wyrm-mark { color: var(--accent); font-weight: 800; }
+    .wordmark { font-weight: var(--ui-strong-weight); }
+    .wordmark span { color: var(--accent); }
+    .tab-divider { width: 1px; height: 22px; margin: 0 4px; background: var(--border); }
+    .repo-tab { display: flex; height: 31px; align-items: center; gap: 7px; padding: 0 10px; border-radius: 5px; background: var(--panel-2); color: var(--text); }
+    .repo-dot { width: 7px; height: 7px; border-radius: 2px; background: var(--accent); }
+    .top-spacer { flex: 1; }
+    .top-action { padding: 6px 9px; border: 1px solid var(--border); border-radius: 5px; color: var(--sub); }
+
+    .workspace-crop { display: grid; min-height: 0; grid-template-columns: 250px minmax(0, 1fr) 310px; }
+    .mini-sidebar, .mini-graph, .mini-right { min-width: 0; }
+    .mini-sidebar { padding: 10px 0; border-right: 1px solid var(--border); background: var(--panel); }
+    .mini-right { border-left: 1px solid var(--border); background: var(--panel); }
+
+    .section-head {
+      display: flex;
+      height: 29px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 12px;
+      color: var(--muted);
+      font-size: var(--ui-small-size);
+      font-weight: var(--ui-strong-weight);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .section-head .count { margin-left: auto; color: var(--sub); font-family: var(--mono); letter-spacing: 0; }
+    .nav-row { display: flex; height: var(--ui-row-height); align-items: center; gap: 9px; margin: 0 6px; padding: 0 10px; border-radius: 4px; color: var(--sub); font-size: var(--ui-label-size); }
+    .nav-row.active { background: var(--soft); color: var(--text); box-shadow: inset 2px 0 var(--accent); }
+    .nav-dot { width: 8px; height: 8px; border: 1px solid var(--muted); border-radius: 50%; }
+    .nav-row.active .nav-dot { border: 0; background: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .1); }
+    .nav-row strong { font-weight: var(--ui-strong-weight); }
+    .nav-row small { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: var(--ui-small-size); }
+    .nav-row.connect { color: var(--accent); }
+
+    .mini-graph { display: grid; grid-template-rows: 43px minmax(0, 1fr); background: #0c1117; }
+    .graph-head { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--border); color: var(--sub); font-size: var(--ui-small-size); font-weight: var(--ui-strong-weight); text-transform: uppercase; }
+    .branch-route { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: var(--ui-small-size); }
+    .graph-body { position: relative; overflow: hidden; padding: 15px 15px 20px; }
+    .graph-line { position: absolute; top: 0; bottom: 0; left: 35px; width: 2px; background: var(--accent); opacity: .72; }
+    .commit-row { position: relative; z-index: 1; display: grid; height: var(--ui-commit-height); grid-template-columns: 42px minmax(0,1fr) auto; align-items: center; gap: 8px; border-bottom: 1px solid rgba(30,40,51,.64); }
+    .commit-node { display: grid; width: 13px; height: 13px; margin-left: 14px; place-items: center; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg); }
+    .commit-node.current { background: var(--accent); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), .12); }
+    .commit-copy strong { display: block; color: var(--text); font-size: var(--ui-label-size); font-weight: var(--ui-strong-weight); }
+    .commit-copy small { display: block; margin-top: 5px; color: var(--muted); font-family: var(--mono); font-size: var(--ui-small-size); }
+    .commit-time { color: var(--muted); font-size: var(--ui-small-size); }
+
+    .ref-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+    .ref-pill { display: inline-flex; min-height: 22px; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 5px; background: var(--accent); color: var(--accent-fg); font-family: var(--mono); font-size: var(--ui-small-size); font-weight: var(--ui-strong-weight); }
+    .ref-pill.outline { border: 1px solid var(--accent); background: transparent; color: var(--accent); }
+
+    .panel-title { display: flex; height: 42px; align-items: center; gap: 8px; padding: 0 13px; border-bottom: 1px solid var(--border); color: var(--sub); font-size: var(--ui-small-size); font-weight: var(--ui-strong-weight); letter-spacing: .07em; text-transform: uppercase; }
+    .panel-title .count { display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 9px; background: var(--accent); color: var(--accent-fg); font-family: var(--mono); font-size: 9px; }
+    .panel-section { padding: 10px 12px 12px; border-bottom: 1px solid var(--border); }
+    .panel-section h4 { margin: 0 0 8px; color: var(--muted); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+    .file-row { display: flex; height: 29px; align-items: center; gap: 7px; color: var(--sub); font-family: var(--mono); font-size: var(--ui-small-size); }
+    .file-state { color: var(--amber); font-weight: 800; }
+    .stage-check { margin-left: auto; color: var(--accent); }
+
+    .button-stack { display: grid; gap: 8px; padding: 13px; }
+    .primary-button, .secondary-button { height: 34px; border-radius: 5px; cursor: pointer; font-size: var(--ui-label-size); font-weight: var(--ui-strong-weight); }
+    .primary-button { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg); }
+    .secondary-button { border: 1px solid var(--accent); background: var(--soft); color: var(--accent); }
+    .focus-sample { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--accent); border-radius: 5px; background: var(--panel-2); color: var(--text); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), .24); font-size: var(--ui-label-size); }
+
+    .all-head { display: flex; align-items: baseline; gap: 12px; margin: 34px 0 13px; }
+    .all-head h2 { margin: 0; font-size: 23px; letter-spacing: -.025em; }
+    .all-head p { margin: 0; color: var(--muted); font-size: 12px; }
+
+    .comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+
+    .candidate-card {
+      --accent: var(--candidate);
+      --accent-rgb: var(--candidate-rgb);
+      --accent-soft-alpha: var(--candidate-soft);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--bg);
+      cursor: pointer;
+      transition: border-color 130ms ease, transform 130ms ease;
+    }
+
+    .candidate-card:hover { border-color: var(--candidate); transform: translateY(-1px); }
+    .candidate-card.selected { border-color: var(--candidate); box-shadow: 0 0 0 1px rgba(var(--candidate-rgb), .2); }
+    .candidate-card:focus-visible { outline: 2px solid var(--candidate); outline-offset: 2px; }
+    .candidate-card .card-head { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 11px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+    .candidate-card .card-swatch { width: 30px; height: 30px; border-radius: 6px; background: var(--candidate); }
+    .candidate-card h3 { margin: 0; font-size: 13px; }
+    .candidate-card .card-head small { display: block; margin-top: 2px; color: var(--muted); font-family: var(--mono); font-size: 9px; }
+    .candidate-card .tone-note { max-width: 180px; color: var(--sub); font-size: 9.5px; line-height: 1.35; text-align: right; }
+
+    .mini-surface { display: grid; height: 210px; grid-template-columns: 180px minmax(0,1fr) 180px; }
+    .mini-surface { font-size: var(--ui-base-size); font-weight: var(--ui-default-weight); }
+    .mini-surface .mini-sidebar { padding-top: 8px; }
+    .mini-surface .section-head { height: 25px; padding-inline: 9px; font-size: var(--mini-small-size); font-weight: var(--mini-strong-weight); }
+    .mini-surface .nav-row { height: var(--mini-row-height); margin-inline: 4px; padding-inline: 8px; font-size: var(--mini-label-size); }
+    .mini-surface .mini-graph { grid-template-rows: 33px minmax(0,1fr); }
+    .mini-surface .graph-head { padding-inline: 10px; font-size: var(--mini-small-size); font-weight: var(--mini-strong-weight); }
+    .mini-surface .graph-body { padding: 8px 10px; }
+    .mini-surface .graph-line { left: 26px; }
+    .mini-surface .commit-row { height: calc(var(--mini-row-height) + 22px); grid-template-columns: 32px minmax(0,1fr); }
+    .mini-surface .commit-node { margin-left: 10px; }
+    .mini-surface .commit-copy strong { font-size: var(--mini-label-size); font-weight: var(--mini-strong-weight); }
+    .mini-surface .commit-copy small { margin-top: 3px; font-size: var(--mini-small-size); }
+    .mini-surface .commit-time { display: none; }
+    .mini-surface .ref-pill { min-height: 18px; padding: 1px 5px; font-size: var(--mini-small-size); font-weight: var(--mini-strong-weight); }
+    .mini-surface .panel-title { height: 33px; padding-inline: 9px; font-size: var(--mini-small-size); font-weight: var(--mini-strong-weight); }
+    .mini-surface .file-row, .mini-surface .panel-section h4 { font-size: var(--mini-small-size); }
+    .mini-surface .button-stack { gap: 6px; padding: 9px; }
+    .mini-surface .primary-button, .mini-surface .secondary-button { height: 29px; font-size: var(--mini-label-size); font-weight: var(--mini-strong-weight); }
+    .mini-surface .focus-sample { padding: 7px; font-size: var(--mini-label-size); }
+
+    .card-metrics { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border); }
+    .metric { padding: 8px 10px; border-right: 1px solid var(--border); }
+    .metric:last-child { border-right: 0; }
+    .metric small { display: block; color: var(--muted); font-size: 8px; text-transform: uppercase; }
+    .metric strong { display: block; margin-top: 3px; color: var(--text); font-family: var(--mono); font-size: 10px; }
+
+    .type-comparison-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .type-card {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--panel);
+      cursor: pointer;
+      transition: border-color 130ms ease, transform 130ms ease;
+    }
+
+    .type-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .type-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(var(--accent-rgb), .2); }
+    .type-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .type-card-head { display: flex; align-items: start; gap: 8px; padding: 11px 12px; border-bottom: 1px solid var(--border); }
+    .type-card-head h3 { margin: 0; font-size: 13px; }
+    .type-card-head small { display: block; margin-top: 3px; color: var(--muted); font-family: var(--mono); font-size: 9px; }
+    .type-card-head span:last-child { margin-left: auto; padding: 3px 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--sub); font-size: 8px; text-transform: uppercase; }
+    .type-specimen { --soft: rgba(var(--accent-rgb), var(--accent-soft-alpha)); display: grid; gap: 10px; min-height: 235px; align-content: start; padding: 13px; background: var(--bg); font-size: var(--ui-base-size); font-weight: var(--ui-default-weight); }
+    .specimen-section { color: var(--muted); font-size: var(--ui-small-size); font-weight: var(--ui-strong-weight); letter-spacing: .08em; text-transform: uppercase; }
+    .specimen-row { display: flex; min-height: var(--ui-row-height); align-items: center; gap: 8px; padding: 0 9px; border-radius: 4px; background: var(--soft); color: var(--text); box-shadow: inset 2px 0 var(--accent); font-size: var(--ui-label-size); }
+    .specimen-row strong { font-weight: var(--ui-strong-weight); }
+    .specimen-row small { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: var(--ui-small-size); }
+    .specimen-commit strong { display: block; color: var(--text); font-size: var(--ui-label-size); font-weight: var(--ui-strong-weight); }
+    .specimen-commit p { margin: 4px 0 0; color: var(--sub); font-size: var(--ui-base-size); line-height: 1.4; }
+    .specimen-meta { margin-top: 5px; color: var(--muted); font-family: var(--mono); font-size: var(--ui-small-size); }
+    .specimen-actions { display: flex; gap: 6px; }
+    .specimen-actions .ref-pill { font-size: var(--ui-small-size); }
+    .specimen-button { height: calc(var(--ui-row-height) + 1px); border: 1px solid var(--accent); border-radius: 5px; background: var(--accent); color: var(--accent-fg); font-size: var(--ui-label-size); font-weight: var(--ui-strong-weight); }
+
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 50;
+      padding: 10px 13px;
+      border: 1px solid rgba(var(--accent-rgb), .4);
+      border-radius: 7px;
+      background: #13201e;
+      color: var(--text);
+      box-shadow: 0 12px 30px rgba(0,0,0,.4);
+      font-size: 11px;
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 1180px) {
+      .page-head { grid-template-columns: 1fr; }
+      .legend { width: max-content; }
+      .picker { grid-template-columns: repeat(3, 1fr); }
+      .comparison-grid { grid-template-columns: 1fr; }
+      .type-picker, .type-comparison-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <div>
+        <p class="eyebrow">GitWyrm color study</p>
+        <h1>Quiet the signal.</h1>
+        <p class="intro">Accent and typography are independent controls. Pair any of five colors with four default size and weight treatments, then compare each axis without losing the other.</p>
+      </div>
+      <div class="legend" aria-label="Contrast targets">
+        <span>Small accent text</span><strong>4.5:1 minimum</strong>
+        <span>Dark text on accent</span><strong>4.5:1 minimum</strong>
+      </div>
+    </header>
+
+    <div class="control-axis"><span class="axis-label">Accent</span><nav class="picker" id="picker" aria-label="Choose an accent color"></nav></div>
+    <div class="control-axis"><span class="axis-label">Type</span><nav class="type-picker" id="type-picker" aria-label="Choose a typography treatment"></nav></div>
+
+    <section class="hero-shell" id="hero-shell" aria-live="polite">
+      <div class="hero-meta">
+        <span class="hero-swatch"></span>
+        <strong id="hero-name">Weathered teal</strong>
+        <code id="hero-hex">#478C83</code>
+        <code id="hero-type">14px / 450</code>
+        <div class="contrast-readout"><span>accent on background</span><b id="hero-bg-ratio">4.89:1</b></div>
+        <div class="contrast-readout"><span>dark text on accent</span><b id="hero-fg-ratio">4.87:1</b></div>
+        <span class="recommendation" id="recommendation">Suggested pairing</span>
+      </div>
+      <div id="hero-preview"></div>
+    </section>
+
+    <div class="all-head" id="color-comparison-head">
+      <h2>Compare every direction</h2>
+      <p>Select any card to move it into the full-size preview.</p>
+    </div>
+    <section class="comparison-grid" id="comparison-grid"></section>
+
+    <div class="all-head" id="typography">
+      <h2>Compare default typography</h2>
+      <p>Every card uses the currently selected accent color.</p>
+    </div>
+    <section class="type-comparison-grid" id="type-comparison-grid"></section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const candidates = [
+      { id: 'current', name: 'Current mint', hex: '#2DD4A7', rgb: '45, 212, 167', soft: '.13', note: 'Baseline. Brightest and most saturated.' },
+      { id: 'harbor', name: 'Harbor teal', hex: '#34927D', rgb: '52, 146, 125', soft: '.18', note: 'Cool and clearly quieter, with familiar green energy.' },
+      { id: 'weathered', name: 'Weathered teal', hex: '#478C83', rgb: '71, 140, 131', soft: '.19', note: 'Blue-grey balance. Calm without feeling dull.', recommended: true },
+      { id: 'juniper', name: 'Juniper', hex: '#568B78', rgb: '86, 139, 120', soft: '.19', note: 'Warmer and more organic, with less screen glow.' },
+      { id: 'slate', name: 'Slate jade', hex: '#5A8478', rgb: '90, 132, 120', soft: '.2', note: 'Most desaturated. Quietest app-wide presence.' }
+    ]
+
+    const typeOptions = [
+      { id: 'current-type', name: 'Current', base: '13px', label: '12px', small: '9px', weight: '400', strong: '650', row: '34px', commit: '66px', miniLabel: '10px', miniSmall: '7.5px', miniRow: '30px', note: 'Existing density and weight.' },
+      { id: 'balanced', name: 'Balanced', base: '14px', label: '13px', small: '10px', weight: '450', strong: '675', row: '36px', commit: '70px', miniLabel: '10.5px', miniSmall: '8px', miniRow: '31px', note: 'One step larger and slightly sturdier.', recommended: true },
+      { id: 'sturdier', name: 'Sturdier', base: '14px', label: '13px', small: '10px', weight: '500', strong: '700', row: '36px', commit: '70px', miniLabel: '10.5px', miniSmall: '8px', miniRow: '31px', note: 'Same size increase with stronger default weight.' },
+      { id: 'comfortable', name: 'Comfortable', base: '15px', label: '14px', small: '10.5px', weight: '475', strong: '675', row: '39px', commit: '74px', miniLabel: '11px', miniSmall: '8.5px', miniRow: '33px', note: 'Largest type and roomiest rows.' }
+    ]
+
+    let selectedId = 'weathered'
+    let selectedTypeId = 'balanced'
+
+    const picker = document.getElementById('picker')
+    const typePicker = document.getElementById('type-picker')
+    const comparisonGrid = document.getElementById('comparison-grid')
+    const typeComparisonGrid = document.getElementById('type-comparison-grid')
+    const heroShell = document.getElementById('hero-shell')
+    const heroPreview = document.getElementById('hero-preview')
+    const toast = document.getElementById('toast')
+
+    function luminance(hex) {
+      const channels = [1, 3, 5].map((index) => Number.parseInt(hex.slice(index, index + 2), 16) / 255)
+        .map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+      return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+    }
+
+    function contrast(first, second) {
+      const high = Math.max(luminance(first), luminance(second))
+      const low = Math.min(luminance(first), luminance(second))
+      return (high + 0.05) / (low + 0.05)
+    }
+
+    function candidateStyle(candidate) {
+      return `--candidate:${candidate.hex};--candidate-rgb:${candidate.rgb};--candidate-soft:${candidate.soft}`
+    }
+
+    function typographyStyle(option) {
+      return `--ui-base-size:${option.base};--ui-label-size:${option.label};--ui-small-size:${option.small};--ui-default-weight:${option.weight};--ui-strong-weight:${option.strong};--ui-row-height:${option.row};--ui-commit-height:${option.commit};--mini-label-size:${option.miniLabel};--mini-small-size:${option.miniSmall};--mini-strong-weight:${option.strong};--mini-row-height:${option.miniRow}`
+    }
+
+    function applyTypography(element, option) {
+      element.style.setProperty('--ui-base-size', option.base)
+      element.style.setProperty('--ui-label-size', option.label)
+      element.style.setProperty('--ui-small-size', option.small)
+      element.style.setProperty('--ui-default-weight', option.weight)
+      element.style.setProperty('--ui-strong-weight', option.strong)
+      element.style.setProperty('--ui-row-height', option.row)
+      element.style.setProperty('--ui-commit-height', option.commit)
+      element.style.setProperty('--mini-label-size', option.miniLabel)
+      element.style.setProperty('--mini-small-size', option.miniSmall)
+      element.style.setProperty('--mini-strong-weight', option.strong)
+      element.style.setProperty('--mini-row-height', option.miniRow)
+    }
+
+    function appSurface(compact = false) {
+      const columns = `<aside class="mini-sidebar">${sidebarMarkup()}</aside><section class="mini-graph">${graphMarkup()}</section><aside class="mini-right">${rightMarkup()}</aside>`
+      if (compact) return `<div class="mini-surface">${columns}</div>`
+      return `<div class="app-crop">
+        <div class="app-topbar"><span class="wyrm-mark">⌁</span><span class="wordmark">Git<span>Wyrm</span></span><span class="tab-divider"></span><span class="repo-tab"><i class="repo-dot"></i>HearthShelf</span><span class="top-spacer"></span><span class="top-action">Fetch</span><span class="top-action">Push</span></div>
+        <div class="workspace-crop">${columns}</div>
+      </div>`
+    }
+
+    function sidebarMarkup() {
+      return `<div class="section-head"><span>⌄</span><span>Local</span><span class="count">1</span></div>
+        <div class="nav-row active"><i class="nav-dot"></i><strong>main</strong><small>current</small></div>
+        <div class="section-head"><span>›</span><span>Remotes</span><span class="count">1</span></div>
+        <div class="section-head"><span>›</span><span>Stashes</span><span class="count">0</span></div>
+        <div class="section-head"><span>›</span><span>Pull requests</span><span class="count">1</span></div>
+        <div class="nav-row connect"><i class="nav-dot"></i><span>Connect GitHub</span></div>
+        <div class="section-head"><span>›</span><span>Issues</span><span class="count">1</span></div>`
+    }
+
+    function graphMarkup() {
+      return `<div class="graph-head"><span>Branch history</span><span class="branch-route">main</span></div>
+        <div class="graph-body"><i class="graph-line"></i>
+          <div class="commit-row"><i class="commit-node current"></i><div class="commit-copy"><strong>Keep branch names readable</strong><small>Jeremy · 4 min ago</small><div class="ref-row"><span class="ref-pill">main</span><span class="ref-pill">◉ origin/main</span></div></div><span class="commit-time">HEAD</span></div>
+          <div class="commit-row"><i class="commit-node"></i><div class="commit-copy"><strong>Refine drag target feedback</strong><small>Casey · 18 min ago</small><div class="ref-row"><span class="ref-pill outline">feature/drag</span></div></div><span class="commit-time">18m</span></div>
+          <div class="commit-row"><i class="commit-node"></i><div class="commit-copy"><strong>Explain removed branches</strong><small>Maya · yesterday</small></div><span class="commit-time">1d</span></div>
+        </div>`
+    }
+
+    function rightMarkup() {
+      return `<div class="panel-title"><span>Changes</span><span class="count">3</span></div>
+        <div class="panel-section"><h4>Staged</h4><div class="file-row"><span class="file-state">M</span><span>BranchRow.tsx</span><span class="stage-check">✓</span></div><div class="file-row"><span class="file-state">M</span><span>index.css</span><span class="stage-check">✓</span></div></div>
+        <div class="button-stack"><button class="primary-button" type="button">Commit 2 staged files</button><button class="secondary-button" type="button">Review selected changes</button><div class="focus-sample"><i class="nav-dot"></i><span>Focused branch control</span></div></div>`
+    }
+
+    function renderPicker() {
+      picker.innerHTML = candidates.map((candidate) => `<button class="picker-button${candidate.id === selectedId ? ' active' : ''}" type="button" data-candidate="${candidate.id}" style="${candidateStyle(candidate)}"><span class="swatch"></span><span><strong>${candidate.name}</strong><small>${candidate.hex}</small></span></button>`).join('')
+      picker.querySelectorAll('[data-candidate]').forEach((button) => button.addEventListener('click', () => selectCandidate(button.dataset.candidate, false)))
+    }
+
+    function renderTypePicker() {
+      typePicker.innerHTML = typeOptions.map((option) => `<button class="type-picker-button${option.id === selectedTypeId ? ' active' : ''}" type="button" data-type-option="${option.id}"><span><strong>${option.name}</strong><small>${option.note}</small></span><code>${option.base} / ${option.weight}</code></button>`).join('')
+      typePicker.querySelectorAll('[data-type-option]').forEach((button) => button.addEventListener('click', () => selectType(button.dataset.typeOption, false)))
+    }
+
+    function renderHero() {
+      const candidate = candidates.find((entry) => entry.id === selectedId) || candidates[0]
+      const typeOption = typeOptions.find((entry) => entry.id === selectedTypeId) || typeOptions[0]
+      heroShell.style.setProperty('--accent', candidate.hex)
+      heroShell.style.setProperty('--accent-rgb', candidate.rgb)
+      heroShell.style.setProperty('--accent-soft-alpha', candidate.soft)
+      applyTypography(heroShell, typeOption)
+      document.getElementById('hero-name').textContent = candidate.name
+      document.getElementById('hero-hex').textContent = candidate.hex
+      document.getElementById('hero-type').textContent = `${typeOption.base} / ${typeOption.weight}`
+      document.getElementById('hero-bg-ratio').textContent = `${contrast(candidate.hex, '#0B0F14').toFixed(2)}:1`
+      document.getElementById('hero-fg-ratio').textContent = `${contrast(candidate.hex, '#04120D').toFixed(2)}:1`
+      document.getElementById('recommendation').hidden = !(candidate.recommended && typeOption.recommended)
+      heroPreview.innerHTML = appSurface(false)
+    }
+
+    function renderCards() {
+      const typeOption = typeOptions.find((entry) => entry.id === selectedTypeId) || typeOptions[0]
+      comparisonGrid.innerHTML = candidates.map((candidate) => `<article class="candidate-card${candidate.id === selectedId ? ' selected' : ''}" tabindex="0" role="button" aria-label="Preview ${candidate.name}" data-card-candidate="${candidate.id}" style="${candidateStyle(candidate)};${typographyStyle(typeOption)}">
+        <div class="card-head"><span class="card-swatch"></span><span><h3>${candidate.name}${candidate.recommended ? ' · recommended' : ''}</h3><small>${candidate.hex}</small></span><span class="tone-note">${candidate.note}</span></div>
+        ${appSurface(true)}
+        <div class="card-metrics"><div class="metric"><small>On background</small><strong>${contrast(candidate.hex, '#0B0F14').toFixed(2)}:1</strong></div><div class="metric"><small>Dark text</small><strong>${contrast(candidate.hex, '#04120D').toFixed(2)}:1</strong></div><div class="metric"><small>Soft tint</small><strong>${Number(candidate.soft) * 100}%</strong></div></div>
+      </article>`).join('')
+      comparisonGrid.querySelectorAll('[data-card-candidate]').forEach((card) => {
+        card.addEventListener('click', () => selectCandidate(card.dataset.cardCandidate, true))
+        card.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectCandidate(card.dataset.cardCandidate, true) }
+        })
+      })
+    }
+
+    function renderTypeCards() {
+      const candidate = candidates.find((entry) => entry.id === selectedId) || candidates[0]
+      typeComparisonGrid.innerHTML = typeOptions.map((option) => `<article class="type-card${option.id === selectedTypeId ? ' selected' : ''}" tabindex="0" role="button" aria-label="Preview ${option.name} typography" data-type-card="${option.id}" style="--accent:${candidate.hex};--accent-rgb:${candidate.rgb};--accent-soft-alpha:${candidate.soft};${typographyStyle(option)}">
+        <div class="type-card-head"><span><h3>${option.name}</h3><small>${option.base} / ${option.weight}</small></span><span>${option.recommended ? 'Recommended' : option.id === 'current-type' ? 'Baseline' : 'Option'}</span></div>
+        <div class="type-specimen">
+          <div class="specimen-section">Local branches</div>
+          <div class="specimen-row"><i class="nav-dot"></i><strong>main</strong><small>current</small></div>
+          <div class="specimen-commit"><strong>Keep branch names readable</strong><p>Selected work stays clear without making the interface feel heavy.</p><div class="specimen-meta">Jeremy · 4 min ago</div></div>
+          <div class="specimen-actions"><span class="ref-pill">main</span><span class="ref-pill outline">origin/main</span></div>
+          <button class="specimen-button" type="button">Commit selected changes</button>
+        </div>
+      </article>`).join('')
+      typeComparisonGrid.querySelectorAll('[data-type-card]').forEach((card) => {
+        card.addEventListener('click', () => selectType(card.dataset.typeCard, true))
+        card.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectType(card.dataset.typeCard, true) }
+        })
+      })
+    }
+
+    let toastTimer
+    function showToast(message) {
+      window.clearTimeout(toastTimer)
+      toast.textContent = message
+      toast.classList.add('show')
+      toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1800)
+    }
+
+    function selectCandidate(id, scrollToHero) {
+      const candidate = candidates.find((entry) => entry.id === id)
+      if (!candidate) return
+      selectedId = id
+      document.documentElement.style.setProperty('--accent', candidate.hex)
+      document.documentElement.style.setProperty('--accent-rgb', candidate.rgb)
+      renderPicker()
+      renderHero()
+      renderCards()
+      renderTypeCards()
+      showToast(`Showing ${candidate.name} in the full preview`)
+      if (scrollToHero) heroShell.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+
+    function selectType(id, scrollToHero) {
+      const option = typeOptions.find((entry) => entry.id === id)
+      if (!option) return
+      selectedTypeId = id
+      applyTypography(document.documentElement, option)
+      renderTypePicker()
+      renderHero()
+      renderCards()
+      renderTypeCards()
+      showToast(`Showing ${option.name} typography in the full preview`)
+      if (scrollToHero) heroShell.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+
+    renderPicker()
+    renderTypePicker()
+    renderHero()
+    renderCards()
+    renderTypeCards()
+    if (new URLSearchParams(window.location.search).get('focus') === 'typography') {
+      document.querySelector('.page-head').hidden = true
+      document.querySelectorAll('.control-axis').forEach((axis) => { axis.hidden = true })
+      heroShell.hidden = true
+      document.getElementById('color-comparison-head').hidden = true
+      comparisonGrid.hidden = true
+    }
+  </script>
+</body>
+</html>

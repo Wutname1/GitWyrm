@@ -1,0 +1,1408 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#090d12" />
+  <title>GitWyrm - Download website mockup</title>
+  <style>
+    @font-face {
+      font-family: "Sora";
+      src: url("../src/assets/fonts/Sora-SemiBold.ttf") format("truetype");
+      font-weight: 600;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "IBM Plex Sans";
+      src: url("../src/assets/fonts/IBMPlexSans-VariableFont.ttf") format("truetype");
+      font-weight: 100 900;
+      font-display: swap;
+    }
+
+    :root {
+      --void: #070a0e;
+      --bg: #090d12;
+      --panel: #0d141b;
+      --panel-raised: #111b24;
+      --steel: #1d2a36;
+      --steel-bright: #2b3a48;
+      --text: #dce5ed;
+      --sub: #96a5b4;
+      --muted: #687887;
+      --green: #35d39f;
+      --green-deep: #1db584;
+      --green-ink: #03130d;
+      --blue: #51a8ff;
+      --amber: #f6b84a;
+      --red: #f27878;
+      --max: 1180px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      overflow-x: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, #000, transparent 78%);
+      content: "";
+    }
+
+    a { color: inherit; }
+    button, select { color: inherit; font: inherit; }
+    button, a, select { -webkit-tap-highlight-color: transparent; }
+    img { display: block; max-width: 100%; }
+
+    :focus-visible {
+      outline: 2px solid var(--green);
+      outline-offset: 3px;
+    }
+
+    .shell {
+      width: min(var(--max), calc(100% - 40px));
+      margin-inline: auto;
+    }
+
+    .site-head {
+      position: relative;
+      z-index: 10;
+      border-bottom: 1px solid rgba(43, 58, 72, .72);
+      background: rgba(9, 13, 18, .82);
+      backdrop-filter: blur(16px);
+    }
+
+    .nav {
+      display: flex;
+      min-height: 72px;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+
+    .brand img { width: 29px; height: 29px; object-fit: contain; }
+    .wordmark { font: 600 18px/1 "Sora", sans-serif; letter-spacing: -.04em; }
+    .wordmark b { color: var(--green); font-weight: inherit; }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-left: auto;
+      color: var(--sub);
+      font-size: 14px;
+    }
+
+    .nav-links a { text-decoration: none; }
+    .nav-links a:hover { color: var(--text); }
+
+    .github-link {
+      display: inline-flex;
+      min-height: 36px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 13px;
+      border: 1px solid var(--steel-bright);
+      border-radius: 7px;
+      background: rgba(17, 27, 36, .66);
+      color: var(--text) !important;
+    }
+
+    .github-link svg { width: 16px; height: 16px; }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.04fr) minmax(380px, .96fr);
+      gap: clamp(50px, 7vw, 96px);
+      align-items: center;
+      padding: clamp(76px, 9vw, 118px) 0 88px;
+    }
+
+    .hero-copy { min-width: 0; }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 21px;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      width: 28px;
+      height: 1px;
+      background: currentColor;
+      content: "";
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 720px;
+      margin-bottom: 24px;
+      font: 600 clamp(48px, 6.3vw, 82px)/.99 "Sora", sans-serif;
+      letter-spacing: -.065em;
+    }
+
+    h1 .plain {
+      display: block;
+      color: var(--sub);
+      font-size: .64em;
+      letter-spacing: -.052em;
+    }
+
+    .hero-lede {
+      max-width: 620px;
+      margin-bottom: 32px;
+      color: var(--sub);
+      font-size: clamp(18px, 2vw, 21px);
+      line-height: 1.52;
+    }
+
+    .hero-lede strong { color: var(--text); font-weight: 600; }
+
+    .developer-note {
+      display: flex;
+      max-width: 610px;
+      align-items: flex-start;
+      gap: 13px;
+      padding-top: 25px;
+      border-top: 1px solid var(--steel);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .developer-note svg { flex: none; width: 18px; margin-top: 2px; color: var(--green); }
+    .developer-note strong { color: var(--sub); font-weight: 650; }
+
+    .download-card {
+      position: relative;
+      border: 1px solid var(--steel-bright);
+      border-radius: 12px;
+      background: linear-gradient(145deg, rgba(17, 27, 36, .96), rgba(11, 17, 23, .96));
+      box-shadow: 0 36px 90px rgba(0,0,0,.35);
+      transition: border-color .24s ease, box-shadow .24s ease;
+    }
+
+    .download-card::before {
+      position: absolute;
+      inset: -1px -1px auto;
+      height: 3px;
+      border-radius: 12px 12px 0 0;
+      background: linear-gradient(90deg, var(--green), var(--blue) 55%, transparent);
+      content: "";
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 23px 24px 18px;
+      border-bottom: 1px solid var(--steel);
+    }
+
+    .card-label {
+      color: var(--muted);
+      font: 600 11px/1 "Sora", sans-serif;
+      letter-spacing: .105em;
+      text-transform: uppercase;
+    }
+
+    .detected {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--sub);
+      font-size: 12px;
+    }
+
+    .detected i {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(53,211,159,.1);
+      animation: status-breathe 3.2s ease-in-out 1.4s infinite;
+    }
+
+    .card-body { padding: 24px; }
+    .release-line { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 17px; }
+    .release-line h2 { margin: 0; font: 600 22px/1.15 "Sora", sans-serif; letter-spacing: -.035em; }
+    .release-line span { color: var(--muted); font: 12px/1.2 ui-monospace, "SFMono-Regular", Consolas, monospace; }
+
+    .select-wrap { position: relative; margin-bottom: 12px; }
+    .select-wrap svg {
+      position: absolute;
+      top: 50%;
+      right: 15px;
+      width: 17px;
+      pointer-events: none;
+      transform: translateY(-50%);
+      color: var(--sub);
+    }
+
+    #build-select {
+      width: 100%;
+      min-height: 49px;
+      appearance: none;
+      padding: 0 44px 0 15px;
+      border: 1px solid var(--steel-bright);
+      border-radius: 7px;
+      background: #0a1016;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .download-button {
+      display: flex;
+      min-height: 54px;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: var(--green-deep);
+      color: var(--green-ink);
+      font-weight: 750;
+      text-decoration: none;
+      transition: background .16s ease, transform .16s ease, box-shadow .16s ease;
+    }
+
+    .download-button:hover {
+      background: var(--green);
+      box-shadow: 0 10px 34px rgba(29,181,132,.22);
+      transform: translateY(-1px);
+    }
+
+    .download-button svg { width: 18px; }
+    .download-button.is-source { background: var(--blue); color: #06111b; }
+
+    .download-button:hover svg { animation: download-nudge .46s ease; }
+
+    .download-status {
+      min-height: 21px;
+      margin: 11px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .receipt {
+      margin: 20px -24px -24px;
+      padding: 18px 24px 20px;
+      border-top: 1px dashed var(--steel-bright);
+      border-radius: 0 0 12px 12px;
+      background: rgba(6, 10, 14, .5);
+    }
+
+    .receipt-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 13px;
+      color: var(--sub);
+      font: 600 11px/1 "Sora", sans-serif;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .receipt-title span:last-child { color: var(--green); }
+
+    .receipt dl {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      gap: 8px 12px;
+      margin: 0;
+      font: 12px/1.45 ui-monospace, "SFMono-Regular", Consolas, monospace;
+    }
+
+    .receipt dt { color: var(--muted); }
+    .receipt dd { min-width: 0; margin: 0; overflow: hidden; color: var(--sub); text-overflow: ellipsis; white-space: nowrap; }
+
+    .copy-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--blue);
+      cursor: pointer;
+      font-size: inherit;
+    }
+
+    .copy-link svg { width: 13px; }
+
+    .download-card.selection-changed {
+      border-color: rgba(53,211,159,.72);
+      box-shadow: 0 30px 80px rgba(0,0,0,.35), 0 0 0 4px rgba(53,211,159,.08);
+    }
+
+    .download-card.selection-changed .receipt {
+      animation: receipt-confirm .72s ease;
+    }
+
+    .under-hero {
+      border-block: 1px solid var(--steel);
+      background: rgba(13, 20, 27, .72);
+    }
+
+    .fact-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    .fact {
+      min-height: 96px;
+      padding: 22px 24px;
+      border-left: 1px solid var(--steel);
+    }
+
+    .fact:last-child { border-right: 1px solid var(--steel); }
+    .fact b { display: block; margin-bottom: 5px; color: var(--text); font-size: 15px; font-weight: 650; }
+    .fact span { color: var(--muted); font-size: 13px; }
+
+    .section { padding: 108px 0; }
+    .section-head { display: grid; grid-template-columns: .66fr 1.34fr; gap: 50px; align-items: start; margin-bottom: 54px; }
+    .section-kicker { color: var(--green); font: 600 11px/1 "Sora", sans-serif; letter-spacing: .11em; text-transform: uppercase; }
+    .section h2 { max-width: 760px; margin-bottom: 18px; font: 600 clamp(34px, 4.2vw, 55px)/1.06 "Sora", sans-serif; letter-spacing: -.052em; }
+    .section-lede { max-width: 720px; margin: 0; color: var(--sub); font-size: 18px; }
+
+    .product-window {
+      overflow: hidden;
+      border: 1px solid var(--steel-bright);
+      border-radius: 10px;
+      background: var(--void);
+      box-shadow: 0 35px 80px rgba(0,0,0,.3);
+    }
+
+    .window-bar { display: flex; height: 42px; align-items: center; padding: 0 14px; border-bottom: 1px solid var(--steel); background: var(--panel); }
+    .window-brand { display: flex; align-items: center; gap: 7px; font: 600 12px/1 "Sora", sans-serif; }
+    .window-brand img { width: 18px; height: 18px; }
+    .window-tabs { display: flex; align-self: stretch; margin-left: 40px; }
+    .window-tab { display: flex; min-width: 150px; align-items: center; gap: 8px; padding: 0 14px; border-inline: 1px solid var(--steel); background: #101820; color: var(--sub); font-size: 11px; }
+    .window-tab i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+    .window-controls { display: flex; gap: 16px; margin-left: auto; color: var(--muted); font: 11px/1 ui-monospace, monospace; }
+
+    .app-body { display: grid; min-height: 470px; grid-template-columns: 190px minmax(380px, 1fr) 245px; }
+    .app-side { padding: 15px 0; border-right: 1px solid var(--steel); background: #0c1218; }
+    .app-side.right { border-right: 0; border-left: 1px solid var(--steel); }
+    .mini-head { padding: 5px 15px 10px; color: var(--muted); font: 600 9px/1 "Sora", sans-serif; letter-spacing: .09em; }
+    .branch { display: flex; height: 29px; align-items: center; gap: 8px; padding: 0 15px; color: var(--sub); font-size: 11px; }
+    .branch.active { background: rgba(53,211,159,.1); color: var(--text); }
+    .branch i { width: 7px; height: 7px; border: 1px solid var(--muted); border-radius: 50%; }
+    .branch.active i { border-color: var(--green); background: var(--green); }
+
+    .graph-head, .commit-row { display: grid; grid-template-columns: 70px minmax(210px, 1fr) 100px; align-items: center; }
+    .graph-head { height: 35px; border-bottom: 1px solid var(--steel); color: var(--muted); font-size: 9px; letter-spacing: .08em; }
+    .graph-head span, .commit-row > span { padding: 0 12px; }
+    .commit-row { height: 47px; border-bottom: 1px solid rgba(29,42,54,.74); color: var(--muted); font-size: 10px; }
+    .commit-row.active { background: #101a22; }
+    .commit-row strong { display: block; overflow: hidden; color: var(--text); font-size: 11.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+    .lane { position: relative; align-self: stretch; }
+    .lane::before { position: absolute; top: 0; bottom: 0; left: 32px; width: 2px; background: var(--green); opacity: .65; content: ""; }
+    .lane::after { position: absolute; top: 17px; left: 27px; width: 12px; height: 12px; border: 2px solid var(--green); border-radius: 50%; background: var(--void); content: ""; }
+    .lane.split::before { box-shadow: 13px 0 0 rgba(81,168,255,.7); }
+    .lane.split::after { border-color: var(--blue); }
+    .hash { font-family: ui-monospace, Consolas, monospace; }
+
+    .change-summary { padding: 15px; }
+    .change-summary h3 { margin-bottom: 5px; font: 600 14px/1.25 "Sora", sans-serif; letter-spacing: -.025em; }
+    .change-summary p { color: var(--muted); font-size: 11px; }
+    .change-file { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--steel); color: var(--sub); font-size: 10px; }
+    .plus { color: var(--green); }
+    .minus { color: var(--red); }
+
+    .changelog-section { border-block: 1px solid var(--steel); background: #0a1016; }
+    .release-panel { border: 1px solid var(--steel-bright); border-radius: 10px; background: #080d12; }
+    .release-toolbar { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--steel); }
+    .release-channels { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--steel); border-radius: 7px; background: var(--panel); }
+    .release-channel { min-height: 32px; padding: 0 12px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 650; }
+    .release-channel:hover { color: var(--text); }
+    .release-channel.active { background: var(--panel-raised); color: var(--green); box-shadow: inset 0 0 0 1px var(--steel-bright); }
+    .release-area-wrap { position: relative; margin-left: auto; }
+    .release-area-wrap svg { position: absolute; top: 50%; right: 12px; width: 15px; pointer-events: none; transform: translateY(-50%); color: var(--muted); }
+    #release-area { min-height: 40px; min-width: 168px; appearance: none; padding: 0 38px 0 12px; border: 1px solid var(--steel); border-radius: 7px; background: var(--panel); cursor: pointer; font-size: 12px; font-weight: 600; }
+    .release-count { flex: none; color: var(--muted); font: 11px/1.4 ui-monospace, Consolas, monospace; }
+
+    .release-feed { position: relative; padding: 10px 28px 20px; }
+    .release-feed::before { position: absolute; top: 0; bottom: 0; left: 169px; width: 2px; background: var(--steel); content: ""; }
+    .release-feed.empty::before { display: none; }
+    .release-entry { position: relative; display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 42px; padding: 30px 0; border-bottom: 1px solid var(--steel); }
+    .release-entry:last-of-type { border-bottom: 0; }
+    .release-entry[hidden] { display: none; }
+    .release-date { padding-top: 5px; color: var(--muted); font: 11px/1.5 ui-monospace, Consolas, monospace; text-align: right; }
+    .release-date span { display: block; color: var(--sub); }
+    .release-dot { position: absolute; top: 35px; left: 135px; z-index: 1; width: 14px; height: 14px; border: 3px solid var(--green-deep); border-radius: 50%; background: #080d12; box-shadow: 0 0 0 5px #080d12; }
+    .release-entry.prerelease .release-dot { border-color: var(--blue); }
+    .release-body { min-width: 0; }
+    .release-heading { display: flex; align-items: center; gap: 10px; }
+    .release-heading h3 { margin: 0; font: 600 22px/1.2 "Sora", sans-serif; letter-spacing: -.035em; }
+    .release-state { padding: 4px 7px; border: 1px solid rgba(53,211,159,.3); border-radius: 4px; background: rgba(53,211,159,.07); color: var(--green); font-size: 9px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .release-entry.prerelease .release-state { border-color: rgba(81,168,255,.3); background: rgba(81,168,255,.07); color: var(--blue); }
+    .release-change-count { color: var(--muted); font: 10px/1.4 ui-monospace, Consolas, monospace; }
+    .release-toggle { display: inline-flex; min-height: 30px; align-items: center; gap: 6px; margin-left: auto; padding: 0 8px; border: 1px solid var(--steel); border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; }
+    .release-toggle:hover { border-color: var(--steel-bright); color: var(--text); }
+    .release-toggle svg { width: 13px; transition: transform .18s ease; }
+    .release-entry.collapsed { padding-block: 19px; }
+    .release-entry.collapsed .release-dot { top: 24px; }
+    .release-entry.collapsed .release-date { padding-top: 0; }
+    .release-entry.collapsed .release-toggle svg { transform: rotate(-90deg); }
+    .release-entry.collapsed .release-summary,
+    .release-entry.collapsed .release-items,
+    .release-entry.collapsed .release-topics,
+    .release-entry.collapsed .release-actions { display: none; }
+    .release-summary { margin: 8px 0 18px; color: var(--sub); font-size: 14px; }
+    .release-items { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+    .release-item { display: grid; grid-template-columns: 72px 1fr; gap: 11px; align-items: baseline; color: var(--sub); font-size: 13px; }
+    .change-kind { color: var(--muted); font: 700 9px/1.4 "Sora", sans-serif; letter-spacing: .07em; text-transform: uppercase; }
+    .change-kind.new { color: var(--green); }
+    .change-kind.fixed { color: var(--amber); }
+    .change-kind.improved { color: var(--blue); }
+    .release-topics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+    .release-topic { padding: 3px 6px; border-radius: 4px; background: var(--panel-raised); color: var(--muted); font: 10px/1.3 ui-monospace, Consolas, monospace; }
+    .release-actions { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 18px; }
+    .release-actions a { display: inline-flex; align-items: center; gap: 6px; color: var(--sub); font-size: 12px; text-underline-offset: 3px; }
+    .release-actions a:hover { color: var(--text); }
+    .release-actions svg { width: 14px; }
+    .release-empty { display: none; margin: 0; padding: 36px 28px; color: var(--muted); font-size: 13px; text-align: center; }
+    .release-empty.show { display: block; }
+    .release-pagination { display: flex; min-height: 60px; align-items: center; gap: 18px; padding: 12px 18px; border-top: 1px solid var(--steel); color: var(--muted); font-size: 11px; }
+    .release-range { font-family: ui-monospace, Consolas, monospace; }
+    .release-page-state { margin-left: auto; font-family: ui-monospace, Consolas, monospace; }
+    .release-page-actions { display: flex; gap: 6px; }
+    .release-page-button { display: inline-flex; min-height: 32px; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid var(--steel); border-radius: 5px; background: var(--panel); color: var(--sub); cursor: pointer; font-size: 11px; }
+    .release-page-button:hover:not(:disabled) { border-color: var(--steel-bright); color: var(--text); }
+    .release-page-button:disabled { cursor: not-allowed; opacity: .38; }
+    .release-page-button svg { width: 13px; }
+
+    .proof-section { border-block: 1px solid var(--steel); background: #0a1016; }
+    .trust-layout { display: grid; grid-template-columns: .78fr 1.22fr; gap: clamp(40px, 7vw, 94px); align-items: start; }
+    .trust-copy { position: sticky; top: 36px; }
+    .trust-copy h2 { margin-top: 17px; }
+    .trust-copy p { color: var(--sub); font-size: 17px; }
+
+    .review-prompt {
+      margin-top: 32px;
+      padding: 18px;
+      border-left: 3px solid var(--blue);
+      background: rgba(81,168,255,.06);
+      color: var(--sub);
+      font-size: 14px;
+    }
+
+    .review-prompt strong { display: block; margin-bottom: 4px; color: var(--text); }
+    .review-prompt a { color: var(--blue); }
+
+    .audit-list { border-top: 1px solid var(--steel-bright); }
+    .audit-row { display: grid; grid-template-columns: 44px minmax(150px, .62fr) 1.38fr; gap: 18px; padding: 22px 0; border-bottom: 1px solid var(--steel); align-items: start; }
+    .audit-icon { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(53,211,159,.35); border-radius: 50%; background: rgba(53,211,159,.07); color: var(--green); }
+    .audit-icon svg { width: 17px; }
+    .audit-row h3 { margin: 4px 0 0; font-size: 15px; font-weight: 650; }
+    .audit-row p { margin: 1px 0 0; color: var(--sub); font-size: 14px; }
+    .audit-row code { color: var(--blue); font: 12px/1.45 ui-monospace, Consolas, monospace; }
+
+    .plain-section { padding-bottom: 120px; }
+    .principles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; border: 1px solid var(--steel); background: var(--steel); }
+    .principle { min-height: 220px; padding: 28px; background: var(--panel); }
+    .principle svg { width: 22px; color: var(--green); }
+    .principle h3 { margin: 40px 0 9px; font: 600 18px/1.25 "Sora", sans-serif; letter-spacing: -.03em; }
+    .principle p { margin: 0; color: var(--sub); font-size: 14px; }
+
+    .final-cta { padding: 64px 0; border-top: 1px solid var(--steel); }
+    .final-inner { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
+    .final-inner h2 { margin: 0 0 7px; font: 600 clamp(28px, 3.5vw, 42px)/1.08 "Sora", sans-serif; letter-spacing: -.045em; }
+    .final-inner p { margin: 0; color: var(--sub); }
+    .small-download { flex: none; min-width: 250px; padding-inline: 22px; }
+
+    footer { padding: 28px 0 40px; border-top: 1px solid var(--steel); color: var(--muted); font-size: 13px; }
+    .footer-inner { display: flex; align-items: center; gap: 22px; }
+    .footer-brand { display: flex; align-items: center; gap: 8px; margin-right: auto; color: var(--sub); }
+    .footer-brand img { width: 20px; height: 20px; }
+    .footer-inner button, .footer-inner a { padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; text-decoration: none; }
+    .footer-inner button:hover, .footer-inner a:hover { color: var(--text); }
+
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 50;
+      display: flex;
+      max-width: min(380px, calc(100% - 48px));
+      align-items: center;
+      gap: 10px;
+      padding: 13px 16px;
+      border: 1px solid var(--steel-bright);
+      border-radius: 8px;
+      background: #111a22;
+      box-shadow: 0 15px 50px rgba(0,0,0,.38);
+      color: var(--text);
+      font-size: 13px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(12px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast svg { width: 17px; flex: none; color: var(--green); }
+
+    /* Motion follows the page's Git metaphor: resolve the headline, connect the
+       install receipt, then reveal supporting evidence as it enters view. */
+    @keyframes hero-resolve {
+      from { opacity: 0; transform: translateY(18px); filter: blur(4px); }
+      to { opacity: 1; transform: translateY(0); filter: blur(0); }
+    }
+
+    @keyframes receipt-connect {
+      from { opacity: 0; transform: translateX(28px) scale(.985); }
+      to { opacity: 1; transform: translateX(0) scale(1); }
+    }
+
+    @keyframes accent-draw {
+      from { transform: scaleX(0); }
+      to { transform: scaleX(1); }
+    }
+
+    @keyframes fact-resolve {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes status-breathe {
+      0%, 100% { box-shadow: 0 0 0 4px rgba(53,211,159,.1); }
+      50% { box-shadow: 0 0 0 7px rgba(53,211,159,.02), 0 0 16px rgba(53,211,159,.32); }
+    }
+
+    @keyframes download-nudge {
+      0%, 100% { transform: translateY(0); }
+      45% { transform: translateY(3px); }
+    }
+
+    @keyframes receipt-confirm {
+      0%, 100% { background-color: rgba(6, 10, 14, .5); }
+      35% { background-color: rgba(29,181,132,.11); }
+    }
+
+    @keyframes commit-resolve {
+      from { opacity: 0; transform: translateX(-12px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    @keyframes icon-resolve {
+      from { opacity: 0; transform: scale(.7) rotate(-12deg); }
+      to { opacity: 1; transform: scale(1) rotate(0); }
+    }
+
+    .hero-copy .eyebrow { animation: hero-resolve .5s cubic-bezier(.16, 1, .3, 1) .08s both; }
+    .hero-copy h1 { animation: hero-resolve .62s cubic-bezier(.16, 1, .3, 1) .16s both; }
+    .hero-copy .hero-lede { animation: hero-resolve .58s cubic-bezier(.16, 1, .3, 1) .28s both; }
+    .hero-copy .developer-note { animation: hero-resolve .54s cubic-bezier(.16, 1, .3, 1) .39s both; }
+    .download-card { animation: receipt-connect .72s cubic-bezier(.16, 1, .3, 1) .2s both; }
+    .download-card::before { transform-origin: left center; animation: accent-draw .7s cubic-bezier(.16, 1, .3, 1) .64s both; }
+    .fact { animation: fact-resolve .46s cubic-bezier(.16, 1, .3, 1) both; }
+    .fact:nth-child(1) { animation-delay: .64s; }
+    .fact:nth-child(2) { animation-delay: .7s; }
+    .fact:nth-child(3) { animation-delay: .76s; }
+    .fact:nth-child(4) { animation-delay: .82s; }
+
+    .motion-ready .reveal {
+      opacity: 0;
+      transform: translateY(22px);
+      transition:
+        opacity .58s cubic-bezier(.16, 1, .3, 1),
+        transform .58s cubic-bezier(.16, 1, .3, 1);
+      transition-delay: var(--reveal-delay, 0ms);
+    }
+
+    .motion-ready .reveal.in-view { opacity: 1; transform: translateY(0); }
+
+    .product-window.in-view .commit-row {
+      animation: commit-resolve .42s cubic-bezier(.16, 1, .3, 1) both;
+    }
+
+    .product-window.in-view .commit-row:nth-child(2) { animation-delay: .22s; }
+    .product-window.in-view .commit-row:nth-child(3) { animation-delay: .27s; }
+    .product-window.in-view .commit-row:nth-child(4) { animation-delay: .32s; }
+    .product-window.in-view .commit-row:nth-child(5) { animation-delay: .37s; }
+    .product-window.in-view .commit-row:nth-child(6) { animation-delay: .42s; }
+    .product-window.in-view .commit-row:nth-child(7) { animation-delay: .47s; }
+    .product-window.in-view .commit-row:nth-child(8) { animation-delay: .52s; }
+
+    .audit-row.in-view .audit-icon { animation: icon-resolve .46s cubic-bezier(.16, 1, .3, 1) .08s both; }
+
+    dialog {
+      width: min(760px, calc(100% - 32px));
+      max-height: min(82vh, 820px);
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid var(--steel-bright);
+      border-radius: 10px;
+      background: var(--panel);
+      color: var(--text);
+      box-shadow: 0 35px 100px rgba(0,0,0,.62);
+    }
+
+    dialog::backdrop { background: rgba(2, 5, 8, .8); backdrop-filter: blur(4px); }
+    .dialog-head { position: sticky; top: 0; display: flex; align-items: flex-start; gap: 24px; padding: 22px 24px; border-bottom: 1px solid var(--steel); background: var(--panel); }
+    .dialog-head h2 { margin: 0 0 3px; font: 600 22px/1.2 "Sora", sans-serif; letter-spacing: -.035em; }
+    .dialog-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .dialog-close { display: grid; width: 34px; height: 34px; margin-left: auto; place-items: center; border: 1px solid var(--steel); border-radius: 6px; background: var(--panel-raised); cursor: pointer; }
+    .dialog-close:hover { border-color: var(--steel-bright); }
+    .dialog-close svg { width: 16px; }
+    .legal-copy { max-height: calc(82vh - 84px); padding: 24px; overflow-y: auto; color: var(--sub); font-size: 14px; }
+    .legal-copy .draft { display: inline-block; margin-bottom: 20px; padding: 4px 8px; border: 1px solid rgba(246,184,74,.32); border-radius: 4px; background: rgba(246,184,74,.08); color: var(--amber); font-size: 11px; font-weight: 700; letter-spacing: .07em; }
+    .legal-copy h3 { margin: 26px 0 7px; color: var(--text); font-size: 15px; }
+    .legal-copy h3:first-of-type { margin-top: 0; }
+    .legal-copy ul { padding-left: 19px; }
+    .legal-copy a { color: var(--blue); }
+
+    @media (max-width: 940px) {
+      .nav-links a:not(.github-link) { display: none; }
+      .hero { grid-template-columns: 1fr; gap: 50px; }
+      .hero-copy { max-width: 760px; }
+      .download-card { max-width: 590px; }
+      .fact-strip { grid-template-columns: repeat(2, 1fr); }
+      .fact:nth-child(3) { border-top: 1px solid var(--steel); }
+      .fact:nth-child(4) { border-top: 1px solid var(--steel); }
+      .section-head, .trust-layout { grid-template-columns: 1fr; }
+      .trust-copy { position: static; }
+      .release-feed::before { left: 145px; }
+      .release-entry { grid-template-columns: 92px minmax(0, 1fr); }
+      .release-dot { left: 111px; }
+      .app-body { grid-template-columns: 165px minmax(340px, 1fr); }
+      .app-side.right { display: none; }
+      .principles { grid-template-columns: 1fr; }
+      .principle { min-height: auto; }
+      .principle h3 { margin-top: 24px; }
+    }
+
+    @media (max-width: 620px) {
+      .shell { width: min(100% - 28px, var(--max)); }
+      .nav { min-height: 64px; }
+      .wordmark { font-size: 16px; }
+      .github-link { width: 36px; padding: 0; justify-content: center; }
+      .github-link span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+      .hero { padding: 62px 0 66px; }
+      h1 { font-size: clamp(44px, 14vw, 64px); }
+      .card-head { align-items: flex-start; flex-direction: column; gap: 10px; }
+      .card-body, .card-head { padding-inline: 19px; }
+      .receipt { margin-inline: -19px; padding-inline: 19px; }
+      .fact-strip { grid-template-columns: 1fr; }
+      .fact { border-right: 1px solid var(--steel); border-top: 1px solid var(--steel); }
+      .fact:first-child { border-top: 0; }
+      .section { padding: 76px 0; }
+      .section-head { gap: 18px; margin-bottom: 34px; }
+      .product-window { overflow-x: auto; }
+      .window-bar, .app-body { min-width: 720px; }
+      .release-toolbar { align-items: stretch; flex-direction: column; }
+      .release-area-wrap { margin-left: 0; }
+      #release-area { width: 100%; }
+      .release-count { order: 3; }
+      .release-feed { padding: 6px 18px 16px; }
+      .release-feed::before { left: 25px; }
+      .release-entry { display: block; padding: 28px 0 28px 34px; }
+      .release-date { margin-bottom: 8px; padding: 0; text-align: left; }
+      .release-date span { display: inline; }
+      .release-dot { top: 31px; left: 0; }
+      .release-entry.collapsed .release-dot { top: 30px; }
+      .release-entry.collapsed .release-date { margin-bottom: 8px; }
+      .release-item { grid-template-columns: 64px 1fr; }
+      .release-heading { align-items: flex-start; flex-wrap: wrap; }
+      .release-toggle { margin-left: 0; }
+      .release-pagination { align-items: flex-start; flex-wrap: wrap; }
+      .release-page-state { margin-left: 0; }
+      .release-page-actions { margin-left: auto; }
+      .audit-row { grid-template-columns: 38px 1fr; gap: 13px; }
+      .audit-row p { grid-column: 2; }
+      .final-inner { align-items: stretch; flex-direction: column; }
+      .small-download { width: 100%; }
+      .footer-inner { align-items: flex-start; flex-wrap: wrap; }
+      .footer-brand { flex-basis: 100%; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+      .motion-ready .reveal { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-head" id="top">
+    <nav class="nav shell" aria-label="Main navigation">
+      <a class="brand" href="#top" aria-label="GitWyrm home">
+        <img src="../src/assets/logo.png" alt="" />
+        <span class="wordmark">Git<b>Wyrm</b></span>
+      </a>
+      <div class="nav-links">
+        <a href="#product">The app</a>
+        <a href="#changelog">Changelog</a>
+        <a href="#security">Security notes</a>
+        <a href="#plain-deal">Plain deal</a>
+        <a class="github-link" href="https://github.com/Wutname1/GitWyrm" target="_blank" rel="noreferrer">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .8a11.5 11.5 0 0 0-3.64 22.42c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.72 1.27 3.39.97.1-.75.4-1.27.74-1.56-2.57-.3-5.27-1.29-5.27-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18A10.99 10.99 0 0 1 12 6.23c.98 0 1.96.13 2.88.39 2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.71 5.39-5.29 5.68.42.36.79 1.06.79 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .8Z"/></svg>
+          <span>View source</span>
+        </a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero shell" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <div class="eyebrow">A Git client for Windows</div>
+        <h1 id="hero-title">Ship code. <span class="plain">Skip the Git ceremony.</span></h1>
+        <p class="hero-lede"><strong>GitWyrm makes everyday Git visual and direct.</strong> Open a repo, see what changed, and move your work without translating a wall of commands first.</p>
+        <div class="developer-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></svg>
+          <span><strong>Built by developers who use it.</strong> No account for the core app. No pricing maze. No claims we cannot explain below.</span>
+        </div>
+      </div>
+
+      <aside class="download-card" aria-label="Download GitWyrm">
+        <div class="card-head">
+          <span class="card-label">Get GitWyrm</span>
+          <span class="detected"><i aria-hidden="true"></i><span id="detected-copy">Checking this device...</span></span>
+        </div>
+        <div class="card-body">
+          <div class="release-line">
+            <h2 id="download-heading">Windows installer</h2>
+            <span>latest stable</span>
+          </div>
+          <div class="select-wrap">
+            <label for="build-select" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Choose a download</label>
+            <select id="build-select">
+              <option value="windows-x64">Windows x64</option>
+              <option value="windows-arm64">Windows ARM64</option>
+              <option value="source">Source code (.zip)</option>
+            </select>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+          </div>
+          <a class="download-button" id="download-button" href="https://cdn.gitwyrm.com/GitWyrm-Setup.exe">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 20h16"/></svg>
+            <span id="download-label">Download for Windows x64</span>
+          </a>
+          <p class="download-status" id="download-status" aria-live="polite">Per-user install. No admin rights needed.</p>
+
+          <div class="receipt" aria-label="Install receipt">
+            <div class="receipt-title"><span>Install receipt</span><span>Public build</span></div>
+            <dl>
+              <dt>Source</dt><dd id="receipt-source">cdn.gitwyrm.com</dd>
+              <dt>Install</dt><dd id="receipt-install">Current Windows user</dd>
+              <dt>Updates</dt><dd id="receipt-updates">Verified by embedded key</dd>
+              <dt>License</dt><dd>MIT</dd>
+              <dt>Link</dt><dd><button class="copy-link" id="copy-link" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg><span>Copy direct link</span></button></dd>
+            </dl>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <div class="under-hero">
+      <div class="fact-strip shell" aria-label="Product facts">
+        <div class="fact"><b>Windows x64 + ARM64</b><span>Native builds for both architectures</span></div>
+        <div class="fact"><b>MIT licensed</b><span>Read, audit, fork, or ship it</span></div>
+        <div class="fact"><b>Local Git engine</b><span>Everyday repo work stays on device</span></div>
+        <div class="fact"><b>System credentials</b><span>Network Git uses Git Credential Manager</span></div>
+      </div>
+    </div>
+
+    <section class="section shell" id="product" aria-labelledby="product-title">
+      <div class="section-head">
+        <div class="section-kicker">The app</div>
+        <div>
+          <h2 id="product-title">Your repo, without the scavenger hunt.</h2>
+          <p class="section-lede">Branches, commits, files, and diffs live in one focused window. GitWyrm uses plain labels and visible before-and-after choices, so the safe action is easier to find.</p>
+        </div>
+      </div>
+
+      <div class="product-window" aria-label="Illustration of the GitWyrm desktop app">
+        <div class="window-bar">
+          <div class="window-brand"><img src="../src/assets/logo.png" alt="" /> GitWyrm</div>
+          <div class="window-tabs"><span class="window-tab"><i></i> gitwyrm / main</span></div>
+          <div class="window-controls"><span>-</span><span>□</span><span>×</span></div>
+        </div>
+        <div class="app-body">
+          <div class="app-side">
+            <div class="mini-head">BRANCHES</div>
+            <div class="branch active"><i></i> main</div>
+            <div class="branch"><i></i> installer-trust</div>
+            <div class="branch"><i></i> download-page</div>
+            <div class="mini-head" style="margin-top:18px">REMOTES</div>
+            <div class="branch"><i></i> origin</div>
+          </div>
+          <div class="graph">
+            <div class="graph-head"><span>GRAPH</span><span>MESSAGE</span><span>COMMIT</span></div>
+            <div class="commit-row active"><span class="lane"></span><span><strong>Make downloads easy to verify</strong>Alex Chen · now</span><span class="hash">a82f1c0</span></div>
+            <div class="commit-row"><span class="lane"></span><span><strong>Explain what leaves the device</strong>Morgan Lee · 18m</span><span class="hash">7c01d91</span></div>
+            <div class="commit-row"><span class="lane split"></span><span><strong>Add Windows ARM64 release</strong>Sam Rivera · 1h</span><span class="hash">41ab39e</span></div>
+            <div class="commit-row"><span class="lane"></span><span><strong>Keep network auth in system Git</strong>Jamie Park · 3h</span><span class="hash">df618a2</span></div>
+            <div class="commit-row"><span class="lane"></span><span><strong>Simplify branch switching</strong>Taylor Quinn · yesterday</span><span class="hash">1f983bd</span></div>
+            <div class="commit-row"><span class="lane"></span><span><strong>Show a clear result after every action</strong>Riley Singh · yesterday</span><span class="hash">28a502f</span></div>
+            <div class="commit-row"><span class="lane"></span><span><strong>Start GitWyrm</strong>Dev team · 2 days ago</span><span class="hash">001e7ab</span></div>
+          </div>
+          <div class="app-side right">
+            <div class="change-summary">
+              <div class="mini-head" style="padding-left:0">CHANGES</div>
+              <h3>Make downloads easy to verify</h3>
+              <p>Shows the selected build and trust details before the download starts.</p>
+              <div class="change-file"><span>download-page.html</span><span><b class="plus">+184</b> <b class="minus">-12</b></span></div>
+              <div class="change-file"><span>privacy.md</span><span><b class="plus">+58</b></span></div>
+              <div class="change-file"><span>release.yml</span><span><b class="plus">+16</b> <b class="minus">-2</b></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section changelog-section" id="changelog" aria-labelledby="changelog-title">
+      <div class="shell">
+        <div class="section-head">
+          <div class="section-kicker">Changelog</div>
+          <div>
+            <h2 id="changelog-title">See what changed before you update.</h2>
+            <p class="section-lede">Every release is built from GitWyrm's public commit history. Read the useful version here, then inspect the source or download that build.</p>
+          </div>
+        </div>
+
+        <div class="release-panel">
+          <div class="release-toolbar" aria-label="Changelog filters">
+            <div class="release-channels" role="group" aria-label="Release channel">
+              <button class="release-channel active" type="button" data-channel="stable" aria-pressed="true">Stable</button>
+              <button class="release-channel" type="button" data-channel="prerelease" aria-pressed="false">Pre-release</button>
+              <button class="release-channel" type="button" data-channel="all" aria-pressed="false">All</button>
+            </div>
+            <div class="release-area-wrap">
+              <label for="release-area" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Filter by area</label>
+              <select id="release-area">
+                <option value="all">All areas</option>
+                <option value="enterprise">Enterprise</option>
+                <option value="updater">Installer and updates</option>
+                <option value="github">GitHub</option>
+                <option value="ai">AI</option>
+                <option value="ui">Interface</option>
+                <option value="merge">Merge and conflicts</option>
+                <option value="remotes">Remotes</option>
+              </select>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+            </div>
+            <span class="release-count" id="release-count" aria-live="polite">1 release</span>
+          </div>
+
+          <div class="release-feed">
+            <article class="release-entry stable" data-release-channel="stable" data-topics="updater enterprise github ui">
+              <time class="release-date" datetime="2026-07-21"><span>Jul 21</span> 2026</time>
+              <span class="release-dot" aria-hidden="true"></span>
+              <div class="release-body">
+                <div class="release-heading">
+                  <h3>0.1.0</h3><span class="release-state">Latest stable</span><span class="release-change-count">5 changes</span>
+                  <button class="release-toggle" type="button" aria-expanded="true" aria-label="Collapse release 0.1.0"><span>Hide details</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
+                </div>
+                <p class="release-summary">The first public GitWyrm release, with managed installs, GitHub work, and a release path you can audit.</p>
+                <ul class="release-items">
+                  <li class="release-item"><span class="change-kind new">New</span><span>Release notes now appear on every GitHub release and the website.</span></li>
+                  <li class="release-item"><span class="change-kind new">New</span><span>Install GitWyrm silently for company-wide rollouts.</span></li>
+                  <li class="release-item"><span class="change-kind new">New</span><span>See and work on GitHub pull requests and issues inside GitWyrm.</span></li>
+                  <li class="release-item"><span class="change-kind improved">Improved</span><span>Beta releases stay separate from the stable download.</span></li>
+                  <li class="release-item"><span class="change-kind improved">Improved</span><span>Softer green accents and bigger, bolder default text.</span></li>
+                </ul>
+                <div class="release-topics"><span class="release-topic">enterprise</span><span class="release-topic">updater</span><span class="release-topic">github</span><span class="release-topic">ui</span></div>
+                <div class="release-actions">
+                  <a href="https://cdn.gitwyrm.com/GitWyrm-Setup.exe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 20h16"/></svg>Download this version</a>
+                  <a href="https://github.com/Wutname1/GitWyrm/releases" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>View source release</a>
+                </div>
+              </div>
+            </article>
+
+            <article class="release-entry prerelease" data-release-channel="prerelease" data-topics="merge ai ui remotes" hidden>
+              <time class="release-date" datetime="2026-07-20"><span>Jul 20</span> 2026</time>
+              <span class="release-dot" aria-hidden="true"></span>
+              <div class="release-body">
+                <div class="release-heading">
+                  <h3>0.1.0-Beta2</h3><span class="release-state">Pre-release</span><span class="release-change-count">4 changes</span>
+                  <button class="release-toggle" type="button" aria-expanded="true" aria-label="Collapse release 0.1.0-Beta2"><span>Hide details</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
+                </div>
+                <p class="release-summary">A reliability pass for conflict work, rebases, branches, and connected AI accounts.</p>
+                <ul class="release-items">
+                  <li class="release-item"><span class="change-kind new">New</span><span>Finish or cancel a paused rebase from the app.</span></li>
+                  <li class="release-item"><span class="change-kind fixed">Fixed</span><span>Picking a side no longer breaks binary or deleted conflict files.</span></li>
+                  <li class="release-item"><span class="change-kind fixed">Fixed</span><span>Copilot stays selected after you sign in.</span></li>
+                  <li class="release-item"><span class="change-kind improved">Improved</span><span>Conflict screens and merge banners now handle every operation.</span></li>
+                </ul>
+                <div class="release-topics"><span class="release-topic">merge</span><span class="release-topic">ai</span><span class="release-topic">remotes</span></div>
+                <div class="release-actions"><a href="https://github.com/Wutname1/GitWyrm/releases" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>View release notes</a></div>
+              </div>
+            </article>
+
+            <article class="release-entry prerelease" data-release-channel="prerelease" data-topics="ui remotes settings" hidden>
+              <time class="release-date" datetime="2026-07-18"><span>Jul 18</span> 2026</time>
+              <span class="release-dot" aria-hidden="true"></span>
+              <div class="release-body">
+                <div class="release-heading">
+                  <h3>0.1.0-Beta1</h3><span class="release-state">Pre-release</span><span class="release-change-count">4 changes</span>
+                  <button class="release-toggle" type="button" aria-expanded="true" aria-label="Collapse release 0.1.0-Beta1"><span>Hide details</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
+                </div>
+                <p class="release-summary">The workspace pass that made larger sets of repositories easier to manage.</p>
+                <ul class="release-items">
+                  <li class="release-item"><span class="change-kind new">New</span><span>Organize repositories with vertical tabs and movable groups.</span></li>
+                  <li class="release-item"><span class="change-kind new">New</span><span>See which remote branches have work you do not have yet.</span></li>
+                  <li class="release-item"><span class="change-kind fixed">Fixed</span><span>Push and pull now say what actually changed.</span></li>
+                  <li class="release-item"><span class="change-kind fixed">Fixed</span><span>Zoom levels stay inside the app window.</span></li>
+                </ul>
+                <div class="release-topics"><span class="release-topic">ui</span><span class="release-topic">remotes</span><span class="release-topic">settings</span></div>
+                <div class="release-actions"><a href="https://github.com/Wutname1/GitWyrm/releases" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>View release notes</a></div>
+              </div>
+            </article>
+          </div>
+          <p class="release-empty" id="release-empty">No releases match this view. Try All releases or All areas.</p>
+          <div class="release-pagination" aria-label="Changelog pages">
+            <span class="release-range" id="release-range" aria-live="polite">Showing 1 of 1</span>
+            <span class="release-page-state" id="release-page-state">Page 1 of 1</span>
+            <div class="release-page-actions">
+              <button class="release-page-button" id="release-prev" type="button" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>Previous</button>
+              <button class="release-page-button" id="release-next" type="button" disabled>Next<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section proof-section" id="security" aria-labelledby="security-title">
+      <div class="shell trust-layout">
+        <div class="trust-copy">
+          <div class="section-kicker">For the person approving it</div>
+          <h2 id="security-title">Here is what the app actually does.</h2>
+          <p>No floating shield icons. No “enterprise-grade” filler. These are the boundaries a desktop or security lead can review.</p>
+          <div class="review-prompt"><strong>Planning a managed rollout?</strong>Review the <a href="https://github.com/Wutname1/GitWyrm" target="_blank" rel="noreferrer">source and release history</a>, then send the team the questions your policy requires.</div>
+        </div>
+
+        <div class="audit-list">
+          <article class="audit-row">
+            <span class="audit-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5"/></svg></span>
+            <h3>Install scope</h3>
+            <p>The standard setup installs for the current Windows user. It does not need administrator rights.</p>
+          </article>
+          <article class="audit-row">
+            <span class="audit-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16v13H4zM8 7V4h8v3"/></svg></span>
+            <h3>Repository access</h3>
+            <p>Local repository operations use the bundled Rust Git library. Fetch, pull, push, and clone run through system <code>git.exe</code>, so Git Credential Manager handles authentication.</p>
+          </article>
+          <article class="audit-row">
+            <span class="audit-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg></span>
+            <h3>Updates</h3>
+            <p>The desktop app checks its public release feed. Update packages are verified against a public key embedded in the app before install.</p>
+          </article>
+          <article class="audit-row">
+            <span class="audit-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 18V6m5 12V9m5 9v-6m5 6V4"/></svg></span>
+            <h3>Diagnostics</h3>
+            <p>Production builds send errors and performance data to Sentry. Default personal data is disabled. Inputs and on-screen text in error replays are masked.</p>
+          </article>
+          <article class="audit-row">
+            <span class="audit-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v4m0 10v4M3 12h4m10 0h4M6 6l3 3m6 6 3 3m0-12-3 3m-6 6-3 3"/></svg></span>
+            <h3>Bring your own AI</h3>
+            <p>GitWyrm does not run an AI service. Connect a provider or GitHub Copilot account you control. Only when you ask for a commit message does GitWyrm send the staged diff and recent commit subjects directly to that provider.</p>
+          </article>
+          <article class="audit-row">
+            <span class="audit-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 3h10v4H7zM5 7h14v14H5zM8 11h8M8 15h6"/></svg></span>
+            <h3>License and source</h3>
+            <p>GitWyrm is published under the MIT License. The source, build workflow, and release history are public on GitHub.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section plain-section shell" id="plain-deal" aria-labelledby="plain-title">
+      <div class="section-head">
+        <div class="section-kicker">The plain deal</div>
+        <div>
+          <h2 id="plain-title">Software should earn trust in specifics.</h2>
+          <p class="section-lede">GitWyrm is made for people doing real work in real repositories. The pitch is short because the source is there when you want the long version.</p>
+        </div>
+      </div>
+
+      <div class="principles">
+        <article class="principle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          <h3>Every action answers back</h3>
+          <p>Clicks, keys, and drags get a visible result. If work takes time, GitWyrm shows what it is doing.</p>
+        </article>
+        <article class="principle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
+          <h3>Plain words beat Git trivia</h3>
+          <p>Choices explain what happens to your files and work. You should not need a glossary to switch a branch safely.</p>
+        </article>
+        <article class="principle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 19 19 4M8 4h11v11M4 9v10h10"/></svg>
+          <h3>Open when details matter</h3>
+          <p>Read the code. Review the network paths. Use the MIT license. The implementation is part of the product story.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="final-cta">
+      <div class="final-inner shell">
+        <div><h2>Ready when your repo is.</h2><p>Windows x64 and ARM64. Free under the MIT License.</p></div>
+        <a class="download-button small-download" id="footer-download" href="https://cdn.gitwyrm.com/GitWyrm-Setup.exe">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 20h16"/></svg>
+          <span>Download GitWyrm</span>
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner shell">
+      <div class="footer-brand"><img src="../src/assets/logo.png" alt="" /><span>GitWyrm · MIT licensed</span></div>
+      <button type="button" data-dialog="privacy-dialog">Privacy</button>
+      <button type="button" data-dialog="terms-dialog">Terms</button>
+      <a href="https://github.com/Wutname1/GitWyrm/blob/main/LICENSE" target="_blank" rel="noreferrer">License</a>
+      <a href="https://github.com/Wutname1/GitWyrm" target="_blank" rel="noreferrer">Source</a>
+    </div>
+  </footer>
+
+  <dialog id="privacy-dialog" aria-labelledby="privacy-title">
+    <div class="dialog-head"><div><h2 id="privacy-title">Privacy policy</h2><p>Proposed website copy · Last updated July 21, 2026</p></div><button class="dialog-close" type="button" aria-label="Close privacy policy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+    <div class="legal-copy">
+      <span class="draft">DRAFT FOR LEGAL REVIEW</span>
+      <h3>The short version</h3>
+      <p>GitWyrm works with repositories on your computer. The core app does not require a GitWyrm account. Some features make network requests, and production builds send diagnostic data so crashes can be fixed.</p>
+      <h3>What GitWyrm processes locally</h3>
+      <p>GitWyrm reads repository files, Git history, branches, diffs, and settings needed to show and change your local repositories. Local Git operations are performed on your device.</p>
+      <h3>When data leaves your device</h3>
+      <ul>
+        <li>Fetch, pull, push, and clone contact the Git remote you chose through system Git and Git Credential Manager.</li>
+        <li>GitHub features contact GitHub after you connect a GitHub account.</li>
+        <li>GitWyrm does not run an AI service. If you connect your own AI provider or GitHub Copilot account and request a commit message, the staged diff and recent commit subjects are sent directly to that provider.</li>
+        <li>Production builds send error, performance, and related diagnostic data to Sentry. Default personal data is disabled. Inputs, media, and visible text are masked in error replays.</li>
+        <li>The app checks the public release feed for updates. This exposes ordinary request data such as IP address and user agent to the hosting provider.</li>
+      </ul>
+      <h3>Credentials</h3>
+      <p>Git network credentials are handled by your system Git setup and Git Credential Manager. Credentials for your AI provider and other connected services are stored on your device for the features you configure. GitWyrm does not sell personal information.</p>
+      <h3>Retention and service providers</h3>
+      <p>Local repository data remains until you remove it through the app or your system. Third-party services, including Sentry, GitHub, your Git remote, CDN host, and any AI provider you choose, process data under their own terms and retention rules.</p>
+      <h3>Your choices</h3>
+      <p>You can use the core local Git features without connecting GitHub or an AI provider. You can remove connected providers in settings. You can uninstall GitWyrm and remove its local settings using Windows.</p>
+      <h3>Changes and contact</h3>
+      <p>Material changes will be posted with a new effective date. Until a dedicated privacy contact is published, questions can be opened in the <a href="https://github.com/Wutname1/GitWyrm/issues" target="_blank" rel="noreferrer">public issue tracker</a>. Do not post secrets or private repository details.</p>
+    </div>
+  </dialog>
+
+  <dialog id="terms-dialog" aria-labelledby="terms-title">
+    <div class="dialog-head"><div><h2 id="terms-title">Terms of use</h2><p>Proposed website copy · Last updated July 21, 2026</p></div><button class="dialog-close" type="button" aria-label="Close terms"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+    <div class="legal-copy">
+      <span class="draft">DRAFT FOR LEGAL REVIEW</span>
+      <h3>Using GitWyrm</h3>
+      <p>You may download, use, copy, modify, and distribute GitWyrm under the MIT License. You are responsible for reviewing changes before you commit, discard, merge, push, or otherwise change a repository.</p>
+      <h3>No warranty</h3>
+      <p>GitWyrm is provided “as is,” without warranties of any kind, to the extent allowed by law. The complete warranty disclaimer and liability limits are in the MIT License included with the software.</p>
+      <h3>Third-party services</h3>
+      <p>Git remotes, GitHub, AI providers, the download CDN, and other connected services are provided by third parties. Your use of those services is also governed by their terms. GitWyrm is not responsible for a third-party service or its availability.</p>
+      <h3>Your repositories and credentials</h3>
+      <p>You are responsible for repository access, backups, credentials, and permission to process or send the code you use with GitWyrm. Do not send confidential code to an AI provider unless your organization allows it.</p>
+      <h3>Updates and availability</h3>
+      <p>Features, download formats, and update support may change. We may stop distributing a build that is unsafe, broken, or no longer supported.</p>
+      <h3>These website terms and the MIT License</h3>
+      <p>The MIT License governs the software and source code. These terms govern use of the download website and connected services. If these terms conflict with rights granted by the MIT License, the MIT License controls for the software.</p>
+      <h3>Changes</h3>
+      <p>Updated terms will be posted with a new effective date. Continuing to use the website after a change means you accept the updated website terms where allowed by law.</p>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+    <span id="toast-copy">Done</span>
+  </div>
+
+  <script>
+    const builds = {
+      "windows-x64": {
+        label: "Download for Windows x64",
+        heading: "Windows installer",
+        url: "https://cdn.gitwyrm.com/GitWyrm-Setup.exe",
+        source: "cdn.gitwyrm.com",
+        install: "Current Windows user",
+        updates: "Verified by embedded key",
+        status: "Per-user install. No admin rights needed.",
+      },
+      "windows-arm64": {
+        label: "Download for Windows ARM64",
+        heading: "ARM64 installer",
+        url: "https://cdn.gitwyrm.com/GitWyrm-Setup-ARM64.exe",
+        source: "cdn.gitwyrm.com",
+        install: "Current Windows user",
+        updates: "Verified by embedded key",
+        status: "For ARM-based Windows PCs. No admin rights needed.",
+      },
+      source: {
+        label: "Download source code",
+        heading: "Source archive",
+        url: "https://github.com/Wutname1/GitWyrm/archive/refs/heads/main.zip",
+        source: "github.com/Wutname1",
+        install: "Build it yourself",
+        updates: "Review the public history",
+        status: "MIT-licensed source from the main branch.",
+      },
+    };
+
+    const select = document.querySelector("#build-select");
+    const button = document.querySelector("#download-button");
+    const footerButton = document.querySelector("#footer-download");
+    const label = document.querySelector("#download-label");
+    const heading = document.querySelector("#download-heading");
+    const status = document.querySelector("#download-status");
+    const detected = document.querySelector("#detected-copy");
+    const receiptSource = document.querySelector("#receipt-source");
+    const receiptInstall = document.querySelector("#receipt-install");
+    const receiptUpdates = document.querySelector("#receipt-updates");
+    const downloadCard = document.querySelector(".download-card");
+    const releaseChannelButtons = document.querySelectorAll(".release-channel");
+    const releaseArea = document.querySelector("#release-area");
+    const releaseFeed = document.querySelector(".release-feed");
+    const releaseCount = document.querySelector("#release-count");
+    const releaseEmpty = document.querySelector("#release-empty");
+    const releaseRange = document.querySelector("#release-range");
+    const releasePageState = document.querySelector("#release-page-state");
+    const releasePrev = document.querySelector("#release-prev");
+    const releaseNext = document.querySelector("#release-next");
+    const releasesPerPage = 5;
+    let releasePage = 1;
+    const copyLink = document.querySelector("#copy-link");
+    const toast = document.querySelector("#toast");
+    const toastCopy = document.querySelector("#toast-copy");
+    let toastTimer;
+
+    function showToast(message) {
+      toastCopy.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2800);
+    }
+
+    function setReleaseExpanded(entry, expanded) {
+      const toggle = entry.querySelector(".release-toggle");
+      const version = entry.querySelector("h3").textContent;
+      entry.classList.toggle("collapsed", !expanded);
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} release ${version}`);
+      toggle.querySelector("span").textContent = expanded ? "Hide details" : "Show details";
+    }
+
+    function applyReleaseFilter(announce = false, resetPage = false) {
+      const activeButton = document.querySelector(".release-channel.active");
+      const channel = activeButton?.dataset.channel || "stable";
+      const area = releaseArea.value;
+      const releaseEntries = Array.from(document.querySelectorAll(".release-entry"));
+      if (resetPage) releasePage = 1;
+
+      const matchingEntries = releaseEntries.filter((entry) => {
+        const channelMatches = channel === "all" || entry.dataset.releaseChannel === channel;
+        const topics = (entry.dataset.topics || "").split(" ");
+        const areaMatches = area === "all" || topics.includes(area);
+        return channelMatches && areaMatches;
+      });
+
+      const total = matchingEntries.length;
+      const totalPages = Math.max(1, Math.ceil(total / releasesPerPage));
+      releasePage = Math.min(releasePage, totalPages);
+      const start = (releasePage - 1) * releasesPerPage;
+      const end = Math.min(start + releasesPerPage, total);
+      const pageEntries = matchingEntries.slice(start, end);
+
+      releaseEntries.forEach((entry) => { entry.hidden = !pageEntries.includes(entry); });
+      pageEntries.forEach((entry, index) => setReleaseExpanded(entry, index === 0));
+
+      releaseCount.textContent = `${total} ${total === 1 ? "release" : "releases"}`;
+      releaseRange.textContent = total === 0 ? "Showing 0 of 0" : start + 1 === end ? `Showing ${end} of ${total}` : `Showing ${start + 1}-${end} of ${total}`;
+      releasePageState.textContent = `Page ${releasePage} of ${totalPages}`;
+      releasePrev.disabled = releasePage === 1 || total === 0;
+      releaseNext.disabled = releasePage === totalPages || total === 0;
+      releaseEmpty.classList.toggle("show", total === 0);
+      releaseFeed.classList.toggle("empty", total === 0);
+
+      if (announce) {
+        const channelLabel = channel === "all" ? "all releases" : channel === "stable" ? "stable releases" : "pre-releases";
+        const areaLabel = releaseArea.options[releaseArea.selectedIndex].text.toLowerCase();
+        showToast(`Showing ${channelLabel} for ${areaLabel}, page ${releasePage}.`);
+      }
+    }
+
+    function applyBuild(value, announce = false) {
+      const build = builds[value];
+      if (!build) return;
+      button.href = build.url;
+      footerButton.href = build.url;
+      label.textContent = build.label;
+      heading.textContent = build.heading;
+      status.textContent = build.status;
+      receiptSource.textContent = build.source;
+      receiptInstall.textContent = build.install;
+      receiptUpdates.textContent = build.updates;
+      button.classList.toggle("is-source", value === "source");
+      if (announce) {
+        downloadCard.classList.remove("selection-changed");
+        requestAnimationFrame(() => downloadCard.classList.add("selection-changed"));
+        setTimeout(() => downloadCard.classList.remove("selection-changed"), 760);
+        showToast(`${build.heading} selected.`);
+      }
+    }
+
+    async function detectPlatform() {
+      const ua = navigator.userAgent || "";
+      const platform = navigator.userAgentData?.platform || navigator.platform || "";
+      const isWindows = /Windows|Win32|Win64/i.test(`${platform} ${ua}`);
+      let architecture = "";
+
+      if (navigator.userAgentData?.getHighEntropyValues) {
+        try {
+          const values = await navigator.userAgentData.getHighEntropyValues(["architecture", "bitness"]);
+          architecture = `${values.architecture || ""} ${values.bitness || ""}`;
+        } catch {
+          architecture = "";
+        }
+      }
+
+      const isArm = /arm|aarch64/i.test(`${architecture} ${ua}`);
+      if (isWindows) {
+        select.value = isArm ? "windows-arm64" : "windows-x64";
+        detected.textContent = isArm ? "Windows ARM64 detected" : "Windows x64 detected";
+      } else {
+        select.value = "source";
+        const os = /Mac/i.test(`${platform} ${ua}`) ? "macOS" : /Linux/i.test(`${platform} ${ua}`) ? "Linux" : "Non-Windows device";
+        detected.textContent = `${os} detected`;
+      }
+      applyBuild(select.value);
+    }
+
+    select.addEventListener("change", () => applyBuild(select.value, true));
+
+    releaseChannelButtons.forEach((releaseButton) => {
+      releaseButton.addEventListener("click", () => {
+        releaseChannelButtons.forEach((candidate) => {
+          const active = candidate === releaseButton;
+          candidate.classList.toggle("active", active);
+          candidate.setAttribute("aria-pressed", String(active));
+        });
+        applyReleaseFilter(true, true);
+      });
+    });
+
+    releaseArea.addEventListener("change", () => applyReleaseFilter(true, true));
+
+    releaseFeed.addEventListener("click", (event) => {
+      const toggle = event.target.closest(".release-toggle");
+      if (!toggle) return;
+      const entry = toggle.closest(".release-entry");
+      const expanded = entry.classList.contains("collapsed");
+      setReleaseExpanded(entry, expanded);
+      showToast(`Release ${entry.querySelector("h3").textContent} ${expanded ? "expanded" : "collapsed"}.`);
+    });
+
+    releasePrev.addEventListener("click", () => {
+      if (releasePage === 1) return;
+      releasePage -= 1;
+      applyReleaseFilter(true);
+    });
+
+    releaseNext.addEventListener("click", () => {
+      releasePage += 1;
+      applyReleaseFilter(true);
+    });
+
+    button.addEventListener("click", () => {
+      status.textContent = select.value === "source" ? "Opening the source archive..." : "Download started. Check your browser downloads.";
+      showToast(select.value === "source" ? "Source download started." : "Installer download started.");
+    });
+
+    footerButton.addEventListener("click", () => showToast("Download started. Check your browser downloads."));
+
+    copyLink.addEventListener("click", async () => {
+      const url = builds[select.value].url;
+      try {
+        await navigator.clipboard.writeText(url);
+        copyLink.querySelector("span").textContent = "Link copied";
+        showToast("Direct download link copied.");
+      } catch {
+        copyLink.querySelector("span").textContent = "Copy failed";
+        showToast("Could not copy. Use the download button instead.");
+      }
+      setTimeout(() => { copyLink.querySelector("span").textContent = "Copy direct link"; }, 2200);
+    });
+
+    document.querySelectorAll("[data-dialog]").forEach((trigger) => {
+      trigger.addEventListener("click", () => document.querySelector(`#${trigger.dataset.dialog}`).showModal());
+    });
+
+    document.querySelectorAll("dialog").forEach((dialog) => {
+      dialog.querySelector(".dialog-close").addEventListener("click", () => dialog.close());
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+    });
+
+    function startScrollReveals() {
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduceMotion || !("IntersectionObserver" in window)) return;
+
+      const staggerGroups = [
+        document.querySelectorAll(".audit-row"),
+        document.querySelectorAll(".principle"),
+      ];
+      staggerGroups.forEach((group) => {
+        group.forEach((element, index) => {
+          element.style.setProperty("--reveal-delay", `${index * 55}ms`);
+        });
+      });
+
+      const targets = document.querySelectorAll(
+        ".section-head, .product-window, .release-panel, .release-entry, .trust-copy, .audit-row, .principle, .final-inner"
+      );
+      targets.forEach((target) => target.classList.add("reveal"));
+      document.body.classList.add("motion-ready");
+
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          entry.target.classList.add("in-view");
+          observer.unobserve(entry.target);
+        });
+      }, { threshold: .16, rootMargin: "0px 0px -7%" });
+
+      requestAnimationFrame(() => targets.forEach((target) => observer.observe(target)));
+    }
+
+    detectPlatform();
+    applyReleaseFilter();
+    startScrollReveals();
+  </script>
+</body>
+</html>
