@@ -15,7 +15,7 @@ export function HunkBar({ text, canPatch, kind, disabled, onApply, onDiscard }: 
   return (
     <div className="flex min-w-max items-center gap-2 bg-panel2 pr-3">
       <span className="w-[72px] flex-none select-none" />
-      <span className="flex-1 whitespace-pre py-px font-mono text-[11px] italic text-muted-foreground">
+      <span className="flex-1 whitespace-pre py-px font-mono text-2xs italic text-muted-foreground">
         {text}
       </span>
       {canPatch && (
@@ -24,10 +24,10 @@ export function HunkBar({ text, canPatch, kind, disabled, onApply, onDiscard }: 
             disabled={disabled}
             onClick={onApply}
             className={cn(
-              'rounded border px-1.5 py-px text-[10px] font-semibold disabled:opacity-50',
+              'rounded border px-1.5 py-px text-2xs font-semibold disabled:opacity-50',
               kind === 'staged'
                 ? 'border-border bg-panel3 text-sub hover:bg-panel'
-                : 'border-primary/50 bg-soft text-primary hover:border-primary hover:bg-primary hover:text-primary-foreground'
+                : 'border-primary/50 bg-soft text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground'
             )}
           >
             {applyLabel}
@@ -37,7 +37,7 @@ export function HunkBar({ text, canPatch, kind, disabled, onApply, onDiscard }: 
               disabled={disabled}
               onClick={onDiscard}
               tooltip="Discard this hunk from the working tree"
-              className="rounded border border-border bg-panel3 px-1.5 py-px text-[10px] font-semibold text-removed hover:border-removed/60 hover:bg-removed/10 disabled:opacity-50"
+              className="rounded border border-border bg-panel3 px-1.5 py-px text-2xs font-semibold text-removed hover:border-removed/60 hover:bg-removed/10 disabled:opacity-50"
             >
               Discard
             </TooltipButton>

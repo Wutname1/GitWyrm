@@ -35,7 +35,7 @@ export function DiffLineMenu({
     <ContextMenu onOpenChange={onOpenChange}>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        <ContextMenuLabel className="text-[11px] text-sub">
+        <ContextMenuLabel className="text-2xs text-sub">
           {count === 1 ? '1 line' : `${count} lines`}
         </ContextMenuLabel>
         <ContextMenuSeparator />

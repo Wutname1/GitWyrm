@@ -56,12 +56,12 @@ export function ConfirmDialog({
         if (!keepOpenOnConfirm) onOpenChange(false)
       }}
     >
-      <DialogDescription className="text-[12px] leading-relaxed text-sub">
+      <DialogDescription className="text-xs leading-relaxed text-sub">
         {description}
       </DialogDescription>
       {confirmPhrase && (
         <div className="grid gap-1.5">
-          <label className="text-[11px] text-muted-foreground">
+          <label className="text-2xs text-muted-foreground">
             Type <span className="font-mono text-foreground">{confirmPhrase}</span> to confirm
           </label>
           <Input

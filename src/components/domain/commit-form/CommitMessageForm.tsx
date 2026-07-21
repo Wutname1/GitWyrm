@@ -147,7 +147,7 @@ export function CommitMessageForm() {
               generating
                 ? 'wyrm-ai-trigger-active cursor-wait'
                 : justGenerated
-                  ? 'border-primary/25 bg-soft text-primary'
+                  ? 'border-primary/25 bg-soft text-accent-text'
                   : 'cursor-pointer hover:bg-panel3 hover:text-foreground'
             )}
           >
@@ -165,7 +165,7 @@ export function CommitMessageForm() {
           placeholder={generating ? '' : 'Extended description…'}
           rows={2}
           className={cn(
-            'wyrm-commit-description w-full bg-background px-2.5 py-2 text-[11.5px] transition-[opacity,filter] duration-200',
+            'wyrm-commit-description w-full bg-background px-2.5 py-2 text-xs transition-[opacity,filter] duration-200',
             generating && 'opacity-[0.18] saturate-[0.35]'
           )}
         />
@@ -197,7 +197,7 @@ export function CommitMessageForm() {
         className={cn(
           'flex h-[34px] w-full overflow-hidden rounded-md border transition-colors',
           canCommit
-            ? 'border-primary/50 bg-soft text-primary hover:border-primary'
+            ? 'border-primary/50 bg-soft text-accent-text hover:border-primary'
             : 'cursor-not-allowed border-transparent bg-panel3 text-muted-foreground'
         )}
       >
@@ -205,7 +205,7 @@ export function CommitMessageForm() {
           onClick={() => doCommit()}
           disabled={!canCommit}
           className={cn(
-            'flex flex-1 items-center justify-center gap-2 text-[12.5px] font-semibold transition-colors',
+            'flex flex-1 items-center justify-center gap-2 text-[0.78125rem] font-semibold transition-colors',
             canCommit
               ? 'cursor-pointer hover:bg-primary hover:text-primary-foreground'
               : 'cursor-not-allowed'

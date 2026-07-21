@@ -49,10 +49,10 @@ export function RightPanel() {
             flash && 'bg-soft'
           )}
         >
-          <span className="text-[11px] font-bold tracking-[.05em] text-sub">
+          <span className="text-2xs font-bold tracking-[.05em] text-sub">
             CHANGES{currentBranch ? ` · ${currentBranch}` : ''}
           </span>
-          <span className="ml-auto rounded-full bg-primary px-[7px] py-px font-mono text-[9px] font-bold text-primary-foreground">
+          <span className="ml-auto rounded-full bg-primary px-[7px] py-px font-mono text-2xs font-bold text-primary-foreground">
             {total}
           </span>
         </div>

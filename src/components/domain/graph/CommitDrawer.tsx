@@ -48,21 +48,21 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
       <div className="flex flex-none items-center gap-2.5 border-b border-border px-3.5 py-[9px]">
         <Avatar initials={initials(d.author_name)} color={color} email={d.author_email} size="md" />
         <div className="min-w-0 flex-1">
-          <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-semibold text-foreground">
+          <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[0.78125rem] font-semibold text-foreground">
             {d.summary}
           </div>
-          <div className="text-[10.5px] text-muted-foreground">
+          <div className="text-2xs text-muted-foreground">
             {d.author_name} committed · {formatCommitTime(d.time)} · parents{' '}
             <span className="font-mono">{parents}</span>
           </div>
         </div>
-        <span className="rounded-[5px] border border-border bg-panel2 px-2 py-[3px] font-mono text-[10.5px] text-sub">
+        <span className="rounded-[5px] border border-border bg-panel2 px-2 py-[3px] font-mono text-2xs text-sub">
           {shortSha(d.sha)}
         </span>
         <Button
           variant="secondary"
           size="sm"
-          className="h-auto rounded border-border bg-panel3 px-[7px] py-0.5 text-[10px] text-sub"
+          className="h-auto rounded border-border bg-panel3 px-[7px] py-0.5 text-2xs text-sub"
           onClick={() => void copyToClipboard(d.sha, `Copied ${shortSha(d.sha)}`)}
         >
           Copy SHA
@@ -75,7 +75,7 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
           <X size={12} />
         </TooltipButton>
       </div>
-      <div className="flex flex-none items-center gap-3.5 border-b border-border px-3.5 py-[5px] text-[10.5px] text-sub">
+      <div className="flex flex-none items-center gap-3.5 border-b border-border px-3.5 py-[5px] text-2xs text-sub">
         <span className="font-semibold">{d.files.length} files changed</span>
         <span className="font-mono text-added">+{adds}</span>
         <span className="font-mono text-removed">-{dels}</span>

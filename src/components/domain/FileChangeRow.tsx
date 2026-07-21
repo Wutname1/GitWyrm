@@ -49,7 +49,7 @@ export function FileChangeRow({
       <StatusBadge st={file.status} />
       <span
         className={cn(
-          'flex flex-1 items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]',
+          'flex flex-1 items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-xs',
           mono && 'font-mono',
           nameClassName ?? 'text-foreground'
         )}
@@ -59,11 +59,11 @@ export function FileChangeRow({
       </span>
       {sub ? (
         // Line counts are meaningless for a submodule pointer; show what moved.
-        <span className="whitespace-nowrap text-[10px] text-sub">submodule · {submoduleNote(sub)}</span>
+        <span className="whitespace-nowrap text-2xs text-sub">submodule · {submoduleNote(sub)}</span>
       ) : (
         <>
-          <span className="font-mono text-[10px] text-added">+{file.additions}</span>
-          <span className="font-mono text-[10px] text-removed">-{file.deletions}</span>
+          <span className="font-mono text-2xs text-added">+{file.additions}</span>
+          <span className="font-mono text-2xs text-removed">-{file.deletions}</span>
         </>
       )}
       {action}
@@ -94,9 +94,9 @@ export function StageToggle({ direction, onToggle, disabled, pending }: StageTog
       aria-busy={pending || undefined}
       tooltip={pending ? (direction === 'stage' ? 'Staging file' : 'Unstaging file') : direction === 'stage' ? 'Stage' : 'Unstage'}
       className={cn(
-        'flex size-[18px] flex-none items-center justify-center rounded border border-border bg-panel2 p-0 text-[13px] leading-none hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none disabled:opacity-40',
+        'flex size-[18px] flex-none items-center justify-center rounded border border-border bg-panel2 p-0 text-[0.8125rem] leading-none hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none disabled:opacity-40',
         direction === 'stage' ? 'text-added' : 'text-sub',
-        pending && 'border-primary/50 bg-soft !text-primary !opacity-100'
+        pending && 'border-primary/50 bg-soft !text-accent-text !opacity-100'
       )}
     >
       {pending ? <PendingIndicator className="size-3" /> : direction === 'stage' ? '+' : '-'}

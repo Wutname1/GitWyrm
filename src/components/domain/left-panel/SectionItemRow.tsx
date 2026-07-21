@@ -74,20 +74,20 @@ export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(fu
         'group/row flex cursor-pointer items-center gap-2 py-1 pl-6 pr-3 transition-colors hover:bg-panel2',
         isCurrent && 'bg-soft',
         disabled && !pending && 'cursor-wait opacity-40',
-        pending && 'cursor-wait bg-soft text-primary',
+        pending && 'cursor-wait bg-soft text-accent-text',
         className
       )}
     >
       {pending ? (
-        <PendingIndicator className="size-3 text-primary" />
+        <PendingIndicator className="size-3 text-accent-text" />
       ) : (
         <span className="size-2 flex-none" style={markerStyle(section, item, isCurrent)} />
       )}
       <span
         className={cn(
-          'overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]',
+          'overflow-hidden text-ellipsis whitespace-nowrap text-xs',
           isCurrent ? 'font-semibold text-foreground' : 'text-sub',
-          pending && 'font-semibold text-primary'
+          pending && 'font-semibold text-accent-text'
         )}
       >
         {pending ? pendingLabel ?? 'Working…' : item.name}
@@ -96,12 +96,12 @@ export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(fu
         <span
           title={item.metaTitle}
           className={cn(
-            'ml-auto whitespace-nowrap pl-1.5 font-mono text-[9.5px]',
+            'ml-auto whitespace-nowrap pl-1.5 font-mono text-2xs',
             // Word markers ("new", "gone") are states, not counts -- give them
             // their own weight so they don't read as an ahead/behind number.
             /^[↑↓]/.test(item.meta)
               ? 'text-muted-foreground'
-              : 'font-semibold uppercase tracking-wide text-primary/80'
+              : 'font-semibold uppercase tracking-wide text-accent-text/80'
           )}
         >
           {item.meta}

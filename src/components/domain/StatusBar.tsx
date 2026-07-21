@@ -95,7 +95,7 @@ export function StatusBar() {
   const total = (status.data?.staged.length ?? 0) + (status.data?.unstaged.length ?? 0)
 
   return (
-    <div data-dim-on-drag className="flex h-6 flex-none items-center gap-4 border-t border-border bg-panel2 px-3 font-mono text-[10.5px] text-sub">
+    <div data-dim-on-drag className="flex h-6 flex-none items-center gap-4 border-t border-border bg-panel2 px-3 font-mono text-2xs text-sub">
       {sync?.text ? <span title={sync.title ?? undefined}>{sync.text}</span> : null}
       <span className="text-muted-foreground">{total} changes</span>
       <div className="flex-1" />

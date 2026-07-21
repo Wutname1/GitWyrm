@@ -93,7 +93,7 @@ function RenameDialog({
       onSubmit={save}
     >
       <div className="grid gap-1.5">
-        <label className="text-[11px] font-semibold text-sub">{label}</label>
+        <label className="text-2xs font-semibold text-sub">{label}</label>
         <Input
           value={value}
           onChange={(event) => setValue(event.target.value)}
@@ -105,7 +105,7 @@ function RenameDialog({
           autoFocus
         />
         {target.type === 'tab' && (
-          <p className="text-[10.5px] text-muted-foreground">
+          <p className="text-2xs text-muted-foreground">
             Leave blank to use the folder name.
           </p>
         )}
@@ -127,7 +127,7 @@ function DropGap({ orientation, active, label }: {
     <div
       aria-hidden="true"
       className={cn(
-        'gw-tab-drop-gap grid flex-none place-items-center overflow-hidden rounded-[5px] border-dashed text-[9px] font-semibold text-primary transition-[width,height,margin,border-color,background-color] duration-150',
+        'gw-tab-drop-gap grid flex-none place-items-center overflow-hidden rounded-[5px] border-dashed text-2xs font-semibold text-accent-text transition-[width,height,margin,border-color,background-color] duration-150',
         orientation === 'horizontal'
           ? active ? 'mx-0.5 h-full w-24 border border-primary/60 bg-soft' : 'h-full w-0 border-0'
           : active ? 'my-0.5 h-8 w-full border border-primary/60 bg-soft' : 'h-0 w-full border-0',
@@ -412,7 +412,7 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
                     ? 'bg-[color:color-mix(in_srgb,var(--tab-group-color)_10%,var(--gw-panel))] font-semibold text-foreground'
                     : 'bg-panel font-semibold text-foreground'
                   : 'text-sub hover:bg-panel2 hover:text-foreground',
-                target === 'group' && 'z-10 border-primary! bg-soft! shadow-[0_0_0_2px_rgba(45,212,167,.13)]',
+                target === 'group' && 'z-10 border-primary! bg-soft! shadow-[0_0_0_2px_var(--gw-accent-soft)]',
               )}
               style={group ? groupStyle(group.color) : undefined}
               title={repo.path}
@@ -561,8 +561,8 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
               className={cn(
                 'flex flex-none cursor-grab items-center gap-1.5 text-left font-semibold outline-none active:cursor-grabbing',
                 orientation === 'horizontal'
-                  ? 'h-full min-w-8 px-2 text-[10.5px]'
-                  : 'h-[29px] w-full rounded-[5px] px-1.5 text-[11px] hover:bg-panel2',
+                  ? 'h-full min-w-8 px-2 text-2xs'
+                  : 'h-[29px] w-full rounded-[5px] px-1.5 text-2xs hover:bg-panel2',
                 groupTarget && 'bg-soft shadow-[inset_0_0_0_1px_var(--gw-accent)]',
               )}
               style={{ color: group.color }}
@@ -577,7 +577,7 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
                 {group.name}
               </span>
               {saved && <Save size={10} strokeWidth={2} aria-label="Saved group" />}
-              <span className="font-mono text-[9px] opacity-65">{group.repoPaths.length}</span>
+              <span className="font-mono text-2xs opacity-65">{group.repoPaths.length}</span>
             </button>
             {!group.collapsed && (
               <div className={cn('flex', orientation === 'horizontal' ? 'h-full flex-none flex-row' : 'w-full flex-col gap-0.5')}>
@@ -590,7 +590,7 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
           </section>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-52">
-          <ContextMenuLabel className="text-[10px] tracking-wide text-muted-foreground">
+          <ContextMenuLabel className="text-2xs tracking-wide text-muted-foreground">
             {group.name.toUpperCase()} · {group.repoPaths.length} REPOS
           </ContextMenuLabel>
           <ContextMenuItem onSelect={() => {
@@ -670,7 +670,7 @@ export function RepositoryTabs({ orientation }: { orientation: TabOrientation })
           dropOnOrder(index)
         }}
         className={cn(
-          'grid flex-none place-items-center overflow-hidden rounded-[5px] border-dashed text-[9px] font-semibold text-primary transition-[width,height,margin,border-color,background-color] duration-150',
+          'grid flex-none place-items-center overflow-hidden rounded-[5px] border-dashed text-2xs font-semibold text-accent-text transition-[width,height,margin,border-color,background-color] duration-150',
           orientation === 'horizontal'
             ? active
               ? 'mx-0.5 h-full w-24 border border-primary/60 bg-soft'

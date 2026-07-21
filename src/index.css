@@ -48,9 +48,13 @@
   --gw-text: #d7e0ea;
   --gw-sub: #8b99a8;
   --gw-muted: #5d6b7a;
-  --gw-accent: #2dd4a7;
+  /* Accent is two tokens: a dimmed fill for buttons/badges/borders and a
+     calmer value for accent-colored text. The old single #2dd4a7 sat at
+     ~10:1 on the background and glared when used as text. */
+  --gw-accent: #1db584;
+  --gw-accent-text: #38b78e;
   --gw-accent-fg: #04120d;
-  --gw-accent-soft: rgba(45, 212, 167, 0.13);
+  --gw-accent-soft: rgba(29, 181, 132, 0.13);
   --gw-green: #34d399;
   --gw-red: #f87171;
   --gw-amber: #fbbf24;
@@ -106,7 +110,12 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
+  /* Micro type floor: nothing in the app renders below this size. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1.45;
+
   /* GitWyrm domain colors as Tailwind utilities (bg-panel, text-sub, ...) */
+  --color-accent-text: var(--gw-accent-text);
   --color-panel: var(--gw-panel);
   --color-panel2: var(--gw-panel2);
   --color-panel3: var(--gw-panel3);
@@ -141,8 +150,10 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-size: 13px;
-    font-weight: 400;
+    /* 13.5px at the default 16px root. All app font sizes are rem, so a
+       future text-size setting only has to change the root font-size. */
+    font-size: 0.84375rem;
+    font-weight: 450;
     user-select: none;
   }
   input,
@@ -217,7 +228,7 @@
 
 .wyrm-blast-logo {
   animation: wyrm-blast-logo 5.2s ease-in-out forwards;
-  filter: drop-shadow(0 0 40px rgba(45, 212, 167, 0.55));
+  filter: drop-shadow(0 0 40px rgba(29, 181, 132, 0.55));
 }
 
 @keyframes wyrm-shard {
@@ -266,7 +277,7 @@
   border: 1px solid color-mix(in srgb, var(--gw-accent) 24%, transparent);
   border-radius: var(--radius-md);
   background:
-    radial-gradient(circle at 48px 50%, rgba(45, 212, 167, 0.11), transparent 68px),
+    radial-gradient(circle at 48px 50%, rgba(29, 181, 132, 0.11), transparent 68px),
     color-mix(in srgb, var(--gw-bg) 97%, transparent);
   pointer-events: none;
   animation: wyrm-ai-stage-in 220ms ease-out both;
@@ -296,7 +307,7 @@
   background: conic-gradient(
     from 0deg,
     transparent 0 78%,
-    rgba(45, 212, 167, 0.12) 82%,
+    rgba(29, 181, 132, 0.12) 82%,
     #8fffe2 91%,
     transparent 98%
   );
@@ -335,7 +346,7 @@
 
 .wyrm-ai-graph path {
   fill: none;
-  stroke: rgba(45, 212, 167, 0.3);
+  stroke: rgba(29, 181, 132, 0.3);
   stroke-width: 2;
 }
 
@@ -362,9 +373,9 @@
 }
 
 .wyrm-ai-stage-label {
-  color: var(--gw-accent);
+  color: var(--gw-accent-text);
   font-family: 'Sora', system-ui, sans-serif;
-  font-size: 8.5px;
+  font-size: 0.6875rem;
   line-height: 1.3;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -375,7 +386,7 @@
   overflow: hidden;
   color: var(--gw-text);
   font-family: 'Sora', system-ui, sans-serif;
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -385,7 +396,7 @@
   margin-top: 4px;
   overflow: hidden;
   color: var(--gw-muted);
-  font-size: 9.5px;
+  font-size: 0.6875rem;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -394,8 +405,8 @@
 .wyrm-ai-trigger-active {
   border-color: color-mix(in srgb, var(--gw-accent) 38%, transparent);
   background: color-mix(in srgb, var(--gw-accent) 13%, var(--gw-panel2));
-  color: var(--gw-accent);
-  box-shadow: 0 0 12px rgba(45, 212, 167, 0.14);
+  color: var(--gw-accent-text);
+  box-shadow: 0 0 12px rgba(29, 181, 132, 0.14);
 }
 
 .wyrm-ai-trigger-active::after {
@@ -437,7 +448,7 @@
   }
   to {
     opacity: 0.88;
-    filter: saturate(1.05) brightness(0.95) drop-shadow(0 0 5px rgba(45, 212, 167, 0.2));
+    filter: saturate(1.05) brightness(0.95) drop-shadow(0 0 5px rgba(29, 181, 132, 0.2));
     transform: scale(1);
   }
 }
@@ -462,11 +473,11 @@
   0%,
   100% {
     opacity: 0.72;
-    box-shadow: 0 0 5px 1px rgba(45, 212, 167, 0.45);
+    box-shadow: 0 0 5px 1px rgba(29, 181, 132, 0.45);
   }
   50% {
     opacity: 1;
-    box-shadow: 0 0 9px 3px rgba(45, 212, 167, 0.82);
+    box-shadow: 0 0 9px 3px rgba(29, 181, 132, 0.82);
   }
 }
 

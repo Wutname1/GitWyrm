@@ -64,13 +64,13 @@ export function OnboardingModal() {
     <Dialog open={open} onOpenChange={(o) => !o && skip()}>
       <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
         <div className="flex flex-col items-center px-6 pb-5 pt-8 text-center">
-          <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-soft text-primary">
+          <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-soft text-accent-text">
             {slide.icon}
           </div>
           <DialogTitle className="text-base font-semibold text-foreground">
             {slide.title}
           </DialogTitle>
-          <p className="mt-2 max-w-sm text-[12.5px] leading-relaxed text-sub">{slide.body}</p>
+          <p className="mt-2 max-w-sm text-[0.78125rem] leading-relaxed text-sub">{slide.body}</p>
 
           <div className="mt-5 flex items-center gap-1.5">
             {SLIDES.map((_, i) => (

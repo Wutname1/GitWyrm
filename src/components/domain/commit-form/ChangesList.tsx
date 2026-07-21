@@ -27,8 +27,8 @@ function GroupHeader({
           tone === 'staged' ? 'bg-primary' : 'bg-modified'
         )}
       />
-      <span className="text-[10px] font-bold tracking-[.05em] text-sub">{label}</span>
-      <span className="font-mono text-[9.5px] text-muted-foreground">{count}</span>
+      <span className="text-2xs font-bold tracking-[.05em] text-sub">{label}</span>
+      <span className="font-mono text-2xs text-muted-foreground">{count}</span>
       <div className="ml-auto flex items-center">{children}</div>
     </div>
   )
@@ -58,10 +58,10 @@ export function ChangesList() {
             <span className="absolute inline-flex size-2 animate-ping rounded-full bg-primary/60" />
             <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
           </span>
-          <span className="text-[10px] font-semibold tracking-[.04em] text-primary">
+          <span className="text-2xs font-semibold tracking-[.04em] text-accent-text">
             Pending changes
           </span>
-          <span className="ml-auto font-mono text-[9.5px] text-sub">
+          <span className="ml-auto font-mono text-2xs text-sub">
             {staged.length + unstaged.length} file{staged.length + unstaged.length === 1 ? '' : 's'}
           </span>
         </div>
@@ -74,7 +74,7 @@ export function ChangesList() {
             size="sm"
             onClick={() => m.unstageAll.mutate()}
             disabled={stagingPending}
-            className="h-auto rounded px-[7px] py-0.5 text-[10px] text-sub hover:bg-panel3 hover:text-foreground"
+            className="h-auto rounded px-[7px] py-0.5 text-2xs text-sub hover:bg-panel3 hover:text-foreground"
           >
             {m.unstageAll.isPending && <PendingIndicator className="size-3" />}
             {m.unstageAll.isPending ? 'Unstaging…' : 'Unstage all'}
@@ -101,7 +101,7 @@ export function ChangesList() {
         />
       ))}
       {staged.length === 0 && hasChanges && (
-        <div className="px-3.5 py-1.5 text-[10.5px] italic text-muted-foreground">
+        <div className="px-3.5 py-1.5 text-2xs italic text-muted-foreground">
           Nothing staged yet
         </div>
       )}
@@ -114,7 +114,7 @@ export function ChangesList() {
             size="sm"
             onClick={() => m.stageAll.mutate()}
             disabled={stagingPending}
-            className="h-auto rounded border border-primary/50 bg-soft px-2 py-0.5 text-[10px] font-semibold text-primary hover:border-primary hover:bg-primary hover:text-primary-foreground"
+            className="h-auto rounded border border-primary/50 bg-soft px-2 py-0.5 text-2xs font-semibold text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
           >
             {m.stageAll.isPending && <PendingIndicator className="size-3" />}
             {m.stageAll.isPending ? 'Staging…' : 'Stage all'}
@@ -135,7 +135,7 @@ export function ChangesList() {
                   e.stopPropagation()
                   openConflict(f.path)
                 }}
-                className="flex-none rounded border border-removed/50 bg-removed/10 px-1.5 py-0.5 text-[10px] font-semibold text-removed hover:bg-removed/20"
+                className="flex-none rounded border border-removed/50 bg-removed/10 px-1.5 py-0.5 text-2xs font-semibold text-removed hover:bg-removed/20"
               >
                 Resolve
               </button>
@@ -162,7 +162,7 @@ export function ChangesList() {
         )
       )}
       {status.data && !hasChanges && (
-        <div className="p-4 text-center text-[11px] text-muted-foreground">Working tree clean</div>
+        <div className="p-4 text-center text-2xs text-muted-foreground">Working tree clean</div>
       )}
     </div>
   )

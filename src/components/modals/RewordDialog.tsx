@@ -55,7 +55,7 @@ export function RewordDialog({
       onSubmit={submit}
     >
       <div className="grid gap-1.5">
-        <label className="text-[11px] font-semibold text-sub">Summary</label>
+        <label className="text-2xs font-semibold text-sub">Summary</label>
         <Input
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
@@ -68,7 +68,7 @@ export function RewordDialog({
         />
       </div>
       <div className="grid gap-1.5">
-        <label className="text-[11px] font-semibold text-sub">
+        <label className="text-2xs font-semibold text-sub">
           Description <span className="font-normal text-muted-foreground">(optional)</span>
         </label>
         <textarea
@@ -79,7 +79,7 @@ export function RewordDialog({
           className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:border-ring"
         />
       </div>
-      <p className="text-[10.5px] text-muted-foreground">
+      <p className="text-2xs text-muted-foreground">
         Only the latest commit's message can be edited.
       </p>
     </FormDialog>

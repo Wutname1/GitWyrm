@@ -23,7 +23,7 @@ export function LineSelectionBar({
   const applyLabel = kind === 'staged' ? 'Unstage lines' : 'Stage lines'
   return (
     <div className="flex flex-none items-center gap-2 border-t border-primary/40 bg-panel px-3.5 py-2">
-      <span className="font-mono text-[11px] text-primary">
+      <span className="font-mono text-2xs text-accent-text">
         {count} line{count === 1 ? '' : 's'} selected
       </span>
       <div className="ml-auto flex items-center gap-1.5">
@@ -33,7 +33,7 @@ export function LineSelectionBar({
             size="sm"
             disabled={disabled}
             onClick={onDiscard}
-            className="h-auto rounded px-2 py-0.5 text-[11px] text-removed hover:bg-removed/10"
+            className="h-auto rounded px-2 py-0.5 text-2xs text-removed hover:bg-removed/10"
           >
             Discard
           </Button>
@@ -42,7 +42,7 @@ export function LineSelectionBar({
           size="sm"
           disabled={disabled}
           onClick={onApply}
-          className={cn('h-auto rounded px-2.5 py-0.5 text-[11px] font-semibold')}
+          className={cn('h-auto rounded px-2.5 py-0.5 text-2xs font-semibold')}
         >
           {applyLabel}
         </Button>

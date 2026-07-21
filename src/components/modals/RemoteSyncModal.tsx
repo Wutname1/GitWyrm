@@ -18,9 +18,9 @@ function Chip({ name, tone }: { name: string; tone: 'source' | 'target' }) {
   return (
     <span
       className={cn(
-        'max-w-[150px] overflow-hidden text-ellipsis whitespace-nowrap rounded-[5px] border px-2 py-1 font-mono text-[11px] font-semibold',
+        'max-w-[150px] overflow-hidden text-ellipsis whitespace-nowrap rounded-[5px] border px-2 py-1 font-mono text-2xs font-semibold',
         tone === 'target'
-          ? 'border-primary bg-soft text-primary'
+          ? 'border-primary bg-soft text-accent-text'
           : 'border-border bg-panel2 text-foreground'
       )}
     >
@@ -216,20 +216,20 @@ export function RemoteSyncModal() {
           <div className="flex items-center justify-center gap-3 rounded-md border border-border bg-panel2 px-3 py-3">
             <div className="flex flex-col items-center gap-1">
               <Chip name={flowFrom ?? ''} tone="source" />
-              <span className="text-[9px] uppercase tracking-[.06em] text-muted-foreground">
+              <span className="text-2xs uppercase tracking-[.06em] text-muted-foreground">
                 from
               </span>
             </div>
             <ArrowRight size={16} className="mt-[-14px] flex-none text-sub" />
             <div className="flex flex-col items-center gap-1">
               <Chip name={flowInto ?? ''} tone="target" />
-              <span className="text-[9px] uppercase tracking-[.06em] text-muted-foreground">
+              <span className="text-2xs uppercase tracking-[.06em] text-muted-foreground">
                 into
               </span>
             </div>
           </div>
 
-          <div className="min-h-[34px] rounded-md border border-border bg-panel2 px-3 py-2 text-[11px]">
+          <div className="min-h-[34px] rounded-md border border-border bg-panel2 px-3 py-2 text-2xs">
             {!pair && (
               <span className="flex items-center gap-1.5 text-muted-foreground">
                 <AlertTriangle size={12} className="flex-none" />
@@ -255,7 +255,7 @@ export function RemoteSyncModal() {
               </span>
             )}
             {pair?.kind === 'tracking' && action?.kind === 'push' && (
-              <span className="flex items-center gap-1.5 text-primary">
+              <span className="flex items-center gap-1.5 text-accent-text">
                 <Cloud size={12} className="flex-none" /> You have {trackingSync.ahead} change
                 {trackingSync.ahead === 1 ? '' : 's'} the cloud doesn't. Send them up.
               </span>
@@ -305,7 +305,7 @@ export function RemoteSyncModal() {
             )}
             {switchesBranch &&
               (action?.kind === 'ff-branch' || action?.kind === 'diverged-branches') && (
-                <span className="mt-1 block text-[10px] text-muted-foreground">
+                <span className="mt-1 block text-2xs text-muted-foreground">
                   This switches you to {tgtName} first.
                 </span>
               )}

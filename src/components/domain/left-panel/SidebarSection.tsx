@@ -58,7 +58,7 @@ export function SidebarSection({
           strokeWidth={2.4}
           className={cn('flex-none text-muted-foreground transition-transform duration-100', open && 'rotate-90')}
         />
-        <span className="text-[10px] font-bold tracking-[.09em] text-sub">{section.label}</span>
+        <span className="text-2xs font-bold tracking-[.09em] text-sub">{section.label}</span>
         {onAdd && (
           <TooltipButton
             onClick={(e) => {
@@ -73,7 +73,7 @@ export function SidebarSection({
         )}
         <span
           className={cn(
-            'font-mono text-[9.5px] text-muted-foreground',
+            'font-mono text-2xs text-muted-foreground',
             onAdd ? 'ml-1.5' : 'ml-auto'
           )}
         >

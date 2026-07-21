@@ -59,7 +59,7 @@ export function NewTagModal() {
       onSubmit={create}
     >
       <div className="grid gap-1.5">
-        <label className="text-[11px] font-semibold text-sub">Tag name</label>
+        <label className="text-2xs font-semibold text-sub">Tag name</label>
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -70,11 +70,11 @@ export function NewTagModal() {
           className="h-auto bg-background py-1.5 font-mono text-xs"
           autoFocus
         />
-        <p className="min-h-[15px] text-[10.5px] leading-tight text-removed">{error ?? ''}</p>
+        <p className="min-h-[15px] text-2xs leading-tight text-removed">{error ?? ''}</p>
       </div>
 
       <div className="grid gap-1.5">
-        <label className="text-[11px] font-semibold text-sub">
+        <label className="text-2xs font-semibold text-sub">
           Message <span className="font-normal text-muted-foreground">(optional)</span>
         </label>
         <Input
@@ -86,12 +86,12 @@ export function NewTagModal() {
           placeholder="What this release is"
           className="h-auto bg-background py-1.5 text-xs"
         />
-        <p className="text-[10.5px] leading-tight text-muted-foreground">
+        <p className="text-2xs leading-tight text-muted-foreground">
           Add a message to make it an annotated tag; leave blank for a simple one.
         </p>
       </div>
 
-      <p className="text-[10.5px] text-muted-foreground">
+      <p className="text-2xs text-muted-foreground">
         Tags{' '}
         {targetSha ? (
           <>

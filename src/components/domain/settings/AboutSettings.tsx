@@ -79,10 +79,10 @@ export function AboutSettings() {
                 : 'Check for updates'}
           </Button>
           {updater.state === 'none' && (
-            <span className="text-[11px] text-muted-foreground">You are up to date.</span>
+            <span className="text-2xs text-muted-foreground">You are up to date.</span>
           )}
           {updater.state === 'error' && (
-            <span className="text-[11px] text-removed">Update check failed.</span>
+            <span className="text-2xs text-removed">Update check failed.</span>
           )}
         </div>
       </SettingRow>

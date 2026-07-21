@@ -61,10 +61,10 @@ export function MergeBanner() {
     <div className="flex flex-none items-center gap-3 border-b border-modified/40 bg-modified/[.08] px-3.5 py-2">
       <GitMerge size={15} className="flex-none text-modified" strokeWidth={2} />
       <div className="min-w-0 flex-1">
-        <div className="text-[11.5px] font-semibold text-foreground">
+        <div className="text-xs font-semibold text-foreground">
           {copy.verb} <span className="font-mono text-modified">{label}</span>
         </div>
-        <div className="flex items-center gap-1.5 text-[10.5px] text-sub">
+        <div className="flex items-center gap-1.5 text-2xs text-sub">
           {remaining > 0 ? (
             <>
               <AlertTriangle size={11} className="text-removed" />
@@ -81,7 +81,7 @@ export function MergeBanner() {
       {remaining > 0 && (
         <button
           onClick={() => openConflict(conflicts[0])}
-          className="flex-none rounded border border-removed/50 bg-removed/10 px-2.5 py-1 text-[11px] font-semibold text-removed hover:bg-removed/20"
+          className="flex-none rounded border border-removed/50 bg-removed/10 px-2.5 py-1 text-2xs font-semibold text-removed hover:bg-removed/20"
         >
           Resolve conflicts
         </button>
@@ -91,7 +91,7 @@ export function MergeBanner() {
         size="sm"
         disabled={remaining > 0 || finishPending || abortPending}
         onClick={finish}
-        className="h-7 flex-none text-[11px]"
+        className="h-7 flex-none text-2xs"
       >
         {finishPending ? (isRebase ? 'Continuing…' : 'Committing…') : copy.finish}
       </Button>
@@ -101,7 +101,7 @@ export function MergeBanner() {
         tooltip={copy.abort}
         disabled={abortPending || finishPending}
         aria-busy={abortPending || undefined}
-        className="flex h-7 flex-none items-center justify-center gap-1.5 rounded border border-border bg-panel2 px-2 text-[11px] text-sub hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none disabled:opacity-50"
+        className="flex h-7 flex-none items-center justify-center gap-1.5 rounded border border-border bg-panel2 px-2 text-2xs text-sub hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none disabled:opacity-50"
       >
         {abortPending ? <PendingIndicator /> : <X size={14} />}
         {abortPending && <span>Aborting…</span>}

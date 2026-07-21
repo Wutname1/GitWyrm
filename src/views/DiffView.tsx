@@ -190,12 +190,12 @@ export function DiffView() {
         deletions={diff.data?.deletions ?? 0}
       />
       {patchPending && (
-        <div className="flex h-7 flex-none items-center gap-2 border-b border-primary/25 bg-soft px-3 text-[10.5px] font-medium text-primary" role="status">
+        <div className="flex h-7 flex-none items-center gap-2 border-b border-primary/25 bg-soft px-3 text-2xs font-medium text-accent-text" role="status">
           <PendingIndicator />
           {patchLabel}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto pb-5 font-mono text-[11.5px] leading-[1.8]">
+      <div className="min-h-0 flex-1 overflow-auto pb-5 font-mono text-xs leading-[1.8]">
         {diff.isLoading && <div className="p-4 text-xs text-muted-foreground">Loading diff…</div>}
         {diff.isError && (
           <div className="p-4 text-xs text-removed">{(diff.error as Error).message}</div>

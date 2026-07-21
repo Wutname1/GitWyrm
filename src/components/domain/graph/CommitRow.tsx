@@ -37,13 +37,13 @@ export const CommitRow = memo(function CommitRow({ commit, selected, onSelect, s
     author: (
       <div data-dim-on-drag className="flex items-center gap-[7px] overflow-hidden">
         <Avatar initials={commit.author_initials} color={color} email={commit.author_email} />
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-sub">
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-sub">
           {commit.author_name}
         </span>
       </div>
     ),
-    date: <div data-dim-on-drag className="font-mono text-[11px] text-sub">{formatCommitTime(commit.time)}</div>,
-    sha: <div data-dim-on-drag className="font-mono text-[11px] text-muted-foreground">{commit.short_sha}</div>,
+    date: <div data-dim-on-drag className="font-mono text-2xs text-sub">{formatCommitTime(commit.time)}</div>,
+    sha: <div data-dim-on-drag className="font-mono text-2xs text-muted-foreground">{commit.short_sha}</div>,
   }
 
   return (

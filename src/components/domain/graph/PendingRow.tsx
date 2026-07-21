@@ -20,7 +20,7 @@ export function PendingRow({ stagedCount, unstagedCount, selected, onSelect, sty
   const cell: Record<ColumnId, React.ReactNode> = {
     refs: (
       <div className="flex items-center gap-1 overflow-hidden pr-1.5">
-        <span className="flex items-center gap-1 rounded border border-dashed border-primary/50 bg-soft px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-[.04em] text-primary">
+        <span className="flex items-center gap-1 rounded border border-dashed border-primary/50 bg-soft px-1.5 py-px text-2xs font-semibold uppercase tracking-[.04em] text-accent-text">
           <span className="relative flex size-1.5 items-center justify-center">
             <span className="absolute inline-flex size-1.5 animate-ping rounded-full bg-primary/60" />
             <span className="relative inline-flex size-1 rounded-full bg-primary" />
@@ -33,17 +33,17 @@ export function PendingRow({ stagedCount, unstagedCount, selected, onSelect, sty
     message: (
       <div className="overflow-hidden text-ellipsis whitespace-nowrap pr-2.5 text-sub">
         Uncommitted changes
-        <span className="ml-2 font-mono text-[10px] text-muted-foreground">
-          {stagedCount > 0 && <span className="text-primary">{stagedCount} staged</span>}
+        <span className="ml-2 font-mono text-2xs text-muted-foreground">
+          {stagedCount > 0 && <span className="text-accent-text">{stagedCount} staged</span>}
           {stagedCount > 0 && unstagedCount > 0 && <span> · </span>}
           {unstagedCount > 0 && <span className="text-modified">{unstagedCount} unstaged</span>}
         </span>
       </div>
     ),
-    author: <div className="text-[11px] italic text-muted-foreground">You</div>,
-    date: <div className="font-mono text-[11px] text-muted-foreground">now</div>,
+    author: <div className="text-2xs italic text-muted-foreground">You</div>,
+    date: <div className="font-mono text-2xs text-muted-foreground">now</div>,
     sha: (
-      <div className="font-mono text-[11px] text-muted-foreground">
+      <div className="font-mono text-2xs text-muted-foreground">
         {total} file{total === 1 ? '' : 's'}
       </div>
     ),

@@ -17,7 +17,7 @@ export function SettingRow({
     <div className="flex items-start gap-6 py-3">
       <div className="w-52 flex-none">
         <div className="text-xs font-semibold text-foreground">{label}</div>
-        {hint && <div className="mt-0.5 text-[10.5px] text-muted-foreground">{hint}</div>}
+        {hint && <div className="mt-0.5 text-2xs text-muted-foreground">{hint}</div>}
       </div>
       <div className="min-w-0 flex-1">{children}</div>
     </div>

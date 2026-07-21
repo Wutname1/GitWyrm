@@ -41,7 +41,7 @@ export function ChangesMenu({ children, asChild = true }: ChangesMenuProps) {
       <ContextMenu>
         <ContextMenuTrigger asChild={asChild}>{children}</ContextMenuTrigger>
         <ContextMenuContent className="w-52">
-          <ContextMenuLabel className="text-[11px] text-sub">
+          <ContextMenuLabel className="text-2xs text-sub">
             {hasChanges ? `${plural(total, 'changed file')}` : 'No changes'}
           </ContextMenuLabel>
           <ContextMenuSeparator />

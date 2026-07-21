@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GitWyrm — Accent &amp; Type, Proposal v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,100..700;1,100..700&family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@600;700&display=swap" rel="stylesheet" />
+<style>
+  /* ------------------------------------------------------------------ */
+  /* Document chrome: deliberately quiet. Neutral-first, one idea per   */
+  /* screen, the candidate colors are the only chroma on the page.      */
+  /* ------------------------------------------------------------------ */
+  :root {
+    --doc-bg: #0a0c0e;
+    --doc-surface: #101316;
+    --doc-surface2: #15191d;
+    --doc-line: #22282e;
+    --doc-ink: #e8ecef;
+    --doc-ink2: #9aa4ad;
+    --doc-ink3: #5f6a73;
+
+    /* GitWyrm app tokens (verbatim from src/index.css) */
+    --gw-bg: #0b0f14;
+    --gw-panel: #0f151c;
+    --gw-panel2: #131b24;
+    --gw-panel3: #1a2430;
+    --gw-border: #1e2833;
+    --gw-text: #d7e0ea;
+    --gw-sub: #8b99a8;
+    --gw-muted: #5d6b7a;
+    --gw-green: #34d399;
+    --gw-red: #f87171;
+    --gw-amber: #fbbf24;
+
+    /* Live-controlled tokens (playground writes these) */
+    --acc-fill: #2dd4a7;      /* buttons, badges, filled surfaces */
+    --acc-text: #2dd4a7;      /* accent used AS text on dark */
+    --acc-fg: #04120d;        /* text on top of accent fills */
+    --type-base: 13px;
+    --type-wght: 400;
+    --type-sub: 11px;
+    --type-micro: 10px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--doc-bg);
+    color: var(--doc-ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: color-mix(in srgb, var(--acc-fill) 30%, transparent); }
+
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 32px; }
+
+  a { color: var(--acc-text); text-decoration: none; }
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.86em; }
+
+  /* -------- masthead ------------------------------------------------ */
+  header { padding: 72px 0 0; }
+  .kicker {
+    font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--doc-ink3); font-weight: 500;
+  }
+  h1 {
+    font-family: "Sora", sans-serif; font-weight: 600;
+    font-size: clamp(30px, 4.4vw, 44px); line-height: 1.12;
+    letter-spacing: -0.015em; margin: 14px 0 18px; max-width: 21ch;
+  }
+  .lede { color: var(--doc-ink2); font-size: 17px; max-width: 60ch; }
+  .lede strong { color: var(--doc-ink); font-weight: 500; }
+
+  .meta-row {
+    display: flex; gap: 28px; flex-wrap: wrap;
+    margin-top: 30px; padding: 16px 0; border-top: 1px solid var(--doc-line);
+    font-size: 13px; color: var(--doc-ink3);
+  }
+  .meta-row b { color: var(--doc-ink2); font-weight: 500; }
+
+  section { padding: 64px 0 8px; }
+  h2 {
+    font-family: "Sora", sans-serif; font-weight: 600; font-size: 21px;
+    letter-spacing: -0.01em; margin-bottom: 6px;
+  }
+  .sec-num { color: var(--doc-ink3); font-family: "IBM Plex Mono", monospace; font-size: 13px; font-weight: 400; margin-right: 10px; }
+  .sub { color: var(--doc-ink2); max-width: 66ch; margin-bottom: 26px; }
+
+  /* -------- diagnosis strip ---------------------------------------- */
+  .diag {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--doc-line); border: 1px solid var(--doc-line);
+    border-radius: 10px; overflow: hidden; margin-top: 8px;
+  }
+  .diag > div { background: var(--doc-surface); padding: 22px 22px 24px; }
+  .diag .big { font-family: "Sora", sans-serif; font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
+  .diag .lbl { font-size: 12.5px; color: var(--doc-ink3); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; }
+  .diag p { font-size: 13.5px; color: var(--doc-ink2); margin-top: 8px; }
+  .glare { color: #2dd4a7; }
+
+  /* -------- candidate cards ----------------------------------------- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 14px; }
+  .card {
+    border: 1px solid var(--doc-line); border-radius: 12px; overflow: hidden;
+    background: var(--doc-surface); cursor: pointer; transition: border-color .15s, transform .15s;
+  }
+  .card:hover { transform: translateY(-2px); }
+  .card.active { border-color: var(--card-c); box-shadow: 0 0 0 1px var(--card-c); }
+  .card .swatch {
+    height: 78px; background: var(--card-c); position: relative;
+    display: flex; align-items: flex-end; padding: 10px 14px;
+  }
+  .card .swatch .hex { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: rgba(0,0,0,0.62); font-weight: 500; }
+  .card .body { padding: 14px 16px 16px; }
+  .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+  .card .note { font-size: 12.5px; color: var(--doc-ink2); min-height: 34px; }
+  .ratios { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; font-size: 12px; }
+  .ratio { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--doc-ink2); }
+  .ratio .val { font-family: "IBM Plex Mono", monospace; color: var(--doc-ink); }
+  .pill {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em;
+    padding: 1px 7px; border-radius: 999px; border: 1px solid transparent;
+  }
+  .pill.pass { color: #7ee2c0; border-color: rgba(126,226,192,.35); }
+  .pill.loud { color: #f0b8b8; border-color: rgba(240,184,184,.35); }
+  .pill.ok   { color: #cdd6de; border-color: rgba(205,214,222,.28); }
+
+  /* luminance meter under each card */
+  .lum { margin-top: 12px; }
+  .lum .track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, #16181b, #f2f4f6); position: relative; }
+  .lum .dot { position: absolute; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: var(--card-c); border: 2px solid var(--doc-bg); transform: translate(-50%, -50%); }
+  .lum .cap { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--doc-ink3); margin-top: 5px; }
+
+  /* -------- playground ---------------------------------------------- */
+  .play {
+    display: grid; grid-template-columns: 250px minmax(0,1fr); gap: 22px; align-items: start;
+  }
+  @media (max-width: 860px) { .play { grid-template-columns: 1fr; } .diag { grid-template-columns: 1fr; } }
+
+  .rail {
+    position: sticky; top: 20px;
+    border: 1px solid var(--doc-line); border-radius: 12px; background: var(--doc-surface);
+    padding: 18px; display: flex; flex-direction: column; gap: 20px;
+  }
+  .rail h4 { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--doc-ink3); font-weight: 600; }
+  .opt-group { display: flex; flex-direction: column; gap: 6px; }
+  .opt {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+    border: 1px solid var(--doc-line); border-radius: 8px; cursor: pointer;
+    font-size: 13px; color: var(--doc-ink2); transition: border-color .12s, color .12s;
+    background: transparent; text-align: left; width: 100%; font-family: inherit;
+  }
+  .opt:hover { color: var(--doc-ink); }
+  .opt.active { border-color: var(--acc-fill); color: var(--doc-ink); }
+  .opt .chip { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+  .opt .tiny { margin-left: auto; font-size: 11px; color: var(--doc-ink3); font-family: "IBM Plex Mono", monospace; }
+
+  .tune { display: flex; flex-direction: column; gap: 6px; }
+  .tune label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12px; color: var(--doc-ink2);
+  }
+  .tune .tiny { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--doc-ink3); }
+  .tune input[type="range"] { width: 100%; accent-color: var(--acc-fill); cursor: pointer; margin-bottom: 6px; }
+
+  .readout {
+    border-top: 1px solid var(--doc-line); padding-top: 14px;
+    font-size: 12px; color: var(--doc-ink2); display: flex; flex-direction: column; gap: 6px;
+  }
+  .readout .row { display: flex; justify-content: space-between; }
+  .readout .row b { font-family: "IBM Plex Mono", monospace; font-weight: 500; color: var(--doc-ink); }
+
+  /* -------- the mock app (uses live tokens) -------------------------- */
+  .app {
+    border: 1px solid var(--gw-border); border-radius: 12px; overflow: hidden;
+    background: var(--gw-bg); font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: var(--type-base); font-weight: var(--type-wght);
+    font-variation-settings: "wght" var(--type-wght);
+    color: var(--gw-text); line-height: 1.45;
+    box-shadow: 0 24px 60px -24px rgba(0,0,0,0.7);
+  }
+  .app * { font-variation-settings: inherit; }
+  .app .titlebar {
+    display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+    background: var(--gw-panel); border-bottom: 1px solid var(--gw-border);
+  }
+  .app .wordmark { font-family: "Sora", sans-serif; font-weight: 600; font-size: 13px; letter-spacing: 0.01em; }
+  .app .wordmark span { color: var(--acc-text); }
+  .app .tabs { display: flex; gap: 4px; margin-left: 16px; }
+  .app .tab {
+    padding: 4px 12px; border-radius: 6px; font-size: calc(var(--type-base) - 1px); color: var(--gw-sub);
+  }
+  .app .tab.on { background: var(--gw-panel3); color: var(--gw-text); box-shadow: inset 0 -2px 0 var(--acc-fill); }
+  .app .cols { display: grid; grid-template-columns: 240px minmax(0,1fr); min-height: 430px; }
+  .app .left { background: var(--gw-panel); border-right: 1px solid var(--gw-border); padding: 12px 0; }
+  .app .sec-h {
+    padding: 6px 14px 4px; font-size: var(--type-micro); letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--gw-muted); font-weight: 600;
+  }
+  .app .row {
+    display: flex; align-items: center; gap: 8px; padding: 5px 14px; color: var(--gw-sub);
+    font-size: calc(var(--type-base) - 1px);
+  }
+  .app .row.cur { color: var(--acc-text); background: color-mix(in srgb, var(--acc-fill) 10%, transparent); }
+  .app .row .cnt { margin-left: auto; font-size: var(--type-micro); color: var(--gw-muted); font-family: "IBM Plex Mono", monospace; }
+  .app .row.cur .cnt { color: var(--acc-text); }
+  .app .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gw-muted); flex: none; }
+  .app .row.cur .dot { background: var(--acc-fill); }
+
+  .app .main { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+  .app .commit-line { display: flex; align-items: baseline; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--gw-border); }
+  .app .sha { font-family: "IBM Plex Mono", monospace; font-size: var(--type-sub); color: var(--gw-muted); flex: none; }
+  .app .msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app .who { margin-left: auto; flex: none; font-size: var(--type-sub); color: var(--gw-sub); }
+  .app .branch-pill {
+    flex: none; font-size: var(--type-micro); font-weight: 600; padding: 1px 8px; border-radius: 999px;
+    color: var(--acc-text); border: 1px solid color-mix(in srgb, var(--acc-fill) 45%, transparent);
+    background: color-mix(in srgb, var(--acc-fill) 12%, transparent);
+  }
+  .app .diffbox { border: 1px solid var(--gw-border); border-radius: 8px; overflow: hidden; }
+  .app .diffhead {
+    display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: var(--gw-panel2);
+    border-bottom: 1px solid var(--gw-border); font-size: calc(var(--type-base) - 1px);
+  }
+  .app .diffhead .stat-a { color: var(--gw-green); font-size: var(--type-sub); }
+  .app .diffhead .stat-r { color: var(--gw-red); font-size: var(--type-sub); }
+  .app .dline { display: flex; font-family: "IBM Plex Mono", monospace; font-size: var(--type-sub); line-height: 1.7; }
+  .app .dline .gut { width: 40px; flex: none; text-align: right; padding-right: 10px; color: var(--gw-muted); background: var(--gw-panel); }
+  .app .dline .txt { padding-left: 12px; white-space: pre; color: var(--gw-sub); }
+  .app .dline.add { background: rgba(52,211,153,0.08); } .app .dline.add .txt { color: #a7e7cd; }
+  .app .dline.del { background: rgba(248,113,113,0.08); } .app .dline.del .txt { color: #eebaba; }
+  .app .dline.hunk .txt { color: var(--acc-text); }
+
+  .app .form { display: flex; flex-direction: column; gap: 8px; }
+  .app .field {
+    background: var(--gw-panel2); border: 1px solid var(--gw-border); border-radius: 7px;
+    padding: 8px 12px; color: var(--gw-text);
+  }
+  .app .field.placeholder { color: var(--gw-muted); }
+  .app .form-foot { display: flex; align-items: center; gap: 10px; }
+  .app .hint { font-size: var(--type-micro); color: var(--gw-muted); }
+  .app .hint a { color: var(--acc-text); }
+  .app .btn {
+    margin-left: auto; border: 0; border-radius: 7px; padding: 8px 18px; cursor: pointer;
+    font-family: inherit; font-size: calc(var(--type-base) - 1px); font-weight: 600;
+    background: var(--acc-fill); color: var(--acc-fg);
+  }
+  .app .btn.ghost {
+    margin-left: 0; background: transparent; color: var(--acc-text);
+    border: 1px solid color-mix(in srgb, var(--acc-fill) 40%, transparent);
+    font-weight: 500;
+  }
+
+  /* -------- type specimen table -------------------------------------- */
+  .spec { border: 1px solid var(--doc-line); border-radius: 12px; overflow: hidden; }
+  .spec .srow { display: grid; grid-template-columns: 190px minmax(0,1fr); border-top: 1px solid var(--doc-line); }
+  .spec .srow:first-child { border-top: 0; }
+  .spec .slabel {
+    padding: 18px 20px; background: var(--doc-surface); border-right: 1px solid var(--doc-line);
+    font-size: 12px; color: var(--doc-ink3); display: flex; flex-direction: column; gap: 3px;
+  }
+  .spec .slabel b { color: var(--doc-ink); font-size: 13px; font-weight: 600; }
+  .spec .slabel .mono { color: var(--doc-ink2); }
+  .spec .sdemo { padding: 16px 22px; background: var(--gw-bg); display: flex; flex-direction: column; gap: 6px; }
+  .spec .sdemo .l1 { color: var(--gw-text); }
+  .spec .sdemo .l2 { color: var(--gw-sub); }
+  .spec .sdemo .l3 { color: var(--gw-muted); }
+
+  .callout {
+    border-left: 3px solid var(--acc-fill); background: var(--doc-surface);
+    border-radius: 0 10px 10px 0; padding: 16px 20px; margin-top: 22px;
+    font-size: 14px; color: var(--doc-ink2);
+  }
+  .callout b { color: var(--doc-ink); font-weight: 600; }
+
+  /* -------- recommendation / diff ------------------------------------ */
+  .rec { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 22px; align-items: start; }
+  @media (max-width: 860px) { .rec { grid-template-columns: 1fr; } }
+  .rec ul { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+  .rec li { padding-left: 26px; position: relative; font-size: 14.5px; color: var(--doc-ink2); }
+  .rec li::before {
+    content: ""; position: absolute; left: 0; top: 7px; width: 8px; height: 8px;
+    border-radius: 2px; background: var(--acc-fill);
+  }
+  .rec li b { color: var(--doc-ink); font-weight: 600; }
+  .codeblock {
+    background: var(--doc-surface); border: 1px solid var(--doc-line); border-radius: 10px;
+    padding: 18px 20px; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; line-height: 1.75;
+    overflow-x: auto; color: var(--doc-ink2); white-space: pre;
+  }
+  .codeblock .del { color: #d99; } .codeblock .add { color: #8fd9bd; }
+  .codeblock .cm { color: var(--doc-ink3); }
+
+  footer { padding: 70px 0 48px; color: var(--doc-ink3); font-size: 12.5px; border-top: 1px solid var(--doc-line); margin-top: 70px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <div class="kicker">GitWyrm design note &middot; Proposal v2 &middot; independent take</div>
+    <h1>Turn the accent down. Turn the type up.</h1>
+    <p class="lede">
+      The current mint <code class="mono">#2dd4a7</code> isn't failing contrast &mdash; it's
+      <strong>too bright to read comfortably</strong>. At ~10:1 against the near-black background,
+      saturated accent text shimmers ("halation"), and it's used as text in <strong>65 places</strong>.
+      Meanwhile the type scale bottoms out at 9.5px on a 13px&thinsp;/&thinsp;400 base &mdash;
+      thin and small compound each other. This note treats both together, because they are the same
+      problem: <strong>legibility under a dark theme</strong>.
+    </p>
+    <div class="meta-row">
+      <div><b>Scope</b> &mdash; tokens only, no layout changes</div>
+      <div><b>Files touched</b> &mdash; <code class="mono">src/index.css</code> (one block)</div>
+      <div><b>Approach</b> &mdash; split one accent into two tokens; raise the type floor</div>
+    </div>
+  </header>
+
+  <!-- ================================================================ -->
+  <section id="diagnosis">
+    <h2><span class="sec-num">01</span>Why "more contrast" made it worse</h2>
+    <p class="sub">
+      Dark-theme legibility is a window, not a ladder. Below ~4.5:1 text is muddy; above ~9:1 a
+      saturated hue starts to glow against black and thin strokes vibrate. The mint sits at the
+      glare end, and the app leans on it for links, counts, pills, and hunk headers.
+    </p>
+    <div class="diag">
+      <div>
+        <div class="lbl">Accent as text, today</div>
+        <div class="big glare" id="d-cur-ratio">9.9 : 1</div>
+        <p>Contrast of <code class="mono">#2dd4a7</code> on <code class="mono">#0b0f14</code>. Passes AAA with room to spare &mdash; and that's the problem. The comfortable band for saturated accents on this background is roughly <b style="color:var(--doc-ink)">5.5&ndash;8.5 : 1</b>.</p>
+      </div>
+      <div>
+        <div class="lbl">Smallest text in the app</div>
+        <div class="big">9.5px</div>
+        <p>224 call sites use 9&ndash;12px type on a 13px&thinsp;/&thinsp;400 base. IBM&nbsp;Plex&nbsp;Sans at 400 is already a light-feeling cut; on a dark ground, dark-on-light optics thin it further.</p>
+      </div>
+      <div>
+        <div class="lbl">The fix, in one sentence</div>
+        <div class="big">1 &rarr; 2</div>
+        <p>One accent token is doing two jobs. <b style="color:var(--doc-ink)">Fills</b> want a dimmer, deeper value; <b style="color:var(--doc-ink)">text</b> wants a calmer, slightly desaturated one. Split them, then raise the base weight to ~450 and the size floor to 11px.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section id="candidates">
+    <h2><span class="sec-num">02</span>Accent candidates</h2>
+    <p class="sub">
+      Each card shows a fill value with its paired text value, plus live-computed WCAG ratios.
+      Click a card &mdash; the playground below re-themes instantly. Ratios are computed in this page,
+      not hand-typed.
+    </p>
+    <div class="cards" id="cards"></div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section id="playground">
+    <h2><span class="sec-num">03</span>Side-by-side, in context</h2>
+    <p class="sub">
+      A faithful slice of the real UI &mdash; branch list, history, diff, commit form &mdash; driven by the
+      candidate tokens. Swap accents and type scales freely; they're independent axes.
+    </p>
+
+    <div class="play">
+      <div class="rail">
+        <div>
+          <h4>Accent</h4>
+          <div class="opt-group" id="rail-accents"></div>
+        </div>
+        <div>
+          <h4>Type scale</h4>
+          <div class="opt-group" id="rail-scales"></div>
+        </div>
+        <div>
+          <h4>Fine-tune</h4>
+          <div class="tune">
+            <label>Size <span class="tiny" id="tune-size-val"></span></label>
+            <input type="range" id="tune-size" min="12" max="16" step="0.25" />
+            <label>Weight <span class="tiny" id="tune-wght-val"></span></label>
+            <input type="range" id="tune-wght" min="300" max="600" step="25" />
+          </div>
+        </div>
+        <div class="readout" id="readout"></div>
+      </div>
+
+      <div class="app" id="mockapp">
+        <div class="titlebar">
+          <div class="wordmark">Git<span>Wyrm</span></div>
+          <div class="tabs">
+            <div class="tab on">Changes</div>
+            <div class="tab">History</div>
+            <div class="tab">Pull Requests</div>
+          </div>
+        </div>
+        <div class="cols">
+          <div class="left">
+            <div class="sec-h">Branches</div>
+            <div class="row cur"><span class="dot"></span> main <span class="cnt">&uarr;2</span></div>
+            <div class="row"><span class="dot"></span> feature/merge-ui <span class="cnt">14</span></div>
+            <div class="row"><span class="dot"></span> fix/submodule-guard</div>
+            <div class="sec-h" style="margin-top:12px">Remotes</div>
+            <div class="row"><span class="dot"></span> origin/main</div>
+            <div class="row"><span class="dot"></span> origin/release</div>
+            <div class="sec-h" style="margin-top:12px">Tags</div>
+            <div class="row"><span class="dot"></span> v0.4.2</div>
+          </div>
+          <div class="main">
+            <div>
+              <div class="commit-line">
+                <span class="sha">702c798</span>
+                <span class="msg">new: See and work on GitHub pull requests inside GitWyrm</span>
+                <span class="branch-pill">main</span>
+                <span class="who">2 days ago</span>
+              </div>
+              <div class="commit-line">
+                <span class="sha">2082453</span>
+                <span class="msg">new: Open several repositories at once from the repo picker</span>
+                <span class="who">4 days ago</span>
+              </div>
+              <div class="commit-line" style="border-bottom:0">
+                <span class="sha">1dbb908</span>
+                <span class="msg">new: Crashes are now reported automatically</span>
+                <span class="who">last week</span>
+              </div>
+            </div>
+
+            <div class="diffbox">
+              <div class="diffhead">
+                <span>src/index.css</span>
+                <span class="stat-a">+4</span><span class="stat-r">&minus;2</span>
+                <span style="margin-left:auto"><a href="#" onclick="return false" style="color:var(--acc-text); font-size:var(--type-sub)">Stage hunk</a></span>
+              </div>
+              <div class="dline hunk"><span class="gut"></span><span class="txt">@@ -51,7 +51,9 @@ :root {</span></div>
+              <div class="dline del"><span class="gut">51</span><span class="txt">-  --gw-accent: #2dd4a7;</span></div>
+              <div class="dline add"><span class="gut">51</span><span class="txt">+  --gw-accent: var(--candidate);</span></div>
+              <div class="dline"><span class="gut">52</span><span class="txt">   --gw-accent-fg: #04120d;</span></div>
+            </div>
+
+            <div class="form">
+              <div class="field">improved: Accent color is easier on the eyes</div>
+              <div class="field placeholder">Description (optional)</div>
+              <div class="form-foot">
+                <button class="btn ghost">Amend</button>
+                <span class="hint">3 files staged &middot; <a href="#" onclick="return false">view all</a></span>
+                <button class="btn">Commit to main</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section id="type">
+    <h2><span class="sec-num">04</span>Type scales</h2>
+    <p class="sub">
+      Both app fonts are variable, so intermediate weights like 450 cost nothing. The scales below
+      keep every existing size role &mdash; body, secondary, micro &mdash; but shift the whole ladder.
+      The mock app above renders with whichever scale is selected.
+    </p>
+    <div class="spec" id="specimens"></div>
+    <div class="callout">
+      <b>Floor rule:</b> nothing below 11px, ever. The 9.5&ndash;10.5px call sites (branch pills, hints,
+      AI-stage captions) move to the micro token instead of hardcoded pixels &mdash; then one variable
+      controls the floor forever.
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section id="recommendation">
+    <h2><span class="sec-num">05</span>Recommendation</h2>
+    <p class="sub">Pairing that tested best in the playground above, expressed as the exact token diff.</p>
+    <div class="rec">
+      <ul>
+        <li><b>Accent &rarr; Deep Mint pair.</b> Fills drop to <code class="mono">#1db584</code> &mdash; still unmistakably GitWyrm, but buttons stop shouting. Accent text becomes its own token at <code class="mono">#38b78e</code>: ~7.6:1 on the background, inside the comfort band, no shimmer.</li>
+        <li><b>Type &rarr; Comfort scale.</b> Base 13.5px&thinsp;/&thinsp;450, secondary 12px, micro floor 11px. One weight step and half a pixel &mdash; invisible as a change, obvious as an improvement.</li>
+        <li><b>Migration is mechanical.</b> Existing <code class="mono">text-primary</code> usages pick up the new text token automatically once <code class="mono">--primary</code> maps to <code class="mono">--gw-accent-text</code>; filled components keep <code class="mono">--gw-accent</code>. No component edits required for the color half.</li>
+        <li><b>What stays.</b> Panel ramp, borders, red/amber/green status colors, lane colors &mdash; all untouched. This is a two-token, three-number change.</li>
+      </ul>
+      <div class="codeblock"><span class="cm">/* src/index.css &mdash; proposed */</span>
+<span class="del">-  --gw-accent: #2dd4a7;</span>
+<span class="add">+  --gw-accent: #1db584;        /* fills, buttons, badges */</span>
+<span class="add">+  --gw-accent-text: #38b78e;   /* accent used as text    */</span>
+   --gw-accent-fg: #04120d;
+<span class="del">-  --gw-accent-soft: rgba(45, 212, 167, 0.13);</span>
+<span class="add">+  --gw-accent-soft: rgba(29, 181, 132, 0.13);</span>
+
+<span class="cm">   /* shadcn semantic mapping */</span>
+<span class="del">-  --primary: var(--gw-accent);</span>
+<span class="add">+  --primary: var(--gw-accent-text);</span>
+
+<span class="cm">   /* base layer */</span>
+   body {
+<span class="del">-    font-size: 13px;</span>
+<span class="del">-    font-weight: 400;</span>
+<span class="add">+    font-size: 13.5px;</span>
+<span class="add">+    font-weight: 450;</span>
+   }</div>
+    </div>
+  </section>
+
+  <footer>
+    GitWyrm &mdash; accent &amp; typography proposal, v2. Supersedes <code class="mono">accent-color-comparison.html</code>.
+    All contrast ratios on this page are computed live per WCAG 2.1 relative luminance.
+  </footer>
+
+</div>
+
+<script>
+/* ------------------------------------------------------------------ */
+/* WCAG math                                                           */
+/* ------------------------------------------------------------------ */
+function lum(hex) {
+  const n = hex.replace('#',''), v = [0,2,4].map(i => parseInt(n.substr(i,2),16)/255)
+    .map(c => c <= 0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4));
+  return 0.2126*v[0] + 0.7152*v[1] + 0.0722*v[2];
+}
+function ratio(a, b) {
+  const [hi, lo] = [lum(a), lum(b)].sort((x,y)=>y-x);
+  return (hi+0.05)/(lo+0.05);
+}
+const fmt = r => r.toFixed(1) + ' : 1';
+
+const BG = '#0b0f14', PANEL = '#0f151c';
+
+/* ------------------------------------------------------------------ */
+/* Candidates: fill + paired text token                                */
+/* ------------------------------------------------------------------ */
+const ACCENTS = [
+  { id:'current', name:'Current mint', fill:'#2dd4a7', text:'#2dd4a7', fg:'#04120d',
+    note:'The baseline. High luminance and full saturation; glows as text.' },
+  { id:'deepmint', name:'Deep Mint', fill:'#1db584', text:'#38b78e', fg:'#031008',
+    note:'Same hue family, dimmed fill, calmed text. Recommended.' },
+  { id:'spruce', name:'Spruce', fill:'#178f6d', text:'#3dbd93', fg:'#e9fef7',
+    note:'Deepest option; fills read as surfaces, light text on buttons.' },
+  { id:'seaglass', name:'Sea Glass', fill:'#2ba18a', text:'#5bbaa2', fg:'#04120d',
+    note:'Desaturated and soft; quietest of the four, less brand punch.' },
+];
+
+const SCALES = [
+  { id:'current', name:'Current', base:13, wght:400, sub:11, micro:10,
+    desc:'13px / 400 · micro 10px' },
+  { id:'comfort', name:'Comfort', base:13.5, wght:450, sub:12, micro:11,
+    desc:'13.5px / 450 · micro 11px' },
+  { id:'sturdy', name:'Sturdy', base:14, wght:475, sub:12.5, micro:11.5,
+    desc:'14px / 475 · micro 11.5px' },
+];
+
+let curAccent = ACCENTS[1], curScale = SCALES[1];
+/* Fine-tune overrides: null = follow the selected preset. */
+let tuneBase = null, tuneWght = null;
+
+/* Effective type values: preset unless a slider has taken over. Secondary and
+   micro sizes track the base proportionally, with an 11px micro floor. */
+function effType() {
+  const base = tuneBase ?? curScale.base;
+  const wght = tuneWght ?? curScale.wght;
+  const sub = Math.round(base * 0.89 * 4) / 4;
+  const micro = Math.max(11, Math.round(base * 0.815 * 4) / 4);
+  return { base, wght, sub, micro };
+}
+
+/* ------------------------------------------------------------------ */
+/* Candidate cards                                                     */
+/* ------------------------------------------------------------------ */
+function verdict(r) {
+  if (r > 9)   return '<span class="pill loud">GLARE</span>';
+  if (r >= 4.5) return '<span class="pill pass">COMFORT</span>';
+  return '<span class="pill ok">LARGE ONLY</span>';
+}
+function renderCards() {
+  document.getElementById('cards').innerHTML = ACCENTS.map(a => {
+    const rt = ratio(a.text, BG), rp = ratio(a.text, PANEL), rb = ratio(a.fg, a.fill);
+    const pos = Math.min(98, Math.max(2, lum(a.fill) * 100));
+    return `<div class="card ${a.id===curAccent.id?'active':''}" style="--card-c:${a.fill}" onclick="pickAccent('${a.id}')">
+      <div class="swatch"><span class="hex">${a.fill}${a.text!==a.fill ? ' · text '+a.text : ''}</span></div>
+      <div class="body">
+        <h3>${a.name}</h3>
+        <div class="note">${a.note}</div>
+        <div class="ratios">
+          <div class="ratio"><span>text on bg</span><span class="val">${fmt(rt)}</span>${verdict(rt)}</div>
+          <div class="ratio"><span>text on panel</span><span class="val">${fmt(rp)}</span>${verdict(rp)}</div>
+          <div class="ratio"><span>label on fill</span><span class="val">${fmt(rb)}</span>${rb>=4.5?'<span class="pill pass">AA</span>':'<span class="pill ok">LARGE</span>'}</div>
+        </div>
+        <div class="lum">
+          <div class="track"><div class="dot" style="left:${pos}%"></div></div>
+          <div class="cap"><span>dim</span><span>fill luminance</span><span>glare</span></div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ------------------------------------------------------------------ */
+/* Rail + live tokens                                                  */
+/* ------------------------------------------------------------------ */
+function renderRail() {
+  document.getElementById('rail-accents').innerHTML = ACCENTS.map(a =>
+    `<button class="opt ${a.id===curAccent.id?'active':''}" onclick="pickAccent('${a.id}')">
+       <span class="chip" style="background:${a.fill}"></span>${a.name}
+       <span class="tiny">${a.fill}</span></button>`).join('');
+  const t = effType(), custom = tuneBase != null || tuneWght != null;
+  document.getElementById('rail-scales').innerHTML = SCALES.map(s =>
+    `<button class="opt ${!custom && s.id===curScale.id?'active':''}" onclick="pickScale('${s.id}')">
+       ${s.name}<span class="tiny">${s.base}px/${s.wght}</span></button>`).join('');
+  document.getElementById('tune-size').value = t.base;
+  document.getElementById('tune-wght').value = t.wght;
+  document.getElementById('tune-size-val').textContent = t.base + 'px';
+  document.getElementById('tune-wght-val').textContent = String(t.wght);
+  const rt = ratio(curAccent.text, BG), rb = ratio(curAccent.fg, curAccent.fill);
+  document.getElementById('readout').innerHTML = `
+    <div class="row"><span>accent text / bg</span><b>${fmt(rt)}</b></div>
+    <div class="row"><span>button label / fill</span><b>${fmt(rb)}</b></div>
+    <div class="row"><span>body</span><b>${t.base}px &middot; ${t.wght}${custom ? ' &middot; custom' : ''}</b></div>
+    <div class="row"><span>micro floor</span><b>${t.micro}px</b></div>`;
+}
+function applyTokens() {
+  const r = document.documentElement.style;
+  r.setProperty('--acc-fill', curAccent.fill);
+  r.setProperty('--acc-text', curAccent.text);
+  r.setProperty('--acc-fg', curAccent.fg);
+  const t = effType();
+  r.setProperty('--type-base', t.base + 'px');
+  r.setProperty('--type-wght', t.wght);
+  r.setProperty('--type-sub', t.sub + 'px');
+  r.setProperty('--type-micro', t.micro + 'px');
+}
+function pickAccent(id) { curAccent = ACCENTS.find(a=>a.id===id); applyTokens(); renderCards(); renderRail(); }
+function pickScale(id)  { curScale  = SCALES.find(s=>s.id===id); tuneBase = null; tuneWght = null; applyTokens(); renderRail(); renderSpecimens(); }
+document.getElementById('tune-size').addEventListener('input', e => { tuneBase = Number(e.target.value); applyTokens(); renderRail(); });
+document.getElementById('tune-wght').addEventListener('input', e => { tuneWght = Number(e.target.value); applyTokens(); renderRail(); });
+
+/* ------------------------------------------------------------------ */
+/* Type specimens                                                      */
+/* ------------------------------------------------------------------ */
+function renderSpecimens() {
+  document.getElementById('specimens').innerHTML = SCALES.map(s => `
+    <div class="srow">
+      <div class="slabel">
+        <b>${s.name}${s.id===curScale.id?' &nbsp;&larr; selected':''}</b>
+        <span class="mono">${s.desc}</span>
+        <span>secondary ${s.sub}px</span>
+      </div>
+      <div class="sdemo" style="font-family:'IBM Plex Sans'; font-weight:${s.wght}; font-variation-settings:'wght' ${s.wght};">
+        <div class="l1" style="font-size:${s.base}px">Merge feature/merge-ui into main &mdash; 14 commits, no conflicts detected</div>
+        <div class="l2" style="font-size:${s.sub}px">Last fetched 2 minutes ago &middot; origin/main is 2 commits behind</div>
+        <div class="l3" style="font-size:${s.micro}px; text-transform:uppercase; letter-spacing:0.1em; font-weight:${Math.min(600, s.wght+150)}">UNCOMMITTED CHANGES &middot; 3 FILES</div>
+      </div>
+    </div>`).join('');
+}
+
+/* boot */
+document.getElementById('d-cur-ratio').textContent = fmt(ratio('#2dd4a7', BG));
+applyTokens(); renderCards(); renderRail(); renderSpecimens();
+</script>
+
+</body>
+</html>

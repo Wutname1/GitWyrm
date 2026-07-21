@@ -114,7 +114,7 @@ export function AiSettings() {
       <div className="flex items-start gap-6 py-3">
         <div className="w-52 flex-none">
           <div className="text-xs font-semibold text-foreground">Provider</div>
-          <div className="mt-0.5 text-[10.5px] text-muted-foreground">
+          <div className="mt-0.5 text-2xs text-muted-foreground">
             Bring your own API key. Keys are stored locally and never leave this machine except
             to call the provider.
           </div>
@@ -183,13 +183,13 @@ export function AiSettings() {
                         {copilot.status.userCode}
                       </span>
                       <div className="mt-1.5 flex items-center gap-2">
-                        <span className="text-[10.5px] text-muted-foreground">
+                        <span className="text-2xs text-muted-foreground">
                           Waiting for authorization…
                         </span>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-6 px-2 text-[10.5px]"
+                          className="h-6 px-2 text-2xs"
                           onClick={copilot.cancel}
                         >
                           Cancel
@@ -210,7 +210,7 @@ export function AiSettings() {
                     </Button>
                   )}
                   {copilot.status.state === 'error' && (
-                    <div className="text-[10.5px] text-destructive">{copilot.status.message}</div>
+                    <div className="text-2xs text-destructive">{copilot.status.message}</div>
                   )}
                 </div>
               ) : (
@@ -245,7 +245,7 @@ export function AiSettings() {
         <div className="flex items-start gap-6 py-3">
           <div className="w-52 flex-none">
             <div className="text-xs font-semibold text-foreground">Model</div>
-            <div className="mt-0.5 text-[10.5px] text-muted-foreground">
+            <div className="mt-0.5 text-2xs text-muted-foreground">
               {isConfigured
                 ? 'Shows the models your account can use.'
                 : 'Used to generate commit messages from your staged changes.'}
@@ -266,7 +266,7 @@ export function AiSettings() {
               ))}
             </select>
             {modelsQuery.isFetching && (
-              <div className="mt-1 text-[10.5px] text-muted-foreground">
+              <div className="mt-1 text-2xs text-muted-foreground">
                 Loading your models…
               </div>
             )}
@@ -323,12 +323,12 @@ function InstructionSetting() {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-foreground">Instructions</span>
           {isCustom && (
-            <span className="rounded bg-panel3 px-1.5 py-0.5 text-[9.5px] font-medium text-sub">
+            <span className="rounded bg-panel3 px-1.5 py-0.5 text-2xs font-medium text-sub">
               Customized
             </span>
           )}
         </div>
-        <div className="mt-0.5 text-[10.5px] text-muted-foreground">
+        <div className="mt-0.5 text-2xs text-muted-foreground">
           Guidance for tone and style. GitWyrm always enforces the summary and
           description format on top of this.
         </div>
@@ -340,7 +340,7 @@ function InstructionSetting() {
           onBlur={() => draft != null && commit(draft)}
           rows={8}
           spellCheck={false}
-          className="resize-y bg-background px-2.5 py-2 font-mono text-[11px] leading-relaxed"
+          className="resize-y bg-background px-2.5 py-2 font-mono text-2xs leading-relaxed"
           placeholder={defaultText}
         />
         <div className="flex items-center gap-2">
@@ -355,7 +355,7 @@ function InstructionSetting() {
             Reset to default
           </Button>
           {saved && (
-            <span className="flex animate-in items-center gap-1 text-[10.5px] text-primary fade-in slide-in-from-left-1">
+            <span className="flex animate-in items-center gap-1 text-2xs text-accent-text fade-in slide-in-from-left-1">
               <Check size={12} /> Saved
             </span>
           )}

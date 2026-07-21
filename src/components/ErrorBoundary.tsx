@@ -103,7 +103,7 @@ export class ErrorBoundary extends Component<Props, State> {
           {error.message}
         </div>
         {info?.componentStack && (
-          <pre className="max-h-64 max-w-2xl overflow-auto rounded border border-border bg-panel2 p-3 font-mono text-[10px] text-muted-foreground">
+          <pre className="max-h-64 max-w-2xl overflow-auto rounded border border-border bg-panel2 p-3 font-mono text-2xs text-muted-foreground">
             {info.componentStack}
           </pre>
         )}

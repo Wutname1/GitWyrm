@@ -108,7 +108,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent className="w-64">
-          <ContextMenuLabel className="font-mono text-[11px] text-sub">
+          <ContextMenuLabel className="font-mono text-2xs text-sub">
             {commit.short_sha}
           </ContextMenuLabel>
           <ContextMenuSeparator />
@@ -148,7 +148,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
             <Pencil />
             Edit commit message
             {!isHead && (
-              <ContextMenuShortcut className="text-[9px] normal-case">latest only</ContextMenuShortcut>
+              <ContextMenuShortcut className="text-2xs normal-case">latest only</ContextMenuShortcut>
             )}
           </ContextMenuItem>
           <PendingMenuItem
@@ -202,7 +202,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
                 {m.reset.isPending && m.reset.variables?.mode === 'Mixed' && <PendingIndicator />}
                 <div className="flex flex-col">
                   <span>{m.reset.isPending && m.reset.variables?.mode === 'Mixed' ? 'Rewinding…' : 'Undo the later commits'}</span>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-2xs text-muted-foreground">
                     Keeps their changes in your files
                   </span>
                 </div>
@@ -217,7 +217,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
                 {m.reset.isPending && m.reset.variables?.mode === 'Soft' && <PendingIndicator />}
                 <div className="flex flex-col">
                   <span>{m.reset.isPending && m.reset.variables?.mode === 'Soft' ? 'Rewinding…' : 'Undo, and keep changes ready to commit'}</span>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-2xs text-muted-foreground">
                     Changes stay staged
                   </span>
                 </div>
@@ -225,7 +225,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
               <ContextMenuItem variant="destructive" onSelect={() => runReset('Hard')}>
                 <div className="flex flex-col">
                   <span>Undo and erase the later changes</span>
-                  <span className="text-[10px] opacity-80">Can't be undone easily</span>
+                  <span className="text-2xs opacity-80">Can't be undone easily</span>
                 </div>
               </ContextMenuItem>
             </ContextMenuSubContent>

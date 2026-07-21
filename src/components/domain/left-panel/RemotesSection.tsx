@@ -64,7 +64,7 @@ function BranchNode({ node, depth }: { node: BranchTreeNode<RemoteBranchInfo>; d
             className={cn('flex-none text-muted-foreground transition-transform', open && 'rotate-90')}
           />
           <Folder size={11} className="flex-none text-muted-foreground" />
-          <span className="truncate text-[11px] text-sub">{node.name}</span>
+          <span className="truncate text-2xs text-sub">{node.name}</span>
         </button>
         {open && node.children.map((c) => <BranchNode key={c.branch ?? c.name} node={c} depth={depth + 1} />)}
       </div>
@@ -90,7 +90,7 @@ function BranchNode({ node, depth }: { node: BranchTreeNode<RemoteBranchInfo>; d
       />
       <span
         className={cn(
-          'truncate font-mono text-[11px]',
+          'truncate font-mono text-2xs',
           hasIncoming ? 'text-foreground' : 'text-sub'
         )}
       >
@@ -98,12 +98,12 @@ function BranchNode({ node, depth }: { node: BranchTreeNode<RemoteBranchInfo>; d
       </span>
 
       {b?.local_only_missing && (
-        <span className="flex-none rounded-sm bg-panel3 px-1 text-[8.5px] uppercase tracking-wide text-muted-foreground">
+        <span className="flex-none rounded-sm bg-panel3 px-1 text-2xs uppercase tracking-wide text-muted-foreground">
           not here
         </span>
       )}
 
-      <span className="ml-auto flex flex-none items-center gap-1 pl-1.5 font-mono text-[9px]">
+      <span className="ml-auto flex flex-none items-center gap-1 pl-1.5 font-mono text-2xs">
         {!!b && b.ahead_of_local > 0 && (
           <span className="text-[var(--gw-green)]">↓{b.ahead_of_local}</span>
         )}
@@ -121,7 +121,7 @@ function BranchNode({ node, depth }: { node: BranchTreeNode<RemoteBranchInfo>; d
     <ContextMenu>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent className="w-60">
-        <ContextMenuLabel className="font-mono text-[11px] text-sub">
+        <ContextMenuLabel className="font-mono text-2xs text-sub">
           {b.local_counterpart}
         </ContextMenuLabel>
         <ContextMenuSeparator />
@@ -164,24 +164,24 @@ function RemoteNode({
               className={cn('flex-none text-muted-foreground transition-transform', open && 'rotate-90')}
             />
             <RemoteIcon provider={provider} width={12} height={12} className="flex-none text-sub" />
-            <span className="truncate text-[11.5px] text-foreground">{remote.name}</span>
+            <span className="truncate text-xs text-foreground">{remote.name}</span>
             {incoming > 0 && (
               <span
                 title={`${incoming} branch${incoming === 1 ? '' : 'es'} here ${incoming === 1 ? 'has' : 'have'} work you don't have yet`}
-                className="ml-auto flex-none rounded-sm bg-[var(--gw-green)]/15 px-1 font-mono text-[9px] text-[var(--gw-green)]"
+                className="ml-auto flex-none rounded-sm bg-[var(--gw-green)]/15 px-1 font-mono text-2xs text-[var(--gw-green)]"
               >
                 {incoming} new
               </span>
             )}
             <span
-              className={cn('pl-1.5 font-mono text-[9px] text-muted-foreground', incoming === 0 && 'ml-auto')}
+              className={cn('pl-1.5 font-mono text-2xs text-muted-foreground', incoming === 0 && 'ml-auto')}
             >
               {remote.branches.length}
             </span>
           </button>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48">
-          <ContextMenuLabel className="font-mono text-[11px] text-sub">{remote.name}</ContextMenuLabel>
+          <ContextMenuLabel className="font-mono text-2xs text-sub">{remote.name}</ContextMenuLabel>
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={onManage}>
             <Pencil />
@@ -205,7 +205,7 @@ function RemoteNode({
       {open && (
         <div className="pb-0.5">
           {remote.branches.length === 0 ? (
-            <p className="py-0.5 pl-9 pr-3 text-[10px] text-muted-foreground">No branches</p>
+            <p className="py-0.5 pl-9 pr-3 text-2xs text-muted-foreground">No branches</p>
           ) : (
             tree.map((n) => <BranchNode key={n.branch ?? n.name} node={n} depth={0} />)
           )}
@@ -239,7 +239,7 @@ export function RemotesSection({
             open && 'rotate-90'
           )}
         />
-        <span className="text-[10px] font-bold tracking-[.09em] text-sub">REMOTES</span>
+        <span className="text-2xs font-bold tracking-[.09em] text-sub">REMOTES</span>
         <TooltipButton
           onClick={(e) => {
             e.stopPropagation()
@@ -250,14 +250,14 @@ export function RemotesSection({
         >
           <Plus size={12} strokeWidth={2.4} />
         </TooltipButton>
-        <span className="ml-1.5 font-mono text-[9.5px] text-muted-foreground">{remotes.length}</span>
+        <span className="ml-1.5 font-mono text-2xs text-muted-foreground">{remotes.length}</span>
       </div>
       {open && (
         <div className="pb-1">
           {remotes.length === 0 ? (
             <button
               onClick={onManage}
-              className="flex w-full items-center gap-1.5 py-1 pl-6 pr-3 text-left text-[11px] text-muted-foreground hover:bg-panel2 hover:text-sub"
+              className="flex w-full items-center gap-1.5 py-1 pl-6 pr-3 text-left text-2xs text-muted-foreground hover:bg-panel2 hover:text-sub"
             >
               <Plus size={11} />
               Add a remote

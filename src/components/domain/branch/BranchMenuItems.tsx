@@ -119,7 +119,7 @@ export function BranchMenuItems({
       <ContextMenuItem onSelect={() => toast('GitHub integration is planned')}>
         <GitPullRequestArrow />
         Start a pull request
-        <ContextMenuShortcut className="text-[10px]">soon</ContextMenuShortcut>
+        <ContextMenuShortcut className="text-2xs">soon</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuSeparator />
 

@@ -44,7 +44,7 @@ const DOCS_URL = 'https://github.com/Wutname1/GitWyrm'
 function Wordmark() {
   return (
     <span
-      className="text-[13.5px] leading-none"
+      className="text-[0.84375rem] leading-none"
       style={{ fontFamily: 'var(--font-wordmark)', fontWeight: 600, letterSpacing: '-0.035em' }}
     >
       <span style={{ color: '#D7DEE7' }}>Git</span>
@@ -122,7 +122,7 @@ function RecentRepositories() {
         </TooltipTrigger>
         <TooltipContent>Recent repositories</TooltipContent>
         <DropdownMenuContent align="start" className="w-[300px] p-2">
-          <DropdownMenuLabel className="px-1.5 py-1 text-[9.5px] font-semibold tracking-[.09em] text-muted-foreground">
+          <DropdownMenuLabel className="px-1.5 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">
             RECENT
           </DropdownMenuLabel>
           {recents.length === 0 && (
@@ -136,7 +136,7 @@ function RecentRepositories() {
             >
               <Clock size={13} strokeWidth={2} />
               <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{repo.name}</span>
-              <span className="font-mono text-[9px] text-muted-foreground">{repo.path}</span>
+              <span className="font-mono text-2xs text-muted-foreground">{repo.path}</span>
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
@@ -158,7 +158,7 @@ function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
       disabled={openRepo.isPending}
     >
       {openRepo.isPending
-        ? <Loader2 size={15} strokeWidth={2} className="animate-spin text-primary" />
+        ? <Loader2 size={15} strokeWidth={2} className="animate-spin text-accent-text" />
         : <Plus size={15} strokeWidth={2} />}
     </TooltipButton>
   )
@@ -181,7 +181,7 @@ export function TabBar() {
         <div className="mr-4 flex items-center">
           <BrandMark />
         </div>
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[9.5px] text-muted-foreground">
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-muted-foreground">
           {activeRepo?.path ?? ''}
         </span>
         <WindowControls />
@@ -232,7 +232,7 @@ export function VerticalTabRail() {
   return (
     <aside className="flex w-[248px] flex-none flex-col border-r border-border bg-[color:#0d1218]">
       <div className="flex h-[42px] flex-none items-center justify-between border-b border-border px-2.5 pl-3">
-        <span className="font-wordmark text-[9px] font-semibold tracking-[.085em] text-sub">
+        <span className="font-wordmark text-2xs font-semibold tracking-[.085em] text-sub">
           REPOSITORIES · {openRepos.length}
         </span>
         <OpenRepositoryButton compact />
@@ -242,7 +242,7 @@ export function VerticalTabRail() {
         <button
           type="button"
           onClick={() => useUiStore.getState().openModal('clone')}
-          className="flex h-[31px] flex-1 items-center justify-center gap-1.5 rounded-[5px] border border-border bg-panel2 text-[11px] text-foreground hover:border-muted-foreground hover:bg-panel3"
+          className="flex h-[31px] flex-1 items-center justify-center gap-1.5 rounded-[5px] border border-border bg-panel2 text-2xs text-foreground hover:border-muted-foreground hover:bg-panel3"
         >
           <Plus size={13} />
           Open a repository

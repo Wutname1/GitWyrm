@@ -60,7 +60,7 @@ export function NewBranchModal() {
       onSubmit={create}
     >
       <div className="grid gap-1.5">
-        <label className="text-[11px] font-semibold text-sub">Branch name</label>
+        <label className="text-2xs font-semibold text-sub">Branch name</label>
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -71,10 +71,10 @@ export function NewBranchModal() {
           className="h-auto bg-background py-1.5 font-mono text-xs"
           autoFocus
         />
-        <p className="min-h-[15px] text-[10.5px] leading-tight text-removed">{error ?? ''}</p>
+        <p className="min-h-[15px] text-2xs leading-tight text-removed">{error ?? ''}</p>
       </div>
 
-      <label className="flex cursor-pointer items-center gap-2 text-[11.5px] text-sub">
+      <label className="flex cursor-pointer items-center gap-2 text-xs text-sub">
         <input
           type="checkbox"
           checked={checkout}
@@ -85,12 +85,12 @@ export function NewBranchModal() {
       </label>
 
       {targetSha ? (
-        <p className="text-[10.5px] text-muted-foreground">
+        <p className="text-2xs text-muted-foreground">
           Branches off commit <span className="font-mono text-sub">{shortSha(targetSha)}</span>.
         </p>
       ) : (
         current && (
-          <p className="text-[10.5px] text-muted-foreground">
+          <p className="text-2xs text-muted-foreground">
             Branches off <span className="font-mono text-sub">{current}</span>.
           </p>
         )

@@ -24,7 +24,7 @@ function LogLine({ line }: { line: string }) {
   return (
     <div
       className={cn(
-        'whitespace-pre-wrap break-all border-l-2 border-transparent px-2 py-px font-mono text-[10.5px] leading-[1.5]',
+        'whitespace-pre-wrap break-all border-l-2 border-transparent px-2 py-px font-mono text-2xs leading-[1.5]',
         level === 'ERROR' && 'border-removed bg-removed/5 text-removed',
         level === 'WARN' && 'border-amber-400 text-amber-300',
         level === 'DEBUG' && 'text-muted-foreground',
@@ -98,7 +98,7 @@ export function LogsModal({ open, onClose }: { open: boolean; onClose: () => voi
           <DialogTitle className="flex items-center gap-2 text-sm">
             Application log
             {errorCount > 0 && (
-              <span className="rounded bg-removed/15 px-1.5 py-0.5 text-[10px] font-semibold text-removed">
+              <span className="rounded bg-removed/15 px-1.5 py-0.5 text-2xs font-semibold text-removed">
                 {errorCount} error{errorCount === 1 ? '' : 's'}
               </span>
             )}
@@ -116,7 +116,7 @@ export function LogsModal({ open, onClose }: { open: boolean; onClose: () => voi
                   key={key}
                   onClick={() => setLevel(key)}
                   className={cn(
-                    'rounded px-2.5 py-1 text-[11px] font-medium',
+                    'rounded px-2.5 py-1 text-2xs font-medium',
                     level === key ? 'bg-panel3 text-foreground' : 'text-sub hover:text-foreground'
                   )}
                 >

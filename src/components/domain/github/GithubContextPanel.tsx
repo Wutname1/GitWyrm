@@ -77,9 +77,9 @@ function PanelShell({
   return (
     <div className="grid flex-none gap-2 border-b-2 border-border bg-panel2/60 px-3 py-2.5">
       <div className="flex items-center gap-2">
-        <span className="text-primary">{icon}</span>
-        <span className="text-[11px] font-bold text-foreground">{title}</span>
-        <span className="ml-auto text-[9.5px] uppercase tracking-wide text-muted-foreground">
+        <span className="text-accent-text">{icon}</span>
+        <span className="text-2xs font-bold text-foreground">{title}</span>
+        <span className="ml-auto text-2xs uppercase tracking-wide text-muted-foreground">
           {status}
         </span>
       </div>
@@ -102,7 +102,7 @@ function PrPanel({ number }: { number: number }) {
   if (!pr.data) {
     return (
       <PanelShell icon={<GitPullRequest size={14} />} title={`Pull request #${number}`} status="">
-        <div className="flex items-center gap-2 py-1 text-[10.5px] text-muted-foreground">
+        <div className="flex items-center gap-2 py-1 text-2xs text-muted-foreground">
           <PendingIndicator /> Loading…
         </div>
       </PanelShell>
@@ -141,7 +141,7 @@ function PrPanel({ number }: { number: number }) {
       title={`Pull request #${number}`}
       status={merged ? 'Merged' : closed ? 'Closed' : detail.draft ? 'Draft' : 'Open'}
     >
-      <p className="text-[10.5px] leading-snug text-sub">{note}</p>
+      <p className="text-2xs leading-snug text-sub">{note}</p>
 
       <div className="flex overflow-hidden rounded-md border border-primary">
         <Button
@@ -168,10 +168,10 @@ function PrPanel({ number }: { number: number }) {
           <DropdownMenuContent align="end" className="w-64">
             {(Object.keys(MERGE_METHODS) as MergeMethod[]).map((key) => (
               <DropdownMenuItem key={key} onSelect={() => setMethod(key)}>
-                <Check size={13} className={key === method ? 'text-primary' : 'opacity-0'} />
+                <Check size={13} className={key === method ? 'text-accent-text' : 'opacity-0'} />
                 <div>
                   <div className="text-xs font-semibold">{MERGE_METHODS[key].label}</div>
-                  <div className="text-[10px] text-muted-foreground">
+                  <div className="text-2xs text-muted-foreground">
                     {MERGE_METHODS[key].description}
                   </div>
                 </div>
@@ -185,7 +185,7 @@ function PrPanel({ number }: { number: number }) {
         <Button
           variant="secondary"
           size="sm"
-          className="h-7 text-[11px]"
+          className="h-7 text-2xs"
           disabled={merged || closed || gh.approvePr.isPending}
           aria-busy={gh.approvePr.isPending || undefined}
           onClick={() => gh.approvePr.mutate(number)}
@@ -196,7 +196,7 @@ function PrPanel({ number }: { number: number }) {
         <Button
           variant="secondary"
           size="sm"
-          className="h-7 text-[11px]"
+          className="h-7 text-2xs"
           disabled={onBranch || git.fetch.isPending || git.checkout.isPending}
           aria-busy={git.fetch.isPending || git.checkout.isPending || undefined}
           onClick={useBranch}
@@ -215,7 +215,7 @@ function PrPanel({ number }: { number: number }) {
       <Button
         variant="ghost"
         size="sm"
-        className="h-7 text-[11px] text-sub"
+        className="h-7 text-2xs text-sub"
         onClick={() => void openExternal(detail.html_url)}
       >
         <ExternalLink size={12} />
@@ -261,7 +261,7 @@ function IssuePanel({ number }: { number: number }) {
   if (!issue.data) {
     return (
       <PanelShell icon={<CircleDot size={14} />} title={`Issue #${number}`} status="">
-        <div className="flex items-center gap-2 py-1 text-[10.5px] text-muted-foreground">
+        <div className="flex items-center gap-2 py-1 text-2xs text-muted-foreground">
           <PendingIndicator /> Loading…
         </div>
       </PanelShell>
@@ -280,7 +280,7 @@ function IssuePanel({ number }: { number: number }) {
       title={`Issue #${number}`}
       status={closed ? 'Closed' : 'Open'}
     >
-      <p className="text-[10.5px] leading-snug text-sub">
+      <p className="text-2xs leading-snug text-sub">
         {closed
           ? 'This issue is closed. It can still be read and reopened on GitHub.'
           : detail.assignee
@@ -303,7 +303,7 @@ function IssuePanel({ number }: { number: number }) {
         <Button
           variant="secondary"
           size="sm"
-          className="h-7 text-[11px]"
+          className="h-7 text-2xs"
           onClick={() => void openExternal(detail.html_url)}
         >
           <ExternalLink size={12} />
@@ -312,7 +312,7 @@ function IssuePanel({ number }: { number: number }) {
         <Button
           variant="secondary"
           size="sm"
-          className="h-7 text-[11px] text-removed hover:text-removed"
+          className="h-7 text-2xs text-removed hover:text-removed"
           disabled={closed || gh.closeIssue.isPending}
           onClick={() => setConfirmClose(true)}
         >
@@ -335,12 +335,12 @@ function IssuePanel({ number }: { number: number }) {
           )
         }
       >
-        <p className="text-[12px] leading-relaxed text-sub">
+        <p className="text-xs leading-relaxed text-sub">
           GitWyrm will make a branch for this issue and switch to it. Your files will stay as they
           are.
         </p>
         <div className="grid gap-1.5">
-          <label className="text-[11px] text-muted-foreground" htmlFor="issue-branch-name">
+          <label className="text-2xs text-muted-foreground" htmlFor="issue-branch-name">
             Branch name
           </label>
           <Input
@@ -352,7 +352,7 @@ function IssuePanel({ number }: { number: number }) {
             autoFocus
           />
           {nameTaken && (
-            <p className="text-[10.5px] text-removed">A branch with this name already exists.</p>
+            <p className="text-2xs text-removed">A branch with this name already exists.</p>
           )}
         </div>
       </FormDialog>

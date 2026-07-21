@@ -23,9 +23,9 @@ export function SyncBadge({ branch, className }: SyncBadgeProps) {
     <span
       title={sync.title ?? undefined}
       className={cn(
-        'whitespace-nowrap font-mono text-[10.5px]',
+        'whitespace-nowrap font-mono text-2xs',
         sync.marker
-          ? 'font-semibold uppercase tracking-wide text-primary/80'
+          ? 'font-semibold uppercase tracking-wide text-accent-text/80'
           : 'text-muted-foreground',
         className
       )}

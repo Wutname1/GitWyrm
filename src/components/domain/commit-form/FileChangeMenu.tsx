@@ -36,7 +36,7 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent className="w-56">
-          <ContextMenuLabel className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-sub">
+          <ContextMenuLabel className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-sub">
             {name}
           </ContextMenuLabel>
           <ContextMenuSeparator />

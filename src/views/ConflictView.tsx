@@ -24,13 +24,13 @@ function SidePanel({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-border last:border-r-0">
       <div
         className={cn(
-          'flex-none border-b border-border px-3 py-1.5 text-[10px] font-bold tracking-[.05em]',
+          'flex-none border-b border-border px-3 py-1.5 text-2xs font-bold tracking-[.05em]',
           tone === 'ours' ? 'text-added' : 'text-modified'
         )}
       >
         {title}
       </div>
-      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-[1.7] text-sub">
+      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-2xs leading-[1.7] text-sub">
         {deleted ? (
           <span className="italic text-removed">
             This side deleted the file. Choosing it removes the file.
@@ -121,7 +121,7 @@ export function ConflictView() {
     <div className="flex min-h-0 flex-1">
       {/* Conflict file list */}
       <div className="w-56 flex-none overflow-y-auto border-r border-border bg-panel py-2">
-        <div className="px-3 pb-1.5 text-[10px] font-bold tracking-[.05em] text-sub">
+        <div className="px-3 pb-1.5 text-2xs font-bold tracking-[.05em] text-sub">
           CONFLICTED FILES
         </div>
         {conflicts.map((c) => (
@@ -136,7 +136,7 @@ export function ConflictView() {
             <FileWarning size={13} className="flex-none text-removed" />
             <span
               className={cn(
-                'overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]',
+                'overflow-hidden text-ellipsis whitespace-nowrap text-xs',
                 c === path ? 'font-semibold text-foreground' : 'text-sub'
               )}
             >
@@ -150,13 +150,13 @@ export function ConflictView() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex flex-none items-center gap-2 border-b border-border bg-panel px-3.5 py-2">
           <FileWarning size={14} className="flex-none text-removed" />
-          <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-foreground">
+          <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs text-foreground">
             {path}
           </span>
           <Button
             size="sm"
             variant="secondary"
-            className="h-7 gap-1.5 text-[11px] text-added"
+            className="h-7 gap-1.5 text-2xs text-added"
             disabled={m.resolveConflict.isPending || !data}
             onClick={() => resolveWith({ kind: 'ours' })}
           >
@@ -170,7 +170,7 @@ export function ConflictView() {
           <Button
             size="sm"
             variant="secondary"
-            className="h-7 gap-1.5 text-[11px] text-modified"
+            className="h-7 gap-1.5 text-2xs text-modified"
             disabled={m.resolveConflict.isPending || !data}
             onClick={() => resolveWith({ kind: 'theirs' })}
           >
@@ -183,7 +183,7 @@ export function ConflictView() {
           </Button>
           <Button
             size="sm"
-            className="h-7 gap-1.5 text-[11px]"
+            className="h-7 gap-1.5 text-2xs"
             disabled={m.resolveConflict.isPending || !data || data.binary}
             onClick={() => resolveWith({ kind: 'manual', text: draft })}
           >
@@ -224,14 +224,14 @@ export function ConflictView() {
             </div>
             {/* Editable merged result */}
             <div className="flex min-h-0 flex-[1.2] flex-col">
-              <div className="flex-none border-b border-border bg-panel2 px-3 py-1.5 text-[10px] font-bold tracking-[.05em] text-sub">
+              <div className="flex-none border-b border-border bg-panel2 px-3 py-1.5 text-2xs font-bold tracking-[.05em] text-sub">
                 RESULT — edit to resolve, then “Mark resolved”
               </div>
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 spellCheck={false}
-                className="min-h-0 flex-1 resize-none bg-background px-3 py-2 font-mono text-[11.5px] leading-[1.7] text-foreground outline-none"
+                className="min-h-0 flex-1 resize-none bg-background px-3 py-2 font-mono text-xs leading-[1.7] text-foreground outline-none"
               />
             </div>
           </div>

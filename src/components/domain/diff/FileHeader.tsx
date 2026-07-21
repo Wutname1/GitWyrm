@@ -28,14 +28,14 @@ export function FileHeader({ request, additions, deletions }: FileHeaderProps) {
       </span>
       <span
         className={cn(
-          'flex-none rounded-full border px-[7px] py-px font-mono text-[9.5px] font-semibold',
-          pending ? 'border-primary bg-soft text-primary' : 'border-border bg-panel3 text-sub'
+          'flex-none rounded-full border px-[7px] py-px font-mono text-2xs font-semibold',
+          pending ? 'border-primary bg-soft text-accent-text' : 'border-border bg-panel3 text-sub'
         )}
       >
         {contextLabel}
       </span>
-      <span className="font-mono text-[10.5px] text-added">+{additions}</span>
-      <span className="font-mono text-[10.5px] text-removed">-{deletions}</span>
+      <span className="font-mono text-2xs text-added">+{additions}</span>
+      <span className="font-mono text-2xs text-removed">-{deletions}</span>
       <div className="flex-1" />
       <TooltipButton
         onClick={closeDiff}

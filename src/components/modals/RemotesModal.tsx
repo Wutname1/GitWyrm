@@ -53,8 +53,8 @@ function BranchNode({
             className={cn('flex-none text-muted-foreground transition-transform', open && 'rotate-90')}
           />
           <Folder size={12} className="flex-none text-muted-foreground" />
-          <span className="truncate text-[11px] text-sub">{node.name}</span>
-          <span className="ml-auto pl-1.5 font-mono text-[9px] text-muted-foreground">
+          <span className="truncate text-2xs text-sub">{node.name}</span>
+          <span className="ml-auto pl-1.5 font-mono text-2xs text-muted-foreground">
             {node.children.length}
           </span>
         </button>
@@ -79,14 +79,14 @@ function BranchNode({
       className="group/branch flex items-center gap-1.5 py-1 pr-2 hover:bg-panel2"
     >
       <GitBranch size={11} className="flex-none text-muted-foreground" />
-      <span className="truncate font-mono text-[11px] text-foreground">{node.name}</span>
+      <span className="truncate font-mono text-2xs text-foreground">{node.name}</span>
       <TooltipButton
         onClick={() => node.branch && onSetUpstream(node.branch)}
         tooltip="Track this branch"
         disabled={upstreamPending}
         className={cn(
-          'ml-auto flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:text-primary disabled:pointer-events-none group-hover/branch:opacity-100',
-          upstreamTarget === node.branch && 'text-primary opacity-100'
+          'ml-auto flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:text-accent-text disabled:pointer-events-none group-hover/branch:opacity-100',
+          upstreamTarget === node.branch && 'text-accent-text opacity-100'
         )}
       >
         {upstreamTarget === node.branch ? <PendingIndicator className="size-3" /> : <Target size={12} />}
@@ -136,11 +136,11 @@ function RemoteRow({
                 )}
               />
               <RemoteIcon provider={provider} width={13} height={13} className="flex-none text-sub" />
-              <span className="flex-none text-[12px] font-semibold text-foreground">{remote.name}</span>
-              <span className="truncate font-mono text-[10.5px] text-muted-foreground">
+              <span className="flex-none text-xs font-semibold text-foreground">{remote.name}</span>
+              <span className="truncate font-mono text-2xs text-muted-foreground">
                 {remote.url}
               </span>
-              <span className="ml-auto flex-none pl-2 font-mono text-[9px] text-muted-foreground">
+              <span className="ml-auto flex-none pl-2 font-mono text-2xs text-muted-foreground">
                 {remote.branches.length}
               </span>
             </button>
@@ -163,7 +163,7 @@ function RemoteRow({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48">
-          <ContextMenuLabel className="font-mono text-[11px] text-sub">{remote.name}</ContextMenuLabel>
+          <ContextMenuLabel className="font-mono text-2xs text-sub">{remote.name}</ContextMenuLabel>
           <ContextMenuSeparator />
           <ContextMenuItem disabled={upstreamPending} onSelect={onEdit}>
             <Pencil />
@@ -190,7 +190,7 @@ function RemoteRow({
       {open && (
         <div className="border-t border-border py-1">
           {remote.branches.length === 0 ? (
-            <p className="px-4 py-1.5 text-[10.5px] text-muted-foreground">
+            <p className="px-4 py-1.5 text-2xs text-muted-foreground">
               No branches yet. Fetch to see this remote's branches.
             </p>
           ) : (
@@ -295,7 +295,7 @@ export function RemotesModal() {
 
           <div className="grid max-h-[60vh] gap-2 overflow-y-auto px-4 py-4">
             {(remotes.data?.length ?? 0) === 0 && !adding && (
-              <p className="py-2 text-center text-[11.5px] text-muted-foreground">
+              <p className="py-2 text-center text-xs text-muted-foreground">
                 No remotes yet. Add one to push and pull your work.
               </p>
             )}
@@ -304,7 +304,7 @@ export function RemotesModal() {
               editing?.original === r.name ? (
                 <div key={r.name} className="grid gap-2 rounded-md border border-primary bg-panel2 p-3">
                   <div className="grid gap-1.5">
-                    <label className="text-[10.5px] font-semibold text-sub">Name</label>
+                    <label className="text-2xs font-semibold text-sub">Name</label>
                     <Input
                       value={editing.name}
                       onChange={(e) => setEditing({ ...editing, name: e.target.value })}
@@ -314,7 +314,7 @@ export function RemotesModal() {
                     />
                   </div>
                   <div className="grid gap-1.5">
-                    <label className="text-[10.5px] font-semibold text-sub">URL</label>
+                    <label className="text-2xs font-semibold text-sub">URL</label>
                     <Input
                       value={editing.url}
                       onChange={(e) => setEditing({ ...editing, url: e.target.value })}
@@ -349,7 +349,7 @@ export function RemotesModal() {
             {adding ? (
               <div className="grid gap-2 rounded-md border border-primary bg-panel2 p-3">
                 <div className="grid gap-1.5">
-                  <label className="text-[10.5px] font-semibold text-sub">Name</label>
+                  <label className="text-2xs font-semibold text-sub">Name</label>
                   <Input
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
@@ -359,11 +359,11 @@ export function RemotesModal() {
                     disabled={m.addRemote.isPending}
                   />
                   {existingNames.has(newName.trim()) && newName.trim() !== '' && (
-                    <p className="text-[10px] text-removed">That name is already used.</p>
+                    <p className="text-2xs text-removed">That name is already used.</p>
                   )}
                 </div>
                 <div className="grid gap-1.5">
-                  <label className="text-[10.5px] font-semibold text-sub">URL</label>
+                  <label className="text-2xs font-semibold text-sub">URL</label>
                   <Input
                     value={newUrl}
                     onChange={(e) => setNewUrl(e.target.value)}
@@ -386,7 +386,7 @@ export function RemotesModal() {
             ) : (
               <button
                 onClick={() => setAdding(true)}
-                className="flex items-center justify-center gap-1.5 rounded-md border border-dashed border-border py-2 text-[11.5px] text-sub hover:border-primary hover:text-primary"
+                className="flex items-center justify-center gap-1.5 rounded-md border border-dashed border-border py-2 text-xs text-sub hover:border-primary hover:text-accent-text"
               >
                 <Plus size={13} />
                 Add remote

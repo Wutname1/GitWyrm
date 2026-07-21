@@ -28,7 +28,7 @@ function Avatar({ name, bot }: { name: string; bot?: boolean }) {
   return (
     <span
       className={cn(
-        'flex size-6 flex-none items-center justify-center rounded-full text-[9px] font-bold',
+        'flex size-6 flex-none items-center justify-center rounded-full text-2xs font-bold',
         bot ? 'border border-border bg-panel3 text-sub' : 'bg-panel3 text-foreground'
       )}
       title={name}
@@ -46,17 +46,17 @@ function MarkdownBody({ text }: { text: string }) {
   return (
     <div
       className={cn(
-        'select-text text-[12.5px] leading-relaxed text-foreground',
+        'select-text text-[0.78125rem] leading-relaxed text-foreground',
         '[&_p]:mb-3 [&_p:last-child]:mb-0',
         '[&_h1]:mb-2 [&_h1]:mt-4 [&_h1]:text-sm [&_h1]:font-bold',
-        '[&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-[13px] [&_h2]:font-bold',
+        '[&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-[0.8125rem] [&_h2]:font-bold',
         '[&_h3]:mb-1.5 [&_h3]:mt-3 [&_h3]:text-xs [&_h3]:font-bold',
         '[&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5',
         '[&_li]:mb-1',
-        '[&_code]:rounded [&_code]:bg-panel3 [&_code]:px-1 [&_code]:py-px [&_code]:font-mono [&_code]:text-[11px]',
+        '[&_code]:rounded [&_code]:bg-panel3 [&_code]:px-1 [&_code]:py-px [&_code]:font-mono [&_code]:text-2xs',
         '[&_pre]:mb-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:border-border [&_pre]:bg-background [&_pre]:p-2.5',
         '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
-        '[&_a]:text-primary [&_a]:underline-offset-2 hover:[&_a]:underline',
+        '[&_a]:text-accent-text [&_a]:underline-offset-2 hover:[&_a]:underline',
         '[&_blockquote]:mb-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-sub',
         '[&_img]:max-w-full [&_hr]:my-3 [&_hr]:border-border',
         '[&_table]:mb-3 [&_table]:border-collapse [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1'
@@ -81,7 +81,7 @@ function CommentThread({
   const [draft, setDraft] = useState('')
   return (
     <section className="mt-4 overflow-hidden rounded-md border border-border bg-panel2/70">
-      <div className="flex items-center border-b border-border px-3.5 py-2.5 text-[11px] font-bold text-foreground">
+      <div className="flex items-center border-b border-border px-3.5 py-2.5 text-2xs font-bold text-foreground">
         Conversation
         <span className="ml-auto font-normal text-muted-foreground">
           {comments.length === 1 ? '1 message' : `${comments.length} messages`}
@@ -98,7 +98,7 @@ function CommentThread({
           >
             <Avatar name={c.author} bot={c.author_is_bot} />
             <div className="min-w-0">
-              <div className="text-[11px]">
+              <div className="text-2xs">
                 <span className="font-bold text-foreground">{c.author}</span>
                 <span className="ml-1.5 text-muted-foreground">{ago(c.created_at)}</span>
               </div>
@@ -141,8 +141,8 @@ function StatusPill({ label, tone }: { label: string; tone: 'green' | 'violet' |
   return (
     <span
       className={cn(
-        'ml-auto rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide',
-        tone === 'green' && 'bg-primary/15 text-primary',
+        'ml-auto rounded-full px-2 py-0.5 text-2xs font-bold uppercase tracking-wide',
+        tone === 'green' && 'bg-primary/15 text-accent-text',
         tone === 'violet' && 'bg-lane2/15 text-lane2',
         tone === 'red' && 'bg-removed/15 text-removed'
       )}
@@ -211,14 +211,14 @@ export function GithubView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <header className="flex min-h-[52px] flex-none items-center gap-3 border-b border-border bg-panel/70 px-4 py-2">
-        <span className="flex size-8 flex-none items-center justify-center rounded-md border border-primary/30 bg-soft text-primary">
+        <span className="flex size-8 flex-none items-center justify-center rounded-md border border-primary/30 bg-soft text-accent-text">
           {isPr ? <GitPullRequest size={15} /> : <CircleDot size={15} />}
         </span>
         <div className="min-w-0">
-          <h2 className="truncate font-wordmark text-[13px] font-semibold text-foreground">
+          <h2 className="truncate font-wordmark text-[0.8125rem] font-semibold text-foreground">
             {kindLabel} #{item.number}
           </h2>
-          <p className="truncate text-[10.5px] text-sub">
+          <p className="truncate text-2xs text-sub">
             {detail ? `Updated ${ago(detail.updated_at)}` : query.isError ? 'Could not load' : 'Loading…'}
           </p>
         </div>
@@ -273,15 +273,15 @@ export function GithubView() {
           )}
           {detail && (
             <>
-              <div className="flex items-center gap-2 text-[10.5px] text-muted-foreground">
+              <div className="flex items-center gap-2 text-2xs text-muted-foreground">
                 {isPr ? <GitPullRequest size={13} /> : <CircleDot size={13} />}
                 <span>{kindLabel}</span>
                 <span className="ml-auto font-mono">#{detail.number}</span>
               </div>
-              <h3 className="mb-2.5 mt-3 select-text font-wordmark text-[22px] font-semibold leading-tight tracking-tight text-foreground">
+              <h3 className="mb-2.5 mt-3 select-text font-wordmark text-[1.375rem] font-semibold leading-tight tracking-tight text-foreground">
                 {detail.title}
               </h3>
-              <div className="flex items-center gap-2 border-b border-border pb-4 text-[11px] text-sub">
+              <div className="flex items-center gap-2 border-b border-border pb-4 text-2xs text-sub">
                 <Avatar name={detail.author} bot={isPr ? pr.data?.author_is_bot : false} />
                 <span>
                   {detail.author} opened this · updated {ago(detail.updated_at)}
@@ -290,11 +290,11 @@ export function GithubView() {
               </div>
 
               {isPr && pr.data && (
-                <div className="mt-3.5 flex flex-wrap items-center gap-2 font-mono text-[10px] text-sub">
+                <div className="mt-3.5 flex flex-wrap items-center gap-2 font-mono text-2xs text-sub">
                   <code className="rounded border border-border bg-panel2 px-1.5 py-0.5 text-foreground">
                     {pr.data.head_ref}
                   </code>
-                  <span className="text-primary">→</span>
+                  <span className="text-accent-text">→</span>
                   <code className="rounded border border-border bg-panel2 px-1.5 py-0.5 text-foreground">
                     {pr.data.base_ref}
                   </code>
@@ -311,7 +311,7 @@ export function GithubView() {
                   {issue.data.labels.map((label) => (
                     <span
                       key={label}
-                      className="rounded-full border border-border bg-panel2 px-2 py-0.5 text-[9.5px] text-sub"
+                      className="rounded-full border border-border bg-panel2 px-2 py-0.5 text-2xs text-sub"
                     >
                       {label}
                     </span>
@@ -320,7 +320,7 @@ export function GithubView() {
               )}
 
               <section className="mt-4 overflow-hidden rounded-md border border-border bg-panel2/70">
-                <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5 text-[11px] font-bold text-foreground">
+                <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5 text-2xs font-bold text-foreground">
                   <Avatar name={detail.author} />
                   <span>{detail.author} wrote</span>
                   <span className="ml-auto font-normal text-muted-foreground">

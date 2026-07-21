@@ -67,7 +67,7 @@ export function Avatar({ initials, color, email, size = 'sm' }: AvatarProps) {
     <span
       className={cn(
         'flex flex-none items-center justify-center rounded-full font-bold',
-        size === 'sm' ? 'size-[19px] text-[8px]' : 'size-[26px] text-[9.5px]'
+        size === 'sm' ? 'size-[19px] text-2xs' : 'size-[26px] text-2xs'
       )}
       style={{ background: color + '2b', color, border: `1px solid ${color}55` }}
     >

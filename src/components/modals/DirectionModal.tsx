@@ -16,9 +16,9 @@ function Chip({ name, tone }: { name: string; tone: 'source' | 'target' }) {
   return (
     <span
       className={cn(
-        'max-w-[130px] overflow-hidden text-ellipsis whitespace-nowrap rounded-[5px] border px-2 py-1 font-mono text-[11px] font-semibold',
+        'max-w-[130px] overflow-hidden text-ellipsis whitespace-nowrap rounded-[5px] border px-2 py-1 font-mono text-2xs font-semibold',
         tone === 'target'
-          ? 'border-primary bg-soft text-primary'
+          ? 'border-primary bg-soft text-accent-text'
           : 'border-border bg-panel2 text-foreground'
       )}
     >
@@ -128,14 +128,14 @@ export function DirectionModal() {
           <div className="flex items-center justify-center gap-3 rounded-md border border-border bg-panel2 px-3 py-3">
             <div className="flex flex-col items-center gap-1">
               <Chip name={source} tone="source" />
-              <span className="text-[9px] uppercase tracking-[.06em] text-muted-foreground">
+              <span className="text-2xs uppercase tracking-[.06em] text-muted-foreground">
                 bring work from
               </span>
             </div>
             <ArrowRight size={16} className="mt-[-14px] flex-none text-sub" />
             <div className="flex flex-col items-center gap-1">
               <Chip name={target} tone="target" />
-              <span className="text-[9px] uppercase tracking-[.06em] text-muted-foreground">
+              <span className="text-2xs uppercase tracking-[.06em] text-muted-foreground">
                 into
               </span>
             </div>
@@ -143,17 +143,17 @@ export function DirectionModal() {
               onClick={() => setReversed((r) => !r)}
               disabled={!other}
               tooltip="Swap direction"
-              className="ml-1 flex size-7 flex-none items-center justify-center rounded border border-border bg-panel text-sub hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+              className="ml-1 flex size-7 flex-none items-center justify-center rounded border border-border bg-panel text-sub hover:border-primary hover:text-accent-text disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Repeat size={13} />
             </TooltipButton>
           </div>
 
           <div className="grid gap-1.5">
-            <label className="text-[11px] font-semibold text-sub">Other branch</label>
+            <label className="text-2xs font-semibold text-sub">Other branch</label>
             <div className="max-h-[180px] overflow-y-auto rounded-md border border-border bg-background p-1">
               {candidates.length === 0 && (
-                <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                <div className="px-2 py-1.5 text-2xs text-muted-foreground">
                   No other branches to merge.
                 </div>
               )}
@@ -162,8 +162,8 @@ export function DirectionModal() {
                   key={name}
                   onClick={() => setOther(name)}
                   className={cn(
-                    'flex w-full items-center gap-2 rounded px-2 py-1 text-left font-mono text-[11.5px] hover:bg-panel3',
-                    other === name ? 'bg-soft text-primary' : 'text-foreground'
+                    'flex w-full items-center gap-2 rounded px-2 py-1 text-left font-mono text-xs hover:bg-panel3',
+                    other === name ? 'bg-soft text-accent-text' : 'text-foreground'
                   )}
                 >
                   <span
@@ -178,7 +178,7 @@ export function DirectionModal() {
             </div>
           </div>
 
-          <div className="min-h-[34px] rounded-md border border-border bg-panel2 px-3 py-2 text-[11px]">
+          <div className="min-h-[34px] rounded-md border border-border bg-panel2 px-3 py-2 text-2xs">
             {!other && (
               <span className="text-muted-foreground">Pick a branch to preview the merge.</span>
             )}

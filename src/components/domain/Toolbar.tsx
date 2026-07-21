@@ -52,18 +52,18 @@ function ToolbarButton({ icon, label, badge, onClick, disabled, pending }: Toolb
       className={cn(
         'relative flex h-8 items-center gap-[7px] overflow-hidden rounded-md border border-transparent px-[11px] text-foreground transition-[border-color,background-color,color,opacity] hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none',
         disabled && !pending && 'opacity-35',
-        pending && 'wyrm-operation-active border-primary/40 bg-soft text-primary'
+        pending && 'wyrm-operation-active border-primary/40 bg-soft text-accent-text'
       )}
     >
       <span className="relative flex flex-none">
         {pending ? <PendingIndicator /> : icon}
         {badge && !pending && (
-          <span className="wyrm-sync-pulse absolute -right-[9px] -top-[7px] rounded-full bg-primary px-1 font-mono text-[8.5px] font-bold leading-[1.3] text-primary-foreground">
+          <span className="wyrm-sync-pulse absolute -right-[9px] -top-[7px] rounded-full bg-primary px-1 font-mono text-2xs font-bold leading-[1.3] text-primary-foreground">
             {badge}
           </span>
         )}
       </span>
-      <span className="text-[11.5px] font-medium">{label}</span>
+      <span className="text-xs font-medium">{label}</span>
     </TooltipButton>
   )
 }
@@ -128,7 +128,7 @@ function BranchSwitcher() {
         <DropdownMenuTrigger asChild>
           <button className="flex h-[30px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-[11px] hover:border-muted-foreground hover:bg-panel3">
             <span className="size-2 rounded-[2px] bg-primary" />
-            <span className="text-[11.5px] font-medium text-foreground">{currentBranch}</span>
+            <span className="text-xs font-medium text-foreground">{currentBranch}</span>
             {head && <SyncBadge branch={head} />}
             <ChevronDown size={13} strokeWidth={2} className="text-muted-foreground" />
           </button>
@@ -139,7 +139,7 @@ function BranchSwitcher() {
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
         >
-          <DropdownMenuLabel className="px-2 py-1 text-[9.5px] font-semibold tracking-[.09em] text-muted-foreground">
+          <DropdownMenuLabel className="px-2 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">
             LOCAL
           </DropdownMenuLabel>
           {locals.map((b) => {
@@ -164,7 +164,7 @@ function BranchSwitcher() {
                 >
                   {b.name}
                 </span>
-                <SyncBadge branch={b} className="text-[9.5px]" />
+                <SyncBadge branch={b} className="text-2xs" />
               </DropdownMenuItem>
             )
           })}
@@ -174,12 +174,12 @@ function BranchSwitcher() {
             return (
               <div key={r.name}>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel className="flex items-center gap-1.5 px-2 py-1 text-[9.5px] font-semibold tracking-[.09em] text-muted-foreground">
+                <DropdownMenuLabel className="flex items-center gap-1.5 px-2 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">
                   <RemoteIcon provider={provider} width={10} height={10} className="flex-none" />
                   {r.name.toUpperCase()}
                 </DropdownMenuLabel>
                 {r.branches.length === 0 ? (
-                  <div className="px-2 py-1 text-[11px] text-muted-foreground">No branches</div>
+                  <div className="px-2 py-1 text-2xs text-muted-foreground">No branches</div>
                 ) : (
                   r.branches.map((b) => {
                     // Already checked out locally under the same short name, so
@@ -208,12 +208,12 @@ function BranchSwitcher() {
                           {b.name}
                         </span>
                         {b.ahead_of_local > 0 && (
-                          <span className="flex-none font-mono text-[9px] text-[var(--gw-green)]">
+                          <span className="flex-none font-mono text-2xs text-[var(--gw-green)]">
                             ↓{b.ahead_of_local}
                           </span>
                         )}
                         {b.local_only_missing && (
-                          <span className="flex-none text-[8.5px] uppercase tracking-wide text-muted-foreground">
+                          <span className="flex-none text-2xs uppercase tracking-wide text-muted-foreground">
                             not here
                           </span>
                         )}
@@ -364,8 +364,8 @@ export function Toolbar() {
         className="flex h-[30px] min-w-[190px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-2.5 text-muted-foreground hover:border-muted-foreground hover:bg-panel3"
       >
         <Search size={14} strokeWidth={1.9} />
-        <span className="text-[11.5px]">Search commits, files…</span>
-        <span className="ml-auto rounded border border-border px-1 font-mono text-[10px]">Ctrl+K</span>
+        <span className="text-xs">Search commits, files…</span>
+        <span className="ml-auto rounded border border-border px-1 font-mono text-2xs">Ctrl+K</span>
       </button>
 
       <GhostButton

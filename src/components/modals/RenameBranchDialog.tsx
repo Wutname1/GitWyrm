@@ -61,7 +61,7 @@ export function RenameBranchDialog({
       onSubmit={submit}
     >
       <div className="grid gap-1.5">
-        <label className="text-[11px] font-semibold text-sub">New name</label>
+        <label className="text-2xs font-semibold text-sub">New name</label>
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -74,9 +74,9 @@ export function RenameBranchDialog({
         />
       </div>
 
-      {error && <p className="text-[10.5px] text-destructive">{error}</p>}
+      {error && <p className="text-2xs text-destructive">{error}</p>}
       {hasUpstream && !error && (
-        <p className="text-[10.5px] text-muted-foreground">
+        <p className="text-2xs text-muted-foreground">
           This renames your copy only. The branch on the remote keeps its old name until you send
           this one.
         </p>

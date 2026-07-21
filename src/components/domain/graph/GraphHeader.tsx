@@ -52,7 +52,7 @@ export function GraphHeader() {
       <ContextMenuTrigger asChild>
         <div
           className={cn(
-            "grid h-[30px] flex-none items-center border-b border-border pl-3 pr-1 text-[10px] font-bold tracking-[.06em] text-muted-foreground",
+            "grid h-[30px] flex-none items-center border-b border-border pl-3 pr-1 text-2xs font-bold tracking-[.06em] text-muted-foreground",
           )}
           style={{ gridTemplateColumns: gridTemplate(order, hidden) }}
         >

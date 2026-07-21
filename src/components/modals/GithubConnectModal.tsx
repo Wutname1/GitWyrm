@@ -38,7 +38,7 @@ export function GithubConnectModal() {
         </DialogHeader>
 
         <div className="grid gap-3 px-4 py-4">
-          <DialogDescription className="text-[12px] leading-relaxed text-sub">
+          <DialogDescription className="text-xs leading-relaxed text-sub">
             See and act on your pull requests and issues without leaving GitWyrm. GitHub will show
             you a code to confirm it is really you.
           </DialogDescription>
@@ -50,10 +50,10 @@ export function GithubConnectModal() {
                 {signIn.status.userCode}
               </span>
               <div className="mt-2 flex items-center gap-2">
-                <span className="text-[10.5px] text-muted-foreground">
+                <span className="text-2xs text-muted-foreground">
                   Waiting for you to finish on GitHub…
                 </span>
-                <Button variant="ghost" size="sm" className="h-6 px-2 text-[10.5px]" onClick={signIn.cancel}>
+                <Button variant="ghost" size="sm" className="h-6 px-2 text-2xs" onClick={signIn.cancel}>
                   Cancel
                 </Button>
               </div>
@@ -70,7 +70,7 @@ export function GithubConnectModal() {
           )}
 
           {signIn.status.state === 'error' && (
-            <div className="text-[10.5px] text-removed">{signIn.status.message}</div>
+            <div className="text-2xs text-removed">{signIn.status.message}</div>
           )}
         </div>
       </DialogContent>

@@ -59,13 +59,13 @@ export function DiffLineRow({
     >
       <span
         className={cn(
-          'w-4 flex-none select-none text-center text-[10px]',
-          selected ? 'text-primary' : contextActive ? 'text-primary/70' : 'text-transparent'
+          'w-4 flex-none select-none text-center text-2xs',
+          selected ? 'text-accent-text' : contextActive ? 'text-accent-text/70' : 'text-transparent'
         )}
       >
         {selectable ? (selected ? '✓' : '·') : ''}
       </span>
-      <span className="w-10 flex-none select-none pr-2.5 text-right text-[10px] text-muted-foreground">
+      <span className="w-10 flex-none select-none pr-2.5 text-right text-2xs text-muted-foreground">
         {isHunk ? '' : (line.new_no ?? line.old_no ?? '')}
       </span>
       <span

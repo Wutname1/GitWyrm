@@ -154,7 +154,7 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
         onDragOver={onDragOver}
         onDrop={onDrop}
         className={cn(
-          'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-[9.5px] font-semibold leading-[1.4] transition-opacity',
+          'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-2xs font-semibold leading-[1.4] transition-opacity',
           draggable ? 'wyrm-draggable cursor-grab active:cursor-grabbing' : 'cursor-default',
           styles[refTag.type],
           // The whole border pulses on a valid target while everything else
