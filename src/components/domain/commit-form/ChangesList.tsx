@@ -7,6 +7,7 @@ import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { FileChangeRow, StageToggle } from '../FileChangeRow'
+import { GenerateCommitsDialog } from './GenerateCommitsDialog'
 
 function GroupHeader({
   label,
@@ -44,6 +45,8 @@ export function ChangesList() {
   const staged = status.data?.staged ?? []
   const unstaged = status.data?.unstaged ?? []
   const hasChanges = staged.length > 0 || unstaged.length > 0
+  const changedFiles = new Set([...staged, ...unstaged].map((file) => file.path)).size
+  const hasConflicts = unstaged.some((file) => file.conflicted)
   const stagingPending =
     m.stageFile.isPending ||
     m.unstageFile.isPending ||
@@ -64,6 +67,7 @@ export function ChangesList() {
           <span className="ml-auto font-mono text-2xs text-sub">
             {staged.length + unstaged.length} file{staged.length + unstaged.length === 1 ? '' : 's'}
           </span>
+          <GenerateCommitsDialog changedFiles={changedFiles} hasConflicts={hasConflicts} />
         </div>
       )}
 

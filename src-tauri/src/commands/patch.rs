@@ -67,6 +67,14 @@ struct ParsedDiff {
   hunks: Vec<RawHunk>,
 }
 
+/// The smallest safe slice of a diff that can be moved to another commit.
+/// Adjacent additions/deletions stay together because splitting a replacement
+/// in the middle can produce a patch that applies in the wrong place.
+pub(crate) struct LogicalPatchUnit {
+  pub selection: Vec<SelectedLine>,
+  pub preview: String,
+}
+
 fn parse_hunk_header(header: &str) -> Option<(u32, u32)> {
   // Form: @@ -old_start[,old_len] +new_start[,new_len] @@ optional section
   let body = header.strip_prefix("@@ ")?;
@@ -101,6 +109,70 @@ fn parse_diff(text: &str) -> Result<ParsedDiff, AppError> {
   }
 
   Ok(ParsedDiff { preamble, hunks })
+}
+
+/// Break a single-file patch into independently stageable change blocks. This
+/// is shared with AI commit splitting so changes from one file can belong to
+/// different commits without asking the model to write or edit patch syntax.
+pub(crate) fn logical_patch_units(raw: &str) -> Result<Vec<LogicalPatchUnit>, AppError> {
+  let parsed = parse_diff(raw)?;
+  let mut units = Vec::new();
+
+  for (hunk_index, hunk) in parsed.hunks.iter().enumerate() {
+    let mut old_no = hunk.old_start;
+    let mut new_no = hunk.new_start;
+    let mut selection = Vec::new();
+    let mut preview = String::new();
+
+    let flush = |selection: &mut Vec<SelectedLine>,
+                 preview: &mut String,
+                 units: &mut Vec<LogicalPatchUnit>| {
+      if selection.is_empty() {
+        return;
+      }
+      units.push(LogicalPatchUnit {
+        selection: std::mem::take(selection),
+        preview: format!("{}{}", hunk.header, std::mem::take(preview)),
+      });
+    };
+
+    for raw_line in &hunk.lines {
+      let sign = raw_line.as_bytes().first().copied().unwrap_or(b' ');
+      match sign {
+        b'+' => {
+          selection.push(SelectedLine {
+            hunk_index: hunk_index as u32,
+            old_no: None,
+            new_no: Some(new_no),
+          });
+          preview.push_str(raw_line);
+          new_no += 1;
+        }
+        b'-' => {
+          selection.push(SelectedLine {
+            hunk_index: hunk_index as u32,
+            old_no: Some(old_no),
+            new_no: None,
+          });
+          preview.push_str(raw_line);
+          old_no += 1;
+        }
+        b'\\' => {
+          if !selection.is_empty() {
+            preview.push_str(raw_line);
+          }
+        }
+        _ => {
+          flush(&mut selection, &mut preview, &mut units);
+          old_no += 1;
+          new_no += 1;
+        }
+      }
+    }
+    flush(&mut selection, &mut preview, &mut units);
+  }
+
+  Ok(units)
 }
 
 /// Validate that within each contiguous run of changed lines (a maximal block
@@ -258,7 +330,7 @@ fn rebuild_hunk(
 /// invocation that produces the source diff (staged vs unstaged).
 fn build_patch(
   repo_path: &str,
-  path: &str,
+  _path: &str,
   diff_args: &[&str],
   selection: &[SelectedLine],
   reverse: bool,
@@ -273,6 +345,16 @@ fn build_patch(
   if raw.match_indices("diff --git ").filter(|(i, _)| *i == 0 || raw.as_bytes()[i - 1] == b'\n').count() > 1 {
     return Err(AppError::Other("expected a single-file diff".into()));
   }
+  build_patch_from_raw(&raw, selection, reverse)
+}
+
+/// Rebuild an already-captured single-file patch with only `selection`. The AI
+/// commit workflow uses the same tested patch filtering as manual line staging.
+pub(crate) fn build_patch_from_raw(
+  raw: &str,
+  selection: &[SelectedLine],
+  reverse: bool,
+) -> Result<String, AppError> {
   let parsed = parse_diff(&raw)?;
 
   let mut patch = String::new();
@@ -292,7 +374,6 @@ fn build_patch(
   if !any {
     return Err(AppError::Other("selection produced no applicable changes".into()));
   }
-  let _ = path; // path is implicit in the diff preamble
   Ok(patch)
 }
 

@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { commands } from '@/lib/bindings'
 import { isTauri } from '@/lib/env'
-import { unwrap } from '@/lib/queryKeys'
+import { keys, unwrap } from '@/lib/queryKeys'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 const catalogKey = ['ai-catalog'] as const
@@ -66,6 +66,30 @@ export function useAiMutations() {
     generate: useMutation({
       mutationFn: async (v: { repoId: string; provider: string; model: string }) =>
         unwrap(await commands.generateCommitMessage(v.repoId, v.provider, v.model)),
+    }),
+    generateCommits: useMutation({
+      mutationFn: async (v: {
+        repoId: string
+        provider: string
+        model: string
+        commitCount: number
+        specialInstructions: string
+      }) =>
+        unwrap(
+          await commands.generateCommits(
+            v.repoId,
+            v.provider,
+            v.model,
+            v.commitCount,
+            v.specialInstructions
+          )
+        ),
+      onSuccess: (_commits, v) => {
+        qc.invalidateQueries({ queryKey: keys.status(v.repoId) })
+        qc.invalidateQueries({ queryKey: keys.log(v.repoId) })
+        qc.invalidateQueries({ queryKey: keys.branches(v.repoId) })
+        qc.invalidateQueries({ queryKey: ['diff', v.repoId] })
+      },
     }),
   }
 }

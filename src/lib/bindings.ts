@@ -856,6 +856,14 @@ async generateCommitMessage(repoId: string, provider: string, model: string) : P
     else return { status: "error", error: e  as any };
 }
 },
+async generateCommits(repoId: string, provider: string, model: string, commitCount: number, specialInstructions: string) : Promise<Result<AiCreatedCommit[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("generate_commits", { repoId, provider, model, commitCount, specialInstructions }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async githubDeviceStart() : Promise<Result<DeviceCodeInfo, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("github_device_start") };
@@ -987,6 +995,7 @@ async githubCloseIssue(owner: string, repo: string, number: number) : Promise<Re
 
 /** user-defined types **/
 
+export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
 export type BranchInfo = { name: string; is_head: boolean; upstream: string | null; ahead: number; behind: number; 
 /**

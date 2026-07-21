@@ -102,6 +102,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::ai::ai_copilot_device_start,
     commands::ai::ai_copilot_device_poll,
     commands::ai::generate_commit_message,
+    commands::ai_commits::generate_commits,
     commands::github::github_device_start,
     commands::github::github_device_poll,
     commands::github::github_sign_out,

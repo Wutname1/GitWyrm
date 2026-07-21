@@ -1,0 +1,320 @@
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Check,
+  GitCommitHorizontal,
+  Minus,
+  Plus,
+  Sparkles,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import logoUrl from '@/assets/logo.png'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { useAiConfigured, useAiMutations } from '@/hooks/useAi'
+import type { AiCreatedCommit } from '@/lib/bindings'
+import { cn } from '@/lib/utils'
+import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
+
+const progressCopy = [
+  ['Reading your changes', 'Finding the parts that belong together'],
+  ['Planning the split', 'Writing clear messages for each commit'],
+  ['Creating the commits', 'Checking that every change is included'],
+] as const
+
+interface GenerateCommitsDialogProps {
+  changedFiles: number
+  hasConflicts: boolean
+}
+
+function shortSha(sha: string) {
+  return sha.slice(0, 7)
+}
+
+export function GenerateCommitsDialog({
+  changedFiles,
+  hasConflicts,
+}: GenerateCommitsDialogProps) {
+  const repo = useActiveRepo()
+  const configured = useAiConfigured()
+  const ai = useAiMutations()
+  const aiProvider = useWorkspaceStore((state) => state.aiProvider)
+  const aiModel = useWorkspaceStore((state) => state.aiModel)
+  const aiReady =
+    aiProvider != null &&
+    aiModel != null &&
+    (configured.data ?? []).some((provider) => provider.id === aiProvider)
+
+  const maxCommits = Math.min(8, Math.max(2, changedFiles))
+  const defaultCount = Math.min(maxCommits, changedFiles >= 8 ? 3 : 2)
+  const [open, setOpen] = useState(false)
+  const [count, setCount] = useState(defaultCount)
+  const [instructions, setInstructions] = useState('')
+  const [created, setCreated] = useState<AiCreatedCommit[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState(0)
+  const pending = ai.generateCommits.isPending
+
+  useEffect(() => {
+    if (!pending) return
+    setProgress(0)
+    const timers = [
+      window.setTimeout(() => setProgress(1), 1700),
+      window.setTimeout(() => setProgress(2), 4300),
+    ]
+    return () => timers.forEach(window.clearTimeout)
+  }, [pending])
+
+  const fileLabel = useMemo(
+    () => `${changedFiles} changed file${changedFiles === 1 ? '' : 's'}`,
+    [changedFiles]
+  )
+
+  if (!aiReady || changedFiles === 0) return null
+
+  const changeOpen = (next: boolean) => {
+    if (!next && pending) return
+    setOpen(next)
+    if (next) {
+      setCount(defaultCount)
+      setInstructions('')
+      setCreated(null)
+      setError(null)
+      setProgress(0)
+    }
+  }
+
+  const generate = () => {
+    if (!repo || pending || hasConflicts) return
+    setError(null)
+    ai.generateCommits.mutate(
+      {
+        repoId: repo.id,
+        provider: aiProvider!,
+        model: aiModel!,
+        commitCount: count,
+        specialInstructions: instructions.trim(),
+      },
+      {
+        onSuccess: (commits) => {
+          setCreated(commits)
+          toast.success(`Created ${commits.length} commits`)
+        },
+        onError: (reason) => {
+          setError(reason instanceof Error ? reason.message : String(reason))
+        },
+      }
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <Button
+        size="xs"
+        onClick={() => changeOpen(true)}
+        className="h-6 border border-primary/45 bg-soft px-2 text-2xs font-semibold text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
+      >
+        <Sparkles />
+        Generate commits
+      </Button>
+
+      <DialogContent
+        className="gap-0 overflow-hidden p-0 sm:max-w-[34rem]"
+        showCloseButton={!pending}
+        onEscapeKeyDown={(event) => pending && event.preventDefault()}
+        onPointerDownOutside={(event) => pending && event.preventDefault()}
+        aria-describedby="generate-commits-description"
+      >
+        <DialogHeader className="border-b border-border px-5 pb-4 pt-5">
+          <DialogTitle className="flex items-center gap-2.5 text-base">
+            <span className="grid size-8 place-items-center rounded-md border border-primary/35 bg-soft text-accent-text">
+              <Sparkles size={16} />
+            </span>
+            {created ? `${created.length} commits created` : 'Generate commits'}
+          </DialogTitle>
+          <DialogDescription id="generate-commits-description" className="pl-[42px] text-xs">
+            {created
+              ? 'Every change is included. Your files stayed in place, and nothing was pushed.'
+              : `AI will organize ${fileLabel} and create the commits for you.`}
+          </DialogDescription>
+        </DialogHeader>
+
+        {created ? (
+          <div className="max-h-[25rem] overflow-y-auto px-5 py-5">
+            <div className="relative grid gap-2.5 before:absolute before:bottom-5 before:left-[17px] before:top-5 before:w-px before:bg-primary/25">
+              {created.map((commit, index) => (
+                <div
+                  key={commit.sha}
+                  className="relative grid grid-cols-[35px_minmax(0,1fr)] gap-3 rounded-lg border border-border bg-panel2 px-3 py-3"
+                >
+                  <span className="relative z-[1] grid size-[35px] place-items-center rounded-full border border-primary/40 bg-background font-mono text-2xs font-bold text-accent-text">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0 pt-0.5">
+                    <div className="truncate text-xs font-semibold text-foreground">
+                      {commit.summary}
+                    </div>
+                    {commit.description && (
+                      <div className="mt-1 line-clamp-2 text-2xs leading-relaxed text-sub">
+                        {commit.description}
+                      </div>
+                    )}
+                    <div className="mt-2 flex items-center gap-2 font-mono text-2xs text-muted-foreground">
+                      <span>{shortSha(commit.sha)}</span>
+                      <span>·</span>
+                      <span>
+                        {commit.files.length} file{commit.files.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : pending ? (
+          <div className="grid min-h-[19rem] place-items-center px-8 py-8" aria-live="polite">
+            <div className="w-full max-w-sm">
+              <div className="mx-auto mb-7 grid size-20 place-items-center rounded-full border border-primary/30 bg-soft shadow-[0_0_35px_rgba(29,181,132,0.12)]">
+                <img
+                  src={logoUrl}
+                  alt=""
+                  className="wyrm-ai-logo size-[68px] object-contain"
+                />
+              </div>
+              <div className="grid gap-2">
+                {progressCopy.map(([label, detail], index) => {
+                  const done = index < progress
+                  const active = index === progress
+                  return (
+                    <div
+                      key={label}
+                      className={cn(
+                        'flex items-start gap-3 rounded-md border px-3 py-2.5 transition-colors',
+                        active
+                          ? 'border-primary/35 bg-soft'
+                          : 'border-transparent bg-transparent'
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'mt-0.5 grid size-5 flex-none place-items-center rounded-full border',
+                          done
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : active
+                              ? 'animate-pulse border-primary text-accent-text'
+                              : 'border-border text-muted-foreground'
+                        )}
+                      >
+                        {done ? <Check size={12} /> : <span className="font-mono text-2xs">{index + 1}</span>}
+                      </span>
+                      <span>
+                        <span className={cn('block text-xs font-semibold', !active && !done && 'text-sub')}>
+                          {label}
+                        </span>
+                        <span className="mt-0.5 block text-2xs text-muted-foreground">{detail}</span>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid gap-5 px-5 py-5">
+            <section>
+              <div className="mb-2 flex items-baseline justify-between gap-3">
+                <label className="text-xs font-semibold text-foreground">
+                  How many commits do you want?
+                </label>
+                <span className="font-mono text-2xs text-muted-foreground">2-{maxCommits}</span>
+              </div>
+              <div className="flex items-center gap-3 rounded-lg border border-border bg-panel2 p-2.5">
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={count <= 2}
+                  onClick={() => setCount((value) => Math.max(2, value - 1))}
+                  tooltip="One fewer commit"
+                >
+                  <Minus />
+                </Button>
+                <div className="min-w-0 flex-1 text-center">
+                  <div className="font-wordmark text-xl text-accent-text">{count}</div>
+                  <div className="text-2xs text-sub">smaller, focused commits</div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={count >= maxCommits}
+                  onClick={() => setCount((value) => Math.min(maxCommits, value + 1))}
+                  tooltip="One more commit"
+                >
+                  <Plus />
+                </Button>
+              </div>
+            </section>
+
+            <section>
+              <label htmlFor="commit-split-instructions" className="mb-2 block text-xs font-semibold">
+                Any special instructions? <span className="font-normal text-sub">Optional</span>
+              </label>
+              <Textarea
+                id="commit-split-instructions"
+                value={instructions}
+                onChange={(event) => {
+                  setInstructions(event.target.value)
+                  setError(null)
+                }}
+                rows={3}
+                maxLength={4000}
+                placeholder="For example: Keep tests with the feature they cover. Put settings changes last."
+                className="resize-none bg-panel2 text-xs"
+              />
+            </section>
+
+            {hasConflicts && (
+              <div className="rounded-md border border-removed/35 bg-removed/10 px-3 py-2 text-xs text-removed">
+                Resolve the conflicted files first, then generate commits.
+              </div>
+            )}
+            {error && (
+              <div role="alert" className="rounded-md border border-removed/35 bg-removed/10 px-3 py-2 text-xs text-removed">
+                {error}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-2xs text-sub">
+              <GitCommitHorizontal size={14} className="text-accent-text" />
+              This creates commits right away. It does not push them.
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="flex-row items-center justify-end gap-2 border-t border-border px-5 py-3">
+          {created ? (
+            <Button size="sm" onClick={() => changeOpen(false)}>
+              Done
+            </Button>
+          ) : (
+            <>
+              <Button variant="secondary" size="sm" disabled={pending} onClick={() => changeOpen(false)}>
+                Cancel
+              </Button>
+              <Button size="sm" disabled={pending || hasConflicts} onClick={generate}>
+                <Sparkles />
+                {pending ? 'Generating commits…' : `Generate ${count} commits`}
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
