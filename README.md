@@ -2,6 +2,13 @@
 
 A fast, focused Git client for Windows. Built with Tauri v2, React, TypeScript, Tailwind CSS v4, shadcn/ui, and a Rust git backend (git2).
 
+## Download
+
+- [Download for Windows (x64)](https://cdn.gitwyrm.com/GitWyrm-Setup.exe)
+- [Download for Windows (ARM64)](https://cdn.gitwyrm.com/GitWyrm-Setup-ARM64.exe)
+
+The setup exe is a tiny bootstrapper that fetches and installs the latest GitWyrm build, so these links always give you the newest version.
+
 ## Architecture
 
 ```
