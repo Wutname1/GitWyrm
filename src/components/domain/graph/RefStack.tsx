@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, GitBranch } from 'lucide-react'
 import type { RefInfo, RefKind, RemoteInfo } from '@/lib/bindings'
-import { detectProvider, type RemoteProvider } from '@/lib/remoteProvider'
+import { detectProvider, providerLabel } from '@/lib/remoteProvider'
 import { resolveDropPair, type DraggedRef } from '@/lib/refSync'
 import { cn } from '@/lib/utils'
 import { useBranches, useRemotes } from '@/hooks/useGitQueries'
@@ -9,20 +9,13 @@ import { useDragStore } from '@/stores/dragStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { RefBadge } from './RefBadge'
+import { RefContextMenu } from './RefContextMenu'
 
 const kindOrder: Record<RefKind, number> = {
   head: 0,
   branch: 1,
   remote: 2,
   tag: 3,
-}
-
-const providerLabels: Record<RemoteProvider, string | null> = {
-  github: 'GitHub',
-  gitlab: 'GitLab',
-  bitbucket: 'Bitbucket',
-  azure: 'Azure DevOps',
-  unknown: null,
 }
 
 function remoteName(refTag: RefInfo): string | null {
@@ -63,8 +56,7 @@ function sourceDetails(refTag: RefInfo, remotes: RemoteInfo[]) {
     case 'remote': {
       const remote = remoteName(refTag)
       const info = remotes.find((item) => item.name === remote)
-      const provider = detectProvider(info?.url)
-      const host = providerLabels[provider]
+      const host = providerLabel(detectProvider(info?.url))
       return host ? `From ${host} · ${remote}` : `From ${remote ?? 'a remote'}`
     }
   }
@@ -84,6 +76,8 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
   const draggingRef = useDragStore((s) => s.draggingRef)
   const [open, setOpen] = useState(false)
   const closeTimer = useRef<number | null>(null)
+  const pointerInside = useRef(false)
+  const branchMenuOpen = useRef(false)
 
   const cancelClose = () => {
     if (closeTimer.current === null) return
@@ -97,6 +91,7 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
   }
 
   const scheduleClose = () => {
+    if (branchMenuOpen.current) return
     cancelClose()
     closeTimer.current = window.setTimeout(() => {
       closeTimer.current = null
@@ -105,6 +100,25 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
   }
 
   useEffect(() => () => cancelClose(), [])
+
+  const pointerEntered = () => {
+    pointerInside.current = true
+    openStack()
+  }
+
+  const pointerLeft = () => {
+    pointerInside.current = false
+    scheduleClose()
+  }
+
+  const branchMenuChanged = (nextOpen: boolean) => {
+    branchMenuOpen.current = nextOpen
+    if (nextOpen) {
+      openStack()
+    } else if (!pointerInside.current) {
+      scheduleClose()
+    }
+  }
 
   const primary = refs.find((ref) => ref.type === 'head') ?? refs.find((ref) => ref.type === 'branch') ?? refs[0]
   const ordered = sortedRefs(refs, primary)
@@ -123,6 +137,7 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
     <Popover
       open={open}
       onOpenChange={(nextOpen) => {
+        if (!nextOpen && branchMenuOpen.current) return
         if (nextOpen) cancelClose()
         setOpen(nextOpen)
       }}
@@ -138,8 +153,8 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
             openStack()
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          onPointerEnter={openStack}
-          onPointerLeave={scheduleClose}
+          onPointerEnter={pointerEntered}
+          onPointerLeave={pointerLeft}
           onFocus={openStack}
           onBlur={scheduleClose}
           onDragEnter={() => {
@@ -167,10 +182,13 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
         align="start"
         sideOffset={6}
         onOpenAutoFocus={(event) => event.preventDefault()}
+        onInteractOutside={(event) => {
+          if (branchMenuOpen.current) event.preventDefault()
+        }}
         onClick={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}
-        onPointerEnter={cancelClose}
-        onPointerLeave={scheduleClose}
+        onPointerEnter={pointerEntered}
+        onPointerLeave={pointerLeft}
         className="w-72 overflow-hidden border-border bg-panel2 p-0 shadow-[0_12px_36px_rgba(0,0,0,0.5)]"
       >
         <div className="border-b border-border bg-panel px-3 py-2.5">
@@ -182,8 +200,8 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
           <div className="space-y-1">
             {ordered.map((refTag) => {
               const source = sourceDetails(refTag, remotes.data ?? [])
-              return (
-                <div key={`${refTag.type}:${refTag.name}`} className="relative flex min-h-8 items-center gap-2.5 rounded-[5px] px-1.5 py-1 hover:bg-panel3">
+              const row = (
+                <div className="relative flex min-h-8 items-center gap-2.5 rounded-[5px] px-1.5 py-1 hover:bg-panel3">
                   <span className="relative z-10 grid size-4 flex-none place-items-center rounded-full bg-panel2">
                     <span
                       aria-hidden
@@ -191,12 +209,20 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
                     />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <RefBadge refTag={refTag} />
+                    <RefBadge refTag={refTag} withContextMenu={false} />
                     <div className="mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-sub">
                       {source}
                     </div>
                   </div>
                 </div>
+              )
+              const key = `${refTag.type}:${refTag.name}`
+              return refTag.type === 'head' || refTag.type === 'branch' ? (
+                <RefContextMenu key={key} refTag={refTag} onOpenChange={branchMenuChanged}>
+                  {row}
+                </RefContextMenu>
+              ) : (
+                <div key={key}>{row}</div>
               )
             })}
           </div>

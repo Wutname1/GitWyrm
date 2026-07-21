@@ -14,6 +14,7 @@ import { BranchMenu } from '@/components/domain/branch/BranchMenu'
 interface RefContextMenuProps {
   refTag: RefInfo
   children: ReactNode
+  onOpenChange?: (open: boolean) => void
 }
 
 /**
@@ -24,7 +25,7 @@ interface RefContextMenuProps {
  * The checked-out branch's chip is tagged `head`, not `branch` -- both are
  * local branches and both get this menu.
  */
-export function RefContextMenu({ refTag, children }: RefContextMenuProps) {
+export function RefContextMenu({ refTag, children, onOpenChange }: RefContextMenuProps) {
   const repo = useActiveRepo()
   const mergeState = useMergeState(repo?.id ?? null)
 
@@ -34,7 +35,7 @@ export function RefContextMenu({ refTag, children }: RefContextMenuProps) {
   const opInProgress = mergeState.data?.merging ?? false
 
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChange={onOpenChange}>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="z-[70] w-60">
         <ContextMenuLabel className="font-mono text-2xs text-sub">{refTag.name}</ContextMenuLabel>

@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp } from 'lucide-react'
 import type { BranchInfo } from '@/lib/bindings'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { useBranchHost } from '@/hooks/useGitQueries'
 import { branchActions } from '@/lib/branchActions'
 
 interface BranchRemoteItemsProps {
@@ -20,7 +21,8 @@ interface BranchRemoteItemsProps {
  */
 export function BranchRemoteItems({ branch, repoId, opInProgress }: BranchRemoteItemsProps) {
   const m = useGitMutations(repoId)
-  const actions = branchActions(branch)
+  const host = useBranchHost(repoId, branch.upstream)
+  const actions = branchActions(branch, host)
 
   const isPushing = m.pushBranch.isPending && m.pushBranch.variables === branch.name
   const isPulling = m.pullBranch.isPending && m.pullBranch.variables === branch.name

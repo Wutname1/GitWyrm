@@ -19,6 +19,22 @@ export function detectProvider(url: string | undefined): RemoteProvider {
   return 'unknown'
 }
 
+const providerNames: Record<RemoteProvider, string | null> = {
+  github: 'GitHub',
+  gitlab: 'GitLab',
+  bitbucket: 'Bitbucket',
+  azure: 'Azure DevOps',
+  unknown: null,
+}
+
+/**
+ * The host's brand name for use in sentences, or null when the host isn't one
+ * we recognize -- callers fall back to generic wording like "the remote".
+ */
+export function providerLabel(provider: RemoteProvider): string | null {
+  return providerNames[provider]
+}
+
 // Brand glyphs inlined as single-path SVGs (CSP-safe, no external assets).
 // currentColor lets them inherit the pill's text color.
 function GithubGlyph(props: SVGProps<SVGSVGElement>) {

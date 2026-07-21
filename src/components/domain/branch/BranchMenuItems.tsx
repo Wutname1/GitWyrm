@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/context-menu'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { useBranchHost } from '@/hooks/useGitQueries'
 import { branchActions } from '@/lib/branchActions'
 import { copyToClipboard } from '@/lib/clipboard'
 
@@ -57,7 +58,8 @@ export function BranchMenuItems({
   handlers,
 }: BranchMenuItemsProps) {
   const m = useGitMutations(repoId)
-  const actions = branchActions(branch)
+  const host = useBranchHost(repoId, branch.upstream)
+  const actions = branchActions(branch, host)
   const isCurrent = branch.is_head
 
   const isPushing = m.pushBranch.isPending && m.pushBranch.variables === branch.name

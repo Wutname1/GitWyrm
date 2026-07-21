@@ -19,7 +19,13 @@ const styles: Record<RefKind, string> = {
   tag: 'bg-primary text-primary-foreground',
 }
 
-export function RefBadge({ refTag }: { refTag: RefInfo }) {
+export function RefBadge({
+  refTag,
+  withContextMenu = true,
+}: {
+  refTag: RefInfo
+  withContextMenu?: boolean
+}) {
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
   const remotes = useRemotes(repo?.id ?? null)
@@ -139,39 +145,39 @@ export function RefBadge({ refTag }: { refTag: RefInfo }) {
   const dragging = !!draggingRef
   const isSource = draggingRef?.name === refTag.name
 
-  return (
-    <RefContextMenu refTag={refTag}>
-      <span
-        draggable={draggable}
-        // Radix's context-menu triggers wrap this pill and their pointerdown
-        // handling cancels a native drag before it starts. Stop the left-button
-        // press from reaching them (right-click still bubbles, so both context
-        // menus keep working).
-        onPointerDown={(e) => {
-          if (draggable && e.button === 0) e.stopPropagation()
-        }}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-        className={cn(
-          'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-2xs font-semibold leading-[1.4] transition-opacity',
-          draggable ? 'wyrm-draggable cursor-grab active:cursor-grabbing' : 'cursor-default',
-          styles[refTag.type],
-          // The whole border pulses on a valid target while everything else
-          // dims (body.wyrm-dragging), so the landing spots stand out.
-          isValidTarget && 'wyrm-drop-target',
-          dragging && !isValidTarget && !isSource && 'opacity-30'
-        )}
-      >
-        {refTag.type === 'head' && <Check aria-hidden className="size-2.5 flex-none stroke-[2.5]" />}
-        {refTag.type === 'branch' && <Laptop aria-hidden className="size-2.5 flex-none" />}
-        {refTag.type === 'remote' && (
-          <RemoteIcon aria-hidden provider={provider} width={10} height={10} className="flex-none" />
-        )}
-        {refTag.type === 'tag' && <Tag aria-hidden className="size-2.5 flex-none" />}
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
-      </span>
-    </RefContextMenu>
+  const badge = (
+    <span
+      draggable={draggable}
+      // Radix's context-menu triggers wrap this pill and their pointerdown
+      // handling cancels a native drag before it starts. Stop the left-button
+      // press from reaching them (right-click still bubbles, so both context
+      // menus keep working).
+      onPointerDown={(e) => {
+        if (draggable && e.button === 0) e.stopPropagation()
+      }}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      className={cn(
+        'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-2xs font-semibold leading-[1.4] transition-opacity',
+        draggable ? 'wyrm-draggable cursor-grab active:cursor-grabbing' : 'cursor-default',
+        styles[refTag.type],
+        // The whole border pulses on a valid target while everything else
+        // dims (body.wyrm-dragging), so the landing spots stand out.
+        isValidTarget && 'wyrm-drop-target',
+        dragging && !isValidTarget && !isSource && 'opacity-30'
+      )}
+    >
+      {refTag.type === 'head' && <Check aria-hidden className="size-2.5 flex-none stroke-[2.5]" />}
+      {refTag.type === 'branch' && <Laptop aria-hidden className="size-2.5 flex-none" />}
+      {refTag.type === 'remote' && (
+        <RemoteIcon aria-hidden provider={provider} width={10} height={10} className="flex-none" />
+      )}
+      {refTag.type === 'tag' && <Tag aria-hidden className="size-2.5 flex-none" />}
+      <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
+    </span>
   )
+
+  return withContextMenu ? <RefContextMenu refTag={refTag}>{badge}</RefContextMenu> : badge
 }

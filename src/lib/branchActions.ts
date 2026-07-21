@@ -77,34 +77,41 @@ export interface BranchActions {
  *
  * Reads `sync` rather than the raw ahead/behind counts: those cannot tell
  * "never pushed" apart from "matches its upstream", since both report zero.
+ *
+ * `host` names where the commits are going -- "GitHub", "GitLab" -- so the
+ * menu says what the user recognizes instead of the generic "the remote".
+ * Pass null when the host is self-hosted or unrecognized.
  */
-export function branchActions(branch: BranchInfo): BranchActions {
+export function branchActions(branch: BranchInfo, host?: string | null): BranchActions {
   const hidden = { show: false, label: '' }
+  const to = host ? `to ${host}` : 'to the remote'
+  const from = host ? `from ${host}` : 'from the remote'
+  const publish = host ? `Publish this branch to ${host}` : 'Publish this branch to the remote'
 
   switch (branch.sync.kind) {
     case 'diverged': {
       const { ahead, behind } = branch.sync
       return {
         push: ahead > 0
-          ? { show: true, label: `Send ${commits(ahead)} to the remote` }
+          ? { show: true, label: `Send ${commits(ahead)} ${to}` }
           : hidden,
         // A branch that has moved on both sides needs a real merge, which
         // needs a working tree; that only happens once it is checked out.
         pull: behind > 0 && ahead === 0
-          ? { show: true, label: `Get ${commits(behind)} from the remote` }
+          ? { show: true, label: `Get ${commits(behind)} ${from}` }
           : hidden,
         setUpstream: hidden,
       }
     }
     case 'never_pushed':
       return {
-        push: { show: true, label: 'Publish this branch to the remote' },
+        push: { show: true, label: publish },
         pull: hidden,
         setUpstream: hidden,
       }
     case 'upstream_gone':
       return {
-        push: { show: true, label: 'Publish this branch to the remote' },
+        push: { show: true, label: publish },
         pull: hidden,
         setUpstream: { show: true, label: 'Reconnect to the remote branch' },
       }
