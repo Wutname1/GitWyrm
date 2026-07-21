@@ -133,6 +133,7 @@ pub async fn get_file_diff(
     opts
       .pathspec(&path)
       .include_untracked(true)
+      .recurse_untracked_dirs(true)
       .show_untracked_content(true)
       .context_lines(3);
 
