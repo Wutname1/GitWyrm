@@ -25,8 +25,7 @@ fn chrono_lite() -> String {
     format!("{:02}:{:02}:{:02}", h, m, s)
 }
 
-// TODO: cdn.gitwyrm.com is not live yet - flip this on once the CDN/R2 bucket is provisioned.
-const CDN_BASE: &str = "https://cdn.gitwyrm.com/installers/latest";
+const CDN_BASE: &str = "https://cdn.gitwyrm.com";
 
 fn installer_filename() -> &'static str {
     if cfg!(target_arch = "aarch64") {

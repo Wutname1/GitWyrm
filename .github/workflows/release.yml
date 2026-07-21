@@ -96,9 +96,9 @@ jobs:
           }
           gh release upload ${{ github.ref_name }} gitwyrm-portable${{ matrix.portable_suffix }}.exe --clobber
 
-      # Republishes the just-built NSIS installer to a stable "latest" path per arch so the
-      # bootstrapper (see .github/workflows/bootstrapper.yml) always fetches the newest build
-      # without its own download link/filename ever changing.
+      # Republishes the just-built NSIS installer to a stable per-arch filename at the CDN root so
+      # the bootstrapper (see .github/workflows/bootstrapper.yml) and the README download links
+      # always fetch the newest build without the URL ever changing.
       - name: Upload installer to CDN latest path
         shell: bash
         env:
@@ -112,6 +112,6 @@ jobs:
           if [ "${{ matrix.arch }}" = "aarch64" ]; then
             SUFFIX="-ARM64"
           fi
-          aws s3 cp "$NSIS_EXE" "s3://gitwyrm-cdn/installers/latest/GitWyrm-Setup${SUFFIX}.exe" \
+          aws s3 cp "$NSIS_EXE" "s3://gitwyrm-cdn/GitWyrm-Setup${SUFFIX}.exe" \
             --endpoint-url "$R2_ENDPOINT" \
             --cache-control "no-cache, no-store"
