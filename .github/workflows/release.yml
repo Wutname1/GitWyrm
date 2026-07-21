@@ -42,6 +42,35 @@ jobs:
           workspaces: src-tauri
           key: ${{ matrix.arch }}
 
+      # Asset filenames and the in-app version come from these manifests, not
+      # from the tag. Without this the release for tag 1.2.3 ships files named
+      # after whatever version happens to be committed.
+      - name: Sync version to tag
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          Write-Host "Setting version to $version"
+
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $conf.version = $version
+          $conf | ConvertTo-Json -Depth 100 | Set-Content src-tauri/tauri.conf.json
+
+          # Only the first version= line, which is the [package] one. The
+          # dependency versions further down must not be touched.
+          $cargo = Get-Content src-tauri/Cargo.toml
+          $done = $false
+          $cargo = $cargo | ForEach-Object {
+            if (-not $done -and $_ -match '^version\s*=') {
+              $done = $true
+              "version = `"$version`""
+            } else {
+              $_
+            }
+          }
+          $cargo | Set-Content src-tauri/Cargo.toml
+
+          npm version $version --no-git-tag-version --allow-same-version
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -57,7 +86,21 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "GitWyrm ${{ github.ref_name }}"
-          releaseBody: "See the assets below. The .exe installer auto-updates; gitwyrm-portable.exe does not."
+          releaseBody: |
+            ## Download
+
+            **Most people want [GitWyrm-Setup.exe](https://cdn.gitwyrm.com/GitWyrm-Setup.exe)** - it always
+            installs the newest version and keeps itself up to date.
+
+            The installers attached below are pinned to this specific version. `gitwyrm-portable.exe`
+            needs no install but does not auto-update.
+
+            Deploying across a company? See the
+            [enterprise deployment guide](https://docs.gitwyrm.com/guide/enterprise-deployment).
+          # Stays a draft here on purpose: both matrix legs share one release,
+          # and publishing from a leg would make it public before the other
+          # arch's installer is attached. The publish job below flips it once
+          # every leg has succeeded.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.tauri_args }}
@@ -106,12 +149,64 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
         run: |
+          set -euo pipefail
           pip install awscli
           NSIS_EXE=$(find "${{ matrix.bundle_base }}/nsis" -name "*.exe" -type f | head -1)
+          if [ -z "$NSIS_EXE" ]; then
+            echo "::error::No NSIS installer found under ${{ matrix.bundle_base }}/nsis"
+            exit 1
+          fi
+          echo "Publishing $NSIS_EXE"
           SUFFIX=""
           if [ "${{ matrix.arch }}" = "aarch64" ]; then
             SUFFIX="-ARM64"
           fi
+          # Stable "latest" path the bootstrapper and download buttons point at.
           aws s3 cp "$NSIS_EXE" "s3://gitwyrm-cdn/GitWyrm-Setup${SUFFIX}.exe" \
             --endpoint-url "$R2_ENDPOINT" \
             --cache-control "no-cache, no-store"
+          # Immutable per-version copy, so a specific build stays fetchable after
+          # the latest path moves on. Useful for pinned corporate deployments.
+          aws s3 cp "$NSIS_EXE" \
+            "s3://gitwyrm-cdn/releases/${{ github.ref_name }}/GitWyrm-Setup${SUFFIX}.exe" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --cache-control "public, max-age=31536000, immutable"
+
+  # Both build legs share one release, so publishing is a separate job that runs
+  # only after every arch has finished and attached its assets. The updater
+  # endpoint resolves /releases/latest, which ignores drafts - so the release is
+  # not live to users, and updates are not offered, until this job runs.
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Verify assets and publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          assets=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          echo "Assets on $TAG:"
+          echo "$assets" | sed 's/^/  /'
+
+          # Refuse to publish a half-built release. latest.json is what the
+          # in-app updater reads; without it clients silently stop updating.
+          missing=0
+          for required in latest.json x64-setup.exe arm64-setup.exe; do
+            if ! echo "$assets" | grep -q -- "$required"; then
+              echo "::error::Missing required asset matching '$required'"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+          gh release edit "$TAG" --draft=false
+          echo "Published $TAG"
