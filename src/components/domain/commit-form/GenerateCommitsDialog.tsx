@@ -211,7 +211,7 @@ export function GenerateCommitsDialog({
         className="h-6 border border-primary/45 bg-soft px-2 text-2xs font-semibold text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
       >
         <Sparkles />
-        Generate commits
+        Generate commits for all changes
       </Button>
 
       <DialogContent

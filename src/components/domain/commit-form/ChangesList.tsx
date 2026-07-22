@@ -168,16 +168,6 @@ export function ChangesList() {
         )}
 
         <div className="my-1 border-t-2 border-border/70" />
-        {hasChanges && (
-          <div>
-            <GenerateCommitsDialog
-              changedFiles={changedFiles}
-              hasConflicts={hasConflicts}
-            />
-
-            <div className="my-1 border-t-2 border-border/70" />
-          </div>
-        )}
 
         <GroupHeader label="STAGED" count={staged.length} tone="staged">
           {staged.length > 0 && (
@@ -236,6 +226,17 @@ export function ChangesList() {
           </div>
         )}
       </div>
+
+      {hasChanges && (
+        <div className="sticky bottom-0 z-[1] flex items-center gap-2 border-t border-border bg-panel py-2">
+          <div className="my-1 border-t-2 border-border/70" />
+
+          <GenerateCommitsDialog
+            changedFiles={changedFiles}
+            hasConflicts={hasConflicts}
+          />
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirmDiscard}
