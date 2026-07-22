@@ -227,10 +227,8 @@ export function ChangesList() {
         )}
       </div>
 
-      {hasChanges && (
-        <div className="sticky bottom-0 z-[1] flex items-center gap-2 border-t border-border bg-panel py-2">
-          <div className="my-1 border-t-2 border-border/70" />
-
+      {hasChanges && staged.length === 0 && (
+        <div className="sticky bottom-0 z-[1] flex items-center justify-center border-t border-border bg-panel py-2">
           <GenerateCommitsDialog
             changedFiles={changedFiles}
             hasConflicts={hasConflicts}

@@ -10,6 +10,7 @@ import { PendingRow } from '@/components/domain/graph/PendingRow'
 import { StashRow } from '@/components/domain/graph/StashRow'
 import { GraphSvg, type GraphRow } from '@/components/domain/graph/GraphSvg'
 import { GraphHeader } from '@/components/domain/graph/GraphHeader'
+import { NoRepoPlaceholder } from '@/components/domain/NoRepoPlaceholder'
 import {
   columnWidth,
   effectiveHiddenColumns,
@@ -193,13 +194,7 @@ export function GraphView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealShaNonce, revealShaValue, rows.length])
 
-  if (!repo) {
-    return (
-      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-        Open a repository to see its history
-      </div>
-    )
-  }
+  if (!repo) return <NoRepoPlaceholder />
 
   if (log.isError) {
     return (
