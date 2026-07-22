@@ -317,7 +317,7 @@ export function TabBar() {
       <RepositoryTabs orientation="horizontal" />
       <RecentRepositories />
       <OpenRepositoryButton />
-      <div data-tauri-drag-region className="min-w-3 flex-1" />
+      <div data-tauri-drag-region className="min-w-3 flex-none" />
       <TooltipButton
         onClick={() => {
           setTabLayout('vertical')

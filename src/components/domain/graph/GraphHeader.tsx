@@ -5,6 +5,7 @@ import {
   DEFAULT_COLUMN_ORDER,
   effectiveHiddenColumns,
   gridTemplate,
+  totalColumnsWidth,
   visibleColumns,
   type ColumnId,
 } from "@/lib/graphColumns";
@@ -23,8 +24,11 @@ import { ResizeHandle } from "@/components/ui/ResizeHandle";
  * Commit-graph column header. Right-click any header cell for a menu to show or
  * hide columns; drag a header onto another to reorder. Both write through to the
  * persisted layout in the workspace store.
+ *
+ * `scrollRef` is driven by the graph body's horizontal scroll so the headers
+ * stay lined up with their columns while the header itself stays pinned.
  */
-export function GraphHeader() {
+export function GraphHeader({ scrollRef }: { scrollRef?: React.Ref<HTMLDivElement> }) {
   const order = useWorkspaceStore((s) => s.columnOrder);
   const hidden = useWorkspaceStore((s) => s.hiddenColumns);
   const widths = useWorkspaceStore((s) => s.columnWidths);
@@ -62,55 +66,63 @@ export function GraphHeader() {
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
+          ref={scrollRef}
           className={cn(
-            "grid h-[30px] flex-none items-center border-b border-border pl-3 pr-1 text-2xs font-bold tracking-[.06em] text-muted-foreground",
+            "h-[30px] flex-none overflow-hidden border-b border-border pl-3 pr-1 text-2xs font-bold tracking-[.06em] text-muted-foreground",
           )}
-          style={{ gridTemplateColumns: gridTemplate(order, effectiveHidden, widths) }}
         >
-          {visible.map((id) => (
-            <span
-              key={id}
-              draggable
-              onDragStart={() => setDragId(id)}
-              onDragEnd={() => {
-                setDragId(null);
-                setOverId(null);
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (id !== overId) setOverId(id);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                handleDrop(id);
-              }}
-              className={cn(
-                "relative flex h-full cursor-grab select-none items-center pr-2 active:cursor-grabbing",
-                dragId === id && "opacity-40",
-                overId === id &&
-                  dragId &&
-                  dragId !== id &&
-                  "bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]",
-              )}
-            >
-              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                {COLUMNS[id].label}
+          <div
+            className="grid h-full items-center"
+            style={{
+              gridTemplateColumns: gridTemplate(order, effectiveHidden, widths),
+              minWidth: totalColumnsWidth(order, effectiveHidden, widths),
+            }}
+          >
+            {visible.map((id) => (
+              <span
+                key={id}
+                draggable
+                onDragStart={() => setDragId(id)}
+                onDragEnd={() => {
+                  setDragId(null);
+                  setOverId(null);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (id !== overId) setOverId(id);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDrop(id);
+                }}
+                className={cn(
+                  "relative flex h-full cursor-grab select-none items-center pr-2 active:cursor-grabbing",
+                  dragId === id && "opacity-40",
+                  overId === id &&
+                    dragId &&
+                    dragId !== id &&
+                    "bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]",
+                )}
+              >
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {COLUMNS[id].label}
+                </span>
+                <ResizeHandle
+                  ariaLabel={`Resize ${COLUMNS[id].label.toLowerCase()} column`}
+                  value={widths[id]}
+                  min={COLUMNS[id].minWidth}
+                  max={COLUMNS[id].maxWidth}
+                  defaultValue={COLUMNS[id].defaultWidth}
+                  getCurrentValue={(handle) =>
+                    handle.parentElement?.getBoundingClientRect().width ?? COLUMNS[id].defaultWidth
+                  }
+                  onChange={(width) => setColumnWidth(id, width)}
+                  onReset={() => resetColumnWidth(id)}
+                  className="-right-1"
+                />
               </span>
-              <ResizeHandle
-                ariaLabel={`Resize ${COLUMNS[id].label.toLowerCase()} column`}
-                value={widths[id]}
-                min={COLUMNS[id].minWidth}
-                max={COLUMNS[id].maxWidth}
-                defaultValue={COLUMNS[id].defaultWidth}
-                getCurrentValue={(handle) =>
-                  handle.parentElement?.getBoundingClientRect().width ?? COLUMNS[id].defaultWidth
-                }
-                onChange={(width) => setColumnWidth(id, width)}
-                onReset={() => resetColumnWidth(id)}
-                className="-right-1"
-              />
-            </span>
-          ))}
+            ))}
+          </div>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-52">

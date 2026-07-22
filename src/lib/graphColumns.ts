@@ -12,15 +12,15 @@ export interface ColumnDef {
   defaultWidth: number
   minWidth: number
   maxWidth: number
-  /** The message column fills unused room until the user gives it an explicit width. */
+  /** The message column grows into unused room but never shrinks below its default. */
   flexible?: boolean
 }
 
 export const COLUMNS: Record<ColumnId, ColumnDef> = {
-  refs: { id: 'refs', label: 'BRANCH / TAG', defaultWidth: 150, minWidth: 88, maxWidth: 360 },
+  refs: { id: 'refs', label: 'BRANCH / TAG', defaultWidth: 110, minWidth: 88, maxWidth: 360 },
   graph: { id: 'graph', label: 'GRAPH', defaultWidth: 124, minWidth: 88, maxWidth: 360 },
-  message: { id: 'message', label: 'COMMIT MESSAGE', defaultWidth: 320, minWidth: 160, maxWidth: 720, flexible: true },
-  author: { id: 'author', label: 'AUTHOR', defaultWidth: 150, minWidth: 88, maxWidth: 320 },
+  message: { id: 'message', label: 'COMMIT MESSAGE', defaultWidth: 380, minWidth: 160, maxWidth: 720, flexible: true },
+  author: { id: 'author', label: 'AUTHOR', defaultWidth: 140, minWidth: 88, maxWidth: 320 },
   changes: { id: 'changes', label: 'CHANGES', defaultWidth: 160, minWidth: 112, maxWidth: 280 },
   date: { id: 'date', label: 'DATE', defaultWidth: 110, minWidth: 88, maxWidth: 220 },
   sha: { id: 'sha', label: 'SHA', defaultWidth: 72, minWidth: 56, maxWidth: 160 },
@@ -69,13 +69,33 @@ export function effectiveHiddenColumns(
   return hidden.includes('changes') ? hidden : [...hidden, 'changes']
 }
 
-/** Builds the `grid-template-columns` value for the visible columns, in order. */
+/**
+ * Builds the `grid-template-columns` value for the visible columns, in order.
+ *
+ * Columns keep their configured width even when the total overflows the viewport,
+ * so the graph scrolls sideways instead of squeezing every column to fit. The
+ * flexible column still absorbs leftover room when there is any, but its default
+ * width is the floor rather than its minimum.
+ */
 export function gridTemplate(order: ColumnId[], hidden: ColumnId[], widths: ColumnWidths): string {
   return visibleColumns(order, hidden)
     .map((id) => {
       const column = COLUMNS[id]
-      if (column.flexible && widths[id] == null) return `minmax(${column.minWidth}px,1fr)`
+      if (column.flexible && widths[id] == null) return `minmax(${column.defaultWidth}px,1fr)`
       return `${columnWidth(id, widths)}px`
     })
     .join(' ')
+}
+
+/**
+ * Sum of the visible columns at their configured widths. The header and the
+ * scrolling row area both use this as a min-width so their tracks stay aligned
+ * once the content is wider than the viewport.
+ */
+export function totalColumnsWidth(order: ColumnId[], hidden: ColumnId[], widths: ColumnWidths): number {
+  return visibleColumns(order, hidden).reduce((total, id) => {
+    const column = COLUMNS[id]
+    if (column.flexible && widths[id] == null) return total + column.defaultWidth
+    return total + columnWidth(id, widths)
+  }, 0)
 }

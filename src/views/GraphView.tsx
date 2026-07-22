@@ -15,6 +15,7 @@ import {
   columnWidth,
   effectiveHiddenColumns,
   gridTemplate,
+  totalColumnsWidth,
   visibleColumns,
 } from '@/lib/graphColumns'
 
@@ -38,10 +39,20 @@ export function GraphView() {
   const graphColumnIndex = visible.indexOf('graph')
   const graphWidth = columnWidth('graph', columnWidths)
   const graphGridTemplate = gridTemplate(columnOrder, effectiveHidden, columnWidths)
+  const columnsWidth = totalColumnsWidth(columnOrder, effectiveHidden, columnWidths)
   const rowHeight = showChangeIndicator && changeSizeDisplay === 'row'
     ? GRAPH_ROW_WITH_CHANGES_HEIGHT
     : GRAPH_ROW_HEIGHT
   const scrollRef = useRef<HTMLDivElement>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
+
+  // The header sits outside the scroll container so it stays pinned vertically.
+  // Mirror the body's horizontal offset onto it so columns stay lined up when
+  // the graph is scrolled sideways.
+  const handleScroll = () => {
+    const header = headerRef.current
+    if (header) header.scrollLeft = scrollRef.current?.scrollLeft ?? 0
+  }
 
   const log = useCommitLog(repo?.id ?? null)
   const status = useStatus(repo?.id ?? null)
@@ -215,10 +226,17 @@ export function GraphView() {
 
   return (
     <>
-      <GraphHeader />
+      <GraphHeader scrollRef={headerRef} />
 
-      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto pl-3">
-        <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="relative min-h-0 flex-1 overflow-auto pl-3"
+      >
+        <div
+          className="relative"
+          style={{ height: virtualizer.getTotalSize(), minWidth: columnsWidth }}
+        >
           {graphColumnIndex >= 0 && (
             <div
               aria-hidden="true"
