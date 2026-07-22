@@ -78,9 +78,9 @@ interface GraphSvgProps {
  * Renders edges from each commit to its parents using the backend-computed
  * lanes. Edge endpoints use the parent's row index (found via sha lookup);
  * parents beyond the loaded pages get a short fading stub. The WIP row gets a
- * dashed node in the HEAD commit's lane; each stash row gets a dashed node in
- * its base commit's lane with a dashed edge down to that commit, so a stash
- * reads as "attached to this point in history, not on the line".
+ * dashed node in the HEAD commit's lane; each stash row gets an archive-box
+ * node in its base commit's lane with a dashed edge down to that commit, so a
+ * stash reads as saved work attached to this point in history, not a commit.
  */
 export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHeight }: GraphSvgProps) {
   const rowCenterY = (row: number) => row * rowHeight + rowHeight / 2
@@ -318,16 +318,25 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
                   opacity={0.3}
                 />
               )}
-              <circle
-                cx={x}
-                cy={y}
-                r={sel ? 7.5 : 6}
+              <g
+                transform={`translate(${x} ${y})`}
                 fill="var(--gw-bg)"
                 stroke={sel ? 'var(--gw-text)' : col}
-                strokeWidth={sel ? 2.5 : 2}
-                strokeDasharray="2.5 2.5"
-                opacity={sel ? 1 : 0.8}
-              />
+                strokeWidth={sel ? 2.25 : 1.75}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={sel ? 1 : 0.9}
+              >
+                <rect
+                  x={sel ? -7.5 : -7}
+                  y={sel ? -6.5 : -6}
+                  width={sel ? 15 : 14}
+                  height={sel ? 13 : 12}
+                  rx={2}
+                />
+                <path d={`M ${sel ? -7.5 : -7} -2 H ${sel ? 7.5 : 7}`} />
+                <path d="M -2 1 H 2" />
+              </g>
             </g>
           )
         }
