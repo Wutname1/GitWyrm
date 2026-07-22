@@ -45,6 +45,10 @@
   --gw-panel2: #131b24;
   --gw-panel3: #1a2430;
   --gw-border: #1e2833;
+  /* Modals float above a dimmed app, so they sit a step lighter than the app
+     background -- on dim or glossy screens a --gw-bg surface behind the
+     overlay reads as part of the dimmed page instead of on top of it. */
+  --gw-modal: #151d26;
   --gw-text: #d7e0ea;
   --gw-sub: #8b99a8;
   --gw-muted: #5d6b7a;
@@ -72,6 +76,8 @@
   --card-foreground: var(--gw-text);
   --popover: var(--gw-panel2);
   --popover-foreground: var(--gw-text);
+  --modal: var(--gw-modal);
+  --modal-foreground: var(--gw-text);
   --primary: var(--gw-accent);
   --primary-foreground: var(--gw-accent-fg);
   --secondary: var(--gw-panel3);
@@ -99,6 +105,8 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-modal: var(--modal);
+  --color-modal-foreground: var(--modal-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
