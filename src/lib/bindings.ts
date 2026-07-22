@@ -78,6 +78,79 @@ async openInTerminal(repoId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Open a single file in VS Code. Mirrors `external::open_in_editor`, but
+ * targets one file inside the repo rather than the repo folder.
+ */
+async openFileInEditor(repoId: string, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_file_in_editor", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Show a single file in the OS file manager, selected in its folder.
+ */
+async revealFileInFileManager(repoId: string, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reveal_file_in_file_manager", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Send a file to the OS Recycle Bin / Trash. Recoverable on purpose: the
+ * menu entry sits next to "Discard changes", and an unrecoverable delete a
+ * click away from a routine action is too sharp an edge.
+ */
+async deleteFile(repoId: string, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_file", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Put a file back to its committed contents, undoing edits and un-deleting it
+ * if it was removed. Restores from HEAD, so a file that was never committed
+ * cannot be restored this way.
+ */
+async restoreFile(repoId: string, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("restore_file", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Commits that touched one file, newest first. Follows the file backwards
+ * through renames so a rename doesn't truncate its story.
+ */
+async getFileHistory(repoId: string, path: string, limit: number) : Promise<Result<FileHistory, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_file_history", { repoId, path, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Line-by-line authorship for a file. `sha` blames the file as of that commit;
+ * omit it to blame the working copy against HEAD.
+ */
+async getFileBlame(repoId: string, path: string, sha: string | null) : Promise<Result<FileBlame, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_file_blame", { repoId, path, sha }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getSettings() : Promise<Result<Settings, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_settings") };
@@ -1144,6 +1217,10 @@ async githubCloseIssue(owner: string, repo: string, number: number) : Promise<Re
 
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
+/**
+ * One line of a file, tagged with the commit that last changed it.
+ */
+export type BlameLine = { line_no: number; text: string; sha: string; short_sha: string; summary: string; author_name: string; author_email: string; time: number }
 export type BranchInfo = { name: string; is_head: boolean; upstream: string | null; ahead: number; behind: number; 
 /**
  * Richer reading of the same relationship; prefer this over the raw counts.
@@ -1307,6 +1384,11 @@ sign: string; old_no: number | null; new_no: number | null; text: string;
  */
 hunk_index: number }
 export type DiffSource = { kind: "staged" } | { kind: "unstaged" } | { kind: "commit"; sha: string }
+export type FileBlame = { path: string; lines: BlameLine[]; 
+/**
+ * Set instead of `lines` when the file can't be blamed line-by-line.
+ */
+binary: boolean }
 export type FileChange = { path: string; status: StatusCode; additions: number; deletions: number; conflicted: boolean; 
 /**
  * Set when this path is a submodule whose pinned commit moved. Ordinary file
@@ -1319,6 +1401,19 @@ export type FileDiff = { path: string;
  * Rename source path, when the delta is a rename.
  */
 old_path: string | null; additions: number; deletions: number; hunks: HunkHeader[]; lines: DiffLineEntry[]; binary: boolean }
+export type FileHistory = { path: string; entries: FileHistoryEntry[]; 
+/**
+ * True when the walk stopped at `limit` and older commits remain.
+ */
+has_more: boolean }
+/**
+ * One commit that touched a given file, plus how the file changed in it.
+ */
+export type FileHistoryEntry = { sha: string; short_sha: string; summary: string; author_name: string; author_email: string; time: number; additions: number; deletions: number; 
+/**
+ * Path this file had in this commit, when the commit renamed it.
+ */
+old_path: string | null }
 export type GeneratedCommitMessage = { summary: string; description: string }
 export type GitProgressPayload = { repo_id: string; operation: string; line: string }
 export type GithubComment = { author: string; author_is_bot: boolean; body: string; created_at: string }

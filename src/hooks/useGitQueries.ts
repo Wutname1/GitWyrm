@@ -125,6 +125,27 @@ export function useFileDiff(repoId: string | null, path: string | null, source: 
   })
 }
 
+/** Commits that touched one file, newest first, following renames backwards. */
+export function useFileHistory(repoId: string | null, path: string | null, limit = 200) {
+  return useQuery({
+    queryKey: keys.fileHistory(repoId ?? 'none', path ?? 'none'),
+    enabled: repoId != null && path != null,
+    queryFn: async () => unwrap(await commands.getFileHistory(repoId!, path!, limit)),
+  })
+}
+
+/**
+ * Line-by-line authorship. `sha` blames the file as of that commit; pass null
+ * to blame the working copy.
+ */
+export function useFileBlame(repoId: string | null, path: string | null, sha: string | null = null) {
+  return useQuery({
+    queryKey: keys.fileBlame(repoId ?? 'none', path ?? 'none', sha),
+    enabled: repoId != null && path != null,
+    queryFn: async () => unwrap(await commands.getFileBlame(repoId!, path!, sha)),
+  })
+}
+
 export function useMergeState(repoId: string | null) {
   return useQuery({
     queryKey: keys.mergeState(repoId ?? 'none'),

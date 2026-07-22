@@ -5,6 +5,7 @@ pub mod branch;
 pub mod commit;
 pub mod diff;
 pub mod external;
+pub mod file;
 pub mod github;
 pub mod gitignore;
 pub mod log;

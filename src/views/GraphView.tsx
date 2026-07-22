@@ -10,7 +10,6 @@ import { PendingRow } from '@/components/domain/graph/PendingRow'
 import { StashRow } from '@/components/domain/graph/StashRow'
 import { GraphSvg, type GraphRow } from '@/components/domain/graph/GraphSvg'
 import { GraphHeader } from '@/components/domain/graph/GraphHeader'
-import { CommitDrawer } from '@/components/domain/graph/CommitDrawer'
 import {
   columnWidth,
   effectiveHiddenColumns,
@@ -20,7 +19,7 @@ import {
 } from '@/lib/graphColumns'
 
 /** Sentinel selection value for the synthetic WIP row (not a real commit). */
-const WIP_SHA = '__wip__'
+export const WIP_SHA = '__wip__'
 
 export function GraphView() {
   const repo = useActiveRepo()
@@ -316,9 +315,6 @@ export function GraphView() {
         </div>
       </div>
 
-      {selectedSha != null && selectedSha !== WIP_SHA && (
-        <CommitDrawer repoId={repo.id} sha={selectedSha} />
-      )}
     </>
   )
 }

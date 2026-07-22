@@ -1,6 +1,5 @@
 import { type ReactNode, useState } from 'react'
 import { Download, FileText, MinusCircle, PlusCircle, RotateCcw, Trash2 } from 'lucide-react'
-import { PendingIndicator } from '@/components/ui/pending-indicator'
 import type { FileChange } from '@/lib/bindings'
 import {
   ContextMenu,
@@ -13,6 +12,7 @@ import {
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { IgnoreMenuItems } from '@/components/domain/commit-form/IgnoreMenuItems'
+import { FileActionMenuItems } from '@/components/domain/FileActionMenuItems'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
@@ -65,6 +65,7 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
             />
           )}
           {!sub && !file.conflicted && <IgnoreMenuItems path={file.path} isFolder={false} />}
+          {!sub && <FileActionMenuItems path={file.path} />}
           {sub ? (
             <>
               <ContextMenuSeparator />

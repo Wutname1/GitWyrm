@@ -4,13 +4,17 @@ import { MergeBanner } from '@/components/domain/MergeBanner'
 import { LeftPanel } from '@/components/domain/left-panel/LeftPanel'
 import { RightPanel } from '@/components/domain/RightPanel'
 import { StatusBar } from '@/components/domain/StatusBar'
-import { GraphView } from '@/views/GraphView'
+import { GraphView, WIP_SHA } from '@/views/GraphView'
 import { DiffView } from '@/views/DiffView'
 import { SettingsView } from '@/views/SettingsView'
 import { ConflictView } from '@/views/ConflictView'
 import { GithubView } from '@/views/GithubView'
+import { FileHistoryView } from '@/views/FileHistoryView'
+import { BlameView } from '@/views/BlameView'
+import { CommitDrawer } from '@/components/domain/graph/CommitDrawer'
 import { useUiStore } from '@/stores/uiStore'
 import {
+  useActiveRepo,
   DEFAULT_LEFT_PANEL_WIDTH,
   DEFAULT_RIGHT_PANEL_WIDTH,
   MAX_LEFT_PANEL_WIDTH,
@@ -27,7 +31,25 @@ function CenterView() {
   if (view === 'settings') return <SettingsView />
   if (view === 'conflict') return <ConflictView />
   if (view === 'github') return <GithubView />
+  if (view === 'fileHistory') return <FileHistoryView />
+  if (view === 'blame') return <BlameView />
   return <GraphView />
+}
+
+/**
+ * The selected commit's files, pinned under the center view. It lives here
+ * rather than inside GraphView so that opening one of its files -- which swaps
+ * the view above to the diff -- leaves the file list in place to click through.
+ * Settings is the one view it does not belong under: it is app-level, not
+ * about any commit.
+ */
+function CommitDrawerSlot() {
+  const repo = useActiveRepo()
+  const view = useUiStore((s) => s.centerView)
+  const selectedSha = useUiStore((s) => s.selectedSha)
+  if (!repo || view === 'settings') return null
+  if (selectedSha == null || selectedSha === WIP_SHA) return null
+  return <CommitDrawer repoId={repo.id} sha={selectedSha} />
 }
 
 export function WorkspaceLayout() {
@@ -56,6 +78,7 @@ export function WorkspaceLayout() {
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
           <CenterView />
+          <CommitDrawerSlot />
         </div>
         <div className="relative flex min-h-0 flex-none" style={{ width: rightPanelWidth }}>
           <ResizeHandle

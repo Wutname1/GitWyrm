@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import type { FileChange } from '@/lib/bindings'
 import { StatusBadge } from './StatusBadge'
 import { FileChangeMenu } from './commit-form/FileChangeMenu'
+import { CommitFileMenu } from './CommitFileMenu'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { TooltipButton } from '@/components/ui/tooltip'
 
@@ -30,10 +31,18 @@ interface FileChangeRowProps {
   action?: ReactNode
   /**
    * When set, wraps the row in a right-click menu with stage/discard actions.
-   * `true` marks the file as staged, `false` as unstaged. Omit for read-only
-   * rows (e.g. a past commit's files) that should have no menu.
+   * `true` marks the file as staged, `false` as unstaged. Omit for rows that
+   * are not pending changes, e.g. a past commit's files.
    */
   menuStaged?: boolean
+  /**
+   * Commit this row's file belongs to. Gives read-only rows (a past commit's
+   * files) a menu with the file actions that make sense there -- open, show in
+   * folder, history, blame -- but none of the staging ones.
+   */
+  menuSha?: string
+  /** Marks the row as the file currently open in the diff view. */
+  active?: boolean
 }
 
 export function FileChangeRow({
@@ -45,6 +54,8 @@ export function FileChangeRow({
   onOpen,
   action,
   menuStaged,
+  menuSha,
+  active,
 }: FileChangeRowProps) {
   const sub = file.submodule
   const row = (
@@ -52,8 +63,12 @@ export function FileChangeRow({
       onClick={onOpen}
       role={treeDepth == null ? undefined : 'treeitem'}
       aria-level={treeDepth == null ? undefined : treeDepth + 1}
+      aria-current={active || undefined}
       style={treeDepth == null ? undefined : { paddingLeft: 14 + treeDepth * 14 }}
-      className="flex cursor-pointer items-center gap-2 px-3.5 py-1 hover:bg-panel2"
+      className={cn(
+        'flex cursor-pointer items-center gap-2 px-3.5 py-1 hover:bg-panel2',
+        active && 'bg-soft hover:bg-soft'
+      )}
     >
       <StatusBadge st={file.status} />
       <span
@@ -79,13 +94,23 @@ export function FileChangeRow({
     </div>
   )
 
-  if (menuStaged === undefined) return row
+  if (menuStaged !== undefined) {
+    return (
+      <FileChangeMenu file={file} staged={menuStaged} onOpen={onOpen}>
+        {row}
+      </FileChangeMenu>
+    )
+  }
 
-  return (
-    <FileChangeMenu file={file} staged={menuStaged} onOpen={onOpen}>
-      {row}
-    </FileChangeMenu>
-  )
+  if (menuSha !== undefined) {
+    return (
+      <CommitFileMenu path={file.path} sha={menuSha} onOpen={onOpen}>
+        {row}
+      </CommitFileMenu>
+    )
+  }
+
+  return row
 }
 
 interface StageToggleProps {

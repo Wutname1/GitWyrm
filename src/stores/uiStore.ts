@@ -2,7 +2,14 @@ import { create } from 'zustand'
 import type { DiffSource } from '@/lib/bindings'
 import type { SectionKey } from '@/lib/types'
 
-export type CenterView = 'graph' | 'diff' | 'settings' | 'conflict' | 'github'
+export type CenterView =
+  | 'graph'
+  | 'diff'
+  | 'settings'
+  | 'conflict'
+  | 'github'
+  | 'fileHistory'
+  | 'blame'
 
 export type ModalKind =
   | 'onboarding'
@@ -38,11 +45,19 @@ export interface DiffRequest {
   source: DiffSource
 }
 
+/** File the history or blame view is showing. `sha` pins blame to a commit. */
+export interface FileTarget {
+  path: string
+  sha: string | null
+}
+
 interface UiState {
   centerView: CenterView
   selectedSha: string | null
   diffRequest: DiffRequest | null
   conflictPath: string | null
+  /** File shown by the history / blame views. */
+  fileTarget: FileTarget | null
   sectionOpen: Record<SectionKey, boolean>
   activeModal: ModalKind
   mergeSource: string | null
@@ -83,6 +98,8 @@ interface UiState {
   openRemoteSync: (source: string, target: string) => void
   openDiff: (request: DiffRequest) => void
   closeDiff: () => void
+  openFileHistory: (path: string) => void
+  openBlame: (path: string, sha?: string | null) => void
   openConflict: (path: string) => void
   showSettings: (section?: SettingsSection) => void
   showGraph: () => void
@@ -94,11 +111,24 @@ interface UiState {
   setSettingsSection: (section: SettingsSection) => void
 }
 
+/**
+ * Views that show one repo's contents and mean nothing once a different repo
+ * is active, so switching repos drops back to the graph.
+ */
+const REPO_SCOPED_VIEWS = new Set<CenterView>([
+  'diff',
+  'conflict',
+  'github',
+  'fileHistory',
+  'blame',
+])
+
 export const useUiStore = create<UiState>((set) => ({
   centerView: 'graph',
   selectedSha: null,
   diffRequest: null,
   conflictPath: null,
+  fileTarget: null,
   sectionOpen: {
     local: true,
     remote: false,
@@ -129,25 +159,25 @@ export const useUiStore = create<UiState>((set) => ({
       selectedSha: null,
       diffRequest: null,
       conflictPath: null,
+      fileTarget: null,
       revealRef: null,
       revealSha: null,
       githubItem: null,
-      centerView:
-        s.centerView === 'diff' || s.centerView === 'conflict' || s.centerView === 'github'
-          ? 'graph'
-          : s.centerView,
+      centerView: REPO_SCOPED_VIEWS.has(s.centerView) ? 'graph' : s.centerView,
     })),
   focusChanges: () => set((s) => ({ changesFocusNonce: s.changesFocusNonce + 1 })),
   revealRefInGraph: (name) =>
     set((s) => ({
       centerView: 'graph',
       diffRequest: null,
+      fileTarget: null,
       revealRef: { name, nonce: (s.revealRef?.nonce ?? 0) + 1 },
     })),
   revealShaInGraph: (sha) =>
     set((s) => ({
       centerView: 'graph',
       diffRequest: null,
+      fileTarget: null,
       revealSha: { sha, nonce: (s.revealSha?.nonce ?? 0) + 1 },
     })),
   openMerge: (source) => set({ activeModal: 'merge', mergeSource: source ?? null }),
@@ -159,17 +189,22 @@ export const useUiStore = create<UiState>((set) => ({
   openRemoteSync: (source, target) =>
     set({ activeModal: 'remote-sync', syncSource: source, syncTarget: target }),
   openDiff: (request) => set({ diffRequest: request, centerView: 'diff' }),
-  closeDiff: () => set({ diffRequest: null, centerView: 'graph' }),
+  closeDiff: () => set({ diffRequest: null, fileTarget: null, centerView: 'graph' }),
+  openFileHistory: (path) =>
+    set({ centerView: 'fileHistory', fileTarget: { path, sha: null }, diffRequest: null }),
+  openBlame: (path, sha = null) =>
+    set({ centerView: 'blame', fileTarget: { path, sha }, diffRequest: null }),
   openConflict: (path) => set({ conflictPath: path, centerView: 'conflict' }),
   showSettings: (section) =>
     set((s) => ({
       centerView: 'settings',
       diffRequest: null,
+      fileTarget: null,
       settingsSection: section ?? s.settingsSection,
     })),
-  showGraph: () => set({ centerView: 'graph', diffRequest: null }),
+  showGraph: () => set({ centerView: 'graph', diffRequest: null, fileTarget: null }),
   openGithubItem: (kind, number) =>
-    set({ centerView: 'github', githubItem: { kind, number }, diffRequest: null }),
+    set({ centerView: 'github', githubItem: { kind, number }, diffRequest: null, fileTarget: null }),
   closeGithubItem: () => set({ centerView: 'graph', githubItem: null }),
   toggleSection: (key) =>
     set((s) => ({ sectionOpen: { ...s.sectionOpen, [key]: !s.sectionOpen[key] } })),

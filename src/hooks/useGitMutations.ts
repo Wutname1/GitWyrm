@@ -192,6 +192,42 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Goes to the Recycle Bin rather than off disk, so the toast says so -- the
+  // user should know the file is recoverable without having to find out.
+  const deleteFile = useMutation({
+    mutationFn: async (path: string) => {
+      await unwrap(await commands.deleteFile(id, path))
+      return path
+    },
+    onSuccess: (path) => {
+      invalidate(qc, id, ['status'])
+      toast(`Moved ${path.split('/').pop()} to the Recycle Bin`)
+    },
+    onError,
+  })
+
+  const restoreFile = useMutation({
+    mutationFn: async (path: string) => {
+      await unwrap(await commands.restoreFile(id, path))
+      return path
+    },
+    onSuccess: (path) => {
+      invalidate(qc, id, ['status'])
+      toast(`Put ${path.split('/').pop()} back to the last commit`)
+    },
+    onError,
+  })
+
+  const openFileInEditor = useMutation({
+    mutationFn: async (path: string) => unwrap(await commands.openFileInEditor(id, path)),
+    onError,
+  })
+
+  const revealFile = useMutation({
+    mutationFn: async (path: string) => unwrap(await commands.revealFileInFileManager(id, path)),
+    onError,
+  })
+
   const discardFiles = useMutation({
     mutationFn: async ({ paths }: FolderFilesArgs) => unwrap(await commands.discardFiles(id, paths)),
     onSuccess: (_data, { folder, paths }) => {
@@ -833,6 +869,10 @@ export function useGitMutations(repoId: string | null) {
     stageAll,
     unstageAll,
     discardFile,
+    deleteFile,
+    restoreFile,
+    openFileInEditor,
+    revealFile,
     discardFiles,
     discardAll,
     addToGitignore,

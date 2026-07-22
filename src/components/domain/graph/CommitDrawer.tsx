@@ -19,7 +19,16 @@ function initials(name: string): string {
 export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
   const selectCommit = useUiStore((s) => s.selectCommit)
   const openDiff = useUiStore((s) => s.openDiff)
+  const diffRequest = useUiStore((s) => s.diffRequest)
   const detail = useCommitDetail(repoId, sha)
+
+  // Highlight the row whose diff is on screen, but only when that diff came
+  // from this commit -- otherwise a same-named file from the pending changes
+  // list would light up a row it has nothing to do with.
+  const openPath =
+    diffRequest?.source.kind === 'commit' && diffRequest.source.sha === sha
+      ? diffRequest.path
+      : null
 
   if (detail.isLoading) {
     return (
@@ -104,6 +113,8 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
             file={f}
             mono
             nameClassName="text-sub"
+            menuSha={d.sha}
+            active={openPath === f.path}
             onOpen={() => openDiff({ path: f.path, source: { kind: 'commit', sha: d.sha } })}
           />
         ))}

@@ -11,6 +11,9 @@ export const keys = {
   commitDetail: (repoId: string, sha: string) => ['commit', repoId, sha] as const,
   fileDiff: (repoId: string, path: string, source: DiffSource) =>
     ['diff', repoId, path, source] as const,
+  fileHistory: (repoId: string, path: string) => ['fileHistory', repoId, path] as const,
+  fileBlame: (repoId: string, path: string, sha: string | null) =>
+    ['fileBlame', repoId, path, sha] as const,
   mergeState: (repoId: string) => ['mergeState', repoId] as const,
   conflict: (repoId: string, path: string) => ['conflict', repoId, path] as const,
 }
