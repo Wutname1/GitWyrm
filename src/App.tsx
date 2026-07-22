@@ -8,6 +8,7 @@ import { RepoPickerModal } from '@/components/modals/RepoPickerModal'
 import { OnboardingModal } from '@/components/modals/OnboardingModal'
 import { DirectionModal } from '@/components/modals/DirectionModal'
 import { RemoteSyncModal } from '@/components/modals/RemoteSyncModal'
+import { PushChoiceModal } from '@/components/modals/PushChoiceModal'
 import { DragScrim } from '@/components/domain/DragScrim'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
@@ -134,6 +135,7 @@ function AppInner() {
       <OnboardingModal />
       <DirectionModal />
       <RemoteSyncModal />
+      <PushChoiceModal />
       <NewBranchModal />
       <NewTagModal />
       <PushTagsModal />

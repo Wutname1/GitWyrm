@@ -268,7 +268,13 @@ export function Toolbar() {
         icon={<ArrowUp size={16} strokeWidth={1.9} />}
         label={m.push.isPending ? 'Pushing…' : 'Push'}
         badge={pushBadge}
-        onClick={requireRepo(() => m.push.mutate())}
+        // A branch that is behind its upstream can't be sent with a plain push --
+        // git refuses it as non-fast-forward. Catch that here and let the user
+        // choose (get the cloud's changes first, or force past them) rather than
+        // firing a push we know will be rejected.
+        onClick={requireRepo(() =>
+          headSync && headSync.behind > 0 ? openModal('push-choice') : m.push.mutate()
+        )}
         disabled={syncPending}
         pending={m.push.isPending}
       />

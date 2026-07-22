@@ -46,6 +46,28 @@ const RULES: Rule[] = [
     message: 'Your local changes conflict with that branch. Commit, stash, or discard them first.',
   },
   {
+    // Server refused the update because the branch is protected -- most force
+    // pushes to a shared main branch hit this. Nothing local will fix it.
+    match: (r) =>
+      r.includes('protected branch') || r.includes('gh006') || r.includes('cannot force-push'),
+    severity: 'warning',
+    message:
+      "The remote won't let you replace this branch - it's protected. Open a pull request instead, or ask a maintainer to allow the change.",
+  },
+  {
+    // Non-fast-forward: the cloud moved on since you last fetched. A plain push
+    // is refused; the user needs to get those changes first or force past them.
+    match: (r) =>
+      r.includes('stale info') ||
+      r.includes('non-fast-forward') ||
+      r.includes('fetch first') ||
+      r.includes('[rejected]') ||
+      r.includes('remote rejected'),
+    severity: 'warning',
+    message:
+      "The cloud has changes yours doesn't, so it turned down the push. Get those changes first, or force push to replace them.",
+  },
+  {
     // Branch switch blocked purely by a moved submodule pointer.
     match: (r) => r.includes('submodule points to a different commit'),
     severity: 'warning',

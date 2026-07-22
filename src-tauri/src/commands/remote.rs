@@ -93,9 +93,17 @@ pub struct GitProgressPayload {
 /// than the cause of the failure. Prefer lines git itself marks as errors, then
 /// fall back to the last line that isn't obvious progress noise.
 fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
+  // A `remote:` prefix is progress noise for most lines, but the server also
+  // reports the real reason a push was refused this way -- e.g.
+  // `remote: error: GH006: Protected branch update failed`. Strip the prefix so
+  // that reason can be recognized and surfaced instead of discarded as noise.
+  fn strip_remote(l: &str) -> &str {
+    l.strip_prefix("remote:").map(str::trim).unwrap_or(l)
+  }
+
   let is_noise = |l: &str| {
-    let low = l.to_lowercase();
-    low.starts_with("remote:")
+    let low = strip_remote(l).to_lowercase();
+    low.is_empty()
       || low.contains('%')
       || low.starts_with("counting objects")
       || low.starts_with("compressing objects")
@@ -107,20 +115,26 @@ fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
       || low.starts_with("already up to date")
   };
 
-  // Lines git explicitly tags are the real cause when present.
+  // Lines git or the server explicitly tag are the real cause when present. The
+  // `remote:` prefix is stripped first so server-side errors count too, and the
+  // rejection markers git prints for a refused ref are treated the same way.
   let tagged = stderr_lines.iter().rev().find(|l| {
-    let low = l.to_lowercase();
-    low.starts_with("error:") || low.starts_with("fatal:") || low.starts_with("hint:")
+    let low = strip_remote(l).to_lowercase();
+    low.starts_with("error:")
+      || low.starts_with("fatal:")
+      || low.starts_with("hint:")
+      || low.contains("[rejected]")
+      || low.contains("[remote rejected]")
   });
   if let Some(line) = tagged {
-    return line.clone();
+    return strip_remote(line).to_string();
   }
 
   stderr_lines
     .iter()
     .rev()
     .find(|l| !is_noise(l))
-    .cloned()
+    .map(|l| strip_remote(l).to_string())
     .unwrap_or_else(|| stdout.trim().to_string())
 }
 
