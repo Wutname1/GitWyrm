@@ -4,7 +4,7 @@
  * can be reordered and hidden consistently.
  */
 
-export type ColumnId = 'refs' | 'graph' | 'message' | 'author' | 'date' | 'sha'
+export type ColumnId = 'refs' | 'graph' | 'message' | 'author' | 'changes' | 'date' | 'sha'
 
 export interface ColumnDef {
   id: ColumnId
@@ -17,14 +17,15 @@ export interface ColumnDef {
 
 export const COLUMNS: Record<ColumnId, ColumnDef> = {
   refs: { id: 'refs', label: 'BRANCH / TAG', track: '150px', width: 150 },
-  graph: { id: 'graph', label: 'GRAPH', track: '96px', width: 96 },
+  graph: { id: 'graph', label: 'GRAPH', track: '124px', width: 124 },
   message: { id: 'message', label: 'COMMIT MESSAGE', track: 'minmax(190px,1fr)', width: null },
   author: { id: 'author', label: 'AUTHOR', track: '150px', width: 150 },
+  changes: { id: 'changes', label: 'CHANGES', track: '160px', width: 160 },
   date: { id: 'date', label: 'DATE', track: '110px', width: 110 },
   sha: { id: 'sha', label: 'SHA', track: '72px', width: 72 },
 }
 
-export const DEFAULT_COLUMN_ORDER: ColumnId[] = ['refs', 'graph', 'message', 'author', 'date', 'sha']
+export const DEFAULT_COLUMN_ORDER: ColumnId[] = ['refs', 'graph', 'message', 'author', 'changes', 'date', 'sha']
 
 /** Pixel width used for the graph SVG when the GRAPH column is visible. */
 export const GRAPH_COLUMN_WIDTH = COLUMNS.graph.width ?? 96
@@ -33,6 +34,19 @@ export const GRAPH_COLUMN_WIDTH = COLUMNS.graph.width ?? 96
 export function visibleColumns(order: ColumnId[], hidden: ColumnId[]): ColumnId[] {
   const hiddenSet = new Set(hidden)
   return order.filter((id) => !hiddenSet.has(id))
+}
+
+/**
+ * Applies the change-size display setting without overwriting the user's saved
+ * column layout. The Changes column only exists while column mode is active.
+ */
+export function effectiveHiddenColumns(
+  hidden: ColumnId[],
+  showChangeIndicator: boolean,
+  changeSizeDisplay: 'row' | 'column',
+): ColumnId[] {
+  if (showChangeIndicator && changeSizeDisplay === 'column') return hidden
+  return hidden.includes('changes') ? hidden : [...hidden, 'changes']
 }
 
 /** Builds the `grid-template-columns` value for the visible columns, in order. */

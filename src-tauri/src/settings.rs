@@ -43,6 +43,24 @@ fn default_branch_switch_mode() -> BranchSwitchMode {
   BranchSwitchMode::AutoStash
 }
 
+/// Where commit change size appears in the graph.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeSizeDisplay {
+  /// A compact Changes column beside the author.
+  Column,
+  /// A second line below each commit message.
+  Row,
+}
+
+fn default_change_size_display() -> ChangeSizeDisplay {
+  ChangeSizeDisplay::Column
+}
+
+fn default_show_change_indicator() -> bool {
+  true
+}
+
 /// Commit-graph column layout. Column ids are validated on the frontend, so
 /// unknown values here are ignored rather than rejected.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -97,6 +115,15 @@ pub struct Settings {
   /// Commit-graph column order and visibility.
   #[serde(default)]
   pub column_layout: Option<ColumnLayout>,
+  /// Whether change size appears below the message or in its own column.
+  #[serde(default = "default_change_size_display")]
+  pub change_size_display: ChangeSizeDisplay,
+  /// Show the change-size indicator in the commit graph.
+  #[serde(default = "default_show_change_indicator")]
+  pub show_change_indicator: bool,
+  /// Show exact added and removed line counts beside the size bar.
+  #[serde(default)]
+  pub show_change_line_counts: bool,
   /// Default action for the commit button: "commit" or "commit_push". None
   /// falls back to plain commit. Validated on the frontend.
   #[serde(default)]
@@ -153,6 +180,9 @@ impl Default for Settings {
       ai_model: None,
       ai_instruction: None,
       column_layout: None,
+      change_size_display: default_change_size_display(),
+      show_change_indicator: default_show_change_indicator(),
+      show_change_line_counts: false,
       commit_button_mode: None,
       enable_worktrees: false,
       ui_scale: None,

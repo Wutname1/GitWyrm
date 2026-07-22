@@ -1,8 +1,16 @@
 import type { StatusCode } from './bindings'
 
-export const LANE_COLORS = ['var(--gw-lane0)', 'var(--gw-lane1)', 'var(--gw-lane2)'] as const
+export const LANE_COLORS = [
+  'var(--gw-lane0)',
+  'var(--gw-lane1)',
+  'var(--gw-lane2)',
+  'var(--gw-lane3)',
+  'var(--gw-lane4)',
+  'var(--gw-lane5)',
+] as const
 
 export const GRAPH_ROW_HEIGHT = 28
+export const GRAPH_ROW_WITH_CHANGES_HEIGHT = 42
 
 export function laneColor(lane: number): string {
   return LANE_COLORS[lane % LANE_COLORS.length]

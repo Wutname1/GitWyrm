@@ -1,21 +1,38 @@
 import { cn } from '@/lib/utils'
-import { GRAPH_ROW_HEIGHT } from '@/lib/gitDisplay'
-import { gridTemplate, visibleColumns, type ColumnId } from '@/lib/graphColumns'
+import { effectiveHiddenColumns, gridTemplate, visibleColumns, type ColumnId } from '@/lib/graphColumns'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { ChangesMenu } from '../commit-form/ChangesMenu'
+import { ChangeSizeIndicator } from './ChangeSizeIndicator'
 
 interface PendingRowProps {
   stagedCount: number
   unstagedCount: number
+  filesChanged: number
+  additions: number
+  deletions: number
+  rowHeight: number
   selected: boolean
   onSelect: () => void
   style?: React.CSSProperties
 }
 
-export function PendingRow({ stagedCount, unstagedCount, selected, onSelect, style }: PendingRowProps) {
+export function PendingRow({
+  stagedCount,
+  unstagedCount,
+  filesChanged,
+  additions,
+  deletions,
+  rowHeight,
+  selected,
+  onSelect,
+  style,
+}: PendingRowProps) {
   const order = useWorkspaceStore((s) => s.columnOrder)
   const hidden = useWorkspaceStore((s) => s.hiddenColumns)
-  const total = stagedCount + unstagedCount
+  const changeSizeDisplay = useWorkspaceStore((s) => s.changeSizeDisplay)
+  const showChangeIndicator = useWorkspaceStore((s) => s.showChangeIndicator)
+  const showLineCounts = useWorkspaceStore((s) => s.showChangeLineCounts)
+  const effectiveHidden = effectiveHiddenColumns(hidden, showChangeIndicator, changeSizeDisplay)
 
   const cell: Record<ColumnId, React.ReactNode> = {
     refs: (
@@ -31,20 +48,43 @@ export function PendingRow({ stagedCount, unstagedCount, selected, onSelect, sty
     ),
     graph: <div />,
     message: (
-      <div className="overflow-hidden text-ellipsis whitespace-nowrap pr-2.5 text-sub">
-        Uncommitted changes
-        <span className="ml-2 font-mono text-2xs text-muted-foreground">
-          {stagedCount > 0 && <span className="text-accent-text">{stagedCount} staged</span>}
-          {stagedCount > 0 && unstagedCount > 0 && <span> · </span>}
-          {unstagedCount > 0 && <span className="text-modified">{unstagedCount} unstaged</span>}
-        </span>
+      <div className={cn(
+        'min-w-0 overflow-hidden pr-2.5 text-sub',
+        showChangeIndicator && changeSizeDisplay === 'row' && 'flex h-full flex-col justify-center',
+      )}>
+        <div className="overflow-hidden text-ellipsis whitespace-nowrap">
+          Uncommitted changes
+          <span className="ml-2 font-mono text-2xs text-muted-foreground">
+            {stagedCount > 0 && <span className="text-accent-text">{stagedCount} staged</span>}
+            {stagedCount > 0 && unstagedCount > 0 && <span> · </span>}
+            {unstagedCount > 0 && <span className="text-modified">{unstagedCount} unstaged</span>}
+          </span>
+        </div>
+        {showChangeIndicator && changeSizeDisplay === 'row' && (
+          <ChangeSizeIndicator
+            filesChanged={filesChanged}
+            additions={additions}
+            deletions={deletions}
+            showLineCounts={showLineCounts}
+            mode="row"
+          />
+        )}
       </div>
     ),
     author: <div className="text-2xs italic text-muted-foreground">You</div>,
+    changes: (
+      <ChangeSizeIndicator
+        filesChanged={filesChanged}
+        additions={additions}
+        deletions={deletions}
+        showLineCounts={showLineCounts}
+        mode="column"
+      />
+    ),
     date: <div className="font-mono text-2xs text-muted-foreground">now</div>,
     sha: (
       <div className="font-mono text-2xs text-muted-foreground">
-        {total} file{total === 1 ? '' : 's'}
+        {filesChanged} file{filesChanged === 1 ? '' : 's'}
       </div>
     ),
   }
@@ -53,13 +93,13 @@ export function PendingRow({ stagedCount, unstagedCount, selected, onSelect, sty
     <ChangesMenu>
       <div
         onClick={onSelect}
-        style={{ height: GRAPH_ROW_HEIGHT, gridTemplateColumns: gridTemplate(order, hidden), ...style }}
+        style={{ height: rowHeight, gridTemplateColumns: gridTemplate(order, effectiveHidden), ...style }}
         className={cn(
           'grid cursor-pointer items-center pr-1',
           selected && 'bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]'
         )}
       >
-        {visibleColumns(order, hidden).map((id) => (
+        {visibleColumns(order, effectiveHidden).map((id) => (
           <div key={id} className="contents">
             {cell[id]}
           </div>

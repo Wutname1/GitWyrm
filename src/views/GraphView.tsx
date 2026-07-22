@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { CommitEntry } from '@/lib/bindings'
-import { GRAPH_ROW_HEIGHT } from '@/lib/gitDisplay'
-import { useCommitLog, useStatus } from '@/hooks/useGitQueries'
+import type { CommitEntry, StashInfo } from '@/lib/bindings'
+import { GRAPH_ROW_HEIGHT, GRAPH_ROW_WITH_CHANGES_HEIGHT } from '@/lib/gitDisplay'
+import { useCommitLog, useStashes, useStatus } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { CommitRow } from '@/components/domain/graph/CommitRow'
 import { PendingRow } from '@/components/domain/graph/PendingRow'
-import { GraphSvg } from '@/components/domain/graph/GraphSvg'
+import { StashRow } from '@/components/domain/graph/StashRow'
+import { GraphSvg, type GraphRow } from '@/components/domain/graph/GraphSvg'
 import { GraphHeader } from '@/components/domain/graph/GraphHeader'
 import { CommitDrawer } from '@/components/domain/graph/CommitDrawer'
-import { graphLeftOffset } from '@/lib/graphColumns'
+import { effectiveHiddenColumns, graphLeftOffset } from '@/lib/graphColumns'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 /** Sentinel selection value for the synthetic WIP row (not a real commit). */
@@ -22,13 +23,21 @@ export function GraphView() {
   const selectCommit = useUiStore((s) => s.selectCommit)
   const focusChanges = useUiStore((s) => s.focusChanges)
   const revealRef = useUiStore((s) => s.revealRef)
+  const revealSha = useUiStore((s) => s.revealSha)
   const columnOrder = useWorkspaceStore((s) => s.columnOrder)
   const hiddenColumns = useWorkspaceStore((s) => s.hiddenColumns)
-  const graphLeft = graphLeftOffset(columnOrder, hiddenColumns)
+  const changeSizeDisplay = useWorkspaceStore((s) => s.changeSizeDisplay)
+  const showChangeIndicator = useWorkspaceStore((s) => s.showChangeIndicator)
+  const effectiveHidden = effectiveHiddenColumns(hiddenColumns, showChangeIndicator, changeSizeDisplay)
+  const graphLeft = graphLeftOffset(columnOrder, effectiveHidden)
+  const rowHeight = showChangeIndicator && changeSizeDisplay === 'row'
+    ? GRAPH_ROW_WITH_CHANGES_HEIGHT
+    : GRAPH_ROW_HEIGHT
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const log = useCommitLog(repo?.id ?? null)
   const status = useStatus(repo?.id ?? null)
+  const stashes = useStashes(repo?.id ?? null)
   const commits: CommitEntry[] = useMemo(
     () => log.data?.pages.flatMap((p) => p.commits) ?? [],
     [log.data]
@@ -36,20 +45,66 @@ export function GraphView() {
 
   const stagedCount = status.data?.staged.length ?? 0
   const unstagedCount = status.data?.unstaged.length ?? 0
+  const pendingFiles = [...(status.data?.staged ?? []), ...(status.data?.unstaged ?? [])]
+  const pendingFileCount = new Set(pendingFiles.map((file) => file.path)).size
+  const pendingAdditions = pendingFiles.reduce((total, file) => total + file.additions, 0)
+  const pendingDeletions = pendingFiles.reduce((total, file) => total + file.deletions, 0)
   const pending = commits.length > 0 && stagedCount + unstagedCount > 0
-  const rowOffset = pending ? 1 : 0
+  const headCommitLoaded = commits.some((commit) =>
+    commit.refs.some((ref) => ref.type === 'head')
+  )
+
+  // One unified row list: the WIP row first, then commits and stashes merged
+  // by TIME, so a stash made five minutes ago sits at the top of the graph
+  // even when the commit it was taken on is far down in history. The graph
+  // svg draws a dashed connector from each stash down to its base commit, so
+  // "when it was made" and "what it was based on" are both visible at once.
+  const hasMorePages = log.hasNextPage ?? false
+  const rows: GraphRow[] = useMemo(() => {
+    const out: GraphRow[] = []
+    if (pending) out.push({ kind: 'wip' })
+    const sorted = [...(stashes.data ?? [])].sort((a, b) => b.time - a.time)
+    const emitted = new Set<string>()
+    const emit = (s: StashInfo) => {
+      if (emitted.has(s.sha)) return
+      emitted.add(s.sha)
+      out.push({ kind: 'stash', stash: s })
+    }
+    for (const c of commits) {
+      // Time rule: anything newer than this commit goes above it.
+      for (const s of sorted) {
+        if (s.time >= c.time) emit(s)
+        else break
+      }
+      // Topology rule: a stash must sit ABOVE the commit it was taken on,
+      // even when topo order puts an older-timed commit higher -- otherwise
+      // its connector would point upward and read as a broken line.
+      for (const s of sorted) if (s.base_sha === c.sha) emit(s)
+      out.push({ kind: 'commit', commit: c })
+    }
+    // Stashes older than every loaded commit belong further down in history.
+    // Hold them back until their time position pages in; once history is
+    // exhausted, show whatever is left at the bottom.
+    if (!hasMorePages) for (const s of sorted) emit(s)
+    return out
+  }, [commits, stashes.data, pending, hasMorePages])
 
   const virtualizer = useVirtualizer({
-    count: commits.length + rowOffset,
+    count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => GRAPH_ROW_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 12,
   })
 
+  // Row mode changes every virtual row's height. Clear cached measurements so
+  // switching the setting visibly reflows the graph immediately.
+  useEffect(() => {
+    virtualizer.measure()
+  }, [rowHeight, virtualizer])
+
   const items = virtualizer.getVirtualItems()
-  // Convert virtual row indices to commit indices (row 0 is the WIP row when pending).
-  const startIndex = Math.max(0, (items.length ? items[0].index : 0) - rowOffset)
-  const endIndex = Math.max(0, (items.length ? items[items.length - 1].index : 0) - rowOffset)
+  const startIndex = items.length ? items[0].index : 0
+  const endIndex = items.length ? items[items.length - 1].index : 0
 
   // Fetch the next page when scrolling nears the end. Depend only on stable
   // primitives: `items` and `log` get fresh identities every render, so
@@ -57,11 +112,26 @@ export function GraphView() {
   // fetchNextPage in a loop.
   const lastVisibleIndex = items.length ? items[items.length - 1].index : 0
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = log
+  // WIP is a child of the checked-out branch tip. If that tip is old enough
+  // to fall outside the first page, keep loading until its real endpoint is
+  // available instead of attaching WIP to the newest visible commit.
   useEffect(() => {
-    if (lastVisibleIndex - rowOffset >= commits.length - 40 && hasNextPage && !isFetchingNextPage) {
+    if (
+      pending &&
+      repo?.head_branch != null &&
+      !headCommitLoaded &&
+      hasNextPage &&
+      !isFetchingNextPage
+    ) {
       fetchNextPage()
     }
-  }, [lastVisibleIndex, commits.length, rowOffset, hasNextPage, isFetchingNextPage, fetchNextPage])
+  }, [pending, repo?.head_branch, headCommitLoaded, hasNextPage, isFetchingNextPage, fetchNextPage])
+
+  useEffect(() => {
+    if (lastVisibleIndex >= rows.length - 40 && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage()
+    }
+  }, [lastVisibleIndex, rows.length, hasNextPage, isFetchingNextPage, fetchNextPage])
 
   // Reveal a branch/tag in the graph: scroll its tip commit into view and select
   // it. If the tip isn't in a loaded page yet, keep pulling pages until it turns
@@ -70,17 +140,40 @@ export function GraphView() {
   const revealName = revealRef?.name
   useEffect(() => {
     if (!revealName) return
-    const index = commits.findIndex((c) => c.refs.some((r) => r.name === revealName))
+    const index = rows.findIndex(
+      (r) => r.kind === 'commit' && r.commit.refs.some((ref) => ref.name === revealName)
+    )
     if (index >= 0) {
-      selectCommit(commits[index].sha)
-      virtualizer.scrollToIndex(index + rowOffset, { align: 'center' })
+      const row = rows[index]
+      if (row.kind === 'commit') selectCommit(row.commit.sha)
+      virtualizer.scrollToIndex(index, { align: 'center' })
     } else if (hasNextPage && !isFetchingNextPage) {
       fetchNextPage()
     }
-    // Depend on the nonce (repeat clicks) and on commits growing (so a pending
+    // Depend on the nonce (repeat clicks) and on rows growing (so a pending
     // fetch that lands the tip re-runs this and scrolls once it's loaded).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealNonce, revealName, commits.length])
+  }, [revealNonce, revealName, rows.length])
+
+  // Reveal a specific commit or stash by sha (sidebar stash click). Same
+  // paging behavior as revealRef when the target row isn't loaded yet.
+  const revealShaNonce = revealSha?.nonce
+  const revealShaValue = revealSha?.sha
+  useEffect(() => {
+    if (!revealShaValue) return
+    const index = rows.findIndex(
+      (r) =>
+        (r.kind === 'commit' && r.commit.sha === revealShaValue) ||
+        (r.kind === 'stash' && r.stash.sha === revealShaValue)
+    )
+    if (index >= 0) {
+      selectCommit(revealShaValue)
+      virtualizer.scrollToIndex(index, { align: 'center' })
+    } else if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealShaNonce, revealShaValue, rows.length])
 
   if (!repo) {
     return (
@@ -120,12 +213,12 @@ export function GraphView() {
         <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
           {graphLeft != null && (
             <GraphSvg
-              commits={commits}
+              rows={rows}
               selectedSha={selectedSha}
               startIndex={startIndex}
               endIndex={endIndex}
-              pending={pending}
               left={graphLeft}
+              rowHeight={rowHeight}
             />
           )}
           {items.map((vi) => {
@@ -136,12 +229,18 @@ export function GraphView() {
               right: 0,
               transform: `translateY(${vi.start}px)`,
             }
-            if (pending && vi.index === 0) {
+            const row = rows[vi.index]
+            if (!row) return null
+            if (row.kind === 'wip') {
               return (
                 <PendingRow
                   key="__wip"
                   stagedCount={stagedCount}
                   unstagedCount={unstagedCount}
+                  filesChanged={pendingFileCount}
+                  additions={pendingAdditions}
+                  deletions={pendingDeletions}
+                  rowHeight={rowHeight}
                   selected={selectedSha === WIP_SHA}
                   onSelect={() => {
                     selectCommit(WIP_SHA)
@@ -151,8 +250,20 @@ export function GraphView() {
                 />
               )
             }
-            const commit = commits[vi.index - rowOffset]
-            if (!commit) return null
+            if (row.kind === 'stash') {
+              const selected = selectedSha === row.stash.sha
+              return (
+                <StashRow
+                  key={`stash:${row.stash.sha}`}
+                  stash={row.stash}
+                  selected={selected}
+                  onSelect={() => selectCommit(selected ? null : row.stash.sha)}
+                  rowHeight={rowHeight}
+                  style={rowStyle}
+                />
+              )
+            }
+            const commit = row.commit
             const selected = selectedSha === commit.sha
             return (
               <CommitRow
@@ -160,6 +271,7 @@ export function GraphView() {
                 commit={commit}
                 selected={selected}
                 onSelect={() => selectCommit(selected ? null : commit.sha)}
+                rowHeight={rowHeight}
                 style={rowStyle}
               />
             )

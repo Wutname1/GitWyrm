@@ -21,7 +21,7 @@ export interface GithubItemRef {
   number: number
 }
 
-export type SettingsSection = 'general' | 'ai' | 'appearance' | 'logs' | 'about'
+export type SettingsSection = 'general' | 'repository' | 'tags' | 'ai' | 'appearance' | 'logs' | 'about'
 
 /** A local-only tag offered after a push. */
 export interface PendingTag {
@@ -62,6 +62,8 @@ interface UiState {
   changesFocusNonce: number
   /** Ref (branch/tag) the graph should scroll to and highlight; bumped nonce re-triggers. */
   revealRef: { name: string; nonce: number } | null
+  /** Commit or stash sha the graph should scroll to and select; bumped nonce re-triggers. */
+  revealSha: { sha: string; nonce: number } | null
   /** PR or issue shown in the center view and the actions panel. */
   githubItem: GithubItemRef | null
 
@@ -70,6 +72,7 @@ interface UiState {
   resetForRepoSwitch: () => void
   focusChanges: () => void
   revealRefInGraph: (name: string) => void
+  revealShaInGraph: (sha: string) => void
   openMerge: (source?: string) => void
   openNewTag: (sha?: string) => void
   openNewBranch: (sha?: string) => void
@@ -117,6 +120,7 @@ export const useUiStore = create<UiState>((set) => ({
   settingsSection: 'general',
   changesFocusNonce: 0,
   revealRef: null,
+  revealSha: null,
   githubItem: null,
 
   selectCommit: (sha) => set({ selectedSha: sha }),
@@ -126,6 +130,7 @@ export const useUiStore = create<UiState>((set) => ({
       diffRequest: null,
       conflictPath: null,
       revealRef: null,
+      revealSha: null,
       githubItem: null,
       centerView:
         s.centerView === 'diff' || s.centerView === 'conflict' || s.centerView === 'github'
@@ -138,6 +143,12 @@ export const useUiStore = create<UiState>((set) => ({
       centerView: 'graph',
       diffRequest: null,
       revealRef: { name, nonce: (s.revealRef?.nonce ?? 0) + 1 },
+    })),
+  revealShaInGraph: (sha) =>
+    set((s) => ({
+      centerView: 'graph',
+      diffRequest: null,
+      revealSha: { sha, nonce: (s.revealSha?.nonce ?? 0) + 1 },
     })),
   openMerge: (source) => set({ activeModal: 'merge', mergeSource: source ?? null }),
   openNewTag: (sha) => set({ activeModal: 'newTag', tagTargetSha: sha ?? null }),

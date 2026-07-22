@@ -1124,6 +1124,18 @@ export type CatalogModel = { id: string; name: string;
 enabled: boolean }
 export type CatalogProvider = { id: string; name: string; base_url: string; dialect: Dialect; models: CatalogModel[] }
 /**
+ * Where commit change size appears in the graph.
+ */
+export type ChangeSizeDisplay = 
+/**
+ * A compact Changes column beside the author.
+ */
+"column" | 
+/**
+ * A second line below each commit message.
+ */
+"row"
+/**
  * What happened to uncommitted changes during a branch switch.
  */
 export type CheckoutOutcome = 
@@ -1154,7 +1166,19 @@ order?: string[];
  */
 hidden?: string[] }
 export type CommitDetail = { sha: string; summary: string; body: string; author_name: string; author_email: string; time: number; parent_shas: string[]; files: FileChange[] }
-export type CommitEntry = { sha: string; short_sha: string; summary: string; author_name: string; author_email: string; author_initials: string; 
+export type CommitEntry = { sha: string; short_sha: string; summary: string; 
+/**
+ * Number of files changed compared with the first parent.
+ */
+files_changed: number; 
+/**
+ * Lines added compared with the first parent.
+ */
+additions: number; 
+/**
+ * Lines removed compared with the first parent.
+ */
+deletions: number; author_name: string; author_email: string; author_initials: string; 
 /**
  * Unix epoch seconds.
  */
@@ -1496,6 +1520,18 @@ ai_instruction?: string | null;
  * Commit-graph column order and visibility.
  */
 column_layout?: ColumnLayout | null; 
+/**
+ * Whether change size appears below the message or in its own column.
+ */
+change_size_display?: ChangeSizeDisplay; 
+/**
+ * Show the change-size indicator in the commit graph.
+ */
+show_change_indicator?: boolean; 
+/**
+ * Show exact added and removed line counts beside the size bar.
+ */
+show_change_line_counts?: boolean; 
 /**
  * Default action for the commit button: "commit" or "commit_push". None
  * falls back to plain commit. Validated on the frontend.

@@ -19,6 +19,15 @@ pub struct LaneAssignment {
 }
 
 impl LaneState {
+  /// Reserve lane zero for the checked-out commit before the time-sorted walk
+  /// begins. Newer commits from other branches then use side lanes and collapse
+  /// into this primary line when the walk reaches HEAD.
+  pub fn with_primary(oid: Oid) -> Self {
+    Self {
+      active: vec![Some(oid)],
+    }
+  }
+
   pub fn assign(&mut self, oid: Oid, parents: &[Oid]) -> LaneAssignment {
     // Find the lane already expecting this commit, else allocate lowest free.
     let lane = match self.active.iter().position(|slot| *slot == Some(oid)) {
@@ -56,7 +65,10 @@ impl LaneState {
       self.active.pop();
     }
 
-    LaneAssignment { lane: lane as u32, parent_lanes }
+    LaneAssignment {
+      lane: lane as u32,
+      parent_lanes,
+    }
   }
 
   fn alloc(&mut self) -> usize {
@@ -126,6 +138,28 @@ mod tests {
     assert_eq!(c.lane, 0);
     let d = s.assign(oid(5), &[]);
     assert_eq!(d.lane, 0);
+  }
+
+  #[test]
+  fn reserved_head_stays_in_lane_zero_below_newer_history() {
+    let head = oid(3);
+    let parent = oid(4);
+    let mut s = LaneState::with_primary(head);
+
+    // A newer commit from another branch is encountered first by the
+    // time-sorted walk. It must move aside instead of claiming the active lane.
+    let newer = s.assign(oid(1), &[oid(2)]);
+    let newer_parent = s.assign(oid(2), &[head]);
+    assert_eq!(newer.lane, 1);
+    assert_eq!(newer_parent.lane, 1);
+
+    // Both expectations collapse at HEAD, which keeps lane zero and continues
+    // its own first-parent history straight down that lane.
+    let active = s.assign(head, &[parent]);
+    let active_parent = s.assign(parent, &[]);
+    assert_eq!(active.lane, 0);
+    assert_eq!(active.parent_lanes, vec![0]);
+    assert_eq!(active_parent.lane, 0);
   }
 
   #[test]

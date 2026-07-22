@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { ChevronDown, GitBranch } from 'lucide-react'
 import type { RefInfo, RefKind, RemoteInfo } from '@/lib/bindings'
 import { detectProvider, providerLabel } from '@/lib/remoteProvider'
@@ -75,49 +75,11 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
   const remotes = useRemotes(repo?.id ?? null)
   const draggingRef = useDragStore((s) => s.draggingRef)
   const [open, setOpen] = useState(false)
-  const closeTimer = useRef<number | null>(null)
-  const pointerInside = useRef(false)
   const branchMenuOpen = useRef(false)
-
-  const cancelClose = () => {
-    if (closeTimer.current === null) return
-    window.clearTimeout(closeTimer.current)
-    closeTimer.current = null
-  }
-
-  const openStack = () => {
-    cancelClose()
-    setOpen(true)
-  }
-
-  const scheduleClose = () => {
-    if (branchMenuOpen.current) return
-    cancelClose()
-    closeTimer.current = window.setTimeout(() => {
-      closeTimer.current = null
-      setOpen(false)
-    }, 140)
-  }
-
-  useEffect(() => () => cancelClose(), [])
-
-  const pointerEntered = () => {
-    pointerInside.current = true
-    openStack()
-  }
-
-  const pointerLeft = () => {
-    pointerInside.current = false
-    scheduleClose()
-  }
 
   const branchMenuChanged = (nextOpen: boolean) => {
     branchMenuOpen.current = nextOpen
-    if (nextOpen) {
-      openStack()
-    } else if (!pointerInside.current) {
-      scheduleClose()
-    }
+    if (nextOpen) setOpen(true)
   }
 
   const primary = refs.find((ref) => ref.type === 'head') ?? refs.find((ref) => ref.type === 'branch') ?? refs[0]
@@ -138,7 +100,6 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
       open={open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen && branchMenuOpen.current) return
-        if (nextOpen) cancelClose()
         setOpen(nextOpen)
       }}
     >
@@ -148,17 +109,11 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
           aria-label={`${label} and ${hiddenCount} more ${hiddenCount === 1 ? 'name' : 'names'} on this commit`}
           aria-expanded={open}
           onClick={(event) => {
-            event.preventDefault()
             event.stopPropagation()
-            openStack()
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          onPointerEnter={pointerEntered}
-          onPointerLeave={pointerLeft}
-          onFocus={openStack}
-          onBlur={scheduleClose}
           onDragEnter={() => {
-            if (draggingRef && canAccept(draggingRef)) openStack()
+            if (draggingRef && canAccept(draggingRef)) setOpen(true)
           }}
           className={cn(
             'inline-flex h-[19px] max-w-[138px] flex-none items-center overflow-hidden rounded-[5px] bg-primary font-mono text-2xs font-semibold leading-none text-primary-foreground outline-none transition-[filter,box-shadow]',
@@ -187,8 +142,6 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
         }}
         onClick={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}
-        onPointerEnter={pointerEntered}
-        onPointerLeave={pointerLeft}
         className="w-72 overflow-hidden border-border bg-panel2 p-0 shadow-[0_12px_36px_rgba(0,0,0,0.5)]"
       >
         <div className="border-b border-border bg-panel px-3 py-2.5">

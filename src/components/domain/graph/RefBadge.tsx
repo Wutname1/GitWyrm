@@ -16,7 +16,7 @@ const styles: Record<RefKind, string> = {
   head: 'bg-primary text-primary-foreground',
   branch: 'bg-primary text-primary-foreground',
   remote: 'bg-primary text-primary-foreground',
-  tag: 'bg-primary text-primary-foreground',
+  tag: 'bg-lane1 text-[var(--gw-accent-fg)]',
 }
 
 export function RefBadge({

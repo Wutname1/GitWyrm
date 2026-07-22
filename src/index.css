@@ -61,6 +61,9 @@
   --gw-lane0: #2dd4a7;
   --gw-lane1: #38bdf8;
   --gw-lane2: #f59e0b;
+  --gw-lane3: #a78bfa;
+  --gw-lane4: #fb7185;
+  --gw-lane5: #a3e635;
 
   /* shadcn semantic mapping */
   --background: var(--gw-bg);
@@ -127,6 +130,9 @@
   --color-lane0: var(--gw-lane0);
   --color-lane1: var(--gw-lane1);
   --color-lane2: var(--gw-lane2);
+  --color-lane3: var(--gw-lane3);
+  --color-lane4: var(--gw-lane4);
+  --color-lane5: var(--gw-lane5);
 
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);

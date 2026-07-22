@@ -12,6 +12,7 @@ export interface RecentRepo {
 
 export type UpdateChannel = 'stable' | 'beta'
 export type CommitButtonMode = 'commit' | 'commit_push'
+export type ChangeSizeDisplay = 'row' | 'column'
 
 /** What to do about local-only tags after a push. */
 export type TagPushDefault = 'ask' | 'always' | 'never'
@@ -192,6 +193,12 @@ interface WorkspaceState {
   columnOrder: ColumnId[]
   /** Commit-graph columns the user has hidden (persisted). */
   hiddenColumns: ColumnId[]
+  /** Where change size appears in the commit graph (persisted). */
+  changeSizeDisplay: ChangeSizeDisplay
+  /** Whether commit rows show a change-size indicator (persisted). */
+  showChangeIndicator: boolean
+  /** Whether the change-size indicator includes exact line counts (persisted). */
+  showChangeLineCounts: boolean
   /** Default action for the commit button (persisted). */
   commitButtonMode: CommitButtonMode
   /** Whether a push offers to send local-only tags too (persisted). */
@@ -256,6 +263,9 @@ interface WorkspaceState {
   toggleColumn: (id: ColumnId) => void
   /** Restore the default column order and show every column. */
   resetColumns: () => void
+  setChangeSizeDisplay: (display: ChangeSizeDisplay) => void
+  setShowChangeIndicator: (enabled: boolean) => void
+  setShowChangeLineCounts: (enabled: boolean) => void
   /** Reads settings.json once and hydrates the store; returns the raw settings for launch-time restore. */
   hydrate: () => Promise<Settings>
 }
@@ -274,6 +284,9 @@ function toSettings(s: WorkspaceState): Settings {
     ai_model: s.aiModel,
     ai_instruction: s.aiInstruction,
     column_layout: { order: s.columnOrder, hidden: s.hiddenColumns },
+    change_size_display: s.changeSizeDisplay,
+    show_change_indicator: s.showChangeIndicator,
+    show_change_line_counts: s.showChangeLineCounts,
     commit_button_mode: s.commitButtonMode,
     tag_push_default: s.tagPushDefault,
     tag_push_on_create: s.tagPushOnCreate,
@@ -314,6 +327,15 @@ function normalizeOrder(order: string[] | undefined): ColumnId[] {
     if (isColumnId(id) && !seen.has(id)) {
       seen.add(id)
       result.push(id)
+    }
+  }
+  // Older settings have no Changes column. Place it beside Author, matching
+  // the new default, while preserving every other saved column position.
+  if (!seen.has('changes')) {
+    const authorIndex = result.indexOf('author')
+    if (authorIndex >= 0) {
+      result.splice(authorIndex + 1, 0, 'changes')
+      seen.add('changes')
     }
   }
   for (const id of DEFAULT_COLUMN_ORDER) {
@@ -372,6 +394,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   aiInstruction: null,
   columnOrder: DEFAULT_COLUMN_ORDER,
   hiddenColumns: [],
+  changeSizeDisplay: 'column',
+  showChangeIndicator: true,
+  showChangeLineCounts: false,
   commitButtonMode: 'commit',
   tagPushDefault: 'ask',
   tagPushOnCreate: false,
@@ -757,6 +782,18 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ columnOrder: DEFAULT_COLUMN_ORDER, hiddenColumns: [] })
     schedulePersist()
   },
+  setChangeSizeDisplay: (display) => {
+    set({ changeSizeDisplay: display })
+    schedulePersist()
+  },
+  setShowChangeIndicator: (enabled) => {
+    set({ showChangeIndicator: enabled })
+    schedulePersist()
+  },
+  setShowChangeLineCounts: (enabled) => {
+    set({ showChangeLineCounts: enabled })
+    schedulePersist()
+  },
 
   hydrate: async () => {
     const settings = unwrap(await commands.getSettings())
@@ -773,6 +810,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         aiInstruction: settings.ai_instruction ?? null,
         columnOrder: normalizeOrder(settings.column_layout?.order),
         hiddenColumns: normalizeHidden(settings.column_layout?.hidden),
+        changeSizeDisplay: settings.change_size_display === 'row' ? 'row' : 'column',
+        showChangeIndicator: settings.show_change_indicator ?? true,
+        showChangeLineCounts: settings.show_change_line_counts ?? false,
         commitButtonMode: settings.commit_button_mode === 'commit_push' ? 'commit_push' : 'commit',
         tagPushDefault: normalizeTagPushDefault(settings.tag_push_default),
         tagPushOnCreate: settings.tag_push_on_create ?? false,

@@ -3,6 +3,7 @@ import { useWorkspaceStore } from "@/stores/workspaceStore";
 import {
   COLUMNS,
   DEFAULT_COLUMN_ORDER,
+  effectiveHiddenColumns,
   gridTemplate,
   visibleColumns,
   type ColumnId,
@@ -26,14 +27,19 @@ import { TooltipHint } from "@/components/ui/tooltip";
 export function GraphHeader() {
   const order = useWorkspaceStore((s) => s.columnOrder);
   const hidden = useWorkspaceStore((s) => s.hiddenColumns);
+  const changeSizeDisplay = useWorkspaceStore((s) => s.changeSizeDisplay);
+  const showChangeIndicator = useWorkspaceStore((s) => s.showChangeIndicator);
   const toggleColumn = useWorkspaceStore((s) => s.toggleColumn);
   const reorderColumn = useWorkspaceStore((s) => s.reorderColumn);
   const resetColumns = useWorkspaceStore((s) => s.resetColumns);
+  const setChangeSizeDisplay = useWorkspaceStore((s) => s.setChangeSizeDisplay);
+  const setShowChangeIndicator = useWorkspaceStore((s) => s.setShowChangeIndicator);
 
   const [dragId, setDragId] = useState<ColumnId | null>(null);
   const [overId, setOverId] = useState<ColumnId | null>(null);
 
-  const visible = visibleColumns(order, hidden);
+  const effectiveHidden = effectiveHiddenColumns(hidden, showChangeIndicator, changeSizeDisplay);
+  const visible = visibleColumns(order, effectiveHidden);
   const hiddenSet = new Set(hidden);
   const isModified =
     hidden.length > 0 || order.some((id, i) => id !== DEFAULT_COLUMN_ORDER[i]);
@@ -54,10 +60,11 @@ export function GraphHeader() {
           className={cn(
             "grid h-[30px] flex-none items-center border-b border-border pl-3 pr-1 text-2xs font-bold tracking-[.06em] text-muted-foreground",
           )}
-          style={{ gridTemplateColumns: gridTemplate(order, hidden) }}
+          style={{ gridTemplateColumns: gridTemplate(order, effectiveHidden) }}
         >
           {visible.map((id) => (
             <span
+              key={id}
               draggable
               onDragStart={() => setDragId(id)}
               onDragEnd={() => {
@@ -88,7 +95,8 @@ export function GraphHeader() {
       </ContextMenuTrigger>
       <ContextMenuContent className="w-52">
         {DEFAULT_COLUMN_ORDER.map((id) => {
-          const isVisible = !hiddenSet.has(id);
+          const isChanges = id === 'changes';
+          const isVisible = isChanges ? !effectiveHidden.includes(id) : !hiddenSet.has(id);
           // Never let the user hide the last remaining column.
           const isLastVisible = isVisible && visible.length === 1;
           return (
@@ -98,7 +106,18 @@ export function GraphHeader() {
               disabled={isLastVisible}
               onSelect={(e) => {
                 e.preventDefault();
-                if (!isLastVisible) toggleColumn(id);
+                if (isLastVisible) return;
+                if (!isChanges) {
+                  toggleColumn(id);
+                  return;
+                }
+                if (isVisible) {
+                  setShowChangeIndicator(false);
+                  return;
+                }
+                if (hiddenSet.has(id)) toggleColumn(id);
+                setChangeSizeDisplay('column');
+                setShowChangeIndicator(true);
               }}
             >
               {COLUMNS[id].label}
