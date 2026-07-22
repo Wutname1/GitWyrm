@@ -99,7 +99,8 @@ export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(fu
             'ml-auto whitespace-nowrap pl-1.5 font-mono text-2xs',
             // Word markers ("new", "gone") are states, not counts -- give them
             // their own weight so they don't read as an ahead/behind number.
-            /^[↑↓]/.test(item.meta)
+            // Sync counts and stash ages are quiet data, not calls to action.
+            /^[↑↓]/.test(item.meta) || section.type === 'stash'
               ? 'text-muted-foreground'
               : 'font-semibold uppercase tracking-wide text-accent-text/80'
           )}

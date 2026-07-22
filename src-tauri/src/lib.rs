@@ -68,6 +68,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::branch::commit_web_url,
     commands::stash::stash_save,
     commands::stash::stash_pop,
+    commands::stash::stash_apply,
+    commands::stash::stash_drop,
     commands::submodule::list_submodules,
     commands::submodule::update_submodule,
     commands::remote::git_fetch,

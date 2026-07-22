@@ -102,7 +102,7 @@ export function SidebarSection({
               />
             )
             const wrapped = renderItemMenu?.(section, item, row)
-            return <div key={item.id ?? item.name}>{wrapped ?? row}</div>
+            return <div key={item.sha ?? item.id ?? item.name}>{wrapped ?? row}</div>
           })}
         </div>
       )}

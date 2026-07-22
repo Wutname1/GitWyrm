@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from 'react'
-import { ArrowLeftRight, CloudOff, Tag, Trash2, Upload } from 'lucide-react'
+import { ArchiveRestore, ArrowLeftRight, CloudOff, Tag, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
+import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { useBranches, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
@@ -19,6 +20,7 @@ import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { RenameBranchDialog } from '@/components/modals/RenameBranchDialog'
 import { branchSync } from '@/lib/branchActions'
 import { BranchMenu } from '@/components/domain/branch/BranchMenu'
+import { StashContextMenu } from '@/components/domain/graph/StashRow'
 import { SidebarSection } from './SidebarSection'
 import { RemotesSection } from './RemotesSection'
 
@@ -26,6 +28,7 @@ export function LeftPanel() {
   const repo = useActiveRepo()
   const selectCommit = useUiStore((s) => s.selectCommit)
   const revealRefInGraph = useUiStore((s) => s.revealRefInGraph)
+  const revealShaInGraph = useUiStore((s) => s.revealShaInGraph)
   const openMerge = useUiStore((s) => s.openMerge)
   const openNewTag = useUiStore((s) => s.openNewTag)
   const openModal = useUiStore((s) => s.openModal)
@@ -72,7 +75,12 @@ export function LeftPanel() {
       key: 'stashes',
       label: 'STASHES',
       type: 'stash',
-      items: (stashes.data ?? []).map((s) => ({ name: s.message })),
+      items: (stashes.data ?? []).map((s) => ({
+        name: s.summary,
+        sha: s.sha,
+        meta: formatRelativeTime(s.time),
+        metaTitle: `Stashed ${formatCommitTime(s.time)}${s.branch ? ` on ${s.branch}` : ''}`,
+      })),
     },
     // PR and issue sections only exist for repos hosted on github.com.
     ...(githubSlug.data == null
@@ -126,19 +134,31 @@ export function LeftPanel() {
     tags: { run: () => openNewTag(), label: 'New tag' },
   }
 
+  const stashBySha = (sha?: string) => (stashes.data ?? []).find((s) => s.sha === sha)
+  const stashBusy = m.stashPop.isPending || m.stashApply.isPending || m.stashDrop.isPending
+
   const isItemPending = (section: SidebarSectionData, item: SectionItem) =>
     (section.type === 'branch' && m.checkout.isPending && m.checkout.variables === item.name) ||
     (section.type === 'stash' &&
-      m.stashPop.isPending &&
-      (stashes.data ?? []).findIndex((s) => s.message === item.name) === m.stashPop.variables)
+      stashBusy &&
+      stashBySha(item.sha)?.index ===
+        (m.stashPop.isPending
+          ? m.stashPop.variables
+          : m.stashApply.isPending
+            ? m.stashApply.variables
+            : m.stashDrop.variables))
 
   const isItemDisabled = (section: SidebarSectionData, item: SectionItem) =>
     isItemPending(section, item) ||
     (section.type === 'branch' && m.checkout.isPending) ||
-    (section.type === 'stash' && m.stashPop.isPending)
+    (section.type === 'stash' && stashBusy)
 
   const getPendingLabel = (section: SidebarSectionData, item: SectionItem) =>
-    section.type === 'branch' ? `Switching to ${item.name}…` : 'Restoring stash…'
+    section.type === 'branch'
+      ? `Switching to ${item.name}…`
+      : m.stashDrop.isPending
+        ? 'Deleting stash…'
+        : 'Applying stash…'
 
   // Switch to a branch. Guards against re-checking out the current branch and
   // against firing mid-checkout.
@@ -155,11 +175,11 @@ export function LeftPanel() {
       case 'branch':
         revealRefInGraph(item.name)
         break
-      case 'stash': {
-        const idx = (stashes.data ?? []).findIndex((s) => s.message === item.name)
-        if (idx >= 0) m.stashPop.mutate(idx)
+      // A click only shows the stash (scroll to its graph row, files in the
+      // drawer). Applying is an explicit action: hover icon or right-click.
+      case 'stash':
+        if (item.sha) revealShaInGraph(item.sha)
         break
-      }
       case 'pr':
       case 'issue':
         if (item.id == null) openModal('githubConnect')
@@ -174,15 +194,28 @@ export function LeftPanel() {
     if (section.type === 'branch') switchToBranch(item.name)
   }
 
-  // A quick-switch icon appears on hover for branches other than the current one.
-  const getHoverAction = (section: SidebarSectionData, item: SectionItem) =>
-    section.type === 'branch' && item.name !== currentBranch
-      ? {
-          icon: <ArrowLeftRight size={12} strokeWidth={2.2} />,
-          title: `Switch to ${item.name}`,
-          onClick: () => switchToBranch(item.name),
-        }
-      : undefined
+  // A quick-switch icon appears on hover for branches other than the current
+  // one; stashes get an apply icon.
+  const getHoverAction = (section: SidebarSectionData, item: SectionItem) => {
+    if (section.type === 'branch' && item.name !== currentBranch) {
+      return {
+        icon: <ArrowLeftRight size={12} strokeWidth={2.2} />,
+        title: `Switch to ${item.name}`,
+        onClick: () => switchToBranch(item.name),
+      }
+    }
+    if (section.type === 'stash') {
+      return {
+        icon: <ArchiveRestore size={12} strokeWidth={2.2} />,
+        title: 'Apply and remove stash',
+        onClick: () => {
+          const stash = stashBySha(item.sha)
+          if (stash != null && !stashBusy) m.stashPop.mutate(stash.index)
+        },
+      }
+    }
+    return undefined
+  }
 
   // Right-click menus for branch and tag rows. Other section types have none.
   const renderItemMenu = (
@@ -199,6 +232,11 @@ export function LeftPanel() {
           </ContextMenuContent>
         </ContextMenu>
       )
+    }
+    if (section.type === 'stash') {
+      const stash = stashBySha(item.sha)
+      if (stash == null) return null
+      return <StashContextMenu stash={stash}>{row}</StashContextMenu>
     }
     if (section.type === 'tag') {
       return (

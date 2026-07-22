@@ -503,6 +503,28 @@ async stashPop(repoId: string, index: number) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Apply a stash to the working tree while keeping it in the stash list.
+ */
+async stashApply(repoId: string, index: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stash_apply", { repoId, index }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a stash without touching the working tree.
+ */
+async stashDrop(repoId: string, index: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stash_drop", { repoId, index }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Every submodule whose checked-out commit differs from the commit the parent
  * repo pins (plus uninitialized ones). Empty when all submodules are in sync.
  */
@@ -1612,7 +1634,32 @@ tag_push_default?: string | null;
  * Whether the New Tag dialog's "send it to the remote" box starts checked.
  */
 tag_push_on_create?: boolean }
-export type StashInfo = { index: number; message: string }
+export type StashInfo = { index: number; 
+/**
+ * Raw stash message as git stores it, e.g. "On develop: auto-stash before...".
+ */
+message: string; 
+/**
+ * Message with git's "On <branch>: " / "WIP on <branch>: " prefix stripped.
+ */
+summary: string; 
+/**
+ * Branch the stash was taken on, parsed from the message when present.
+ */
+branch: string | null; 
+/**
+ * Full sha of the stash commit itself.
+ */
+sha: string; 
+/**
+ * Full sha of the commit the stash was taken on (first parent); anchors the
+ * stash to a row in the graph.
+ */
+base_sha: string; 
+/**
+ * Unix epoch seconds of the stash commit.
+ */
+time: number; files_changed: number; additions: number; deletions: number }
 /**
  * Result of a stash-save attempt. A clean working tree is a no-op, not an error.
  */

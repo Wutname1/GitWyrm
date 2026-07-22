@@ -353,10 +353,12 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Stash rows render in the graph, so every stash mutation refreshes `log`
+  // too -- otherwise a popped stash lingers as a ghost row.
   const stashSave = useMutation({
     mutationFn: async (message?: string) => unwrap(await commands.stashSave(id, message ?? null)),
     onSuccess: (outcome) => {
-      invalidate(qc, id, ['status', 'stashes'])
+      invalidate(qc, id, ['status', 'stashes', 'log'])
       if (outcome === 'nothing_to_stash') {
         toast.info('Nothing to stash -- your working tree is already clean.')
       } else {
@@ -369,8 +371,26 @@ export function useGitMutations(repoId: string | null) {
   const stashPop = useMutation({
     mutationFn: async (index: number) => unwrap(await commands.stashPop(id, index)),
     onSuccess: () => {
-      invalidate(qc, id, ['status', 'stashes'])
-      toast('Popped stash')
+      invalidate(qc, id, ['status', 'stashes', 'log'])
+      toast('Applied stash and removed it from your stash list')
+    },
+    onError,
+  })
+
+  const stashApply = useMutation({
+    mutationFn: async (index: number) => unwrap(await commands.stashApply(id, index)),
+    onSuccess: () => {
+      invalidate(qc, id, ['status', 'stashes', 'log'])
+      toast('Applied stash -- a copy stays in your stash list')
+    },
+    onError,
+  })
+
+  const stashDrop = useMutation({
+    mutationFn: async (index: number) => unwrap(await commands.stashDrop(id, index)),
+    onSuccess: () => {
+      invalidate(qc, id, ['status', 'stashes', 'log'])
+      toast('Deleted stash')
     },
     onError,
   })
@@ -814,6 +834,8 @@ export function useGitMutations(repoId: string | null) {
     checkout,
     stashSave,
     stashPop,
+    stashApply,
+    stashDrop,
     fetch,
     pull,
     push,

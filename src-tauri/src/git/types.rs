@@ -212,7 +212,22 @@ pub enum CheckoutOutcome {
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct StashInfo {
   pub index: u32,
+  /// Raw stash message as git stores it, e.g. "On develop: auto-stash before...".
   pub message: String,
+  /// Message with git's "On <branch>: " / "WIP on <branch>: " prefix stripped.
+  pub summary: String,
+  /// Branch the stash was taken on, parsed from the message when present.
+  pub branch: Option<String>,
+  /// Full sha of the stash commit itself.
+  pub sha: String,
+  /// Full sha of the commit the stash was taken on (first parent); anchors the
+  /// stash to a row in the graph.
+  pub base_sha: String,
+  /// Unix epoch seconds of the stash commit.
+  pub time: f64,
+  pub files_changed: u32,
+  pub additions: u32,
+  pub deletions: u32,
 }
 
 /// Result of a stash-save attempt. A clean working tree is a no-op, not an error.
