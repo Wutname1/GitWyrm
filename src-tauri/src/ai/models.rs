@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::catalog::{CatalogModel, CatalogProvider, Dialect};
@@ -18,16 +18,31 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 /// Fetches the user's usable models for a provider, best effort. Never errors
 /// out to the caller for a plain network/permission problem: it returns the
 /// static catalog list instead so the picker always has something to show.
-pub async fn list(app: &tauri::AppHandle, provider: &CatalogProvider) -> Vec<CatalogModel> {
+///
+/// `live` reports which of the two happened. The static catalog cannot know
+/// plan entitlements and marks everything enabled, so a caller that would
+/// auto-select a model must not treat `live: false` as an endorsement.
+pub async fn list(app: &tauri::AppHandle, provider: &CatalogProvider) -> ModelList {
   match fetch_live(app, provider).await {
     Ok(mut models) if !models.is_empty() => {
       models.sort_by(|a, b| a.id.cmp(&b.id));
       models.dedup_by(|a, b| a.id == b.id);
       models.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-      models
+      ModelList { models, live: true }
     }
-    _ => provider.models.clone(),
+    _ => ModelList {
+      models: provider.models.clone(),
+      live: false,
+    },
   }
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct ModelList {
+  pub models: Vec<CatalogModel>,
+  /// True when the list came from the provider's own `/models` endpoint, so
+  /// `enabled` reflects real entitlements rather than a static assumption.
+  pub live: bool,
 }
 
 async fn fetch_live(

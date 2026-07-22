@@ -1049,7 +1049,7 @@ async aiRemoveProvider(provider: string) : Promise<Result<null, string>> {
  * entitlements and other providers reflect key access), falling back to the
  * static catalog list.
  */
-async aiListModels(provider: string) : Promise<Result<CatalogModel[], string>> {
+async aiListModels(provider: string) : Promise<Result<ModelList, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("ai_list_models", { provider }) };
 } catch (e) {
@@ -1511,6 +1511,12 @@ full_message: string | null;
  * Paths still conflicted.
  */
 conflicts: string[] }
+export type ModelList = { models: CatalogModel[]; 
+/**
+ * True when the list came from the provider's own `/models` endpoint, so
+ * `enabled` reflects real entitlements rather than a static assumption.
+ */
+live: boolean }
 /**
  * A pending index-level operation that can leave conflicts to resolve.
  */

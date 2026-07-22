@@ -107,12 +107,29 @@ async fn fetch_raw(app: &tauri::AppHandle) -> Result<String, AppError> {
     }
   }
 
-  let fetched = reqwest::Client::new()
-    .get(CATALOG_URL)
-    .timeout(Duration::from_secs(15))
-    .send()
-    .await
-    .and_then(reqwest::Response::error_for_status);
+  // A fresh device has no cache to fall back on, so a single blip would leave
+  // the user with no providers at all. Retry briefly before giving up.
+  let http = reqwest::Client::new();
+  // Each attempt is already bounded by its own timeout, which paces the retries.
+  let mut fetched = Err(None);
+  for _ in 0..3u32 {
+    match http
+      .get(CATALOG_URL)
+      .timeout(Duration::from_secs(15))
+      .send()
+      .await
+      .and_then(reqwest::Response::error_for_status)
+    {
+      Ok(res) => {
+        fetched = Ok(res);
+        break;
+      }
+      Err(e) => fetched = Err(Some(e)),
+    }
+  }
+  let fetched = fetched.map_err(|e| {
+    e.map_or_else(|| "model catalog request never ran".to_string(), |e| e.to_string())
+  });
 
   match fetched {
     Ok(res) => {

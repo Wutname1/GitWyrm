@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -69,20 +70,27 @@ export function AiSettings() {
   }, [aiProvider, configured.data, setAiSelection])
 
   const modelsQuery = useAiModels(aiProvider, isConfigured)
-  const models = modelsQuery.data ?? provider?.models ?? []
+  const models = modelsQuery.data?.models ?? provider?.models ?? []
+  // The static catalog marks every model enabled because it cannot know plan
+  // entitlements. Only a live list is evidence a model is actually usable.
+  const entitlementsKnown = modelsQuery.data?.live ?? false
 
   // Keep the persisted model valid and usable: if the saved model isn't in the
   // live list or is disabled (e.g. Copilot plan-gated), fall back to the first
   // enabled one. Leaves the selection alone when only disabled models exist.
+  //
+  // Only ever auto-selects from a live list. Picking off the static list would
+  // hand the user a model their plan may not include, which then fails at
+  // generate time far from the cause.
   useEffect(() => {
-    if (!provider || models.length === 0) return
+    if (!provider || models.length === 0 || !entitlementsKnown) return
     const saved = models.find((mo) => mo.id === aiModel)
     if (saved?.enabled) return
     const firstEnabled = models.find((mo) => mo.enabled)
     if (firstEnabled && firstEnabled.id !== aiModel) {
       setAiSelection(provider.id, firstEnabled.id)
     }
-  }, [provider, models, aiModel, setAiSelection])
+  }, [provider, models, aiModel, entitlementsKnown, setAiSelection])
 
   const saveKey = () => {
     if (!aiProvider || !keyDraft.trim()) return
@@ -103,8 +111,20 @@ export function AiSettings() {
   }
   if (catalog.isError) {
     return (
-      <div className="py-3 text-xs text-destructive">
-        Could not load the provider catalog. Check your connection and reopen settings.
+      <div className="grid justify-items-start gap-2 py-3">
+        <div className="text-xs text-destructive">
+          Could not load the list of AI providers. This needs a connection the first time.
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-8 text-xs"
+          disabled={catalog.isFetching}
+          onClick={() => void catalog.refetch()}
+        >
+          {catalog.isFetching ? <PendingIndicator /> : <RotateCcw size={12} />}
+          {catalog.isFetching ? 'Retrying…' : 'Try again'}
+        </Button>
       </div>
     )
   }
@@ -124,9 +144,9 @@ export function AiSettings() {
             className={selectClass}
             value={aiProvider ?? ''}
             onChange={(e) => {
-              const id = e.target.value || null
-              const first = providers.find((p) => p.id === id)?.models[0]?.id ?? null
-              setAiSelection(id, first)
+              // Leave the model unset: the effect above fills it once the live
+              // list confirms what this account can actually use.
+              setAiSelection(e.target.value || null, null)
               setKeyDraft('')
             }}
           >
@@ -177,25 +197,11 @@ export function AiSettings() {
               ) : provider.id === 'github-copilot' ? (
                 <div className="space-y-2">
                   {copilot.status.state === 'waiting' ? (
-                    <div className="rounded-md border border-border bg-background p-2.5 text-xs text-sub">
-                      Enter this code on GitHub:{' '}
-                      <span className="select-all font-mono text-sm font-bold text-foreground">
-                        {copilot.status.userCode}
-                      </span>
-                      <div className="mt-1.5 flex items-center gap-2">
-                        <span className="text-2xs text-muted-foreground">
-                          Waiting for authorization…
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 text-2xs"
-                          onClick={copilot.cancel}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
+                    <DeviceCodePanel
+                      userCode={copilot.status.userCode}
+                      verificationUri={copilot.status.verificationUri}
+                      onCancel={copilot.cancel}
+                    />
                   ) : (
                     <Button
                       variant="secondary"
@@ -258,17 +264,24 @@ export function AiSettings() {
               disabled={modelsQuery.isLoading}
               onChange={(e) => setAiSelection(provider.id, e.target.value || null)}
             >
+              <option value="">Select a model…</option>
               {models.map((mo) => (
                 <option key={mo.id} value={mo.id} disabled={!mo.enabled}>
                   {mo.name}
-                  {mo.enabled ? '' : ' — needs an active Copilot subscription'}
+                  {mo.enabled ? '' : ' - needs an active Copilot subscription'}
                 </option>
               ))}
             </select>
-            {modelsQuery.isFetching && (
-              <div className="mt-1 text-2xs text-muted-foreground">
-                Loading your models…
-              </div>
+            {modelsQuery.isFetching ? (
+              <div className="mt-1 text-2xs text-muted-foreground">Loading your models…</div>
+            ) : (
+              isConfigured &&
+              !entitlementsKnown && (
+                <div className="mt-1 text-2xs text-muted-foreground">
+                  We could not check which models your account can use, so nothing is picked for
+                  you. Choose one, or retry the connection.
+                </div>
+              )
             )}
           </div>
         </div>

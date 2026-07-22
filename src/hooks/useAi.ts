@@ -13,6 +13,9 @@ export function useAiCatalog(enabled = true) {
     queryKey: catalogKey,
     enabled: enabled && isTauri,
     staleTime: 60 * 60 * 1000,
+    // The catalog is the whole provider list; without it settings has nothing
+    // to show. Worth retrying rather than bailing on the first failure.
+    retry: 2,
     queryFn: async () => unwrap(await commands.aiGetCatalog()),
   })
 }
@@ -121,9 +124,6 @@ export function useCopilotSignIn() {
         userCode: info.user_code,
         verificationUri: info.verification_uri,
       })
-      const { openUrl } = await import('@tauri-apps/plugin-opener')
-      await openUrl(info.verification_uri)
-
       let interval = Math.max(info.interval, 5)
       for (;;) {
         await new Promise((r) => setTimeout(r, interval * 1000))

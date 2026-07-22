@@ -62,7 +62,7 @@ pub fn ai_remove_provider(app: tauri::AppHandle, provider: String) -> Result<(),
 pub async fn ai_list_models(
   app: tauri::AppHandle,
   provider: String,
-) -> Result<Vec<catalog::CatalogModel>, AppError> {
+) -> Result<models::ModelList, AppError> {
   let cat = catalog::find(&app, &provider).await?;
   Ok(models::list(&app, &cat).await)
 }
