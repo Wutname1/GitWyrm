@@ -19,6 +19,11 @@ import { useUiStore } from '@/stores/uiStore'
 
 type QueryName = 'status' | 'log' | 'branches' | 'stashes' | 'tags' | 'remotes' | 'mergeState'
 
+interface FolderFilesArgs {
+  folder: string
+  paths: string[]
+}
+
 /**
  * Named sets for the invalidations that are easy to get wrong.
  *
@@ -139,9 +144,27 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  const stageFiles = useMutation({
+    mutationFn: async ({ paths }: FolderFilesArgs) => unwrap(await commands.stageFiles(id, paths)),
+    onSuccess: (_data, { folder, paths }) => {
+      invalidate(qc, id, ['status'])
+      toast(`Staged ${plural(paths.length, 'file')} in ${folder}`)
+    },
+    onError,
+  })
+
   const unstageFile = useMutation({
     mutationFn: async (path: string) => unwrap(await commands.unstageFile(id, path)),
     onSuccess: () => invalidate(qc, id, ['status']),
+    onError,
+  })
+
+  const unstageFiles = useMutation({
+    mutationFn: async ({ paths }: FolderFilesArgs) => unwrap(await commands.unstageFiles(id, paths)),
+    onSuccess: (_data, { folder, paths }) => {
+      invalidate(qc, id, ['status'])
+      toast(`Unstaged ${plural(paths.length, 'file')} in ${folder}`)
+    },
     onError,
   })
 
@@ -165,6 +188,15 @@ export function useGitMutations(repoId: string | null) {
     onSuccess: (path) => {
       invalidate(qc, id, ['status'])
       toast(`Discarded changes in ${path.split('/').pop()}`)
+    },
+    onError,
+  })
+
+  const discardFiles = useMutation({
+    mutationFn: async ({ paths }: FolderFilesArgs) => unwrap(await commands.discardFiles(id, paths)),
+    onSuccess: (_data, { folder, paths }) => {
+      invalidate(qc, id, ['status'])
+      toast(`Discarded ${plural(paths.length, 'file')} in ${folder}`)
     },
     onError,
   })
@@ -760,10 +792,13 @@ export function useGitMutations(repoId: string | null) {
 
   return {
     stageFile,
+    stageFiles,
     unstageFile,
+    unstageFiles,
     stageAll,
     unstageAll,
     discardFile,
+    discardFiles,
     discardAll,
     updateSubmodule,
     createCommit,

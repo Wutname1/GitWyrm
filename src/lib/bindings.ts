@@ -227,9 +227,31 @@ async stageFile(repoId: string, path: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Stage an exact set of files as one visible folder action.
+ */
+async stageFiles(repoId: string, paths: string[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stage_files", { repoId, paths }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async unstageFile(repoId: string, path: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("unstage_file", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Unstage an exact set of files as one visible folder action.
+ */
+async unstageFiles(repoId: string, paths: string[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("unstage_files", { repoId, paths }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -254,6 +276,18 @@ async unstageAll(repoId: string) : Promise<Result<null, string>> {
 async discardFile(repoId: string, path: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("discard_file", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Discard staged and unstaged changes for an exact set of files. The caller
+ * confirms this destructive action before invoking it.
+ */
+async discardFiles(repoId: string, paths: string[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("discard_files", { repoId, paths }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
