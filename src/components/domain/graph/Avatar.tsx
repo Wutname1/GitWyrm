@@ -16,7 +16,7 @@ export function Avatar({ initials, color, email, size = 'sm' }: AvatarProps) {
   useEffect(() => {
     if (!email) return
     let cancelled = false
-    lookup(email, px * 2).then((url) => {
+    void avatarUrl(email, px * 2).then((url) => {
       if (!cancelled) setSrc(url)
     })
     return () => {

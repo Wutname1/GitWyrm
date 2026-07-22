@@ -10,6 +10,7 @@ import {
 } from "@/lib/graphColumns";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { Avatar } from "./Avatar";
+import { AuthorHoverCard } from "./AuthorHoverCard";
 import { RefBadge } from "./RefBadge";
 import { RefStack } from "./RefStack";
 import { CommitContextMenu } from "./CommitContextMenu";
@@ -81,19 +82,28 @@ export const CommitRow = memo(function CommitRow({
       </div>
     ),
     author: (
-      <div
-        data-dim-on-drag
-        className="flex items-center gap-[7px] overflow-hidden"
+      <AuthorHoverCard
+        name={commit.author_name}
+        email={commit.author_email}
+        initials={commit.author_initials}
+        sha={commit.sha}
       >
-        <Avatar
-          initials={commit.author_initials}
-          color={color}
-          email={commit.author_email}
-        />
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-sub">
-          {commit.author_name}
-        </span>
-      </div>
+        <div
+          data-dim-on-drag
+          className="flex items-center gap-[7px] overflow-hidden"
+        >
+          <Avatar
+            initials={commit.author_initials}
+            color={color}
+            email={commit.author_email}
+          />
+          {!authorIconOnly && (
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-sub">
+              {commit.author_name}
+            </span>
+          )}
+        </div>
+      </AuthorHoverCard>
     ),
     changes: (
       <ChangeSizeIndicator

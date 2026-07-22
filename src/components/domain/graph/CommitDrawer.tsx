@@ -7,6 +7,7 @@ import { authorColor, formatCommitTime, shortSha } from '@/lib/gitDisplay'
 import { useCommitDetail } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { Avatar } from './Avatar'
+import { AuthorHoverCard } from './AuthorHoverCard'
 import { FileChangeRow } from '../FileChangeRow'
 
 function initials(name: string): string {
@@ -46,13 +47,29 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
   return (
     <div className="flex h-[212px] min-h-0 flex-none flex-col border-t border-border bg-panel">
       <div className="flex flex-none items-center gap-2.5 border-b border-border px-3.5 py-[9px]">
-        <Avatar initials={initials(d.author_name)} color={color} email={d.author_email} size="md" />
+        <AuthorHoverCard name={d.author_name} email={d.author_email} initials={initials(d.author_name)}>
+          <span className="flex-none cursor-default">
+            <Avatar
+              initials={initials(d.author_name)}
+              color={color}
+              email={d.author_email}
+              size="md"
+            />
+          </span>
+        </AuthorHoverCard>
         <div className="min-w-0 flex-1">
           <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[0.78125rem] font-semibold text-foreground">
             {d.summary}
           </div>
           <div className="text-2xs text-muted-foreground">
-            {d.author_name} committed · {formatCommitTime(d.time)} · parents{' '}
+            <AuthorHoverCard
+              name={d.author_name}
+              email={d.author_email}
+              initials={initials(d.author_name)}
+            >
+              <span className="cursor-default hover:text-foreground">{d.author_name}</span>
+            </AuthorHoverCard>{' '}
+            committed · {formatCommitTime(d.time)} · parents{' '}
             <span className="font-mono">{parents}</span>
           </div>
         </div>
