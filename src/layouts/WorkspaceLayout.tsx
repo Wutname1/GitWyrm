@@ -24,6 +24,7 @@ import {
   useWorkspaceStore,
 } from '@/stores/workspaceStore'
 import { ResizeHandle } from '@/components/ui/ResizeHandle'
+import { RepositoryPreviewCapture } from '@/components/domain/RepositoryPreviewCapture'
 
 function CenterView() {
   const view = useUiStore((s) => s.centerView)
@@ -60,7 +61,10 @@ export function WorkspaceLayout() {
   const setRightPanelWidth = useWorkspaceStore((state) => state.setRightPanelWidth)
 
   const workspaceBody = (
-    <>
+    <div
+      data-repository-preview-root
+      className="flex min-h-0 flex-1 flex-col bg-background"
+    >
       <Toolbar />
       <MergeBanner />
       <div className="flex min-h-0 flex-1">
@@ -95,11 +99,12 @@ export function WorkspaceLayout() {
         </div>
       </div>
       <StatusBar />
-    </>
+    </div>
   )
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
+      <RepositoryPreviewCapture />
       <TabBar />
       {tabLayout === 'vertical' ? (
         <div className="flex min-h-0 flex-1">

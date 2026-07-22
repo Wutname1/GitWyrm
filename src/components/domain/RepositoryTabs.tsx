@@ -27,6 +27,7 @@ import type { RepoInfo } from "@/lib/bindings";
 import { commands } from "@/lib/bindings";
 import { cn } from "@/lib/utils";
 import { normalizePath } from "@/lib/paths";
+import { useRepositoryPreview } from "@/lib/repositoryPreviews";
 import {
   TAB_GROUP_COLORS,
   useWorkspaceStore,
@@ -319,6 +320,53 @@ function RepoTabIcon({
         onError={() => setDataUrl(null)}
       />
     </span>
+  );
+}
+
+function RepoTabPreview({
+  repo,
+  name,
+  orientation,
+}: {
+  repo: RepoInfo;
+  name: string;
+  orientation: TabOrientation;
+}) {
+  const preview = useRepositoryPreview(repo.id);
+
+  return (
+    <TooltipContent
+      side={orientation === "vertical" ? "right" : "bottom"}
+      className="w-80 max-w-[calc(100vw-16px)] overflow-hidden p-0"
+    >
+      {preview && (
+        <div
+          className="overflow-hidden border-b border-border bg-background"
+          style={{ aspectRatio: `${preview.width} / ${preview.height}` }}
+        >
+          <img
+            src={preview.dataUrl}
+            alt=""
+            draggable={false}
+            className="size-full object-cover object-top"
+          />
+        </div>
+      )}
+      <div className="px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
+            {name}
+          </span>
+          <span className="flex max-w-32 items-center gap-1 font-mono text-[10px] text-sub">
+            <GitBranch size={10} strokeWidth={2} />
+            <span className="truncate">{repo.head_branch ?? "No branch"}</span>
+          </span>
+        </div>
+        <div className="mt-0.5 break-all font-mono text-[10px] leading-4 text-muted-foreground">
+          {repo.path}
+        </div>
+      </div>
+    </TooltipContent>
   );
 }
 
@@ -793,12 +841,11 @@ export function RepositoryTabs({
             </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
-          <TooltipContent side={orientation === "vertical" ? "right" : "bottom"}>
-            <div className="font-semibold">{repoName(repo)}</div>
-            <div className="max-w-64 truncate font-mono text-[10px] text-muted-foreground">
-              {repo.path}
-            </div>
-          </TooltipContent>
+          <RepoTabPreview
+            repo={repo}
+            name={repoName(repo)}
+            orientation={orientation}
+          />
         </Tooltip>
         <DropGap
           orientation={orientation}
