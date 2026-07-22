@@ -1,34 +1,6 @@
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
-
-// Gravatar accepts SHA-256 email hashes (d=404 -> 404 when no avatar exists).
-// Cache hash + existence per email for the session so scrolling stays cheap.
-const urlCache = new Map<string, Promise<string | null>>()
-
-async function gravatarUrl(email: string, px: number): Promise<string | null> {
-  const normalized = email.trim().toLowerCase()
-  if (!normalized) return null
-  const bytes = new TextEncoder().encode(normalized)
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
-  const url = `https://gravatar.com/avatar/${hash}?s=${px}&d=404`
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => resolve(url)
-    img.onerror = () => resolve(null)
-    img.src = url
-  })
-}
-
-function lookup(email: string, px: number): Promise<string | null> {
-  const key = email.trim().toLowerCase()
-  let hit = urlCache.get(key)
-  if (!hit) {
-    hit = gravatarUrl(key, px)
-    urlCache.set(key, hit)
-  }
-  return hit
-}
+import { avatarUrl } from '@/lib/avatarSource'
 
 interface AvatarProps {
   initials: string
