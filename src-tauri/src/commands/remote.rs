@@ -657,7 +657,6 @@ pub async fn list_remotes(
     let repo = open.repo.lock().unwrap();
     let records = refs::walk_branches(&repo)?;
     let locals = refs::local_tips(&records);
-    let head_oid = repo.head().ok().and_then(|h| h.target());
     let mut remotes = Vec::new();
 
     for name in repo.remotes()?.iter().flatten() {
@@ -671,12 +670,12 @@ pub async fn list_remotes(
         .map(|rec| {
           let short = rec.short_name().to_string();
 
-          // Compare against the same-named local branch when there is one. When
-          // there isn't, compare against HEAD so the row can still answer "is
-          // there work here I don't have?" - which is the whole point.
+          // A remote branch is only meaningfully ahead of or behind its
+          // same-named local branch. Comparing a remote-only branch to HEAD
+          // mixes unrelated histories and produces misleading counts.
           let counterpart = locals.get(short.as_str()).map(|&oid| (short.clone(), oid));
           let local_only_missing = counterpart.is_none();
-          let baseline = counterpart.as_ref().map(|(_, oid)| *oid).or(head_oid);
+          let baseline = counterpart.as_ref().map(|(_, oid)| *oid);
 
           let (ahead_of_local, behind_local) = match (rec.tip, baseline) {
             (Some(remote_oid), Some(base_oid)) => {

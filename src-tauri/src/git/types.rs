@@ -178,8 +178,8 @@ pub struct RemoteBranchInfo {
   pub summary: Option<String>,
   /// Name of the local branch this was compared against, when one exists.
   pub local_counterpart: Option<String>,
-  /// Commits this remote branch has that the local counterpart lacks. When
-  /// there is no counterpart, commits it has that HEAD lacks.
+  /// Commits this remote branch has that the local counterpart lacks.
+  /// Zero when there is no same-named local branch to compare with.
   pub ahead_of_local: u32,
   /// Commits the local counterpart has that this remote branch lacks.
   pub behind_local: u32,
