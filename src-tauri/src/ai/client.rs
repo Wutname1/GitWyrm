@@ -1,14 +1,14 @@
 //! Minimal chat-completion client speaking the two API dialects that cover
 //! the catalog: Anthropic Messages and OpenAI chat/completions.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
 use super::catalog::{CatalogProvider, Dialect};
 use crate::error::AppError;
 
-const TIMEOUT: Duration = Duration::from_secs(60);
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct ChatRequest<'a> {
   pub provider: &'a CatalogProvider,
@@ -17,6 +17,7 @@ pub struct ChatRequest<'a> {
   pub system: &'a str,
   pub user: &'a str,
   pub max_tokens: u32,
+  pub timeout: Duration,
 }
 
 /// Extra headers some providers require beyond the bearer token.
@@ -34,6 +35,17 @@ pub fn extra_headers(provider_id: &str, req: reqwest::RequestBuilder) -> reqwest
 pub async fn chat(req: ChatRequest<'_>) -> Result<String, AppError> {
   let client = reqwest::Client::new();
   let base = req.provider.base_url.trim_end_matches('/');
+  let input_chars = req.system.chars().count() + req.user.chars().count();
+  let started = Instant::now();
+
+  log::info!(
+    "AI request started: provider={}, model={}, input_chars={}, max_tokens={}, timeout_secs={}",
+    req.provider.id,
+    req.model,
+    input_chars,
+    req.max_tokens,
+    req.timeout.as_secs()
+  );
 
   let (url, builder, body): (String, reqwest::RequestBuilder, Value) = match req.provider.dialect {
     Dialect::Anthropic => {
@@ -66,11 +78,31 @@ pub async fn chat(req: ChatRequest<'_>) -> Result<String, AppError> {
   };
 
   let res = extra_headers(&req.provider.id, builder)
-    .timeout(TIMEOUT)
+    .timeout(req.timeout)
     .json(&body)
     .send()
     .await
-    .map_err(|e| AppError::Other(format!("AI request failed: {e}")))?;
+    .map_err(|error| {
+      let elapsed_ms = started.elapsed().as_millis();
+      log::error!(
+        "AI request transport failed: provider={}, model={}, input_chars={}, elapsed_ms={}, timeout={}, connect={}, error={}",
+        req.provider.id,
+        req.model,
+        input_chars,
+        elapsed_ms,
+        error.is_timeout(),
+        error.is_connect(),
+        error
+      );
+      if error.is_timeout() {
+        AppError::Other(format!(
+          "AI took longer than {} to respond. No changes were made. Try again, or choose a faster model.",
+          duration_label(req.timeout)
+        ))
+      } else {
+        AppError::Other(format!("AI request failed: {error}"))
+      }
+    })?;
 
   let status = res.status();
   let text = res
@@ -78,7 +110,23 @@ pub async fn chat(req: ChatRequest<'_>) -> Result<String, AppError> {
     .await
     .map_err(|e| AppError::Other(format!("AI response read failed: {e}")))?;
 
+  log::info!(
+    "AI response received: provider={}, model={}, status={}, response_chars={}, elapsed_ms={}",
+    req.provider.id,
+    req.model,
+    status,
+    text.chars().count(),
+    started.elapsed().as_millis()
+  );
+
   if !status.is_success() {
+    log::error!(
+      "AI provider rejected request: provider={}, model={}, status={}, response={}",
+      req.provider.id,
+      req.model,
+      status,
+      snippet(&text)
+    );
     return Err(AppError::Other(format!(
       "AI request to {url} failed ({status}): {}",
       snippet(&text)
@@ -103,9 +151,52 @@ pub async fn chat(req: ChatRequest<'_>) -> Result<String, AppError> {
       .map(str::to_string),
   };
 
-  content.ok_or_else(|| AppError::Other(format!("AI response had no text: {}", snippet(&text))))
+  content.ok_or_else(|| {
+    let completion_tokens = parsed["usage"]["completion_tokens"].as_u64();
+    let finish_reason = parsed["choices"][0]["finish_reason"].as_str().unwrap_or("missing");
+    let choices = parsed["choices"].as_array().map(Vec::len).unwrap_or_default();
+    log::error!(
+      "AI response had no text: provider={}, model={}, choices={}, finish_reason={}, completion_tokens={:?}, max_tokens={}",
+      req.provider.id,
+      req.model,
+      choices,
+      finish_reason,
+      completion_tokens,
+      req.max_tokens
+    );
+
+    if completion_tokens.is_some_and(|used| used >= u64::from(req.max_tokens)) {
+      AppError::Other(format!(
+        "AI used all {} response tokens before it finished. No changes were made. Try again with fewer changes or a faster model.",
+        req.max_tokens
+      ))
+    } else {
+      AppError::Other(format!("AI response had no text: {}", snippet(&text)))
+    }
+  })
 }
 
 fn snippet(text: &str) -> String {
   text.chars().take(300).collect()
+}
+
+fn duration_label(duration: Duration) -> String {
+  let seconds = duration.as_secs();
+  if seconds >= 60 && seconds % 60 == 0 {
+    let minutes = seconds / 60;
+    format!("{minutes} minute{}", if minutes == 1 { "" } else { "s" })
+  } else {
+    format!("{seconds} second{}", if seconds == 1 { "" } else { "s" })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn timeout_labels_are_plain_language() {
+    assert_eq!(duration_label(Duration::from_secs(300)), "5 minutes");
+    assert_eq!(duration_label(Duration::from_secs(45)), "45 seconds");
+  }
 }

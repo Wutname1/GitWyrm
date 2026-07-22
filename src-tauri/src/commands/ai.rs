@@ -190,6 +190,7 @@ pub async fn generate_commit_message(
     system: &system,
     user: &user,
     max_tokens: 1024,
+    timeout: client::DEFAULT_TIMEOUT,
   })
   .await?;
 
