@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { commands, type BranchSwitchMode, type RepoInfo, type Settings } from '@/lib/bindings'
+import { log } from '@/lib/log'
 import { normalizePath } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
 import {
@@ -656,6 +657,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       order.splice(Math.min(insertionIndex, order.length), 0, { type: 'group', id })
       return { tabGroups: groups, tabOrder: order }
     })
+    log.info(`workspace: created tab group ${id} with ${repoPaths.length} repo(s)`)
     schedulePersist()
     return id
   },
@@ -673,6 +675,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         tabOrder: workspace.order,
       }
     })
+    log.info(`workspace: added repo to group ${groupId}`)
     schedulePersist()
   },
   removeRepoFromGroup: (repoPath) => {
@@ -689,6 +692,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       })
       return { tabGroups: workspace.groups, tabOrder: order }
     })
+    log.info('workspace: removed repo from its group')
     schedulePersist()
   },
   renameTabGroup: (groupId, name) => {
