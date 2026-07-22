@@ -138,8 +138,13 @@ jobs:
 
           # Cargo.lock records the package's own version too. Left stale it
           # contradicts Cargo.toml, which fails any --locked/--frozen build.
-          cargo update -p gitwyrm --offline --manifest-path src-tauri/Cargo.toml
-          if ($LASTEXITCODE -ne 0) { throw "Failed to sync Cargo.lock to $version" }
+          # Rewritten in place rather than via `cargo update`, which needs the
+          # registry index and so cannot run before dependencies are fetched.
+          $lock = Get-Content src-tauri/Cargo.lock -Raw
+          $pattern = '(?m)^(name = "gitwyrm"\r?\nversion = )"[^"]*"'
+          if ($lock -notmatch $pattern) { throw "gitwyrm package entry not found in Cargo.lock" }
+          $lock = [regex]::Replace($lock, $pattern, "`$1`"$version`"")
+          Set-Content src-tauri/Cargo.lock -Value $lock -NoNewline
 
           npm version $version --no-git-tag-version --allow-same-version
 
