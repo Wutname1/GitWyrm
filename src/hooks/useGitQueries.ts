@@ -146,6 +146,22 @@ export function useFileBlame(repoId: string | null, path: string | null, sha: st
   })
 }
 
+/**
+ * True when a file has no commits behind it, so history and blame have nothing
+ * to show. A file pinned to a commit is committed by definition; otherwise it
+ * counts as new only if every entry the working tree has for it is an add -- a
+ * file staged as added and then modified again still has no history.
+ *
+ * Returns false while status is loading: hiding actions and then popping them
+ * back in reads worse than briefly offering one that opens an empty view.
+ */
+export function useNeverCommitted(repoId: string | null, path: string | null, sha: string | null) {
+  const status = useStatus(repoId)
+  if (sha != null || path == null || !status.data) return false
+  const entries = [...status.data.staged, ...status.data.unstaged].filter((f) => f.path === path)
+  return entries.length > 0 && entries.every((f) => f.status === 'A')
+}
+
 export function useMergeState(repoId: string | null) {
   return useQuery({
     queryKey: keys.mergeState(repoId ?? 'none'),

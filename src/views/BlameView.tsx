@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { cn } from '@/lib/utils'
-import { authorColor, formatCommitTime, shortSha } from '@/lib/gitDisplay'
+import { commitColor, formatCommitTime, shortSha } from '@/lib/gitDisplay'
 import { useFileBlame } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
@@ -75,7 +75,7 @@ export function BlameView() {
 
         {blocks.map((block) => {
           const first = block.lines[0]
-          const color = authorColor(first.author_name)
+          const color = commitColor(block.sha)
           return (
             <div key={`${block.sha}:${first.line_no}`} className="flex items-stretch">
               {/* Who and when, once per run of lines from the same commit. */}

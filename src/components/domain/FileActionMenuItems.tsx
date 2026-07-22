@@ -4,6 +4,7 @@ import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-m
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { useNeverCommitted } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
@@ -32,6 +33,9 @@ export function FileActionMenuItems({ path, sha = null }: FileActionMenuItemsPro
   const [confirmRestore, setConfirmRestore] = useState(false)
   const name = path.split('/').pop() ?? path
   const workingCopy = sha == null
+  // A file with no commits behind it has no history to show and nothing to be
+  // restored to, so both are left out rather than offered and then failing.
+  const neverCommitted = useNeverCommitted(repo?.id ?? null, path, sha)
 
   return (
     <>
@@ -51,23 +55,29 @@ export function FileActionMenuItems({ path, sha = null }: FileActionMenuItemsPro
         onRun={() => m.revealFile.mutate(path)}
       />
 
-      <ContextMenuSeparator />
-      <ContextMenuItem onSelect={() => openFileHistory(path)}>
-        <History />
-        File history
-      </ContextMenuItem>
-      <ContextMenuItem onSelect={() => openBlame(path, sha)}>
-        <UserSearch />
-        Blame
-      </ContextMenuItem>
+      {!neverCommitted && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => openFileHistory(path)}>
+            <History />
+            File history
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => openBlame(path, sha)}>
+            <UserSearch />
+            Blame
+          </ContextMenuItem>
+        </>
+      )}
 
       {workingCopy && (
         <>
           <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => setConfirmRestore(true)}>
-            <Undo2 />
-            Restore file
-          </ContextMenuItem>
+          {!neverCommitted && (
+            <ContextMenuItem onSelect={() => setConfirmRestore(true)}>
+              <Undo2 />
+              Restore file
+            </ContextMenuItem>
+          )}
           <ContextMenuItem variant="destructive" onSelect={() => setConfirmDelete(true)}>
             <Trash2 />
             Delete file

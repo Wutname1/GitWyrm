@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { shortSha } from '@/lib/gitDisplay'
 import { TooltipButton } from '@/components/ui/tooltip'
 import { useUiStore, type DiffRequest } from '@/stores/uiStore'
+import { FileViewTabs } from '@/components/domain/file/FileViewTabs'
 
 interface FileHeaderProps {
   request: DiffRequest
@@ -37,6 +38,7 @@ export function FileHeader({ request, additions, deletions }: FileHeaderProps) {
       <span className="font-mono text-2xs text-added">+{additions}</span>
       <span className="font-mono text-2xs text-removed">-{deletions}</span>
       <div className="flex-1" />
+      <FileViewTabs path={request.path} mode="diff" />
       <TooltipButton
         onClick={closeDiff}
         tooltip="Back to graph"

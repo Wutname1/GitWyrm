@@ -188,10 +188,27 @@ export const useUiStore = create<UiState>((set) => ({
   deleteBranchPrompt: (name) => set({ branchToDelete: name }),
   openRemoteSync: (source, target) =>
     set({ activeModal: 'remote-sync', syncSource: source, syncTarget: target }),
-  openDiff: (request) => set({ diffRequest: request, centerView: 'diff' }),
+  // Remember which commit a diff came from, so the file view tabs can offer
+  // that commit's blame and diff rather than dropping back to the working tree.
+  openDiff: (request) =>
+    set({
+      diffRequest: request,
+      fileTarget: {
+        path: request.path,
+        sha: request.source.kind === 'commit' ? request.source.sha : null,
+      },
+      centerView: 'diff',
+    }),
   closeDiff: () => set({ diffRequest: null, fileTarget: null, centerView: 'graph' }),
+  // History covers the whole file rather than one commit, but the commit we
+  // arrived with is kept so tabbing through History and back to Diff or Blame
+  // still lands on that commit instead of the working tree.
   openFileHistory: (path) =>
-    set({ centerView: 'fileHistory', fileTarget: { path, sha: null }, diffRequest: null }),
+    set((s) => ({
+      centerView: 'fileHistory',
+      fileTarget: { path, sha: s.fileTarget?.path === path ? (s.fileTarget.sha ?? null) : null },
+      diffRequest: null,
+    })),
   openBlame: (path, sha = null) =>
     set({ centerView: 'blame', fileTarget: { path, sha }, diffRequest: null }),
   openConflict: (path) => set({ conflictPath: path, centerView: 'conflict' }),

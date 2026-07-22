@@ -24,13 +24,27 @@ export function statusColor(st: StatusCode): string {
 
 const AUTHOR_PALETTE = ['#2dd4a7', '#38bdf8', '#f59e0b', '#e06b9a', '#a78bfa', '#fb7185', '#4ade80']
 
-/** Deterministic color per author (keyed by email or name). */
-export function authorColor(key: string): string {
+function paletteColor(key: string, palette: readonly string[]): string {
   let hash = 0
   for (let i = 0; i < key.length; i++) {
     hash = (hash * 31 + key.charCodeAt(i)) | 0
   }
-  return AUTHOR_PALETTE[Math.abs(hash) % AUTHOR_PALETTE.length]
+  return palette[Math.abs(hash) % palette.length]
+}
+
+/** Deterministic color per author (keyed by email or name). */
+export function authorColor(key: string): string {
+  return paletteColor(key, AUTHOR_PALETTE)
+}
+
+/**
+ * Deterministic color per commit. Blame uses this rather than the author color
+ * so that adjacent blocks by the same person still read as separate commits.
+ * A sha is uniformly distributed already, but it is hashed anyway so that
+ * neighbouring shas do not land on neighbouring palette slots.
+ */
+export function commitColor(sha: string): string {
+  return paletteColor(sha, AUTHOR_PALETTE)
 }
 
 /** Short relative age: "just now", "4h ago", "3d ago", "2mo ago". */
