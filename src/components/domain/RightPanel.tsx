@@ -36,7 +36,7 @@ export function RightPanel() {
     <div
       data-dim-on-drag
       className={cn(
-        'flex w-80 min-w-80 min-h-0 flex-none flex-col border-l bg-panel transition-colors duration-500',
+        'flex h-full w-full min-h-0 flex-col border-l bg-panel transition-colors duration-500',
         flash ? 'border-primary' : 'border-border'
       )}
     >

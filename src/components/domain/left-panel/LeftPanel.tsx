@@ -279,7 +279,7 @@ export function LeftPanel() {
 
   if (!repo) {
     return (
-      <div className="w-60 flex-none border-r border-border bg-panel p-4 text-xs text-muted-foreground">
+      <div className="h-full w-full border-r border-border bg-panel p-4 text-xs text-muted-foreground">
         No repository open
       </div>
     )
@@ -289,7 +289,7 @@ export function LeftPanel() {
   const otherSections = sections.slice(1)
 
   return (
-    <div data-dim-on-drag className="w-60 flex-none overflow-y-auto border-r border-border bg-panel pb-6 pt-1.5">
+    <div data-dim-on-drag className="h-full w-full overflow-y-auto border-r border-border bg-panel pb-6 pt-1.5">
       <SidebarSection
         key={localSection.key}
         section={localSection}

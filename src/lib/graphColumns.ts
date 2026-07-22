@@ -9,26 +9,46 @@ export type ColumnId = 'refs' | 'graph' | 'message' | 'author' | 'changes' | 'da
 export interface ColumnDef {
   id: ColumnId
   label: string
-  /** CSS grid track sizing for this column. */
-  track: string
-  /** Fixed pixel width, used to position the graph SVG. Null for the flexible message column. */
-  width: number | null
+  defaultWidth: number
+  minWidth: number
+  maxWidth: number
+  /** The message column fills unused room until the user gives it an explicit width. */
+  flexible?: boolean
 }
 
 export const COLUMNS: Record<ColumnId, ColumnDef> = {
-  refs: { id: 'refs', label: 'BRANCH / TAG', track: '150px', width: 150 },
-  graph: { id: 'graph', label: 'GRAPH', track: '124px', width: 124 },
-  message: { id: 'message', label: 'COMMIT MESSAGE', track: 'minmax(190px,1fr)', width: null },
-  author: { id: 'author', label: 'AUTHOR', track: '150px', width: 150 },
-  changes: { id: 'changes', label: 'CHANGES', track: '160px', width: 160 },
-  date: { id: 'date', label: 'DATE', track: '110px', width: 110 },
-  sha: { id: 'sha', label: 'SHA', track: '72px', width: 72 },
+  refs: { id: 'refs', label: 'BRANCH / TAG', defaultWidth: 150, minWidth: 88, maxWidth: 360 },
+  graph: { id: 'graph', label: 'GRAPH', defaultWidth: 124, minWidth: 88, maxWidth: 360 },
+  message: { id: 'message', label: 'COMMIT MESSAGE', defaultWidth: 320, minWidth: 160, maxWidth: 720, flexible: true },
+  author: { id: 'author', label: 'AUTHOR', defaultWidth: 150, minWidth: 88, maxWidth: 320 },
+  changes: { id: 'changes', label: 'CHANGES', defaultWidth: 160, minWidth: 112, maxWidth: 280 },
+  date: { id: 'date', label: 'DATE', defaultWidth: 110, minWidth: 88, maxWidth: 220 },
+  sha: { id: 'sha', label: 'SHA', defaultWidth: 72, minWidth: 56, maxWidth: 160 },
 }
 
 export const DEFAULT_COLUMN_ORDER: ColumnId[] = ['refs', 'graph', 'message', 'author', 'changes', 'date', 'sha']
+export type ColumnWidths = Partial<Record<ColumnId, number>>
 
-/** Pixel width used for the graph SVG when the GRAPH column is visible. */
-export const GRAPH_COLUMN_WIDTH = COLUMNS.graph.width ?? 96
+export function clampColumnWidth(id: ColumnId, width: number): number {
+  const column = COLUMNS[id]
+  if (!Number.isFinite(width)) return column.defaultWidth
+  return Math.round(Math.min(column.maxWidth, Math.max(column.minWidth, width)))
+}
+
+export function columnWidth(id: ColumnId, widths: ColumnWidths): number {
+  return clampColumnWidth(id, widths[id] ?? COLUMNS[id].defaultWidth)
+}
+
+export function normalizeColumnWidths(
+  widths: Partial<Record<string, number>> | undefined,
+): ColumnWidths {
+  const result: ColumnWidths = {}
+  for (const id of DEFAULT_COLUMN_ORDER) {
+    const width = widths?.[id]
+    if (width != null && Number.isFinite(width)) result[id] = clampColumnWidth(id, width)
+  }
+  return result
+}
 
 /** Columns visible, in display order (order minus hidden). */
 export function visibleColumns(order: ColumnId[], hidden: ColumnId[]): ColumnId[] {
@@ -50,25 +70,12 @@ export function effectiveHiddenColumns(
 }
 
 /** Builds the `grid-template-columns` value for the visible columns, in order. */
-export function gridTemplate(order: ColumnId[], hidden: ColumnId[]): string {
+export function gridTemplate(order: ColumnId[], hidden: ColumnId[], widths: ColumnWidths): string {
   return visibleColumns(order, hidden)
-    .map((id) => COLUMNS[id].track)
+    .map((id) => {
+      const column = COLUMNS[id]
+      if (column.flexible && widths[id] == null) return `minmax(${column.minWidth}px,1fr)`
+      return `${columnWidth(id, widths)}px`
+    })
     .join(' ')
-}
-
-/**
- * Left offset (px) where the GRAPH column starts, summing the fixed widths of
- * every visible column before it. Returns null when the graph column is hidden.
- * The message column has no fixed width and never precedes graph in practice,
- * but if it did we cannot resolve a pixel offset, so we treat it as 0.
- */
-export function graphLeftOffset(order: ColumnId[], hidden: ColumnId[]): number | null {
-  const visible = visibleColumns(order, hidden)
-  const graphIndex = visible.indexOf('graph')
-  if (graphIndex === -1) return null
-  let left = 0
-  for (let i = 0; i < graphIndex; i++) {
-    left += COLUMNS[visible[i]].width ?? 0
-  }
-  return left
 }

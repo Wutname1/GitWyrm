@@ -2,7 +2,13 @@ import { create } from 'zustand'
 import { commands, type BranchSwitchMode, type RepoInfo, type Settings } from '@/lib/bindings'
 import { normalizePath } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
-import { DEFAULT_COLUMN_ORDER, type ColumnId } from '@/lib/graphColumns'
+import {
+  DEFAULT_COLUMN_ORDER,
+  clampColumnWidth,
+  normalizeColumnWidths,
+  type ColumnId,
+  type ColumnWidths,
+} from '@/lib/graphColumns'
 import { useUiStore } from '@/stores/uiStore'
 
 export interface RecentRepo {
@@ -52,6 +58,14 @@ export const MIN_VERTICAL_TAB_WIDTH = 48
 export const MAX_VERTICAL_TAB_WIDTH = 420
 export const DEFAULT_VERTICAL_TAB_WIDTH = 248
 
+/** Saved width limits for the main workspace panes. */
+export const MIN_LEFT_PANEL_WIDTH = 176
+export const MAX_LEFT_PANEL_WIDTH = 420
+export const DEFAULT_LEFT_PANEL_WIDTH = 240
+export const MIN_RIGHT_PANEL_WIDTH = 240
+export const MAX_RIGHT_PANEL_WIDTH = 520
+export const DEFAULT_RIGHT_PANEL_WIDTH = 320
+
 /** Clamps a scale into the supported range and rounds to whole percent. */
 export function clampUiScale(scale: number): number {
   if (!Number.isFinite(scale)) return DEFAULT_UI_SCALE
@@ -62,6 +76,16 @@ export function clampUiScale(scale: number): number {
 export function clampVerticalTabWidth(width: number): number {
   if (!Number.isFinite(width)) return DEFAULT_VERTICAL_TAB_WIDTH
   return Math.round(Math.min(MAX_VERTICAL_TAB_WIDTH, Math.max(MIN_VERTICAL_TAB_WIDTH, width)))
+}
+
+export function clampLeftPanelWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_LEFT_PANEL_WIDTH
+  return Math.round(Math.min(MAX_LEFT_PANEL_WIDTH, Math.max(MIN_LEFT_PANEL_WIDTH, width)))
+}
+
+export function clampRightPanelWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_RIGHT_PANEL_WIDTH
+  return Math.round(Math.min(MAX_RIGHT_PANEL_WIDTH, Math.max(MIN_RIGHT_PANEL_WIDTH, width)))
 }
 
 function pathKey(path: string): string {
@@ -203,6 +227,12 @@ interface WorkspaceState {
   columnOrder: ColumnId[]
   /** Commit-graph columns the user has hidden (persisted). */
   hiddenColumns: ColumnId[]
+  /** Explicit commit-graph column widths (persisted). */
+  columnWidths: ColumnWidths
+  /** Width of the branches and tags pane (persisted). */
+  leftPanelWidth: number
+  /** Width of the changes and commit pane (persisted). */
+  rightPanelWidth: number
   /** Where change size appears in the commit graph (persisted). */
   changeSizeDisplay: ChangeSizeDisplay
   /** Whether commit rows show a change-size indicator (persisted). */
@@ -285,6 +315,12 @@ interface WorkspaceState {
   toggleColumn: (id: ColumnId) => void
   /** Restore the default column order and show every column. */
   resetColumns: () => void
+  /** Resize one graph column. */
+  setColumnWidth: (id: ColumnId, width: number) => void
+  /** Return one graph column to its default sizing behavior. */
+  resetColumnWidth: (id: ColumnId) => void
+  setLeftPanelWidth: (width: number) => void
+  setRightPanelWidth: (width: number) => void
   setChangeSizeDisplay: (display: ChangeSizeDisplay) => void
   setShowChangeIndicator: (enabled: boolean) => void
   setShowChangeLineCounts: (enabled: boolean) => void
@@ -305,7 +341,9 @@ function toSettings(s: WorkspaceState): Settings {
     ai_provider: s.aiProvider,
     ai_model: s.aiModel,
     ai_instruction: s.aiInstruction,
-    column_layout: { order: s.columnOrder, hidden: s.hiddenColumns },
+    column_layout: { order: s.columnOrder, hidden: s.hiddenColumns, widths: s.columnWidths },
+    left_panel_width: s.leftPanelWidth,
+    right_panel_width: s.rightPanelWidth,
     change_size_display: s.changeSizeDisplay,
     show_change_indicator: s.showChangeIndicator,
     show_change_line_counts: s.showChangeLineCounts,
@@ -419,6 +457,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   aiInstruction: null,
   columnOrder: DEFAULT_COLUMN_ORDER,
   hiddenColumns: [],
+  columnWidths: {},
+  leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
+  rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
   changeSizeDisplay: 'column',
   showChangeIndicator: true,
   showChangeLineCounts: false,
@@ -829,7 +870,27 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     schedulePersist()
   },
   resetColumns: () => {
-    set({ columnOrder: DEFAULT_COLUMN_ORDER, hiddenColumns: [] })
+    set({ columnOrder: DEFAULT_COLUMN_ORDER, hiddenColumns: [], columnWidths: {} })
+    schedulePersist()
+  },
+  setColumnWidth: (id, width) => {
+    set((s) => ({ columnWidths: { ...s.columnWidths, [id]: clampColumnWidth(id, width) } }))
+    schedulePersist()
+  },
+  resetColumnWidth: (id) => {
+    set((s) => {
+      const columnWidths = { ...s.columnWidths }
+      delete columnWidths[id]
+      return { columnWidths }
+    })
+    schedulePersist()
+  },
+  setLeftPanelWidth: (width) => {
+    set({ leftPanelWidth: clampLeftPanelWidth(width) })
+    schedulePersist()
+  },
+  setRightPanelWidth: (width) => {
+    set({ rightPanelWidth: clampRightPanelWidth(width) })
     schedulePersist()
   },
   setChangeSizeDisplay: (display) => {
@@ -860,6 +921,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         aiInstruction: settings.ai_instruction ?? null,
         columnOrder: normalizeOrder(settings.column_layout?.order),
         hiddenColumns: normalizeHidden(settings.column_layout?.hidden),
+        columnWidths: normalizeColumnWidths(settings.column_layout?.widths),
+        leftPanelWidth: clampLeftPanelWidth(settings.left_panel_width ?? DEFAULT_LEFT_PANEL_WIDTH),
+        rightPanelWidth: clampRightPanelWidth(settings.right_panel_width ?? DEFAULT_RIGHT_PANEL_WIDTH),
         changeSizeDisplay: settings.change_size_display === 'row' ? 'row' : 'column',
         showChangeIndicator: settings.show_change_indicator ?? true,
         showChangeLineCounts: settings.show_change_line_counts ?? false,

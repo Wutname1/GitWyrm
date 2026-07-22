@@ -99,6 +99,7 @@ interface StashRowProps {
 export function StashRow({ stash, rowHeight, selected, onSelect, style }: StashRowProps) {
   const order = useWorkspaceStore((s) => s.columnOrder)
   const hidden = useWorkspaceStore((s) => s.hiddenColumns)
+  const widths = useWorkspaceStore((s) => s.columnWidths)
   const changeSizeDisplay = useWorkspaceStore((s) => s.changeSizeDisplay)
   const showChangeIndicator = useWorkspaceStore((s) => s.showChangeIndicator)
   const showLineCounts = useWorkspaceStore((s) => s.showChangeLineCounts)
@@ -144,7 +145,7 @@ export function StashRow({ stash, rowHeight, selected, onSelect, style }: StashR
     <StashContextMenu stash={stash}>
       <div
         onClick={onSelect}
-        style={{ height: rowHeight, gridTemplateColumns: gridTemplate(order, effectiveHidden), ...style }}
+        style={{ height: rowHeight, gridTemplateColumns: gridTemplate(order, effectiveHidden, widths), ...style }}
         className={cn(
           'grid cursor-pointer items-center pr-1',
           selected && 'bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]'

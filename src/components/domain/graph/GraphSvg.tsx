@@ -1,12 +1,9 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { CommitEntry, StashInfo } from '@/lib/bindings'
 import { laneColor } from '@/lib/gitDisplay'
-import { GRAPH_COLUMN_WIDTH } from '@/lib/graphColumns'
 
-const X0 = 16
+const X0 = 14
 const LANE_WIDTH = 20
-
-const laneX = (lane: number) => X0 + lane * LANE_WIDTH
 
 /**
  * Route an edge like a rail line: change lanes close to an endpoint, then run
@@ -71,8 +68,8 @@ interface GraphSvgProps {
   /** Virtualized visible window (inclusive row indices). */
   startIndex: number
   endIndex: number
-  /** Left offset (px) of the graph column within the row grid. */
-  left: number
+  /** Current width of the graph grid cell. */
+  width: number
   /** Height shared by the virtualized rows and graph geometry. */
   rowHeight: number
 }
@@ -85,7 +82,7 @@ interface GraphSvgProps {
  * its base commit's lane with a dashed edge down to that commit, so a stash
  * reads as "attached to this point in history, not on the line".
  */
-export function GraphSvg({ rows, selectedSha, startIndex, endIndex, left, rowHeight }: GraphSvgProps) {
+export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHeight }: GraphSvgProps) {
   const rowCenterY = (row: number) => row * rowHeight + rowHeight / 2
 
   // Row index and lane of every loaded commit, keyed by sha.
@@ -175,6 +172,23 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, left, rowHei
     return m
   }, [rows, commitRowBySha, commitTrackIsBusy, pendingTrack, headCommit])
 
+  // Keep every lane inside the resized graph cell. At the default and wider
+  // sizes lanes retain their familiar 20px rhythm; narrowing the column
+  // compresses only the horizontal spacing, never the row or edge topology.
+  const maxTrack = useMemo(() => {
+    let max = pendingTrack ?? 0
+    for (const row of rows) {
+      if (row.kind !== 'commit') continue
+      max = Math.max(max, row.commit.lane, ...row.commit.parent_lanes)
+    }
+    for (const track of stashTrackBySha.values()) max = Math.max(max, track)
+    return max
+  }, [rows, pendingTrack, stashTrackBySha])
+  const laneSpacing = maxTrack === 0
+    ? LANE_WIDTH
+    : Math.min(LANE_WIDTH, (width - X0 * 2) / maxTrack)
+  const laneX = useCallback((lane: number) => X0 + lane * laneSpacing, [laneSpacing])
+
   const edges = useMemo(() => {
     const out: { d: string; color: string; fade?: boolean; dashed?: boolean }[] = []
     const lo = Math.max(0, startIndex - 30)
@@ -208,14 +222,13 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, left, rowHei
     }
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, commitRowBySha, startIndex, endIndex, rowHeight])
+  }, [rows, commitRowBySha, startIndex, endIndex, rowHeight, laneX])
 
   return (
     <svg
-      width={GRAPH_COLUMN_WIDTH}
+      width={width}
       height={rows.length * rowHeight}
-      style={{ left }}
-      className="pointer-events-none absolute top-0 overflow-visible"
+      className="block overflow-hidden"
     >
       {edges.map((e, i) => (
         <path

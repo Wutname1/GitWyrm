@@ -1220,7 +1220,11 @@ order?: string[];
 /**
  * Column ids the user has hidden.
  */
-hidden?: string[] }
+hidden?: string[]; 
+/**
+ * Saved widths in logical pixels, keyed by column id.
+ */
+widths?: Partial<{ [key in string]: number }> }
 export type CommitDetail = { sha: string; summary: string; body: string; author_name: string; author_email: string; time: number; parent_shas: string[]; files: FileChange[] }
 export type CommitEntry = { sha: string; short_sha: string; summary: string; 
 /**
@@ -1576,6 +1580,14 @@ ai_instruction?: string | null;
  * Commit-graph column order and visibility.
  */
 column_layout?: ColumnLayout | null; 
+/**
+ * Saved width of the branches and tags pane in logical pixels.
+ */
+left_panel_width?: number; 
+/**
+ * Saved width of the changes and commit pane in logical pixels.
+ */
+right_panel_width?: number; 
 /**
  * Whether change size appears below the message or in its own column.
  */

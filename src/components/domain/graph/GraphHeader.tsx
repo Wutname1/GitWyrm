@@ -17,7 +17,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
-import { TooltipHint } from "@/components/ui/tooltip";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
 
 /**
  * Commit-graph column header. Right-click any header cell for a menu to show or
@@ -27,11 +27,14 @@ import { TooltipHint } from "@/components/ui/tooltip";
 export function GraphHeader() {
   const order = useWorkspaceStore((s) => s.columnOrder);
   const hidden = useWorkspaceStore((s) => s.hiddenColumns);
+  const widths = useWorkspaceStore((s) => s.columnWidths);
   const changeSizeDisplay = useWorkspaceStore((s) => s.changeSizeDisplay);
   const showChangeIndicator = useWorkspaceStore((s) => s.showChangeIndicator);
   const toggleColumn = useWorkspaceStore((s) => s.toggleColumn);
   const reorderColumn = useWorkspaceStore((s) => s.reorderColumn);
   const resetColumns = useWorkspaceStore((s) => s.resetColumns);
+  const setColumnWidth = useWorkspaceStore((s) => s.setColumnWidth);
+  const resetColumnWidth = useWorkspaceStore((s) => s.resetColumnWidth);
   const setChangeSizeDisplay = useWorkspaceStore((s) => s.setChangeSizeDisplay);
   const setShowChangeIndicator = useWorkspaceStore((s) => s.setShowChangeIndicator);
 
@@ -42,7 +45,9 @@ export function GraphHeader() {
   const visible = visibleColumns(order, effectiveHidden);
   const hiddenSet = new Set(hidden);
   const isModified =
-    hidden.length > 0 || order.some((id, i) => id !== DEFAULT_COLUMN_ORDER[i]);
+    hidden.length > 0 ||
+    Object.keys(widths).length > 0 ||
+    order.some((id, i) => id !== DEFAULT_COLUMN_ORDER[i]);
 
   const handleDrop = (targetId: ColumnId) => {
     if (dragId && dragId !== targetId) {
@@ -60,7 +65,7 @@ export function GraphHeader() {
           className={cn(
             "grid h-[30px] flex-none items-center border-b border-border pl-3 pr-1 text-2xs font-bold tracking-[.06em] text-muted-foreground",
           )}
-          style={{ gridTemplateColumns: gridTemplate(order, effectiveHidden) }}
+          style={{ gridTemplateColumns: gridTemplate(order, effectiveHidden, widths) }}
         >
           {visible.map((id) => (
             <span
@@ -80,7 +85,7 @@ export function GraphHeader() {
                 handleDrop(id);
               }}
               className={cn(
-                "flex h-full cursor-grab select-none items-center active:cursor-grabbing",
+                "relative flex h-full cursor-grab select-none items-center pr-2 active:cursor-grabbing",
                 dragId === id && "opacity-40",
                 overId === id &&
                   dragId &&
@@ -88,7 +93,22 @@ export function GraphHeader() {
                   "bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]",
               )}
             >
-              {COLUMNS[id].label}
+              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                {COLUMNS[id].label}
+              </span>
+              <ResizeHandle
+                ariaLabel={`Resize ${COLUMNS[id].label.toLowerCase()} column`}
+                value={widths[id]}
+                min={COLUMNS[id].minWidth}
+                max={COLUMNS[id].maxWidth}
+                defaultValue={COLUMNS[id].defaultWidth}
+                getCurrentValue={(handle) =>
+                  handle.parentElement?.getBoundingClientRect().width ?? COLUMNS[id].defaultWidth
+                }
+                onChange={(width) => setColumnWidth(id, width)}
+                onReset={() => resetColumnWidth(id)}
+                className="-right-1"
+              />
             </span>
           ))}
         </div>

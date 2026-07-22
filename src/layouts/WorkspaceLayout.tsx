@@ -10,7 +10,16 @@ import { SettingsView } from '@/views/SettingsView'
 import { ConflictView } from '@/views/ConflictView'
 import { GithubView } from '@/views/GithubView'
 import { useUiStore } from '@/stores/uiStore'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
+import {
+  DEFAULT_LEFT_PANEL_WIDTH,
+  DEFAULT_RIGHT_PANEL_WIDTH,
+  MAX_LEFT_PANEL_WIDTH,
+  MAX_RIGHT_PANEL_WIDTH,
+  MIN_LEFT_PANEL_WIDTH,
+  MIN_RIGHT_PANEL_WIDTH,
+  useWorkspaceStore,
+} from '@/stores/workspaceStore'
+import { ResizeHandle } from '@/components/ui/ResizeHandle'
 
 function CenterView() {
   const view = useUiStore((s) => s.centerView)
@@ -23,17 +32,44 @@ function CenterView() {
 
 export function WorkspaceLayout() {
   const tabLayout = useWorkspaceStore((state) => state.tabLayout)
+  const leftPanelWidth = useWorkspaceStore((state) => state.leftPanelWidth)
+  const rightPanelWidth = useWorkspaceStore((state) => state.rightPanelWidth)
+  const setLeftPanelWidth = useWorkspaceStore((state) => state.setLeftPanelWidth)
+  const setRightPanelWidth = useWorkspaceStore((state) => state.setRightPanelWidth)
 
   const workspaceBody = (
     <>
       <Toolbar />
       <MergeBanner />
       <div className="flex min-h-0 flex-1">
-        <LeftPanel />
+        <div className="relative flex min-h-0 flex-none" style={{ width: leftPanelWidth }}>
+          <LeftPanel />
+          <ResizeHandle
+            ariaLabel="Resize branches and tags"
+            value={leftPanelWidth}
+            min={MIN_LEFT_PANEL_WIDTH}
+            max={MAX_LEFT_PANEL_WIDTH}
+            defaultValue={DEFAULT_LEFT_PANEL_WIDTH}
+            onChange={setLeftPanelWidth}
+            className="-right-1"
+          />
+        </div>
         <div className="flex min-w-0 flex-1 flex-col">
           <CenterView />
         </div>
-        <RightPanel />
+        <div className="relative flex min-h-0 flex-none" style={{ width: rightPanelWidth }}>
+          <ResizeHandle
+            ariaLabel="Resize changes and commit panel"
+            value={rightPanelWidth}
+            min={MIN_RIGHT_PANEL_WIDTH}
+            max={MAX_RIGHT_PANEL_WIDTH}
+            defaultValue={DEFAULT_RIGHT_PANEL_WIDTH}
+            direction={-1}
+            onChange={setRightPanelWidth}
+            className="-left-1"
+          />
+          <RightPanel />
+        </div>
       </div>
       <StatusBar />
     </>

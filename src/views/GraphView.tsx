@@ -4,15 +4,19 @@ import type { CommitEntry, StashInfo } from '@/lib/bindings'
 import { GRAPH_ROW_HEIGHT, GRAPH_ROW_WITH_CHANGES_HEIGHT } from '@/lib/gitDisplay'
 import { useCommitLog, useStashes, useStatus } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
-import { useActiveRepo } from '@/stores/workspaceStore'
+import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import { CommitRow } from '@/components/domain/graph/CommitRow'
 import { PendingRow } from '@/components/domain/graph/PendingRow'
 import { StashRow } from '@/components/domain/graph/StashRow'
 import { GraphSvg, type GraphRow } from '@/components/domain/graph/GraphSvg'
 import { GraphHeader } from '@/components/domain/graph/GraphHeader'
 import { CommitDrawer } from '@/components/domain/graph/CommitDrawer'
-import { effectiveHiddenColumns, graphLeftOffset } from '@/lib/graphColumns'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
+import {
+  columnWidth,
+  effectiveHiddenColumns,
+  gridTemplate,
+  visibleColumns,
+} from '@/lib/graphColumns'
 
 /** Sentinel selection value for the synthetic WIP row (not a real commit). */
 const WIP_SHA = '__wip__'
@@ -26,10 +30,14 @@ export function GraphView() {
   const revealSha = useUiStore((s) => s.revealSha)
   const columnOrder = useWorkspaceStore((s) => s.columnOrder)
   const hiddenColumns = useWorkspaceStore((s) => s.hiddenColumns)
+  const columnWidths = useWorkspaceStore((s) => s.columnWidths)
   const changeSizeDisplay = useWorkspaceStore((s) => s.changeSizeDisplay)
   const showChangeIndicator = useWorkspaceStore((s) => s.showChangeIndicator)
   const effectiveHidden = effectiveHiddenColumns(hiddenColumns, showChangeIndicator, changeSizeDisplay)
-  const graphLeft = graphLeftOffset(columnOrder, effectiveHidden)
+  const visible = visibleColumns(columnOrder, effectiveHidden)
+  const graphColumnIndex = visible.indexOf('graph')
+  const graphWidth = columnWidth('graph', columnWidths)
+  const graphGridTemplate = gridTemplate(columnOrder, effectiveHidden, columnWidths)
   const rowHeight = showChangeIndicator && changeSizeDisplay === 'row'
     ? GRAPH_ROW_WITH_CHANGES_HEIGHT
     : GRAPH_ROW_HEIGHT
@@ -211,15 +219,26 @@ export function GraphView() {
 
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto pl-3">
         <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
-          {graphLeft != null && (
-            <GraphSvg
-              rows={rows}
-              selectedSha={selectedSha}
-              startIndex={startIndex}
-              endIndex={endIndex}
-              left={graphLeft}
-              rowHeight={rowHeight}
-            />
+          {graphColumnIndex >= 0 && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 grid"
+              style={{
+                height: virtualizer.getTotalSize(),
+                gridTemplateColumns: graphGridTemplate,
+              }}
+            >
+              <div className="min-w-0 overflow-hidden" style={{ gridColumn: graphColumnIndex + 1 }}>
+                <GraphSvg
+                  rows={rows}
+                  selectedSha={selectedSha}
+                  startIndex={startIndex}
+                  endIndex={endIndex}
+                  width={graphWidth}
+                  rowHeight={rowHeight}
+                />
+              </div>
+            </div>
           )}
           {items.map((vi) => {
             const rowStyle: React.CSSProperties = {

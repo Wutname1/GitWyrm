@@ -71,6 +71,9 @@ pub struct ColumnLayout {
   /// Column ids the user has hidden.
   #[serde(default)]
   pub hidden: Vec<String>,
+  /// Saved widths in logical pixels, keyed by column id.
+  #[serde(default)]
+  pub widths: HashMap<String, f64>,
 }
 
 /// A named set of repository tabs. Repository paths are stable across app
@@ -115,6 +118,12 @@ pub struct Settings {
   /// Commit-graph column order and visibility.
   #[serde(default)]
   pub column_layout: Option<ColumnLayout>,
+  /// Saved width of the branches and tags pane in logical pixels.
+  #[serde(default = "default_left_panel_width")]
+  pub left_panel_width: f64,
+  /// Saved width of the changes and commit pane in logical pixels.
+  #[serde(default = "default_right_panel_width")]
+  pub right_panel_width: f64,
   /// Whether change size appears below the message or in its own column.
   #[serde(default = "default_change_size_display")]
   pub change_size_display: ChangeSizeDisplay,
@@ -183,6 +192,14 @@ fn default_vertical_tab_width() -> f64 {
   248.0
 }
 
+fn default_left_panel_width() -> f64 {
+  240.0
+}
+
+fn default_right_panel_width() -> f64 {
+  320.0
+}
+
 impl Default for Settings {
   fn default() -> Self {
     Self {
@@ -197,6 +214,8 @@ impl Default for Settings {
       ai_model: None,
       ai_instruction: None,
       column_layout: None,
+      left_panel_width: default_left_panel_width(),
+      right_panel_width: default_right_panel_width(),
       change_size_display: default_change_size_display(),
       show_change_indicator: default_show_change_indicator(),
       show_change_line_counts: false,
@@ -257,6 +276,8 @@ mod tests {
     assert!(settings.show_repo_icons);
     assert!(!settings.tab_icon_only);
     assert_eq!(settings.vertical_tab_width, 248.0);
+    assert_eq!(settings.left_panel_width, 240.0);
+    assert_eq!(settings.right_panel_width, 320.0);
     assert_eq!(settings.change_size_display, ChangeSizeDisplay::Column);
     assert!(settings.show_change_indicator);
     assert!(!settings.show_change_line_counts);
@@ -323,5 +344,28 @@ mod tests {
     assert_eq!(restored.change_size_display, ChangeSizeDisplay::Row);
     assert!(!restored.show_change_indicator);
     assert!(restored.show_change_line_counts);
+  }
+
+  #[test]
+  fn resized_layout_round_trips_through_settings_json() {
+    let mut widths = HashMap::new();
+    widths.insert("graph".to_string(), 184.0);
+    let settings = Settings {
+      column_layout: Some(ColumnLayout {
+        order: vec!["graph".to_string(), "message".to_string()],
+        hidden: vec!["sha".to_string()],
+        widths,
+      }),
+      left_panel_width: 276.0,
+      right_panel_width: 388.0,
+      ..Settings::default()
+    };
+
+    let json = serde_json::to_string(&settings).expect("settings should serialize");
+    let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
+
+    assert_eq!(restored.left_panel_width, 276.0);
+    assert_eq!(restored.right_panel_width, 388.0);
+    assert_eq!(restored.column_layout.unwrap().widths.get("graph"), Some(&184.0));
   }
 }
