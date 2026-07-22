@@ -10,6 +10,14 @@ export function useUpdater() {
   const [version, setVersion] = useState<string | null>(null)
 
   const checkAndInstall = async () => {
+    // Dev builds carry the placeholder version from tauri.conf.json, so every
+    // release looks newer and would offer to replace the build being worked on.
+    if (import.meta.env.DEV) {
+      setState('none')
+      toast('Update checks are off in development builds')
+      return
+    }
+
     setState('checking')
     try {
       const { check } = await import('@tauri-apps/plugin-updater')
