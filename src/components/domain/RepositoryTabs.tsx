@@ -1076,7 +1076,7 @@ export function RepositoryTabs({
         className={cn(
           "gw-repository-tabs flex min-h-0 min-w-0",
           orientation === "horizontal"
-            ? "gw-tab-scroll h-full flex-initial flex-row items-stretch overflow-x-auto overflow-y-hidden"
+            ? "gw-tab-scroll h-full flex-1 flex-row items-stretch overflow-x-auto overflow-y-hidden"
             : "w-full flex-1 flex-col overflow-y-auto overflow-x-hidden px-1.5 py-1",
         )}
         onDragEnd={finishDrag}
