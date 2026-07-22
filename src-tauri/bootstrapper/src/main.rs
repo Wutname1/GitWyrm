@@ -47,6 +47,12 @@ fn chrono_lite() -> String {
 
 const CDN_BASE: &str = "https://cdn.gitwyrm.com";
 
+// The installer lives under installers/latest/, not at the CDN root. The root
+// holds this bootstrapper, published under the same GitWyrm-Setup.exe name that
+// the website's download button points at -- pointing here at the root would make
+// the bootstrapper download and run itself.
+const INSTALLER_PATH: &str = "installers/latest";
+
 fn installer_filename() -> &'static str {
     if cfg!(target_arch = "aarch64") {
         "GitWyrm-Setup-ARM64.exe"
@@ -289,7 +295,7 @@ fn fake_download(tx: mpsc::Sender<DownloadMsg>) {
 }
 
 fn download_installer(tx: mpsc::Sender<DownloadMsg>) {
-    let url = format!("{}/{}", CDN_BASE, installer_filename());
+    let url = format!("{}/{}/{}", CDN_BASE, INSTALLER_PATH, installer_filename());
     log(&format!("Downloading: {}", url));
 
     let temp_dir = std::env::temp_dir();

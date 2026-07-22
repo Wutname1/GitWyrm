@@ -231,13 +231,18 @@ jobs:
           if [ "${{ matrix.arch }}" = "aarch64" ]; then
             SUFFIX="-ARM64"
           fi
-          # Stable "latest" path the bootstrapper and download buttons point at.
-          # Betas must never land here, or everyone downloading GitWyrm-Setup.exe
-          # gets a prerelease.
+          # The "latest installer" path the bootstrapper downloads from. This must
+          # stay under installers/ and never at the bucket root: the root holds
+          # GitWyrm-Setup.exe, which is the bootstrapper itself and the single URL
+          # the website's download button has always pointed at. Publishing the raw
+          # NSIS installer over it replaces the bootstrapper, and the browser-trust
+          # reputation built up on that unchanging filename is lost with it.
+          # Betas must never land here either, or everyone gets a prerelease.
           if [ "${{ steps.channel.outputs.is_beta }}" = "true" ]; then
-            echo "Beta build - leaving the latest path untouched"
+            echo "Beta build - leaving the latest installer path untouched"
           else
-            aws s3 cp "$NSIS_EXE" "s3://gitwyrm-cdn/GitWyrm-Setup${SUFFIX}.exe" \
+            aws s3 cp "$NSIS_EXE" \
+              "s3://gitwyrm-cdn/installers/latest/GitWyrm-Setup${SUFFIX}.exe" \
               --endpoint-url "$R2_ENDPOINT" \
               --cache-control "no-cache, no-store"
           fi
