@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   BookOpen,
   ChevronDown,
@@ -317,43 +318,25 @@ function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export function TabBar() {
-  const tabLayout = useWorkspaceStore((state) => state.tabLayout);
+/**
+ * Double-clicking a title bar maximizes or restores the window everywhere else
+ * on the desktop, so the app bar has to do it too. The check keeps the handler
+ * off buttons and tabs inside the bar, which have their own double-click
+ * behavior (renaming a tab, for one).
+ */
+function onTitleBarDoubleClick(event: React.MouseEvent<HTMLElement>) {
+  if (!(event.target as HTMLElement).hasAttribute("data-tauri-drag-region"))
+    return;
+  void getCurrentWindow()
+    .toggleMaximize()
+    .catch(() => {});
+}
+
+function TabLayoutButtons() {
   const setTabLayout = useWorkspaceStore((state) => state.setTabLayout);
   const showSettings = useUiStore((state) => state.showSettings);
-
-  if (tabLayout === "vertical") {
-    return (
-      <div
-        data-tauri-drag-region
-        data-dim-on-drag
-        className="flex h-9 flex-none items-center border-b border-border bg-background pl-2.5"
-      >
-        <div data-tauri-drag-region className="mr-4 flex items-center">
-          <BrandMark />
-        </div>
-        <div data-tauri-drag-region className="min-w-0 flex-1" />
-        <WindowControls />
-      </div>
-    );
-  }
-
   return (
-    <div
-      data-tauri-drag-region
-      data-dim-on-drag
-      className="flex h-9 flex-none items-stretch gap-0.5 border-b border-border bg-background pl-2.5"
-    >
-      <div
-        data-tauri-drag-region
-        className="flex items-center border-r border-border pr-3"
-      >
-        <BrandMark />
-      </div>
-      <RepositoryTabs orientation="horizontal" />
-      <RecentRepositories />
-      <OpenRepositoryButton />
-      <div data-tauri-drag-region className="min-w-3 flex-none" />
+    <>
       <TooltipButton
         onClick={() => {
           setTabLayout("vertical");
@@ -371,6 +354,61 @@ export function TabBar() {
       >
         <Settings size={15} strokeWidth={1.9} />
       </TooltipButton>
+    </>
+  );
+}
+
+export function TabBar() {
+  const tabLayout = useWorkspaceStore((state) => state.tabLayout);
+  const horizontalTabRow = useWorkspaceStore((state) => state.horizontalTabRow);
+
+  // Vertical tabs, or horizontal tabs moved to their own row below: either way
+  // the app bar itself holds only the logo and the window buttons.
+  if (tabLayout === "vertical" || horizontalTabRow) {
+    return (
+      <>
+        <div
+          data-tauri-drag-region
+          data-dim-on-drag
+          onDoubleClick={onTitleBarDoubleClick}
+          className="flex h-9 flex-none items-stretch border-b border-border bg-background pl-2.5"
+        >
+          <div data-tauri-drag-region className="mr-4 flex items-center">
+            <BrandMark />
+          </div>
+          <div data-tauri-drag-region className="min-w-0 flex-1" />
+          {tabLayout === "horizontal" && <TabLayoutButtons />}
+          <WindowControls />
+        </div>
+        {tabLayout === "horizontal" && (
+          <div className="flex h-9 flex-none items-stretch gap-0.5 border-b border-border bg-background pl-2.5">
+            <RepositoryTabs orientation="horizontal" />
+            <RecentRepositories />
+            <OpenRepositoryButton />
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div
+      data-tauri-drag-region
+      data-dim-on-drag
+      onDoubleClick={onTitleBarDoubleClick}
+      className="flex h-9 flex-none items-stretch gap-0.5 border-b border-border bg-background pl-2.5"
+    >
+      <div
+        data-tauri-drag-region
+        className="flex items-center border-r border-border pr-3"
+      >
+        <BrandMark />
+      </div>
+      <RepositoryTabs orientation="horizontal" />
+      <RecentRepositories />
+      <OpenRepositoryButton />
+      <div data-tauri-drag-region className="min-w-3 flex-none" />
+      <TabLayoutButtons />
       <WindowControls />
     </div>
   );

@@ -161,6 +161,9 @@ pub struct Settings {
   /// the frontend so older and hand-edited settings remain safe.
   #[serde(default)]
   pub tab_layout: Option<String>,
+  /// Give horizontal tabs their own row under the app bar instead of sharing it.
+  #[serde(default)]
+  pub horizontal_tab_row: bool,
   /// Open tab groups. These disappear when their last repository is closed.
   #[serde(default)]
   pub tab_groups: Vec<TabGroupSetting>,
@@ -227,6 +230,7 @@ impl Default for Settings {
       tab_icon_only: false,
       vertical_tab_width: default_vertical_tab_width(),
       tab_layout: None,
+      horizontal_tab_row: false,
       tab_groups: Vec::new(),
       tab_order: Vec::new(),
       saved_tab_groups: Vec::new(),

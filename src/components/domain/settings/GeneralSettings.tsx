@@ -34,6 +34,8 @@ export function GeneralSettings() {
   const setEnableWorktrees = useWorkspaceStore((s) => s.setEnableWorktrees)
   const tabLayout = useWorkspaceStore((s) => s.tabLayout)
   const setTabLayout = useWorkspaceStore((s) => s.setTabLayout)
+  const horizontalTabRow = useWorkspaceStore((s) => s.horizontalTabRow)
+  const setHorizontalTabRow = useWorkspaceStore((s) => s.setHorizontalTabRow)
 
   return (
     <div>
@@ -90,6 +92,22 @@ export function GeneralSettings() {
           <option value="vertical">Down the left side</option>
         </select>
       </SettingRow>
+      {tabLayout === 'horizontal' && (
+        <SettingRow
+          label="Tab row"
+          hint="Give the tabs a row of their own under the app bar, so long repository names have the full width to themselves."
+        >
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={horizontalTabRow}
+              onChange={(e) => setHorizontalTabRow(e.target.checked)}
+              className="size-3.5 accent-[var(--gw-accent)]"
+            />
+            Put tabs on their own row
+          </label>
+        </SettingRow>
+      )}
       <SettingRow
         label="Worktrees"
         hint="Worktrees let you check out more than one branch at once, each in its own folder. An advanced feature, off by default. Turns on by itself if this repo already uses them."

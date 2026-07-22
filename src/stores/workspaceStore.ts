@@ -262,6 +262,8 @@ interface WorkspaceState {
   repoIconRevisions: Record<string, number>
   /** Whether repository tabs run across the top or down the left side (persisted). */
   tabLayout: TabLayout
+  /** Give horizontal tabs their own row under the app bar instead of sharing it (persisted). */
+  horizontalTabRow: boolean
   /** Groups that currently wrap open repository tabs (persisted while open). */
   tabGroups: TabGroup[]
   /** Shared order of loose repository tabs and complete groups (persisted). */
@@ -287,6 +289,7 @@ interface WorkspaceState {
   setTagPushOnCreate: (enabled: boolean) => void
   setEnableWorktrees: (enabled: boolean) => void
   setTabLayout: (layout: TabLayout) => void
+  setHorizontalTabRow: (enabled: boolean) => void
   /** Set the whole-app zoom factor (clamped to the supported range). */
   setUiScale: (scale: number) => void
   /** Rename a tab by repo path. An empty/blank alias clears it (back to the folder name). */
@@ -359,6 +362,7 @@ function toSettings(s: WorkspaceState): Settings {
     tab_icon_only: s.tabIconOnly,
     vertical_tab_width: s.verticalTabWidth,
     tab_layout: s.tabLayout,
+    horizontal_tab_row: s.horizontalTabRow,
     tab_groups: s.tabGroups.map((group) => ({
       id: group.id,
       name: group.name,
@@ -476,6 +480,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
   repoIconRevisions: {},
   tabLayout: 'horizontal',
+  horizontalTabRow: false,
   tabGroups: [],
   tabOrder: [],
   savedTabGroups: [],
@@ -589,6 +594,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setTabLayout: (layout) => {
     set({ tabLayout: layout })
+    schedulePersist()
+  },
+  setHorizontalTabRow: (enabled) => {
+    set({ horizontalTabRow: enabled })
     schedulePersist()
   },
   setUiScale: (scale) => {
@@ -962,6 +971,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.vertical_tab_width ?? DEFAULT_VERTICAL_TAB_WIDTH,
         ),
         tabLayout: settings.tab_layout === 'vertical' ? 'vertical' : 'horizontal',
+        horizontalTabRow: settings.horizontal_tab_row ?? false,
         tabGroups,
         tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),
         savedTabGroups: deserializeSavedTabGroups(settings.saved_tab_groups),

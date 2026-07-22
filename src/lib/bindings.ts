@@ -1769,6 +1769,10 @@ vertical_tab_width?: number;
  */
 tab_layout?: string | null; 
 /**
+ * Give horizontal tabs their own row under the app bar instead of sharing it.
+ */
+horizontal_tab_row?: boolean; 
+/**
  * Open tab groups. These disappear when their last repository is closed.
  */
 tab_groups?: TabGroupSetting[]; 
