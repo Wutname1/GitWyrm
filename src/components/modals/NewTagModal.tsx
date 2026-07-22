@@ -7,6 +7,7 @@ import { useGitMutations } from '@/hooks/useGitMutations'
 import { useTagSync } from '@/hooks/useTagSync'
 import { shortSha } from '@/lib/gitDisplay'
 import { refNameError } from '@/lib/refName'
+import { bumpSemver, formatSemver, highestSemver } from '@/lib/semver'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -46,6 +47,17 @@ export function NewTagModal() {
     [tags.data]
   )
 
+  // When the repo tags with semver, offer one-tap buttons for the next major,
+  // minor, and patch versions off the highest existing tag.
+  const quickPicks = useMemo(() => {
+    const latest = highestSemver([...existing])
+    if (!latest) return []
+    return (['major', 'minor', 'patch'] as const).map((bump) => ({
+      bump,
+      value: formatSemver(bumpSemver(latest, bump)),
+    }))
+  }, [existing])
+
   const trimmed = name.trim()
   const error = refNameError(trimmed, [...existing], 'tag')
 
@@ -74,6 +86,21 @@ export function NewTagModal() {
     >
       <div className="grid gap-1.5">
         <label className="text-2xs font-semibold text-sub">Tag name</label>
+        {quickPicks.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {quickPicks.map((pick) => (
+              <button
+                key={pick.bump}
+                type="button"
+                onClick={() => setName(pick.value)}
+                className="flex items-baseline gap-1.5 rounded border border-border bg-panel px-2 py-1 text-2xs text-sub hover:border-primary hover:text-accent-text"
+              >
+                <span className="font-mono">{pick.value}</span>
+                <span className="capitalize text-muted-foreground">{pick.bump}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
