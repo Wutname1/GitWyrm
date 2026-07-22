@@ -9,7 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use git2::{ErrorCode, Oid, ResetType};
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,7 @@ const MAX_SUMMARY_CHARS: usize = 72;
 const MAX_PLAN_PROMPT_CHARS: usize = 120_000;
 const PLAN_MAX_TOKENS: u32 = 16_384;
 const PLAN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+static TEMP_INDEX_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -116,8 +118,9 @@ impl TempIndex {
       .duration_since(UNIX_EPOCH)
       .map(|duration| duration.as_nanos())
       .unwrap_or_default();
+    let sequence = TEMP_INDEX_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     Self(std::env::temp_dir().join(format!(
-      "gitwyrm-ai-{}-{stamp}.index",
+      "gitwyrm-ai-{}-{stamp}-{sequence}.index",
       std::process::id()
     )))
   }
@@ -348,17 +351,6 @@ fn capture_snapshot(repo_path: &str, repo: &git2::Repository) -> Result<Snapshot
   parse_snapshot(head, tree, diff, paths)
 }
 
-/// Rebuild only the working-tree identity used by the post-AI safety check.
-/// Re-parsing every logical patch group here made a large plan do the same
-/// expensive analysis twice even though this phase only compares tree IDs.
-fn capture_current_tree(repo_path: &str, head: Option<Oid>) -> Result<Oid, AppError> {
-  let temp = TempIndex::new();
-  init_index(repo_path, &temp.0, head)?;
-  run_with_index(repo_path, &temp.0, &["add", "-A", "--", "."], None)?;
-  let tree_text = run_with_index(repo_path, &temp.0, &["write-tree"], None)?;
-  Ok(Oid::from_str(tree_text.trim())?)
-}
-
 fn present_units(units: &[ChangeUnit]) -> String {
   // Leave room for each unit's heading, shortening marker, and trailing newline.
   // The old 300-character minimum made a large run exceed the advertised cap.
@@ -554,25 +546,13 @@ fn create_commit_chain(
       app,
       repo_id,
       "check",
-      "Checking your files again",
-      "Making sure nothing changed while the plan was being made.",
+      "Checking your branch",
+      "New file edits will stay uncommitted while this snapshot is committed.",
     );
   }
   if head_state(repo)? != snapshot.head {
     return Err(AppError::Other(
       "The current branch changed while AI was working. No commits were created.".into(),
-    ));
-  }
-  let check_started = Instant::now();
-  let latest_tree = capture_current_tree(repo_path, snapshot.head.oid)?;
-  log::info!(
-    "AI commit safety check finished: units={}, elapsed_ms={}",
-    snapshot.units.len(),
-    check_started.elapsed().as_millis()
-  );
-  if latest_tree != snapshot.tree {
-    return Err(AppError::Other(
-      "Your files changed while AI was working. No commits were created; review the new changes and try again.".into(),
     ));
   }
 
@@ -1001,5 +981,69 @@ mod tests {
     walk.push_head().unwrap();
     walk.hide(base).unwrap();
     assert_eq!(walk.count(), 2);
+  }
+
+  #[test]
+  fn keeps_edits_made_after_the_snapshot_out_of_generated_commits() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(temp.path()).unwrap();
+    {
+      let mut config = repo.config().unwrap();
+      config.set_str("user.name", "Test Wyrm").unwrap();
+      config.set_str("user.email", "test@gitwyrm.dev").unwrap();
+    }
+    let original = (1..=8).map(|line| format!("line {line}\n")).collect::<String>();
+    fs::write(temp.path().join("story.txt"), &original).unwrap();
+    {
+      let mut index = repo.index().unwrap();
+      index.add_path(Path::new("story.txt")).unwrap();
+      index.write().unwrap();
+      let tree_oid = index.write_tree().unwrap();
+      let tree = repo.find_tree(tree_oid).unwrap();
+      let signature = repo.signature().unwrap();
+      repo.commit(Some("HEAD"), &signature, &signature, "base", &tree, &[]).unwrap();
+    }
+
+    let snapshotted = original
+      .replace("line 2\n", "line two changed\n")
+      .replace("line 6\n", "line six changed\n");
+    fs::write(temp.path().join("story.txt"), &snapshotted).unwrap();
+    let repo_path = temp.path().to_string_lossy().into_owned();
+    let snapshot = capture_snapshot(&repo_path, &repo).unwrap();
+
+    // Simulate continued work while the model plans, including another edit to
+    // a line that belongs to the captured snapshot and a brand-new file.
+    let continued = snapshotted.replace("line two changed\n", "line two changed again\n");
+    fs::write(temp.path().join("story.txt"), &continued).unwrap();
+    fs::write(temp.path().join("notes.txt"), "work started during planning\n").unwrap();
+
+    let plan = CommitPlan {
+      commits: vec![
+        PlannedCommit {
+          summary: "Change the opening".into(),
+          description: String::new(),
+          units: vec![snapshot.units[0].id.clone()],
+        },
+        PlannedCommit {
+          summary: "Change the ending".into(),
+          description: String::new(),
+          units: vec![snapshot.units[1].id.clone()],
+        },
+      ],
+    };
+    create_commit_chain(&repo_path, &repo, &snapshot, plan, None).unwrap();
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let tree = head.tree().unwrap();
+    let entry = tree.get_path(Path::new("story.txt")).unwrap();
+    let committed = repo.find_blob(entry.id()).unwrap();
+    assert_eq!(std::str::from_utf8(committed.content()).unwrap(), snapshotted);
+    assert_eq!(fs::read_to_string(temp.path().join("story.txt")).unwrap(), continued);
+
+    let status = crate::git::shell::run_git(Some(&repo_path), &["status", "--short"])
+      .unwrap()
+      .stdout;
+    assert!(status.contains("story.txt"), "same-line follow-up edit must remain");
+    assert!(status.contains("notes.txt"), "new file must remain uncommitted");
   }
 }
