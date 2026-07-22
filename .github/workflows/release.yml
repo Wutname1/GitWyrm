@@ -290,6 +290,20 @@ jobs:
             exit 1
           fi
 
+      # tauri-action points the manifest at api.github.com asset URLs, which serve
+      # JSON metadata rather than the installer to an unauthenticated client. The
+      # updater then feeds that JSON to NSIS, which uninstalls the current version
+      # and leaves nothing runnable (shipped as 0.0.3). Rewrites the URLs to the
+      # public releases/download form and fails the publish if any of them does not
+      # return a plausible binary, so a broken manifest can never go live again.
+      - name: Fix and verify updater manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          chmod +x .github/scripts/*.sh
+          .github/scripts/fix-updater-manifest.sh "${{ github.ref_name }}"
+
       # Publish the structured changelog to gitwyrm.com and render the same
       # items to CHANGELOG.md. Without CHANGELOG_API_KEY the upload is skipped
       # and only the render below runs, so the GitHub Release still gets notes.

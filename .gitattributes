@@ -3,3 +3,7 @@
 # regenerate it. This stops merges/cherry-picks from leaving conflict markers
 # in a file Vite watches, which crashes the dev server.
 src/lib/bindings.ts merge=ours linguist-generated=true
+
+# Shell scripts run on the Linux CI runner. Checked out with CRLF they fail with
+# "bad interpreter", so pin them to LF regardless of the developer's platform.
+*.sh text eol=lf
