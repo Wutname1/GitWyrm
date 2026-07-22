@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Clock, CornerUpRight, Download, Folder, FolderGit2, FolderSearch, Layers3, ListChecks, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { Clock, CornerUpRight, Download, Folder, FolderGit2, FolderSearch, Layers3, ListChecks, Loader2, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { listen } from '@tauri-apps/api/event'
 import { cn } from '@/lib/utils'
@@ -43,13 +43,11 @@ function RepoRow({
   selectable?: boolean
   selected?: boolean
   onSelectedChange?: (selected: boolean) => void
-  /** Already open in a tab: not selectable, and offers a jump instead of an open. */
+  /** Already open in a tab: offers a jump instead of another open. */
   alreadyOpen?: boolean
   onJumpToTab?: () => void
 }) {
-  // An open repo can't be opened again, so its checkbox is inert and the whole
-  // row dims to explain why. Jumping to its tab stays available.
-  const inert = disabled || (selectable && alreadyOpen)
+  const inert = disabled
   return (
     <div className="group/row flex w-full items-center rounded-md pr-1.5 hover:bg-panel3">
       <button
@@ -65,7 +63,6 @@ function RepoRow({
           <input
             type="checkbox"
             checked={selected ?? false}
-            disabled={alreadyOpen}
             readOnly
             tabIndex={-1}
             aria-hidden
@@ -124,6 +121,7 @@ export function RepoPickerModal() {
   const setCloneDirectory = useWorkspaceStore((s) => s.setCloneDirectory)
   const addRepo = useWorkspaceStore((s) => s.addRepo)
   const savedTabGroups = useWorkspaceStore((s) => s.savedTabGroups)
+  const createSavedTabGroup = useWorkspaceStore((s) => s.createSavedTabGroup)
   const deleteSavedTabGroup = useWorkspaceStore((s) => s.deleteSavedTabGroup)
 
   const scanned = useCodeFolderRepos()
@@ -136,6 +134,9 @@ export function RepoPickerModal() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   /** Checkbox mode. Off by default so a single click still opens one repo. */
   const [selectionMode, setSelectionMode] = useState(false)
+  /** Inline naming step shown after choosing Save group. */
+  const [namingGroup, setNamingGroup] = useState(false)
+  const [groupName, setGroupName] = useState('')
 
   const busy = openRepo.isPending || openRepos_.isPending
 
@@ -192,6 +193,21 @@ export function RepoPickerModal() {
     )
   }, [recents, scanned.data, filter])
 
+  const selectedPaths = useMemo(() => {
+    const byPath = new Map(
+      [...(scanned.data ?? []), ...recents].map((repo) => [repo.path.toLowerCase(), repo.path]),
+    )
+    return [...selected].flatMap((path) => {
+      const originalPath = byPath.get(path)
+      return originalPath ? [originalPath] : []
+    })
+  }, [recents, scanned.data, selected])
+
+  const openableSelectedPaths = useMemo(
+    () => selectedPaths.filter((path) => !openByPath.has(path.toLowerCase())),
+    [openByPath, selectedPaths],
+  )
+
   const pickCodeFolder = async () => {
     const { open: openDialog } = await import('@tauri-apps/plugin-dialog')
     const dir = await openDialog({ directory: true, title: 'Select your code folder' })
@@ -207,17 +223,26 @@ export function RepoPickerModal() {
   }
 
   const openSelected = () => {
-    const wanted = new Set(selected)
-    const paths = [...filteredScanned, ...filteredRecents]
-      .map((r) => r.path)
-      .filter((path) => wanted.has(path.toLowerCase()) && !openByPath.has(path.toLowerCase()))
-    if (paths.length === 0) return
-    openRepos_.mutate(paths, {
+    if (openableSelectedPaths.length === 0) return
+    openRepos_.mutate(openableSelectedPaths, {
       onSuccess: () => {
         setSelected(new Set())
         setSelectionMode(false)
       },
     })
+  }
+
+  const saveSelectedGroup = () => {
+    const id = createSavedTabGroup(selectedPaths, groupName)
+    if (!id) return
+
+    const savedName = groupName.trim()
+    setSelected(new Set())
+    setSelectionMode(false)
+    setNamingGroup(false)
+    setGroupName('')
+    setTab('groups')
+    toast.success(`${savedName} saved with ${selectedPaths.length} ${selectedPaths.length === 1 ? 'repository' : 'repositories'}`)
   }
 
   const suggestedName =
@@ -346,6 +371,8 @@ export function RepoPickerModal() {
                 onClick={() => {
                   setSelectionMode((on) => !on)
                   setSelected(new Set())
+                  setNamingGroup(false)
+                  setGroupName('')
                 }}
                 disabled={busy}
               >
@@ -447,23 +474,76 @@ export function RepoPickerModal() {
             </div>
 
             {selectionMode && (
-              <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
-                <span className="text-2xs text-muted-foreground">
-                  {selected.size === 0
-                    ? 'Tick the repositories you want to open.'
-                    : `${selected.size} selected`}
-                </span>
-                <div className="flex-1" />
-                <Button
-                  size="sm"
-                  className="h-7 gap-1.5 text-2xs"
-                  disabled={selected.size === 0 || busy}
-                  onClick={openSelected}
-                >
-                  {openRepos_.isPending && <Loader2 size={12} className="animate-spin" />}
-                  Open {selected.size > 0 ? selected.size : ''}{' '}
-                  {selected.size === 1 ? 'repository' : 'repositories'}
-                </Button>
+              <div className="border-t border-border px-4 py-2.5">
+                {namingGroup ? (
+                  <form
+                    className="flex items-center gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      saveSelectedGroup()
+                    }}
+                  >
+                    <Input
+                      value={groupName}
+                      onChange={(event) => setGroupName(event.target.value)}
+                      placeholder="Group name"
+                      aria-label="Group name"
+                      className="h-7 bg-background text-xs"
+                      autoFocus
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-7 text-2xs"
+                      onClick={() => {
+                        setNamingGroup(false)
+                        setGroupName('')
+                      }}
+                    >
+                      Back
+                    </Button>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      className="h-7 gap-1.5 text-2xs"
+                      disabled={!groupName.trim() || selectedPaths.length === 0}
+                    >
+                      <Save size={12} />
+                      Save group
+                    </Button>
+                  </form>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xs text-muted-foreground">
+                      {selected.size === 0
+                        ? 'Tick the repositories you want to use.'
+                        : `${selected.size} selected`}
+                    </span>
+                    <div className="flex-1" />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-7 gap-1.5 text-2xs"
+                      disabled={selectedPaths.length === 0 || busy}
+                      onClick={() => setNamingGroup(true)}
+                    >
+                      <Save size={12} />
+                      Save group
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="h-7 gap-1.5 text-2xs"
+                      disabled={openableSelectedPaths.length === 0 || busy}
+                      onClick={openSelected}
+                    >
+                      {openRepos_.isPending && <Loader2 size={12} className="animate-spin" />}
+                      {openableSelectedPaths.length === 0
+                        ? 'Already open'
+                        : `Open ${openableSelectedPaths.length} ${openableSelectedPaths.length === 1 ? 'repository' : 'repositories'}`}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -559,7 +639,7 @@ export function RepoPickerModal() {
                 <Layers3 size={22} strokeWidth={1.5} className="mx-auto mb-2 text-muted-foreground" />
                 <div className="text-xs font-semibold text-foreground">No saved groups yet</div>
                 <p className="mt-1 text-2xs leading-4 text-muted-foreground">
-                  Right-click an open group and choose Save group.
+                  On the Open tab, choose Select, tick your repositories, then save the group.
                 </p>
               </div>
             ) : savedTabGroups.map((group) => {

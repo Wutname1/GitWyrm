@@ -5,6 +5,8 @@ import {
   DEFAULT_COLUMN_ORDER,
   effectiveHiddenColumns,
   gridTemplate,
+  isAuthorIconOnly,
+  snapAuthorWidth,
   totalColumnsWidth,
   visibleColumns,
   type ColumnId,
@@ -47,6 +49,7 @@ export function GraphHeader({ scrollRef }: { scrollRef?: React.Ref<HTMLDivElemen
 
   const effectiveHidden = effectiveHiddenColumns(hidden, showChangeIndicator, changeSizeDisplay);
   const visible = visibleColumns(order, effectiveHidden);
+  const authorIconOnly = isAuthorIconOnly(widths);
   const hiddenSet = new Set(hidden);
   const isModified =
     hidden.length > 0 ||
@@ -105,7 +108,7 @@ export function GraphHeader({ scrollRef }: { scrollRef?: React.Ref<HTMLDivElemen
                 )}
               >
                 <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                  {COLUMNS[id].label}
+                  {id === 'author' && authorIconOnly ? '' : COLUMNS[id].label}
                 </span>
                 <ResizeHandle
                   ariaLabel={`Resize ${COLUMNS[id].label.toLowerCase()} column`}
@@ -116,7 +119,9 @@ export function GraphHeader({ scrollRef }: { scrollRef?: React.Ref<HTMLDivElemen
                   getCurrentValue={(handle) =>
                     handle.parentElement?.getBoundingClientRect().width ?? COLUMNS[id].defaultWidth
                   }
-                  onChange={(width) => setColumnWidth(id, width)}
+                  onChange={(width) =>
+                    setColumnWidth(id, id === 'author' ? snapAuthorWidth(width) : width)
+                  }
                   onReset={() => resetColumnWidth(id)}
                   className="-right-1"
                 />

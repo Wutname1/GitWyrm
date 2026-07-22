@@ -12,6 +12,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  GitBranch,
   ImageIcon,
   Layers3,
   Pencil,
@@ -812,202 +813,266 @@ export function RepositoryTabs({
     const groupTarget =
       dropTarget?.type === "group" && dropTarget.id === group.id;
     const saved = isSaved(group.id);
+    const groupRepos = group.repoPaths.map((path) => ({
+      path,
+      repo: findRepo(openRepos, path),
+    }));
     return (
-      <ContextMenu key={group.id}>
-        <ContextMenuTrigger asChild>
-          <section
-            data-tab-group={group.id}
-            className={cn(
-              "gw-tab-group flex border-[color:var(--tab-group-color)] transition-opacity",
-              orientation === "horizontal"
-                ? "h-full min-w-0 flex-row border-b-2 bg-[color:color-mix(in_srgb,var(--tab-group-color)_5%,transparent)]"
-                : "relative w-full flex-none flex-col border-l-2 pl-[3px]",
-              orientation === "horizontal" && "flex-none",
-              dragItem?.type === "group" &&
-                dragItem.id === group.id &&
-                "opacity-35",
-            )}
-            style={groupStyle(group.color)}
-          >
-            <button
-              type="button"
-              draggable
-              onDragStart={(event) => startGroupDrag(event, group)}
-              onDragEnd={() => {
-                draggedGroupRef.current = group.id;
-                window.setTimeout(() => {
-                  if (draggedGroupRef.current === group.id)
-                    draggedGroupRef.current = null;
-                }, 200);
-                finishDrag();
-              }}
-              onDragOver={(event) => {
-                if (dragItem?.type !== "repo") return;
-                event.preventDefault();
-                event.stopPropagation();
-                setTarget({ type: "group", id: group.id });
-              }}
-              onDragLeave={(event) => {
-                if (
-                  !event.currentTarget.contains(
-                    event.relatedTarget as Node | null,
-                  ) &&
-                  groupTarget
-                )
-                  setTarget(null);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                dropOnGroup(group);
-              }}
-              onClick={() => {
-                if (draggedGroupRef.current === group.id) {
-                  draggedGroupRef.current = null;
-                  return;
-                }
+      <Tooltip key={group.id}>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <section
+              data-tab-group={group.id}
+              className={cn(
+                "gw-tab-group flex border-[color:var(--tab-group-color)] transition-opacity",
+                orientation === "horizontal"
+                  ? "h-full min-w-0 flex-row border-b-2 bg-[color:color-mix(in_srgb,var(--tab-group-color)_5%,transparent)]"
+                  : "relative w-full flex-none flex-col border-l-2 pl-[3px]",
+                orientation === "horizontal" && "flex-none",
+                dragItem?.type === "group" &&
+                  dragItem.id === group.id &&
+                  "opacity-35",
+              )}
+              style={groupStyle(group.color)}
+            >
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  draggable
+                  onDragStart={(event) => startGroupDrag(event, group)}
+                  onDragEnd={() => {
+                    draggedGroupRef.current = group.id;
+                    window.setTimeout(() => {
+                      if (draggedGroupRef.current === group.id)
+                        draggedGroupRef.current = null;
+                    }, 200);
+                    finishDrag();
+                  }}
+                  onDragOver={(event) => {
+                    if (dragItem?.type !== "repo") return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setTarget({ type: "group", id: group.id });
+                  }}
+                  onDragLeave={(event) => {
+                    if (
+                      !event.currentTarget.contains(
+                        event.relatedTarget as Node | null,
+                      ) &&
+                      groupTarget
+                    )
+                      setTarget(null);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    dropOnGroup(group);
+                  }}
+                  onClick={() => {
+                    if (draggedGroupRef.current === group.id) {
+                      draggedGroupRef.current = null;
+                      return;
+                    }
+                    useWorkspaceStore.getState().toggleTabGroup(group.id);
+                    toast.info(
+                      `${group.name} ${group.collapsed ? "expanded" : "collapsed"}`,
+                    );
+                  }}
+                  className={cn(
+                    "flex flex-none cursor-grab items-center gap-1.5 text-left font-semibold outline-none active:cursor-grabbing",
+                    orientation === "horizontal"
+                      ? "h-full min-w-8 px-2 text-2xs"
+                      : effectiveIconOnly
+                        ? "h-[29px] w-full justify-center rounded-[5px] px-0 text-2xs hover:bg-panel2"
+                        : "h-[29px] w-full rounded-[5px] px-1.5 text-2xs hover:bg-panel2",
+                    groupTarget &&
+                      "bg-soft shadow-[inset_0_0_0_1px_var(--gw-accent)]",
+                  )}
+                  style={{ color: group.color }}
+                  aria-label={`${group.name}. ${group.collapsed ? "Expand" : "Collapse"} group`}
+                >
+                  <ChevronRight
+                    size={11}
+                    strokeWidth={2.2}
+                    className={cn(
+                      "flex-none transition-transform",
+                      !group.collapsed && "rotate-90",
+                    )}
+                  />
+                  {!(effectiveIconOnly && orientation === "vertical") && (
+                    <>
+                      <span className="max-w-28 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">
+                        {group.name}
+                      </span>
+                      {saved && (
+                        <Save size={10} strokeWidth={2} aria-label="Saved group" />
+                      )}
+                      <span className="font-mono text-2xs opacity-65">
+                        {group.repoPaths.length}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </TooltipTrigger>
+              {!group.collapsed && (
+                <div
+                  className={cn(
+                    "flex",
+                    orientation === "horizontal"
+                      ? "h-full flex-none flex-row"
+                      : "w-full flex-col gap-0.5",
+                  )}
+                >
+                  {group.repoPaths.map((path) => {
+                    const repo = findRepo(openRepos, path);
+                    return repo ? renderRepoTab(repo, group) : null;
+                  })}
+                </div>
+              )}
+            </section>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-52">
+            <ContextMenuLabel className="text-2xs tracking-wide text-muted-foreground">
+              {group.name.toUpperCase()} · {group.repoPaths.length} REPOS
+            </ContextMenuLabel>
+            <ContextMenuItem
+              onSelect={() => {
                 useWorkspaceStore.getState().toggleTabGroup(group.id);
                 toast.info(
                   `${group.name} ${group.collapsed ? "expanded" : "collapsed"}`,
                 );
               }}
-              className={cn(
-                "flex flex-none cursor-grab items-center gap-1.5 text-left font-semibold outline-none active:cursor-grabbing",
-                orientation === "horizontal"
-                  ? "h-full min-w-8 px-2 text-2xs"
-                  : effectiveIconOnly
-                    ? "h-[29px] w-full justify-center rounded-[5px] px-0 text-2xs hover:bg-panel2"
-                    : "h-[29px] w-full rounded-[5px] px-1.5 text-2xs hover:bg-panel2",
-                groupTarget &&
-                  "bg-soft shadow-[inset_0_0_0_1px_var(--gw-accent)]",
-              )}
-              style={{ color: group.color }}
-              aria-label={`${group.name}. ${group.collapsed ? "Expand" : "Collapse"} group`}
             >
               <ChevronRight
-                size={11}
-                strokeWidth={2.2}
-                className={cn(
-                  "flex-none transition-transform",
-                  !group.collapsed && "rotate-90",
-                )}
+                size={13}
+                className={cn(!group.collapsed && "rotate-90")}
               />
-              {!(effectiveIconOnly && orientation === "vertical") && (
-                <>
-                  <span className="max-w-28 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">
-                    {group.name}
-                  </span>
-                  {saved && (
-                    <Save size={10} strokeWidth={2} aria-label="Saved group" />
-                  )}
-                  <span className="font-mono text-2xs opacity-65">
-                    {group.repoPaths.length}
-                  </span>
-                </>
-              )}
-            </button>
-            {!group.collapsed && (
-              <div
-                className={cn(
-                  "flex",
-                  orientation === "horizontal"
-                    ? "h-full flex-none flex-row"
-                    : "w-full flex-col gap-0.5",
-                )}
-              >
-                {group.repoPaths.map((path) => {
-                  const repo = findRepo(openRepos, path);
-                  return repo ? renderRepoTab(repo, group) : null;
-                })}
-              </div>
-            )}
-          </section>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-52">
-          <ContextMenuLabel className="text-2xs tracking-wide text-muted-foreground">
-            {group.name.toUpperCase()} · {group.repoPaths.length} REPOS
-          </ContextMenuLabel>
-          <ContextMenuItem
-            onSelect={() => {
-              useWorkspaceStore.getState().toggleTabGroup(group.id);
-              toast.info(
-                `${group.name} ${group.collapsed ? "expanded" : "collapsed"}`,
-              );
-            }}
+              {group.collapsed ? "Expand group" : "Collapse group"}
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() =>
+                setRenaming({ type: "group", id: group.id, value: group.name })
+              }
+            >
+              <Pencil size={13} strokeWidth={2} />
+              Rename group
+            </ContextMenuItem>
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <span
+                  className="size-2.5 rounded-full"
+                  style={{ background: group.color }}
+                />
+                Change color
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-40">
+                {TAB_GROUP_COLORS.map((color) => (
+                  <ContextMenuItem
+                    key={color}
+                    onSelect={() => {
+                      useWorkspaceStore
+                        .getState()
+                        .setTabGroupColor(group.id, color);
+                      toast.success(`${group.name} color changed`);
+                    }}
+                  >
+                    <span
+                      className="size-3 rounded-full"
+                      style={{ background: color }}
+                    />
+                    <span className="flex-1">{color.toUpperCase()}</span>
+                    {group.color === color && <Check size={12} />}
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+            <ContextMenuItem
+              onSelect={() => {
+                useWorkspaceStore.getState().saveTabGroup(group.id);
+                toast.success(`${group.name} saved for later`);
+              }}
+            >
+              <Save size={13} strokeWidth={2} />
+              {saved ? "Update saved group" : "Save group"}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onSelect={() => {
+                useWorkspaceStore.getState().ungroupTabGroup(group.id);
+                toast.success(
+                  `${group.name} ungrouped. Its repositories stayed in place.`,
+                );
+              }}
+            >
+              <Ungroup size={13} strokeWidth={2} />
+              Ungroup
+            </ContextMenuItem>
+            <ContextMenuItem
+              variant="destructive"
+              onSelect={() => closeGroup(group)}
+            >
+              <Trash2 size={13} strokeWidth={2} />
+              Close group
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+        <TooltipContent
+          side={orientation === "vertical" ? "right" : "bottom"}
+          className="w-80 max-w-[calc(100vw-16px)] p-0"
+        >
+          <div
+            className="border-b border-border px-3 py-2.5"
+            style={{ borderTop: `2px solid ${group.color}` }}
           >
-            <ChevronRight
-              size={13}
-              className={cn(!group.collapsed && "rotate-90")}
-            />
-            {group.collapsed ? "Expand group" : "Collapse group"}
-          </ContextMenuItem>
-          <ContextMenuItem
-            onSelect={() =>
-              setRenaming({ type: "group", id: group.id, value: group.name })
-            }
-          >
-            <Pencil size={13} strokeWidth={2} />
-            Rename group
-          </ContextMenuItem>
-          <ContextMenuSub>
-            <ContextMenuSubTrigger>
-              <span
-                className="size-2.5 rounded-full"
-                style={{ background: group.color }}
-              />
-              Change color
-            </ContextMenuSubTrigger>
-            <ContextMenuSubContent className="w-40">
-              {TAB_GROUP_COLORS.map((color) => (
-                <ContextMenuItem
-                  key={color}
-                  onSelect={() => {
-                    useWorkspaceStore
-                      .getState()
-                      .setTabGroupColor(group.id, color);
-                    toast.success(`${group.name} color changed`);
-                  }}
+            <div className="flex items-center justify-between gap-3">
+              <span className="truncate text-xs font-semibold text-foreground">
+                {group.name}
+              </span>
+              <span className="flex-none font-mono text-[10px] text-muted-foreground">
+                {group.repoPaths.length}{" "}
+                {group.repoPaths.length === 1 ? "repository" : "repositories"}
+              </span>
+            </div>
+          </div>
+          <div className="grid gap-px bg-border">
+            {groupRepos.map(({ path, repo }) => {
+              const name = repo
+                ? repoName(repo)
+                : (path.split(/[\\/]/).filter(Boolean).at(-1) ?? path);
+              return (
+                <div
+                  key={path}
+                  className="flex min-w-0 gap-2.5 bg-panel3 px-3 py-2.5"
                 >
                   <span
-                    className="size-3 rounded-full"
-                    style={{ background: color }}
-                  />
-                  <span className="flex-1">{color.toUpperCase()}</span>
-                  {group.color === color && <Check size={12} />}
-                </ContextMenuItem>
-              ))}
-            </ContextMenuSubContent>
-          </ContextMenuSub>
-          <ContextMenuItem
-            onSelect={() => {
-              useWorkspaceStore.getState().saveTabGroup(group.id);
-              toast.success(`${group.name} saved for later`);
-            }}
-          >
-            <Save size={13} strokeWidth={2} />
-            {saved ? "Update saved group" : "Save group"}
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem
-            onSelect={() => {
-              useWorkspaceStore.getState().ungroupTabGroup(group.id);
-              toast.success(
-                `${group.name} ungrouped. Its repositories stayed in place.`,
+                    className="mt-0.5 grid size-6 flex-none place-items-center rounded-[5px] text-[10px] font-bold uppercase text-background"
+                    style={{ background: group.color }}
+                    aria-hidden="true"
+                  >
+                    {name.trim().charAt(0) || "R"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-xs font-semibold text-foreground">
+                        {name}
+                      </span>
+                      <span className="ml-auto flex min-w-0 flex-none items-center gap-1 font-mono text-[10px] text-sub">
+                        <GitBranch size={10} strokeWidth={2} />
+                        <span className="max-w-28 truncate">
+                          {repo?.head_branch ?? "No branch"}
+                        </span>
+                      </span>
+                    </div>
+                    <div className="mt-0.5 break-all font-mono text-[10px] leading-4 text-muted-foreground">
+                      {path}
+                    </div>
+                  </div>
+                </div>
               );
-            }}
-          >
-            <Ungroup size={13} strokeWidth={2} />
-            Ungroup
-          </ContextMenuItem>
-          <ContextMenuItem
-            variant="destructive"
-            onSelect={() => closeGroup(group)}
-          >
-            <Trash2 size={13} strokeWidth={2} />
-            Close group
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
+            })}
+          </div>
+        </TooltipContent>
+      </Tooltip>
     );
   };
 

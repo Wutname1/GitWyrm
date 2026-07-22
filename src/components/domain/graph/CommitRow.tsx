@@ -5,6 +5,7 @@ import { authorColor, formatCommitTime } from "@/lib/gitDisplay";
 import {
   effectiveHiddenColumns,
   gridTemplate,
+  isAuthorIconOnly,
   visibleColumns,
   type ColumnId,
 } from "@/lib/graphColumns";
@@ -43,6 +44,7 @@ export const CommitRow = memo(function CommitRow({
     changeSizeDisplay,
   );
   const color = authorColor(commit.author_email || commit.author_name);
+  const authorIconOnly = isAuthorIconOnly(widths);
 
   const cell: Record<ColumnId, React.ReactNode> = {
     refs: (

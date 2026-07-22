@@ -20,7 +20,7 @@ export const COLUMNS: Record<ColumnId, ColumnDef> = {
   refs: { id: 'refs', label: 'BRANCH / TAG', defaultWidth: 110, minWidth: 88, maxWidth: 360 },
   graph: { id: 'graph', label: 'GRAPH', defaultWidth: 124, minWidth: 88, maxWidth: 360 },
   message: { id: 'message', label: 'COMMIT MESSAGE', defaultWidth: 380, minWidth: 160, maxWidth: 720, flexible: true },
-  author: { id: 'author', label: 'AUTHOR', defaultWidth: 140, minWidth: 88, maxWidth: 320 },
+  author: { id: 'author', label: 'AUTHOR', defaultWidth: 140, minWidth: 34, maxWidth: 320 },
   changes: { id: 'changes', label: 'CHANGES', defaultWidth: 160, minWidth: 112, maxWidth: 280 },
   date: { id: 'date', label: 'DATE', defaultWidth: 110, minWidth: 88, maxWidth: 220 },
   sha: { id: 'sha', label: 'SHA', defaultWidth: 72, minWidth: 56, maxWidth: 160 },
@@ -28,6 +28,23 @@ export const COLUMNS: Record<ColumnId, ColumnDef> = {
 
 export const DEFAULT_COLUMN_ORDER: ColumnId[] = ['refs', 'graph', 'message', 'author', 'changes', 'date', 'sha']
 export type ColumnWidths = Partial<Record<ColumnId, number>>
+
+/**
+ * Below this width the author column drops its name and shows just the avatar,
+ * the same way the repository tabs collapse to icons. Dragging the handle past
+ * the threshold snaps to the icon-only width rather than leaving a clipped name.
+ */
+export const AUTHOR_ICON_ONLY_WIDTH = COLUMNS.author.minWidth
+const AUTHOR_COLLAPSE_AT = 96
+
+export function isAuthorIconOnly(widths: ColumnWidths): boolean {
+  return columnWidth('author', widths) < AUTHOR_COLLAPSE_AT
+}
+
+/** Snaps an in-progress author resize to icon-only once it passes the threshold. */
+export function snapAuthorWidth(width: number): number {
+  return width < AUTHOR_COLLAPSE_AT ? AUTHOR_ICON_ONLY_WIDTH : width
+}
 
 export function clampColumnWidth(id: ColumnId, width: number): number {
   const column = COLUMNS[id]

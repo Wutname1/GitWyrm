@@ -304,6 +304,7 @@ interface WorkspaceState {
   ungroupTabGroup: (groupId: string) => void
   removeTabGroup: (groupId: string) => void
   saveTabGroup: (groupId: string) => void
+  createSavedTabGroup: (repoPaths: string[], name: string) => string | null
   deleteSavedTabGroup: (groupId: string) => void
   moveRepoBeside: (sourcePath: string, targetPath: string, placement: TabDropPlacement) => void
   moveRepoToOrder: (repoPath: string, orderIndex: number) => void
@@ -764,6 +765,24 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       }
     })
     schedulePersist()
+  },
+  createSavedTabGroup: (repoPaths, name) => {
+    const trimmedName = name.trim()
+    const paths = [...new Map(repoPaths.map((path) => [pathKey(path), normalizePath(path)])).values()]
+    if (!trimmedName || paths.length === 0) return null
+
+    const id = newGroupId()
+    set((s) => ({
+      savedTabGroups: [...s.savedTabGroups, {
+        id,
+        name: trimmedName,
+        color: TAB_GROUP_COLORS[s.savedTabGroups.length % TAB_GROUP_COLORS.length],
+        repoPaths: paths,
+      }],
+    }))
+    log.info(`workspace: saved new group ${id} with ${paths.length} repo(s)`)
+    schedulePersist()
+    return id
   },
   deleteSavedTabGroup: (groupId) => {
     set((s) => ({ savedTabGroups: s.savedTabGroups.filter((group) => group.id !== groupId) }))
