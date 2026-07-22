@@ -306,6 +306,15 @@
     wyrm-ai-logo-think 2.6s 320ms ease-in-out infinite;
 }
 
+/* The batch-progress badge is only 40px wide. Keep the shared animation, but
+   size and optically center the artwork for this compact frame. */
+.wyrm-ai-logo-compact {
+  width: 32px;
+  height: 32px;
+  margin-top: -2px;
+  margin-left: -1px;
+}
+
 .wyrm-ai-energy-ring {
   position: absolute;
   inset: 0;

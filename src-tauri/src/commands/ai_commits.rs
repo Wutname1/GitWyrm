@@ -9,12 +9,12 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use git2::{ErrorCode, Oid, ResetType};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::ai::{auth, catalog, client, prompt};
 use crate::commands::patch::{self, SelectedLine};
@@ -24,7 +24,10 @@ use crate::state::RepoManager;
 
 const MAX_COMMITS: usize = 8;
 const MAX_SPECIAL_INSTRUCTION_CHARS: usize = 4_000;
+const MAX_SUMMARY_CHARS: usize = 72;
 const MAX_PLAN_PROMPT_CHARS: usize = 120_000;
+const PLAN_MAX_TOKENS: u32 = 16_384;
+const PLAN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -35,6 +38,32 @@ pub struct AiCreatedCommit {
   pub summary: String,
   pub description: String,
   pub files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AiCommitProgressPayload {
+  repo_id: String,
+  kind: String,
+  message: String,
+  detail: String,
+}
+
+fn emit_progress(
+  app: &tauri::AppHandle,
+  repo_id: &str,
+  kind: &str,
+  message: impl Into<String>,
+  detail: impl Into<String>,
+) {
+  let _ = app.emit(
+    "ai-commit-progress",
+    AiCommitProgressPayload {
+      repo_id: repo_id.to_string(),
+      kind: kind.to_string(),
+      message: message.into(),
+      detail: detail.into(),
+    },
+  );
 }
 
 #[derive(Debug, Deserialize)]
@@ -319,16 +348,32 @@ fn capture_snapshot(repo_path: &str, repo: &git2::Repository) -> Result<Snapshot
   parse_snapshot(head, tree, diff, paths)
 }
 
+/// Rebuild only the working-tree identity used by the post-AI safety check.
+/// Re-parsing every logical patch group here made a large plan do the same
+/// expensive analysis twice even though this phase only compares tree IDs.
+fn capture_current_tree(repo_path: &str, head: Option<Oid>) -> Result<Oid, AppError> {
+  let temp = TempIndex::new();
+  init_index(repo_path, &temp.0, head)?;
+  run_with_index(repo_path, &temp.0, &["add", "-A", "--", "."], None)?;
+  let tree_text = run_with_index(repo_path, &temp.0, &["write-tree"], None)?;
+  Ok(Oid::from_str(tree_text.trim())?)
+}
+
 fn present_units(units: &[ChangeUnit]) -> String {
-  let fixed_overhead: usize = units.iter().map(|unit| unit.id.len() + unit.path.len() + 32).sum();
+  // Leave room for each unit's heading, shortening marker, and trailing newline.
+  // The old 300-character minimum made a large run exceed the advertised cap.
+  let fixed_overhead: usize = units
+    .iter()
+    .map(|unit| unit.id.chars().count() + unit.path.chars().count() + 48)
+    .sum();
   let preview_budget = MAX_PLAN_PROMPT_CHARS.saturating_sub(fixed_overhead);
-  let per_unit = (preview_budget / units.len().max(1)).max(300);
+  let per_unit = preview_budget / units.len().max(1);
   let mut output = String::new();
 
   for unit in units {
     output.push_str(&format!("\n--- {} | {} ---\n", unit.id, unit.path));
     let mut preview: String = unit.preview.chars().take(per_unit).collect();
-    if preview.len() < unit.preview.len() {
+    if unit.preview.chars().count() > per_unit {
       preview.push_str("\n[change preview shortened]\n");
     }
     output.push_str(&preview);
@@ -349,6 +394,69 @@ fn parse_plan(text: &str) -> Result<CommitPlan, AppError> {
     .map_err(|error| AppError::Other(format!("AI returned a plan GitWyrm could not read: {error}")))
 }
 
+fn is_message_tag(word: &str) -> bool {
+  (word.starts_with('#') && word.len() > 1)
+    || (word.starts_with('[') && word.ends_with(']') && word.len() > 2)
+}
+
+fn shorten_at_word(text: &str, max_chars: usize) -> String {
+  if text.chars().count() <= max_chars {
+    return text.to_string();
+  }
+
+  let candidate = text.chars().take(max_chars).collect::<String>();
+  let cut = candidate
+    .rfind(char::is_whitespace)
+    .filter(|index| candidate[..*index].chars().count() >= max_chars / 2)
+    .unwrap_or(candidate.len());
+  candidate[..cut]
+    .trim_end_matches(|character: char| {
+      character.is_whitespace() || matches!(character, ',' | ';' | ':' | '-')
+    })
+    .to_string()
+}
+
+fn normalize_summary(summary: &str) -> String {
+  let collapsed = summary.split_whitespace().collect::<Vec<_>>().join(" ");
+  if collapsed.chars().count() <= MAX_SUMMARY_CHARS {
+    return collapsed;
+  }
+
+  // Preserve explicit changelog tags at the end when shortening the words in
+  // front of them. A long AI sentence should not silently discard #graph.
+  let words = collapsed.split_whitespace().collect::<Vec<_>>();
+  let tag_start = words
+    .iter()
+    .rposition(|word| !is_message_tag(word))
+    .map(|index| index + 1)
+    .unwrap_or(0);
+  let tags = words[tag_start..].join(" ");
+  let core = words[..tag_start].join(" ");
+
+  if !tags.is_empty() && tags.chars().count() + 2 < MAX_SUMMARY_CHARS {
+    let shortened = shorten_at_word(&core, MAX_SUMMARY_CHARS - tags.chars().count() - 1);
+    return format!("{shortened} {tags}");
+  }
+
+  shorten_at_word(&collapsed, MAX_SUMMARY_CHARS)
+}
+
+fn normalize_plan(plan: &mut CommitPlan) {
+  for (index, commit) in plan.commits.iter_mut().enumerate() {
+    let original_chars = commit.summary.trim().chars().count();
+    let normalized = normalize_summary(&commit.summary);
+    if normalized != commit.summary.trim() {
+      log::warn!(
+        "Normalized AI commit summary {}: original_chars={}, normalized_chars={}",
+        index + 1,
+        original_chars,
+        normalized.chars().count()
+      );
+    }
+    commit.summary = normalized;
+  }
+}
+
 fn validate_plan(plan: &CommitPlan, requested: usize, units: &[ChangeUnit]) -> Result<(), AppError> {
   if plan.commits.len() != requested {
     return Err(AppError::Other(format!(
@@ -362,12 +470,6 @@ fn validate_plan(plan: &CommitPlan, requested: usize, units: &[ChangeUnit]) -> R
   for (index, commit) in plan.commits.iter().enumerate() {
     if commit.summary.trim().is_empty() {
       return Err(AppError::Other(format!("Commit {} has no message", index + 1)));
-    }
-    if commit.summary.contains('\n') || commit.summary.trim().chars().count() > 72 {
-      return Err(AppError::Other(format!(
-        "Commit {} needs a one-line message under 72 characters",
-        index + 1
-      )));
     }
     if commit.units.is_empty() {
       return Err(AppError::Other(format!("Commit {} has no changes", index + 1)));
@@ -445,14 +547,30 @@ fn create_commit_chain(
   repo: &git2::Repository,
   snapshot: &Snapshot,
   plan: CommitPlan,
+  progress: Option<(&tauri::AppHandle, &str)>,
 ) -> Result<Vec<AiCreatedCommit>, AppError> {
+  if let Some((app, repo_id)) = progress {
+    emit_progress(
+      app,
+      repo_id,
+      "check",
+      "Checking your files again",
+      "Making sure nothing changed while the plan was being made.",
+    );
+  }
   if head_state(repo)? != snapshot.head {
     return Err(AppError::Other(
       "The current branch changed while AI was working. No commits were created.".into(),
     ));
   }
-  let latest = capture_snapshot(repo_path, repo)?;
-  if latest.tree != snapshot.tree {
+  let check_started = Instant::now();
+  let latest_tree = capture_current_tree(repo_path, snapshot.head.oid)?;
+  log::info!(
+    "AI commit safety check finished: units={}, elapsed_ms={}",
+    snapshot.units.len(),
+    check_started.elapsed().as_millis()
+  );
+  if latest_tree != snapshot.tree {
     return Err(AppError::Other(
       "Your files changed while AI was working. No commits were created; review the new changes and try again.".into(),
     ));
@@ -466,8 +584,29 @@ fn create_commit_chain(
   let mut selected = HashSet::new();
   let mut parent_oid = snapshot.head.oid;
   let mut created = Vec::with_capacity(plan.commits.len());
+  let total_commits = plan.commits.len();
 
-  for planned in plan.commits {
+  for (index, planned) in plan.commits.into_iter().enumerate() {
+    let mut files: Vec<String> = planned
+      .units
+      .iter()
+      .filter_map(|id| unit_by_id.get(id.as_str()).map(|unit| unit.path.clone()))
+      .collect();
+    files.sort();
+    files.dedup();
+    if let Some((app, repo_id)) = progress {
+      emit_progress(
+        app,
+        repo_id,
+        "stage",
+        format!(
+          "Staging {} for commit {} of {total_commits}",
+          file_count_label(files.len()),
+          index + 1
+        ),
+        planned.summary.trim(),
+      );
+    }
     for unit in &planned.units {
       selected.insert(unit.clone());
     }
@@ -484,22 +623,33 @@ fn create_commit_chain(
     };
     let oid = repo.commit(None, &signature, &signature, &message, &tree, &parents)?;
 
-    let mut files: Vec<String> = planned
-      .units
-      .iter()
-      .filter_map(|id| unit_by_id.get(id.as_str()).map(|unit| unit.path.clone()))
-      .collect();
-    files.sort();
-    files.dedup();
     created.push(AiCreatedCommit {
       sha: oid.to_string(),
-      summary,
+      summary: summary.clone(),
       description,
       files,
     });
+    if let Some((app, repo_id)) = progress {
+      emit_progress(
+        app,
+        repo_id,
+        "commit",
+        format!("Created commit {} of {total_commits}", index + 1),
+        summary,
+      );
+    }
     parent_oid = Some(oid);
   }
 
+  if let Some((app, repo_id)) = progress {
+    emit_progress(
+      app,
+      repo_id,
+      "check",
+      "Checking the finished commit set",
+      "Confirming that every change is included before updating your branch.",
+    );
+  }
   let final_oid = parent_oid.ok_or_else(|| AppError::Other("AI made no commits".into()))?;
   let final_commit = repo.find_commit(final_oid)?;
   if final_commit.tree_id() != snapshot.tree {
@@ -524,6 +674,10 @@ fn create_commit_chain(
   }
 
   Ok(created)
+}
+
+fn file_count_label(count: usize) -> String {
+  format!("{count} file{}", if count == 1 { "" } else { "s" })
 }
 
 fn bearer_for(info: &auth::AuthInfo) -> &str {
@@ -554,6 +708,13 @@ pub async fn generate_commits(
 
   let open = manager.get(&repo_id)?;
   let repo_path = open.path.to_string_lossy().into_owned();
+  emit_progress(
+    &app,
+    &repo_id,
+    "scan",
+    "Reading your changes",
+    "Finding the parts that can safely go into separate commits.",
+  );
   let snapshot = tauri::async_runtime::spawn_blocking({
     let open = open.clone();
     let repo_path = repo_path.clone();
@@ -564,6 +725,24 @@ pub async fn generate_commits(
   })
   .await
   .map_err(|error| AppError::Other(error.to_string()))??;
+
+  let changed_files = snapshot
+    .units
+    .iter()
+    .map(|unit| unit.path.as_str())
+    .collect::<HashSet<_>>()
+    .len();
+  emit_progress(
+    &app,
+    &repo_id,
+    "scan",
+    format!("Found {}", file_count_label(changed_files)),
+    format!(
+      "Split them into {} safe change group{} for planning.",
+      snapshot.units.len(),
+      if snapshot.units.len() == 1 { "" } else { "s" }
+    ),
+  );
 
   if snapshot.units.len() < requested {
     return Err(AppError::Other(format!(
@@ -608,24 +787,76 @@ Recent commit subjects:\n{}\n\nChange units:{}",
     present_units(&snapshot.units)
   );
 
+  emit_progress(
+    &app,
+    &repo_id,
+    "plan",
+    format!("Planning {requested} commits"),
+    "AI is deciding which changes belong together and writing clear messages.",
+  );
   let response = client::chat(client::ChatRequest {
     provider: &provider_config,
     bearer: bearer_for(&info),
     model: &model,
     system: &system,
     user: &user,
-    max_tokens: 4_096,
+    max_tokens: PLAN_MAX_TOKENS,
+    timeout: PLAN_TIMEOUT,
   })
   .await?;
-  let plan = parse_plan(&response)?;
+  emit_progress(
+    &app,
+    &repo_id,
+    "check",
+    "Checking the AI plan",
+    "Making sure every change appears once and no change is left out.",
+  );
+  let mut plan = parse_plan(&response)?;
+  normalize_plan(&mut plan);
   validate_plan(&plan, requested, &snapshot.units)?;
+  emit_progress(
+    &app,
+    &repo_id,
+    "plan",
+    format!("Plan ready for {requested} commits"),
+    format!("All {} change groups are included.", snapshot.units.len()),
+  );
 
-  tauri::async_runtime::spawn_blocking(move || {
+  let progress_app = app.clone();
+  let progress_repo_id = repo_id.clone();
+  let created_result = tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    create_commit_chain(&repo_path, &repo, &snapshot, plan)
+    create_commit_chain(
+      &repo_path,
+      &repo,
+      &snapshot,
+      plan,
+      Some((&progress_app, &progress_repo_id)),
+    )
   })
   .await
-  .map_err(|error| AppError::Other(error.to_string()))?
+  .map_err(|error| AppError::Other(error.to_string()))?;
+  let created = match created_result {
+    Ok(created) => created,
+    Err(error) => {
+      emit_progress(
+        &app,
+        &repo_id,
+        "error",
+        "Commit generation stopped",
+        error.to_string(),
+      );
+      return Err(error);
+    }
+  };
+  emit_progress(
+    &app,
+    &repo_id,
+    "done",
+    format!("Finished all {requested} commits"),
+    "Your branch is ready. Nothing was pushed.",
+  );
+  Ok(created)
 }
 
 #[cfg(test)]
@@ -657,6 +888,24 @@ mod tests {
   }
 
   #[test]
+  fn normalizes_overlong_summaries_without_dropping_tags() {
+    let summary = "improved: Make the generated commit plan keep working when the model writes a subject that is much too long #ai";
+    let normalized = normalize_summary(summary);
+
+    assert!(normalized.chars().count() <= MAX_SUMMARY_CHARS);
+    assert!(normalized.starts_with("improved:"));
+    assert!(normalized.ends_with("#ai"));
+  }
+
+  #[test]
+  fn normalizes_accidental_summary_line_breaks() {
+    assert_eq!(
+      normalize_summary("fixes: Keep the first line\nwith the rest"),
+      "fixes: Keep the first line with the rest"
+    );
+  }
+
+  #[test]
   fn rejects_duplicate_or_missing_units() {
     let plan = CommitPlan {
       commits: vec![
@@ -676,6 +925,24 @@ mod tests {
       ],
     };
     assert!(validate_plan(&plan, 2, &units()).is_ok());
+  }
+
+  #[test]
+  fn large_change_sets_stay_inside_the_planning_budget() {
+    let units = (1..=463)
+      .map(|index| ChangeUnit {
+        id: format!("u{index}"),
+        path: format!("src/feature-{index}/long-component-name.tsx"),
+        block_index: index - 1,
+        selection: None,
+        preview: "changed line with enough context to repeat\n".repeat(80),
+      })
+      .collect::<Vec<_>>();
+
+    let presented = present_units(&units);
+    assert!(presented.chars().count() <= MAX_PLAN_PROMPT_CHARS);
+    assert!(presented.contains("--- u1 |"));
+    assert!(presented.contains("--- u463 |"));
   }
 
   #[test]
@@ -725,7 +992,7 @@ mod tests {
         },
       ],
     };
-    let made = create_commit_chain(&repo_path, &repo, &snapshot, plan).unwrap();
+    let made = create_commit_chain(&repo_path, &repo, &snapshot, plan, None).unwrap();
 
     assert_eq!(made.len(), 2);
     assert_eq!(fs::read_to_string(temp.path().join("story.txt")).unwrap(), changed);

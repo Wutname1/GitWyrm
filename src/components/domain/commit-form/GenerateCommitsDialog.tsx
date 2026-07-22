@@ -1,9 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import {
+  Brain,
   Check,
+  CircleAlert,
+  FileSearch,
   GitCommitHorizontal,
+  Layers3,
+  Loader2,
   Minus,
   Plus,
+  ShieldCheck,
   Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -20,14 +27,27 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { useAiConfigured, useAiMutations } from '@/hooks/useAi'
 import type { AiCreatedCommit } from '@/lib/bindings'
-import { cn } from '@/lib/utils'
+import { describeError, log } from '@/lib/log'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 
-const progressCopy = [
-  ['Reading your changes', 'Finding the parts that belong together'],
-  ['Planning the split', 'Writing clear messages for each commit'],
-  ['Creating the commits', 'Checking that every change is included'],
-] as const
+type ProgressKind = 'scan' | 'plan' | 'check' | 'stage' | 'commit' | 'done' | 'error'
+
+interface AiCommitProgressPayload {
+  repo_id: string
+  kind: ProgressKind
+  message: string
+  detail: string
+}
+
+const progressIcons: Record<ProgressKind, typeof Sparkles> = {
+  scan: FileSearch,
+  plan: Brain,
+  check: ShieldCheck,
+  stage: Layers3,
+  commit: GitCommitHorizontal,
+  done: Check,
+  error: CircleAlert,
+}
 
 interface GenerateCommitsDialogProps {
   changedFiles: number
@@ -59,18 +79,48 @@ export function GenerateCommitsDialog({
   const [instructions, setInstructions] = useState('')
   const [created, setCreated] = useState<AiCreatedCommit[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [progress, setProgress] = useState(0)
+  const [activity, setActivity] = useState<AiCommitProgressPayload[]>([])
+  const [startedAt, setStartedAt] = useState<number | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const activityRef = useRef<HTMLDivElement>(null)
   const pending = ai.generateCommits.isPending
+  const working = pending && error == null
 
   useEffect(() => {
-    if (!pending) return
-    setProgress(0)
-    const timers = [
-      window.setTimeout(() => setProgress(1), 1700),
-      window.setTimeout(() => setProgress(2), 4300),
-    ]
-    return () => timers.forEach(window.clearTimeout)
-  }, [pending])
+    if (!repo) return
+    const repoId = repo.id
+    const unlisten = listen<AiCommitProgressPayload>('ai-commit-progress', (event) => {
+      if (event.payload.repo_id !== repoId) return
+      if (event.payload.kind === 'error') setError(event.payload.detail)
+      setActivity((current) => {
+        const previous = current.at(-1)
+        if (
+          previous?.kind === event.payload.kind &&
+          previous.message === event.payload.message &&
+          previous.detail === event.payload.detail
+        ) {
+          return current
+        }
+        return [...current, event.payload]
+      })
+    })
+    return () => {
+      unlisten.then((dispose) => dispose())
+    }
+  }, [repo])
+
+  useEffect(() => {
+    if (!working || startedAt == null) return
+    const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+    updateElapsed()
+    const timer = window.setInterval(updateElapsed, 1000)
+    return () => window.clearInterval(timer)
+  }, [working, startedAt])
+
+  useEffect(() => {
+    const viewport = activityRef.current
+    if (viewport) viewport.scrollTop = viewport.scrollHeight
+  }, [activity])
 
   const fileLabel = useMemo(
     () => `${changedFiles} changed file${changedFiles === 1 ? '' : 's'}`,
@@ -80,20 +130,33 @@ export function GenerateCommitsDialog({
   if (!aiReady || changedFiles === 0) return null
 
   const changeOpen = (next: boolean) => {
-    if (!next && pending) return
+    if (!next && working) return
     setOpen(next)
     if (next) {
       setCount(defaultCount)
       setInstructions('')
       setCreated(null)
       setError(null)
-      setProgress(0)
+      setActivity([])
+      setStartedAt(null)
+      setElapsedSeconds(0)
     }
   }
 
   const generate = () => {
     if (!repo || pending || hasConflicts) return
     setError(null)
+    setCreated(null)
+    setStartedAt(Date.now())
+    setElapsedSeconds(0)
+    setActivity([
+      {
+        repo_id: repo.id,
+        kind: 'scan',
+        message: `Starting ${count}-commit run`,
+        detail: `Preparing to organize ${fileLabel}.`,
+      },
+    ])
     ai.generateCommits.mutate(
       {
         repoId: repo.id,
@@ -108,7 +171,21 @@ export function GenerateCommitsDialog({
           toast.success(`Created ${commits.length} commits`)
         },
         onError: (reason) => {
-          setError(reason instanceof Error ? reason.message : String(reason))
+          const message = reason instanceof Error ? reason.message : String(reason)
+          log.error(`AI commit generation failed: ${describeError(reason)}`)
+          setError(message)
+          setActivity((current) => {
+            const failure: AiCommitProgressPayload = {
+              repo_id: repo.id,
+              kind: 'error',
+              message: 'Commit generation stopped',
+              detail: message,
+            }
+            const previous = current.at(-1)
+            return previous?.kind === 'error' && previous.detail === message
+              ? current
+              : [...current, failure]
+          })
         },
       }
     )
@@ -127,9 +204,9 @@ export function GenerateCommitsDialog({
 
       <DialogContent
         className="gap-0 overflow-hidden p-0 sm:max-w-[34rem]"
-        showCloseButton={!pending}
-        onEscapeKeyDown={(event) => pending && event.preventDefault()}
-        onPointerDownOutside={(event) => pending && event.preventDefault()}
+        showCloseButton={!working}
+        onEscapeKeyDown={(event) => working && event.preventDefault()}
+        onPointerDownOutside={(event) => working && event.preventDefault()}
         aria-describedby="generate-commits-description"
       >
         <DialogHeader className="border-b border-border px-5 pb-4 pt-5">
@@ -178,47 +255,65 @@ export function GenerateCommitsDialog({
               ))}
             </div>
           </div>
-        ) : pending ? (
-          <div className="grid min-h-[19rem] place-items-center px-8 py-8" aria-live="polite">
-            <div className="w-full max-w-sm">
-              <div className="mx-auto mb-7 grid size-20 place-items-center rounded-full border border-primary/30 bg-soft shadow-[0_0_35px_rgba(29,181,132,0.12)]">
-                <img
-                  src={logoUrl}
-                  alt=""
-                  className="wyrm-ai-logo size-[68px] object-contain"
-                />
-              </div>
-              <div className="grid gap-2">
-                {progressCopy.map(([label, detail], index) => {
-                  const done = index < progress
-                  const active = index === progress
+        ) : pending || error ? (
+          <div className="grid min-h-[19rem] grid-rows-[auto_minmax(0,1fr)] gap-4 px-5 py-5">
+            <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-soft px-3.5 py-3">
+              <span className="grid size-11 flex-none place-items-center rounded-full border border-primary/30 bg-background">
+                {working ? (
+                  <img
+                    src={logoUrl}
+                    alt=""
+                    className="wyrm-ai-logo wyrm-ai-logo-compact object-contain"
+                  />
+                ) : (
+                  <CircleAlert size={18} className="text-removed" />
+                )}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-xs font-semibold text-foreground">
+                  {working ? `Building ${count} commits` : 'Stopped before finishing'}
+                </span>
+                <span className="mt-0.5 block font-mono text-2xs text-muted-foreground">
+                  {working ? `Working for ${elapsedSeconds}s` : `Stopped after ${elapsedSeconds}s`}
+                </span>
+              </span>
+              {working && <Loader2 size={16} className="animate-spin text-accent-text" />}
+            </div>
+
+            <div
+              ref={activityRef}
+              className="max-h-[18rem] overflow-y-auto rounded-lg border border-border bg-panel2"
+              aria-live="polite"
+              aria-label="Commit generation activity"
+            >
+              <div className="relative grid gap-0 px-3 py-2 before:absolute before:bottom-5 before:left-[26px] before:top-5 before:w-px before:bg-border">
+                {activity.map((item, index) => {
+                  const Icon = progressIcons[item.kind]
+                  const active = working && index === activity.length - 1
+                  const failed = item.kind === 'error'
                   return (
                     <div
-                      key={label}
-                      className={cn(
-                        'flex items-start gap-3 rounded-md border px-3 py-2.5 transition-colors',
-                        active
-                          ? 'border-primary/35 bg-soft'
-                          : 'border-transparent bg-transparent'
-                      )}
+                      key={`${index}-${item.message}`}
+                      className="relative grid grid-cols-[29px_minmax(0,1fr)] gap-3 px-1 py-2.5"
                     >
                       <span
-                        className={cn(
-                          'mt-0.5 grid size-5 flex-none place-items-center rounded-full border',
-                          done
-                            ? 'border-primary bg-primary text-primary-foreground'
+                        className={`relative z-[1] grid size-[29px] place-items-center rounded-full border bg-background ${
+                          failed
+                            ? 'border-removed/50 text-removed'
                             : active
-                              ? 'animate-pulse border-primary text-accent-text'
-                              : 'border-border text-muted-foreground'
-                        )}
+                              ? 'border-primary text-accent-text'
+                              : 'border-primary/35 text-accent-text'
+                        }`}
                       >
-                        {done ? <Check size={12} /> : <span className="font-mono text-2xs">{index + 1}</span>}
+                        {active ? <Loader2 size={13} className="animate-spin" /> : <Icon size={13} />}
                       </span>
-                      <span>
-                        <span className={cn('block text-xs font-semibold', !active && !done && 'text-sub')}>
-                          {label}
+                      <span className="min-w-0 pt-0.5">
+                        <span className="block text-xs font-semibold text-foreground">
+                          {item.message}
                         </span>
-                        <span className="mt-0.5 block text-2xs text-muted-foreground">{detail}</span>
+                        <span className="mt-0.5 block text-2xs leading-relaxed text-muted-foreground">
+                          {item.detail}
+                        </span>
                       </span>
                     </div>
                   )
@@ -284,12 +379,6 @@ export function GenerateCommitsDialog({
                 Resolve the conflicted files first, then generate commits.
               </div>
             )}
-            {error && (
-              <div role="alert" className="rounded-md border border-removed/35 bg-removed/10 px-3 py-2 text-xs text-removed">
-                {error}
-              </div>
-            )}
-
             <div className="flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-2xs text-sub">
               <GitCommitHorizontal size={14} className="text-accent-text" />
               This creates commits right away. It does not push them.
@@ -301,6 +390,19 @@ export function GenerateCommitsDialog({
           {created ? (
             <Button size="sm" onClick={() => changeOpen(false)}>
               Done
+            </Button>
+          ) : error ? (
+            <Button
+              size="sm"
+              onClick={() => {
+                ai.generateCommits.reset()
+                setError(null)
+                setActivity([])
+                setStartedAt(null)
+                setElapsedSeconds(0)
+              }}
+            >
+              Review and try again
             </Button>
           ) : (
             <>
