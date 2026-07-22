@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Check, Cloud, GitMerge, Repeat2, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, Cloud, GitMerge, Repeat2, RotateCcw, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -93,6 +93,7 @@ export function RemoteSyncModal() {
   const open = useUiStore((s) => s.activeModal === 'remote-sync')
   const closeModal = useUiStore((s) => s.closeModal)
   const openConflict = useUiStore((s) => s.openConflict)
+  const resetToBranchPrompt = useUiStore((s) => s.resetToBranchPrompt)
   const syncSource = useUiStore((s) => s.syncSource)
   const syncTarget = useUiStore((s) => s.syncTarget)
 
@@ -200,6 +201,16 @@ export function RemoteSyncModal() {
       },
       { onSuccess: ({ result }) => onConflicts(result.conflicts) }
     )
+  }
+  // Reset makes the checked-out branch match the source exactly, dropping its
+  // own later commits. It only re-points HEAD's branch, so it is offered only
+  // when the target IS the checked-out branch. Routes through the shared
+  // hard-reset confirm (hosted in the sidebar) after closing this modal.
+  const canReset = !!branchPair && branchPair.target.name === headName
+  const runReset = () => {
+    if (!branchPair) return
+    closeModal()
+    resetToBranchPrompt(branchPair.source.name)
   }
 
   return (
@@ -348,12 +359,24 @@ export function RemoteSyncModal() {
             </Button>
           )}
           {action?.kind === 'ff-branch' && (
-            <Button size="sm" disabled={pending} onClick={runMergeIntoTarget}>
-              {pending ? 'Updating…' : `Update ${tgtName}`}
-            </Button>
+            <>
+              {canReset && (
+                <Button variant="secondary" size="sm" disabled={pending} onClick={runReset}>
+                  <RotateCcw size={13} /> Reset to match
+                </Button>
+              )}
+              <Button size="sm" disabled={pending} onClick={runMergeIntoTarget}>
+                {pending ? 'Updating…' : `Update ${tgtName}`}
+              </Button>
+            </>
           )}
           {action?.kind === 'diverged-branches' && (
             <>
+              {canReset && (
+                <Button variant="secondary" size="sm" disabled={pending} onClick={runReset}>
+                  <RotateCcw size={13} /> Reset to match
+                </Button>
+              )}
               <Button variant="secondary" size="sm" disabled={pending} onClick={runMergeIntoTarget}>
                 <GitMerge size={13} /> Blend
               </Button>

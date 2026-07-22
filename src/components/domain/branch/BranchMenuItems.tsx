@@ -8,10 +8,11 @@ import {
   GitPullRequestArrow,
   Link2,
   PenLine,
+  RotateCcw,
   Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { BranchInfo } from '@/lib/bindings'
+import type { BranchInfo, ResetMode } from '@/lib/bindings'
 import {
   ContextMenuItem,
   ContextMenuSeparator,
@@ -20,6 +21,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
 } from '@/components/ui/context-menu'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useBranchHost, useRemotes } from '@/hooks/useGitQueries'
@@ -31,6 +33,8 @@ export interface BranchMenuHandlers {
   onMerge: (name: string) => void
   onRename: (name: string) => void
   onDelete: (name: string) => void
+  /** Confirm hard-resetting the current branch to this branch. */
+  onResetTo: (name: string) => void
 }
 
 interface BranchMenuItemsProps {
@@ -71,6 +75,13 @@ export function BranchMenuItems({
   const isPulling = m.pullBranch.isPending && m.pullBranch.variables === branch.name
   const isSwitching = m.checkout.isPending && m.checkout.variables === branch.name
   const busy = m.pushBranch.isPending || m.pullBranch.isPending
+
+  // Reset rewinds the checked-out branch TO this one, so it only makes sense on
+  // some other branch. Soft/Mixed keep your files, so they run straight away;
+  // Hard erases uncommitted work, so it goes through a confirm.
+  const resetting = m.resetToBranch.isPending && m.resetToBranch.variables?.target === branch.name
+  const resetTo = (mode: ResetMode) => m.resetToBranch.mutate({ target: branch.name, mode })
+  const isResetMode = (mode: ResetMode) => resetting && m.resetToBranch.variables?.mode === mode
 
   const hasRemoteAction = actions.push.show || actions.pull.show || actions.setUpstream.show
   const [upstreamRemoteName, ...upstreamBranchParts] = branch.upstream?.split('/') ?? []
@@ -128,6 +139,55 @@ export function BranchMenuItems({
         <GitMerge />
         Merge into {currentBranch || 'current'}
       </ContextMenuItem>
+      {!isCurrent && (
+        <ContextMenuSub>
+          <ContextMenuSubTrigger
+            className="data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+            data-disabled={opInProgress || resetting ? '' : undefined}
+          >
+            <RotateCcw />
+            Reset {currentBranch || 'current'} to {branch.name}
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent className="w-64">
+            <ContextMenuItem
+              disabled={resetting}
+              onSelect={(e) => {
+                e.preventDefault()
+                resetTo('Mixed')
+              }}
+            >
+              {isResetMode('Mixed') && <PendingIndicator />}
+              <div className="flex flex-col">
+                <span>{isResetMode('Mixed') ? 'Resetting…' : 'Match it, keep your changes'}</span>
+                <span className="text-2xs text-muted-foreground">Changes stay in your files</span>
+              </div>
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={resetting}
+              onSelect={(e) => {
+                e.preventDefault()
+                resetTo('Soft')
+              }}
+            >
+              {isResetMode('Soft') && <PendingIndicator />}
+              <div className="flex flex-col">
+                <span>{isResetMode('Soft') ? 'Resetting…' : 'Match it, keep changes staged'}</span>
+                <span className="text-2xs text-muted-foreground">Changes stay ready to commit</span>
+              </div>
+            </ContextMenuItem>
+            <ContextMenuItem
+              variant="destructive"
+              disabled={resetting}
+              onSelect={() => handlers.onResetTo(branch.name)}
+            >
+              <div className="flex flex-col">
+                <span>Match it, erase your changes</span>
+                <span className="text-2xs opacity-80">Can't be undone easily</span>
+              </div>
+            </ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+      )}
       {showWebLink && webTarget && webUrl && (
         <ContextMenuItem onSelect={() => openWebUrl(webUrl, webTarget.label)}>
           <ExternalLink />

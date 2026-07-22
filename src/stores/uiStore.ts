@@ -17,6 +17,7 @@ export type ModalKind =
   | 'tutorial'
   | 'merge'
   | 'remote-sync'
+  | 'push-choice'
   | 'newBranch'
   | 'newTag'
   | 'remotes'
@@ -73,6 +74,12 @@ interface UiState {
   /** Branch pending a rename / delete confirm, set from any branch menu. */
   branchToRename: string | null
   branchToDelete: string | null
+  /**
+   * Branch the current branch will be hard-reset to, pending confirm. Set from
+   * any branch menu or a branch-onto-branch drop; the target names where the
+   * checked-out branch will be rewound to.
+   */
+  branchToResetTo: string | null
   settingsSection: SettingsSection
   changesFocusNonce: number
   /** Ref (branch/tag) the graph should scroll to and highlight; bumped nonce re-triggers. */
@@ -95,6 +102,7 @@ interface UiState {
   promptPushTags: (tags: PendingTag[]) => void
   renameBranchPrompt: (name: string | null) => void
   deleteBranchPrompt: (name: string | null) => void
+  resetToBranchPrompt: (name: string | null) => void
   openRemoteSync: (source: string, target: string) => void
   openDiff: (request: DiffRequest) => void
   closeDiff: () => void
@@ -147,6 +155,7 @@ export const useUiStore = create<UiState>((set) => ({
   tagsToPush: null,
   branchToRename: null,
   branchToDelete: null,
+  branchToResetTo: null,
   settingsSection: 'general',
   changesFocusNonce: 0,
   revealRef: null,
@@ -186,6 +195,7 @@ export const useUiStore = create<UiState>((set) => ({
   promptPushTags: (tags) => set({ tagsToPush: tags.length > 0 ? tags : null }),
   renameBranchPrompt: (name) => set({ branchToRename: name }),
   deleteBranchPrompt: (name) => set({ branchToDelete: name }),
+  resetToBranchPrompt: (name) => set({ branchToResetTo: name }),
   openRemoteSync: (source, target) =>
     set({ activeModal: 'remote-sync', syncSource: source, syncTarget: target }),
   // Remember which commit a diff came from, so the file view tabs can offer

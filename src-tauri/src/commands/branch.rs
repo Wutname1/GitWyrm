@@ -472,32 +472,67 @@ pub async fn reset_current(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    let branch = current_branch_name(&repo)?;
-
-    if mode == ResetMode::Hard && refs::tracked_changes_present(&repo)? {
-      return Err(AppError::Other(
-        "working tree has changes; a hard reset would discard them - commit or stash first".into(),
-      ));
-    }
-
-    let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
-
     let target_oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
-    let target = repo.find_object(target_oid, None)?;
-    let kind = match mode {
-      ResetMode::Soft => ResetType::Soft,
-      ResetMode::Mixed => ResetType::Mixed,
-      ResetMode::Hard => ResetType::Hard,
-    };
-    let mut checkout = CheckoutBuilder::new();
-    checkout.force();
-    let checkout = if mode == ResetMode::Hard { Some(&mut checkout) } else { None };
-    repo.reset(&target, kind, checkout)?;
-
-    Ok(RefMove { branch, previous_sha })
+    let commit = repo.find_commit(target_oid)?;
+    reset_current_to_commit(&repo, &commit, mode)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Reset the current branch to another ref (a branch name or any revspec),
+/// resolving it to its tip commit. This backs "reset this branch to that
+/// branch": while `<current>` is checked out, right-clicking or dropping onto
+/// `<other>` rewinds `<current>` to wherever `<other>` points. Same discard
+/// rules as [`reset_current`] - a hard reset is refused over a dirty tree.
+#[tauri::command]
+#[specta::specta]
+pub async fn reset_current_to_ref(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  target_ref: String,
+  mode: ResetMode,
+) -> Result<RefMove, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let object = repo.revparse_single(target_ref.trim())?;
+    let commit = object.peel_to_commit()?;
+    reset_current_to_commit(&repo, &commit, mode)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Shared core for the reset commands: rewind the checked-out branch to a
+/// resolved commit and report where it pointed before. Refuses a hard reset
+/// over a dirty tree so committed-but-not-yet-saved work is never silently lost.
+fn reset_current_to_commit(
+  repo: &git2::Repository,
+  commit: &git2::Commit,
+  mode: ResetMode,
+) -> Result<RefMove, AppError> {
+  let branch = current_branch_name(repo)?;
+
+  if mode == ResetMode::Hard && refs::tracked_changes_present(repo)? {
+    return Err(AppError::Other(
+      "working tree has changes; a hard reset would discard them - commit or stash first".into(),
+    ));
+  }
+
+  let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
+
+  let kind = match mode {
+    ResetMode::Soft => ResetType::Soft,
+    ResetMode::Mixed => ResetType::Mixed,
+    ResetMode::Hard => ResetType::Hard,
+  };
+  let mut checkout = CheckoutBuilder::new();
+  checkout.force();
+  let checkout = if mode == ResetMode::Hard { Some(&mut checkout) } else { None };
+  repo.reset(commit.as_object(), kind, checkout)?;
+
+  Ok(RefMove { branch, previous_sha })
 }
 
 /// Move the current branch ref to a commit without touching the working tree

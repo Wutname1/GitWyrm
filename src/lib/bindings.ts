@@ -479,6 +479,21 @@ async resetCurrent(repoId: string, sha: string, mode: ResetMode) : Promise<Resul
 }
 },
 /**
+ * Reset the current branch to another ref (a branch name or any revspec),
+ * resolving it to its tip commit. This backs "reset this branch to that
+ * branch": while `<current>` is checked out, right-clicking or dropping onto
+ * `<other>` rewinds `<current>` to wherever `<other>` points. Same discard
+ * rules as [`reset_current`] - a hard reset is refused over a dirty tree.
+ */
+async resetCurrentToRef(repoId: string, targetRef: string, mode: ResetMode) : Promise<Result<RefMove, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reset_current_to_ref", { repoId, targetRef, mode }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Move the current branch ref to a commit without touching the working tree
  * (like `git branch -f <current> <sha>` re-pointing HEAD's branch). Refused
  * over a dirty tree so the tree never silently diverges from the new tip.

@@ -699,6 +699,19 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Reset the checked-out branch to another branch's tip. Same undo pattern as
+  // `reset`: a hard reset can't restore uncommitted work, so the undo just moves
+  // the ref back with a soft reset.
+  const resetToBranch = useMutation({
+    mutationFn: async (args: { target: string; mode: ResetMode }) => ({
+      mode: args.mode,
+      move: unwrap(await commands.resetCurrentToRef(id, args.target, args.mode)),
+    }),
+    onSuccess: ({ mode, move }) =>
+      afterRefMove(move.previous_sha, `Rewound ${move.branch} — was at`, mode),
+    onError,
+  })
+
   const moveBranch = useMutation({
     mutationFn: async (sha: string) => unwrap(await commands.moveCurrentBranch(id, sha)),
     onSuccess: (move) => afterRefMove(move.previous_sha, `Moved ${move.branch} — was at`, 'Soft'),
@@ -910,6 +923,7 @@ export function useGitMutations(repoId: string | null) {
     mergeDirectional,
     cherryPick,
     reset,
+    resetToBranch,
     moveBranch,
     openOnGitHub,
     copyCommitLink,

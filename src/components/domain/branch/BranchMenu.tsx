@@ -29,6 +29,7 @@ export function BranchMenu({ branch, opInProgress, showWebLink = true }: BranchM
   const openMerge = useUiStore((s) => s.openMerge)
   const renameBranchPrompt = useUiStore((s) => s.renameBranchPrompt)
   const deleteBranchPrompt = useUiStore((s) => s.deleteBranchPrompt)
+  const resetToBranchPrompt = useUiStore((s) => s.resetToBranchPrompt)
 
   const resolved =
     typeof branch === 'string'
@@ -49,6 +50,7 @@ export function BranchMenu({ branch, opInProgress, showWebLink = true }: BranchM
         onMerge: openMerge,
         onRename: renameBranchPrompt,
         onDelete: deleteBranchPrompt,
+        onResetTo: resetToBranchPrompt,
       }}
     />
   )

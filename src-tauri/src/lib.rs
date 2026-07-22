@@ -66,6 +66,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::branch::create_tag,
     commands::branch::delete_tag,
     commands::branch::reset_current,
+    commands::branch::reset_current_to_ref,
     commands::branch::move_current_branch,
     commands::branch::checkout_commit,
     commands::branch::reword_commit,

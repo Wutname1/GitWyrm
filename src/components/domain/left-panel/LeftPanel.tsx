@@ -23,6 +23,7 @@ import { openWebUrl } from '@/lib/remoteWeb'
 import { BranchMenu } from '@/components/domain/branch/BranchMenu'
 import { StashContextMenu } from '@/components/domain/graph/StashRow'
 import { SidebarSection } from './SidebarSection'
+import { BranchSidebarItem } from './BranchSidebarItem'
 import { RemotesSection } from './RemotesSection'
 
 export function LeftPanel() {
@@ -56,8 +57,10 @@ export function LeftPanel() {
   const [toRemoveFromRemote, setToRemoveFromRemote] = useState<string | null>(null)
   const branchToRename = useUiStore((s) => s.branchToRename)
   const branchToDelete = useUiStore((s) => s.branchToDelete)
+  const branchToResetTo = useUiStore((s) => s.branchToResetTo)
   const renameBranchPrompt = useUiStore((s) => s.renameBranchPrompt)
   const deleteBranchPrompt = useUiStore((s) => s.deleteBranchPrompt)
+  const resetToBranchPrompt = useUiStore((s) => s.resetToBranchPrompt)
 
   const currentBranch =
     branches.data?.local.find((b) => b.is_head)?.name ?? repo?.head_branch ?? ''
@@ -301,6 +304,32 @@ export function LeftPanel() {
     return null
   }
 
+  // Branch rows get their own drag-and-drop wiring so a branch can be dragged
+  // onto another branch (or a graph chip) to sync/merge/reset. Other section
+  // types fall through to the default row (return undefined).
+  const renderBranchItem = (
+    section: SidebarSectionData,
+    item: SectionItem,
+    ctx: { isCurrent: boolean; renderMenu: (row: ReactNode) => ReactNode }
+  ): ReactNode | undefined => {
+    if (section.type !== 'branch') return undefined
+    return (
+      <BranchSidebarItem
+        section={section}
+        item={item}
+        currentBranch={currentBranch}
+        isCurrent={ctx.isCurrent}
+        onClick={() => onItemClick(section, item)}
+        onDoubleClick={() => onItemDoubleClick(section, item)}
+        hoverAction={getHoverAction(section, item)}
+        pending={isItemPending(section, item)}
+        disabled={isItemDisabled(section, item)}
+        pendingLabel={getPendingLabel(section, item)}
+        renderMenu={ctx.renderMenu}
+      />
+    )
+  }
+
   if (!repo) {
     return (
       <div className="h-full w-full border-r border-border bg-panel p-4 text-xs text-muted-foreground">
@@ -313,7 +342,10 @@ export function LeftPanel() {
   const otherSections = sections.slice(1)
 
   return (
-    <div data-dim-on-drag className="h-full w-full overflow-y-auto border-r border-border bg-panel pb-6 pt-1.5">
+    <div
+      data-drag-scroll
+      className="h-full w-full overflow-y-auto border-r border-border bg-panel pb-6 pt-1.5"
+    >
       <SidebarSection
         key={localSection.key}
         section={localSection}
@@ -321,6 +353,7 @@ export function LeftPanel() {
         onItemClick={onItemClick}
         onItemDoubleClick={onItemDoubleClick}
         renderItemMenu={renderItemMenu}
+        renderItem={renderBranchItem}
         onAdd={addAction.local?.run}
         addLabel={addAction.local?.label}
         isItemPending={isItemPending}
@@ -362,6 +395,33 @@ export function LeftPanel() {
         }
         confirmLabel="Delete branch"
         onConfirm={() => branchToDelete && m.deleteBranch.mutate(branchToDelete)}
+      />
+
+      <ConfirmDialog
+        open={branchToResetTo !== null}
+        onOpenChange={(o) => !o && resetToBranchPrompt(null)}
+        destructive
+        title={`Reset ${currentBranch || 'this branch'} to ${branchToResetTo}?`}
+        description={
+          <>
+            This moves <span className="font-mono text-foreground">{currentBranch}</span> to match{' '}
+            <span className="font-mono text-foreground">{branchToResetTo}</span> exactly and{' '}
+            <span className="text-removed">erases any work you haven't committed</span>. Commits that
+            were only on <span className="font-mono text-foreground">{currentBranch}</span> may become
+            hard to find. This is hard to undo.
+          </>
+        }
+        confirmLabel="Reset and erase"
+        pending={m.resetToBranch.isPending}
+        pendingLabel="Resetting…"
+        keepOpenOnConfirm
+        onConfirm={() =>
+          branchToResetTo &&
+          m.resetToBranch.mutate(
+            { target: branchToResetTo, mode: 'Hard' },
+            { onSuccess: () => resetToBranchPrompt(null) }
+          )
+        }
       />
 
       <RenameBranchDialog

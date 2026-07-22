@@ -18,6 +18,20 @@ interface SidebarSectionProps {
     item: SectionItem,
     row: ReactNode
   ) => ReactNode
+  /**
+   * Fully render an item instead of the default row (used to give branch rows
+   * their own drag-and-drop wiring). Gets a `renderMenu` that wraps a row in the
+   * section's right-click menu. When omitted, the default row + `renderItemMenu`
+   * path is used.
+   */
+  renderItem?: (
+    section: SidebarSectionData,
+    item: SectionItem,
+    ctx: {
+      isCurrent: boolean
+      renderMenu: (row: ReactNode) => ReactNode
+    }
+  ) => ReactNode
   /** When set, a `+` button appears on hover in the section header. */
   onAdd?: () => void
   addLabel?: string
@@ -37,6 +51,7 @@ export function SidebarSection({
   onItemDoubleClick,
   onItemContextMenu,
   renderItemMenu,
+  renderItem,
   onAdd,
   addLabel,
   isItemPending,
@@ -99,6 +114,14 @@ export function SidebarSection({
       {open && (
         <div className="pb-1">
           {section.items.map((item) => {
+            const key = item.sha ?? item.id ?? item.name
+            if (renderItem) {
+              const custom = renderItem(section, item, {
+                isCurrent: isCurrentItem(item),
+                renderMenu: (row) => renderItemMenu?.(section, item, row) ?? row,
+              })
+              if (custom !== undefined) return <div key={key}>{custom}</div>
+            }
             const row = (
               <SectionItemRow
                 section={section}
@@ -118,7 +141,7 @@ export function SidebarSection({
               />
             )
             const wrapped = renderItemMenu?.(section, item, row)
-            return <div key={item.sha ?? item.id ?? item.name}>{wrapped ?? row}</div>
+            return <div key={key}>{wrapped ?? row}</div>
           })}
         </div>
       )}
