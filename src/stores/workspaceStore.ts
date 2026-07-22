@@ -965,3 +965,18 @@ export function useActiveRepo(): RepoInfo | null {
   const activeRepoId = useWorkspaceStore((s) => s.activeRepoId)
   return openRepos.find((r) => r.id === activeRepoId) ?? null
 }
+
+// Dev-only: `openRepos` holds live repo handles that cannot be serialized, so a
+// hot reload that re-evaluates this module would drop every open tab -- and the
+// debounced persist would then write the empty list back to settings.json. Carry
+// the state across reloads so editing a component never closes the user's repos.
+// Production builds never run this.
+if (import.meta.hot) {
+  const carried = import.meta.hot.data.workspaceState as WorkspaceState | undefined
+  if (carried) {
+    useWorkspaceStore.setState(carried, true)
+  }
+  import.meta.hot.dispose((data) => {
+    data.workspaceState = useWorkspaceStore.getState()
+  })
+}

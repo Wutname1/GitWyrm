@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -31,12 +31,17 @@ const queryClient = new QueryClient({
   },
 })
 
+// Module-scoped, not a ref: launch restore must run exactly once per app load.
+// A component ref resets whenever AppInner remounts -- which React StrictMode
+// and dev hot reloads both do -- and re-running the restore would reopen tabs
+// the user had deliberately closed.
+let launched = false
+
 function AppInner() {
   useRepoWatcher()
   const openModal = useUiStore((s) => s.openModal)
   const activeRepoId = useWorkspaceStore((s) => s.activeRepoId)
   const uiScale = useWorkspaceStore((s) => s.uiScale)
-  const launched = useRef(false)
 
   // Apply the user's zoom to the body, not #root. `zoom` scales layout and
   // every pixel value (unlike a font-size trick), which is what we want for a
@@ -59,8 +64,8 @@ function AppInner() {
   // recent repo, or onboarding when there is none), then re-select whichever
   // tab was active before the app closed.
   useEffect(() => {
-    if (launched.current) return
-    launched.current = true
+    if (launched) return
+    launched = true
 
     void (async () => {
       const { hydrate, addRepo, setActiveRepo, finishRepoRestore } = useWorkspaceStore.getState()
