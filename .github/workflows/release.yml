@@ -293,16 +293,17 @@ jobs:
       # tauri-action points the manifest at api.github.com asset URLs, which serve
       # JSON metadata rather than the installer to an unauthenticated client. The
       # updater then feeds that JSON to NSIS, which uninstalls the current version
-      # and leaves nothing runnable (shipped as 0.0.3). Rewrites the URLs to the
-      # public releases/download form and fails the publish if any of them does not
-      # return a plausible binary, so a broken manifest can never go live again.
-      - name: Fix and verify updater manifest
+      # and leaves nothing runnable (shipped as 0.0.3). Rewritten here, before the
+      # release goes live, so the manifest is correct the moment anyone can read it.
+      # Verification has to wait until after publishing -- a draft's assets 404 on
+      # the public download path -- so it runs as its own step further down.
+      - name: Point updater manifest at public download URLs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           chmod +x .github/scripts/*.sh
-          .github/scripts/fix-updater-manifest.sh "${{ github.ref_name }}"
+          .github/scripts/resolve-updater-urls.sh rewrite "${{ github.ref_name }}"
 
       # Publish the structured changelog to gitwyrm.com and render the same
       # items to CHANGELOG.md. Without CHANGELOG_API_KEY the upload is skipped
@@ -366,3 +367,20 @@ jobs:
           set -euo pipefail
           gh release edit "$TAG" --notes-file RELEASE_BODY.md --draft=false
           echo "Published $TAG"
+
+      # The public download path only serves a published release, so this is the
+      # first moment the manifest's URLs can actually be checked. If any of them
+      # does not return a plausible installer the release goes back to draft --
+      # better a missing release than one that bricks every client that updates.
+      - name: Verify updater manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          chmod +x .github/scripts/*.sh
+          if ! .github/scripts/resolve-updater-urls.sh verify "$TAG"; then
+            echo "::error::Reverting $TAG to draft; its updater manifest is unusable."
+            gh release edit "$TAG" --draft=true
+            exit 1
+          fi
