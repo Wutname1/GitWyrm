@@ -305,6 +305,17 @@ async discardAll(repoId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Add one pattern to the repository's .gitignore.
+ */
+async addToGitignore(repoId: string, pattern: string) : Promise<Result<IgnoreOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_to_gitignore", { repoId, pattern }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async createCommit(repoId: string, summary: string, description: string) : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("create_commit", { repoId, summary, description }) };
@@ -1320,6 +1331,11 @@ export type HunkHeader = { old_start: number; old_lines: number; new_start: numb
  * Raw header text including any trailing section context.
  */
 header: string }
+/**
+ * What happened when a pattern was added, so the UI can say something true
+ * rather than always claiming a line was written.
+ */
+export type IgnoreOutcome = "added" | "already_present"
 export type IssueDetail = { number: number; title: string; body: string; author: string; state: string; labels: string[]; assignee: string | null; comments: GithubComment[]; html_url: string; created_at: string; updated_at: string }
 export type IssueSummary = { number: number; title: string; author: string; labels: string[]; assignee: string | null; comments: number; updated_at: string; html_url: string }
 export type LogPage = { commits: CommitEntry[]; has_more: boolean }

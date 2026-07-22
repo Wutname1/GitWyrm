@@ -6,6 +6,7 @@ pub mod commit;
 pub mod diff;
 pub mod external;
 pub mod github;
+pub mod gitignore;
 pub mod log;
 pub mod merge;
 pub mod patch;

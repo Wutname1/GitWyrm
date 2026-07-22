@@ -201,6 +201,21 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Adding a line to .gitignore changes the working tree, so the status list
+  // has to refresh for the newly ignored file to disappear from it.
+  const addToGitignore = useMutation({
+    mutationFn: async (args: { pattern: string; label: string }) => ({
+      outcome: unwrap(await commands.addToGitignore(id, args.pattern)),
+      ...args,
+    }),
+    onSuccess: ({ outcome, pattern, label }) => {
+      invalidate(qc, id, ['status'])
+      if (outcome === 'already_present') toast.info(`${pattern} was already ignored`)
+      else toast(`Now ignoring ${label}`)
+    },
+    onError,
+  })
+
   const discardAll = useMutation({
     mutationFn: async () => unwrap(await commands.discardAll(id)),
     onSuccess: () => {
@@ -820,6 +835,7 @@ export function useGitMutations(repoId: string | null) {
     discardFile,
     discardFiles,
     discardAll,
+    addToGitignore,
     updateSubmodule,
     createCommit,
     createBranch,

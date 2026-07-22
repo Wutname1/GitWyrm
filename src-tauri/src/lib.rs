@@ -51,6 +51,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::staging::discard_file,
     commands::staging::discard_files,
     commands::staging::discard_all,
+    commands::gitignore::add_to_gitignore,
     commands::commit::create_commit,
     commands::branch::checkout_branch,
     commands::branch::create_branch,
@@ -166,6 +167,25 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
   )))
 }
 
+/// Shared configuration for the log plugin: stdout + a rotating gitwyrm.log.
+fn log_builder() -> tauri_plugin_log::Builder {
+  tauri_plugin_log::Builder::new()
+    .targets([
+      tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+      tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+        file_name: Some(commands::app::LOG_FILE_NAME.into()),
+      }),
+    ])
+    .level(if cfg!(debug_assertions) {
+      log::LevelFilter::Debug
+    } else {
+      log::LevelFilter::Info
+    })
+    .max_file_size(5_000_000)
+    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
+    .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+}
+
 pub fn run() {
   let _sentry = init_sentry();
 
@@ -210,28 +230,38 @@ pub fn run() {
     .expect("failed to export typescript bindings");
 
   tauri::Builder::default()
-    .plugin(
-      tauri_plugin_log::Builder::new()
-        .targets([
-          tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-          tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-            file_name: Some(commands::app::LOG_FILE_NAME.into()),
-          }),
-        ])
-        .level(if cfg!(debug_assertions) {
-          log::LevelFilter::Debug
-        } else {
-          log::LevelFilter::Info
-        })
-        .max_file_size(5_000_000)
-        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
-        .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
-        .build(),
-    )
+    // The log plugin is registered inside setup via `split()` so we can wrap
+    // its logger with Sentry. `skip_logger()` keeps the plugin from claiming
+    // the global logger slot before we get there.
+    .plugin(log_builder().skip_logger().build())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_process::init())
     .plugin(tauri_plugin_updater::Builder::new().build())
+    .setup(|app| {
+      // `tauri_plugin_log` normally claims the global `log` logger for itself,
+      // which left `log::error!` writing to gitwyrm.log and nothing else --
+      // the backend Sentry project only ever saw panics. Splitting hands back
+      // the plugin's logger instead of installing it, so we wrap it in a
+      // SentryLogger and attach the pair. Records still reach the file and
+      // stdout exactly as before; errors additionally become Sentry events,
+      // and warn/info become breadcrumbs that give those events context.
+      let (_plugin, max_level, logger) = log_builder().split(app.handle())?;
+      let bridged = sentry_log::SentryLogger::with_dest(logger);
+      tauri_plugin_log::attach_logger(max_level, Box::new(bridged))?;
+
+      let info = commands::app::build_info();
+      log::info!(
+        "GitWyrm {} starting (build {}, git {}, debug {}) on {} {}",
+        info.version,
+        info.build_date,
+        info.git_hash,
+        info.debug,
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+      );
+      Ok(())
+    })
     .manage(RepoManager::default())
     .manage(WatcherRegistry::default())
     .invoke_handler(builder.invoke_handler())

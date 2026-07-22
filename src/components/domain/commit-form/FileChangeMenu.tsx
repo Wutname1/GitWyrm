@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/context-menu'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { IgnoreMenuItems } from '@/components/domain/commit-form/IgnoreMenuItems'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
@@ -63,6 +64,7 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
               onRun={() => m.stageFile.mutate(file.path)}
             />
           )}
+          {!sub && !file.conflicted && <IgnoreMenuItems path={file.path} isFolder={false} />}
           {sub ? (
             <>
               <ContextMenuSeparator />

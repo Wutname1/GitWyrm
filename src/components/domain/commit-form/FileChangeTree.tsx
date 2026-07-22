@@ -12,6 +12,7 @@ import {
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { IgnoreMenuItems } from '@/components/domain/commit-form/IgnoreMenuItems'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { cn } from '@/lib/utils'
 
@@ -174,6 +175,11 @@ export function FileChangeTree({
                       onRun={() => m.stageFiles.mutate({ folder: directory.path, paths: groupPaths })}
                     />
                   )}
+                  <IgnoreMenuItems
+                    path={directory.path}
+                    isFolder
+                    disabled={operationsDisabled}
+                  />
                   <ContextMenuSeparator />
                   <ContextMenuItem
                     variant="destructive"
