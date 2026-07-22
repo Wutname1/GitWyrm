@@ -41,6 +41,9 @@ sentry = { version = "0.48.5", default-features = false, features = [
   "reqwest",
   "rustls",
 ] }
+# Bridges `log::error!`/`warn!` into Sentry events. Without this the backend
+# only ever reports panics, so command failures stayed local to gitwyrm.log.
+sentry-log = "0.48.5"
 
 [dev-dependencies]
 tempfile = "3"

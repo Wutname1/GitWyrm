@@ -1528,6 +1528,7 @@ dependencies = [
  "notify-debouncer-full",
  "reqwest 0.12.28",
  "sentry",
+ "sentry-log",
  "serde",
  "serde_json",
  "specta",
@@ -3859,6 +3860,17 @@ dependencies = [
  "serde",
  "serde_json",
  "url",
+]
+
+[[package]]
+name = "sentry-log"
+version = "0.48.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11ffc7737b6d4f1cb3707284703c7364e9f5f056118abc523dd52e732f13cbe1"
+dependencies = [
+ "bitflags 2.13.1",
+ "log",
+ "sentry-core",
 ]
 
 [[package]]
