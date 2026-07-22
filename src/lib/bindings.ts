@@ -1481,8 +1481,8 @@ summary: string | null;
  */
 local_counterpart: string | null; 
 /**
- * Commits this remote branch has that the local counterpart lacks. When
- * there is no counterpart, commits it has that HEAD lacks.
+ * Commits this remote branch has that the local counterpart lacks.
+ * Zero when there is no same-named local branch to compare with.
  */
 ahead_of_local: number; 
 /**

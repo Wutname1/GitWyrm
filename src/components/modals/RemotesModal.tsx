@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, Cloud, Folder, GitBranch, Pencil, Plus, Target, Trash2, X } from 'lucide-react'
+import { ChevronRight, Cloud, ExternalLink, Folder, GitBranch, Pencil, Plus, Target, Trash2, X } from 'lucide-react'
 import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -22,16 +22,19 @@ import { useRemotes } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
+import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
 
 function BranchNode({
   node,
   depth,
+  remote,
   onSetUpstream,
   upstreamPending,
   upstreamTarget,
 }: {
   node: BranchTreeNode<RemoteBranchInfo>
   depth: number
+  remote: RemoteInfo
   onSetUpstream: (branch: string) => void
   upstreamPending: boolean
   upstreamTarget?: string
@@ -64,6 +67,7 @@ function BranchNode({
               key={c.branch ?? c.name}
               node={c}
               depth={depth + 1}
+              remote={remote}
               onSetUpstream={onSetUpstream}
               upstreamPending={upstreamPending}
               upstreamTarget={upstreamTarget}
@@ -73,7 +77,7 @@ function BranchNode({
     )
   }
 
-  return (
+  const row = (
     <div
       style={{ paddingLeft: pad + 16 }}
       className="group/branch flex items-center gap-1.5 py-1 pr-2 hover:bg-panel2"
@@ -92,6 +96,26 @@ function BranchNode({
         {upstreamTarget === node.branch ? <PendingIndicator className="size-3" /> : <Target size={12} />}
       </TooltipButton>
     </div>
+  )
+
+  const webTarget = remoteWebTarget(remote.url)
+  const webUrl = webTarget && node.branch ? remoteBranchWebUrl(webTarget, node.branch) : null
+  if (!webTarget || !webUrl) return row
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+      <ContextMenuContent className="w-52">
+        <ContextMenuLabel className="font-mono text-2xs text-sub">
+          {remote.name}/{node.branch}
+        </ContextMenuLabel>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => openWebUrl(webUrl, webTarget.label)}>
+          <ExternalLink />
+          View on {webTarget.label}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -118,6 +142,7 @@ function RemoteRow({
     [remote.branches]
   )
   const provider = detectProvider(remote.url)
+  const webTarget = remoteWebTarget(remote.url)
 
   return (
     <div className="rounded-md border border-border bg-background">
@@ -165,6 +190,17 @@ function RemoteRow({
         <ContextMenuContent className="w-48">
           <ContextMenuLabel className="font-mono text-2xs text-sub">{remote.name}</ContextMenuLabel>
           <ContextMenuSeparator />
+          {webTarget && (
+            <>
+              <ContextMenuItem
+                onSelect={() => openWebUrl(webTarget.repositoryUrl, webTarget.label)}
+              >
+                <ExternalLink />
+                View on {webTarget.label}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
           <ContextMenuItem disabled={upstreamPending} onSelect={onEdit}>
             <Pencil />
             Edit
@@ -199,6 +235,7 @@ function RemoteRow({
                 key={n.branch ?? n.name}
                 node={n}
                 depth={0}
+                remote={remote}
                 onSetUpstream={onSetUpstream}
                 upstreamPending={upstreamPending}
                 upstreamTarget={upstreamTarget}

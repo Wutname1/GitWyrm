@@ -8,6 +8,8 @@ interface BranchMenuProps {
   /** The branch to act on, or its name -- looked up when only a name is known. */
   branch: BranchInfo | string
   opInProgress?: boolean
+  /** Remote rows provide their own exact host link. */
+  showWebLink?: boolean
 }
 
 /**
@@ -21,7 +23,7 @@ interface BranchMenuProps {
  * Renders nothing when the name doesn't resolve to a local branch -- a remote
  * branch with no local counterpart has nothing local to act on.
  */
-export function BranchMenu({ branch, opInProgress }: BranchMenuProps) {
+export function BranchMenu({ branch, opInProgress, showWebLink = true }: BranchMenuProps) {
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
   const openMerge = useUiStore((s) => s.openMerge)
@@ -42,6 +44,7 @@ export function BranchMenu({ branch, opInProgress }: BranchMenuProps) {
       repoId={repo?.id ?? null}
       currentBranch={currentBranch}
       opInProgress={opInProgress}
+      showWebLink={showWebLink}
       handlers={{
         onMerge: openMerge,
         onRename: renameBranchPrompt,

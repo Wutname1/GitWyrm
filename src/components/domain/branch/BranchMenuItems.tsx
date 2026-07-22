@@ -2,6 +2,7 @@ import {
   ArrowDown,
   ArrowUp,
   Copy,
+  ExternalLink,
   GitBranch,
   GitMerge,
   GitPullRequestArrow,
@@ -21,9 +22,10 @@ import {
 } from '@/components/ui/context-menu'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
-import { useBranchHost } from '@/hooks/useGitQueries'
+import { useBranchHost, useRemotes } from '@/hooks/useGitQueries'
 import { branchActions } from '@/lib/branchActions'
 import { copyToClipboard } from '@/lib/clipboard'
+import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
 
 export interface BranchMenuHandlers {
   onMerge: (name: string) => void
@@ -38,6 +40,7 @@ interface BranchMenuItemsProps {
   currentBranch: string
   /** Set while a merge or similar is mid-flight, which blocks remote work. */
   opInProgress?: boolean
+  showWebLink?: boolean
   handlers: BranchMenuHandlers
 }
 
@@ -55,10 +58,12 @@ export function BranchMenuItems({
   repoId,
   currentBranch,
   opInProgress,
+  showWebLink = true,
   handlers,
 }: BranchMenuItemsProps) {
   const m = useGitMutations(repoId)
   const host = useBranchHost(repoId, branch.upstream)
+  const remotes = useRemotes(repoId)
   const actions = branchActions(branch, host)
   const isCurrent = branch.is_head
 
@@ -68,6 +73,12 @@ export function BranchMenuItems({
   const busy = m.pushBranch.isPending || m.pullBranch.isPending
 
   const hasRemoteAction = actions.push.show || actions.pull.show || actions.setUpstream.show
+  const [upstreamRemoteName, ...upstreamBranchParts] = branch.upstream?.split('/') ?? []
+  const upstreamRemote = remotes.data?.find((remote) => remote.name === upstreamRemoteName)
+  const webTarget = upstreamRemote ? remoteWebTarget(upstreamRemote.url) : null
+  const webUrl = webTarget && upstreamBranchParts.length > 0
+    ? remoteBranchWebUrl(webTarget, upstreamBranchParts.join('/'))
+    : null
 
   return (
     <>
@@ -117,6 +128,12 @@ export function BranchMenuItems({
         <GitMerge />
         Merge into {currentBranch || 'current'}
       </ContextMenuItem>
+      {showWebLink && webTarget && webUrl && (
+        <ContextMenuItem onSelect={() => openWebUrl(webUrl, webTarget.label)}>
+          <ExternalLink />
+          View on {webTarget.label}
+        </ContextMenuItem>
+      )}
       {/* TODO(github): needs the GitHub integration before it can run. */}
       <ContextMenuItem onSelect={() => toast('GitHub integration is planned')}>
         <GitPullRequestArrow />
