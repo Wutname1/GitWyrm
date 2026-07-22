@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import { ArchiveRestore, ArrowLeftRight, CloudOff, Tag, Trash2, Upload } from 'lucide-react'
+import { ArchiveRestore, ArrowLeftRight, CloudOff, ExternalLink, Eye, Tag, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
@@ -19,6 +19,7 @@ import {
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { RenameBranchDialog } from '@/components/modals/RenameBranchDialog'
 import { branchSync } from '@/lib/branchActions'
+import { openWebUrl } from '@/lib/remoteWeb'
 import { BranchMenu } from '@/components/domain/branch/BranchMenu'
 import { StashContextMenu } from '@/components/domain/graph/StashRow'
 import { SidebarSection } from './SidebarSection'
@@ -96,6 +97,7 @@ export function LeftPanel() {
                   meta: `#${p.number}`,
                   metaTitle: `#${p.number} by ${p.author}${p.draft ? ' · draft' : ''}`,
                   id: p.number,
+                  webUrl: p.html_url,
                 }))
               : [{ name: 'Connect GitHub' }],
           },
@@ -109,6 +111,7 @@ export function LeftPanel() {
                   meta: `#${i.number}`,
                   metaTitle: `#${i.number} by ${i.author}`,
                   id: i.number,
+                  webUrl: i.html_url,
                 }))
               : [{ name: 'Connect GitHub' }],
           },
@@ -237,6 +240,27 @@ export function LeftPanel() {
       const stash = stashBySha(item.sha)
       if (stash == null) return null
       return <StashContextMenu stash={stash}>{row}</StashContextMenu>
+    }
+    if ((section.type === 'pr' || section.type === 'issue') && item.id != null) {
+      const githubKind = section.type === 'pr' ? 'pr' : 'issue'
+      const kind = githubKind === 'pr' ? 'Pull request' : 'Issue'
+      return (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+          <ContextMenuContent className="w-52">
+            <ContextMenuItem onSelect={() => openGithubItem(githubKind, item.id!)}>
+              <Eye />
+              View {kind.toLowerCase()}
+            </ContextMenuItem>
+            {item.webUrl && (
+              <ContextMenuItem onSelect={() => openWebUrl(item.webUrl!, 'GitHub')}>
+                <ExternalLink />
+                View on GitHub
+              </ContextMenuItem>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
+      )
     }
     if (section.type === 'tag') {
       return (

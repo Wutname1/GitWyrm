@@ -12,6 +12,8 @@ export interface SectionItem {
   state?: 'open' | 'draft' | 'merged'
   /** GitHub PR or issue number, for pr/issue rows. */
   id?: number
+  /** Browser page for a hosted item such as a pull request or issue. */
+  webUrl?: string
   /** Stash commit sha, for stash rows. Stable where messages can repeat. */
   sha?: string
 }

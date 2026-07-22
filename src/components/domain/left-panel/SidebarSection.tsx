@@ -46,6 +46,22 @@ export function SidebarSection({
 }: SidebarSectionProps) {
   const open = useUiStore((s) => s.sectionOpen[section.key])
   const toggleSection = useUiStore((s) => s.toggleSection)
+  const githubItem = useUiStore((s) => s.githubItem)
+  const centerView = useUiStore((s) => s.centerView)
+
+  // A branch row is "current" when it is checked out; a PR/issue row is
+  // "current" when that item is the one open in the center view.
+  const isCurrentItem = (item: SectionItem) => {
+    if (section.type === 'branch') return item.name === currentBranch
+    if (section.type === 'pr' || section.type === 'issue') {
+      return (
+        centerView === 'github' &&
+        githubItem?.kind === (section.type === 'pr' ? 'pr' : 'issue') &&
+        githubItem.number === item.id
+      )
+    }
+    return false
+  }
 
   return (
     <div className="group/section">
@@ -87,7 +103,7 @@ export function SidebarSection({
               <SectionItemRow
                 section={section}
                 item={item}
-                isCurrent={section.type === 'branch' && item.name === currentBranch}
+                isCurrent={isCurrentItem(item)}
                 onClick={() => onItemClick(section, item)}
                 onDoubleClick={
                   onItemDoubleClick ? () => onItemDoubleClick(section, item) : undefined

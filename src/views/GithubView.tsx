@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { CircleDot, ExternalLink, GitPullRequest, RefreshCw, X } from 'lucide-react'
+import { CircleDot, Copy, ExternalLink, GitPullRequest, RefreshCw, X } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
+import { copyToClipboard } from '@/lib/clipboard'
 import { formatRelativeTime } from '@/lib/gitDisplay'
-import type { GithubComment } from '@/lib/bindings'
+import type { GithubComment, IssueDetail, PrDetail } from '@/lib/bindings'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { Textarea } from '@/components/ui/textarea'
+import { TooltipButton } from '@/components/ui/tooltip'
 import {
   githubKeys,
   useGithubIssueDetail,
@@ -36,6 +38,50 @@ function Avatar({ name, bot }: { name: string; bot?: boolean }) {
       {name.slice(0, 2).toUpperCase()}
     </span>
   )
+}
+
+/** Quiet copy icon that appears on hover over the card it sits in. */
+function CopyButton({
+  text,
+  tooltip,
+  successMessage,
+  className,
+}: {
+  text: string
+  tooltip: string
+  successMessage: string
+  className?: string
+}) {
+  return (
+    <TooltipButton
+      onClick={() => void copyToClipboard(text, successMessage)}
+      tooltip={tooltip}
+      className={cn(
+        'flex size-5 flex-none items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover/card:opacity-100',
+        className
+      )}
+    >
+      <Copy size={12} />
+    </TooltipButton>
+  )
+}
+
+/** One comment as markdown, with the author and time as a quoted header line. */
+function commentMarkdown(c: GithubComment): string {
+  return `**${c.author}** commented ${ago(c.created_at)}:\n\n${c.body.trim()}`
+}
+
+/** The whole item -- title, link, body, and every comment -- as markdown. */
+function itemMarkdown(detail: IssueDetail | PrDetail, kindLabel: string): string {
+  const parts = [
+    `# ${detail.title}`,
+    `${kindLabel} #${detail.number} - ${detail.state} - opened by ${detail.author}`,
+    detail.html_url,
+    '---',
+    `**${detail.author}** wrote ${ago(detail.created_at)}:\n\n${detail.body.trim() || '_No description was written._'}`,
+  ]
+  for (const c of detail.comments) parts.push('---', commentMarkdown(c))
+  return parts.join('\n\n')
 }
 
 /** GitHub-flavored markdown with styling scoped to this card. */
@@ -94,13 +140,19 @@ function CommentThread({
         {comments.map((c, i) => (
           <div
             key={`${c.created_at}-${i}`}
-            className="grid grid-cols-[auto_minmax(0,1fr)] gap-2.5 border-b border-border/60 py-3 last:border-b-0"
+            className="group/card grid grid-cols-[auto_minmax(0,1fr)] gap-2.5 border-b border-border/60 py-3 last:border-b-0"
           >
             <Avatar name={c.author} bot={c.author_is_bot} />
             <div className="min-w-0">
-              <div className="text-2xs">
+              <div className="flex items-center text-2xs">
                 <span className="font-bold text-foreground">{c.author}</span>
                 <span className="ml-1.5 text-muted-foreground">{ago(c.created_at)}</span>
+                <CopyButton
+                  className="ml-auto"
+                  text={commentMarkdown(c)}
+                  tooltip="Copy this comment as markdown"
+                  successMessage="Comment copied as markdown"
+                />
               </div>
               <div className="mt-1">
                 <MarkdownBody text={c.body} />
@@ -239,6 +291,23 @@ export function GithubView() {
               variant="ghost"
               size="sm"
               className="h-7 px-2 text-xs"
+              onClick={() =>
+                void copyToClipboard(
+                  itemMarkdown(detail, kindLabel),
+                  `${kindLabel} copied as markdown`
+                )
+              }
+              tooltip="Copy the title, description, and every comment as markdown"
+            >
+              <Copy size={13} />
+              Copy all
+            </Button>
+          )}
+          {detail && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
               onClick={() => void openExternal(detail.html_url)}
               tooltip="Open this item in your browser"
             >
@@ -319,13 +388,18 @@ export function GithubView() {
                 </div>
               )}
 
-              <section className="mt-4 overflow-hidden rounded-md border border-border bg-panel2/70">
+              <section className="group/card mt-4 overflow-hidden rounded-md border border-border bg-panel2/70">
                 <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5 text-2xs font-bold text-foreground">
                   <Avatar name={detail.author} />
                   <span>{detail.author} wrote</span>
                   <span className="ml-auto font-normal text-muted-foreground">
                     {ago(detail.created_at)}
                   </span>
+                  <CopyButton
+                    text={`**${detail.author}** wrote ${ago(detail.created_at)}:\n\n${detail.body.trim()}`}
+                    tooltip="Copy this description as markdown"
+                    successMessage="Description copied as markdown"
+                  />
                 </div>
                 <div className="px-4 py-3.5">
                   <MarkdownBody text={detail.body} />
