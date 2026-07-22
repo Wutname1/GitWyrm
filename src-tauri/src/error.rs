@@ -12,7 +12,12 @@ pub enum AppError {
 
 impl Serialize for AppError {
   fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(&self.to_string())
+    let message = self.to_string();
+    // Tauri serializes command errors before returning them to the UI. Logging
+    // at this boundary guarantees that an error shown to the user also has a
+    // durable entry in gitwyrm.log.
+    log::error!("Command failed: {message}");
+    serializer.serialize_str(&message)
   }
 }
 

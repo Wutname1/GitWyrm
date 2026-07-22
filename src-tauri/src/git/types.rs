@@ -30,6 +30,12 @@ pub struct CommitEntry {
   pub sha: String,
   pub short_sha: String,
   pub summary: String,
+  /// Number of files changed compared with the first parent.
+  pub files_changed: u32,
+  /// Lines added compared with the first parent.
+  pub additions: u32,
+  /// Lines removed compared with the first parent.
+  pub deletions: u32,
   pub author_name: String,
   pub author_email: String,
   pub author_initials: String,
