@@ -1,12 +1,15 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   BookOpen,
   ChevronDown,
   Clock,
   Columns3,
+  FolderOpen,
   Loader2,
   PanelLeft,
   Plus,
   RefreshCw,
+  Search,
   Settings,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -16,8 +19,15 @@ import { WyrmExplosion, useWyrmEasterEgg } from '@/components/domain/WyrmEasterE
 import logoUrl from '@/assets/logo.png'
 import { useOpenRepo } from '@/hooks/useRepoActions'
 import { useUpdater } from '@/hooks/useUpdater'
+import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/uiStore'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
+import {
+  DEFAULT_VERTICAL_TAB_WIDTH,
+  MAX_VERTICAL_TAB_WIDTH,
+  MIN_VERTICAL_TAB_WIDTH,
+  clampVerticalTabWidth,
+  useWorkspaceStore,
+} from '@/stores/workspaceStore'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -30,6 +40,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -106,42 +117,148 @@ function BrandMark() {
   )
 }
 
-function RecentRepositories() {
+function RepoRow({
+  name,
+  path,
+  icon,
+  onSelect,
+}: {
+  name: string
+  path: string
+  icon: ReactNode
+  onSelect: () => void
+}) {
+  return (
+    <DropdownMenuItem
+      className="flex-col items-start gap-0 text-xs text-sub"
+      onSelect={onSelect}
+    >
+      <span className="flex w-full items-center gap-2">
+        {icon}
+        <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{name}</span>
+      </span>
+      <span className="w-full overflow-hidden text-ellipsis whitespace-nowrap pl-[21px] font-mono text-2xs text-muted-foreground">
+        {path}
+      </span>
+    </DropdownMenuItem>
+  )
+}
+
+function RecentRepositories({ compact = false }: { compact?: boolean }) {
   const recents = useWorkspaceStore((state) => state.recents)
+  const openRepos = useWorkspaceStore((state) => state.openRepos)
+  const activeRepoId = useWorkspaceStore((state) => state.activeRepoId)
+  const setActiveRepo = useWorkspaceStore((state) => state.setActiveRepo)
   const openRepo = useOpenRepo()
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  // Radix focuses the first menu item on open; take focus back for the search box.
+  useEffect(() => {
+    if (!open) return
+    const timer = setTimeout(() => searchRef.current?.focus(), 0)
+    return () => clearTimeout(timer)
+  }, [open])
+
+  const search = query.trim().toLowerCase()
+  const matches = (name: string, path: string) =>
+    !search || name.toLowerCase().includes(search) || path.toLowerCase().includes(search)
+
+  const openMatches = openRepos.filter((repo) => matches(repo.name, repo.path))
+  const openPaths = new Set(openRepos.map((repo) => repo.path.toLowerCase()))
+  const recentMatches = recents.filter(
+    (repo) => !openPaths.has(repo.path.toLowerCase()) && matches(repo.name, repo.path),
+  )
 
   return (
     <Tooltip>
-      <DropdownMenu>
+      <DropdownMenu
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next)
+          if (!next) setQuery('')
+        }}
+      >
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button
-              aria-label="Recent repositories"
-              className="flex items-center px-2 text-sub hover:text-foreground"
+              type="button"
+              aria-label="Open and recent repositories"
+              className={compact
+                ? 'flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground'
+                : 'flex items-center px-2 text-sub hover:text-foreground'}
             >
               <ChevronDown size={14} strokeWidth={2} />
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Recent repositories</TooltipContent>
-        <DropdownMenuContent align="start" className="w-[300px] p-2">
-          <DropdownMenuLabel className="px-1.5 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">
-            RECENT
-          </DropdownMenuLabel>
-          {recents.length === 0 && (
-            <div className="px-1.5 py-2 text-xs text-muted-foreground">No recent repositories</div>
-          )}
-          {recents.map((repo) => (
-            <DropdownMenuItem
-              key={repo.path}
-              className="gap-2 text-xs text-sub"
-              onClick={() => openRepo.mutate(repo.path)}
-            >
-              <Clock size={13} strokeWidth={2} />
-              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{repo.name}</span>
-              <span className="font-mono text-2xs text-muted-foreground">{repo.path}</span>
-            </DropdownMenuItem>
-          ))}
+        <TooltipContent>Open and recent repositories</TooltipContent>
+        <DropdownMenuContent align={compact ? 'end' : 'start'} className="w-[320px] p-2">
+          <div className="relative mb-1">
+            <Search
+              size={13}
+              strokeWidth={2}
+              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                // Radix menus type-ahead on printable keys; keep them in the input.
+                if (event.key !== 'Escape') event.stopPropagation()
+              }}
+              placeholder="Search repositories"
+              className="h-7 w-full rounded-[5px] border border-border bg-panel2 pl-7 pr-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-muted-foreground"
+            />
+          </div>
+
+          <div className="max-h-[360px] overflow-y-auto">
+            <DropdownMenuLabel className="px-1.5 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">
+              CURRENTLY OPEN
+            </DropdownMenuLabel>
+            {openMatches.length === 0 && (
+              <div className="px-1.5 py-1.5 text-xs text-muted-foreground">
+                {search ? 'No matches' : 'No repositories open'}
+              </div>
+            )}
+            {openMatches.map((repo) => (
+              <RepoRow
+                key={repo.id}
+                name={repo.name}
+                path={repo.path}
+                icon={
+                  <FolderOpen
+                    size={13}
+                    strokeWidth={2}
+                    className={repo.id === activeRepoId ? 'text-accent-text' : undefined}
+                  />
+                }
+                onSelect={() => setActiveRepo(repo.id)}
+              />
+            ))}
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuLabel className="px-1.5 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">
+              RECENT
+            </DropdownMenuLabel>
+            {recentMatches.length === 0 && (
+              <div className="px-1.5 py-1.5 text-xs text-muted-foreground">
+                {search ? 'No matches' : 'No recent repositories'}
+              </div>
+            )}
+            {recentMatches.map((repo) => (
+              <RepoRow
+                key={repo.path}
+                name={repo.name}
+                path={repo.path}
+                icon={<Clock size={13} strokeWidth={2} />}
+                onSelect={() => openRepo.mutate(repo.path)}
+              />
+            ))}
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>
     </Tooltip>
@@ -169,8 +286,6 @@ function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
 
 export function TabBar() {
   const tabLayout = useWorkspaceStore((state) => state.tabLayout)
-  const activeRepoId = useWorkspaceStore((state) => state.activeRepoId)
-  const activeRepo = useWorkspaceStore((state) => state.openRepos.find((repo) => repo.id === activeRepoId))
   const setTabLayout = useWorkspaceStore((state) => state.setTabLayout)
   const showSettings = useUiStore((state) => state.showSettings)
 
@@ -184,9 +299,7 @@ export function TabBar() {
         <div data-tauri-drag-region className="mr-4 flex items-center">
           <BrandMark />
         </div>
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-muted-foreground">
-          {activeRepo?.path ?? ''}
-        </span>
+        <div data-tauri-drag-region className="min-w-0 flex-1" />
         <WindowControls />
       </div>
     )
@@ -230,26 +343,76 @@ export function TabBar() {
 export function VerticalTabRail() {
   const openRepos = useWorkspaceStore((state) => state.openRepos)
   const setTabLayout = useWorkspaceStore((state) => state.setTabLayout)
+  const verticalTabWidth = useWorkspaceStore((state) => state.verticalTabWidth)
+  const setVerticalTabWidth = useWorkspaceStore((state) => state.setVerticalTabWidth)
   const showSettings = useUiStore((state) => state.showSettings)
+  const resizeStart = useRef<{ pointerId: number; x: number; width: number } | null>(null)
+  const [resizing, setResizing] = useState(false)
+  const compact = verticalTabWidth < 168
+  const stackedControls = verticalTabWidth < 128
+  const iconRail = verticalTabWidth <= 72
+
+  const finishResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = resizeStart.current
+    if (!start || start.pointerId !== event.pointerId) return
+    const width = clampVerticalTabWidth(start.width + event.clientX - start.x)
+    setVerticalTabWidth(width)
+    resizeStart.current = null
+    setResizing(false)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
 
   return (
-    <aside className="flex w-[248px] flex-none flex-col border-r border-border bg-[color:#0d1218]">
-      <div className="flex h-[42px] flex-none items-center justify-between border-b border-border px-2.5 pl-3">
-        <span className="font-wordmark text-2xs font-semibold tracking-[.085em] text-sub">
-          REPOSITORIES · {openRepos.length}
+    <aside
+      className={cn(
+        'relative z-20 flex min-h-0 flex-none flex-col border-r border-border bg-[color:#0d1218]',
+        resizing && 'select-none',
+      )}
+      style={{ width: verticalTabWidth }}
+    >
+      <div
+        className={cn(
+          'flex h-[42px] flex-none items-center border-b border-border',
+          iconRail ? 'justify-center px-1' : 'justify-between px-2.5 pl-3',
+        )}
+      >
+        <span
+          className={cn(
+            'min-w-0 truncate font-wordmark text-2xs font-semibold text-sub',
+            iconRail ? 'font-mono tracking-normal' : 'tracking-[.085em]',
+          )}
+          aria-label={`${openRepos.length} repositories open`}
+        >
+          {iconRail ? openRepos.length : compact ? `${openRepos.length} REPOS` : `REPOSITORIES · ${openRepos.length}`}
         </span>
-        <OpenRepositoryButton compact />
+        {!compact && (
+          <div className="flex items-center gap-1.5">
+            <RecentRepositories compact />
+            <OpenRepositoryButton compact />
+          </div>
+        )}
       </div>
       <RepositoryTabs orientation="vertical" />
-      <div className="flex flex-none gap-1.5 border-t border-border p-2">
-        <button
-          type="button"
-          onClick={() => useUiStore.getState().openModal('clone')}
-          className="flex h-[31px] flex-1 items-center justify-center gap-1.5 rounded-[5px] border border-border bg-panel2 text-2xs text-foreground hover:border-muted-foreground hover:bg-panel3"
-        >
-          <Plus size={13} />
-          Open a repository
-        </button>
+      <div
+        className={cn(
+          'flex flex-none gap-1.5 border-t border-border p-2',
+          stackedControls && 'flex-col items-center',
+        )}
+      >
+        {compact ? (
+          <OpenRepositoryButton compact />
+        ) : (
+          <button
+            type="button"
+            onClick={() => useUiStore.getState().openModal('clone')}
+            className="flex h-[31px] flex-1 items-center justify-center gap-1.5 rounded-[5px] border border-border bg-panel2 text-2xs text-foreground hover:border-muted-foreground hover:bg-panel3"
+          >
+            <Plus size={13} />
+            Open a repository
+          </button>
+        )}
         <TooltipButton
           onClick={() => {
             setTabLayout('horizontal')
@@ -268,6 +431,49 @@ export function VerticalTabRail() {
           <Settings size={14} />
         </TooltipButton>
       </div>
+      <div
+        role="separator"
+        aria-label="Resize repository column"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_VERTICAL_TAB_WIDTH}
+        aria-valuemax={MAX_VERTICAL_TAB_WIDTH}
+        aria-valuenow={verticalTabWidth}
+        tabIndex={0}
+        onPointerDown={(event) => {
+          resizeStart.current = {
+            pointerId: event.pointerId,
+            x: event.clientX,
+            width: verticalTabWidth,
+          }
+          event.currentTarget.setPointerCapture(event.pointerId)
+          setResizing(true)
+        }}
+        onPointerMove={(event) => {
+          const start = resizeStart.current
+          if (!start || start.pointerId !== event.pointerId) return
+          setVerticalTabWidth(start.width + event.clientX - start.x)
+        }}
+        onPointerUp={finishResize}
+        onPointerCancel={(event) => {
+          if (resizeStart.current?.pointerId !== event.pointerId) return
+          resizeStart.current = null
+          setResizing(false)
+        }}
+        onDoubleClick={() => {
+          setVerticalTabWidth(DEFAULT_VERTICAL_TAB_WIDTH)
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+          event.preventDefault()
+          setVerticalTabWidth(verticalTabWidth + (event.key === 'ArrowLeft' ? -8 : 8))
+        }}
+        className={cn(
+          'group absolute -right-1 top-0 z-30 h-full w-2 cursor-col-resize touch-none outline-none',
+          'after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent after:transition-colors',
+          'hover:after:bg-primary focus-visible:after:bg-primary',
+          resizing && 'after:bg-primary',
+        )}
+      />
     </aside>
   )
 }

@@ -139,6 +139,15 @@ pub struct Settings {
   /// Custom tab names, keyed by repo path. Absent paths use the repo folder name.
   #[serde(default)]
   pub tab_aliases: HashMap<String, String>,
+  /// Show repository favicon or logo images in repository tabs.
+  #[serde(default = "default_show_repo_icons")]
+  pub show_repo_icons: bool,
+  /// Hide repository names until the user points at a tab.
+  #[serde(default)]
+  pub tab_icon_only: bool,
+  /// Saved width of the vertical repository rail in logical pixels.
+  #[serde(default = "default_vertical_tab_width")]
+  pub vertical_tab_width: f64,
   /// "horizontal" or "vertical". Unknown values fall back to horizontal on
   /// the frontend so older and hand-edited settings remain safe.
   #[serde(default)]
@@ -166,6 +175,14 @@ fn default_update_channel() -> UpdateChannel {
   UpdateChannel::Stable
 }
 
+fn default_show_repo_icons() -> bool {
+  true
+}
+
+fn default_vertical_tab_width() -> f64 {
+  248.0
+}
+
 impl Default for Settings {
   fn default() -> Self {
     Self {
@@ -187,6 +204,9 @@ impl Default for Settings {
       enable_worktrees: false,
       ui_scale: None,
       tab_aliases: HashMap::new(),
+      show_repo_icons: true,
+      tab_icon_only: false,
+      vertical_tab_width: default_vertical_tab_width(),
       tab_layout: None,
       tab_groups: Vec::new(),
       tab_order: Vec::new(),
@@ -234,6 +254,12 @@ mod tests {
     let settings: Settings = serde_json::from_str("{}").expect("empty settings should load");
 
     assert!(settings.tab_layout.is_none());
+    assert!(settings.show_repo_icons);
+    assert!(!settings.tab_icon_only);
+    assert_eq!(settings.vertical_tab_width, 248.0);
+    assert_eq!(settings.change_size_display, ChangeSizeDisplay::Column);
+    assert!(settings.show_change_indicator);
+    assert!(!settings.show_change_line_counts);
     assert!(settings.tab_groups.is_empty());
     assert!(settings.tab_order.is_empty());
     assert!(settings.saved_tab_groups.is_empty());
@@ -263,5 +289,39 @@ mod tests {
     assert_eq!(restored.tab_groups[0].name, "Work");
     assert!(restored.tab_groups[0].collapsed);
     assert_eq!(restored.saved_tab_groups[0].repo_paths, vec!["C:\\code\\GitWyrm"]);
+  }
+
+  #[test]
+  fn repo_icon_visibility_round_trips_through_settings_json() {
+    let settings = Settings {
+      show_repo_icons: false,
+      tab_icon_only: true,
+      vertical_tab_width: 156.0,
+      ..Settings::default()
+    };
+
+    let json = serde_json::to_string(&settings).expect("settings should serialize");
+    let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
+
+    assert!(!restored.show_repo_icons);
+    assert!(restored.tab_icon_only);
+    assert_eq!(restored.vertical_tab_width, 156.0);
+  }
+
+  #[test]
+  fn change_size_options_round_trip_through_settings_json() {
+    let settings = Settings {
+      change_size_display: ChangeSizeDisplay::Row,
+      show_change_indicator: false,
+      show_change_line_counts: true,
+      ..Settings::default()
+    };
+
+    let json = serde_json::to_string(&settings).expect("settings should serialize");
+    let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
+
+    assert_eq!(restored.change_size_display, ChangeSizeDisplay::Row);
+    assert!(!restored.show_change_indicator);
+    assert!(restored.show_change_line_counts);
   }
 }

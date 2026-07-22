@@ -1,4 +1,4 @@
-import { Minus, Plus, Search } from 'lucide-react'
+import { Minus, Plus, RotateCcw, Search } from 'lucide-react'
 import { useBranches, useStatus } from '@/hooks/useGitQueries'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { branchSync } from '@/lib/branchActions'
@@ -18,9 +18,11 @@ function ZoomControl() {
   const uiScale = useWorkspaceStore((s) => s.uiScale)
   const setUiScale = useWorkspaceStore((s) => s.setUiScale)
   const percent = Math.round(uiScale * 100)
+  const isDefault = uiScale === DEFAULT_UI_SCALE
 
   return (
-    <Tooltip>
+    <div className="flex items-center gap-1">
+      <Tooltip>
       <Popover>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
@@ -34,7 +36,11 @@ function ZoomControl() {
             </button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top">App zoom</TooltipContent>
+        <TooltipContent side="top">
+          {isDefault
+            ? 'App zoom - click to make everything bigger or smaller'
+            : `App zoom is ${percent}% - click to change it, or use the arrow to go back to 100%`}
+        </TooltipContent>
         <PopoverContent align="end" side="top" collisionPadding={8} className="w-56">
           <div className="flex flex-col gap-3 text-text">
             <div className="flex items-center justify-between text-sm font-medium">
@@ -74,14 +80,30 @@ function ZoomControl() {
               variant="ghost"
               size="sm"
               onClick={() => setUiScale(DEFAULT_UI_SCALE)}
-              disabled={uiScale === DEFAULT_UI_SCALE}
+              disabled={isDefault}
             >
               Reset to 100%
             </Button>
           </div>
         </PopoverContent>
       </Popover>
-    </Tooltip>
+      </Tooltip>
+      {!isDefault && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="Reset zoom to 100%"
+              onClick={() => setUiScale(DEFAULT_UI_SCALE)}
+              className="titlebar-no-drag flex items-center rounded px-1 text-sub hover:text-text"
+            >
+              <RotateCcw className="size-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">Back to 100%</TooltipContent>
+        </Tooltip>
+      )}
+    </div>
   )
 }
 

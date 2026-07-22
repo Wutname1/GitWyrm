@@ -4,7 +4,9 @@ import { AiSettings } from '@/components/domain/settings/AiSettings'
 import { AppearanceSettings } from '@/components/domain/settings/AppearanceSettings'
 import { GeneralSettings } from '@/components/domain/settings/GeneralSettings'
 import { LogsSettings } from '@/components/domain/settings/LogsSettings'
+import { RepositorySettings } from '@/components/domain/settings/RepositorySettings'
 import { SettingsNav } from '@/components/domain/settings/SettingsNav'
+import { TagsSettings } from '@/components/domain/settings/TagsSettings'
 import { Separator } from '@/components/ui/separator'
 import { TooltipButton } from '@/components/ui/tooltip'
 import type { SettingsSection } from '@/stores/uiStore'
@@ -12,6 +14,8 @@ import { useUiStore } from '@/stores/uiStore'
 
 const TITLES: Record<SettingsSection, string> = {
   general: 'General',
+  repository: 'Repository',
+  tags: 'Tags',
   ai: 'AI',
   appearance: 'Appearance',
   logs: 'Logs',
@@ -20,6 +24,8 @@ const TITLES: Record<SettingsSection, string> = {
 
 const SECTION_BODIES: Record<SettingsSection, React.ComponentType> = {
   general: GeneralSettings,
+  repository: RepositorySettings,
+  tags: TagsSettings,
   ai: AiSettings,
   appearance: AppearanceSettings,
   logs: LogsSettings,

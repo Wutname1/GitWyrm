@@ -23,8 +23,10 @@ export function NewTagModal() {
   // is open, so the remote lookup is gated on that.
   const { hostLabel, hasRemote } = useTagSync(repo?.id ?? null, open)
 
+  // The saved preference seeds the checkbox but is never written back from
+  // here: ticking it for one tag is a one-off, not a change of setting. It
+  // lives in Settings > Tags.
   const tagPushOnCreate = useWorkspaceStore((s) => s.tagPushOnCreate)
-  const setTagPushOnCreate = useWorkspaceStore((s) => s.setTagPushOnCreate)
 
   const [name, setName] = useState('')
   const [message, setMessage] = useState('')
@@ -52,8 +54,6 @@ export function NewTagModal() {
 
   const create = () => {
     if (!canCreate) return
-    // Remember the checkbox so the next tag starts from the same choice.
-    setTagPushOnCreate(sendIt)
     m.createTag.mutate(
       { name: trimmed, sha: targetSha ?? '', message: message.trim(), push: sendIt },
       { onSuccess: () => closeModal() }

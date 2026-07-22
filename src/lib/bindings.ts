@@ -1608,6 +1608,18 @@ ui_scale?: number | null;
  */
 tab_aliases?: Partial<{ [key in string]: string }>; 
 /**
+ * Show repository favicon or logo images in repository tabs.
+ */
+show_repo_icons?: boolean; 
+/**
+ * Hide repository names until the user points at a tab.
+ */
+tab_icon_only?: boolean; 
+/**
+ * Saved width of the vertical repository rail in logical pixels.
+ */
+vertical_tab_width?: number; 
+/**
  * "horizontal" or "vertical". Unknown values fall back to horizontal on
  * the frontend so older and hand-edited settings remain safe.
  */

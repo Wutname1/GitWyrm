@@ -3,6 +3,8 @@ import type { SettingsSection } from '@/stores/uiStore'
 
 const ITEMS: { key: SettingsSection; label: string }[] = [
   { key: 'general', label: 'General' },
+  { key: 'repository', label: 'Repository' },
+  { key: 'tags', label: 'Tags' },
   { key: 'ai', label: 'AI' },
   { key: 'appearance', label: 'Appearance' },
   { key: 'logs', label: 'Logs' },

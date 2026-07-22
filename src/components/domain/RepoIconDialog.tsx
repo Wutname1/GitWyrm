@@ -6,6 +6,7 @@ import { unwrap } from '@/lib/queryKeys'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 import {
   Dialog,
   DialogContent,
@@ -19,14 +20,13 @@ interface RepoIconDialogProps {
   repo: RepoInfo
   open: boolean
   onOpenChange: (open: boolean) => void
-  onIconChanged: () => void
 }
 
 function messageFrom(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function RepoIconDialog({ repo, open, onOpenChange, onIconChanged }: RepoIconDialogProps) {
+export function RepoIconDialog({ repo, open, onOpenChange }: RepoIconDialogProps) {
   const [icons, setIcons] = useState<RepoIcon[]>([])
   const [current, setCurrent] = useState<RepoIcon | null>(null)
   const [loading, setLoading] = useState(false)
@@ -59,7 +59,7 @@ export function RepoIconDialog({ repo, open, onOpenChange, onIconChanged }: Repo
     try {
       const saved = unwrap(await commands.setRepoIcon(repo.path, sourcePath))
       setCurrent(saved)
-      onIconChanged()
+      useWorkspaceStore.getState().refreshRepoIcon(repo.path)
       onOpenChange(false)
       toast.success(`${repo.name} now has a custom icon`)
     } catch (error: unknown) {
@@ -88,7 +88,7 @@ export function RepoIconDialog({ repo, open, onOpenChange, onIconChanged }: Repo
     try {
       const found = unwrap(await commands.clearRepoIcon(repo.path))
       setCurrent(found)
-      onIconChanged()
+      useWorkspaceStore.getState().refreshRepoIcon(repo.path)
       onOpenChange(false)
       toast.success(found
         ? `${repo.name} is using the icon found in its files`

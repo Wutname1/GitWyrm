@@ -47,11 +47,21 @@ export const MAX_UI_SCALE = 2.0
 export const UI_SCALE_STEP = 0.1
 export const DEFAULT_UI_SCALE = 1.0
 
+/** Saved width limits for the vertical repository rail. */
+export const MIN_VERTICAL_TAB_WIDTH = 48
+export const MAX_VERTICAL_TAB_WIDTH = 420
+export const DEFAULT_VERTICAL_TAB_WIDTH = 248
+
 /** Clamps a scale into the supported range and rounds to whole percent. */
 export function clampUiScale(scale: number): number {
   if (!Number.isFinite(scale)) return DEFAULT_UI_SCALE
   const clamped = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, scale))
   return Math.round(clamped * 100) / 100
+}
+
+export function clampVerticalTabWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_VERTICAL_TAB_WIDTH
+  return Math.round(Math.min(MAX_VERTICAL_TAB_WIDTH, Math.max(MIN_VERTICAL_TAB_WIDTH, width)))
 }
 
 function pathKey(path: string): string {
@@ -211,6 +221,14 @@ interface WorkspaceState {
   uiScale: number
   /** Custom tab names, keyed by repo path. Missing paths use the repo folder name (persisted). */
   tabAliases: Record<string, string>
+  /** Show favicon or logo images in repository tabs (persisted). */
+  showRepoIcons: boolean
+  /** Hide repository names until a tab is hovered (persisted). */
+  tabIconOnly: boolean
+  /** Width of the vertical repository rail in pixels (persisted). */
+  verticalTabWidth: number
+  /** In-memory change counters used to refresh an icon everywhere it is shown. */
+  repoIconRevisions: Record<string, number>
   /** Whether repository tabs run across the top or down the left side (persisted). */
   tabLayout: TabLayout
   /** Groups that currently wrap open repository tabs (persisted while open). */
@@ -242,6 +260,10 @@ interface WorkspaceState {
   setUiScale: (scale: number) => void
   /** Rename a tab by repo path. An empty/blank alias clears it (back to the folder name). */
   setTabAlias: (path: string, alias: string) => void
+  setShowRepoIcons: (enabled: boolean) => void
+  setTabIconOnly: (enabled: boolean) => void
+  setVerticalTabWidth: (width: number) => void
+  refreshRepoIcon: (path: string) => void
   createTabGroup: (repoPaths: string[], options?: { name?: string; color?: string; id?: string }) => string
   addRepoToGroup: (repoPath: string, groupId: string) => void
   removeRepoFromGroup: (repoPath: string) => void
@@ -293,6 +315,9 @@ function toSettings(s: WorkspaceState): Settings {
     enable_worktrees: s.enableWorktrees,
     ui_scale: s.uiScale,
     tab_aliases: s.tabAliases,
+    show_repo_icons: s.showRepoIcons,
+    tab_icon_only: s.tabIconOnly,
+    vertical_tab_width: s.verticalTabWidth,
     tab_layout: s.tabLayout,
     tab_groups: s.tabGroups.map((group) => ({
       id: group.id,
@@ -403,6 +428,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   enableWorktrees: false,
   uiScale: DEFAULT_UI_SCALE,
   tabAliases: {},
+  showRepoIcons: true,
+  tabIconOnly: false,
+  verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
+  repoIconRevisions: {},
   tabLayout: 'horizontal',
   tabGroups: [],
   tabOrder: [],
@@ -532,6 +561,27 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       return { tabAliases: next }
     })
     schedulePersist()
+  },
+  setShowRepoIcons: (enabled) => {
+    set({ showRepoIcons: enabled })
+    schedulePersist()
+  },
+  setTabIconOnly: (enabled) => {
+    set({ tabIconOnly: enabled })
+    schedulePersist()
+  },
+  setVerticalTabWidth: (width) => {
+    set({ verticalTabWidth: clampVerticalTabWidth(width) })
+    schedulePersist()
+  },
+  refreshRepoIcon: (path) => {
+    const key = pathKey(path)
+    set((s) => ({
+      repoIconRevisions: {
+        ...s.repoIconRevisions,
+        [key]: (s.repoIconRevisions[key] ?? 0) + 1,
+      },
+    }))
   },
   createTabGroup: (repoPaths, options) => {
     const existingIds = new Set(get().tabGroups.map((group) => group.id))
@@ -819,6 +869,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         enableWorktrees: settings.enable_worktrees ?? false,
         uiScale: settings.ui_scale != null ? clampUiScale(settings.ui_scale) : DEFAULT_UI_SCALE,
         tabAliases: normalizeAliases(settings.tab_aliases),
+        showRepoIcons: settings.show_repo_icons ?? true,
+        tabIconOnly: settings.tab_icon_only ?? false,
+        verticalTabWidth: clampVerticalTabWidth(
+          settings.vertical_tab_width ?? DEFAULT_VERTICAL_TAB_WIDTH,
+        ),
         tabLayout: settings.tab_layout === 'vertical' ? 'vertical' : 'horizontal',
         tabGroups,
         tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),

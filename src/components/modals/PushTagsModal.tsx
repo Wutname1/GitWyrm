@@ -72,7 +72,7 @@ export function PushTagsModal() {
             onChange={(e) => setRemember(e.target.checked)}
             className="size-3.5 accent-[var(--gw-accent)]"
           />
-          Always do this
+          Remember my answer
         </label>
       }
     >
@@ -93,6 +93,13 @@ export function PushTagsModal() {
           </li>
         ))}
       </ul>
+
+      {remember && (
+        <p className="text-2xs leading-relaxed text-muted-foreground">
+          Whichever button you press next becomes the default for every push. You can change it
+          later in Settings &gt; Tags.
+        </p>
+      )}
     </FormDialog>
   )
 }

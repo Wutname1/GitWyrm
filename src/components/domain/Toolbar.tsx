@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import {
   ArchiveRestore,
   Archive,
@@ -69,9 +69,9 @@ function ToolbarButton({ icon, label, badge, onClick, disabled, pending }: Toolb
 }
 
 /**
- * The current-branch pill by the search box, doubling as a hover dropdown of
- * every branch. Clicking any branch switches to it; picking a remote one lands
- * on a local branch tracking it.
+ * The current-branch pill by the search box, doubling as a dropdown of every
+ * branch. Clicking any branch switches to it; picking a remote one lands on a
+ * local branch tracking it.
  */
 function BranchSwitcher() {
   const repo = useActiveRepo()
@@ -80,24 +80,6 @@ function BranchSwitcher() {
   const revealRefInGraph = useUiStore((s) => s.revealRefInGraph)
   const m = useGitMutations(repo?.id ?? null)
   const [open, setOpen] = useState(false)
-  const closeTimer = useRef<number | null>(null)
-
-  // The menu content is portalled to document.body, outside this component's
-  // DOM, so leaving the trigger for the menu fires mouseleave. Closing on a
-  // short delay that the menu itself cancels lets the cursor cross the gap
-  // without the menu flickering shut and reopening.
-  const cancelClose = () => {
-    if (closeTimer.current !== null) {
-      window.clearTimeout(closeTimer.current)
-      closeTimer.current = null
-    }
-    setOpen(true)
-  }
-  const scheduleClose = () => {
-    cancelClose()
-    closeTimer.current = window.setTimeout(() => setOpen(false), 180)
-  }
-  useEffect(() => () => cancelClose(), [])
 
   const locals = branches.data?.local ?? []
   const head = locals.find((b) => b.is_head)
@@ -118,13 +100,8 @@ function BranchSwitcher() {
   }
 
   return (
-    <div className="mr-1.5" onMouseEnter={cancelClose} onMouseLeave={scheduleClose}>
-      {/* Not modal: a modal dropdown sets pointer-events:none on the rest of
-          the page while open, so the trigger underneath stops receiving them.
-          The browser then reports the cursor as having left the button, which
-          closed the menu, which restored pointer events, which re-hovered the
-          button -- the flicker. */}
-      <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
+    <div className="mr-1.5">
+      <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button className="flex h-[30px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-[11px] hover:border-muted-foreground hover:bg-panel3">
             <span className="size-2 rounded-[2px] bg-primary" />
@@ -133,12 +110,7 @@ function BranchSwitcher() {
             <ChevronDown size={13} strokeWidth={2} className="text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          className="max-h-[70vh] w-[240px]"
-          onMouseEnter={cancelClose}
-          onMouseLeave={scheduleClose}
-        >
+        <DropdownMenuContent align="end" className="max-h-[70vh] w-[240px]">
           <DropdownMenuLabel className="px-2 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">
             LOCAL
           </DropdownMenuLabel>

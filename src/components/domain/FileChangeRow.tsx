@@ -20,6 +20,10 @@ function submoduleNote(sub: NonNullable<FileChange['submodule']>): string {
 
 interface FileChangeRowProps {
   file: FileChange
+  /** Alternate visible label; actions and menus still use the full file path. */
+  displayPath?: string
+  /** When set, renders this row as a leaf in a changed-files tree. */
+  treeDepth?: number
   mono?: boolean
   nameClassName?: string
   onOpen: () => void
@@ -34,6 +38,8 @@ interface FileChangeRowProps {
 
 export function FileChangeRow({
   file,
+  displayPath,
+  treeDepth,
   mono,
   nameClassName,
   onOpen,
@@ -44,6 +50,9 @@ export function FileChangeRow({
   const row = (
     <div
       onClick={onOpen}
+      role={treeDepth == null ? undefined : 'treeitem'}
+      aria-level={treeDepth == null ? undefined : treeDepth + 1}
+      style={treeDepth == null ? undefined : { paddingLeft: 14 + treeDepth * 14 }}
       className="flex cursor-pointer items-center gap-2 px-3.5 py-1 hover:bg-panel2"
     >
       <StatusBadge st={file.status} />
@@ -55,7 +64,7 @@ export function FileChangeRow({
         )}
       >
         {sub && <Package className="size-3 flex-none text-sub" aria-label="Submodule" />}
-        <span className="overflow-hidden text-ellipsis">{file.path}</span>
+        <span className="overflow-hidden text-ellipsis">{displayPath ?? file.path}</span>
       </span>
       {sub ? (
         // Line counts are meaningless for a submodule pointer; show what moved.
