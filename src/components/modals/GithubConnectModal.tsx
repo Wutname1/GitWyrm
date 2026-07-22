@@ -1,3 +1,4 @@
+import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
 import { GithubIcon } from '@/components/domain/github/GithubIcon'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,25 +40,16 @@ export function GithubConnectModal() {
 
         <div className="grid gap-3 px-4 py-4">
           <DialogDescription className="text-xs leading-relaxed text-sub">
-            See and act on your pull requests and issues without leaving GitWyrm. GitHub will show
-            you a code to confirm it is really you.
+            See and act on your pull requests and issues without leaving GitWyrm. We will give you a
+            code to enter on GitHub, so it knows it is really you.
           </DialogDescription>
 
           {signIn.status.state === 'waiting' ? (
-            <div className="rounded-md border border-border bg-background p-3 text-xs text-sub">
-              Enter this code on GitHub:{' '}
-              <span className="select-all font-mono text-base font-bold text-foreground">
-                {signIn.status.userCode}
-              </span>
-              <div className="mt-2 flex items-center gap-2">
-                <span className="text-2xs text-muted-foreground">
-                  Waiting for you to finish on GitHub…
-                </span>
-                <Button variant="ghost" size="sm" className="h-6 px-2 text-2xs" onClick={signIn.cancel}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
+            <DeviceCodePanel
+              userCode={signIn.status.userCode}
+              verificationUri={signIn.status.verificationUri}
+              onCancel={signIn.cancel}
+            />
           ) : (
             <Button
               size="sm"
