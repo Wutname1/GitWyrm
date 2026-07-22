@@ -33,6 +33,15 @@ This is the second thing to check in any UI review, right after Rule #1: does
 this screen assume git knowledge the user might not have, and could a picture
 or a plain sentence replace the jargon?
 
+## Rule #3 - never make the user type to confirm
+
+**No action is ever gated behind typing a word or phrase.** No "type DISCARD to
+confirm", no "type the branch name to continue", no typed confirmation of any
+kind, anywhere. If an action is dangerous, guard it with a plain confirm dialog
+(a clear warning + a labeled button), never a text box the user has to copy a
+word into. `ConfirmDialog` intentionally has no typed-phrase option - don't add
+one back.
+
 ## What this repo is
 
 GitWyrm - a fast, focused Git client for Windows. Tauri v2 shell, React +

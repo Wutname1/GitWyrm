@@ -94,7 +94,6 @@ export function ChangesMenu({ children, asChild = true }: ChangesMenuProps) {
           </>
         }
         confirmLabel="Discard everything"
-        confirmPhrase="discard"
         onConfirm={() => m.discardAll.mutate()}
       />
     </>

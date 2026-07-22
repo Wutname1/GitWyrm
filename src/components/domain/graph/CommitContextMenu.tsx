@@ -318,7 +318,6 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
           </>
         }
         confirmLabel="Erase and rewind"
-        confirmPhrase={branchName}
         pending={m.reset.isPending}
         pendingLabel="Erasing and rewinding…"
         keepOpenOnConfirm

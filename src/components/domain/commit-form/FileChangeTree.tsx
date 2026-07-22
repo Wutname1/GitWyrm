@@ -250,7 +250,6 @@ export function FileChangeTree({
           </>
         }
         confirmLabel="Discard folder changes"
-        confirmPhrase="discard"
         pending={m.discardFiles.isPending}
         pendingLabel="Discarding folder changes…"
         keepOpenOnConfirm

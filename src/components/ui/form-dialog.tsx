@@ -22,8 +22,8 @@ interface FormDialogProps {
   submitLabel: string
   /** Button text while the action runs. Falls back to `submitLabel`. */
   pendingLabel?: string
-  /** Disables the submit button; the dialog decides what "ready" means. */
-  canSubmit: boolean
+  /** Disables the submit button; the dialog decides what "ready" means. Defaults to enabled. */
+  canSubmit?: boolean
   pending?: boolean
   destructive?: boolean
   onSubmit: () => void
@@ -48,7 +48,7 @@ export function FormDialog({
   cancelLabel = 'Cancel',
   submitLabel,
   pendingLabel,
-  canSubmit,
+  canSubmit = true,
   pending = false,
   destructive = false,
   onSubmit,

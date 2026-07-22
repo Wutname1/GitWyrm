@@ -252,7 +252,6 @@ export function ChangesList() {
           </>
         }
         confirmLabel="Discard everything"
-        confirmPhrase="discard"
         pending={m.discardAll.isPending}
         pendingLabel="Discarding changes…"
         keepOpenOnConfirm
