@@ -73,6 +73,26 @@ function ToolbarButton({ icon, label, badge, onClick, disabled, pending }: Toolb
  * branch. Clicking any branch switches to it; picking a remote one lands on a
  * local branch tracking it.
  */
+// Explicit "switch to this branch" affordance on a dropdown row. The whole row
+// already switches on click; this button makes the action discoverable. It sits
+// hidden until the row is hovered so rows stay clean.
+function SwitchRowButton({ onClick }: { onClick: () => void }) {
+  return (
+    <span
+      role="button"
+      tabIndex={-1}
+      title="Switch to this branch"
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      className="flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+    >
+      <GitBranch size={12} strokeWidth={2} />
+    </span>
+  )
+}
+
 function BranchSwitcher() {
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
@@ -119,7 +139,7 @@ function BranchSwitcher() {
             return (
               <DropdownMenuItem
                 key={b.name}
-                className="gap-2 text-xs"
+                className="group gap-2 text-xs"
                 onClick={() => (isCurrent ? reveal(b.name) : switchTo(b.name))}
               >
                 <span
@@ -137,6 +157,7 @@ function BranchSwitcher() {
                   {b.name}
                 </span>
                 <SyncBadge branch={b} className="text-2xs" />
+                {!isCurrent && <SwitchRowButton onClick={() => switchTo(b.name)} />}
               </DropdownMenuItem>
             )
           })}
@@ -160,7 +181,7 @@ function BranchSwitcher() {
                     return (
                       <DropdownMenuItem
                         key={b.name}
-                        className="gap-2 text-xs text-sub"
+                        className="group gap-2 text-xs text-sub"
                         onClick={() =>
                           isCurrent ? reveal(b.name) : switchTo(`${r.name}/${b.name}`)
                         }
@@ -188,6 +209,9 @@ function BranchSwitcher() {
                           <span className="flex-none text-2xs uppercase tracking-wide text-muted-foreground">
                             not here
                           </span>
+                        )}
+                        {!isCurrent && (
+                          <SwitchRowButton onClick={() => switchTo(`${r.name}/${b.name}`)} />
                         )}
                       </DropdownMenuItem>
                     )
