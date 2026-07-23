@@ -17,6 +17,12 @@ import {
 } from '@/lib/themes'
 import { cn } from '@/lib/utils'
 import { ChangeSizeSettings } from './ChangeSizeSettings'
+import {
+  FontFamilySetting,
+  FontSizeSetting,
+  FontWeightSetting,
+  useResetFonts,
+} from './FontSettings'
 
 const MODE_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
   { value: 'system', label: 'System', icon: Monitor },
@@ -200,6 +206,7 @@ export function AppearanceSettings() {
   const setShowRepoIcons = useWorkspaceStore((s) => s.setShowRepoIcons)
   const tabIconOnly = useWorkspaceStore((s) => s.tabIconOnly)
   const setTabIconOnly = useWorkspaceStore((s) => s.setTabIconOnly)
+  const resetFonts = useResetFonts()
 
   return (
     <div>
@@ -214,6 +221,23 @@ export function AppearanceSettings() {
         hint="Keep GitWyrm's mint highlight, or let each theme show its own accent color."
       >
         <MintSetting />
+      </SettingRow>
+      <SettingRow
+        label="Font"
+        hint="Choose the font used across GitWyrm. Included fonts always work; you can also pick any font installed on this PC."
+      >
+        <FontFamilySetting />
+      </SettingRow>
+      <SettingRow label="Text size" hint="Makes all text bigger or smaller. App zoom still applies on top of this.">
+        <FontSizeSetting />
+      </SettingRow>
+      <SettingRow label="Text weight" hint="Makes text lighter or bolder throughout the app.">
+        <FontWeightSetting />
+      </SettingRow>
+      <SettingRow label="Reset fonts" hint="Put the font, size, and weight back to GitWyrm's defaults.">
+        <Button variant="outline" size="sm" onClick={resetFonts}>
+          Reset all font settings
+        </Button>
       </SettingRow>
       <SettingRow
         label="Repository icons"

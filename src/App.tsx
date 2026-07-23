@@ -18,6 +18,7 @@ import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { useTheme } from '@/hooks/useTheme'
+import { useFont } from '@/hooks/useFont'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { useUiStore } from '@/stores/uiStore'
@@ -42,6 +43,7 @@ let launched = false
 function AppInner() {
   useRepoWatcher()
   useTheme()
+  useFont()
   const openModal = useUiStore((s) => s.openModal)
   const activeRepoId = useWorkspaceStore((s) => s.activeRepoId)
   const uiScale = useWorkspaceStore((s) => s.uiScale)

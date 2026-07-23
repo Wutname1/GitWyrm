@@ -16,7 +16,9 @@
     "bootstrapper:dev": "cargo run --manifest-path src-tauri/bootstrapper/Cargo.toml --release -- --dry-run"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/roboto": "^5.3.0",
     "@fontsource/geist-mono": "^5.2.8",
     "@sentry/react": "^10.67.0",
     "@tailwindcss/vite": "^4.3.3",

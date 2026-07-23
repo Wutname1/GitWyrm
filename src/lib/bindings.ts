@@ -1771,6 +1771,20 @@ enable_worktrees?: boolean;
  */
 ui_scale?: number | null; 
 /**
+ * Selected UI font id (see the frontend font registry). None means the
+ * default font. Validated on the frontend.
+ */
+font_family?: string | null; 
+/**
+ * Base UI text size in rem, before whole-app zoom. None uses the default.
+ * Clamped on the frontend before display.
+ */
+font_size?: number | null; 
+/**
+ * Base UI text weight. None uses the default. Clamped on the frontend.
+ */
+font_weight?: number | null; 
+/**
  * Custom tab names, keyed by repo path. Absent paths use the repo folder name.
  */
 tab_aliases?: Partial<{ [key in string]: string }>; 

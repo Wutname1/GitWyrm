@@ -145,6 +145,17 @@ pub struct Settings {
   /// Clamped on the frontend before display.
   #[serde(default)]
   pub ui_scale: Option<f64>,
+  /// Selected UI font id (see the frontend font registry). None means the
+  /// default font. Validated on the frontend.
+  #[serde(default)]
+  pub font_family: Option<String>,
+  /// Base UI text size in rem, before whole-app zoom. None uses the default.
+  /// Clamped on the frontend before display.
+  #[serde(default)]
+  pub font_size: Option<f64>,
+  /// Base UI text weight. None uses the default. Clamped on the frontend.
+  #[serde(default)]
+  pub font_weight: Option<f64>,
   /// Custom tab names, keyed by repo path. Absent paths use the repo folder name.
   #[serde(default)]
   pub tab_aliases: HashMap<String, String>,
@@ -242,6 +253,9 @@ impl Default for Settings {
       commit_button_mode: None,
       enable_worktrees: false,
       ui_scale: None,
+      font_family: None,
+      font_size: None,
+      font_weight: None,
       tab_aliases: HashMap::new(),
       show_repo_icons: true,
       tab_icon_only: false,

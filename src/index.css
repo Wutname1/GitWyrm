@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/roboto";
 @import "@fontsource/geist-mono";
 
 @custom-variant dark (&:is(.dark *));
@@ -94,10 +96,18 @@
   --input: var(--gw-border);
   --ring: var(--gw-accent);
   --radius: 0.375rem;
+
+  /* Font settings. The useFont hook overrides these at runtime from the user's
+     Appearance choices. --gw-font-sans is the chosen UI font; --gw-font-size is
+     the base body size (all app text is rem, so this scales every label); and
+     --gw-font-weight is the base text weight. */
+  --gw-font-sans: "IBM Plex Sans Variable", system-ui, sans-serif;
+  --gw-font-size: 0.84375rem;
+  --gw-font-weight: 450;
 }
 
 @theme inline {
-  --font-sans: "IBM Plex Sans Variable", system-ui, sans-serif;
+  --font-sans: var(--gw-font-sans);
   --font-mono: "Inter", ui-monospace, "SF Mono", monospace;
   --font-wordmark: "Sora", "Inter Variable", system-ui, sans-serif;
 
@@ -166,10 +176,10 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    /* 13.5px at the default 16px root. All app font sizes are rem, so a
-       future text-size setting only has to change the root font-size. */
-    font-size: 0.84375rem;
-    font-weight: 450;
+    /* Base size and weight come from the font settings vars (see :root). All app
+       text is rem, so changing --gw-font-size scales every label at once. */
+    font-size: var(--gw-font-size);
+    font-weight: var(--gw-font-weight);
     user-select: none;
   }
   input,

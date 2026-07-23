@@ -12,6 +12,7 @@ import {
 } from '@/lib/graphColumns'
 import { useUiStore } from '@/stores/uiStore'
 import type { ThemeId, ThemeMode } from '@/lib/themes'
+import { DEFAULT_FONT_ID } from '@/lib/fonts'
 
 export interface RecentRepo {
   name: string
@@ -54,6 +55,35 @@ export const MIN_UI_SCALE = 0.5
 export const MAX_UI_SCALE = 2.0
 export const UI_SCALE_STEP = 0.1
 export const DEFAULT_UI_SCALE = 1.0
+
+/**
+ * Base UI text size in rem, before the whole-app zoom applies. The default
+ * matches the original hard-coded body size (0.84375rem = 13.5px at a 16px root).
+ */
+export const MIN_FONT_SIZE = 0.6875
+export const MAX_FONT_SIZE = 1.125
+export const FONT_SIZE_STEP = 0.03125
+export const DEFAULT_FONT_SIZE = 0.84375
+
+/** Base UI text weight. The default matches the original body weight. */
+export const MIN_FONT_WEIGHT = 300
+export const MAX_FONT_WEIGHT = 600
+export const FONT_WEIGHT_STEP = 50
+export const DEFAULT_FONT_WEIGHT = 450
+
+/** Clamps and rounds a base font size (rem) into the supported range. */
+export function clampFontSize(size: number): number {
+  if (!Number.isFinite(size)) return DEFAULT_FONT_SIZE
+  const clamped = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size))
+  return Math.round(clamped / FONT_SIZE_STEP) * FONT_SIZE_STEP
+}
+
+/** Clamps and snaps a font weight into the supported range. */
+export function clampFontWeight(weight: number): number {
+  if (!Number.isFinite(weight)) return DEFAULT_FONT_WEIGHT
+  const clamped = Math.min(MAX_FONT_WEIGHT, Math.max(MIN_FONT_WEIGHT, weight))
+  return Math.round(clamped / FONT_WEIGHT_STEP) * FONT_WEIGHT_STEP
+}
 
 /** Saved width limits for the vertical repository rail. */
 export const MIN_VERTICAL_TAB_WIDTH = 48
@@ -251,6 +281,12 @@ interface WorkspaceState {
   enableWorktrees: boolean
   /** Whole-app zoom factor, 1.0 = 100% (persisted). */
   uiScale: number
+  /** Selected UI font id; see lib/fonts.ts. 'plex' is the default (persisted). */
+  fontFamily: string
+  /** Base UI text size in rem, before whole-app zoom (persisted). */
+  fontSize: number
+  /** Base UI text weight (persisted). */
+  fontWeight: number
   /** Custom tab names, keyed by repo path. Missing paths use the repo folder name (persisted). */
   tabAliases: Record<string, string>
   /** Selected color theme; 'auto' picks Slate (dark) or Paper (light) (persisted). */
@@ -299,6 +335,12 @@ interface WorkspaceState {
   setHorizontalTabRow: (enabled: boolean) => void
   /** Set the whole-app zoom factor (clamped to the supported range). */
   setUiScale: (scale: number) => void
+  /** Set the UI font by id (see lib/fonts.ts). */
+  setFontFamily: (id: string) => void
+  /** Set the base UI text size in rem (clamped to the supported range). */
+  setFontSize: (size: number) => void
+  /** Set the base UI text weight (clamped to the supported range). */
+  setFontWeight: (weight: number) => void
   /** Rename a tab by repo path. An empty/blank alias clears it (back to the folder name). */
   setTabAlias: (path: string, alias: string) => void
   setTheme: (theme: ThemeId) => void
@@ -367,6 +409,9 @@ function toSettings(s: WorkspaceState): Settings {
     tag_push_on_create: s.tagPushOnCreate,
     enable_worktrees: s.enableWorktrees,
     ui_scale: s.uiScale,
+    font_family: s.fontFamily === DEFAULT_FONT_ID ? null : s.fontFamily,
+    font_size: s.fontSize,
+    font_weight: s.fontWeight,
     tab_aliases: s.tabAliases,
     theme: s.theme === 'auto' ? null : s.theme,
     theme_mode: s.themeMode === 'system' ? null : s.themeMode,
@@ -499,6 +544,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   tagPushOnCreate: false,
   enableWorktrees: false,
   uiScale: DEFAULT_UI_SCALE,
+  fontFamily: DEFAULT_FONT_ID,
+  fontSize: DEFAULT_FONT_SIZE,
+  fontWeight: DEFAULT_FONT_WEIGHT,
   tabAliases: {},
   theme: 'auto',
   themeMode: 'system',
@@ -630,6 +678,18 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setUiScale: (scale) => {
     set({ uiScale: clampUiScale(scale) })
+    schedulePersist()
+  },
+  setFontFamily: (id) => {
+    set({ fontFamily: id || DEFAULT_FONT_ID })
+    schedulePersist()
+  },
+  setFontSize: (size) => {
+    set({ fontSize: clampFontSize(size) })
+    schedulePersist()
+  },
+  setFontWeight: (weight) => {
+    set({ fontWeight: clampFontWeight(weight) })
     schedulePersist()
   },
   setTabAlias: (path, alias) => {
@@ -1004,6 +1064,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         tagPushOnCreate: settings.tag_push_on_create ?? false,
         enableWorktrees: settings.enable_worktrees ?? false,
         uiScale: settings.ui_scale != null ? clampUiScale(settings.ui_scale) : DEFAULT_UI_SCALE,
+        fontFamily: settings.font_family ?? DEFAULT_FONT_ID,
+        fontSize: settings.font_size != null ? clampFontSize(settings.font_size) : DEFAULT_FONT_SIZE,
+        fontWeight: settings.font_weight != null ? clampFontWeight(settings.font_weight) : DEFAULT_FONT_WEIGHT,
         tabAliases: normalizeAliases(settings.tab_aliases),
         theme: normalizeTheme(settings.theme),
         themeMode: normalizeThemeMode(settings.theme_mode),
