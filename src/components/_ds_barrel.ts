@@ -1,5 +1,3 @@
-export * from './dev/ThemeLab';
-export * from './dev/ThemeLabLauncher';
 export * from './domain/branch/BranchMenu';
 export * from './domain/branch/BranchMenuItems';
 export * from './domain/branch/BranchRemoteItems';

@@ -1793,8 +1793,20 @@ tag_push_default?: string | null;
 /**
  * Whether the New Tag dialog's "send it to the remote" box starts checked.
  */
-tag_push_on_create?: boolean }
-export type StashInfo = { index: number; 
+tag_push_on_create?: boolean;
+/**
+ * Selected color theme id ("slate", "onyx", "midnight", "paper"). None means Auto.
+ */
+theme?: string | null;
+/**
+ * Light/dark preference ("light", "dark", "system"). None means system.
+ */
+theme_mode?: string | null;
+/**
+ * Use the GitWyrm mint accent across every theme.
+ */
+mint_accent?: boolean }
+export type StashInfo = { index: number;
 /**
  * Raw stash message as git stores it, e.g. "On develop: auto-stash before...".
  */

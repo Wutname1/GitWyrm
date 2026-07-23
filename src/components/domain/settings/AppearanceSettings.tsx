@@ -1,4 +1,4 @@
-import { Minus, Plus } from 'lucide-react'
+import { Minus, Monitor, Moon, Plus, Sun } from 'lucide-react'
 import { SettingRow } from './SettingRow'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
@@ -9,7 +9,141 @@ import {
   UI_SCALE_STEP,
   useWorkspaceStore,
 } from '@/stores/workspaceStore'
+import {
+  THEMES,
+  resolveMode,
+  type ThemeId,
+  type ThemeMode,
+} from '@/lib/themes'
+import { cn } from '@/lib/utils'
 import { ChangeSizeSettings } from './ChangeSizeSettings'
+
+const MODE_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
+  { value: 'system', label: 'System', icon: Monitor },
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'dark', label: 'Dark', icon: Moon },
+]
+
+function ModeSetting() {
+  const themeMode = useWorkspaceStore((s) => s.themeMode)
+  const setThemeMode = useWorkspaceStore((s) => s.setThemeMode)
+
+  return (
+    <div className="inline-flex overflow-hidden rounded-md border border-border">
+      {MODE_OPTIONS.map(({ value, label, icon: Icon }) => (
+        <button
+          key={value}
+          onClick={() => setThemeMode(value)}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors',
+            themeMode === value
+              ? 'bg-[var(--gw-accent)] text-[var(--gw-accent-fg)]'
+              : 'bg-panel2 text-sub hover:bg-panel3 hover:text-foreground',
+          )}
+        >
+          <Icon size={13} />
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function ThemeSetting() {
+  const theme = useWorkspaceStore((s) => s.theme)
+  const themeMode = useWorkspaceStore((s) => s.themeMode)
+  const setTheme = useWorkspaceStore((s) => s.setTheme)
+
+  // Preview each theme in the mode the app is actually showing, so the swatches
+  // match what the user sees.
+  const systemPrefersDark =
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches
+  const activeMode = resolveMode(themeMode, systemPrefersDark)
+
+  const options: { id: ThemeId; name: string; note: string }[] = [
+    {
+      id: 'auto',
+      name: 'Auto',
+      note: 'Match the light or dark setting (Slate or Paper).',
+    },
+    ...THEMES.map((t) => ({ id: t.id as ThemeId, name: t.name, note: t.note })),
+  ]
+
+  return (
+    <div className="grid max-w-xl grid-cols-2 gap-2">
+      {options.map((opt) => {
+        const def = opt.id === 'auto' ? null : THEMES.find((t) => t.id === opt.id)
+        const swatch = def ? def[activeMode].surface : null
+        const dot = def ? def[activeMode].accent.accent : 'var(--gw-accent)'
+        const active = theme === opt.id
+        return (
+          <button
+            key={opt.id}
+            onClick={() => setTheme(opt.id)}
+            className={cn(
+              'flex items-center gap-2.5 rounded-lg border p-2.5 text-left transition-colors',
+              active
+                ? 'border-[var(--gw-accent)] bg-[var(--gw-accent-soft)]'
+                : 'border-border bg-panel hover:bg-panel2',
+            )}
+          >
+            <div className="flex flex-none items-center">
+              {swatch ? (
+                <>
+                  <span
+                    className="size-5 rounded-l border border-border"
+                    style={{ background: swatch.bg }}
+                  />
+                  <span
+                    className="size-5 border-y border-border"
+                    style={{ background: swatch.panel2 }}
+                  />
+                  <span
+                    className="flex size-5 items-center justify-center rounded-r border border-border"
+                    style={{ background: swatch.panel3 }}
+                  >
+                    <span
+                      className="size-2 rounded-full"
+                      style={{ background: dot }}
+                    />
+                  </span>
+                </>
+              ) : (
+                // Auto: split light/dark tile
+                <span className="flex size-5 overflow-hidden rounded border border-border">
+                  <span className="w-1/2 bg-[#1a1a1a]" />
+                  <span className="w-1/2 bg-white" />
+                </span>
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-foreground">{opt.name}</div>
+              <div className="truncate text-2xs text-muted-foreground">{opt.note}</div>
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function MintSetting() {
+  const mintAccent = useWorkspaceStore((s) => s.mintAccent)
+  const setMintAccent = useWorkspaceStore((s) => s.setMintAccent)
+
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+      <input
+        type="checkbox"
+        checked={mintAccent}
+        onChange={(event) => setMintAccent(event.target.checked)}
+        className="size-3.5 accent-[var(--gw-accent)]"
+      />
+      Use the GitWyrm mint accent on every theme
+    </label>
+  )
+}
 
 function ZoomSetting() {
   const uiScale = useWorkspaceStore((s) => s.uiScale)
@@ -69,8 +203,17 @@ export function AppearanceSettings() {
 
   return (
     <div>
-      <SettingRow label="Theme" hint="Accent and density options land in a later release.">
-        <div className="text-xs text-sub">GitWyrm Dark</div>
+      <SettingRow label="Mode" hint="Use light, dark, or match your system setting.">
+        <ModeSetting />
+      </SettingRow>
+      <SettingRow label="Theme" hint="Pick a color scheme. Auto follows the mode above.">
+        <ThemeSetting />
+      </SettingRow>
+      <SettingRow
+        label="Mint accent"
+        hint="Keep GitWyrm's mint highlight, or let each theme show its own accent color."
+      >
+        <MintSetting />
       </SettingRow>
       <SettingRow
         label="Repository icons"

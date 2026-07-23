@@ -10,7 +10,6 @@ import { DirectionModal } from '@/components/modals/DirectionModal'
 import { RemoteSyncModal } from '@/components/modals/RemoteSyncModal'
 import { PushChoiceModal } from '@/components/modals/PushChoiceModal'
 import { DragScrim } from '@/components/domain/DragScrim'
-import { ThemeLabLauncher } from '@/components/dev/ThemeLabLauncher'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
 import { NewTagModal } from '@/components/modals/NewTagModal'
@@ -18,6 +17,7 @@ import { PushTagsModal } from '@/components/modals/PushTagsModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
+import { useTheme } from '@/hooks/useTheme'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { useUiStore } from '@/stores/uiStore'
@@ -41,6 +41,7 @@ let launched = false
 
 function AppInner() {
   useRepoWatcher()
+  useTheme()
   const openModal = useUiStore((s) => s.openModal)
   const activeRepoId = useWorkspaceStore((s) => s.activeRepoId)
   const uiScale = useWorkspaceStore((s) => s.uiScale)
@@ -143,7 +144,6 @@ function AppInner() {
       <RemotesModal />
       <GithubConnectModal />
       <Toaster position="bottom-center" />
-      {import.meta.env.DEV && <ThemeLabLauncher />}
     </>
   )
 }

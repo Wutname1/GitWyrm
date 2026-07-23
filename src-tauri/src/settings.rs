@@ -181,6 +181,23 @@ pub struct Settings {
   /// Whether the New Tag dialog's "send it to the remote" box starts checked.
   #[serde(default)]
   pub tag_push_on_create: bool,
+  /// Selected color theme id ("slate", "onyx", "midnight", "paper"). None means
+  /// Auto: the app picks Slate in dark mode and Paper in light mode. Validated
+  /// on the frontend.
+  #[serde(default)]
+  pub theme: Option<String>,
+  /// Light/dark preference ("light", "dark", "system"). None means system,
+  /// which follows the OS setting. Validated on the frontend.
+  #[serde(default)]
+  pub theme_mode: Option<String>,
+  /// Use the GitWyrm mint accent across every theme. When off, each theme shows
+  /// its own native accent color.
+  #[serde(default = "default_mint_accent")]
+  pub mint_accent: bool,
+}
+
+fn default_mint_accent() -> bool {
+  true
 }
 
 fn default_update_channel() -> UpdateChannel {
@@ -236,6 +253,9 @@ impl Default for Settings {
       saved_tab_groups: Vec::new(),
       tag_push_default: None,
       tag_push_on_create: false,
+      theme: None,
+      theme_mode: None,
+      mint_accent: default_mint_accent(),
     }
   }
 }
@@ -288,6 +308,27 @@ mod tests {
     assert!(settings.tab_groups.is_empty());
     assert!(settings.tab_order.is_empty());
     assert!(settings.saved_tab_groups.is_empty());
+    // Theme fields default to Auto / system / mint-on.
+    assert!(settings.theme.is_none());
+    assert!(settings.theme_mode.is_none());
+    assert!(settings.mint_accent);
+  }
+
+  #[test]
+  fn theme_settings_round_trip_through_settings_json() {
+    let settings = Settings {
+      theme: Some("midnight".to_string()),
+      theme_mode: Some("dark".to_string()),
+      mint_accent: false,
+      ..Settings::default()
+    };
+
+    let json = serde_json::to_string(&settings).expect("settings should serialize");
+    let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
+
+    assert_eq!(restored.theme.as_deref(), Some("midnight"));
+    assert_eq!(restored.theme_mode.as_deref(), Some("dark"));
+    assert!(!restored.mint_accent);
   }
 
   #[test]

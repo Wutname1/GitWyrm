@@ -11,6 +11,7 @@ import {
   type ColumnWidths,
 } from '@/lib/graphColumns'
 import { useUiStore } from '@/stores/uiStore'
+import type { ThemeId, ThemeMode } from '@/lib/themes'
 
 export interface RecentRepo {
   name: string
@@ -252,6 +253,12 @@ interface WorkspaceState {
   uiScale: number
   /** Custom tab names, keyed by repo path. Missing paths use the repo folder name (persisted). */
   tabAliases: Record<string, string>
+  /** Selected color theme; 'auto' picks Slate (dark) or Paper (light) (persisted). */
+  theme: ThemeId
+  /** Light/dark preference; 'system' follows the OS (persisted). */
+  themeMode: ThemeMode
+  /** Use the mint accent across every theme; off reveals native accents (persisted). */
+  mintAccent: boolean
   /** Show favicon or logo images in repository tabs (persisted). */
   showRepoIcons: boolean
   /** Hide repository names until a tab is hovered (persisted). */
@@ -294,6 +301,9 @@ interface WorkspaceState {
   setUiScale: (scale: number) => void
   /** Rename a tab by repo path. An empty/blank alias clears it (back to the folder name). */
   setTabAlias: (path: string, alias: string) => void
+  setTheme: (theme: ThemeId) => void
+  setThemeMode: (mode: ThemeMode) => void
+  setMintAccent: (enabled: boolean) => void
   setShowRepoIcons: (enabled: boolean) => void
   setTabIconOnly: (enabled: boolean) => void
   setVerticalTabWidth: (width: number) => void
@@ -358,6 +368,9 @@ function toSettings(s: WorkspaceState): Settings {
     enable_worktrees: s.enableWorktrees,
     ui_scale: s.uiScale,
     tab_aliases: s.tabAliases,
+    theme: s.theme === 'auto' ? null : s.theme,
+    theme_mode: s.themeMode === 'system' ? null : s.themeMode,
+    mint_accent: s.mintAccent,
     show_repo_icons: s.showRepoIcons,
     tab_icon_only: s.tabIconOnly,
     vertical_tab_width: s.verticalTabWidth,
@@ -426,6 +439,18 @@ function normalizeTagPushDefault(mode: string | null | undefined): TagPushDefaul
   return mode === 'always' || mode === 'never' ? mode : 'ask'
 }
 
+/** Validate a stored theme id; unknown/absent falls back to Auto. */
+function normalizeTheme(theme: string | null | undefined): ThemeId {
+  return theme === 'slate' || theme === 'onyx' || theme === 'midnight' || theme === 'paper'
+    ? theme
+    : 'auto'
+}
+
+/** Validate a stored theme mode; unknown/absent falls back to system. */
+function normalizeThemeMode(mode: string | null | undefined): ThemeMode {
+  return mode === 'light' || mode === 'dark' ? mode : 'system'
+}
+
 /**
  * Settings map values arrive as `string | undefined` (a Rust HashMap maps to a
  * Partial record). Drop the empty entries so the store holds a plain map.
@@ -475,6 +500,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   enableWorktrees: false,
   uiScale: DEFAULT_UI_SCALE,
   tabAliases: {},
+  theme: 'auto',
+  themeMode: 'system',
+  mintAccent: true,
   showRepoIcons: true,
   tabIconOnly: false,
   verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
@@ -612,6 +640,18 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       else delete next[path]
       return { tabAliases: next }
     })
+    schedulePersist()
+  },
+  setTheme: (theme) => {
+    set({ theme })
+    schedulePersist()
+  },
+  setThemeMode: (mode) => {
+    set({ themeMode: mode })
+    schedulePersist()
+  },
+  setMintAccent: (enabled) => {
+    set({ mintAccent: enabled })
     schedulePersist()
   },
   setShowRepoIcons: (enabled) => {
@@ -965,6 +1005,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         enableWorktrees: settings.enable_worktrees ?? false,
         uiScale: settings.ui_scale != null ? clampUiScale(settings.ui_scale) : DEFAULT_UI_SCALE,
         tabAliases: normalizeAliases(settings.tab_aliases),
+        theme: normalizeTheme(settings.theme),
+        themeMode: normalizeThemeMode(settings.theme_mode),
+        mintAccent: settings.mint_accent ?? true,
         showRepoIcons: settings.show_repo_icons ?? true,
         tabIconOnly: settings.tab_icon_only ?? false,
         verticalTabWidth: clampVerticalTabWidth(

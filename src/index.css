@@ -39,19 +39,21 @@
 }
 
 :root {
-  /* GitWyrm design tokens (from GitWyrmFinal design) */
-  --gw-bg: #0b0f14;
-  --gw-panel: #0f151c;
-  --gw-panel2: #131b24;
-  --gw-panel3: #1a2430;
-  --gw-border: #1e2833;
+  /* GitWyrm design tokens. These are the Slate-dark defaults (the app's default
+     theme) used for first paint; the useTheme hook overrides these --gw-* values
+     at runtime once React mounts, per the user's theme/mode/mint settings. */
+  --gw-bg: #121212;
+  --gw-panel: #1a1a1a;
+  --gw-panel2: #262626;
+  --gw-panel3: #2d2d2d;
+  --gw-border: #2d2d2d;
   /* Modals float above a dimmed app, so they sit a step lighter than the app
      background -- on dim or glossy screens a --gw-bg surface behind the
      overlay reads as part of the dimmed page instead of on top of it. */
-  --gw-modal: #151d26;
-  --gw-text: #d7e0ea;
-  --gw-sub: #8b99a8;
-  --gw-muted: #5d6b7a;
+  --gw-modal: #1a1a1a;
+  --gw-text: #e5e5e5;
+  --gw-sub: #9e9e9e;
+  --gw-muted: #717171;
   /* Accent is two tokens: a dimmed fill for buttons/badges/borders and a
      calmer value for accent-colored text. The old single #2dd4a7 sat at
      ~10:1 on the background and glared when used as text. */
