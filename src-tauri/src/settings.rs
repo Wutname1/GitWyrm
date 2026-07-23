@@ -89,6 +89,20 @@ pub struct TabGroupSetting {
   pub repo_paths: Vec<String>,
 }
 
+/// One repository's tag-setting overrides, keyed by repo path in `Settings`.
+/// Each field is optional: `Some` overrides the app-wide default for that repo,
+/// `None` (the default) means the repo follows the app-wide setting. Validated
+/// on the frontend.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+pub struct TagOverrideSetting {
+  /// Per-repo push default: "ask", "always", "never". None follows the app default.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub push_default: Option<String>,
+  /// Per-repo default for the New Tag send box. None follows the app default.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub push_on_create: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Settings {
   /// Paths of repos open in tabs, in tab order, so they can be reopened on launch.
@@ -103,6 +117,10 @@ pub struct Settings {
   pub code_folder: Option<String>,
   #[serde(default)]
   pub clone_directory: Option<String>,
+  /// Path to the git executable used for fetch, pull, push, and clone. None
+  /// (the default) uses `git` from PATH.
+  #[serde(default)]
+  pub git_executable: Option<String>,
   #[serde(default = "default_update_channel")]
   pub update_channel: UpdateChannel,
   #[serde(default = "default_branch_switch_mode")]
@@ -192,6 +210,10 @@ pub struct Settings {
   /// Whether the New Tag dialog's "send it to the remote" box starts checked.
   #[serde(default)]
   pub tag_push_on_create: bool,
+  /// Per-repo tag overrides, keyed by repo path. Absent repos follow the
+  /// app-wide `tag_push_default` / `tag_push_on_create`.
+  #[serde(default)]
+  pub tag_overrides_by_repo: HashMap<String, TagOverrideSetting>,
   /// Selected color theme id ("slate", "onyx", "midnight", "paper"). None means
   /// Auto: the app picks Slate in dark mode and Paper in light mode. Validated
   /// on the frontend.
@@ -239,6 +261,7 @@ impl Default for Settings {
       recents: Vec::new(),
       code_folder: None,
       clone_directory: None,
+      git_executable: None,
       update_channel: default_update_channel(),
       branch_switch_mode: default_branch_switch_mode(),
       ai_provider: None,
@@ -267,6 +290,7 @@ impl Default for Settings {
       saved_tab_groups: Vec::new(),
       tag_push_default: None,
       tag_push_on_create: false,
+      tag_overrides_by_repo: HashMap::new(),
       theme: None,
       theme_mode: None,
       mint_accent: default_mint_accent(),
@@ -296,10 +320,22 @@ pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, AppError> {
 #[tauri::command]
 #[specta::specta]
 pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), AppError> {
+  // Apply the git executable immediately so a change takes effect without a
+  // restart. Every git shell-out reads this global.
+  crate::git::shell::set_git_program(settings.git_executable.as_deref());
+
   let path = settings_path(&app)?;
   let json = serde_json::to_string_pretty(&settings).map_err(|e| AppError::Other(e.to_string()))?;
   fs::write(path, json)?;
   Ok(())
+}
+
+/// Load the persisted git executable and apply it to the shell global. Called
+/// once at startup so saved settings take effect before the first git command.
+pub fn apply_startup_git_executable(app: &tauri::AppHandle) {
+  if let Ok(settings) = get_settings(app.clone()) {
+    crate::git::shell::set_git_program(settings.git_executable.as_deref());
+  }
 }
 
 #[cfg(test)]

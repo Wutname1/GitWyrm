@@ -7,6 +7,7 @@ type NavItem = { key: SettingsSection; label: string }
 
 const APP_ITEMS: NavItem[] = [
   { key: 'general', label: 'General' },
+  { key: 'tags', label: 'Tags' },
   { key: 'ai', label: 'AI' },
   { key: 'appearance', label: 'Appearance' },
   { key: 'logs', label: 'Logs' },
@@ -15,7 +16,7 @@ const APP_ITEMS: NavItem[] = [
 
 const REPO_ITEMS: NavItem[] = [
   { key: 'repository', label: 'Repository' },
-  { key: 'tags', label: 'Tags' },
+  { key: 'repositoryTags', label: 'Tags' },
 ]
 
 export function SettingsNav({

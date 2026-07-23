@@ -17,6 +17,7 @@ import {
 } from '@/lib/themes'
 import { cn } from '@/lib/utils'
 import { ChangeSizeSettings } from './ChangeSizeSettings'
+import { ResetToDefaults } from './ResetToDefaults'
 import {
   FontFamilySetting,
   FontSizeSetting,
@@ -276,6 +277,7 @@ export function AppearanceSettings() {
       <SettingRow label="App zoom" hint="Makes everything in GitWyrm bigger or smaller.">
         <ZoomSetting />
       </SettingRow>
+      <ResetToDefaults group="appearance" />
     </div>
   )
 }

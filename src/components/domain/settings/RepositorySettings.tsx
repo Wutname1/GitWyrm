@@ -14,6 +14,7 @@ import {
 import { toast } from 'sonner'
 import { RepoIconDialog } from '@/components/domain/RepoIconDialog'
 import { SettingRow } from '@/components/domain/settings/SettingRow'
+import { ResetToDefaults } from '@/components/domain/settings/ResetToDefaults'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { commands, type RepoIcon, type Result } from '@/lib/bindings'
@@ -266,6 +267,18 @@ export function RepositorySettings() {
           </div>
         </div>
       </SettingRow>
+
+      <ResetToDefaults
+        label="Reset this repository's tab name"
+        message={`Tab name reset to ${repo.name}`}
+        disabled={!currentAlias}
+        onReset={() => {
+          const prior = currentAlias
+          setTabAlias(repo.path, '')
+          setAliasDraft('')
+          return prior ? () => setTabAlias(repo.path, prior) : null
+        }}
+      />
 
       <RepoIconDialog
         repo={repo}

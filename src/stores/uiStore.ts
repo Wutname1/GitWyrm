@@ -29,7 +29,7 @@ export interface GithubItemRef {
   number: number
 }
 
-export type SettingsSection = 'general' | 'repository' | 'tags' | 'ai' | 'appearance' | 'logs' | 'about'
+export type SettingsSection = 'general' | 'repository' | 'repositoryTags' | 'tags' | 'ai' | 'appearance' | 'logs' | 'about'
 
 /** A local-only tag offered after a push. */
 export interface PendingTag {

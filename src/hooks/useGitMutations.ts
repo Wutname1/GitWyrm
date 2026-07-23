@@ -104,7 +104,8 @@ export function useGitMutations(repoId: string | null) {
   const qc = useQueryClient()
   const id = repoId ?? ''
   const hostOf = useHostResolver(repoId)
-  const tagPushDefault = useWorkspaceStore((s) => s.tagPushDefault)
+  const repoPath = useWorkspaceStore((s) => s.openRepos.find((r) => r.id === repoId)?.path ?? null)
+  const resolveTagSettings = useWorkspaceStore((s) => s.resolveTagSettings)
   const promptPushTags = useUiStore((s) => s.promptPushTags)
 
   /**
@@ -119,12 +120,13 @@ export function useGitMutations(repoId: string | null) {
    * logged and dropped rather than turning a good push into an error.
    */
   const handleTagsAfterPush = async () => {
-    if (tagPushDefault === 'never') return
+    const { pushDefault } = resolveTagSettings(repoPath)
+    if (pushDefault === 'never') return
     try {
       const pending = unwrap(await commands.unpushedTags(id, ''))
       if (pending.length === 0) return
 
-      if (tagPushDefault === 'always') {
+      if (pushDefault === 'always') {
         for (const tag of pending) {
           await unwrap(await commands.pushTag(id, tag.name, ''))
         }

@@ -167,6 +167,20 @@ async saveSettings(settings: Settings) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Run `<candidate> --version` to confirm a chosen git path works. Returns the
+ * version banner (e.g. "git version 2.45.1") on success. Used by Settings to
+ * give immediate feedback when the user picks or types a git executable.
+ * An empty/blank candidate checks `git` on PATH.
+ */
+async verifyGitExecutable(path: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("verify_git_executable", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async openRepo(path: string) : Promise<Result<RepoInfo, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("open_repo", { path }) };
@@ -1725,7 +1739,12 @@ open_repos?: string[];
 /**
  * Id of the repo that was active when the app last closed.
  */
-active_repo_path?: string | null; recents?: RecentRepo[]; code_folder?: string | null; clone_directory?: string | null; update_channel?: UpdateChannel; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null; 
+active_repo_path?: string | null; recents?: RecentRepo[]; code_folder?: string | null; clone_directory?: string | null; 
+/**
+ * Path to the git executable used for fetch, pull, push, and clone. None
+ * (the default) uses `git` from PATH.
+ */
+git_executable?: string | null; update_channel?: UpdateChannel; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null; 
 /**
  * Custom system instruction for commit-message generation. None uses the
  * built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).
@@ -1831,6 +1850,11 @@ tag_push_default?: string | null;
  * Whether the New Tag dialog's "send it to the remote" box starts checked.
  */
 tag_push_on_create?: boolean; 
+/**
+ * Per-repo tag overrides, keyed by repo path. Absent repos follow the
+ * app-wide `tag_push_default` / `tag_push_on_create`.
+ */
+tag_overrides_by_repo?: Partial<{ [key in string]: TagOverrideSetting }>; 
 /**
  * Selected color theme id ("slate", "onyx", "midnight", "paper"). None means
  * Auto: the app picks Slate in dark mode and Paper in light mode. Validated
@@ -1941,6 +1965,21 @@ target_sha: string;
  * Annotated tags carry an author and message; lightweight ones don't.
  */
 annotated: boolean }
+/**
+ * One repository's tag-setting overrides, keyed by repo path in `Settings`.
+ * Each field is optional: `Some` overrides the app-wide default for that repo,
+ * `None` (the default) means the repo follows the app-wide setting. Validated
+ * on the frontend.
+ */
+export type TagOverrideSetting = { 
+/**
+ * Per-repo push default: "ask", "always", "never". None follows the app default.
+ */
+push_default?: string | null; 
+/**
+ * Per-repo default for the New Tag send box. None follows the app default.
+ */
+push_on_create?: boolean | null }
 /**
  * A local tag the given remote does not have, along with whether the remote
  * already holds the commit it points at. Tags on commits the remote lacks

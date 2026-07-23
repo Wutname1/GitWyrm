@@ -140,7 +140,7 @@ fn run_with_index(
   args: &[&str],
   stdin: Option<&[u8]>,
 ) -> Result<String, AppError> {
-  let mut command = Command::new("git");
+  let mut command = Command::new(crate::git::shell::git_program_name());
   command
     .arg("-C")
     .arg(repo_path)

@@ -4,6 +4,7 @@ import { AppearanceSettings } from '@/components/domain/settings/AppearanceSetti
 import { GeneralSettings } from '@/components/domain/settings/GeneralSettings'
 import { LogsSettings } from '@/components/domain/settings/LogsSettings'
 import { RepositorySettings } from '@/components/domain/settings/RepositorySettings'
+import { RepositoryTagsSettings } from '@/components/domain/settings/RepositoryTagsSettings'
 import { SettingsNav } from '@/components/domain/settings/SettingsNav'
 import { TagsSettings } from '@/components/domain/settings/TagsSettings'
 import { Separator } from '@/components/ui/separator'
@@ -13,6 +14,7 @@ import { useUiStore } from '@/stores/uiStore'
 const TITLES: Record<SettingsSection, string> = {
   general: 'General',
   repository: 'Repository',
+  repositoryTags: 'Tags',
   tags: 'Tags',
   ai: 'AI',
   appearance: 'Appearance',
@@ -22,11 +24,14 @@ const TITLES: Record<SettingsSection, string> = {
 
 const SUBTITLES: Partial<Record<SettingsSection, string>> = {
   repository: 'These settings apply only to the repository open in the active tab.',
+  repositoryTags: 'Tag rules for the repository open in the active tab.',
+  tags: 'The default tag rules for every repository.',
 }
 
 const SECTION_BODIES: Record<SettingsSection, React.ComponentType> = {
   general: GeneralSettings,
   repository: RepositorySettings,
+  repositoryTags: RepositoryTagsSettings,
   tags: TagsSettings,
   ai: AiSettings,
   appearance: AppearanceSettings,

@@ -26,8 +26,14 @@ export function NewTagModal() {
 
   // The saved preference seeds the checkbox but is never written back from
   // here: ticking it for one tag is a one-off, not a change of setting. It
-  // lives in Settings > Tags.
-  const tagPushOnCreate = useWorkspaceStore((s) => s.tagPushOnCreate)
+  // lives in Settings > Tags (this repository's rule, or the app default).
+  // Subscribe to both the app default and this repo's override so the seeded
+  // value stays reactive if either changes while the dialog is closed.
+  const appPushOnCreate = useWorkspaceStore((s) => s.tagPushOnCreate)
+  const repoPushOnCreate = useWorkspaceStore((s) =>
+    repo ? s.tagOverridesByRepo[repo.path]?.pushOnCreate : undefined
+  )
+  const tagPushOnCreate = repoPushOnCreate ?? appPushOnCreate
 
   const [name, setName] = useState('')
   const [message, setMessage] = useState('')

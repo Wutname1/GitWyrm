@@ -1,4 +1,3 @@
-import { Input } from '@/components/ui/input'
 import {
   useWorkspaceStore,
   type BranchSwitchMode,
@@ -6,6 +5,8 @@ import {
   type TabLayout,
 } from '@/stores/workspaceStore'
 import { FolderSetting, SettingRow } from './SettingRow'
+import { GitExecutableSetting } from './GitExecutableSetting'
+import { ResetToDefaults } from './ResetToDefaults'
 
 const selectClass =
   'h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring'
@@ -39,8 +40,11 @@ export function GeneralSettings() {
 
   return (
     <div>
-      <SettingRow label="Git executable" hint="Used for fetch, pull, push, and clone.">
-        <Input defaultValue="git" className="h-8 bg-background font-mono text-xs" />
+      <SettingRow
+        label="Git executable"
+        hint="Used for fetch, pull, push, and clone. Leave blank to use the git on your PATH."
+      >
+        <GitExecutableSetting />
       </SettingRow>
       <SettingRow label="Code folder" hint="Scanned for repositories to quick-launch from the open dialog.">
         <FolderSetting value={codeFolder} placeholder="e.g. C:\code" onCommit={setCodeFolder} />
@@ -122,6 +126,7 @@ export function GeneralSettings() {
           Enable worktrees
         </label>
       </SettingRow>
+      <ResetToDefaults group="general" />
     </div>
   )
 }

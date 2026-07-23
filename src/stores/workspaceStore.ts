@@ -25,6 +25,21 @@ export type ChangeSizeDisplay = 'row' | 'column'
 
 /** What to do about local-only tags after a push. */
 export type TagPushDefault = 'ask' | 'always' | 'never'
+
+/**
+ * A single repo's tag-setting overrides. Each field is optional: present means
+ * this repo overrides that setting; absent means it follows the app-wide default.
+ */
+export interface TagOverride {
+  pushDefault?: TagPushDefault
+  pushOnCreate?: boolean
+}
+
+/** Tag settings resolved for one repo: app-wide default with any repo override applied. */
+export interface ResolvedTagSettings {
+  pushDefault: TagPushDefault
+  pushOnCreate: boolean
+}
 export type TabLayout = 'horizontal' | 'vertical'
 export type TabDropPlacement = 'before' | 'after'
 
@@ -245,6 +260,8 @@ interface WorkspaceState {
   codeFolder: string | null
   /** Default directory new clones go into (persisted; falls back to codeFolder). */
   cloneDirectory: string | null
+  /** Path to the git executable for fetch/pull/push/clone. Empty uses PATH's git (persisted). */
+  gitExecutable: string
   /** Release channel used when checking for updates (persisted). */
   updateChannel: UpdateChannel
   /** What to do with uncommitted changes when switching branches (persisted). */
@@ -273,10 +290,16 @@ interface WorkspaceState {
   showChangeLineCounts: boolean
   /** Default action for the commit button (persisted). */
   commitButtonMode: CommitButtonMode
-  /** Whether a push offers to send local-only tags too (persisted). */
+  /** App-wide default for whether a push offers to send local-only tags (persisted). */
   tagPushDefault: TagPushDefault
-  /** Whether the New Tag dialog's send-to-remote box starts checked (persisted). */
+  /** App-wide default for whether the New Tag dialog's send box starts checked (persisted). */
   tagPushOnCreate: boolean
+  /**
+   * Per-repo tag settings that override the app-wide defaults, keyed by repo path.
+   * A field is present only when that repo overrides it; absent fields follow the
+   * app-wide default. A repo with no entry follows the defaults entirely (persisted).
+   */
+  tagOverridesByRepo: Record<string, TagOverride>
   /** Show worktree actions and the worktree sidebar section (persisted). */
   enableWorktrees: boolean
   /** Whole-app zoom factor, 1.0 = 100% (persisted). */
@@ -313,6 +336,10 @@ interface WorkspaceState {
   tabOrder: TabOrderItem[]
   /** Reusable group snapshots available from the repository picker (persisted). */
   savedTabGroups: SavedTabGroup[]
+  /** Repository shortcuts shown first in the repository picker (persisted, newest pin first). */
+  pinnedRepoPaths: string[]
+  /** Saved-group shortcuts shown first in the repository picker (persisted, newest pin first). */
+  pinnedSavedGroupIds: string[]
   /** True once settings.json has been read on launch. */
   hydrated: boolean
 
@@ -323,6 +350,8 @@ interface WorkspaceState {
   setActiveRepo: (id: string) => void
   setCodeFolder: (path: string | null) => void
   setCloneDirectory: (path: string | null) => void
+  /** Set the git executable path. Empty/blank falls back to PATH's git. */
+  setGitExecutable: (path: string) => void
   setUpdateChannel: (channel: UpdateChannel) => void
   setBranchSwitchMode: (mode: BranchSwitchMode) => void
   setAiSelection: (provider: string | null, model: string | null) => void
@@ -330,6 +359,19 @@ interface WorkspaceState {
   setCommitButtonMode: (mode: CommitButtonMode) => void
   setTagPushDefault: (mode: TagPushDefault) => void
   setTagPushOnCreate: (enabled: boolean) => void
+  /**
+   * Patch one repo's tag override. For each key, a value overrides that setting
+   * for this repo; null clears it back to the app default. When no overridden
+   * fields remain, the repo's entry is removed entirely.
+   */
+  setRepoTagOverride: (
+    path: string,
+    patch: { pushDefault?: TagPushDefault | null; pushOnCreate?: boolean | null },
+  ) => void
+  /** Remove a repo's override entirely so it follows the app-wide defaults. */
+  clearRepoTagOverride: (path: string) => void
+  /** Resolve tag settings for a repo path: app-wide defaults with any override applied. */
+  resolveTagSettings: (path: string | null | undefined) => ResolvedTagSettings
   setEnableWorktrees: (enabled: boolean) => void
   setTabLayout: (layout: TabLayout) => void
   setHorizontalTabRow: (enabled: boolean) => void
@@ -361,6 +403,8 @@ interface WorkspaceState {
   saveTabGroup: (groupId: string) => void
   createSavedTabGroup: (repoPaths: string[], name: string) => string | null
   deleteSavedTabGroup: (groupId: string) => void
+  togglePinnedRepo: (repoPath: string) => void
+  togglePinnedSavedGroup: (groupId: string) => void
   moveRepoBeside: (sourcePath: string, targetPath: string, placement: TabDropPlacement) => void
   moveRepoToOrder: (repoPath: string, orderIndex: number) => void
   moveGroupToOrder: (groupId: string, orderIndex: number) => void
@@ -370,6 +414,16 @@ interface WorkspaceState {
   reorderColumn: (id: ColumnId, toIndex: number) => void
   /** Show or hide a column. */
   toggleColumn: (id: ColumnId) => void
+  /**
+   * Reset one settings screen's preferences to their defaults. Returns a
+   * snapshot of the prior values so the UI can offer an undo. Does not touch
+   * open repos, groups, or other runtime state.
+   */
+  resetSettingsGroup: (group: SettingsGroup) => SettingsSnapshot
+  /** Reset every preference to its default. Returns a snapshot for undo. */
+  resetAllSettings: () => SettingsSnapshot
+  /** Re-apply a captured snapshot of settings values (used to undo a reset). */
+  restoreSettings: (snapshot: SettingsSnapshot) => void
   /** Restore the default column order and show every column. */
   resetColumns: () => void
   /** Resize one graph column. */
@@ -393,6 +447,7 @@ function toSettings(s: WorkspaceState): Settings {
     recents: s.recents.map((r) => ({ name: r.name, path: r.path })),
     code_folder: s.codeFolder,
     clone_directory: s.cloneDirectory,
+    git_executable: s.gitExecutable.trim() ? s.gitExecutable.trim() : null,
     update_channel: s.updateChannel === 'beta' ? 'beta' : 'stable',
     branch_switch_mode: s.branchSwitchMode,
     ai_provider: s.aiProvider,
@@ -407,6 +462,7 @@ function toSettings(s: WorkspaceState): Settings {
     commit_button_mode: s.commitButtonMode,
     tag_push_default: s.tagPushDefault,
     tag_push_on_create: s.tagPushOnCreate,
+    tag_overrides_by_repo: serializeTagOverrides(s.tagOverridesByRepo),
     enable_worktrees: s.enableWorktrees,
     ui_scale: s.uiScale,
     font_family: s.fontFamily === DEFAULT_FONT_ID ? null : s.fontFamily,
@@ -436,6 +492,8 @@ function toSettings(s: WorkspaceState): Settings {
       collapsed: false,
       repo_paths: group.repoPaths,
     })),
+    pinned_repo_paths: s.pinnedRepoPaths,
+    pinned_saved_group_ids: s.pinnedSavedGroupIds,
   }
 }
 
@@ -508,6 +566,46 @@ function normalizeAliases(aliases: Partial<Record<string, string>> | undefined):
   return out
 }
 
+/** Wire shape of a per-repo tag override as stored in settings.json (snake_case, nullable fields). */
+type StoredTagOverride = { push_default?: string | null; push_on_create?: boolean | null }
+
+/** Serialize the override map for persistence. Empty overrides are dropped. */
+function serializeTagOverrides(
+  overrides: Record<string, TagOverride>,
+): Record<string, StoredTagOverride> {
+  const out: Record<string, StoredTagOverride> = {}
+  for (const [path, value] of Object.entries(overrides)) {
+    const stored: StoredTagOverride = {}
+    if (value.pushDefault !== undefined) stored.push_default = value.pushDefault
+    if (value.pushOnCreate !== undefined) stored.push_on_create = value.pushOnCreate
+    if (stored.push_default !== undefined || stored.push_on_create !== undefined) {
+      out[path] = stored
+    }
+  }
+  return out
+}
+
+/** Read the override map back from settings, dropping empty or invalid entries. */
+function normalizeTagOverrides(
+  overrides: Partial<Record<string, StoredTagOverride>> | undefined,
+): Record<string, TagOverride> {
+  const out: Record<string, TagOverride> = {}
+  for (const [path, stored] of Object.entries(overrides ?? {})) {
+    if (!stored) continue
+    const value: TagOverride = {}
+    if (stored.push_default === 'ask' || stored.push_default === 'always' || stored.push_default === 'never') {
+      value.pushDefault = stored.push_default
+    }
+    if (typeof stored.push_on_create === 'boolean') {
+      value.pushOnCreate = stored.push_on_create
+    }
+    if (value.pushDefault !== undefined || value.pushOnCreate !== undefined) {
+      out[path] = value
+    }
+  }
+  return out
+}
+
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 
 /** Debounced write-through to settings.json; skipped until hydration completes. */
@@ -520,12 +618,65 @@ function schedulePersist() {
   }, 300)
 }
 
+/**
+ * Default values for every user-facing preference, the single source of truth
+ * for the per-screen and global "Reset to defaults" actions. Runtime state
+ * (open repos, hydration, icon revisions, tab layout data) is intentionally
+ * excluded: resetting preferences must never close tabs or drop groups.
+ */
+export const SETTINGS_DEFAULTS = {
+  codeFolder: null,
+  cloneDirectory: null,
+  gitExecutable: '',
+  // Not in any per-screen group: only the global "Reset all" restores it.
+  updateChannel: 'stable',
+  branchSwitchMode: 'auto_stash',
+  commitButtonMode: 'commit',
+  enableWorktrees: false,
+  tagPushDefault: 'ask',
+  tagPushOnCreate: false,
+  aiInstruction: null,
+  changeSizeDisplay: 'column',
+  showChangeIndicator: true,
+  showChangeLineCounts: false,
+  uiScale: DEFAULT_UI_SCALE,
+  fontFamily: DEFAULT_FONT_ID,
+  fontSize: DEFAULT_FONT_SIZE,
+  fontWeight: DEFAULT_FONT_WEIGHT,
+  theme: 'auto',
+  themeMode: 'system',
+  mintAccent: true,
+  showRepoIcons: true,
+  tabIconOnly: false,
+} satisfies Partial<WorkspaceState>
+
+/** A resettable preference key. */
+export type SettingsKey = keyof typeof SETTINGS_DEFAULTS
+
+/** Which preference keys each settings screen owns, for per-screen reset. */
+export const SETTINGS_GROUPS = {
+  general: ['codeFolder', 'cloneDirectory', 'gitExecutable', 'branchSwitchMode', 'commitButtonMode', 'enableWorktrees'],
+  tags: ['tagPushDefault', 'tagPushOnCreate'],
+  ai: ['aiInstruction'],
+  appearance: [
+    'changeSizeDisplay', 'showChangeIndicator', 'showChangeLineCounts',
+    'uiScale', 'fontFamily', 'fontSize', 'fontWeight',
+    'theme', 'themeMode', 'mintAccent', 'showRepoIcons', 'tabIconOnly',
+  ],
+} satisfies Record<string, SettingsKey[]>
+
+export type SettingsGroup = keyof typeof SETTINGS_GROUPS
+
+/** A captured slice of settings values, used to undo a reset. */
+export type SettingsSnapshot = Partial<Pick<WorkspaceState, SettingsKey>>
+
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   openRepos: [],
   activeRepoId: null,
   recents: [],
   codeFolder: null,
   cloneDirectory: null,
+  gitExecutable: '',
   updateChannel: 'stable',
   branchSwitchMode: 'auto_stash',
   aiProvider: null,
@@ -542,6 +693,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   commitButtonMode: 'commit',
   tagPushDefault: 'ask',
   tagPushOnCreate: false,
+  tagOverridesByRepo: {},
   enableWorktrees: false,
   uiScale: DEFAULT_UI_SCALE,
   fontFamily: DEFAULT_FONT_ID,
@@ -560,6 +712,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   tabGroups: [],
   tabOrder: [],
   savedTabGroups: [],
+  pinnedRepoPaths: [],
+  pinnedSavedGroupIds: [],
   hydrated: false,
 
   addRepo: (repo) => {
@@ -626,6 +780,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setActiveRepo: (id) => {
     set({ activeRepoId: id })
+    // Selecting a repo tab means "show me that repo", so step out of the
+    // app-level picker view if it was covering the center.
+    const ui = useUiStore.getState()
+    if (ui.centerView === 'repoPicker') ui.showGraph()
     schedulePersist()
   },
   setCodeFolder: (path) => {
@@ -634,6 +792,41 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setCloneDirectory: (path) => {
     set({ cloneDirectory: path ? normalizePath(path) : null })
+    schedulePersist()
+  },
+  setGitExecutable: (path) => {
+    set({ gitExecutable: path })
+    schedulePersist()
+  },
+  resetSettingsGroup: (group) => {
+    const keys = SETTINGS_GROUPS[group]
+    const s = get()
+    const snapshot: SettingsSnapshot = {}
+    const next: Partial<WorkspaceState> = {}
+    for (const key of keys) {
+      // Capture the current value, then stage the default. The `as never`
+      // casts bridge the heterogeneous value types behind the shared key set.
+      ;(snapshot as Record<string, unknown>)[key] = s[key]
+      ;(next as Record<string, unknown>)[key] = SETTINGS_DEFAULTS[key]
+    }
+    set(next as Partial<WorkspaceState>)
+    schedulePersist()
+    return snapshot
+  },
+  resetAllSettings: () => {
+    const s = get()
+    const snapshot: SettingsSnapshot = {}
+    const next: Partial<WorkspaceState> = {}
+    for (const key of Object.keys(SETTINGS_DEFAULTS) as SettingsKey[]) {
+      ;(snapshot as Record<string, unknown>)[key] = s[key]
+      ;(next as Record<string, unknown>)[key] = SETTINGS_DEFAULTS[key]
+    }
+    set(next as Partial<WorkspaceState>)
+    schedulePersist()
+    return snapshot
+  },
+  restoreSettings: (snapshot) => {
+    set(snapshot as Partial<WorkspaceState>)
     schedulePersist()
   },
   setUpdateChannel: (channel) => {
@@ -663,6 +856,46 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   setTagPushOnCreate: (enabled) => {
     set({ tagPushOnCreate: enabled })
     schedulePersist()
+  },
+  setRepoTagOverride: (path, patch) => {
+    set((s) => {
+      const next = { ...s.tagOverridesByRepo }
+      const current: TagOverride = { ...next[path] }
+
+      if ('pushDefault' in patch) {
+        if (patch.pushDefault == null) delete current.pushDefault
+        else current.pushDefault = patch.pushDefault
+      }
+      if ('pushOnCreate' in patch) {
+        if (patch.pushOnCreate == null) delete current.pushOnCreate
+        else current.pushOnCreate = patch.pushOnCreate
+      }
+
+      if (current.pushDefault === undefined && current.pushOnCreate === undefined) {
+        delete next[path]
+      } else {
+        next[path] = current
+      }
+      return { tagOverridesByRepo: next }
+    })
+    schedulePersist()
+  },
+  clearRepoTagOverride: (path) => {
+    set((s) => {
+      if (!(path in s.tagOverridesByRepo)) return s
+      const next = { ...s.tagOverridesByRepo }
+      delete next[path]
+      return { tagOverridesByRepo: next }
+    })
+    schedulePersist()
+  },
+  resolveTagSettings: (path) => {
+    const s = get()
+    const override = path ? s.tagOverridesByRepo[path] : undefined
+    return {
+      pushDefault: override?.pushDefault ?? s.tagPushDefault,
+      pushOnCreate: override?.pushOnCreate ?? s.tagPushOnCreate,
+    }
   },
   setEnableWorktrees: (enabled) => {
     set({ enableWorktrees: enabled })
@@ -871,6 +1104,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       }
       return {
         savedTabGroups: [...s.savedTabGroups.filter((candidate) => candidate.id !== groupId), saved],
+        pinnedSavedGroupIds: [
+          groupId,
+          ...s.pinnedSavedGroupIds.filter((candidate) => candidate !== groupId),
+        ],
       }
     })
     schedulePersist()
@@ -888,13 +1125,40 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         color: TAB_GROUP_COLORS[s.savedTabGroups.length % TAB_GROUP_COLORS.length],
         repoPaths: paths,
       }],
+      pinnedSavedGroupIds: [id, ...s.pinnedSavedGroupIds.filter((candidate) => candidate !== id)],
     }))
     log.info(`workspace: saved new group ${id} with ${paths.length} repo(s)`)
     schedulePersist()
     return id
   },
   deleteSavedTabGroup: (groupId) => {
-    set((s) => ({ savedTabGroups: s.savedTabGroups.filter((group) => group.id !== groupId) }))
+    set((s) => ({
+      savedTabGroups: s.savedTabGroups.filter((group) => group.id !== groupId),
+      pinnedSavedGroupIds: s.pinnedSavedGroupIds.filter((id) => id !== groupId),
+    }))
+    schedulePersist()
+  },
+  togglePinnedRepo: (repoPath) => {
+    const path = normalizePath(repoPath)
+    set((s) => {
+      const pinned = s.pinnedRepoPaths.some((candidate) => samePath(candidate, path))
+      return {
+        pinnedRepoPaths: pinned
+          ? s.pinnedRepoPaths.filter((candidate) => !samePath(candidate, path))
+          : [path, ...s.pinnedRepoPaths.filter((candidate) => !samePath(candidate, path))],
+      }
+    })
+    schedulePersist()
+  },
+  togglePinnedSavedGroup: (groupId) => {
+    set((s) => {
+      const pinned = s.pinnedSavedGroupIds.includes(groupId)
+      return {
+        pinnedSavedGroupIds: pinned
+          ? s.pinnedSavedGroupIds.filter((id) => id !== groupId)
+          : [groupId, ...s.pinnedSavedGroupIds.filter((id) => id !== groupId)],
+      }
+    })
     schedulePersist()
   },
   moveRepoBeside: (sourcePath, targetPath, placement) => {
@@ -1042,10 +1306,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const settings = unwrap(await commands.getSettings())
     if (!get().hydrated) {
       const tabGroups = deserializeTabGroups(settings.tab_groups)
+      const savedTabGroups = deserializeSavedTabGroups(settings.saved_tab_groups)
       set({
         recents: settings.recents ?? [],
         codeFolder: settings.code_folder ?? null,
         cloneDirectory: settings.clone_directory ?? null,
+        gitExecutable: settings.git_executable ?? '',
         updateChannel: settings.update_channel === 'beta' ? 'beta' : 'stable',
         branchSwitchMode: settings.branch_switch_mode ?? 'auto_stash',
         aiProvider: settings.ai_provider ?? null,
@@ -1062,6 +1328,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         commitButtonMode: settings.commit_button_mode === 'commit_push' ? 'commit_push' : 'commit',
         tagPushDefault: normalizeTagPushDefault(settings.tag_push_default),
         tagPushOnCreate: settings.tag_push_on_create ?? false,
+        tagOverridesByRepo: normalizeTagOverrides(settings.tag_overrides_by_repo),
         enableWorktrees: settings.enable_worktrees ?? false,
         uiScale: settings.ui_scale != null ? clampUiScale(settings.ui_scale) : DEFAULT_UI_SCALE,
         fontFamily: settings.font_family ?? DEFAULT_FONT_ID,
@@ -1080,7 +1347,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         horizontalTabRow: settings.horizontal_tab_row ?? false,
         tabGroups,
         tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),
-        savedTabGroups: deserializeSavedTabGroups(settings.saved_tab_groups),
+        savedTabGroups,
+        pinnedRepoPaths: settings.pinned_repo_paths ?? [],
+        pinnedSavedGroupIds:
+          settings.pinned_saved_group_ids
+          ?? savedTabGroups.slice(0, 3).map((group) => group.id),
         hydrated: true,
       })
     }

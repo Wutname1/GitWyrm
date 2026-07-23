@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
+import { ResetToDefaults } from './ResetToDefaults'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -324,6 +325,7 @@ export function AiSettings() {
       )}
 
       <InstructionSetting />
+      <ResetToDefaults group="ai" label="Reset commit instructions to default" />
     </div>
   )
 }

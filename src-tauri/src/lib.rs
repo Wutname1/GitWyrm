@@ -33,6 +33,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::file::get_file_blame,
     settings::get_settings,
     settings::save_settings,
+    git::shell::verify_git_executable,
     commands::repo::open_repo,
     commands::repo::close_repo,
     commands::repo::git_available,
@@ -268,6 +269,10 @@ pub fn run() {
         std::env::consts::OS,
         std::env::consts::ARCH,
       );
+
+      // Point git shell-outs at the saved executable (if any) before the first
+      // git command runs.
+      settings::apply_startup_git_executable(app.handle());
       Ok(())
     })
     .manage(RepoManager::default())

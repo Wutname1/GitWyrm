@@ -1,5 +1,6 @@
 import { useWorkspaceStore, type TagPushDefault } from '@/stores/workspaceStore'
 import { SettingRow } from './SettingRow'
+import { ResetToDefaults } from './ResetToDefaults'
 
 const selectClass =
   'h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring'
@@ -20,7 +21,9 @@ export function TagsSettings() {
     <div>
       <p className="pt-3 text-2xs leading-relaxed text-muted-foreground">
         A tag is a name you pin to one commit, usually to mark a release. Tags are not sent when you
-        push, so they stay on your computer until you send them on purpose.
+        push, so they stay on your computer until you send them on purpose. These are the defaults
+        for every repository. A single repository can use its own rules under This repository &gt;
+        Tags.
       </p>
 
       <SettingRow label="After pushing" hint={tagPushHints[tagPushDefault]}>
@@ -49,6 +52,7 @@ export function TagsSettings() {
           Send a new tag as soon as I make it
         </label>
       </SettingRow>
+      <ResetToDefaults group="tags" />
     </div>
   )
 }
