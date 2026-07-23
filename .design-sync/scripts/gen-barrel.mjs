@@ -2,13 +2,19 @@ import { readdirSync, statSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 const root = 'src/components';
+// Directories under src/components/ to exclude from the design-system export.
+// `dev/` holds dev-only tooling (ThemeLab etc.) that is not shipped UI.
+const EXCLUDE_DIRS = new Set(['dev']);
+
 const files = [];
 (function walk(d) {
   for (const n of readdirSync(d)) {
     const p = join(d, n);
     const s = statSync(p);
-    if (s.isDirectory()) walk(p);
-    else if (/\.tsx$/.test(n)) files.push(p);
+    if (s.isDirectory()) {
+      if (EXCLUDE_DIRS.has(n)) continue;
+      walk(p);
+    } else if (/\.tsx$/.test(n)) files.push(p);
   }
 })(root);
 

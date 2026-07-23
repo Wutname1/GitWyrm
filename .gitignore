@@ -53,3 +53,4 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+src/components/_ds_barrel.ts

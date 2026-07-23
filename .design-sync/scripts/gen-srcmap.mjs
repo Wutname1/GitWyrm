@@ -3,12 +3,16 @@ import { join, relative, basename } from 'node:path';
 
 const root = 'src/components';
 const files = [];
+// dev/ holds dev-only tooling (ThemeLab etc.), excluded from the DS export.
+const EXCLUDE_DIRS = new Set(['dev']);
 (function walk(d) {
   for (const n of readdirSync(d)) {
     const p = join(d, n);
     const s = statSync(p);
-    if (s.isDirectory()) walk(p);
-    else if (/\.tsx$/.test(n)) files.push(p);
+    if (s.isDirectory()) {
+      if (EXCLUDE_DIRS.has(n)) continue;
+      walk(p);
+    } else if (/\.tsx$/.test(n)) files.push(p);
   }
 })(root);
 
