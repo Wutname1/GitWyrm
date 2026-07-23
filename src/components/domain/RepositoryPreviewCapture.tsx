@@ -83,8 +83,7 @@ export function RepositoryPreviewCapture() {
       subtree: true,
     });
 
-    const resizeObserver = new ResizeObserver(scheduleCapture);
-    resizeObserver.observe(root);
+    window.addEventListener("resize", scheduleCapture);
     root.addEventListener("scroll", scheduleCapture, true);
     scheduleCapture();
 
@@ -92,7 +91,7 @@ export function RepositoryPreviewCapture() {
       cancelled = true;
       if (timer) clearTimeout(timer);
       mutationObserver.disconnect();
-      resizeObserver.disconnect();
+      window.removeEventListener("resize", scheduleCapture);
       root.removeEventListener("scroll", scheduleCapture, true);
     };
   }, [activeRepoId]);
