@@ -29,7 +29,6 @@ import { RepositoryPreviewCapture } from '@/components/domain/RepositoryPreviewC
 function CenterView() {
   const view = useUiStore((s) => s.centerView)
   if (view === 'diff') return <DiffView />
-  if (view === 'settings') return <SettingsView />
   if (view === 'conflict') return <ConflictView />
   if (view === 'github') return <GithubView />
   if (view === 'fileHistory') return <FileHistoryView />
@@ -59,6 +58,41 @@ export function WorkspaceLayout() {
   const rightPanelWidth = useWorkspaceStore((state) => state.rightPanelWidth)
   const setLeftPanelWidth = useWorkspaceStore((state) => state.setLeftPanelWidth)
   const setRightPanelWidth = useWorkspaceStore((state) => state.setRightPanelWidth)
+  const inSettings = useUiStore((s) => s.centerView === 'settings')
+
+  const panelRow = (
+    <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-none" style={{ width: leftPanelWidth }}>
+        <LeftPanel />
+        <ResizeHandle
+          ariaLabel="Resize branches and tags"
+          value={leftPanelWidth}
+          min={MIN_LEFT_PANEL_WIDTH}
+          max={MAX_LEFT_PANEL_WIDTH}
+          defaultValue={DEFAULT_LEFT_PANEL_WIDTH}
+          onChange={setLeftPanelWidth}
+          className="-right-1"
+        />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <CenterView />
+        <CommitDrawerSlot />
+      </div>
+      <div className="relative flex min-h-0 flex-none" style={{ width: rightPanelWidth }}>
+        <ResizeHandle
+          ariaLabel="Resize changes and commit panel"
+          value={rightPanelWidth}
+          min={MIN_RIGHT_PANEL_WIDTH}
+          max={MAX_RIGHT_PANEL_WIDTH}
+          defaultValue={DEFAULT_RIGHT_PANEL_WIDTH}
+          direction={-1}
+          onChange={setRightPanelWidth}
+          className="-left-1"
+        />
+        <RightPanel />
+      </div>
+    </div>
+  )
 
   const workspaceBody = (
     <div
@@ -67,37 +101,7 @@ export function WorkspaceLayout() {
     >
       <Toolbar />
       <MergeBanner />
-      <div className="flex min-h-0 flex-1">
-        <div className="relative flex min-h-0 flex-none" style={{ width: leftPanelWidth }}>
-          <LeftPanel />
-          <ResizeHandle
-            ariaLabel="Resize branches and tags"
-            value={leftPanelWidth}
-            min={MIN_LEFT_PANEL_WIDTH}
-            max={MAX_LEFT_PANEL_WIDTH}
-            defaultValue={DEFAULT_LEFT_PANEL_WIDTH}
-            onChange={setLeftPanelWidth}
-            className="-right-1"
-          />
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <CenterView />
-          <CommitDrawerSlot />
-        </div>
-        <div className="relative flex min-h-0 flex-none" style={{ width: rightPanelWidth }}>
-          <ResizeHandle
-            ariaLabel="Resize changes and commit panel"
-            value={rightPanelWidth}
-            min={MIN_RIGHT_PANEL_WIDTH}
-            max={MAX_RIGHT_PANEL_WIDTH}
-            defaultValue={DEFAULT_RIGHT_PANEL_WIDTH}
-            direction={-1}
-            onChange={setRightPanelWidth}
-            className="-left-1"
-          />
-          <RightPanel />
-        </div>
-      </div>
+      {inSettings ? <SettingsView /> : panelRow}
       <StatusBar />
     </div>
   )

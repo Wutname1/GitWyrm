@@ -335,6 +335,8 @@ function onTitleBarDoubleClick(event: React.MouseEvent<HTMLElement>) {
 function TabLayoutButtons() {
   const setTabLayout = useWorkspaceStore((state) => state.setTabLayout);
   const showSettings = useUiStore((state) => state.showSettings);
+  const showGraph = useUiStore((state) => state.showGraph);
+  const inSettings = useUiStore((state) => state.centerView === "settings");
   return (
     <>
       <TooltipButton
@@ -348,9 +350,12 @@ function TabLayoutButtons() {
         <PanelLeft size={15} strokeWidth={1.9} />
       </TooltipButton>
       <TooltipButton
-        onClick={() => showSettings()}
-        className="flex items-center px-2 text-sub hover:text-foreground"
-        tooltip="Settings"
+        onClick={() => (inSettings ? showGraph() : showSettings())}
+        className={cn(
+          "flex items-center px-2 hover:text-foreground",
+          inSettings ? "text-accent-text" : "text-sub",
+        )}
+        tooltip={inSettings ? "Close settings" : "Settings"}
       >
         <Settings size={15} strokeWidth={1.9} />
       </TooltipButton>
