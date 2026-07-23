@@ -1,9 +1,14 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import { ThemeLab } from './components/dev/ThemeLab'
 import { describeError, log } from './lib/log'
 import { initSentry, Sentry } from './lib/sentry'
 import './index.css'
+
+// The Theme Lab popout window loads the same bundle at index.html#theme-lab.
+// When that hash is present, render only the lab -- not the full app.
+const isThemeLab = window.location.hash === '#theme-lab'
 
 initSentry()
 
@@ -26,7 +31,5 @@ window.addEventListener('unhandledrejection', (e) => {
 })
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+  <StrictMode>{isThemeLab ? <ThemeLab /> : <App />}</StrictMode>,
 )

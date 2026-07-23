@@ -10,6 +10,7 @@ import { DirectionModal } from '@/components/modals/DirectionModal'
 import { RemoteSyncModal } from '@/components/modals/RemoteSyncModal'
 import { PushChoiceModal } from '@/components/modals/PushChoiceModal'
 import { DragScrim } from '@/components/domain/DragScrim'
+import { ThemeLabLauncher } from '@/components/dev/ThemeLabLauncher'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
 import { NewTagModal } from '@/components/modals/NewTagModal'
@@ -142,6 +143,7 @@ function AppInner() {
       <RemotesModal />
       <GithubConnectModal />
       <Toaster position="bottom-center" />
+      {import.meta.env.DEV && <ThemeLabLauncher />}
     </>
   )
 }
