@@ -24,17 +24,68 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 /// auto-select a model must not treat `live: false` as an endorsement.
 pub async fn list(app: &tauri::AppHandle, provider: &CatalogProvider) -> ModelList {
   match fetch_live(app, provider).await {
-    Ok(mut models) if !models.is_empty() => {
-      models.sort_by(|a, b| a.id.cmp(&b.id));
-      models.dedup_by(|a, b| a.id == b.id);
+    Ok(models) if !models.is_empty() => {
+      let mut models = dedupe_by_id(models);
       models.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+      let enabled = models.iter().filter(|m| m.enabled).count();
+      log::info!(
+        "model detection live: provider={}, models={}, enabled={}",
+        provider.id,
+        models.len(),
+        enabled
+      );
+      if enabled == 0 {
+        log::warn!(
+          "model detection live but no models are enabled: provider={}. For Copilot this means the signed-in account has no active subscription, or the token lacks Copilot access.",
+          provider.id
+        );
+      }
       ModelList { models, live: true }
     }
-    _ => ModelList {
-      models: provider.models.clone(),
-      live: false,
-    },
+    Ok(_) => {
+      log::warn!(
+        "model detection returned an empty list, falling back to static catalog: provider={}",
+        provider.id
+      );
+      ModelList {
+        models: provider.models.clone(),
+        live: false,
+      }
+    }
+    Err(e) => {
+      log::warn!(
+        "model detection failed, falling back to static catalog: provider={}, error={}",
+        provider.id,
+        e
+      );
+      ModelList {
+        models: provider.models.clone(),
+        live: false,
+      }
+    }
   }
+}
+
+/// Collapse duplicate model ids, keeping a single entry per id. Copilot lists
+/// the same id more than once (capability variants) and the `enabled` flag can
+/// differ between copies; a model is usable if ANY copy is enabled, so we OR
+/// the flag together instead of arbitrarily keeping whichever sorted first.
+fn dedupe_by_id(models: Vec<CatalogModel>) -> Vec<CatalogModel> {
+  let mut order: Vec<String> = Vec::new();
+  let mut by_id: std::collections::HashMap<String, CatalogModel> = std::collections::HashMap::new();
+  for model in models {
+    match by_id.get_mut(&model.id) {
+      Some(existing) => existing.enabled = existing.enabled || model.enabled,
+      None => {
+        order.push(model.id.clone());
+        by_id.insert(model.id.clone(), model);
+      }
+    }
+  }
+  order
+    .into_iter()
+    .filter_map(|id| by_id.remove(&id))
+    .collect()
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -50,9 +101,18 @@ async fn fetch_live(
   provider: &CatalogProvider,
 ) -> Result<Vec<CatalogModel>, AppError> {
   let bearer = match auth::get(app, &provider.id)? {
-    Some(auth::AuthInfo::Api { key }) => key,
-    Some(auth::AuthInfo::Oauth { refresh, .. }) => refresh,
-    None => return Ok(Vec::new()),
+    Some(auth::AuthInfo::Api { key }) => {
+      log::debug!("model detection auth: provider={}, source=api-key", provider.id);
+      key
+    }
+    Some(auth::AuthInfo::Oauth { refresh, .. }) => {
+      log::debug!("model detection auth: provider={}, source=oauth", provider.id);
+      refresh
+    }
+    None => {
+      log::info!("model detection: no credential configured for provider={}", provider.id);
+      return Ok(Vec::new());
+    }
   };
 
   let http = reqwest::Client::new();
@@ -74,19 +134,81 @@ async fn fetch_live(
     }
   };
 
+  log::debug!("model detection request: provider={}, url={}", provider.id, url);
+
   let res = client::extra_headers(&provider.id, builder)
     .timeout(TIMEOUT)
     .send()
     .await
-    .and_then(reqwest::Response::error_for_status)
-    .map_err(|e| AppError::Other(format!("model list request to {url} failed: {e}")))?;
+    .map_err(|e| {
+      log::warn!(
+        "model detection transport failed: provider={}, url={}, timeout={}, connect={}, error={}",
+        provider.id,
+        url,
+        e.is_timeout(),
+        e.is_connect(),
+        e
+      );
+      AppError::Other(format!("model list request to {url} failed: {e}"))
+    })?;
 
-  let body: Value = res
-    .json()
-    .await
-    .map_err(|e| AppError::Other(format!("bad model list response: {e}")))?;
+  let status = res.status();
+  let res = res.error_for_status().map_err(|e| {
+    log::warn!(
+      "model detection rejected: provider={}, url={}, status={}, error={}",
+      provider.id,
+      url,
+      status,
+      e
+    );
+    AppError::Other(format!("model list request to {url} failed: {e}"))
+  })?;
 
-  Ok(parse_models(provider, &body))
+  let body: Value = res.json().await.map_err(|e| {
+    log::warn!(
+      "model detection bad response body: provider={}, url={}, error={}",
+      provider.id,
+      url,
+      e
+    );
+    AppError::Other(format!("bad model list response: {e}"))
+  })?;
+
+  let raw_count = body.get("data").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+  // For Copilot, the whole "some models enabled" behaviour hinges on the raw
+  // `model_picker_enabled` flag. Logging its distribution lets two machines on
+  // the same account be compared directly to see if the endpoint returns the
+  // same entitlements (a token/header problem shows up as all-absent/all-false).
+  if provider.dialect == Dialect::OpenAi {
+    if let Some(data) = body.get("data").and_then(Value::as_array) {
+      let mut picker_true = 0;
+      let mut picker_false = 0;
+      let mut picker_absent = 0;
+      for item in data {
+        match item.get("model_picker_enabled").and_then(Value::as_bool) {
+          Some(true) => picker_true += 1,
+          Some(false) => picker_false += 1,
+          None => picker_absent += 1,
+        }
+      }
+      log::info!(
+        "model detection picker flags: provider={}, model_picker_enabled true={}, false={}, absent={}",
+        provider.id,
+        picker_true,
+        picker_false,
+        picker_absent
+      );
+    }
+  }
+  let models = parse_models(provider, &body);
+  log::debug!(
+    "model detection parsed: provider={}, status={}, raw_items={}, parsed={}",
+    provider.id,
+    status,
+    raw_count,
+    models.len()
+  );
+  Ok(models)
 }
 
 // OpenAI-dialect /models item. Copilot labels each model in `name` (plain

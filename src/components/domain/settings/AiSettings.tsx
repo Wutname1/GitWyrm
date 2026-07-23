@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, RotateCcw, Trash2 } from 'lucide-react'
+import { Check, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
 import { Button } from '@/components/ui/button'
@@ -172,28 +172,64 @@ export function AiSettings() {
           {provider && (
             <>
               {isConfigured ? (
-                <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-1.5 text-xs text-sub">
-                    <Check size={13} className="text-green-500" />
-                    API key configured
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                    tooltip="Remove API key"
-                    disabled={m.removeProvider.isPending}
-                    aria-busy={m.removeProvider.isPending || undefined}
-                    onClick={() =>
-                      m.removeProvider.mutate(provider.id, {
-                        onError: (e) => toast.error(String(e)),
-                      })
-                    }
-                  >
-                    {m.removeProvider.isPending ? <PendingIndicator /> : <Trash2 size={12} />}
-                    {m.removeProvider.isPending ? 'Removing…' : 'Remove'}
-                  </Button>
-                </div>
+                provider.id === 'github-copilot' && copilot.status.state === 'waiting' ? (
+                  <DeviceCodePanel
+                    userCode={copilot.status.userCode}
+                    verificationUri={copilot.status.verificationUri}
+                    onCancel={copilot.cancel}
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex items-center gap-1.5 text-xs text-sub">
+                        <Check size={13} className="text-green-500" />
+                        {provider.id === 'github-copilot' ? 'Connected' : 'API key configured'}
+                      </span>
+                      {provider.id === 'github-copilot' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          tooltip="Sign in again to refresh which models your plan can use"
+                          disabled={copilot.status.state === 'starting'}
+                          onClick={copilot.start}
+                        >
+                          {copilot.status.state === 'starting' ? (
+                            <PendingIndicator />
+                          ) : (
+                            <RefreshCw size={12} />
+                          )}
+                          {copilot.status.state === 'starting' ? 'Starting…' : 'Reconnect'}
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                        tooltip={
+                          provider.id === 'github-copilot' ? 'Disconnect' : 'Remove API key'
+                        }
+                        disabled={m.removeProvider.isPending}
+                        aria-busy={m.removeProvider.isPending || undefined}
+                        onClick={() =>
+                          m.removeProvider.mutate(provider.id, {
+                            onError: (e) => toast.error(String(e)),
+                          })
+                        }
+                      >
+                        {m.removeProvider.isPending ? <PendingIndicator /> : <Trash2 size={12} />}
+                        {m.removeProvider.isPending
+                          ? 'Removing…'
+                          : provider.id === 'github-copilot'
+                            ? 'Disconnect'
+                            : 'Remove'}
+                      </Button>
+                    </div>
+                    {provider.id === 'github-copilot' && copilot.status.state === 'error' && (
+                      <div className="text-2xs text-destructive">{copilot.status.message}</div>
+                    )}
+                  </div>
+                )
               ) : provider.id === 'github-copilot' ? (
                 <div className="space-y-2">
                   {copilot.status.state === 'waiting' ? (
