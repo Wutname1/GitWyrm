@@ -51,29 +51,58 @@ export function resolveSyncPair(
 /**
  * Any valid drop pairing. A local branch and its own upstream form a `tracking`
  * pair (push / pull / rebase against the cloud copy). Any other ref dropped
- * onto a LOCAL branch is a `branches` pair: bring the source's work into the
- * target branch (fast-forward, rebase, or merge). The target must be local -
- * another branch's cloud copy can't be changed directly.
+ * onto a LOCAL branch is a `branches` pair.
+ *
+ * Branch-pair direction is set by which ref CAN move. A remote-tracking ref
+ * can't be moved locally, so it is always the `source` (where commits come
+ * from) and the local branch is the `target` (the one that catches up). When
+ * both refs are local, the physical drag decides: dragging a branch onto
+ * another reads as "put this branch here", so the DRAGGED branch is the target
+ * that moves and the branch it landed on is the source.
  */
 export type DropPair =
   | ({ kind: 'tracking' } & RefSyncPair)
   | { kind: 'branches'; source: DraggedRef; target: DraggedRef }
 
+const isLocalBranch = (ref: DraggedRef, branches: BranchList) =>
+  (ref.type === 'head' || ref.type === 'branch') &&
+  branches.local.some((b) => b.name === ref.name)
+
+/**
+ * `dragged` is the ref the user picked up; `droppedOn` is the ref it was
+ * released over. For tracking pairs the two are handed to `resolveSyncPair`
+ * as-is (its push/pull direction keys off which one was dragged). For branch
+ * pairs the mover becomes the operation's `target` -- see DropPair.
+ */
 export function resolveDropPair(
-  source: DraggedRef,
-  target: DraggedRef,
+  dragged: DraggedRef,
+  droppedOn: DraggedRef,
   branches: BranchList
 ): DropPair | null {
-  if (source.type === 'tag' || target.type === 'tag') return null
-  if (source.name === target.name) return null
+  if (dragged.type === 'tag' || droppedOn.type === 'tag') return null
+  if (dragged.name === droppedOn.name) return null
 
-  const tracking = resolveSyncPair(source, target, branches)
+  const tracking = resolveSyncPair(dragged, droppedOn, branches)
   if (tracking) return { kind: 'tracking', ...tracking }
 
-  const targetIsLocal =
-    (target.type === 'head' || target.type === 'branch') &&
-    branches.local.some((b) => b.name === target.name)
-  if (!targetIsLocal) return null
+  const draggedLocal = isLocalBranch(dragged, branches)
+  const droppedLocal = isLocalBranch(droppedOn, branches)
 
-  return { kind: 'branches', source, target }
+  // The target is whichever ref can actually move. A remote ref can't, so the
+  // local side receives its commits. With both local, the dragged one moves.
+  if (draggedLocal && !droppedLocal) {
+    // Dragged a local branch onto a remote/other ref: the dragged branch moves.
+    return { kind: 'branches', source: droppedOn, target: dragged }
+  }
+  if (droppedLocal && !draggedLocal) {
+    // Dragged a remote ref onto a local branch: the local branch receives it.
+    return { kind: 'branches', source: dragged, target: droppedOn }
+  }
+  if (draggedLocal && droppedLocal) {
+    // Both local: the dragged branch is the one being placed.
+    return { kind: 'branches', source: droppedOn, target: dragged }
+  }
+
+  // Neither side is a local branch (e.g. remote onto remote): nothing to do.
+  return null
 }

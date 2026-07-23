@@ -137,7 +137,9 @@ export function RemoteSyncModal() {
         ? chooseBranchAction(relation.data)
         : null
 
-  // Names used in the copy. For a branch pair, "bring source's work into target".
+  // Names used in the copy. For a branch pair the target is the dragged branch
+  // (the one that moves); the source is where it was dropped (where commits
+  // come from). So the copy reads "target catches up to source".
   const srcName = pair?.kind === 'tracking' ? pair.upstream : (branchPair?.source.name ?? '')
   const tgtName = pair?.kind === 'tracking' ? pair.branch.name : (branchPair?.target.name ?? '')
 
@@ -158,9 +160,9 @@ export function RemoteSyncModal() {
   const switchesBranch = !!branchPair && branchPair.target.name !== headName
 
   // Offer a direction swap only when flipping still resolves to a valid pairing:
-  // both refs must be local branches (the drop target has to be local). This is
-  // the case that traps people -- dragging main onto feature reads as "nothing
-  // to do", when what they meant was to catch main up. One click flips it.
+  // both refs must be local branches, so either can be the one that moves.
+  // Dragging main onto feature moves main by default; the swap covers the rarer
+  // "no, move feature instead" without re-dragging.
   const canSwap =
     !!branchPair &&
     !!branches.data?.local.some((b) => b.name === syncSource) &&
