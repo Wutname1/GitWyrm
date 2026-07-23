@@ -10,9 +10,13 @@ import {
   PenLine,
   RotateCcw,
   Trash2,
+  Zap,
 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { BranchInfo, ResetMode } from '@/lib/bindings'
+import { commands } from '@/lib/bindings'
+import { unwrap } from '@/lib/queryKeys'
 import {
   ContextMenuItem,
   ContextMenuSeparator,
@@ -70,6 +74,27 @@ export function BranchMenuItems({
   const remotes = useRemotes(repoId)
   const actions = branchActions(branch, host)
   const isCurrent = branch.is_head
+
+  // How this branch relates to the checked-out one: ahead = commits only this
+  // branch has, behind = commits only the current branch has. Drives the two
+  // fast-forward affordances below. Skipped for the current branch itself (it
+  // can't merge or fast-forward into itself).
+  const relation = useQuery({
+    queryKey: ['branchRelation', repoId, branch.name, currentBranch],
+    enabled: !!repoId && !isCurrent && !!currentBranch,
+    queryFn: async () => unwrap(await commands.branchRelation(repoId!, branch.name, currentBranch)),
+  })
+  // This branch trails the current one on a straight line: it can catch up with
+  // a plain fast-forward (no switch, no merge commit) -- the case that had no
+  // menu item before.
+  const canFastForwardToCurrent =
+    !!relation.data && relation.data.ahead === 0 && relation.data.behind > 0
+  // The reverse: current trails this branch on a straight line, so "Merge into
+  // current" is really a fast-forward. Reword it so that reads clearly.
+  const mergeIsFastForward =
+    !!relation.data && relation.data.behind === 0 && relation.data.ahead > 0
+  const isFastForwarding =
+    m.fastForwardBranch.isPending && m.fastForwardBranch.variables?.branch === branch.name
 
   const isPushing = m.pushBranch.isPending && m.pushBranch.variables === branch.name
   const isPulling = m.pullBranch.isPending && m.pullBranch.variables === branch.name
@@ -136,9 +161,21 @@ export function BranchMenuItems({
         />
       )}
       <ContextMenuItem disabled={isCurrent} onSelect={() => handlers.onMerge(branch.name)}>
-        <GitMerge />
-        Merge into {currentBranch || 'current'}
+        {mergeIsFastForward ? <Zap /> : <GitMerge />}
+        {mergeIsFastForward
+          ? `Fast-forward ${currentBranch || 'current'} to ${branch.name}`
+          : `Merge into ${currentBranch || 'current'}`}
       </ContextMenuItem>
+      {canFastForwardToCurrent && (
+        <PendingMenuItem
+          icon={<Zap />}
+          label={`Fast-forward ${branch.name} to ${currentBranch || 'current'}`}
+          pendingLabel={`Catching ${branch.name} up…`}
+          pending={isFastForwarding}
+          disabled={opInProgress || m.fastForwardBranch.isPending}
+          onRun={() => m.fastForwardBranch.mutate({ branch: branch.name, target: currentBranch })}
+        />
+      )}
       {!isCurrent && (
         <ContextMenuSub>
           <ContextMenuSubTrigger

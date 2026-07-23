@@ -507,6 +507,29 @@ async moveCurrentBranch(repoId: string, sha: string) : Promise<Result<RefMove, s
 }
 },
 /**
+ * Fast-forward a branch to another ref, without merging or a merge commit.
+ * 
+ * This is `git branch -f <branch> <target>` restricted to the safe case: it
+ * only runs when `target` is a descendant of `branch`, so no work is ever
+ * discarded. Any other relationship (diverged, or `branch` already ahead) is
+ * refused with a plain message, since that would need a real merge or a reset.
+ * 
+ * The key difference from the reset/merge commands: `branch` need NOT be the
+ * checked-out one. Moving a non-HEAD branch forward is a pure ref update - it
+ * doesn't touch the working tree and doesn't switch branches, which is what
+ * "bring main up to my current branch, without leaving it" needs. When the
+ * branch IS checked out, the working tree is updated to match and a dirty tree
+ * is refused so nothing is clobbered.
+ */
+async fastForwardBranch(repoId: string, branch: string, target: string) : Promise<Result<RefMove, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fast_forward_branch", { repoId, branch, target }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Check out a commit directly, leaving HEAD detached (not on any branch).
  * Refused over a dirty tree so no uncommitted work is clobbered. The frontend
  * warns that new commits here won't belong to a branch until one is made.
@@ -1793,20 +1816,24 @@ tag_push_default?: string | null;
 /**
  * Whether the New Tag dialog's "send it to the remote" box starts checked.
  */
-tag_push_on_create?: boolean;
+tag_push_on_create?: boolean; 
 /**
- * Selected color theme id ("slate", "onyx", "midnight", "paper"). None means Auto.
+ * Selected color theme id ("slate", "onyx", "midnight", "paper"). None means
+ * Auto: the app picks Slate in dark mode and Paper in light mode. Validated
+ * on the frontend.
  */
-theme?: string | null;
+theme?: string | null; 
 /**
- * Light/dark preference ("light", "dark", "system"). None means system.
+ * Light/dark preference ("light", "dark", "system"). None means system,
+ * which follows the OS setting. Validated on the frontend.
  */
-theme_mode?: string | null;
+theme_mode?: string | null; 
 /**
- * Use the GitWyrm mint accent across every theme.
+ * Use the GitWyrm mint accent across every theme. When off, each theme shows
+ * its own native accent color.
  */
 mint_accent?: boolean }
-export type StashInfo = { index: number;
+export type StashInfo = { index: number; 
 /**
  * Raw stash message as git stores it, e.g. "On develop: auto-stash before...".
  */

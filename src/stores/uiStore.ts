@@ -104,6 +104,8 @@ interface UiState {
   deleteBranchPrompt: (name: string | null) => void
   resetToBranchPrompt: (name: string | null) => void
   openRemoteSync: (source: string, target: string) => void
+  /** Flip the sync direction in the open Sync modal (source <-> target). */
+  swapSync: () => void
   openDiff: (request: DiffRequest) => void
   closeDiff: () => void
   openFileHistory: (path: string) => void
@@ -198,6 +200,7 @@ export const useUiStore = create<UiState>((set) => ({
   resetToBranchPrompt: (name) => set({ branchToResetTo: name }),
   openRemoteSync: (source, target) =>
     set({ activeModal: 'remote-sync', syncSource: source, syncTarget: target }),
+  swapSync: () => set((s) => ({ syncSource: s.syncTarget, syncTarget: s.syncSource })),
   // Remember which commit a diff came from, so the file view tabs can offer
   // that commit's blame and diff rather than dropping back to the working tree.
   openDiff: (request) =>

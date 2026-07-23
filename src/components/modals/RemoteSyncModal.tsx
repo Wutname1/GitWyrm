@@ -1,9 +1,10 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Check, Cloud, GitMerge, Repeat2, RotateCcw, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, Cloud, GitMerge, Repeat, Repeat2, RotateCcw, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TooltipButton } from '@/components/ui/tooltip'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { resolveDropPair, type DropPair } from '@/lib/refSync'
@@ -94,6 +95,7 @@ export function RemoteSyncModal() {
   const closeModal = useUiStore((s) => s.closeModal)
   const openConflict = useUiStore((s) => s.openConflict)
   const resetToBranchPrompt = useUiStore((s) => s.resetToBranchPrompt)
+  const swapSync = useUiStore((s) => s.swapSync)
   const syncSource = useUiStore((s) => s.syncSource)
   const syncTarget = useUiStore((s) => s.syncTarget)
 
@@ -155,13 +157,23 @@ export function RemoteSyncModal() {
   const headName = branches.data?.local.find((b) => b.is_head)?.name
   const switchesBranch = !!branchPair && branchPair.target.name !== headName
 
+  // Offer a direction swap only when flipping still resolves to a valid pairing:
+  // both refs must be local branches (the drop target has to be local). This is
+  // the case that traps people -- dragging main onto feature reads as "nothing
+  // to do", when what they meant was to catch main up. One click flips it.
+  const canSwap =
+    !!branchPair &&
+    !!branches.data?.local.some((b) => b.name === syncSource) &&
+    !!branches.data?.local.some((b) => b.name === syncTarget)
+
   const pending =
     m.pull.isPending ||
     m.push.isPending ||
     m.pushBranch.isPending ||
     m.pushForce.isPending ||
     m.rebase.isPending ||
-    m.mergeDirectional.isPending
+    m.mergeDirectional.isPending ||
+    m.fastForwardBranch.isPending
 
   const onConflicts = (conflicts: string[]) => {
     closeModal()
@@ -182,9 +194,20 @@ export function RemoteSyncModal() {
     if (pair?.kind !== 'tracking') return
     m.rebase.mutate({ onto: pair.upstream }, { onSuccess: ({ result }) => onConflicts(result.conflicts) })
   }
-  // Branch pair: bring source into target. Fast-forward and Blend both go
-  // through merge-directional (it fast-forwards when it can); Stack rebases the
-  // target branch onto the source.
+  // A clean fast-forward: slide the target up to the source with no merge
+  // commit and, crucially, no branch switch even when the target isn't the one
+  // checked out. That's the win over merge-directional, which would move you
+  // onto the target first.
+  const runFastForwardTarget = () => {
+    if (!branchPair) return
+    m.fastForwardBranch.mutate(
+      { branch: branchPair.target.name, target: branchPair.source.name },
+      { onSuccess: () => closeModal() }
+    )
+  }
+  // Branch pair with real divergence: bring source into target via
+  // merge-directional (it switches to the target and blends). Only reached for
+  // the diverged case now; the clean fast-forward uses runFastForwardTarget.
   const runMergeIntoTarget = () => {
     if (!branchPair) return
     m.mergeDirectional.mutate(
@@ -238,6 +261,15 @@ export function RemoteSyncModal() {
                 into
               </span>
             </div>
+            {canSwap && (
+              <TooltipButton
+                onClick={swapSync}
+                tooltip="Swap direction"
+                className="ml-1 flex size-7 flex-none items-center justify-center rounded border border-border bg-panel text-sub hover:border-primary hover:text-accent-text"
+              >
+                <Repeat size={13} />
+              </TooltipButton>
+            )}
           </div>
 
           <div className="min-h-[34px] rounded-md border border-border bg-panel2 px-3 py-2 text-2xs">
@@ -314,12 +346,11 @@ export function RemoteSyncModal() {
                 changes. Stack {tgtName}'s work on top of {srcName} (tidy), or blend them together.
               </span>
             )}
-            {switchesBranch &&
-              (action?.kind === 'ff-branch' || action?.kind === 'diverged-branches') && (
-                <span className="mt-1 block text-2xs text-muted-foreground">
-                  This switches you to {tgtName} first.
-                </span>
-              )}
+            {switchesBranch && action?.kind === 'diverged-branches' && (
+              <span className="mt-1 block text-2xs text-muted-foreground">
+                This switches you to {tgtName} first.
+              </span>
+            )}
           </div>
         </div>
 
@@ -365,7 +396,7 @@ export function RemoteSyncModal() {
                   <RotateCcw size={13} /> Reset to match
                 </Button>
               )}
-              <Button size="sm" disabled={pending} onClick={runMergeIntoTarget}>
+              <Button size="sm" disabled={pending} onClick={runFastForwardTarget}>
                 {pending ? 'Updating…' : `Update ${tgtName}`}
               </Button>
             </>

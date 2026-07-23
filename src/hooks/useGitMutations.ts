@@ -718,6 +718,23 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Slide a branch forward to another ref, no merge commit and no branch
+  // switch when the branch isn't the one checked out. Backs "catch main up to
+  // this branch" from the menu and the drop modal. No Undo action: the command
+  // only ever fast-forwards, so it can't move the ref back itself, and the
+  // change is trivially reversible by the user (nothing was lost or rewritten).
+  const fastForwardBranch = useMutation({
+    mutationFn: async (args: { branch: string; target: string }) => ({
+      ...args,
+      move: unwrap(await commands.fastForwardBranch(id, args.branch, args.target)),
+    }),
+    onSuccess: ({ target, move }) => {
+      invalidate(qc, id, REFS)
+      toast(`Caught ${move.branch} up to ${target}`)
+    },
+    onError,
+  })
+
   const openOnGitHub = useMutation({
     mutationFn: async (sha: string) => {
       const url = unwrap(await commands.commitWebUrl(id, sha))
@@ -925,6 +942,7 @@ export function useGitMutations(repoId: string | null) {
     reset,
     resetToBranch,
     moveBranch,
+    fastForwardBranch,
     openOnGitHub,
     copyCommitLink,
     checkoutCommit,

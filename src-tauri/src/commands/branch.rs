@@ -569,6 +569,101 @@ pub async fn move_current_branch(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Fast-forward a branch to another ref, without merging or a merge commit.
+///
+/// This is `git branch -f <branch> <target>` restricted to the safe case: it
+/// only runs when `target` is a descendant of `branch`, so no work is ever
+/// discarded. Any other relationship (diverged, or `branch` already ahead) is
+/// refused with a plain message, since that would need a real merge or a reset.
+///
+/// The key difference from the reset/merge commands: `branch` need NOT be the
+/// checked-out one. Moving a non-HEAD branch forward is a pure ref update - it
+/// doesn't touch the working tree and doesn't switch branches, which is what
+/// "bring main up to my current branch, without leaving it" needs. When the
+/// branch IS checked out, the working tree is updated to match and a dirty tree
+/// is refused so nothing is clobbered.
+#[tauri::command]
+#[specta::specta]
+pub async fn fast_forward_branch(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  branch: String,
+  target: String,
+) -> Result<RefMove, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+
+    let mut branch_ref = repo.find_branch(branch.trim(), BranchType::Local)?;
+    let branch_oid = branch_ref
+      .get()
+      .peel_to_commit()
+      .map_err(|_| AppError::Other(format!("{} has no commits to move.", branch.trim())))?
+      .id();
+    let target_oid = repo.revparse_single(target.trim())?.peel_to_commit()?.id();
+
+    if branch_oid == target_oid {
+      return Err(AppError::Other(format!(
+        "{} is already at {}. Nothing to do.",
+        branch.trim(),
+        target.trim()
+      )));
+    }
+    // A clean fast-forward means the target is strictly ahead of the branch.
+    // Anything else (branch ahead, or the two diverged) can't move by just
+    // sliding the ref forward - it would need a merge or a reset instead.
+    if !repo.graph_descendant_of(target_oid, branch_oid).unwrap_or(false) {
+      return Err(AppError::Other(format!(
+        "{} can't just catch up to {} - their histories have split. Merge or rebase instead.",
+        branch.trim(),
+        target.trim()
+      )));
+    }
+
+    let is_head = repo
+      .head()
+      .ok()
+      .and_then(|h| h.shorthand().map(str::to_string))
+      .as_deref()
+      == Some(branch.trim());
+
+    let previous_sha = branch_oid.to_string();
+
+    if is_head {
+      // The branch is checked out, so the working tree must move with it. Refuse
+      // over uncommitted changes - a fast-forward checkout would overwrite them.
+      if refs::tracked_changes_present(&repo)? {
+        return Err(AppError::Other(
+          "working tree has changes; commit or stash before moving this branch".into(),
+        ));
+      }
+      let object = repo.find_object(target_oid, None)?;
+      repo.checkout_tree(&object, Some(CheckoutBuilder::new().safe()))?;
+      let head_ref = repo.head()?;
+      let name = head_ref.name().map(str::to_string);
+      drop(head_ref);
+      match name {
+        Some(head_ref_name) => {
+          repo.reference(&head_ref_name, target_oid, true, "fast-forward")?;
+        }
+        None => repo.set_head_detached(target_oid)?,
+      }
+    } else {
+      // Not checked out: a pure ref move. The working tree and HEAD are
+      // untouched, so the user stays on their current branch.
+      let refname =
+        branch_ref.get().name().map(str::to_string).ok_or_else(|| {
+          AppError::Other("could not read the branch reference".into())
+        })?;
+      repo.reference(&refname, target_oid, true, "fast-forward")?;
+    }
+
+    Ok(RefMove { branch: branch.trim().to_string(), previous_sha })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// Check out a commit directly, leaving HEAD detached (not on any branch).
 /// Refused over a dirty tree so no uncommitted work is clobbered. The frontend
 /// warns that new commits here won't belong to a branch until one is made.
