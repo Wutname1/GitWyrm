@@ -30,6 +30,13 @@ pub fn build_info() -> BuildInfo {
   }
 }
 
+/// Checks whether a file or folder already exists without changing it.
+#[tauri::command]
+#[specta::specta]
+pub fn path_exists(path: String) -> bool {
+  std::path::Path::new(&path).exists()
+}
+
 fn log_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, AppError> {
   let dir = app
     .path()
@@ -72,4 +79,18 @@ pub fn open_logs_folder(app: tauri::AppHandle) -> Result<(), AppError> {
     .opener()
     .open_path(dir.to_string_lossy().to_string(), None::<&str>)
     .map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::path_exists;
+
+  #[test]
+  fn path_exists_reports_existing_and_missing_paths() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    assert!(path_exists(directory.path().to_string_lossy().to_string()));
+    assert!(!path_exists(
+      directory.path().join("not-created").to_string_lossy().to_string()
+    ));
+  }
 }

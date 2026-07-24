@@ -146,6 +146,86 @@ pub struct GithubRepoRef {
   pub repo: String,
 }
 
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct GithubRepository {
+  pub full_name: String,
+  pub clone_url: String,
+  pub html_url: String,
+  pub description: Option<String>,
+  pub private: bool,
+  pub pushed_at: String,
+  pub starred: bool,
+}
+
+#[derive(Deserialize)]
+struct ApiRepository {
+  full_name: String,
+  clone_url: String,
+  html_url: String,
+  #[serde(default)]
+  description: Option<String>,
+  #[serde(default)]
+  private: bool,
+  #[serde(default)]
+  pushed_at: Option<String>,
+  updated_at: String,
+}
+
+impl ApiRepository {
+  fn into_repository(self, starred: bool) -> GithubRepository {
+    GithubRepository {
+      full_name: self.full_name,
+      clone_url: self.clone_url,
+      html_url: self.html_url,
+      description: self.description,
+      private: self.private,
+      pushed_at: self.pushed_at.unwrap_or(self.updated_at),
+      starred,
+    }
+  }
+}
+
+/// Repositories available to the signed-in account, with starred repositories
+/// marked so the add screen can keep those shortcuts first.
+#[tauri::command]
+#[specta::specta]
+pub async fn github_list_repositories(
+  app: tauri::AppHandle,
+) -> Result<Vec<GithubRepository>, AppError> {
+  let repositories: Vec<ApiRepository> = send(api(
+    &app,
+    reqwest::Method::GET,
+    "/user/repos?sort=pushed&direction=desc&per_page=50&affiliation=owner,collaborator,organization_member",
+  )?)
+  .await?
+  .json()
+  .await
+  .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
+
+  let starred: Vec<ApiRepository> = send(api(
+    &app,
+    reqwest::Method::GET,
+    "/user/starred?sort=updated&direction=desc&per_page=50",
+  )?)
+  .await?
+  .json()
+  .await
+  .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
+
+  let mut seen = std::collections::HashSet::new();
+  let mut result = Vec::with_capacity(repositories.len() + starred.len());
+  for repo in starred {
+    seen.insert(repo.full_name.to_lowercase());
+    result.push(repo.into_repository(true));
+  }
+  for repo in repositories {
+    if seen.insert(repo.full_name.to_lowercase()) {
+      result.push(repo.into_repository(false));
+    }
+  }
+  Ok(result)
+}
+
 /// The GitHub owner/repo behind the origin remote, or None when origin is
 /// missing or not hosted on github.com.
 #[tauri::command]

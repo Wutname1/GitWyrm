@@ -203,6 +203,17 @@ pub struct Settings {
   /// Reusable group snapshots shown in Open a repository > Groups.
   #[serde(default)]
   pub saved_tab_groups: Vec<TabGroupSetting>,
+  /// Repository shortcuts shown first on the add screen, most recently pinned
+  /// first.
+  #[serde(default)]
+  pub pinned_repo_paths: Vec<String>,
+  /// Saved-group shortcuts shown first on the add screen, most recently pinned
+  /// first. None lets older settings start with their first three groups pinned.
+  #[serde(default)]
+  pub pinned_saved_group_ids: Option<Vec<String>>,
+  /// Repository-picker sections the user has hidden.
+  #[serde(default)]
+  pub repo_picker_collapsed_sections: Vec<String>,
   /// What to do about local-only tags after a push: "ask", "always", "never".
   /// None means ask. Validated on the frontend.
   #[serde(default)]
@@ -288,6 +299,9 @@ impl Default for Settings {
       tab_groups: Vec::new(),
       tab_order: Vec::new(),
       saved_tab_groups: Vec::new(),
+      pinned_repo_paths: Vec::new(),
+      pinned_saved_group_ids: None,
+      repo_picker_collapsed_sections: Vec::new(),
       tag_push_default: None,
       tag_push_on_create: false,
       tag_overrides_by_repo: HashMap::new(),
@@ -358,6 +372,9 @@ mod tests {
     assert!(settings.tab_groups.is_empty());
     assert!(settings.tab_order.is_empty());
     assert!(settings.saved_tab_groups.is_empty());
+    assert!(settings.pinned_repo_paths.is_empty());
+    assert!(settings.pinned_saved_group_ids.is_none());
+    assert!(settings.repo_picker_collapsed_sections.is_empty());
     // Theme fields default to Auto / system / mint-on.
     assert!(settings.theme.is_none());
     assert!(settings.theme_mode.is_none());
@@ -396,6 +413,10 @@ mod tests {
       repo_paths: vec!["C:\\code\\GitWyrm".to_string()],
     });
     settings.saved_tab_groups = settings.tab_groups.clone();
+    settings.pinned_repo_paths = vec!["C:\\code\\GitWyrm".to_string()];
+    settings.pinned_saved_group_ids = Some(vec!["work".to_string()]);
+    settings.repo_picker_collapsed_sections =
+      vec!["recent".to_string(), "watched".to_string()];
 
     let json = serde_json::to_string(&settings).expect("settings should serialize");
     let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
@@ -405,6 +426,12 @@ mod tests {
     assert_eq!(restored.tab_groups[0].name, "Work");
     assert!(restored.tab_groups[0].collapsed);
     assert_eq!(restored.saved_tab_groups[0].repo_paths, vec!["C:\\code\\GitWyrm"]);
+    assert_eq!(restored.pinned_repo_paths, vec!["C:\\code\\GitWyrm"]);
+    assert_eq!(restored.pinned_saved_group_ids, Some(vec!["work".to_string()]));
+    assert_eq!(
+      restored.repo_picker_collapsed_sections,
+      vec!["recent".to_string(), "watched".to_string()]
+    );
   }
 
   #[test]

@@ -19,6 +19,7 @@ use watcher::WatcherRegistry;
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
   tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
     commands::app::build_info,
+    commands::app::path_exists,
     commands::app::read_log,
     commands::app::clear_log,
     commands::app::open_logs_folder,
@@ -37,6 +38,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::repo::open_repo,
     commands::repo::close_repo,
     commands::repo::git_available,
+    commands::repo::git_init,
     commands::repo_icon::get_repo_icon,
     commands::repo_icon::find_repo_icons,
     commands::repo_icon::set_repo_icon,
@@ -130,6 +132,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::github::github_device_poll,
     commands::github::github_sign_out,
     commands::github::github_auth_status,
+    commands::github::github_list_repositories,
     commands::github::github_repo_slug,
     commands::github::github_list_prs,
     commands::github::github_list_issues,
