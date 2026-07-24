@@ -19,6 +19,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { plural } from "@/lib/gitDisplay";
+import { branchSync } from "@/lib/branchActions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,6 +64,7 @@ export function CommitMessageForm() {
   const aiProvider = useWorkspaceStore((s) => s.aiProvider);
   const aiModel = useWorkspaceStore((s) => s.aiModel);
   const showSettings = useUiStore((s) => s.showSettings);
+  const openModal = useUiStore((s) => s.openModal);
   const commitButtonMode = useWorkspaceStore((s) => s.commitButtonMode);
   const setCommitButtonMode = useWorkspaceStore((s) => s.setCommitButtonMode);
   const aiReady =
@@ -108,11 +110,20 @@ export function CommitMessageForm() {
     m.createCommit.mutate(
       { summary: msg, description: desc, amend },
       {
-        onSuccess: () => {
+        onSuccess: async () => {
           setMsg("");
           setDesc("");
           setAmend(false);
-          if (mode === "commit_push") m.push.mutate();
+          if (mode !== "commit_push") return;
+          // Amending a commit the remote already has leaves the branch
+          // diverged (behind > 0), so a plain push would be rejected. Refetch
+          // the sync state and route through the force-push choice, matching
+          // the toolbar Push button, instead of firing a push we know fails.
+          const fresh = await branches.refetch();
+          const head = fresh.data?.local.find((b) => b.is_head);
+          const behind = head ? branchSync(head).behind : 0;
+          if (behind > 0) openModal("push-choice");
+          else m.push.mutate();
         },
       },
     );
@@ -151,8 +162,8 @@ export function CommitMessageForm() {
   const generating = ai.generate.isPending;
 
   return (
-    <div className="min-h-[183px] flex-none border-t border-border bg-panel2 px-3 pb-[13px] pt-[11px]">
-      <div className="relative mb-[9px] min-h-[116px]">
+    <div className="flex-none border-t border-border bg-panel2 px-3 pb-[13px] pt-[11px]">
+      <div className={cn("relative mb-[9px]", generating && "min-h-[116px]")}>
         <div className="relative mb-[7px] rounded-md">
           <Input
             value={generating ? "" : msg}
