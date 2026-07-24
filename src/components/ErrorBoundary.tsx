@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { log, describeError } from '../lib/log'
 import { Sentry } from '../lib/sentry'
+import { CrashTitleBar } from './CrashTitleBar'
 
 interface Props {
   children: ReactNode
@@ -97,7 +98,9 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children
 
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-panel p-8 text-sm">
+      <div className="flex h-screen flex-col bg-panel text-sm">
+        <CrashTitleBar />
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-auto p-8">
         <div className="text-base font-semibold text-removed">Something went wrong</div>
         <div className="max-w-2xl rounded border border-border bg-panel2 p-3 font-mono text-xs text-foreground">
           {error.message}
@@ -126,6 +129,7 @@ export class ErrorBoundary extends Component<Props, State> {
           >
             Try again
           </button>
+        </div>
         </div>
       </div>
     )
