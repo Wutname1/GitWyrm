@@ -100,8 +100,18 @@ interface UiState {
    * instead of starting over. Closing the tab is what clears it.
    */
   repoPickerOpen: boolean
+  /**
+   * Lane track the graph drew each stash in, keyed by stash sha. The graph owns
+   * this -- the track falls out of lane packing over the loaded rows, so it can
+   * shift as more history pages in and cannot be derived from a stash alone.
+   * The sidebar reads it to tint its stash icon the same color as the node in
+   * the graph, and falls back to a neutral marker for stashes not drawn yet.
+   */
+  stashTracks: Record<string, number>
 
   selectCommit: (sha: string | null) => void
+  /** Publish the graph's stash lane assignment. No-ops when nothing changed. */
+  setStashTracks: (tracks: Record<string, number>) => void
   /** Drop view state tied to one repo. Call when the active repo changes. */
   resetForRepoSwitch: () => void
   focusChanges: () => void
@@ -183,8 +193,17 @@ export const useUiStore = create<UiState>((set) => ({
   githubItem: null,
   repoPickerWiggleNonce: 0,
   repoPickerOpen: false,
+  stashTracks: {},
 
   selectCommit: (sha) => set({ selectedSha: sha }),
+  setStashTracks: (tracks) =>
+    set((s) => {
+      const prev = s.stashTracks
+      const keys = Object.keys(tracks)
+      const same =
+        keys.length === Object.keys(prev).length && keys.every((k) => prev[k] === tracks[k])
+      return same ? {} : { stashTracks: tracks }
+    }),
   resetForRepoSwitch: () =>
     set((s) => ({
       selectedSha: null,
@@ -194,6 +213,7 @@ export const useUiStore = create<UiState>((set) => ({
       revealRef: null,
       revealSha: null,
       githubItem: null,
+      stashTracks: {},
       centerView: REPO_SCOPED_VIEWS.has(s.centerView) ? 'graph' : s.centerView,
     })),
   focusChanges: () => set((s) => ({ changesFocusNonce: s.changesFocusNonce + 1 })),

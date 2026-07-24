@@ -1,21 +1,16 @@
 import { forwardRef, type ComponentPropsWithoutRef, type CSSProperties, type ReactNode } from 'react'
 import { Tag } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { GithubItemIcon } from '@/lib/githubDisplay'
+import { laneColor } from '@/lib/gitDisplay'
+import { useUiStore } from '@/stores/uiStore'
+import { StashGlyph } from '@/components/domain/graph/StashGlyph'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { TooltipButton } from '@/components/ui/tooltip'
 
-function markerStyle(section: SidebarSectionData, item: SectionItem, isCurrent: boolean): CSSProperties {
+function markerStyle(section: SidebarSectionData, isCurrent: boolean): CSSProperties {
   switch (section.type) {
-    case 'pr':
-      return {
-        borderRadius: '50%',
-        border: `2px solid ${
-          item.state === 'merged' ? 'var(--gw-accent)' : item.state === 'draft' ? 'var(--gw-muted)' : 'var(--gw-green)'
-        }`,
-      }
-    case 'issue':
-      return { borderRadius: 2, background: 'var(--gw-red)' }
     case 'remote':
       return { borderRadius: '50%', border: '1.5px solid var(--gw-sub)' }
     case 'branch':
@@ -25,6 +20,45 @@ function markerStyle(section: SidebarSectionData, item: SectionItem, isCurrent: 
     default:
       return { borderRadius: 2, border: '1.5px solid var(--gw-muted)' }
   }
+}
+
+/**
+ * The leading marker for a row. Tags, pull requests, issues and stashes each
+ * get their own icon; everything else keeps the small colored dot.
+ */
+function RowMarker({
+  section,
+  item,
+  isCurrent,
+}: {
+  section: SidebarSectionData
+  item: SectionItem
+  isCurrent: boolean
+}) {
+  // Match the color the graph drew this stash in. Until the graph has laid the
+  // stash out (another view is open, or its page has not loaded) there is no
+  // track to match, so fall back to the neutral lane color rather than
+  // inventing one that would change under the user a moment later.
+  const track = useUiStore((s) => (item.sha ? s.stashTracks[item.sha] : undefined))
+
+  if (section.type === 'tag') {
+    return <Tag aria-hidden className="size-2.5 flex-none text-[var(--gw-blue)]" />
+  }
+  if (section.type === 'pr' || section.type === 'issue') {
+    return (
+      <span className="flex-none">
+        <GithubItemIcon kind={section.type === 'pr' ? 'pr' : 'issue'} size={11} />
+      </span>
+    )
+  }
+  if (section.type === 'stash') {
+    return (
+      <span className="flex-none">
+        <StashGlyph size={12} color={laneColor(track ?? 0)} />
+      </span>
+    )
+  }
+  return <span className="size-2 flex-none" style={markerStyle(section, isCurrent)} />
 }
 
 interface SectionItemRowProps extends Omit<ComponentPropsWithoutRef<'div'>, 'onClick' | 'onDoubleClick'> {
@@ -79,10 +113,8 @@ export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(fu
     >
       {pending ? (
         <PendingIndicator className="size-3 text-accent-text" />
-      ) : section.type === 'tag' ? (
-        <Tag aria-hidden className="size-2.5 flex-none text-[var(--gw-blue)]" />
       ) : (
-        <span className="size-2 flex-none" style={markerStyle(section, item, isCurrent)} />
+        <RowMarker section={section} item={item} isCurrent={isCurrent} />
       )}
       <span
         className={cn(

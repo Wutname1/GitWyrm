@@ -1,6 +1,7 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import type { CommitEntry, StashInfo } from '@/lib/bindings'
 import { laneColor } from '@/lib/gitDisplay'
+import { useUiStore } from '@/stores/uiStore'
 
 const X0 = 14
 const LANE_WIDTH = 20
@@ -171,6 +172,14 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
     })
     return m
   }, [rows, commitRowBySha, commitTrackIsBusy, pendingTrack, headCommit])
+
+  // Share the assignment so the sidebar can tint its stash icon to match the
+  // node drawn here. The store de-dupes, so republishing an unchanged map on
+  // every scroll or paging render does not re-render its readers.
+  const setStashTracks = useUiStore((s) => s.setStashTracks)
+  useEffect(() => {
+    setStashTracks(Object.fromEntries(stashTrackBySha))
+  }, [stashTrackBySha, setStashTracks])
 
   // Keep every lane inside the resized graph cell. At the default and wider
   // sizes lanes retain their familiar 20px rhythm; narrowing the column
