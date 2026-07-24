@@ -17,8 +17,11 @@ import { MultiCommitDrawer } from '@/components/domain/graph/MultiCommitDrawer'
 import { useUiStore } from '@/stores/uiStore'
 import {
   useActiveRepo,
+  DEFAULT_DRAWER_HEIGHT,
   DEFAULT_LEFT_PANEL_WIDTH,
   DEFAULT_RIGHT_PANEL_WIDTH,
+  MAX_DRAWER_HEIGHT,
+  MIN_DRAWER_HEIGHT,
   MAX_LEFT_PANEL_WIDTH,
   MAX_RIGHT_PANEL_WIDTH,
   MIN_LEFT_PANEL_WIDTH,
@@ -50,11 +53,32 @@ function CommitDrawerSlot() {
   const view = useUiStore((s) => s.centerView)
   const selectedSha = useUiStore((s) => s.selectedSha)
   const selectedShas = useUiStore((s) => s.selectedShas)
+  const drawerHeight = useWorkspaceStore((s) => s.drawerHeight)
+  const setDrawerHeight = useWorkspaceStore((s) => s.setDrawerHeight)
   if (!repo || view === 'settings') return null
   if (selectedSha == null || selectedSha === WIP_SHA) return null
-  // Two or more selected commits: show every change they made, combined.
-  if (selectedShas.length > 1) return <MultiCommitDrawer repoId={repo.id} shas={selectedShas} />
-  return <CommitDrawer repoId={repo.id} sha={selectedSha} />
+  return (
+    <div className="relative flex-none" style={{ height: drawerHeight }}>
+      {/* Handle on the drawer's top edge: dragging up makes it taller. */}
+      <ResizeHandle
+        ariaLabel="Resize commit details"
+        axis="y"
+        direction={-1}
+        value={drawerHeight}
+        min={MIN_DRAWER_HEIGHT}
+        max={MAX_DRAWER_HEIGHT}
+        defaultValue={DEFAULT_DRAWER_HEIGHT}
+        onChange={setDrawerHeight}
+        className="-top-1"
+      />
+      {selectedShas.length > 1 ? (
+        // Two or more selected commits: show every change they made, combined.
+        <MultiCommitDrawer repoId={repo.id} shas={selectedShas} />
+      ) : (
+        <CommitDrawer repoId={repo.id} sha={selectedSha} />
+      )}
+    </div>
+  )
 }
 
 export function WorkspaceLayout() {

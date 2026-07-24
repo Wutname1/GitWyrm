@@ -37,14 +37,14 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
 
   if (detail.isLoading) {
     return (
-      <div className="flex h-[212px] flex-none items-center justify-center border-t border-border bg-panel text-xs text-muted-foreground">
+      <div className="flex h-full flex-none items-center justify-center border-t border-border bg-panel text-xs text-muted-foreground">
         Loading commit…
       </div>
     )
   }
   if (detail.isError || !detail.data) {
     return (
-      <div className="flex h-[212px] flex-none items-center justify-center border-t border-border bg-panel text-xs text-removed">
+      <div className="flex h-full flex-none items-center justify-center border-t border-border bg-panel text-xs text-removed">
         {(detail.error as Error | null)?.message ?? 'Failed to load commit'}
       </div>
     )
@@ -59,7 +59,7 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
   const dels = d.files.reduce((a, f) => a + f.deletions, 0)
 
   return (
-    <div className="flex h-[212px] min-h-0 flex-none flex-col border-t border-border bg-panel">
+    <div className="flex h-full min-h-0 flex-none flex-col border-t border-border bg-panel">
       <div className="flex flex-none items-center gap-2.5 border-b border-border px-3.5 py-[9px]">
         <AuthorHoverCard name={d.author_name} email={d.author_email} initials={initials(d.author_name)}>
           <span className="flex-none cursor-default">

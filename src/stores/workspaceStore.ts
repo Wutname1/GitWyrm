@@ -143,6 +143,24 @@ export function clampRightPanelWidth(width: number): number {
   return Math.round(Math.min(MAX_RIGHT_PANEL_WIDTH, Math.max(MIN_RIGHT_PANEL_WIDTH, width)))
 }
 
+/** Saved size limits for the commit details drawer under the graph. */
+export const MIN_DRAWER_HEIGHT = 120
+export const MAX_DRAWER_HEIGHT = 560
+export const DEFAULT_DRAWER_HEIGHT = 212
+export const MIN_DRAWER_LIST_WIDTH = 160
+export const MAX_DRAWER_LIST_WIDTH = 520
+export const DEFAULT_DRAWER_LIST_WIDTH = 280
+
+export function clampDrawerHeight(height: number): number {
+  if (!Number.isFinite(height)) return DEFAULT_DRAWER_HEIGHT
+  return Math.round(Math.min(MAX_DRAWER_HEIGHT, Math.max(MIN_DRAWER_HEIGHT, height)))
+}
+
+export function clampDrawerListWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_DRAWER_LIST_WIDTH
+  return Math.round(Math.min(MAX_DRAWER_LIST_WIDTH, Math.max(MIN_DRAWER_LIST_WIDTH, width)))
+}
+
 function pathKey(path: string): string {
   return normalizePath(path).toLowerCase()
 }
@@ -298,6 +316,10 @@ interface WorkspaceState {
   leftPanelWidth: number
   /** Width of the changes and commit pane (persisted). */
   rightPanelWidth: number
+  /** Height of the commit details drawer under the graph (persisted). */
+  drawerHeight: number
+  /** Width of the commit list pane inside the multi-select drawer (persisted). */
+  drawerListWidth: number
   /** Where change size appears in the commit graph (persisted). */
   changeSizeDisplay: ChangeSizeDisplay
   /** Whether commit rows show a change-size indicator (persisted). */
@@ -463,6 +485,8 @@ interface WorkspaceState {
   resetColumnWidth: (id: ColumnId) => void
   setLeftPanelWidth: (width: number) => void
   setRightPanelWidth: (width: number) => void
+  setDrawerHeight: (height: number) => void
+  setDrawerListWidth: (width: number) => void
   setChangeSizeDisplay: (display: ChangeSizeDisplay) => void
   setShowChangeIndicator: (enabled: boolean) => void
   setShowChangeLineCounts: (enabled: boolean) => void
@@ -487,6 +511,8 @@ function toSettings(s: WorkspaceState): Settings {
     column_layout: { order: s.columnOrder, hidden: s.hiddenColumns, widths: s.columnWidths },
     left_panel_width: s.leftPanelWidth,
     right_panel_width: s.rightPanelWidth,
+    drawer_height: s.drawerHeight,
+    drawer_commit_list_width: s.drawerListWidth,
     change_size_display: s.changeSizeDisplay,
     show_change_indicator: s.showChangeIndicator,
     show_change_line_counts: s.showChangeLineCounts,
@@ -751,6 +777,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   columnWidths: {},
   leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
   rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
+  drawerHeight: DEFAULT_DRAWER_HEIGHT,
+  drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
   changeSizeDisplay: "column",
   showChangeIndicator: false,
   showChangeLineCounts: false,
@@ -1524,6 +1552,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ rightPanelWidth: clampRightPanelWidth(width) });
     schedulePersist();
   },
+  setDrawerHeight: (height) => {
+    set({ drawerHeight: clampDrawerHeight(height) });
+    schedulePersist();
+  },
+  setDrawerListWidth: (width) => {
+    set({ drawerListWidth: clampDrawerListWidth(width) });
+    schedulePersist();
+  },
   setChangeSizeDisplay: (display) => {
     set({ changeSizeDisplay: display });
     schedulePersist();
@@ -1562,6 +1598,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ),
         rightPanelWidth: clampRightPanelWidth(
           settings.right_panel_width ?? DEFAULT_RIGHT_PANEL_WIDTH,
+        ),
+        drawerHeight: clampDrawerHeight(settings.drawer_height ?? DEFAULT_DRAWER_HEIGHT),
+        drawerListWidth: clampDrawerListWidth(
+          settings.drawer_commit_list_width ?? DEFAULT_DRAWER_LIST_WIDTH,
         ),
         changeSizeDisplay:
           settings.change_size_display === "row" ? "row" : "column",

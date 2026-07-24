@@ -9,6 +9,13 @@ import { TooltipButton } from '@/components/ui/tooltip'
 import { authorColor, formatCommitTime, plural, shortSha } from '@/lib/gitDisplay'
 import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/uiStore'
+import {
+  DEFAULT_DRAWER_LIST_WIDTH,
+  MAX_DRAWER_LIST_WIDTH,
+  MIN_DRAWER_LIST_WIDTH,
+  useWorkspaceStore,
+} from '@/stores/workspaceStore'
+import { ResizeHandle } from '@/components/ui/ResizeHandle'
 import { Avatar } from './Avatar'
 import { FileChangeRow } from '../FileChangeRow'
 
@@ -87,6 +94,8 @@ export function MultiCommitDrawer({ repoId, shas }: { repoId: string; shas: stri
   const diffRequest = useUiStore((s) => s.diffRequest)
   const [view, setView] = useState<'path' | 'tree'>('path')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const listWidth = useWorkspaceStore((s) => s.drawerListWidth)
+  const setListWidth = useWorkspaceStore((s) => s.setDrawerListWidth)
 
   const results = useQueries({
     queries: shas.map((sha) => ({
@@ -104,14 +113,14 @@ export function MultiCommitDrawer({ repoId, shas }: { repoId: string; shas: stri
   const failed = results.find((r) => r.isError)
   if (failed) {
     return (
-      <div className="flex h-[212px] flex-none items-center justify-center border-t border-border bg-panel text-xs text-removed">
+      <div className="flex h-full flex-none items-center justify-center border-t border-border bg-panel text-xs text-removed">
         {(failed.error as Error | null)?.message ?? 'Failed to load commits'}
       </div>
     )
   }
   if (!loaded) {
     return (
-      <div className="flex h-[212px] flex-none items-center justify-center border-t border-border bg-panel text-xs text-muted-foreground">
+      <div className="flex h-full flex-none items-center justify-center border-t border-border bg-panel text-xs text-muted-foreground">
         Loading {plural(shas.length, 'commit')}…
       </div>
     )
@@ -186,7 +195,7 @@ export function MultiCommitDrawer({ repoId, shas }: { repoId: string; shas: stri
   )
 
   return (
-    <div className="flex h-[212px] min-h-0 flex-none flex-col border-t border-border bg-panel">
+    <div className="flex h-full min-h-0 flex-none flex-col border-t border-border bg-panel">
       <div className="flex flex-none items-center gap-2.5 border-b border-border px-3.5 py-[7px]">
         <div className="min-w-0 flex-1 text-[0.78125rem] font-semibold text-foreground">
           Viewing the merged changes of {plural(shas.length, 'commit')}
@@ -211,7 +220,11 @@ export function MultiCommitDrawer({ repoId, shas }: { repoId: string; shas: stri
       </div>
       <div className="flex min-h-0 flex-1">
         {/* The selected commits, newest first. Click one to view just it. */}
-        <div className="min-h-0 w-[38%] max-w-[340px] flex-none overflow-y-auto border-r border-border py-1">
+        <div
+          className="relative flex min-h-0 flex-none flex-col"
+          style={{ width: listWidth }}
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto border-r border-border py-1">
           {details.map((d) => (
             <button
               key={d.sha}
@@ -238,6 +251,16 @@ export function MultiCommitDrawer({ repoId, shas }: { repoId: string; shas: stri
               </span>
             </button>
           ))}
+          </div>
+          <ResizeHandle
+            ariaLabel="Resize commit list"
+            value={listWidth}
+            min={MIN_DRAWER_LIST_WIDTH}
+            max={MAX_DRAWER_LIST_WIDTH}
+            defaultValue={DEFAULT_DRAWER_LIST_WIDTH}
+            onChange={setListWidth}
+            className="-right-1"
+          />
         </div>
         {/* Combined file list with the selection's overall counts. */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

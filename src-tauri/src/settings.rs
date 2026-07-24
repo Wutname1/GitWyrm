@@ -142,6 +142,12 @@ pub struct Settings {
   /// Saved width of the changes and commit pane in logical pixels.
   #[serde(default = "default_right_panel_width")]
   pub right_panel_width: f64,
+  /// Saved height of the commit details drawer in logical pixels.
+  #[serde(default = "default_drawer_height")]
+  pub drawer_height: f64,
+  /// Saved width of the commit list pane inside the multi-select drawer.
+  #[serde(default = "default_drawer_commit_list_width")]
+  pub drawer_commit_list_width: f64,
   /// Whether change size appears below the message or in its own column.
   #[serde(default = "default_change_size_display")]
   pub change_size_display: ChangeSizeDisplay,
@@ -268,6 +274,14 @@ fn default_right_panel_width() -> f64 {
   320.0
 }
 
+fn default_drawer_height() -> f64 {
+  212.0
+}
+
+fn default_drawer_commit_list_width() -> f64 {
+  280.0
+}
+
 impl Default for Settings {
   fn default() -> Self {
     Self {
@@ -285,6 +299,8 @@ impl Default for Settings {
       column_layout: None,
       left_panel_width: default_left_panel_width(),
       right_panel_width: default_right_panel_width(),
+      drawer_height: default_drawer_height(),
+      drawer_commit_list_width: default_drawer_commit_list_width(),
       change_size_display: default_change_size_display(),
       show_change_indicator: default_show_change_indicator(),
       show_change_line_counts: false,
@@ -371,6 +387,8 @@ mod tests {
     assert_eq!(settings.vertical_tab_width, 248.0);
     assert_eq!(settings.left_panel_width, 240.0);
     assert_eq!(settings.right_panel_width, 320.0);
+    assert_eq!(settings.drawer_height, 212.0);
+    assert_eq!(settings.drawer_commit_list_width, 280.0);
     assert_eq!(settings.change_size_display, ChangeSizeDisplay::Column);
     assert!(settings.show_change_indicator);
     assert!(!settings.show_change_line_counts);

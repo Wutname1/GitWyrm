@@ -618,11 +618,9 @@ async dropCommit(repoId: string, sha: string) : Promise<Result<RefMove, string>>
 }
 },
 /**
- * Combine several commits into one. The selected commits are applied in order
- * onto the oldest one's parent and committed once with `message`; any other
- * commits in the same stretch of history (between and above the selected
- * ones) are replayed on top, keeping their own messages and authors. Only
- * works on a linear stretch; any conflict aborts and restores the branch.
+ * Combine several commits into one, replaying the rest of the stretch on
+ * top. See `git::history::squash_commits` for the algorithm; it lives there
+ * so the rewrite logic is testable against scratch repos.
  */
 async squashCommits(repoId: string, shas: string[], message: string) : Promise<Result<RefMove, string>> {
     try {
@@ -633,10 +631,8 @@ async squashCommits(repoId: string, shas: string[], message: string) : Promise<R
 }
 },
 /**
- * Drop several commits from the current branch in one rewrite: replay the
- * stretch of history from the oldest selected commit's parent up to HEAD,
- * skipping every selected commit. Only works on a linear stretch; any
- * conflict aborts and restores the branch.
+ * Drop several commits from the current branch in one rewrite. See
+ * `git::history::drop_commits` for the algorithm.
  */
 async dropCommits(repoId: string, shas: string[]) : Promise<Result<RefMove, string>> {
     try {
@@ -1825,6 +1821,14 @@ left_panel_width?: number;
  * Saved width of the changes and commit pane in logical pixels.
  */
 right_panel_width?: number; 
+/**
+ * Saved height of the commit details drawer in logical pixels.
+ */
+drawer_height?: number; 
+/**
+ * Saved width of the commit list pane inside the multi-select drawer.
+ */
+drawer_commit_list_width?: number; 
 /**
  * Whether change size appears below the message or in its own column.
  */
