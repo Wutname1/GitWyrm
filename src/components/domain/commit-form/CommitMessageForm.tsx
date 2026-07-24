@@ -1,17 +1,24 @@
-import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, GitCommitHorizontal, Sparkles, Upload } from 'lucide-react'
-import { toast } from 'sonner'
-import logoUrl from '@/assets/logo.png'
-import { cn } from '@/lib/utils'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import { useEffect, useRef, useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  GitCommitHorizontal,
+  Pencil,
+  Sparkles,
+  Upload,
+} from "lucide-react";
+import { toast } from "sonner";
+import logoUrl from "@/assets/logo.png";
+import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipButton,
   TooltipContent,
   TooltipTrigger,
-} from '@/components/ui/tooltip'
-import { plural } from '@/lib/gitDisplay'
+} from "@/components/ui/tooltip";
+import { plural } from "@/lib/gitDisplay";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,153 +27,190 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { useAiConfigured, useAiMutations } from '@/hooks/useAi'
-import { useBranches, useStatus } from '@/hooks/useGitQueries'
-import { useGitMutations } from '@/hooks/useGitMutations'
+} from "@/components/ui/dropdown-menu";
+import { useAiConfigured, useAiMutations } from "@/hooks/useAi";
+import {
+  useBranches,
+  useCommitDetail,
+  useCommitLog,
+  useStatus,
+} from "@/hooks/useGitQueries";
+import { useGitMutations } from "@/hooks/useGitMutations";
 import {
   useActiveRepo,
   useWorkspaceStore,
   type CommitButtonMode,
-} from '@/stores/workspaceStore'
-import { useUiStore } from '@/stores/uiStore'
+} from "@/stores/workspaceStore";
+import { useUiStore } from "@/stores/uiStore";
 
 export function CommitMessageForm() {
-  const repo = useActiveRepo()
-  const status = useStatus(repo?.id ?? null)
-  const branches = useBranches(repo?.id ?? null)
-  const m = useGitMutations(repo?.id ?? null)
-  const [msg, setMsg] = useState('')
-  const [desc, setDesc] = useState('')
-  const [justGenerated, setJustGenerated] = useState(false)
-  const generatedTimer = useRef<number | null>(null)
+  const repo = useActiveRepo();
+  const status = useStatus(repo?.id ?? null);
+  const branches = useBranches(repo?.id ?? null);
+  const log = useCommitLog(repo?.id ?? null);
+  const m = useGitMutations(repo?.id ?? null);
+  const [msg, setMsg] = useState("");
+  const [desc, setDesc] = useState("");
+  const [amend, setAmend] = useState(false);
+  const [justGenerated, setJustGenerated] = useState(false);
+  const generatedTimer = useRef<number | null>(null);
 
-  const ai = useAiMutations()
-  const configured = useAiConfigured()
-  const aiProvider = useWorkspaceStore((s) => s.aiProvider)
-  const aiModel = useWorkspaceStore((s) => s.aiModel)
-  const showSettings = useUiStore((s) => s.showSettings)
-  const commitButtonMode = useWorkspaceStore((s) => s.commitButtonMode)
-  const setCommitButtonMode = useWorkspaceStore((s) => s.setCommitButtonMode)
+  const headSha = log.data?.pages[0]?.commits[0]?.sha ?? null;
+  const headDetail = useCommitDetail(repo?.id ?? null, amend ? headSha : null);
+
+  const ai = useAiMutations();
+  const configured = useAiConfigured();
+  const aiProvider = useWorkspaceStore((s) => s.aiProvider);
+  const aiModel = useWorkspaceStore((s) => s.aiModel);
+  const showSettings = useUiStore((s) => s.showSettings);
+  const commitButtonMode = useWorkspaceStore((s) => s.commitButtonMode);
+  const setCommitButtonMode = useWorkspaceStore((s) => s.setCommitButtonMode);
   const aiReady =
     aiProvider != null &&
     aiModel != null &&
-    (configured.data ?? []).some((c) => c.id === aiProvider)
+    (configured.data ?? []).some((c) => c.id === aiProvider);
 
-  const stagedCount = status.data?.staged.length ?? 0
-  const currentBranch = branches.data?.local.find((b) => b.is_head)?.name ?? 'HEAD'
-  const pushPending = m.push.isPending
+  const stagedCount = status.data?.staged.length ?? 0;
+  const currentBranch =
+    branches.data?.local.find((b) => b.is_head)?.name ?? "HEAD";
+  const pushPending = m.push.isPending;
+  const canAmend = headSha != null;
+  // Amend can change just the message, so it does not require staged files.
+  const hasWork = amend ? canAmend : stagedCount > 0;
   const canCommit =
-    stagedCount > 0 &&
+    hasWork &&
     msg.trim().length > 0 &&
     !m.createCommit.isPending &&
     !pushPending &&
-    !ai.generate.isPending
+    !ai.generate.isPending;
 
   useEffect(
     () => () => {
-      if (generatedTimer.current != null) window.clearTimeout(generatedTimer.current)
+      if (generatedTimer.current != null)
+        window.clearTimeout(generatedTimer.current);
     },
-    []
-  )
+    [],
+  );
+
+  // When amend is turned on with empty fields, pre-fill the previous message.
+  useEffect(() => {
+    if (!amend || !headDetail.data) return;
+    setMsg((m) => (m.trim().length > 0 ? m : headDetail.data.summary));
+    setDesc((d) => (d.trim().length > 0 ? d : headDetail.data.body));
+  }, [amend, headDetail.data]);
 
   const doCommit = (mode: CommitButtonMode = commitButtonMode) => {
     if (!canCommit) {
-      toast(stagedCount ? 'Enter a commit message' : 'Stage files to commit')
-      return
+      if (amend && !canAmend) toast("No commit to amend");
+      else toast(hasWork ? "Enter a commit message" : "Stage files to commit");
+      return;
     }
     m.createCommit.mutate(
-      { summary: msg, description: desc },
+      { summary: msg, description: desc, amend },
       {
         onSuccess: () => {
-          setMsg('')
-          setDesc('')
-          if (mode === 'commit_push') m.push.mutate()
+          setMsg("");
+          setDesc("");
+          setAmend(false);
+          if (mode === "commit_push") m.push.mutate();
         },
-      }
-    )
-  }
+      },
+    );
+  };
 
   const doGenerate = () => {
     if (!aiReady) {
-      showSettings('ai')
-      return
+      showSettings("ai");
+      return;
     }
-    if (ai.generate.isPending) return
+    if (ai.generate.isPending) return;
     if (!repo || stagedCount === 0) {
-      toast('Stage files to generate a message')
-      return
+      toast("Stage files to generate a message");
+      return;
     }
-    setJustGenerated(false)
+    setJustGenerated(false);
     ai.generate.mutate(
       { repoId: repo.id, provider: aiProvider!, model: aiModel! },
       {
         onSuccess: (r) => {
-          setMsg(r.summary)
-          setDesc(r.description)
-          setJustGenerated(true)
-          if (generatedTimer.current != null) window.clearTimeout(generatedTimer.current)
-          generatedTimer.current = window.setTimeout(() => setJustGenerated(false), 1400)
+          setMsg(r.summary);
+          setDesc(r.description);
+          setJustGenerated(true);
+          if (generatedTimer.current != null)
+            window.clearTimeout(generatedTimer.current);
+          generatedTimer.current = window.setTimeout(
+            () => setJustGenerated(false),
+            1400,
+          );
         },
         onError: (e) => toast.error(String(e)),
-      }
-    )
-  }
+      },
+    );
+  };
 
-  const generating = ai.generate.isPending
+  const generating = ai.generate.isPending;
 
   return (
     <div className="min-h-[183px] flex-none border-t border-border bg-panel2 px-3 pb-[13px] pt-[11px]">
       <div className="relative mb-[9px] min-h-[116px]">
         <div className="relative mb-[7px] rounded-md">
           <Input
-            value={generating ? '' : msg}
+            value={generating ? "" : msg}
             onChange={(e) => setMsg(e.target.value)}
             disabled={generating}
-            placeholder={generating ? '' : 'Summary (required)'}
+            placeholder={generating ? "" : "Summary (required)"}
             className={cn(
-              'h-auto bg-background py-2 pl-2.5 pr-9 text-xs transition-[opacity,filter] duration-200',
-              generating && 'opacity-[0.18] saturate-[0.35]'
+              "h-auto bg-background py-2 pl-2.5 pr-9 text-xs transition-[opacity,filter] duration-200",
+              generating && "opacity-[0.18] saturate-[0.35]",
             )}
           />
           <TooltipButton
             onClick={doGenerate}
             disabled={generating}
-            aria-label={generating ? 'Generating commit message' : 'Generate commit message with AI'}
+            aria-label={
+              generating
+                ? "Generating commit message"
+                : "Generate commit message with AI"
+            }
             tooltip={
               generating
-                ? 'Generating commit message'
+                ? "Generating commit message"
                 : !aiReady
-                  ? 'Set up an AI provider to generate messages'
+                  ? "Set up an AI provider to generate messages"
                   : stagedCount === 0
-                    ? 'Stage files to generate a message'
-                    : 'Generate commit message with AI'
+                    ? "Stage files to generate a message"
+                    : "Generate commit message with AI"
             }
             className={cn(
-              'absolute right-1.5 top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center overflow-hidden rounded-[5px] border border-transparent text-sub',
+              "absolute right-1.5 top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center overflow-hidden rounded-[5px] border text-sub",
               generating
-                ? 'wyrm-ai-trigger-active cursor-wait'
+                ? "wyrm-ai-trigger-active cursor-wait border-transparent"
                 : justGenerated
-                  ? 'border-primary/25 bg-soft text-accent-text'
-                  : 'cursor-pointer hover:bg-panel3 hover:text-foreground'
+                  ? "border-primary/25 bg-soft text-accent-text"
+                  : aiReady && stagedCount > 0
+                    ? "cursor-pointer border-primary/50 bg-soft text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
+                    : "cursor-pointer border-transparent hover:bg-panel3 hover:text-foreground",
             )}
           >
             {justGenerated && !generating ? (
               <Check size={13} strokeWidth={2.3} />
             ) : (
-              <Sparkles size={13} className={cn(generating && 'wyrm-ai-spark')} />
+              <Sparkles
+                size={13}
+                className={cn(generating && "wyrm-ai-spark")}
+              />
             )}
           </TooltipButton>
         </div>
         <Textarea
-          value={generating ? '' : desc}
+          value={generating ? "" : desc}
           onChange={(e) => setDesc(e.target.value)}
           disabled={generating}
-          placeholder={generating ? '' : 'Extended description…'}
+          placeholder={generating ? "" : "Extended description…"}
           rows={2}
           className={cn(
-            'wyrm-commit-description w-full bg-background px-2.5 py-2 text-xs transition-[opacity,filter] duration-200',
-            generating && 'opacity-[0.18] saturate-[0.35]'
+            "wyrm-commit-description w-full bg-background px-2.5 py-2 text-xs transition-[opacity,filter] duration-200",
+            generating && "opacity-[0.18] saturate-[0.35]",
           )}
         />
         {generating && (
@@ -184,43 +228,70 @@ export function CommitMessageForm() {
               </svg>
             </div>
             <div className="wyrm-ai-stage-copy">
-              <div className="wyrm-ai-stage-label">Generating commit message</div>
-              <div className="wyrm-ai-stage-status">
-                Reading {stagedCount} staged file{stagedCount === 1 ? '' : 's'}…
+              <div className="wyrm-ai-stage-label">
+                Generating commit message
               </div>
-              <div className="wyrm-ai-stage-detail">Writing a summary and description</div>
+              <div className="wyrm-ai-stage-status">
+                Reading {stagedCount} staged file{stagedCount === 1 ? "" : "s"}…
+              </div>
+              <div className="wyrm-ai-stage-detail">
+                Writing a summary and description
+              </div>
             </div>
           </div>
         )}
       </div>
+      {(stagedCount > 0 || amend) && canAmend && (
+        <label
+          className={cn(
+            "mb-[9px] flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-2xs transition-colors",
+            amend
+              ? "border-border bg-panel3 text-accent-text"
+              : "border-border bg-panel3 text-sub hover:text-foreground",
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={amend}
+            onChange={(e) => setAmend(e.target.checked)}
+            className="size-3.5 accent-primary"
+          />
+          <Pencil size={12} strokeWidth={2} />
+          <span className="font-semibold">Amend previous commit</span>
+        </label>
+      )}
       <div
         className={cn(
-          'flex h-[34px] w-full overflow-hidden rounded-md border transition-colors',
+          "flex h-[34px] w-full overflow-hidden rounded-md border transition-colors",
           canCommit
-            ? 'border-primary/50 bg-soft text-accent-text hover:border-primary'
-            : 'cursor-not-allowed border-transparent bg-panel3 text-muted-foreground'
+            ? "border-primary/50 bg-soft text-accent-text hover:border-primary"
+            : "cursor-not-allowed border-transparent bg-panel3 text-muted-foreground",
         )}
       >
         <button
           onClick={() => doCommit()}
           disabled={!canCommit}
           className={cn(
-            'flex flex-1 items-center justify-center gap-2 text-[0.78125rem] font-semibold transition-colors',
+            "flex flex-1 items-center justify-center gap-2 text-[0.78125rem] font-semibold transition-colors",
             canCommit
-              ? 'cursor-pointer hover:bg-primary hover:text-primary-foreground'
-              : 'cursor-not-allowed'
+              ? "cursor-pointer hover:bg-primary hover:text-primary-foreground"
+              : "cursor-not-allowed",
           )}
         >
-          {commitButtonMode === 'commit_push' ? (
+          {amend ? (
+            <Pencil size={14} strokeWidth={2} />
+          ) : commitButtonMode === "commit_push" ? (
             <Upload size={14} strokeWidth={2} />
           ) : (
             <GitCommitHorizontal size={15} strokeWidth={2} />
           )}
           {pushPending
-            ? 'Pushing…'
-            : commitButtonMode === 'commit_push'
-              ? `Commit & push to ${currentBranch}`
-              : `Commit ${plural(stagedCount, 'file')} to ${currentBranch}`}
+            ? "Pushing…"
+            : amend
+              ? `Amend commit on ${currentBranch}`
+              : commitButtonMode === "commit_push"
+                ? `Commit & push to ${currentBranch}`
+                : `Commit ${plural(stagedCount, "file")} to ${currentBranch}`}
         </button>
         <Tooltip>
           <DropdownMenu>
@@ -229,10 +300,10 @@ export function CommitMessageForm() {
                 <button
                   aria-label="Change default commit action"
                   className={cn(
-                    'flex w-[30px] items-center justify-center border-l transition-colors',
+                    "flex w-[30px] items-center justify-center border-l transition-colors",
                     canCommit
-                      ? 'cursor-pointer border-primary/40 hover:bg-primary hover:text-primary-foreground'
-                      : 'cursor-pointer border-border/60 text-sub hover:bg-panel2 hover:text-foreground'
+                      ? "cursor-pointer border-primary/40 hover:bg-primary hover:text-primary-foreground"
+                      : "cursor-pointer border-border/60 text-sub hover:bg-panel2 hover:text-foreground",
                   )}
                 >
                   <ChevronDown size={14} strokeWidth={2.2} />
@@ -247,7 +318,9 @@ export function CommitMessageForm() {
               <DropdownMenuSeparator />
               <DropdownMenuRadioGroup
                 value={commitButtonMode}
-                onValueChange={(v) => setCommitButtonMode(v as CommitButtonMode)}
+                onValueChange={(v) =>
+                  setCommitButtonMode(v as CommitButtonMode)
+                }
               >
                 <DropdownMenuRadioItem value="commit" className="text-xs">
                   <GitCommitHorizontal size={13} className="text-current" />
@@ -263,5 +336,5 @@ export function CommitMessageForm() {
         </Tooltip>
       </div>
     </div>
-  )
+  );
 }

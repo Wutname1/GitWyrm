@@ -279,11 +279,11 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const createCommit = useMutation({
-    mutationFn: async (args: { summary: string; description: string }) =>
-      unwrap(await commands.createCommit(id, args.summary, args.description)),
-    onSuccess: (sha) => {
+    mutationFn: async (args: { summary: string; description: string; amend?: boolean }) =>
+      unwrap(await commands.createCommit(id, args.summary, args.description, args.amend ?? false)),
+    onSuccess: (sha, args) => {
       invalidate(qc, id, ['status', 'log', 'branches'])
-      toast(`Committed ${shortSha(sha)}`)
+      toast(args.amend ? `Amended ${shortSha(sha)}` : `Committed ${shortSha(sha)}`)
     },
     onError,
   })

@@ -422,9 +422,9 @@ async addToGitignore(repoId: string, pattern: string) : Promise<Result<IgnoreOut
     else return { status: "error", error: e  as any };
 }
 },
-async createCommit(repoId: string, summary: string, description: string) : Promise<Result<string, string>> {
+async createCommit(repoId: string, summary: string, description: string, amend: boolean) : Promise<Result<string, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_commit", { repoId, summary, description }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_commit", { repoId, summary, description, amend }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -576,9 +576,10 @@ async checkoutCommit(repoId: string, sha: string) : Promise<Result<null, string>
 }
 },
 /**
- * Reword a commit's message. Only the tip commit (HEAD) is supported: it is
- * amended in place, keeping its tree, parent, and original author. Rewording
- * an older commit would rewrite history below it (a rebase) and is refused.
+ * Reword a commit's message. The tip commit (HEAD) is amended in place. An
+ * older commit is rebuilt with the new message and every commit after it is
+ * replayed on top, which rewrites those commits' SHAs (the same history
+ * rewrite as dropping a commit). Returns the new SHA of the reworded commit.
  */
 async rewordCommit(repoId: string, sha: string, message: string) : Promise<Result<string, string>> {
     try {
