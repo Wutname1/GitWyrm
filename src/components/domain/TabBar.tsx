@@ -23,6 +23,7 @@ import {
 import logoUrl from "@/assets/logo.png";
 import { useOpenRepo } from "@/hooks/useRepoActions";
 import { useUpdater } from "@/hooks/useUpdater";
+import { measureToPaint } from "@/lib/perf";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/uiStore";
 import {
@@ -195,6 +196,9 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
       <DropdownMenu
         open={open}
         onOpenChange={(next) => {
+          // Time the open from click to painted menu so a slow popover shows up
+          // in Sentry as a real span, not just a "feels laggy" report.
+          if (next) measureToPaint("recentRepos.open", "ui.menu");
           setOpen(next);
           if (!next) setQuery("");
         }}

@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { CommitEntry, StashInfo } from '@/lib/bindings'
 import { GRAPH_ROW_HEIGHT, GRAPH_ROW_WITH_CHANGES_HEIGHT } from '@/lib/gitDisplay'
 import { useCommitLog, useStashes, useStatus } from '@/hooks/useGitQueries'
+import { useGraphLoadSpan } from '@/lib/perf'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import { CommitRow } from '@/components/domain/graph/CommitRow'
@@ -57,6 +58,13 @@ export function GraphView() {
   const log = useCommitLog(repo?.id ?? null)
   const status = useStatus(repo?.id ?? null)
   const stashes = useStashes(repo?.id ?? null)
+
+  // Time the felt "opened a repo -> graph is on screen" gap that happens
+  // entirely after open_repo returns: the commit-log fetch plus first paint.
+  // open_repo's own span covers the IPC; this covers everything after it, which
+  // is the latency the user actually stares at. Keyed on repo id so switching
+  // repos re-measures.
+  useGraphLoadSpan(repo?.id ?? null, log.isLoading)
   const commits: CommitEntry[] = useMemo(
     () => log.data?.pages.flatMap((p) => p.commits) ?? [],
     [log.data]

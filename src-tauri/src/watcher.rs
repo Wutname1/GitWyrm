@@ -6,11 +6,13 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use std::path::PathBuf;
+
 use notify_debouncer_full::{new_debouncer, notify::RecursiveMode, DebouncedEvent, Debouncer, RecommendedCache};
 use notify_debouncer_full::notify::RecommendedWatcher;
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct RepoChangedPayload {
@@ -25,6 +27,27 @@ pub struct WatcherRegistry {
 }
 
 impl WatcherRegistry {
+  /// Registers the recursive watch on a background blocking thread and returns
+  /// immediately. Walking a large working tree to arm `ReadDirectoryChangesW`
+  /// can take seconds, and none of `open_repo`'s callers need the watch to be
+  /// live before they get their `RepoInfo` back -- external-change events just
+  /// start flowing a moment later. `app` owns the managed `WatcherRegistry`, so
+  /// the spawned task reaches back into it through state rather than borrowing.
+  pub fn watch_deferred(app: AppHandle, repo_id: String, workdir: PathBuf) {
+    tauri::async_runtime::spawn_blocking(move || {
+      let start = std::time::Instant::now();
+      let registry = app.state::<WatcherRegistry>();
+      match registry.watch(app.clone(), repo_id.clone(), &workdir) {
+        Ok(()) => log::info!(
+          "watch: armed in {}ms for {}",
+          start.elapsed().as_millis(),
+          workdir.display()
+        ),
+        Err(e) => log::warn!("watch: failed to arm for {}: {e}", workdir.display()),
+      }
+    });
+  }
+
   pub fn watch(&self, app: AppHandle, repo_id: String, workdir: &Path) -> Result<(), String> {
     let id = repo_id.clone();
     let mut debouncer = new_debouncer(

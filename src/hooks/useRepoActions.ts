@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { commands, type RepoInfo } from '@/lib/bindings'
 import { normalizePath } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
+import { Sentry } from '@/lib/sentry'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -29,7 +30,11 @@ export function useOpenRepo() {
       const name = path.split('\\').pop() ?? path
       const toastId = toast.loading(`Opening ${name}…`)
       try {
-        return unwrap(await commands.openRepo(path))
+        // Spans the whole IPC round-trip so the felt open latency (dominated by
+        // the backend discover + head phases) lands in the Sentry dashboard.
+        return await Sentry.startSpan({ name: 'openRepo', op: 'git.open' }, () =>
+          commands.openRepo(path).then(unwrap)
+        )
       } finally {
         toast.dismiss(toastId)
       }
