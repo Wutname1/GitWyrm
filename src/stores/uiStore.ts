@@ -10,10 +10,10 @@ export type CenterView =
   | 'github'
   | 'fileHistory'
   | 'blame'
+  | 'repoPicker'
 
 export type ModalKind =
   | 'onboarding'
-  | 'clone'
   | 'tutorial'
   | 'merge'
   | 'remote-sync'
@@ -88,6 +88,18 @@ interface UiState {
   revealSha: { sha: string; nonce: number } | null
   /** PR or issue shown in the center view and the actions panel. */
   githubItem: GithubItemRef | null
+  /**
+   * Bumped when the user tries to drag the "Add a repository" placeholder tab.
+   * The picker view watches it and does a little "nuh uh, over here" wiggle
+   * instead of letting the tab move.
+   */
+  repoPickerWiggleNonce: number
+  /**
+   * True while the "Add a repository" tab exists. It stays open when the user
+   * clicks away to a repo, so they can come back to a half-finished clone URL
+   * instead of starting over. Closing the tab is what clears it.
+   */
+  repoPickerOpen: boolean
 
   selectCommit: (sha: string | null) => void
   /** Drop view state tied to one repo. Call when the active repo changes. */
@@ -113,6 +125,12 @@ interface UiState {
   openConflict: (path: string) => void
   showSettings: (section?: SettingsSection) => void
   showGraph: () => void
+  /** Open the "Add a repository" tab and show its open/clone/new/groups picker. */
+  showRepoPicker: () => void
+  /** Close the "Add a repository" tab and fall back to the graph. */
+  closeRepoPicker: () => void
+  /** Trigger the placeholder tab's "nuh uh, over here" wiggle. */
+  wiggleRepoPicker: () => void
   openGithubItem: (kind: 'pr' | 'issue', number: number) => void
   closeGithubItem: () => void
   toggleSection: (key: SectionKey) => void
@@ -163,6 +181,8 @@ export const useUiStore = create<UiState>((set) => ({
   revealRef: null,
   revealSha: null,
   githubItem: null,
+  repoPickerWiggleNonce: 0,
+  repoPickerOpen: false,
 
   selectCommit: (sha) => set({ selectedSha: sha }),
   resetForRepoSwitch: () =>
@@ -233,6 +253,14 @@ export const useUiStore = create<UiState>((set) => ({
       settingsSection: section ?? s.settingsSection,
     })),
   showGraph: () => set({ centerView: 'graph', diffRequest: null, fileTarget: null }),
+  showRepoPicker: () =>
+    set({ centerView: 'repoPicker', repoPickerOpen: true, diffRequest: null, fileTarget: null }),
+  closeRepoPicker: () =>
+    set((s) => ({
+      repoPickerOpen: false,
+      centerView: s.centerView === 'repoPicker' ? 'graph' : s.centerView,
+    })),
+  wiggleRepoPicker: () => set((s) => ({ repoPickerWiggleNonce: s.repoPickerWiggleNonce + 1 })),
   openGithubItem: (kind, number) =>
     set({ centerView: 'github', githubItem: { kind, number }, diffRequest: null, fileTarget: null }),
   closeGithubItem: () => set({ centerView: 'graph', githubItem: null }),

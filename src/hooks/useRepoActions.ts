@@ -21,6 +21,7 @@ export function useCodeFolderRepos() {
 export function useOpenRepo() {
   const addRepo = useWorkspaceStore((s) => s.addRepo)
   const closeModal = useUiStore((s) => s.closeModal)
+  const closeRepoPicker = useUiStore((s) => s.closeRepoPicker)
 
   return useMutation({
     mutationFn: async (rawPath: string) => {
@@ -34,6 +35,9 @@ export function useOpenRepo() {
       }
     },
     onSuccess: (repo) => {
+      // The picker did its job, so its tab retires rather than sitting there
+      // next to the repository it just opened.
+      closeRepoPicker()
       addRepo(repo)
       closeModal()
       toast.success(`Opened ${repo.name}`)
@@ -49,6 +53,7 @@ export function useOpenRepo() {
 export function useOpenRepos() {
   const addReposInBackground = useWorkspaceStore((s) => s.addReposInBackground)
   const closeModal = useUiStore((s) => s.closeModal)
+  const closeRepoPicker = useUiStore((s) => s.closeRepoPicker)
 
   return useMutation({
     mutationFn: async (rawPaths: string[]) => {
@@ -73,7 +78,10 @@ export function useOpenRepos() {
     },
     onSuccess: ({ opened, failed }) => {
       addReposInBackground(opened)
-      if (opened.length > 0) closeModal()
+      if (opened.length > 0) {
+        closeRepoPicker()
+        closeModal()
+      }
       if (failed.length === 0) {
         toast.success(`Opened ${opened.length} ${opened.length === 1 ? 'repository' : 'repositories'}`)
       } else if (opened.length > 0) {

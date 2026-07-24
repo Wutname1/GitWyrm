@@ -11,6 +11,12 @@ async buildInfo() : Promise<BuildInfo> {
     return await TAURI_INVOKE("build_info");
 },
 /**
+ * Checks whether a file or folder already exists without changing it.
+ */
+async pathExists(path: string) : Promise<boolean> {
+    return await TAURI_INVOKE("path_exists", { path });
+},
+/**
  * Returns the current log file contents ("" when it does not exist yet).
  */
 async readLog() : Promise<Result<string, string>> {
@@ -200,6 +206,19 @@ async closeRepo(repoId: string) : Promise<Result<null, string>> {
 async gitAvailable() : Promise<Result<boolean, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_available") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Create a brand-new git repository and its requested starter files. The
+ * folder must be new or empty so existing work is never overwritten. Returns
+ * the working-directory path so the caller can immediately open it.
+ */
+async gitInit(path: string, starter: RepositoryStarter, addReadme: boolean, createInitialCommit: boolean) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("git_init", { path, starter, addReadme, createInitialCommit }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1176,6 +1195,18 @@ async githubAuthStatus() : Promise<Result<string | null, string>> {
 }
 },
 /**
+ * Repositories available to the signed-in account, with starred repositories
+ * marked so the add screen can keep those shortcuts first.
+ */
+async githubListRepositories() : Promise<Result<GithubRepository[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_list_repositories") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * The GitHub owner/repo behind the origin remote, or None when origin is
  * missing or not hosted on github.com.
  */
@@ -1470,6 +1501,7 @@ export type GeneratedCommitMessage = { summary: string; description: string }
 export type GitProgressPayload = { repo_id: string; operation: string; line: string }
 export type GithubComment = { author: string; author_is_bot: boolean; body: string; created_at: string }
 export type GithubRepoRef = { owner: string; repo: string }
+export type GithubRepository = { full_name: string; clone_url: string; html_url: string; description: string | null; private: boolean; pushed_at: string; starred: boolean }
 /**
  * A `@@ -old_start,old_lines +new_start,new_lines @@` hunk boundary.
  */
@@ -1692,6 +1724,7 @@ sha: string }
 export type RepoChangedPayload = { repo_id: string }
 export type RepoIcon = { source_path: string; label: string; data_url: string; custom: boolean }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
+export type RepositoryStarter = "blank" | "node" | "rust" | "csharp" | "all_in_one"
 /**
  * How far a reset rewinds: ref only, ref+index, or ref+index+working tree.
  */
@@ -1841,6 +1874,20 @@ tab_order?: string[];
  * Reusable group snapshots shown in Open a repository > Groups.
  */
 saved_tab_groups?: TabGroupSetting[]; 
+/**
+ * Repository shortcuts shown first on the add screen, most recently pinned
+ * first.
+ */
+pinned_repo_paths?: string[]; 
+/**
+ * Saved-group shortcuts shown first on the add screen, most recently pinned
+ * first. None lets older settings start with their first three groups pinned.
+ */
+pinned_saved_group_ids?: string[] | null; 
+/**
+ * Repository-picker sections the user has hidden.
+ */
+repo_picker_collapsed_sections?: string[]; 
 /**
  * What to do about local-only tags after a push: "ask", "always", "never".
  * None means ask. Validated on the frontend.

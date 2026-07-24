@@ -9,6 +9,7 @@ import { log } from '@/lib/log'
 
 export const githubKeys = {
   auth: ['github-auth'] as const,
+  repositories: ['github-repositories'] as const,
   slug: (repoId: string) => ['github-slug', repoId] as const,
   prs: (owner: string, repo: string) => ['github-prs', owner, repo] as const,
   issues: (owner: string, repo: string) => ['github-issues', owner, repo] as const,
@@ -25,6 +26,17 @@ export function useGithubAuth() {
     staleTime: 5 * 60 * 1000,
     retry: false,
     queryFn: async () => unwrap(await commands.githubAuthStatus()),
+  })
+}
+
+/** Repositories available to the signed-in account, with starred entries marked. */
+export function useGithubRepositories(connected: boolean) {
+  return useQuery({
+    queryKey: githubKeys.repositories,
+    enabled: isTauri && connected,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.githubListRepositories()),
   })
 }
 

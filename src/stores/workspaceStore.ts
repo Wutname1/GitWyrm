@@ -22,6 +22,14 @@ export interface RecentRepo {
 export type UpdateChannel = 'stable' | 'beta'
 export type CommitButtonMode = 'commit' | 'commit_push'
 export type ChangeSizeDisplay = 'row' | 'column'
+export type RepoPickerSection = 'pinned_groups' | 'pinned_repositories' | 'recent' | 'watched'
+
+const REPO_PICKER_SECTIONS = new Set<RepoPickerSection>([
+  'pinned_groups',
+  'pinned_repositories',
+  'recent',
+  'watched',
+])
 
 /** What to do about local-only tags after a push. */
 export type TagPushDefault = 'ask' | 'always' | 'never'
@@ -340,6 +348,8 @@ interface WorkspaceState {
   pinnedRepoPaths: string[]
   /** Saved-group shortcuts shown first in the repository picker (persisted, newest pin first). */
   pinnedSavedGroupIds: string[]
+  /** Repository-picker sections the user has hidden (persisted). */
+  repoPickerCollapsedSections: RepoPickerSection[]
   /** True once settings.json has been read on launch. */
   hydrated: boolean
 
@@ -405,6 +415,7 @@ interface WorkspaceState {
   deleteSavedTabGroup: (groupId: string) => void
   togglePinnedRepo: (repoPath: string) => void
   togglePinnedSavedGroup: (groupId: string) => void
+  toggleRepoPickerSection: (section: RepoPickerSection) => void
   moveRepoBeside: (sourcePath: string, targetPath: string, placement: TabDropPlacement) => void
   moveRepoToOrder: (repoPath: string, orderIndex: number) => void
   moveGroupToOrder: (groupId: string, orderIndex: number) => void
@@ -494,6 +505,7 @@ function toSettings(s: WorkspaceState): Settings {
     })),
     pinned_repo_paths: s.pinnedRepoPaths,
     pinned_saved_group_ids: s.pinnedSavedGroupIds,
+    repo_picker_collapsed_sections: s.repoPickerCollapsedSections,
   }
 }
 
@@ -540,6 +552,13 @@ function isColumnId(id: string): id is ColumnId {
 /** Unknown or missing values fall back to asking, the safest of the three. */
 function normalizeTagPushDefault(mode: string | null | undefined): TagPushDefault {
   return mode === 'always' || mode === 'never' ? mode : 'ask'
+}
+
+function normalizeRepoPickerSections(sections: string[] | undefined): RepoPickerSection[] {
+  return (sections ?? []).filter(
+    (section): section is RepoPickerSection =>
+      REPO_PICKER_SECTIONS.has(section as RepoPickerSection),
+  )
 }
 
 /** Validate a stored theme id; unknown/absent falls back to Auto. */
@@ -627,6 +646,7 @@ function schedulePersist() {
 export const SETTINGS_DEFAULTS = {
   codeFolder: null,
   cloneDirectory: null,
+  repoPickerCollapsedSections: [],
   gitExecutable: '',
   // Not in any per-screen group: only the global "Reset all" restores it.
   updateChannel: 'stable',
@@ -655,7 +675,15 @@ export type SettingsKey = keyof typeof SETTINGS_DEFAULTS
 
 /** Which preference keys each settings screen owns, for per-screen reset. */
 export const SETTINGS_GROUPS = {
-  general: ['codeFolder', 'cloneDirectory', 'gitExecutable', 'branchSwitchMode', 'commitButtonMode', 'enableWorktrees'],
+  general: [
+    'codeFolder',
+    'cloneDirectory',
+    'repoPickerCollapsedSections',
+    'gitExecutable',
+    'branchSwitchMode',
+    'commitButtonMode',
+    'enableWorktrees',
+  ],
   tags: ['tagPushDefault', 'tagPushOnCreate'],
   ai: ['aiInstruction'],
   appearance: [
@@ -714,6 +742,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   savedTabGroups: [],
   pinnedRepoPaths: [],
   pinnedSavedGroupIds: [],
+  repoPickerCollapsedSections: [],
   hydrated: false,
 
   addRepo: (repo) => {
@@ -781,9 +810,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   setActiveRepo: (id) => {
     set({ activeRepoId: id })
     // Selecting a repo tab means "show me that repo", so step out of the
-    // app-level picker view if it was covering the center.
+    // app-level picker view if it was covering the center. The picker's own tab
+    // stays open, so coming back to it keeps whatever was typed there.
     const ui = useUiStore.getState()
     if (ui.centerView === 'repoPicker') ui.showGraph()
+
     schedulePersist()
   },
   setCodeFolder: (path) => {
@@ -1161,6 +1192,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     })
     schedulePersist()
   },
+  toggleRepoPickerSection: (section) => {
+    set((s) => ({
+      repoPickerCollapsedSections: s.repoPickerCollapsedSections.includes(section)
+        ? s.repoPickerCollapsedSections.filter((candidate) => candidate !== section)
+        : [...s.repoPickerCollapsedSections, section],
+    }))
+    schedulePersist()
+  },
   moveRepoBeside: (sourcePath, targetPath, placement) => {
     if (samePath(sourcePath, targetPath)) return
     set((s) => {
@@ -1352,6 +1391,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         pinnedSavedGroupIds:
           settings.pinned_saved_group_ids
           ?? savedTabGroups.slice(0, 3).map((group) => group.id),
+        repoPickerCollapsedSections: normalizeRepoPickerSections(
+          settings.repo_picker_collapsed_sections,
+        ),
         hydrated: true,
       })
     }
