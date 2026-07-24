@@ -29,6 +29,9 @@ notify = "8"
 # straight off disk, so a misclick stays recoverable.
 trash = "5"
 notify-debouncer-full = "0.5"
+# Parses .gitignore chains into a fast, lock-free matcher so the file watcher can
+# skip ignored paths without contending with the repo lock that git status holds.
+ignore = "0.4"
 specta = "=2.0.0-rc.22"
 specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
