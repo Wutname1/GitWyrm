@@ -373,13 +373,14 @@ function RepoTabPreview({
 }
 
 /**
- * The trailing "Add a repository" tab. Once opened it behaves like a real tab:
- * it stays put while the user clicks over to a repository and back, and only
- * goes away when they close it or finish adding a repository. It is deliberately
- * NOT part of tabOrder -- it never reorders, groups, or persists, so it lives
- * outside the drag system entirely. It is still marked draggable so we can catch
- * the drag attempt and, instead of moving it, nudge the picker view with a
- * little "nuh uh, over here" wiggle.
+ * The trailing "Add a repository" tab. The Open-repository button in the app bar
+ * (or rail) creates it via showRepoPicker(); it does not exist until then. Once
+ * opened it behaves like a real tab: it stays put while the user clicks over to a
+ * repository and back, and only goes away when they close it or finish adding a
+ * repository. It is deliberately NOT part of tabOrder -- it never reorders,
+ * groups, or persists, so it lives outside the drag system entirely. It is still
+ * marked draggable so we can catch the drag attempt and, instead of moving it,
+ * nudge the picker view with a little "nuh uh, over here" wiggle.
  */
 function AddRepoTab({
   orientation,
@@ -404,25 +405,8 @@ function AddRepoTab({
     wiggleRepoPicker();
   };
 
-  // Before it is opened it is just the trailing "+" button, not a tab.
-  if (!open) {
-    return (
-      <TooltipButton
-        onClick={() => showRepoPicker()}
-        aria-label="Add a repository"
-        className={cn(
-          "flex flex-none cursor-pointer items-center gap-1.5 text-xs text-sub transition-[border-color,background-color,color] hover:bg-panel2 hover:text-foreground",
-          orientation === "horizontal"
-            ? "h-full border-l border-border px-2.5"
-            : "mx-1.5 my-1 h-[31px] justify-center rounded-[5px] border border-dashed border-border px-2",
-        )}
-        tooltip="Add a repository"
-      >
-        <Plus size={13} strokeWidth={2.2} className="flex-none" />
-        {orientation === "vertical" && !iconOnly && <span>Add a repository</span>}
-      </TooltipButton>
-    );
-  }
+  // The tab only exists once the picker has been opened from the app bar.
+  if (!open) return null;
 
   const showName = !iconOnly || (orientation === "horizontal" && hovered);
   const horizontalWidth =
