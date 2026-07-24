@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Tag } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { FormDialog } from '@/components/ui/form-dialog'
@@ -39,10 +39,16 @@ export function NewTagModal() {
   const [message, setMessage] = useState('')
   const [push, setPush] = useState(false)
 
+  // Blocks a second submit within the same tick -- `isPending` does not flip
+  // synchronously after `mutate`, so an Enter keypress and a fast button click
+  // could otherwise both fire the create before the first one registers.
+  const submitting = useRef(false)
+
   useEffect(() => {
     if (open) {
       setName('')
       setMessage('')
+      submitting.current = false
       // Start from the remembered choice each time the dialog opens.
       setPush(tagPushOnCreate)
     }
@@ -71,10 +77,16 @@ export function NewTagModal() {
   const sendIt = push && hasRemote
 
   const create = () => {
-    if (!canCreate) return
+    if (!canCreate || submitting.current) return
+    submitting.current = true
     m.createTag.mutate(
       { name: trimmed, sha: targetSha ?? '', message: message.trim(), push: sendIt },
-      { onSuccess: () => closeModal() }
+      {
+        onSuccess: () => closeModal(),
+        onError: () => {
+          submitting.current = false
+        },
+      }
     )
   }
 

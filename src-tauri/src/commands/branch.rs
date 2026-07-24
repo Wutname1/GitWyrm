@@ -374,6 +374,19 @@ pub async fn create_tag(
       repo.find_object(oid, None)?
     };
 
+    // If a tag by this name already points at the same commit, treat the call
+    // as a no-op success. A duplicate create for the identical tag is never a
+    // user error worth surfacing -- it only happens when the same request
+    // reaches the backend twice, and libgit2's "tag already exists" would
+    // otherwise flash as a spurious warning right after the tag is made.
+    if let Ok(existing) = repo.find_reference(&format!("refs/tags/{name}")) {
+      if let (Ok(existing_oid), Some(target_oid)) = (existing.peel_to_commit().map(|c| c.id()), target.peel_to_commit().ok().map(|c| c.id())) {
+        if existing_oid == target_oid {
+          return Ok(());
+        }
+      }
+    }
+
     let message = message.trim();
     if message.is_empty() {
       repo.tag_lightweight(name, &target, false)?;
