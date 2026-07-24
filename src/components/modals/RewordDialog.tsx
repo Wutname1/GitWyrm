@@ -79,9 +79,6 @@ export function RewordDialog({
           className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:border-ring"
         />
       </div>
-      <p className="text-2xs text-muted-foreground">
-        Only the latest commit's message can be edited.
-      </p>
     </FormDialog>
   )
 }

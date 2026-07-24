@@ -694,9 +694,10 @@ pub async fn checkout_commit(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// Reword a commit's message. Only the tip commit (HEAD) is supported: it is
-/// amended in place, keeping its tree, parent, and original author. Rewording
-/// an older commit would rewrite history below it (a rebase) and is refused.
+/// Reword a commit's message. The tip commit (HEAD) is amended in place. An
+/// older commit is rebuilt with the new message and every commit after it is
+/// replayed on top, which rewrites those commits' SHAs (the same history
+/// rewrite as dropping a commit). Returns the new SHA of the reworded commit.
 #[tauri::command]
 #[specta::specta]
 pub async fn reword_commit(
@@ -714,21 +715,99 @@ pub async fn reword_commit(
       .peel_to_commit()
       .map_err(|_| AppError::Other("repository has no commits yet".into()))?;
     let target_oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
-    if head.id() != target_oid {
-      return Err(AppError::Other(
-        "only the latest commit's message can be edited right now".into(),
-      ));
-    }
 
     let message = message.trim();
     if message.is_empty() {
       return Err(AppError::Other("a commit message is required".into()));
     }
 
-    // Amend keeps the tree and parent; pass the original author so only the
-    // message (and committer) change.
-    let new_oid = head.amend(Some("HEAD"), Some(&head.author()), None, None, Some(message), None)?;
-    Ok(new_oid.to_string())
+    // Fast path: the tip commit amends in place, keeping tree and parent.
+    if head.id() == target_oid {
+      let new_oid =
+        head.amend(Some("HEAD"), Some(&head.author()), None, None, Some(message), None)?;
+      return Ok(new_oid.to_string());
+    }
+
+    // Older commit: rebuild it with the new message and replay the commits
+    // above it. This needs a clean tree, the same as dropping a commit.
+    if refs::tracked_changes_present(&repo)? {
+      return Err(AppError::Other(
+        "working tree has changes; commit or stash before editing an older message".into(),
+      ));
+    }
+
+    let target = repo.find_commit(target_oid)?;
+    if target.parent_count() != 1 {
+      return Err(AppError::Other(
+        "only commits with a single parent can be edited right now".into(),
+      ));
+    }
+    let parent = target.parent(0)?;
+    let previous_sha = head.id().to_string();
+
+    // Collect the commits from HEAD down to (not including) the target, newest
+    // first, so we can replay them oldest-first onto the reworded commit.
+    let mut to_replay = Vec::new();
+    let mut walk = repo.revwalk()?;
+    walk.push(head.id())?;
+    let mut found = false;
+    for step in walk {
+      let step_oid = step?;
+      if step_oid == target_oid {
+        found = true;
+        break;
+      }
+      let c = repo.find_commit(step_oid)?;
+      if c.parent_count() > 1 {
+        return Err(AppError::Other(
+          "there is a merge commit above this one; can't edit it safely".into(),
+        ));
+      }
+      to_replay.push(c);
+    }
+    if !found {
+      return Err(AppError::Other("that commit is not on the current branch".into()));
+    }
+    to_replay.reverse();
+
+    // Rebuild the target with the new message, same tree, parent, and author.
+    let signature = repo.signature()?;
+    let new_target_oid = repo.commit(
+      None,
+      &target.author(),
+      &signature,
+      message,
+      &target.tree()?,
+      &[&parent],
+    )?;
+    let mut new_tip = repo.find_commit(new_target_oid)?;
+    let reworded_sha = new_target_oid.to_string();
+
+    // Cherry-pick each later commit onto the growing new tip. Any conflict
+    // aborts: reset back to where we started so nothing is left half-done.
+    for commit in to_replay {
+      let mut index = repo
+        .cherrypick_commit(&commit, &new_tip, 0, None)
+        .map_err(AppError::Git)?;
+      if index.has_conflicts() {
+        let start_oid = Oid::from_str(&previous_sha).map_err(AppError::Git)?;
+        let head_obj = repo.find_object(start_oid, None)?;
+        repo.reset(&head_obj, ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
+        return Err(AppError::Other(
+          "editing this message causes conflicts in a later commit; nothing was changed".into(),
+        ));
+      }
+      let tree_oid = index.write_tree_to(&repo)?;
+      let tree = repo.find_tree(tree_oid)?;
+      let msg = commit.message().unwrap_or("");
+      let new_oid = repo.commit(None, &commit.author(), &signature, msg, &tree, &[&new_tip])?;
+      new_tip = repo.find_commit(new_oid)?;
+    }
+
+    // Point the branch at the rebuilt tip and sync the working tree.
+    repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
+
+    Ok(reworded_sha)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

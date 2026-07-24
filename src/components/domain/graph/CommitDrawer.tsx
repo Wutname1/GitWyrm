@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -5,7 +6,9 @@ import { Button } from '@/components/ui/button'
 import { TooltipButton } from '@/components/ui/tooltip'
 import { authorColor, formatCommitTime, shortSha } from '@/lib/gitDisplay'
 import { useCommitDetail } from '@/hooks/useGitQueries'
+import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
+import { RewordDialog } from '@/components/modals/RewordDialog'
 import { Avatar } from './Avatar'
 import { AuthorHoverCard } from './AuthorHoverCard'
 import { FileChangeRow } from '../FileChangeRow'
@@ -21,6 +24,8 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
   const openDiff = useUiStore((s) => s.openDiff)
   const diffRequest = useUiStore((s) => s.diffRequest)
   const detail = useCommitDetail(repoId, sha)
+  const m = useGitMutations(repoId)
+  const [rewordOpen, setRewordOpen] = useState(false)
 
   // Highlight the row whose diff is on screen, but only when that diff came
   // from this commit -- otherwise a same-named file from the pending changes
@@ -67,7 +72,11 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
           </span>
         </AuthorHoverCard>
         <div className="min-w-0 flex-1">
-          <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[0.78125rem] font-semibold text-foreground">
+          <div
+            onDoubleClick={() => setRewordOpen(true)}
+            title="Double-click to edit this message"
+            className="cursor-text overflow-hidden text-ellipsis whitespace-nowrap text-[0.78125rem] font-semibold text-foreground"
+          >
             {d.summary}
           </div>
           <div className="text-2xs text-muted-foreground">
@@ -101,6 +110,15 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
           <X size={12} />
         </TooltipButton>
       </div>
+      {d.body.trim() !== '' && (
+        <div
+          onDoubleClick={() => setRewordOpen(true)}
+          title="Double-click to edit this message"
+          className="max-h-20 flex-none cursor-text overflow-y-auto whitespace-pre-wrap border-b border-border px-3.5 py-2 text-2xs leading-relaxed text-sub"
+        >
+          {d.body}
+        </div>
+      )}
       <div className="flex flex-none items-center gap-3.5 border-b border-border px-3.5 py-[5px] text-2xs text-sub">
         <span className="font-semibold">{d.files.length} files changed</span>
         <span className="font-mono text-added">+{adds}</span>
@@ -119,6 +137,26 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
           />
         ))}
       </div>
+      <RewordDialog
+        open={rewordOpen}
+        onOpenChange={setRewordOpen}
+        initialSummary={d.summary}
+        initialBody={d.body}
+        pending={m.rewordCommit.isPending}
+        onConfirm={(message) =>
+          m.rewordCommit.mutate(
+            { sha: d.sha, message },
+            {
+              onSuccess: (newSha) => {
+                setRewordOpen(false)
+                // The old sha no longer exists after a reword; follow the commit
+                // to its new sha so the drawer keeps showing it.
+                if (newSha !== d.sha) selectCommit(newSha)
+              },
+            }
+          )
+        }
+      />
     </div>
   )
 }

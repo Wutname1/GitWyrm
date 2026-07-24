@@ -139,7 +139,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
-            disabled={!isHead || m.rewordCommit.isPending}
+            disabled={m.rewordCommit.isPending || (!isHead && !canDrop)}
             onSelect={(e) => {
               e.preventDefault()
               setPending({ kind: 'reword' })
@@ -147,9 +147,6 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
           >
             <Pencil />
             Edit commit message
-            {!isHead && (
-              <ContextMenuShortcut className="text-2xs normal-case">latest only</ContextMenuShortcut>
-            )}
           </ContextMenuItem>
           <PendingMenuItem
             icon={<Undo2 />}
