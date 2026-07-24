@@ -22,6 +22,8 @@ interface CommitRowProps {
   selected: boolean;
   onSelect: () => void;
   rowHeight: number;
+  /** Faded out because a commit search is active and this row doesn't match. */
+  dimmed?: boolean;
   style?: React.CSSProperties;
 }
 
@@ -30,6 +32,7 @@ export const CommitRow = memo(function CommitRow({
   selected,
   onSelect,
   rowHeight,
+  dimmed,
   style,
 }: CommitRowProps) {
   const order = useWorkspaceStore((s) => s.columnOrder);
@@ -141,8 +144,9 @@ export const CommitRow = memo(function CommitRow({
           ...style,
         }}
         className={cn(
-          "grid cursor-pointer items-center pr-1",
+          "grid cursor-pointer items-center pr-1 transition-opacity",
           selected && "bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]",
+          dimmed && "opacity-30",
         )}
       >
         {visibleColumns(order, effectiveHidden).map((id) => (

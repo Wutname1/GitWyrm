@@ -128,6 +128,19 @@ function AppInner() {
     })
   }, [activeRepoId])
 
+  // Ctrl/Cmd+F focuses the toolbar's commit search box. The toolbar owns the
+  // input, so we bump a nonce it watches rather than reaching for the DOM here.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        useUiStore.getState().requestSearchFocus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // Suppress the browser's native right-click menu everywhere it isn't wanted.
   // Our own Radix context menus still open (they handle the event first); text
   // fields keep their native menu so copy/paste works.

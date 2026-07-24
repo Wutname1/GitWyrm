@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import {
   ArchiveRestore,
   Archive,
@@ -6,11 +6,13 @@ import {
   ArrowDownToLine,
   ArrowUp,
   ChevronDown,
+  ChevronUp,
   Folder,
   GitBranch,
   GitMerge,
   Search,
   SquareTerminal,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Separator } from '@/components/ui/separator'
@@ -238,6 +240,116 @@ function GhostButton({ icon, tooltip, onClick }: { icon: ReactNode; tooltip: str
   )
 }
 
+// A prev/next stepper button in the search box. Disabled when there's nothing
+// to step through so it reads as inert rather than broken.
+function StepButton({
+  icon,
+  title,
+  onClick,
+  disabled,
+}: {
+  icon: ReactNode
+  title: string
+  onClick: () => void
+  disabled: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="flex-none rounded p-0.5 hover:bg-panel3 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+    >
+      {icon}
+    </button>
+  )
+}
+
+/**
+ * The commit search box. Typing dims commits in the graph that don't match and
+ * scrolls to the first that does. A "current/total" readout and up/down steppers
+ * move between matches (Enter / Shift+Enter do the same). Ctrl+F focuses it (via
+ * a nonce the app root bumps).
+ */
+function CommitSearchBox() {
+  const query = useUiStore((s) => s.commitSearch)
+  const setCommitSearch = useUiStore((s) => s.setCommitSearch)
+  const jumpMatch = useUiStore((s) => s.jumpMatch)
+  const focusNonce = useUiStore((s) => s.searchFocusNonce)
+  const matchCount = useUiStore((s) => s.searchMatchCount)
+  const matchIndex = useUiStore((s) => s.searchMatchIndex)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (focusNonce === 0) return
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [focusNonce])
+
+  const hasMatches = (matchCount ?? 0) > 0
+  const showStatus = query.trim() !== '' && matchCount !== null
+
+  return (
+    <div className="flex h-[30px] min-w-[210px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-2.5 text-muted-foreground focus-within:border-muted-foreground">
+      <Search size={14} strokeWidth={1.9} className="flex-none" />
+      <input
+        ref={inputRef}
+        value={query}
+        onChange={(e) => setCommitSearch(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            if (hasMatches) jumpMatch(e.shiftKey ? -1 : 1)
+          } else if (e.key === 'Escape') {
+            setCommitSearch('')
+            inputRef.current?.blur()
+          }
+        }}
+        placeholder="Search commits"
+        className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
+      />
+      {showStatus && (
+        <span
+          className={cn(
+            'flex-none whitespace-nowrap font-mono text-2xs tabular-nums',
+            hasMatches ? 'text-muted-foreground' : 'text-removed'
+          )}
+        >
+          {hasMatches ? `${matchIndex || 1}/${matchCount}` : 'no results'}
+        </span>
+      )}
+      {showStatus && hasMatches && (
+        <>
+          <StepButton
+            icon={<ChevronUp size={13} strokeWidth={2} />}
+            title="Previous match (Shift+Enter)"
+            onClick={() => jumpMatch(-1)}
+            disabled={!hasMatches}
+          />
+          <StepButton
+            icon={<ChevronDown size={13} strokeWidth={2} />}
+            title="Next match (Enter)"
+            onClick={() => jumpMatch(1)}
+            disabled={!hasMatches}
+          />
+        </>
+      )}
+      {query && (
+        <button
+          onClick={() => {
+            setCommitSearch('')
+            inputRef.current?.focus()
+          }}
+          title="Clear search"
+          className="flex-none rounded p-0.5 hover:bg-panel3 hover:text-foreground"
+        >
+          <X size={13} strokeWidth={2} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function Toolbar() {
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
@@ -361,14 +473,7 @@ export function Toolbar() {
 
       <BranchSwitcher />
 
-      <button
-        onClick={() => toast('Command palette · Ctrl+K')}
-        className="flex h-[30px] min-w-[190px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-2.5 text-muted-foreground hover:border-muted-foreground hover:bg-panel3"
-      >
-        <Search size={14} strokeWidth={1.9} />
-        <span className="text-xs">Search commits, files…</span>
-        <span className="ml-auto rounded border border-border px-1 font-mono text-2xs">Ctrl+K</span>
-      </button>
+      <CommitSearchBox />
 
       <GhostButton
         icon={<Folder size={16} strokeWidth={1.9} />}

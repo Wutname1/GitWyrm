@@ -30,6 +30,9 @@ export function GraphView() {
   const focusChanges = useUiStore((s) => s.focusChanges)
   const revealRef = useUiStore((s) => s.revealRef)
   const revealSha = useUiStore((s) => s.revealSha)
+  const commitSearch = useUiStore((s) => s.commitSearch)
+  const searchJumpNonce = useUiStore((s) => s.searchJumpNonce)
+  const setSearchMatchStatus = useUiStore((s) => s.setSearchMatchStatus)
   const columnOrder = useWorkspaceStore((s) => s.columnOrder)
   const hiddenColumns = useWorkspaceStore((s) => s.hiddenColumns)
   const columnWidths = useWorkspaceStore((s) => s.columnWidths)
@@ -116,6 +119,47 @@ export function GraphView() {
     return out
   }, [commits, stashes.data, pending, hasMorePages])
 
+  // Row indices of commits matching the search text, in graph (top-down) order.
+  // Null when not searching. A commit matches on its summary, author, or sha so
+  // the box works for "who changed this" and "where's that commit" alike. The
+  // Set alongside is for the O(1) dim check on every rendered row.
+  const query = commitSearch.trim().toLowerCase()
+  const matchList = useMemo(() => {
+    if (!query) return null
+    const list: number[] = []
+    rows.forEach((r, i) => {
+      if (r.kind !== 'commit') return
+      const c = r.commit
+      if (
+        c.summary.toLowerCase().includes(query) ||
+        c.author_name.toLowerCase().includes(query) ||
+        c.sha.toLowerCase().includes(query)
+      ) {
+        list.push(i)
+      }
+    })
+    return list
+  }, [rows, query])
+  const matchRows = useMemo(() => (matchList ? new Set(matchList) : null), [matchList])
+  const matchCount = matchList?.length ?? 0
+
+  // 1-based position of the selected match among all matches, or 0 when the
+  // selection isn't sitting on a match. Drives the "3/12" readout.
+  const selectedMatchOrdinal = useMemo(() => {
+    if (!matchList || matchList.length === 0) return 0
+    const selectedIndex = rows.findIndex(
+      (r) => r.kind === 'commit' && r.commit.sha === selectedSha
+    )
+    const pos = matchList.indexOf(selectedIndex)
+    return pos < 0 ? 0 : pos + 1
+  }, [matchList, rows, selectedSha])
+
+  // Publish count + ordinal so the toolbar's search box can show "3/12".
+  useEffect(() => {
+    if (!query) setSearchMatchStatus(null, null)
+    else setSearchMatchStatus(matchCount, selectedMatchOrdinal)
+  }, [query, matchCount, selectedMatchOrdinal, setSearchMatchStatus])
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -201,6 +245,61 @@ export function GraphView() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealShaNonce, revealShaValue, rows.length])
+
+  // Direction of the last jump, derived from the sign of the nonce's change.
+  // The box bumps searchJumpNonce by +1 (next) or -1 (prev); the delta since
+  // the previous render tells us which way to step. A fresh query resets the
+  // nonce to 0, which we treat as "forward to the first match".
+  const prevJumpNonce = useRef(0)
+
+  // Move the selection to a matching commit. On a new query this lands on the
+  // first match at or after the current row; the < / > buttons step to the
+  // adjacent match, wrapping at either end. If no match is loaded yet, keep
+  // paging history until one turns up or history runs out.
+  useEffect(() => {
+    if (!matchList || matchList.length === 0) {
+      prevJumpNonce.current = searchJumpNonce
+      if (query && hasNextPage && !isFetchingNextPage) fetchNextPage()
+      return
+    }
+    // A jump changed the nonce; a query edit reset it to 0 (no step).
+    const isJump = searchJumpNonce !== prevJumpNonce.current
+    const dir = searchJumpNonce < prevJumpNonce.current ? -1 : 1
+    prevJumpNonce.current = searchJumpNonce
+
+    const selectedIndex = rows.findIndex(
+      (r) => r.kind === 'commit' && r.commit.sha === selectedSha
+    )
+    const pos = matchList.indexOf(selectedIndex)
+
+    let target: number
+    if (!isJump) {
+      // New/edited query: settle on the first match at or after the current
+      // row (staying put if it already matches), rather than stepping off it.
+      target = pos >= 0 ? selectedIndex : (matchList.find((i) => i >= selectedIndex) ?? matchList[0])
+    } else if (pos < 0) {
+      // Stepping while off a match: forward picks the first match at or after
+      // the row, backward the last at or before it.
+      target =
+        dir === 1
+          ? (matchList.find((i) => i >= selectedIndex) ?? matchList[0])
+          : ([...matchList].reverse().find((i) => i <= selectedIndex) ??
+            matchList[matchList.length - 1])
+    } else {
+      // Already on a match: step to the neighbor, wrapping around the ends.
+      target = matchList[(pos + dir + matchList.length) % matchList.length]
+    }
+
+    const row = rows[target]
+    if (row?.kind === 'commit') {
+      selectCommit(row.commit.sha)
+      virtualizer.scrollToIndex(target, { align: 'center' })
+    }
+    // Re-run on: a changed query (first match), a jump (next/prev), and rows
+    // growing (a pending page that lands the first match). Not on selectedSha,
+    // which this effect itself changes -- that would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, searchJumpNonce, matchCount])
 
   if (!repo) return <NoRepoPlaceholder />
 
@@ -311,6 +410,7 @@ export function GraphView() {
                 selected={selected}
                 onSelect={() => selectCommit(selected ? null : commit.sha)}
                 rowHeight={rowHeight}
+                dimmed={matchRows != null && !matchRows.has(vi.index)}
                 style={rowStyle}
               />
             )

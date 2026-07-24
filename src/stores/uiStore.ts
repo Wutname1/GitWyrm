@@ -86,6 +86,31 @@ interface UiState {
   revealRef: { name: string; nonce: number } | null
   /** Commit or stash sha the graph should scroll to and select; bumped nonce re-triggers. */
   revealSha: { sha: string; nonce: number } | null
+  /**
+   * Text typed in the toolbar search box. The graph dims commits that don't
+   * match and scrolls to the first that does. Empty string means "not searching".
+   */
+  commitSearch: string
+  /**
+   * Signed nonce the search box bumps to step through matches: +1 for next, -1
+   * for previous. The graph reads the sign to pick a direction and the changing
+   * value to re-trigger. Reset to 0 on a new query.
+   */
+  searchJumpNonce: number
+  /** Bumped when Ctrl+F is pressed, so the toolbar can focus its search box. */
+  searchFocusNonce: number
+  /**
+   * How many loaded commits match the current search. The graph computes it and
+   * publishes it so the search box can show "N found" without re-scanning rows.
+   * Null when not searching.
+   */
+  searchMatchCount: number | null
+  /**
+   * 1-based position of the currently selected match among all matches (so the
+   * box can show "3/12"), or 0 when the selection isn't on a match yet. Null
+   * when not searching. Published by the graph alongside the count.
+   */
+  searchMatchIndex: number | null
   /** PR or issue shown in the center view and the actions panel. */
   githubItem: GithubItemRef | null
   /**
@@ -117,6 +142,14 @@ interface UiState {
   focusChanges: () => void
   revealRefInGraph: (name: string) => void
   revealShaInGraph: (sha: string) => void
+  /** Update the toolbar search text. */
+  setCommitSearch: (query: string) => void
+  /** Step to the next (dir 1) or previous (dir -1) commit matching the search. */
+  jumpMatch: (dir: 1 | -1) => void
+  /** Ask the toolbar to focus its search box (Ctrl+F). */
+  requestSearchFocus: () => void
+  /** Publish the match count and current ordinal (null both = not searching). */
+  setSearchMatchStatus: (count: number | null, index: number | null) => void
   openMerge: (source?: string) => void
   openNewTag: (sha?: string) => void
   openNewBranch: (sha?: string) => void
@@ -190,6 +223,11 @@ export const useUiStore = create<UiState>((set) => ({
   changesFocusNonce: 0,
   revealRef: null,
   revealSha: null,
+  commitSearch: '',
+  searchJumpNonce: 0,
+  searchFocusNonce: 0,
+  searchMatchCount: null,
+  searchMatchIndex: null,
   githubItem: null,
   repoPickerWiggleNonce: 0,
   repoPickerOpen: false,
@@ -212,6 +250,9 @@ export const useUiStore = create<UiState>((set) => ({
       fileTarget: null,
       revealRef: null,
       revealSha: null,
+      commitSearch: '',
+      searchMatchCount: null,
+      searchMatchIndex: null,
       githubItem: null,
       stashTracks: {},
       centerView: REPO_SCOPED_VIEWS.has(s.centerView) ? 'graph' : s.centerView,
@@ -231,6 +272,11 @@ export const useUiStore = create<UiState>((set) => ({
       fileTarget: null,
       revealSha: { sha, nonce: (s.revealSha?.nonce ?? 0) + 1 },
     })),
+  setCommitSearch: (query) => set({ commitSearch: query, searchJumpNonce: 0 }),
+  jumpMatch: (dir) => set((s) => ({ searchJumpNonce: s.searchJumpNonce + dir })),
+  requestSearchFocus: () => set((s) => ({ searchFocusNonce: s.searchFocusNonce + 1 })),
+  setSearchMatchStatus: (count, index) =>
+    set({ searchMatchCount: count, searchMatchIndex: index }),
   openMerge: (source) => set({ activeModal: 'merge', mergeSource: source ?? null }),
   openNewTag: (sha) => set({ activeModal: 'newTag', tagTargetSha: sha ?? null }),
   openNewBranch: (sha) => set({ activeModal: 'newBranch', branchTargetSha: sha ?? null }),
