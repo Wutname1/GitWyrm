@@ -227,14 +227,11 @@ export function ChangesList() {
         )}
       </div>
 
-      {hasChanges && staged.length === 0 && (
-        <div className="sticky bottom-0 z-[1] flex items-center justify-center border-t border-border bg-panel py-2">
-          <GenerateCommitsDialog
-            changedFiles={changedFiles}
-            hasConflicts={hasConflicts}
-          />
-        </div>
-      )}
+      <GenerateCommitsDialog
+        changedFiles={changedFiles}
+        hasConflicts={hasConflicts}
+        canOffer={hasChanges && staged.length === 0}
+      />
 
       <ConfirmDialog
         open={confirmDiscard}

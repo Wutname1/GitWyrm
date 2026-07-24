@@ -59,6 +59,13 @@ const progressIcons: Record<ProgressKind, typeof Sparkles> = {
 interface GenerateCommitsDialogProps {
   changedFiles: number;
   hasConflicts: boolean;
+  /**
+   * Whether the entry point is worth offering right now. Only hides the
+   * trigger - an open dialog stays open, because generation itself stages
+   * files and drops the change count, which would otherwise tear the dialog
+   * down mid-run and take the results summary with it.
+   */
+  canOffer: boolean;
 }
 
 function shortSha(sha: string) {
@@ -68,6 +75,7 @@ function shortSha(sha: string) {
 export function GenerateCommitsDialog({
   changedFiles,
   hasConflicts,
+  canOffer,
 }: GenerateCommitsDialogProps) {
   const repo = useActiveRepo();
   const configured = useAiConfigured();
@@ -79,9 +87,12 @@ export function GenerateCommitsDialog({
     aiModel != null &&
     (configured.data ?? []).some((provider) => provider.id === aiProvider);
 
-  const maxCommits = Math.min(8, Math.max(2, changedFiles));
-  const defaultCount = Math.min(maxCommits, changedFiles >= 8 ? 3 : 2);
   const [open, setOpen] = useState(false);
+  // Snapshot on open: generation stages and commits the files, so the live
+  // count falls to zero while the dialog is still describing the run.
+  const [openedWith, setOpenedWith] = useState(changedFiles);
+  const maxCommits = Math.min(8, Math.max(2, openedWith));
+  const defaultCount = Math.min(maxCommits, openedWith >= 8 ? 3 : 2);
   const [count, setCount] = useState(defaultCount);
   const [instructions, setInstructions] = useState("");
   const [created, setCreated] = useState<AiCreatedCommit[] | null>(null);
@@ -134,17 +145,20 @@ export function GenerateCommitsDialog({
   }, [activity]);
 
   const fileLabel = useMemo(
-    () => `${changedFiles} changed file${changedFiles === 1 ? "" : "s"}`,
-    [changedFiles],
+    () => `${openedWith} changed file${openedWith === 1 ? "" : "s"}`,
+    [openedWith],
   );
 
-  if (!aiReady || changedFiles === 0) return null;
+  // Once open, the dialog outlives the conditions that offered it.
+  if (!open && (!aiReady || !canOffer || changedFiles === 0)) return null;
 
   const changeOpen = (next: boolean) => {
     if (!next && working) return;
     setOpen(next);
     if (next) {
-      setCount(defaultCount);
+      const max = Math.min(8, Math.max(2, changedFiles));
+      setOpenedWith(changedFiles);
+      setCount(Math.min(max, changedFiles >= 8 ? 3 : 2));
       setInstructions("");
       setCreated(null);
       setError(null);
@@ -205,14 +219,18 @@ export function GenerateCommitsDialog({
 
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <Button
-        size="xs"
-        onClick={() => changeOpen(true)}
-        className="h-6 border border-primary/45 bg-soft px-2 text-2xs font-semibold text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
-      >
-        <Sparkles />
-        Generate commits for all changes
-      </Button>
+      {canOffer && changedFiles > 0 && (
+        <div className="sticky bottom-0 z-[1] flex items-center justify-center border-t border-border bg-panel py-2">
+          <Button
+            size="xs"
+            onClick={() => changeOpen(true)}
+            className="h-6 border border-primary/45 bg-soft px-2 text-2xs font-semibold text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
+          >
+            <Sparkles />
+            Generate commits for all changes
+          </Button>
+        </div>
+      )}
 
       <DialogContent
         className="gap-0 overflow-hidden p-0 sm:max-w-[34rem]"

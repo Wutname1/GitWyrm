@@ -44,7 +44,7 @@ export function WindowControls() {
       <TooltipButton
         onClick={() => getCurrentWindow().close().catch(() => {})}
         tooltip="Close"
-        className="inline-flex h-full w-11 flex-none items-center justify-center text-sub transition-colors hover:bg-red-600 hover:text-white"
+        className="inline-flex h-full w-11 flex-none items-center justify-center text-sub transition-colors hover:bg-red-600 hover:text-white mr-2 rounded-tr"
       >
         <X size={14} />
       </TooltipButton>
