@@ -151,6 +151,14 @@ function samePath(left: string, right: string): boolean {
   return pathKey(left) === pathKey(right)
 }
 
+/**
+ * Key for one repo's staged or unstaged changes tree. Repo-scoped so two repos
+ * with the same folder names keep their own open/closed state.
+ */
+export function changeTreeKey(repoPath: string, treeId: string): string {
+  return `${pathKey(repoPath)}|${treeId}`
+}
+
 function groupMarker(groupId: string): string {
   return `group:${groupId}`
 }
@@ -350,6 +358,12 @@ interface WorkspaceState {
   pinnedSavedGroupIds: string[]
   /** Repository-picker sections the user has hidden (persisted). */
   repoPickerCollapsedSections: RepoPickerSection[]
+  /**
+   * Folders left open in the changes trees, keyed by `changeTreeKey(repo, tree)`.
+   * Only open folders are stored, so a folder the user never touched stays
+   * collapsed and a deleted folder simply drops out on the next write (persisted).
+   */
+  expandedChangeFolders: Record<string, string[]>
   /** True once settings.json has been read on launch. */
   hydrated: boolean
 
@@ -416,6 +430,12 @@ interface WorkspaceState {
   togglePinnedRepo: (repoPath: string) => void
   togglePinnedSavedGroup: (groupId: string) => void
   toggleRepoPickerSection: (section: RepoPickerSection) => void
+  /**
+   * Replace the open-folder set for one changes tree. An empty list drops the
+   * entry entirely so settings.json does not accumulate keys for repos whose
+   * folders are all collapsed.
+   */
+  setExpandedChangeFolders: (key: string, folders: string[]) => void
   moveRepoBeside: (sourcePath: string, targetPath: string, placement: TabDropPlacement) => void
   moveRepoToOrder: (repoPath: string, orderIndex: number) => void
   moveGroupToOrder: (groupId: string, orderIndex: number) => void
@@ -506,6 +526,7 @@ function toSettings(s: WorkspaceState): Settings {
     pinned_repo_paths: s.pinnedRepoPaths,
     pinned_saved_group_ids: s.pinnedSavedGroupIds,
     repo_picker_collapsed_sections: s.repoPickerCollapsedSections,
+    expanded_change_folders: s.expandedChangeFolders,
   }
 }
 
@@ -585,6 +606,21 @@ function normalizeAliases(aliases: Partial<Record<string, string>> | undefined):
   return out
 }
 
+/**
+ * Read the saved open-folder map back, dropping empty entries. Folder paths are
+ * not validated against the working tree: a folder that no longer has changes is
+ * simply never rendered, and drops out the next time the tree is written.
+ */
+function normalizeExpandedChangeFolders(
+  folders: Partial<Record<string, string[]>> | undefined,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [key, value] of Object.entries(folders ?? {})) {
+    if (value && value.length > 0) out[key] = value
+  }
+  return out
+}
+
 /** Wire shape of a per-repo tag override as stored in settings.json (snake_case, nullable fields). */
 type StoredTagOverride = { push_default?: string | null; push_on_create?: boolean | null }
 
@@ -647,28 +683,28 @@ export const SETTINGS_DEFAULTS = {
   codeFolder: null,
   cloneDirectory: null,
   repoPickerCollapsedSections: [],
-  gitExecutable: '',
+  gitExecutable: "",
   // Not in any per-screen group: only the global "Reset all" restores it.
-  updateChannel: 'stable',
-  branchSwitchMode: 'auto_stash',
-  commitButtonMode: 'commit',
+  updateChannel: "stable",
+  branchSwitchMode: "auto_stash",
+  commitButtonMode: "commit",
   enableWorktrees: false,
-  tagPushDefault: 'ask',
+  tagPushDefault: "ask",
   tagPushOnCreate: false,
   aiInstruction: null,
-  changeSizeDisplay: 'column',
-  showChangeIndicator: true,
+  changeSizeDisplay: "column",
+  showChangeIndicator: false,
   showChangeLineCounts: false,
   uiScale: DEFAULT_UI_SCALE,
   fontFamily: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
   fontWeight: DEFAULT_FONT_WEIGHT,
-  theme: 'auto',
-  themeMode: 'system',
+  theme: "auto",
+  themeMode: "system",
   mintAccent: true,
   showRepoIcons: true,
   tabIconOnly: false,
-} satisfies Partial<WorkspaceState>
+} satisfies Partial<WorkspaceState>;
 
 /** A resettable preference key. */
 export type SettingsKey = keyof typeof SETTINGS_DEFAULTS
@@ -704,9 +740,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   recents: [],
   codeFolder: null,
   cloneDirectory: null,
-  gitExecutable: '',
-  updateChannel: 'stable',
-  branchSwitchMode: 'auto_stash',
+  gitExecutable: "",
+  updateChannel: "stable",
+  branchSwitchMode: "auto_stash",
   aiProvider: null,
   aiModel: null,
   aiInstruction: null,
@@ -715,11 +751,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   columnWidths: {},
   leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
   rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
-  changeSizeDisplay: 'column',
-  showChangeIndicator: true,
+  changeSizeDisplay: "column",
+  showChangeIndicator: false,
   showChangeLineCounts: false,
-  commitButtonMode: 'commit',
-  tagPushDefault: 'ask',
+  commitButtonMode: "commit",
+  tagPushDefault: "ask",
   tagPushOnCreate: false,
   tagOverridesByRepo: {},
   enableWorktrees: false,
@@ -728,14 +764,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   fontSize: DEFAULT_FONT_SIZE,
   fontWeight: DEFAULT_FONT_WEIGHT,
   tabAliases: {},
-  theme: 'auto',
-  themeMode: 'system',
+  theme: "auto",
+  themeMode: "system",
   mintAccent: true,
   showRepoIcons: true,
   tabIconOnly: false,
   verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
   repoIconRevisions: {},
-  tabLayout: 'horizontal',
+  tabLayout: "horizontal",
   horizontalTabRow: false,
   tabGroups: [],
   tabOrder: [],
@@ -743,636 +779,817 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   pinnedRepoPaths: [],
   pinnedSavedGroupIds: [],
   repoPickerCollapsedSections: [],
+  expandedChangeFolders: {},
   hydrated: false,
 
   addRepo: (repo) => {
     set((s) => {
-      const openRepos = s.openRepos.some((r) => r.id === repo.id || samePath(r.path, repo.path))
+      const openRepos = s.openRepos.some(
+        (r) => r.id === repo.id || samePath(r.path, repo.path),
+      )
         ? s.openRepos
-        : [...s.openRepos, repo]
-      const represented = s.tabOrder.some((item) => item.type === 'repo' && samePath(item.path, repo.path))
-        || groupForPath(s.tabGroups, repo.path) != null
-      const tabOrder = represented ? s.tabOrder : [...s.tabOrder, { type: 'repo' as const, path: repo.path }]
+        : [...s.openRepos, repo];
+      const represented =
+        s.tabOrder.some(
+          (item) => item.type === "repo" && samePath(item.path, repo.path),
+        ) || groupForPath(s.tabGroups, repo.path) != null;
+      const tabOrder = represented
+        ? s.tabOrder
+        : [...s.tabOrder, { type: "repo" as const, path: repo.path }];
       const recents = [
         { name: repo.name, path: repo.path },
         ...s.recents.filter((r) => r.path !== repo.path),
-      ].slice(0, 10)
-      return { openRepos, activeRepoId: repo.id, recents, tabOrder }
-    })
-    schedulePersist()
+      ].slice(0, 10);
+      return { openRepos, activeRepoId: repo.id, recents, tabOrder };
+    });
+    schedulePersist();
   },
   addReposInBackground: (repos) => {
-    if (repos.length === 0) return
+    if (repos.length === 0) return;
     set((s) => {
-      let openRepos = s.openRepos
-      let tabOrder = s.tabOrder
-      let recents = s.recents
+      let openRepos = s.openRepos;
+      let tabOrder = s.tabOrder;
+      let recents = s.recents;
       for (const repo of repos) {
-        if (openRepos.some((r) => r.id === repo.id || samePath(r.path, repo.path))) continue
-        openRepos = [...openRepos, repo]
-        const represented = tabOrder.some((item) => item.type === 'repo' && samePath(item.path, repo.path))
-          || groupForPath(s.tabGroups, repo.path) != null
-        if (!represented) tabOrder = [...tabOrder, { type: 'repo' as const, path: repo.path }]
-        recents = [{ name: repo.name, path: repo.path }, ...recents.filter((r) => !samePath(r.path, repo.path))]
+        if (
+          openRepos.some((r) => r.id === repo.id || samePath(r.path, repo.path))
+        )
+          continue;
+        openRepos = [...openRepos, repo];
+        const represented =
+          tabOrder.some(
+            (item) => item.type === "repo" && samePath(item.path, repo.path),
+          ) || groupForPath(s.tabGroups, repo.path) != null;
+        if (!represented)
+          tabOrder = [...tabOrder, { type: "repo" as const, path: repo.path }];
+        recents = [
+          { name: repo.name, path: repo.path },
+          ...recents.filter((r) => !samePath(r.path, repo.path)),
+        ];
       }
       // activeRepoId is deliberately untouched: a batch open must not steal focus.
       // With no tab open yet there is nothing to steal, so focus the first one.
-      const activeRepoId = s.activeRepoId ?? openRepos[0]?.id ?? null
-      return { openRepos, activeRepoId, recents: recents.slice(0, 10), tabOrder }
-    })
-    schedulePersist()
+      const activeRepoId = s.activeRepoId ?? openRepos[0]?.id ?? null;
+      return {
+        openRepos,
+        activeRepoId,
+        recents: recents.slice(0, 10),
+        tabOrder,
+      };
+    });
+    schedulePersist();
   },
   removeRepo: (id) => {
     set((s) => {
-      const removed = s.openRepos.find((repo) => repo.id === id)
-      const openRepos = s.openRepos.filter((r) => r.id !== id)
+      const removed = s.openRepos.find((repo) => repo.id === id);
+      const openRepos = s.openRepos.filter((r) => r.id !== id);
       const workspace = removed
         ? removePathFromWorkspace(s.tabGroups, s.tabOrder, removed.path)
-        : { groups: s.tabGroups, order: s.tabOrder }
+        : { groups: s.tabGroups, order: s.tabOrder };
       const orderedRemaining = workspace.order.flatMap((item) => {
-        if (item.type === 'repo') return [item.path]
-        return workspace.groups.find((group) => group.id === item.id)?.repoPaths ?? []
-      })
-      const nextActivePath = orderedRemaining.find((path) => openRepos.some((repo) => samePath(repo.path, path)))
+        if (item.type === "repo") return [item.path];
+        return (
+          workspace.groups.find((group) => group.id === item.id)?.repoPaths ??
+          []
+        );
+      });
+      const nextActivePath = orderedRemaining.find((path) =>
+        openRepos.some((repo) => samePath(repo.path, path)),
+      );
       const activeRepoId =
         s.activeRepoId === id
-          ? (openRepos.find((repo) => nextActivePath && samePath(repo.path, nextActivePath))?.id ?? openRepos[0]?.id ?? null)
-          : s.activeRepoId
+          ? (openRepos.find(
+              (repo) => nextActivePath && samePath(repo.path, nextActivePath),
+            )?.id ??
+            openRepos[0]?.id ??
+            null)
+          : s.activeRepoId;
       return {
         openRepos,
         activeRepoId,
         tabGroups: workspace.groups,
         tabOrder: workspace.order,
-      }
-    })
-    schedulePersist()
+      };
+    });
+    schedulePersist();
   },
   setActiveRepo: (id) => {
-    set({ activeRepoId: id })
+    set({ activeRepoId: id });
     // Selecting a repo tab means "show me that repo", so step out of the
     // app-level picker view if it was covering the center. The picker's own tab
     // stays open, so coming back to it keeps whatever was typed there.
-    const ui = useUiStore.getState()
-    if (ui.centerView === 'repoPicker') ui.showGraph()
+    const ui = useUiStore.getState();
+    if (ui.centerView === "repoPicker") ui.showGraph();
 
-    schedulePersist()
+    schedulePersist();
   },
   setCodeFolder: (path) => {
-    set({ codeFolder: path ? normalizePath(path) : null })
-    schedulePersist()
+    set({ codeFolder: path ? normalizePath(path) : null });
+    schedulePersist();
   },
   setCloneDirectory: (path) => {
-    set({ cloneDirectory: path ? normalizePath(path) : null })
-    schedulePersist()
+    set({ cloneDirectory: path ? normalizePath(path) : null });
+    schedulePersist();
   },
   setGitExecutable: (path) => {
-    set({ gitExecutable: path })
-    schedulePersist()
+    set({ gitExecutable: path });
+    schedulePersist();
   },
   resetSettingsGroup: (group) => {
-    const keys = SETTINGS_GROUPS[group]
-    const s = get()
-    const snapshot: SettingsSnapshot = {}
-    const next: Partial<WorkspaceState> = {}
+    const keys = SETTINGS_GROUPS[group];
+    const s = get();
+    const snapshot: SettingsSnapshot = {};
+    const next: Partial<WorkspaceState> = {};
     for (const key of keys) {
       // Capture the current value, then stage the default. The `as never`
       // casts bridge the heterogeneous value types behind the shared key set.
-      ;(snapshot as Record<string, unknown>)[key] = s[key]
-      ;(next as Record<string, unknown>)[key] = SETTINGS_DEFAULTS[key]
+      (snapshot as Record<string, unknown>)[key] = s[key];
+      (next as Record<string, unknown>)[key] = SETTINGS_DEFAULTS[key];
     }
-    set(next as Partial<WorkspaceState>)
-    schedulePersist()
-    return snapshot
+    set(next as Partial<WorkspaceState>);
+    schedulePersist();
+    return snapshot;
   },
   resetAllSettings: () => {
-    const s = get()
-    const snapshot: SettingsSnapshot = {}
-    const next: Partial<WorkspaceState> = {}
+    const s = get();
+    const snapshot: SettingsSnapshot = {};
+    const next: Partial<WorkspaceState> = {};
     for (const key of Object.keys(SETTINGS_DEFAULTS) as SettingsKey[]) {
-      ;(snapshot as Record<string, unknown>)[key] = s[key]
-      ;(next as Record<string, unknown>)[key] = SETTINGS_DEFAULTS[key]
+      (snapshot as Record<string, unknown>)[key] = s[key];
+      (next as Record<string, unknown>)[key] = SETTINGS_DEFAULTS[key];
     }
-    set(next as Partial<WorkspaceState>)
-    schedulePersist()
-    return snapshot
+    set(next as Partial<WorkspaceState>);
+    schedulePersist();
+    return snapshot;
   },
   restoreSettings: (snapshot) => {
-    set(snapshot as Partial<WorkspaceState>)
-    schedulePersist()
+    set(snapshot as Partial<WorkspaceState>);
+    schedulePersist();
   },
   setUpdateChannel: (channel) => {
-    set({ updateChannel: channel })
-    schedulePersist()
+    set({ updateChannel: channel });
+    schedulePersist();
   },
   setBranchSwitchMode: (mode) => {
-    set({ branchSwitchMode: mode })
-    schedulePersist()
+    set({ branchSwitchMode: mode });
+    schedulePersist();
   },
   setAiSelection: (provider, model) => {
-    set({ aiProvider: provider, aiModel: model })
-    schedulePersist()
+    set({ aiProvider: provider, aiModel: model });
+    schedulePersist();
   },
   setAiInstruction: (instruction) => {
-    set({ aiInstruction: instruction })
-    schedulePersist()
+    set({ aiInstruction: instruction });
+    schedulePersist();
   },
   setCommitButtonMode: (mode) => {
-    set({ commitButtonMode: mode })
-    schedulePersist()
+    set({ commitButtonMode: mode });
+    schedulePersist();
   },
   setTagPushDefault: (mode) => {
-    set({ tagPushDefault: mode })
-    schedulePersist()
+    set({ tagPushDefault: mode });
+    schedulePersist();
   },
   setTagPushOnCreate: (enabled) => {
-    set({ tagPushOnCreate: enabled })
-    schedulePersist()
+    set({ tagPushOnCreate: enabled });
+    schedulePersist();
   },
   setRepoTagOverride: (path, patch) => {
     set((s) => {
-      const next = { ...s.tagOverridesByRepo }
-      const current: TagOverride = { ...next[path] }
+      const next = { ...s.tagOverridesByRepo };
+      const current: TagOverride = { ...next[path] };
 
-      if ('pushDefault' in patch) {
-        if (patch.pushDefault == null) delete current.pushDefault
-        else current.pushDefault = patch.pushDefault
+      if ("pushDefault" in patch) {
+        if (patch.pushDefault == null) delete current.pushDefault;
+        else current.pushDefault = patch.pushDefault;
       }
-      if ('pushOnCreate' in patch) {
-        if (patch.pushOnCreate == null) delete current.pushOnCreate
-        else current.pushOnCreate = patch.pushOnCreate
+      if ("pushOnCreate" in patch) {
+        if (patch.pushOnCreate == null) delete current.pushOnCreate;
+        else current.pushOnCreate = patch.pushOnCreate;
       }
 
-      if (current.pushDefault === undefined && current.pushOnCreate === undefined) {
-        delete next[path]
+      if (
+        current.pushDefault === undefined &&
+        current.pushOnCreate === undefined
+      ) {
+        delete next[path];
       } else {
-        next[path] = current
+        next[path] = current;
       }
-      return { tagOverridesByRepo: next }
-    })
-    schedulePersist()
+      return { tagOverridesByRepo: next };
+    });
+    schedulePersist();
   },
   clearRepoTagOverride: (path) => {
     set((s) => {
-      if (!(path in s.tagOverridesByRepo)) return s
-      const next = { ...s.tagOverridesByRepo }
-      delete next[path]
-      return { tagOverridesByRepo: next }
-    })
-    schedulePersist()
+      if (!(path in s.tagOverridesByRepo)) return s;
+      const next = { ...s.tagOverridesByRepo };
+      delete next[path];
+      return { tagOverridesByRepo: next };
+    });
+    schedulePersist();
   },
   resolveTagSettings: (path) => {
-    const s = get()
-    const override = path ? s.tagOverridesByRepo[path] : undefined
+    const s = get();
+    const override = path ? s.tagOverridesByRepo[path] : undefined;
     return {
       pushDefault: override?.pushDefault ?? s.tagPushDefault,
       pushOnCreate: override?.pushOnCreate ?? s.tagPushOnCreate,
-    }
+    };
   },
   setEnableWorktrees: (enabled) => {
-    set({ enableWorktrees: enabled })
-    schedulePersist()
+    set({ enableWorktrees: enabled });
+    schedulePersist();
   },
   setTabLayout: (layout) => {
-    set({ tabLayout: layout })
-    schedulePersist()
+    set({ tabLayout: layout });
+    schedulePersist();
   },
   setHorizontalTabRow: (enabled) => {
-    set({ horizontalTabRow: enabled })
-    schedulePersist()
+    set({ horizontalTabRow: enabled });
+    schedulePersist();
   },
   setUiScale: (scale) => {
-    set({ uiScale: clampUiScale(scale) })
-    schedulePersist()
+    set({ uiScale: clampUiScale(scale) });
+    schedulePersist();
   },
   setFontFamily: (id) => {
-    set({ fontFamily: id || DEFAULT_FONT_ID })
-    schedulePersist()
+    set({ fontFamily: id || DEFAULT_FONT_ID });
+    schedulePersist();
   },
   setFontSize: (size) => {
-    set({ fontSize: clampFontSize(size) })
-    schedulePersist()
+    set({ fontSize: clampFontSize(size) });
+    schedulePersist();
   },
   setFontWeight: (weight) => {
-    set({ fontWeight: clampFontWeight(weight) })
-    schedulePersist()
+    set({ fontWeight: clampFontWeight(weight) });
+    schedulePersist();
   },
   setTabAlias: (path, alias) => {
     set((s) => {
-      const next = { ...s.tabAliases }
-      const trimmed = alias.trim()
-      if (trimmed) next[path] = trimmed
-      else delete next[path]
-      return { tabAliases: next }
-    })
-    schedulePersist()
+      const next = { ...s.tabAliases };
+      const trimmed = alias.trim();
+      if (trimmed) next[path] = trimmed;
+      else delete next[path];
+      return { tabAliases: next };
+    });
+    schedulePersist();
   },
   setTheme: (theme) => {
-    set({ theme })
-    schedulePersist()
+    set({ theme });
+    schedulePersist();
   },
   setThemeMode: (mode) => {
-    set({ themeMode: mode })
-    schedulePersist()
+    set({ themeMode: mode });
+    schedulePersist();
   },
   setMintAccent: (enabled) => {
-    set({ mintAccent: enabled })
-    schedulePersist()
+    set({ mintAccent: enabled });
+    schedulePersist();
   },
   setShowRepoIcons: (enabled) => {
-    set({ showRepoIcons: enabled })
-    schedulePersist()
+    set({ showRepoIcons: enabled });
+    schedulePersist();
   },
   setTabIconOnly: (enabled) => {
-    set({ tabIconOnly: enabled })
-    schedulePersist()
+    set({ tabIconOnly: enabled });
+    schedulePersist();
   },
   setVerticalTabWidth: (width) => {
-    set({ verticalTabWidth: clampVerticalTabWidth(width) })
-    schedulePersist()
+    set({ verticalTabWidth: clampVerticalTabWidth(width) });
+    schedulePersist();
   },
   refreshRepoIcon: (path) => {
-    const key = pathKey(path)
+    const key = pathKey(path);
     set((s) => ({
       repoIconRevisions: {
         ...s.repoIconRevisions,
         [key]: (s.repoIconRevisions[key] ?? 0) + 1,
       },
-    }))
+    }));
   },
   createTabGroup: (repoPaths, options) => {
-    const existingIds = new Set(get().tabGroups.map((group) => group.id))
-    const requestedId = options?.id
-    const id = requestedId && !existingIds.has(requestedId) ? requestedId : newGroupId()
+    const existingIds = new Set(get().tabGroups.map((group) => group.id));
+    const requestedId = options?.id;
+    const id =
+      requestedId && !existingIds.has(requestedId) ? requestedId : newGroupId();
     set((s) => {
-      const paths = [...new Map(repoPaths
-        .filter((path) => s.openRepos.some((repo) => samePath(repo.path, path)))
-        .map((path) => [pathKey(path), normalizePath(path)])).values()]
-      if (paths.length === 0) return s
+      const paths = [
+        ...new Map(
+          repoPaths
+            .filter((path) =>
+              s.openRepos.some((repo) => samePath(repo.path, path)),
+            )
+            .map((path) => [pathKey(path), normalizePath(path)]),
+        ).values(),
+      ];
+      if (paths.length === 0) return s;
       const positions = paths
         .map((path) => workspaceIndexForPath(s.tabGroups, s.tabOrder, path))
-        .filter((index) => index >= 0)
-      const insertionIndex = positions.length > 0 ? Math.min(...positions) : s.tabOrder.length
-      let groups = s.tabGroups
-      let order = s.tabOrder
+        .filter((index) => index >= 0);
+      const insertionIndex =
+        positions.length > 0 ? Math.min(...positions) : s.tabOrder.length;
+      let groups = s.tabGroups;
+      let order = s.tabOrder;
       for (const path of paths) {
-        const next = removePathFromWorkspace(groups, order, path)
-        groups = next.groups
-        order = next.order
+        const next = removePathFromWorkspace(groups, order, path);
+        groups = next.groups;
+        order = next.order;
       }
       const group: TabGroup = {
         id,
-        name: options?.name?.trim() || 'New group',
-        color: options?.color || TAB_GROUP_COLORS[groups.length % TAB_GROUP_COLORS.length],
+        name: options?.name?.trim() || "New group",
+        color:
+          options?.color ||
+          TAB_GROUP_COLORS[groups.length % TAB_GROUP_COLORS.length],
         collapsed: false,
         repoPaths: paths,
-      }
-      groups = [...groups, group]
-      order = [...order]
-      order.splice(Math.min(insertionIndex, order.length), 0, { type: 'group', id })
-      return { tabGroups: groups, tabOrder: order }
-    })
-    log.info(`workspace: created tab group ${id} with ${repoPaths.length} repo(s)`)
-    schedulePersist()
-    return id
+      };
+      groups = [...groups, group];
+      order = [...order];
+      order.splice(Math.min(insertionIndex, order.length), 0, {
+        type: "group",
+        id,
+      });
+      return { tabGroups: groups, tabOrder: order };
+    });
+    log.info(
+      `workspace: created tab group ${id} with ${repoPaths.length} repo(s)`,
+    );
+    schedulePersist();
+    return id;
   },
   addRepoToGroup: (repoPath, groupId) => {
     set((s) => {
-      const currentGroup = groupForPath(s.tabGroups, repoPath)
-      if (currentGroup?.id === groupId) return s
-      const workspace = removePathFromWorkspace(s.tabGroups, s.tabOrder, repoPath)
-      const target = workspace.groups.find((group) => group.id === groupId)
-      if (!target) return s
+      const currentGroup = groupForPath(s.tabGroups, repoPath);
+      if (currentGroup?.id === groupId) return s;
+      const workspace = removePathFromWorkspace(
+        s.tabGroups,
+        s.tabOrder,
+        repoPath,
+      );
+      const target = workspace.groups.find((group) => group.id === groupId);
+      if (!target) return s;
       return {
-        tabGroups: workspace.groups.map((group) => group.id === groupId
-          ? { ...group, collapsed: false, repoPaths: [...group.repoPaths, normalizePath(repoPath)] }
-          : group),
+        tabGroups: workspace.groups.map((group) =>
+          group.id === groupId
+            ? {
+                ...group,
+                collapsed: false,
+                repoPaths: [...group.repoPaths, normalizePath(repoPath)],
+              }
+            : group,
+        ),
         tabOrder: workspace.order,
-      }
-    })
-    log.info(`workspace: added repo to group ${groupId}`)
-    schedulePersist()
+      };
+    });
+    log.info(`workspace: added repo to group ${groupId}`);
+    schedulePersist();
   },
   removeRepoFromGroup: (repoPath) => {
     set((s) => {
-      const group = groupForPath(s.tabGroups, repoPath)
-      if (!group) return s
-      const groupIndex = s.tabOrder.findIndex((item) => item.type === 'group' && item.id === group.id)
-      const groupWillRemain = group.repoPaths.length > 1
-      const workspace = removePathFromWorkspace(s.tabGroups, s.tabOrder, repoPath)
-      const order = [...workspace.order]
-      order.splice(Math.max(0, Math.min(groupIndex + (groupWillRemain ? 1 : 0), order.length)), 0, {
-        type: 'repo',
-        path: normalizePath(repoPath),
-      })
-      return { tabGroups: workspace.groups, tabOrder: order }
-    })
-    log.info('workspace: removed repo from its group')
-    schedulePersist()
+      const group = groupForPath(s.tabGroups, repoPath);
+      if (!group) return s;
+      const groupIndex = s.tabOrder.findIndex(
+        (item) => item.type === "group" && item.id === group.id,
+      );
+      const groupWillRemain = group.repoPaths.length > 1;
+      const workspace = removePathFromWorkspace(
+        s.tabGroups,
+        s.tabOrder,
+        repoPath,
+      );
+      const order = [...workspace.order];
+      order.splice(
+        Math.max(
+          0,
+          Math.min(groupIndex + (groupWillRemain ? 1 : 0), order.length),
+        ),
+        0,
+        {
+          type: "repo",
+          path: normalizePath(repoPath),
+        },
+      );
+      return { tabGroups: workspace.groups, tabOrder: order };
+    });
+    log.info("workspace: removed repo from its group");
+    schedulePersist();
   },
   renameTabGroup: (groupId, name) => {
-    const trimmed = name.trim()
-    if (!trimmed) return
+    const trimmed = name.trim();
+    if (!trimmed) return;
     set((s) => ({
-      tabGroups: s.tabGroups.map((group) => group.id === groupId ? { ...group, name: trimmed } : group),
-    }))
-    schedulePersist()
+      tabGroups: s.tabGroups.map((group) =>
+        group.id === groupId ? { ...group, name: trimmed } : group,
+      ),
+    }));
+    schedulePersist();
   },
   setTabGroupColor: (groupId, color) => {
     set((s) => ({
-      tabGroups: s.tabGroups.map((group) => group.id === groupId ? { ...group, color } : group),
-    }))
-    schedulePersist()
+      tabGroups: s.tabGroups.map((group) =>
+        group.id === groupId ? { ...group, color } : group,
+      ),
+    }));
+    schedulePersist();
   },
   toggleTabGroup: (groupId) => {
     set((s) => ({
-      tabGroups: s.tabGroups.map((group) => group.id === groupId
-        ? { ...group, collapsed: !group.collapsed }
-        : group),
-    }))
-    schedulePersist()
+      tabGroups: s.tabGroups.map((group) =>
+        group.id === groupId
+          ? { ...group, collapsed: !group.collapsed }
+          : group,
+      ),
+    }));
+    schedulePersist();
   },
   ungroupTabGroup: (groupId) => {
     set((s) => {
-      const group = s.tabGroups.find((candidate) => candidate.id === groupId)
-      const groupIndex = s.tabOrder.findIndex((item) => item.type === 'group' && item.id === groupId)
-      if (!group || groupIndex < 0) return s
-      const order = [...s.tabOrder]
-      order.splice(groupIndex, 1, ...group.repoPaths.map((path) => ({ type: 'repo' as const, path })))
+      const group = s.tabGroups.find((candidate) => candidate.id === groupId);
+      const groupIndex = s.tabOrder.findIndex(
+        (item) => item.type === "group" && item.id === groupId,
+      );
+      if (!group || groupIndex < 0) return s;
+      const order = [...s.tabOrder];
+      order.splice(
+        groupIndex,
+        1,
+        ...group.repoPaths.map((path) => ({ type: "repo" as const, path })),
+      );
       return {
         tabGroups: s.tabGroups.filter((candidate) => candidate.id !== groupId),
         tabOrder: order,
-      }
-    })
-    schedulePersist()
+      };
+    });
+    schedulePersist();
   },
   removeTabGroup: (groupId) => {
     set((s) => {
-      const group = s.tabGroups.find((candidate) => candidate.id === groupId)
-      if (!group) return s
-      const closedKeys = new Set(group.repoPaths.map(pathKey))
-      const openRepos = s.openRepos.filter((repo) => !closedKeys.has(pathKey(repo.path)))
+      const group = s.tabGroups.find((candidate) => candidate.id === groupId);
+      if (!group) return s;
+      const closedKeys = new Set(group.repoPaths.map(pathKey));
+      const openRepos = s.openRepos.filter(
+        (repo) => !closedKeys.has(pathKey(repo.path)),
+      );
       const activeRepoId = openRepos.some((repo) => repo.id === s.activeRepoId)
         ? s.activeRepoId
-        : (openRepos[0]?.id ?? null)
+        : (openRepos[0]?.id ?? null);
       return {
         openRepos,
         activeRepoId,
         tabGroups: s.tabGroups.filter((candidate) => candidate.id !== groupId),
-        tabOrder: s.tabOrder.filter((item) => !(item.type === 'group' && item.id === groupId)),
-      }
-    })
-    schedulePersist()
+        tabOrder: s.tabOrder.filter(
+          (item) => !(item.type === "group" && item.id === groupId),
+        ),
+      };
+    });
+    schedulePersist();
   },
   saveTabGroup: (groupId) => {
     set((s) => {
-      const group = s.tabGroups.find((candidate) => candidate.id === groupId)
-      if (!group) return s
+      const group = s.tabGroups.find((candidate) => candidate.id === groupId);
+      if (!group) return s;
       const saved: SavedTabGroup = {
         id: group.id,
         name: group.name,
         color: group.color,
         repoPaths: [...group.repoPaths],
-      }
+      };
       return {
-        savedTabGroups: [...s.savedTabGroups.filter((candidate) => candidate.id !== groupId), saved],
+        savedTabGroups: [
+          ...s.savedTabGroups.filter((candidate) => candidate.id !== groupId),
+          saved,
+        ],
         pinnedSavedGroupIds: [
           groupId,
           ...s.pinnedSavedGroupIds.filter((candidate) => candidate !== groupId),
         ],
-      }
-    })
-    schedulePersist()
+      };
+    });
+    schedulePersist();
   },
   createSavedTabGroup: (repoPaths, name) => {
-    const trimmedName = name.trim()
-    const paths = [...new Map(repoPaths.map((path) => [pathKey(path), normalizePath(path)])).values()]
-    if (!trimmedName || paths.length === 0) return null
+    const trimmedName = name.trim();
+    const paths = [
+      ...new Map(
+        repoPaths.map((path) => [pathKey(path), normalizePath(path)]),
+      ).values(),
+    ];
+    if (!trimmedName || paths.length === 0) return null;
 
-    const id = newGroupId()
+    const id = newGroupId();
     set((s) => ({
-      savedTabGroups: [...s.savedTabGroups, {
+      savedTabGroups: [
+        ...s.savedTabGroups,
+        {
+          id,
+          name: trimmedName,
+          color:
+            TAB_GROUP_COLORS[s.savedTabGroups.length % TAB_GROUP_COLORS.length],
+          repoPaths: paths,
+        },
+      ],
+      pinnedSavedGroupIds: [
         id,
-        name: trimmedName,
-        color: TAB_GROUP_COLORS[s.savedTabGroups.length % TAB_GROUP_COLORS.length],
-        repoPaths: paths,
-      }],
-      pinnedSavedGroupIds: [id, ...s.pinnedSavedGroupIds.filter((candidate) => candidate !== id)],
-    }))
-    log.info(`workspace: saved new group ${id} with ${paths.length} repo(s)`)
-    schedulePersist()
-    return id
+        ...s.pinnedSavedGroupIds.filter((candidate) => candidate !== id),
+      ],
+    }));
+    log.info(`workspace: saved new group ${id} with ${paths.length} repo(s)`);
+    schedulePersist();
+    return id;
   },
   deleteSavedTabGroup: (groupId) => {
     set((s) => ({
       savedTabGroups: s.savedTabGroups.filter((group) => group.id !== groupId),
       pinnedSavedGroupIds: s.pinnedSavedGroupIds.filter((id) => id !== groupId),
-    }))
-    schedulePersist()
+    }));
+    schedulePersist();
   },
   togglePinnedRepo: (repoPath) => {
-    const path = normalizePath(repoPath)
+    const path = normalizePath(repoPath);
     set((s) => {
-      const pinned = s.pinnedRepoPaths.some((candidate) => samePath(candidate, path))
+      const pinned = s.pinnedRepoPaths.some((candidate) =>
+        samePath(candidate, path),
+      );
       return {
         pinnedRepoPaths: pinned
           ? s.pinnedRepoPaths.filter((candidate) => !samePath(candidate, path))
-          : [path, ...s.pinnedRepoPaths.filter((candidate) => !samePath(candidate, path))],
-      }
-    })
-    schedulePersist()
+          : [
+              path,
+              ...s.pinnedRepoPaths.filter(
+                (candidate) => !samePath(candidate, path),
+              ),
+            ],
+      };
+    });
+    schedulePersist();
   },
   togglePinnedSavedGroup: (groupId) => {
     set((s) => {
-      const pinned = s.pinnedSavedGroupIds.includes(groupId)
+      const pinned = s.pinnedSavedGroupIds.includes(groupId);
       return {
         pinnedSavedGroupIds: pinned
           ? s.pinnedSavedGroupIds.filter((id) => id !== groupId)
           : [groupId, ...s.pinnedSavedGroupIds.filter((id) => id !== groupId)],
-      }
-    })
-    schedulePersist()
+      };
+    });
+    schedulePersist();
   },
   toggleRepoPickerSection: (section) => {
     set((s) => ({
-      repoPickerCollapsedSections: s.repoPickerCollapsedSections.includes(section)
-        ? s.repoPickerCollapsedSections.filter((candidate) => candidate !== section)
+      repoPickerCollapsedSections: s.repoPickerCollapsedSections.includes(
+        section,
+      )
+        ? s.repoPickerCollapsedSections.filter(
+            (candidate) => candidate !== section,
+          )
         : [...s.repoPickerCollapsedSections, section],
-    }))
-    schedulePersist()
+    }));
+    schedulePersist();
+  },
+  setExpandedChangeFolders: (key, folders) => {
+    set((s) => {
+      const next = { ...s.expandedChangeFolders };
+      if (folders.length === 0) delete next[key];
+      else next[key] = folders;
+      return { expandedChangeFolders: next };
+    });
+    schedulePersist();
   },
   moveRepoBeside: (sourcePath, targetPath, placement) => {
-    if (samePath(sourcePath, targetPath)) return
+    if (samePath(sourcePath, targetPath)) return;
     set((s) => {
-      const targetGroupId = groupForPath(s.tabGroups, targetPath)?.id ?? null
-      const workspace = removePathFromWorkspace(s.tabGroups, s.tabOrder, sourcePath)
+      const targetGroupId = groupForPath(s.tabGroups, targetPath)?.id ?? null;
+      const workspace = removePathFromWorkspace(
+        s.tabGroups,
+        s.tabOrder,
+        sourcePath,
+      );
       if (targetGroupId) {
-        const target = workspace.groups.find((group) => group.id === targetGroupId)
-        if (!target) return s
-        const targetIndex = target.repoPaths.findIndex((path) => samePath(path, targetPath))
+        const target = workspace.groups.find(
+          (group) => group.id === targetGroupId,
+        );
+        if (!target) return s;
+        const targetIndex = target.repoPaths.findIndex((path) =>
+          samePath(path, targetPath),
+        );
         const groups = workspace.groups.map((group) => {
-          if (group.id !== targetGroupId) return group
-          const repoPaths = [...group.repoPaths]
-          repoPaths.splice(targetIndex + (placement === 'after' ? 1 : 0), 0, normalizePath(sourcePath))
-          return { ...group, collapsed: false, repoPaths }
-        })
-        return { tabGroups: groups, tabOrder: workspace.order }
+          if (group.id !== targetGroupId) return group;
+          const repoPaths = [...group.repoPaths];
+          repoPaths.splice(
+            targetIndex + (placement === "after" ? 1 : 0),
+            0,
+            normalizePath(sourcePath),
+          );
+          return { ...group, collapsed: false, repoPaths };
+        });
+        return { tabGroups: groups, tabOrder: workspace.order };
       }
-      const targetIndex = workspace.order.findIndex((item) => item.type === 'repo' && samePath(item.path, targetPath))
-      if (targetIndex < 0) return s
-      const order = [...workspace.order]
-      order.splice(targetIndex + (placement === 'after' ? 1 : 0), 0, {
-        type: 'repo',
+      const targetIndex = workspace.order.findIndex(
+        (item) => item.type === "repo" && samePath(item.path, targetPath),
+      );
+      if (targetIndex < 0) return s;
+      const order = [...workspace.order];
+      order.splice(targetIndex + (placement === "after" ? 1 : 0), 0, {
+        type: "repo",
         path: normalizePath(sourcePath),
-      })
-      return { tabGroups: workspace.groups, tabOrder: order }
-    })
-    schedulePersist()
+      });
+      return { tabGroups: workspace.groups, tabOrder: order };
+    });
+    schedulePersist();
   },
   moveRepoToOrder: (repoPath, requestedIndex) => {
     set((s) => {
-      const sourceGroup = groupForPath(s.tabGroups, repoPath)
-      const sourceIndex = workspaceIndexForPath(s.tabGroups, s.tabOrder, repoPath)
-      const removesOrderItem = !sourceGroup || sourceGroup.repoPaths.length === 1
-      let insertAt = requestedIndex
-      if (removesOrderItem && sourceIndex >= 0 && sourceIndex < requestedIndex) insertAt -= 1
-      const workspace = removePathFromWorkspace(s.tabGroups, s.tabOrder, repoPath)
-      const order = [...workspace.order]
+      const sourceGroup = groupForPath(s.tabGroups, repoPath);
+      const sourceIndex = workspaceIndexForPath(
+        s.tabGroups,
+        s.tabOrder,
+        repoPath,
+      );
+      const removesOrderItem =
+        !sourceGroup || sourceGroup.repoPaths.length === 1;
+      let insertAt = requestedIndex;
+      if (removesOrderItem && sourceIndex >= 0 && sourceIndex < requestedIndex)
+        insertAt -= 1;
+      const workspace = removePathFromWorkspace(
+        s.tabGroups,
+        s.tabOrder,
+        repoPath,
+      );
+      const order = [...workspace.order];
       order.splice(Math.max(0, Math.min(insertAt, order.length)), 0, {
-        type: 'repo',
+        type: "repo",
         path: normalizePath(repoPath),
-      })
-      return { tabGroups: workspace.groups, tabOrder: order }
-    })
-    schedulePersist()
+      });
+      return { tabGroups: workspace.groups, tabOrder: order };
+    });
+    schedulePersist();
   },
   moveGroupToOrder: (groupId, requestedIndex) => {
     set((s) => {
-      const fromIndex = s.tabOrder.findIndex((item) => item.type === 'group' && item.id === groupId)
-      if (fromIndex < 0) return s
-      let insertAt = requestedIndex
-      if (fromIndex < requestedIndex) insertAt -= 1
-      const order = [...s.tabOrder]
-      const [item] = order.splice(fromIndex, 1)
-      if (!item) return s
-      order.splice(Math.max(0, Math.min(insertAt, order.length)), 0, item)
-      return { tabOrder: order }
-    })
-    schedulePersist()
+      const fromIndex = s.tabOrder.findIndex(
+        (item) => item.type === "group" && item.id === groupId,
+      );
+      if (fromIndex < 0) return s;
+      let insertAt = requestedIndex;
+      if (fromIndex < requestedIndex) insertAt -= 1;
+      const order = [...s.tabOrder];
+      const [item] = order.splice(fromIndex, 1);
+      if (!item) return s;
+      order.splice(Math.max(0, Math.min(insertAt, order.length)), 0, item);
+      return { tabOrder: order };
+    });
+    schedulePersist();
   },
   finishRepoRestore: () => {
     set((s) => {
-      const openKeys = new Set(s.openRepos.map((repo) => pathKey(repo.path)))
+      const openKeys = new Set(s.openRepos.map((repo) => pathKey(repo.path)));
       const tabGroups = s.tabGroups
-        .map((group) => ({ ...group, repoPaths: group.repoPaths.filter((path) => openKeys.has(pathKey(path))) }))
-        .filter((group) => group.repoPaths.length > 0)
-      const groupIds = new Set(tabGroups.map((group) => group.id))
-      const represented = new Set(tabGroups.flatMap((group) => group.repoPaths.map(pathKey)))
+        .map((group) => ({
+          ...group,
+          repoPaths: group.repoPaths.filter((path) =>
+            openKeys.has(pathKey(path)),
+          ),
+        }))
+        .filter((group) => group.repoPaths.length > 0);
+      const groupIds = new Set(tabGroups.map((group) => group.id));
+      const represented = new Set(
+        tabGroups.flatMap((group) => group.repoPaths.map(pathKey)),
+      );
       const tabOrder = s.tabOrder.filter((item) => {
-        if (item.type === 'group') return groupIds.has(item.id)
-        const key = pathKey(item.path)
-        if (!openKeys.has(key) || represented.has(key)) return false
-        represented.add(key)
-        return true
-      })
+        if (item.type === "group") return groupIds.has(item.id);
+        const key = pathKey(item.path);
+        if (!openKeys.has(key) || represented.has(key)) return false;
+        represented.add(key);
+        return true;
+      });
       for (const repo of s.openRepos) {
-        const key = pathKey(repo.path)
+        const key = pathKey(repo.path);
         if (!represented.has(key)) {
-          represented.add(key)
-          tabOrder.push({ type: 'repo', path: repo.path })
+          represented.add(key);
+          tabOrder.push({ type: "repo", path: repo.path });
         }
       }
-      return { tabGroups, tabOrder }
-    })
-    schedulePersist()
+      return { tabGroups, tabOrder };
+    });
+    schedulePersist();
   },
   reorderColumn: (id, toIndex) => {
     set((s) => {
-      const from = s.columnOrder.indexOf(id)
-      if (from === -1) return s
-      const next = [...s.columnOrder]
-      next.splice(from, 1)
-      next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, id)
-      return { columnOrder: next }
-    })
-    schedulePersist()
+      const from = s.columnOrder.indexOf(id);
+      if (from === -1) return s;
+      const next = [...s.columnOrder];
+      next.splice(from, 1);
+      next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, id);
+      return { columnOrder: next };
+    });
+    schedulePersist();
   },
   toggleColumn: (id) => {
     set((s) => ({
       hiddenColumns: s.hiddenColumns.includes(id)
         ? s.hiddenColumns.filter((c) => c !== id)
         : [...s.hiddenColumns, id],
-    }))
-    schedulePersist()
+    }));
+    schedulePersist();
   },
   resetColumns: () => {
-    set({ columnOrder: DEFAULT_COLUMN_ORDER, hiddenColumns: [], columnWidths: {} })
-    schedulePersist()
+    set({
+      columnOrder: DEFAULT_COLUMN_ORDER,
+      hiddenColumns: [],
+      columnWidths: {},
+    });
+    schedulePersist();
   },
   setColumnWidth: (id, width) => {
-    set((s) => ({ columnWidths: { ...s.columnWidths, [id]: clampColumnWidth(id, width) } }))
-    schedulePersist()
+    set((s) => ({
+      columnWidths: { ...s.columnWidths, [id]: clampColumnWidth(id, width) },
+    }));
+    schedulePersist();
   },
   resetColumnWidth: (id) => {
     set((s) => {
-      const columnWidths = { ...s.columnWidths }
-      delete columnWidths[id]
-      return { columnWidths }
-    })
-    schedulePersist()
+      const columnWidths = { ...s.columnWidths };
+      delete columnWidths[id];
+      return { columnWidths };
+    });
+    schedulePersist();
   },
   setLeftPanelWidth: (width) => {
-    set({ leftPanelWidth: clampLeftPanelWidth(width) })
-    schedulePersist()
+    set({ leftPanelWidth: clampLeftPanelWidth(width) });
+    schedulePersist();
   },
   setRightPanelWidth: (width) => {
-    set({ rightPanelWidth: clampRightPanelWidth(width) })
-    schedulePersist()
+    set({ rightPanelWidth: clampRightPanelWidth(width) });
+    schedulePersist();
   },
   setChangeSizeDisplay: (display) => {
-    set({ changeSizeDisplay: display })
-    schedulePersist()
+    set({ changeSizeDisplay: display });
+    schedulePersist();
   },
   setShowChangeIndicator: (enabled) => {
-    set({ showChangeIndicator: enabled })
-    schedulePersist()
+    set({ showChangeIndicator: enabled });
+    schedulePersist();
   },
   setShowChangeLineCounts: (enabled) => {
-    set({ showChangeLineCounts: enabled })
-    schedulePersist()
+    set({ showChangeLineCounts: enabled });
+    schedulePersist();
   },
 
   hydrate: async () => {
-    const settings = unwrap(await commands.getSettings())
+    const settings = unwrap(await commands.getSettings());
     if (!get().hydrated) {
-      const tabGroups = deserializeTabGroups(settings.tab_groups)
-      const savedTabGroups = deserializeSavedTabGroups(settings.saved_tab_groups)
+      const tabGroups = deserializeTabGroups(settings.tab_groups);
+      const savedTabGroups = deserializeSavedTabGroups(
+        settings.saved_tab_groups,
+      );
       set({
         recents: settings.recents ?? [],
         codeFolder: settings.code_folder ?? null,
         cloneDirectory: settings.clone_directory ?? null,
-        gitExecutable: settings.git_executable ?? '',
-        updateChannel: settings.update_channel === 'beta' ? 'beta' : 'stable',
-        branchSwitchMode: settings.branch_switch_mode ?? 'auto_stash',
+        gitExecutable: settings.git_executable ?? "",
+        updateChannel: settings.update_channel === "beta" ? "beta" : "stable",
+        branchSwitchMode: settings.branch_switch_mode ?? "auto_stash",
         aiProvider: settings.ai_provider ?? null,
         aiModel: settings.ai_model ?? null,
         aiInstruction: settings.ai_instruction ?? null,
         columnOrder: normalizeOrder(settings.column_layout?.order),
         hiddenColumns: normalizeHidden(settings.column_layout?.hidden),
         columnWidths: normalizeColumnWidths(settings.column_layout?.widths),
-        leftPanelWidth: clampLeftPanelWidth(settings.left_panel_width ?? DEFAULT_LEFT_PANEL_WIDTH),
-        rightPanelWidth: clampRightPanelWidth(settings.right_panel_width ?? DEFAULT_RIGHT_PANEL_WIDTH),
-        changeSizeDisplay: settings.change_size_display === 'row' ? 'row' : 'column',
+        leftPanelWidth: clampLeftPanelWidth(
+          settings.left_panel_width ?? DEFAULT_LEFT_PANEL_WIDTH,
+        ),
+        rightPanelWidth: clampRightPanelWidth(
+          settings.right_panel_width ?? DEFAULT_RIGHT_PANEL_WIDTH,
+        ),
+        changeSizeDisplay:
+          settings.change_size_display === "row" ? "row" : "column",
         showChangeIndicator: settings.show_change_indicator ?? true,
         showChangeLineCounts: settings.show_change_line_counts ?? false,
-        commitButtonMode: settings.commit_button_mode === 'commit_push' ? 'commit_push' : 'commit',
+        commitButtonMode:
+          settings.commit_button_mode === "commit_push"
+            ? "commit_push"
+            : "commit",
         tagPushDefault: normalizeTagPushDefault(settings.tag_push_default),
         tagPushOnCreate: settings.tag_push_on_create ?? false,
-        tagOverridesByRepo: normalizeTagOverrides(settings.tag_overrides_by_repo),
+        tagOverridesByRepo: normalizeTagOverrides(
+          settings.tag_overrides_by_repo,
+        ),
         enableWorktrees: settings.enable_worktrees ?? false,
-        uiScale: settings.ui_scale != null ? clampUiScale(settings.ui_scale) : DEFAULT_UI_SCALE,
+        uiScale:
+          settings.ui_scale != null
+            ? clampUiScale(settings.ui_scale)
+            : DEFAULT_UI_SCALE,
         fontFamily: settings.font_family ?? DEFAULT_FONT_ID,
-        fontSize: settings.font_size != null ? clampFontSize(settings.font_size) : DEFAULT_FONT_SIZE,
-        fontWeight: settings.font_weight != null ? clampFontWeight(settings.font_weight) : DEFAULT_FONT_WEIGHT,
+        fontSize:
+          settings.font_size != null
+            ? clampFontSize(settings.font_size)
+            : DEFAULT_FONT_SIZE,
+        fontWeight:
+          settings.font_weight != null
+            ? clampFontWeight(settings.font_weight)
+            : DEFAULT_FONT_WEIGHT,
         tabAliases: normalizeAliases(settings.tab_aliases),
         theme: normalizeTheme(settings.theme),
         themeMode: normalizeThemeMode(settings.theme_mode),
@@ -1382,24 +1599,28 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         verticalTabWidth: clampVerticalTabWidth(
           settings.vertical_tab_width ?? DEFAULT_VERTICAL_TAB_WIDTH,
         ),
-        tabLayout: settings.tab_layout === 'vertical' ? 'vertical' : 'horizontal',
+        tabLayout:
+          settings.tab_layout === "vertical" ? "vertical" : "horizontal",
         horizontalTabRow: settings.horizontal_tab_row ?? false,
         tabGroups,
         tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),
         savedTabGroups,
         pinnedRepoPaths: settings.pinned_repo_paths ?? [],
         pinnedSavedGroupIds:
-          settings.pinned_saved_group_ids
-          ?? savedTabGroups.slice(0, 3).map((group) => group.id),
+          settings.pinned_saved_group_ids ??
+          savedTabGroups.slice(0, 3).map((group) => group.id),
         repoPickerCollapsedSections: normalizeRepoPickerSections(
           settings.repo_picker_collapsed_sections,
         ),
+        expandedChangeFolders: normalizeExpandedChangeFolders(
+          settings.expanded_change_folders,
+        ),
         hydrated: true,
-      })
+      });
     }
-    return settings
+    return settings;
   },
-}))
+}));
 
 // Commit selection, open diffs and conflicts all belong to one repo. Whenever the
 // active repo changes - tab click, close, group close - drop them so the graph

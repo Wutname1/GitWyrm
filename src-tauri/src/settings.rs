@@ -238,6 +238,10 @@ pub struct Settings {
   /// its own native accent color.
   #[serde(default = "default_mint_accent")]
   pub mint_accent: bool,
+  /// Folders left open in the changes trees, keyed by `<repo path>|<staged
+  /// |unstaged>`. Only open folders are stored; anything absent is collapsed.
+  #[serde(default)]
+  pub expanded_change_folders: HashMap<String, Vec<String>>,
 }
 
 fn default_mint_accent() -> bool {
@@ -302,6 +306,7 @@ impl Default for Settings {
       pinned_repo_paths: Vec::new(),
       pinned_saved_group_ids: None,
       repo_picker_collapsed_sections: Vec::new(),
+      expanded_change_folders: HashMap::new(),
       tag_push_default: None,
       tag_push_on_create: false,
       tag_overrides_by_repo: HashMap::new(),
@@ -375,6 +380,7 @@ mod tests {
     assert!(settings.pinned_repo_paths.is_empty());
     assert!(settings.pinned_saved_group_ids.is_none());
     assert!(settings.repo_picker_collapsed_sections.is_empty());
+    assert!(settings.expanded_change_folders.is_empty());
     // Theme fields default to Auto / system / mint-on.
     assert!(settings.theme.is_none());
     assert!(settings.theme_mode.is_none());
@@ -417,6 +423,10 @@ mod tests {
     settings.pinned_saved_group_ids = Some(vec!["work".to_string()]);
     settings.repo_picker_collapsed_sections =
       vec!["recent".to_string(), "watched".to_string()];
+    settings.expanded_change_folders.insert(
+      "c:\\code\\gitwyrm|unstaged".to_string(),
+      vec!["src".to_string(), "src/components".to_string()],
+    );
 
     let json = serde_json::to_string(&settings).expect("settings should serialize");
     let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
@@ -431,6 +441,10 @@ mod tests {
     assert_eq!(
       restored.repo_picker_collapsed_sections,
       vec!["recent".to_string(), "watched".to_string()]
+    );
+    assert_eq!(
+      restored.expanded_change_folders["c:\\code\\gitwyrm|unstaged"],
+      vec!["src".to_string(), "src/components".to_string()]
     );
   }
 

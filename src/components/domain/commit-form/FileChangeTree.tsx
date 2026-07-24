@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight, MinusCircle, PlusCircle, Trash2 } from 'lucide-react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, MinusCircle, PlusCircle, Trash2 } from 'lucide-react'
 import type { FileChange } from '@/lib/bindings'
 import {
   ContextMenu,
@@ -14,6 +14,7 @@ import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { IgnoreMenuItems } from '@/components/domain/commit-form/IgnoreMenuItems'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { changeTreeKey, useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import { cn } from '@/lib/utils'
 
 interface TreeNode {
@@ -95,11 +96,30 @@ export function FileChangeTree({
 }: FileChangeTreeProps) {
   const root = useMemo(() => buildTree(files), [files])
   const allFolderKeys = useMemo(() => folderKeys(root, treeId), [root, treeId])
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const repo = useActiveRepo()
+  const storeKey = repo ? changeTreeKey(repo.path, treeId) : null
+  const saveExpanded = useWorkspaceStore((s) => s.setExpandedChangeFolders)
+  const savedFolders = useWorkspaceStore(
+    (s) => (storeKey ? s.expandedChangeFolders[storeKey] : undefined),
+  )
+  // Folder paths are stored bare so settings.json stays readable; the treeId
+  // prefix that keys the rendered rows is re-applied here.
+  const expanded = useMemo(
+    () => new Set((savedFolders ?? []).map((path) => `${treeId}:${path}`)),
+    [savedFolders, treeId],
+  )
+  const setExpanded = useCallback(
+    (update: (current: Set<string>) => Set<string>) => {
+      if (!storeKey) return
+      const next = update(expanded)
+      const prefix = `${treeId}:`
+      saveExpanded(storeKey, [...next].map((key) => key.slice(prefix.length)))
+    },
+    [expanded, saveExpanded, storeKey, treeId],
+  )
   const [discardFolder, setDiscardFolder] = useState<PendingFolderDiscard | null>(null)
   const folderOperationPending = m.stageFiles.isPending || m.unstageFiles.isPending || m.discardFiles.isPending
   const allExpanded = allFolderKeys.length > 0 && allFolderKeys.every((key) => expanded.has(key))
-  const allCollapsed = allFolderKeys.every((key) => !expanded.has(key))
 
   const toggle = (path: string) => {
     setExpanded((current) => {
@@ -216,20 +236,13 @@ export function FileChangeTree({
         <div className="flex items-center justify-end gap-1 border-b border-border/50 px-3.5 py-1">
           <button
             type="button"
-            onClick={() => setExpanded(new Set(allFolderKeys))}
-            disabled={allExpanded}
-            className="rounded px-1.5 py-0.5 text-2xs text-sub hover:bg-panel2 hover:text-foreground disabled:cursor-default disabled:opacity-40"
+            onClick={() => setExpanded(() => allExpanded ? new Set() : new Set(allFolderKeys))}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-sub hover:bg-panel2 hover:text-foreground"
           >
-            Expand all
-          </button>
-          <span aria-hidden className="text-muted-foreground">·</span>
-          <button
-            type="button"
-            onClick={() => setExpanded(new Set())}
-            disabled={allCollapsed}
-            className="rounded px-1.5 py-0.5 text-2xs text-sub hover:bg-panel2 hover:text-foreground disabled:cursor-default disabled:opacity-40"
-          >
-            Collapse all
+            {allExpanded
+              ? <ChevronsDownUp aria-hidden className="size-3 flex-none" />
+              : <ChevronsUpDown aria-hidden className="size-3 flex-none" />}
+            {allExpanded ? 'Collapse all' : 'Expand all'}
           </button>
         </div>
       )}

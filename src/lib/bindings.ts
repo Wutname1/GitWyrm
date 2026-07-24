@@ -1917,7 +1917,12 @@ theme_mode?: string | null;
  * Use the GitWyrm mint accent across every theme. When off, each theme shows
  * its own native accent color.
  */
-mint_accent?: boolean }
+mint_accent?: boolean; 
+/**
+ * Folders left open in the changes trees, keyed by `<repo path>|<staged
+ * |unstaged>`. Only open folders are stored; anything absent is collapsed.
+ */
+expanded_change_folders?: Partial<{ [key in string]: string[] }> }
 export type StashInfo = { index: number; 
 /**
  * Raw stash message as git stores it, e.g. "On develop: auto-stash before...".

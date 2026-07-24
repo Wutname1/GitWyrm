@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PendingIndicator } from "@/components/ui/pending-indicator";
 import { ConfirmDialog } from "@/components/modals/ConfirmDialog";
@@ -27,12 +27,16 @@ function GroupHeader({
   return (
     <ChangesMenu>
       <div className="sticky top-0 z-[2] flex items-center gap-2 bg-panel px-3.5 py-[7px]">
-        <span
-          className={cn(
-            "size-1.5 flex-none rounded-full",
-            tone === "staged" ? "bg-primary" : "bg-modified",
-          )}
-        />
+        {tone === "staged" ? (
+          <span className="size-1.5 flex-none rounded-full bg-primary" />
+        ) : (
+          <Pencil
+            size={11}
+            strokeWidth={2}
+            className="flex-none text-modified"
+            aria-hidden
+          />
+        )}
         <span className="text-2xs font-bold tracking-[.05em] text-sub">
           {label}
         </span>
