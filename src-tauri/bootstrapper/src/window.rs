@@ -40,12 +40,6 @@ const CONFIRM_YES_X: i32 = CONFIRM_X + CONFIRM_W - 24 - CONFIRM_BTN_W;
 const CONFIRM_NO_X: i32 = CONFIRM_YES_X - CONFIRM_BTN_GAP - CONFIRM_BTN_W;
 const CONFIRM_BTN_Y: i32 = CONFIRM_Y + CONFIRM_H - 24 - CONFIRM_BTN_H;
 
-// Wordmark colors: Git in #D7DEE7, Wyrm in #2DD4A7
-const WORDMARK_GIT: COLORREF = COLORREF(0x00E7DED7);
-const WORDMARK_WYRM: COLORREF = COLORREF(0x00A7D42D);
-const FONT_SIZE_WORDMARK_TITLE: i32 = -34;
-const FONT_SIZE_WORDMARK_TITLEBAR: i32 = -18;
-
 struct AppState {
     tx: Sender<DownloadMsg>,
     rx: std::sync::mpsc::Receiver<DownloadMsg>,
@@ -54,8 +48,6 @@ struct AppState {
     detail: String,
     error: String,
     font_title: HFONT,
-    font_wordmark_title: HFONT,
-    font_wordmark_titlebar: HFONT,
     font_tagline: HFONT,
     font_body: HFONT,
     font_small: HFONT,
@@ -73,8 +65,6 @@ struct AppState {
 }
 
 pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
-    load_private_fonts();
-
     let dry_run = std::env::args().any(|a| a == "--dry-run");
 
     // Replace the original channel with one we control,
@@ -96,8 +86,6 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
         detail: String::new(),
         error: String::new(),
         font_title: create_font(-32, 700),
-        font_wordmark_title: create_font_named(FONT_SIZE_WORDMARK_TITLE, 600, "Sora"),
-        font_wordmark_titlebar: create_font_named(FONT_SIZE_WORDMARK_TITLEBAR, 600, "Sora"),
         font_tagline: create_font(-20, 600),
         font_body: create_font(-17, 600),
         font_small: create_font(-15, 400),
@@ -376,17 +364,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
 
             // Title bar (icon + wordmark, over the right panel)
             draw_logo(mem_dc, PANEL_W + 24, 12, 32, 32);
-            let wordmark_w = draw_wordmark(
-                mem_dc,
-                PANEL_W + 68,
-                16,
-                200,
-                24,
-                s.font_wordmark_titlebar,
-                FONT_SIZE_WORDMARK_TITLEBAR,
-                WORDMARK_GIT,
-                WORDMARK_WYRM,
-            );
+            let wordmark_w = draw_wordmark_img(mem_dc, PANEL_W + 68, 16, 24);
             draw_text(mem_dc, " Setup", PANEL_W + 68 + wordmark_w, 18, 100, 24, s.font_body, COLOR_TEXT);
             fill_rect(mem_dc, PANEL_W, TITLEBAR_H, WND_W - PANEL_W, 1, COLOR_DIVIDER);
 
@@ -407,17 +385,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 draw_text_center(mem_dc, "Close", content_x, btn_y, ERR_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_TEXT);
             } else {
                 draw_text(mem_dc, "Welcome to", content_x, 110, content_w, 44, s.font_title, COLOR_TEXT);
-                let wordmark_w = draw_wordmark(
-                    mem_dc,
-                    content_x,
-                    154,
-                    content_w,
-                    44,
-                    s.font_wordmark_title,
-                    FONT_SIZE_WORDMARK_TITLE,
-                    WORDMARK_GIT,
-                    WORDMARK_WYRM,
-                );
+                let wordmark_w = draw_wordmark_img(mem_dc, content_x, 156, 40);
                 draw_text(mem_dc, " Setup", content_x + wordmark_w, 154, content_w - wordmark_w, 44, s.font_title, COLOR_TEXT);
 
                 draw_text(mem_dc, "Fast. Focused. Familiar.", content_x, 212, content_w, 30, s.font_tagline, COLOR_ACCENT);

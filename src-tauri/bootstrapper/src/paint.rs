@@ -195,42 +195,6 @@ pub fn create_font_named(size: i32, weight: u32, face: &str) -> HFONT {
     }
 }
 
-static SORA_TTF: &[u8] = include_bytes!("../fonts/Sora-SemiBold.ttf");
-
-/// Register the embedded Sora font for this process only (no install, no admin rights).
-/// Must be called once before any font using face name "Sora" is created.
-pub fn load_private_fonts() {
-    unsafe {
-        let mut num_fonts: u32 = 0;
-        let _ = AddFontMemResourceEx(SORA_TTF.as_ptr() as *const _, SORA_TTF.len() as u32, None, &mut num_fonts);
-    }
-}
-
-/// Draw "Git" in `git_color` immediately followed by "Wyrm" in `wyrm_color`, applying the
-/// wordmark's tight tracking (letter-spacing: -0.035em) that Sora needs at display sizes.
-/// `font_size` must match the negative pixel height used to create `font` (see create_font).
-pub fn draw_wordmark(
-    hdc: HDC,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    font: HFONT,
-    font_size: i32,
-    git_color: COLORREF,
-    wyrm_color: COLORREF,
-) -> i32 {
-    let tracking = -((font_size.unsigned_abs() as f64) * 0.035) as i32;
-    unsafe {
-        SetTextCharacterExtra(hdc, tracking);
-    }
-    let git_w = draw_text_w(hdc, "Git", x, y, w, h, font, git_color);
-    let wyrm_w = draw_text_w(hdc, "Wyrm", x + git_w, y, w - git_w, h, font, wyrm_color);
-    unsafe {
-        SetTextCharacterExtra(hdc, 0);
-    }
-    git_w + wyrm_w
-}
 
 struct RgbBitmap {
     width: i32,
@@ -342,71 +306,62 @@ pub fn draw_splash(hdc: HDC, x: i32, y: i32, w: i32, h: i32) {
     }
 }
 
-static LOGO_PNG: &[u8] = include_bytes!("images/logo.png");
-static LOGO_DECODED: OnceLock<BgraBitmap> = OnceLock::new();
-
 struct BgraBitmap {
     width: i32,
     height: i32,
     pixels: Vec<u8>,
 }
 
-fn decode_logo() -> &'static BgraBitmap {
-    LOGO_DECODED.get_or_init(|| {
-        let decoder = png::Decoder::new(LOGO_PNG);
-        let mut reader = decoder.read_info().expect("bad logo png");
-        let info = reader.info();
-        let width = info.width as i32;
-        let height = info.height as i32;
-        let color_type = info.color_type;
+/// Decode a PNG into a bottom-up, premultiplied-BGRA bitmap ready for AlphaBlend.
+fn decode_png_to_bgra(bytes: &[u8]) -> BgraBitmap {
+    let decoder = png::Decoder::new(bytes);
+    let mut reader = decoder.read_info().expect("bad png");
+    let info = reader.info();
+    let width = info.width as i32;
+    let height = info.height as i32;
+    let color_type = info.color_type;
 
-        let mut buf = vec![0u8; reader.output_buffer_size()];
-        let frame = reader.next_frame(&mut buf).expect("bad logo png frame");
-        let data = &buf[..frame.buffer_size()];
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let frame = reader.next_frame(&mut buf).expect("bad png frame");
+    let data = &buf[..frame.buffer_size()];
 
-        let row_bytes = (width * 4) as usize;
-        let mut pixels = vec![0u8; row_bytes * height as usize];
+    let row_bytes = (width * 4) as usize;
+    let mut pixels = vec![0u8; row_bytes * height as usize];
 
-        for y in 0..height as usize {
-            let dst_y = (height as usize - 1) - y;
-            for x in 0..width as usize {
-                let (r, g, b, a) = match color_type {
-                    png::ColorType::Rgb => {
-                        let i = y * width as usize * 3 + x * 3;
-                        (data[i], data[i + 1], data[i + 2], 255u8)
-                    }
-                    png::ColorType::Rgba => {
-                        let i = y * width as usize * 4 + x * 4;
-                        (data[i], data[i + 1], data[i + 2], data[i + 3])
-                    }
-                    _ => (0, 0, 0, 255),
-                };
-                let af = a as f64 / 255.0;
-                let dst = dst_y * row_bytes + x * 4;
-                pixels[dst] = (b as f64 * af) as u8;
-                pixels[dst + 1] = (g as f64 * af) as u8;
-                pixels[dst + 2] = (r as f64 * af) as u8;
-                pixels[dst + 3] = a;
-            }
+    for y in 0..height as usize {
+        let dst_y = (height as usize - 1) - y;
+        for x in 0..width as usize {
+            let (r, g, b, a) = match color_type {
+                png::ColorType::Rgb => {
+                    let i = y * width as usize * 3 + x * 3;
+                    (data[i], data[i + 1], data[i + 2], 255u8)
+                }
+                png::ColorType::Rgba => {
+                    let i = y * width as usize * 4 + x * 4;
+                    (data[i], data[i + 1], data[i + 2], data[i + 3])
+                }
+                _ => (0, 0, 0, 255),
+            };
+            let af = a as f64 / 255.0;
+            let dst = dst_y * row_bytes + x * 4;
+            pixels[dst] = (b as f64 * af) as u8;
+            pixels[dst + 1] = (g as f64 * af) as u8;
+            pixels[dst + 2] = (r as f64 * af) as u8;
+            pixels[dst + 3] = a;
         }
+    }
 
-        BgraBitmap { width, height, pixels }
-    })
+    BgraBitmap { width, height, pixels }
 }
 
-pub fn draw_logo(hdc: HDC, x: i32, y: i32, max_w: i32, max_h: i32) {
-    let logo = decode_logo();
-
-    let scale = (max_w as f64 / logo.width as f64).min(max_h as f64 / logo.height as f64);
-    let draw_w = (logo.width as f64 * scale) as i32;
-    let draw_h = (logo.height as f64 * scale) as i32;
-
+/// Alpha-blend a premultiplied-BGRA bitmap onto `hdc` at (x, y), scaled to draw_w x draw_h.
+fn blit_bgra(hdc: HDC, bmp: &BgraBitmap, x: i32, y: i32, draw_w: i32, draw_h: i32) {
     unsafe {
         let bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: logo.width,
-                biHeight: logo.height,
+                biWidth: bmp.width,
+                biHeight: bmp.height,
                 biPlanes: 1,
                 biBitCount: 32,
                 biCompression: BI_RGB.0,
@@ -421,7 +376,7 @@ pub fn draw_logo(hdc: HDC, x: i32, y: i32, max_w: i32, max_h: i32) {
             .expect("CreateDIBSection failed");
         let old = SelectObject(mem_dc, dib.into());
 
-        std::ptr::copy_nonoverlapping(logo.pixels.as_ptr(), bits_ptr as *mut u8, logo.pixels.len());
+        std::ptr::copy_nonoverlapping(bmp.pixels.as_ptr(), bits_ptr as *mut u8, bmp.pixels.len());
 
         let bf = BLENDFUNCTION {
             BlendOp: 0,
@@ -431,12 +386,44 @@ pub fn draw_logo(hdc: HDC, x: i32, y: i32, max_w: i32, max_h: i32) {
         };
 
         SetStretchBltMode(hdc, HALFTONE);
-        let _ = AlphaBlend(hdc, x, y, draw_w, draw_h, mem_dc, 0, 0, logo.width, logo.height, bf);
+        let _ = AlphaBlend(hdc, x, y, draw_w, draw_h, mem_dc, 0, 0, bmp.width, bmp.height, bf);
 
         SelectObject(mem_dc, old);
         let _ = DeleteObject(dib.into());
         let _ = DeleteDC(mem_dc);
     }
+}
+
+static LOGO_PNG: &[u8] = include_bytes!("images/logo.png");
+static LOGO_DECODED: OnceLock<BgraBitmap> = OnceLock::new();
+
+fn decode_logo() -> &'static BgraBitmap {
+    LOGO_DECODED.get_or_init(|| decode_png_to_bgra(LOGO_PNG))
+}
+
+pub fn draw_logo(hdc: HDC, x: i32, y: i32, max_w: i32, max_h: i32) {
+    let logo = decode_logo();
+    let scale = (max_w as f64 / logo.width as f64).min(max_h as f64 / logo.height as f64);
+    let draw_w = (logo.width as f64 * scale) as i32;
+    let draw_h = (logo.height as f64 * scale) as i32;
+    blit_bgra(hdc, logo, x, y, draw_w, draw_h);
+}
+
+static WORDMARK_PNG: &[u8] = include_bytes!("images/wordmark.png");
+static WORDMARK_DECODED: OnceLock<BgraBitmap> = OnceLock::new();
+
+fn decode_wordmark() -> &'static BgraBitmap {
+    WORDMARK_DECODED.get_or_init(|| decode_png_to_bgra(WORDMARK_PNG))
+}
+
+/// Draw the "GitWyrm" wordmark image scaled to `height` pixels tall, top-aligned at (x, y).
+/// Returns the width it occupied, so following text can be positioned after it.
+pub fn draw_wordmark_img(hdc: HDC, x: i32, y: i32, height: i32) -> i32 {
+    let wm = decode_wordmark();
+    let scale = height as f64 / wm.height as f64;
+    let draw_w = (wm.width as f64 * scale) as i32;
+    blit_bgra(hdc, wm, x, y, draw_w, height);
+    draw_w
 }
 
 /// Draw an indeterminate progress bar - a glowing segment that slides back and forth
