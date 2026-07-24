@@ -85,7 +85,7 @@ function openDocs() {
 
 function BrandMark() {
   const showSettings = useUiStore((state) => state.showSettings);
-  const { checkAndInstall } = useUpdater();
+  const checkAndInstall = useUpdater((s) => s.checkAndInstall);
   const { onLogoClick, bounceNonce, blast } = useWyrmEasterEgg();
 
   return (

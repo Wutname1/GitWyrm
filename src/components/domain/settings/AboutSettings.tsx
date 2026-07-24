@@ -20,6 +20,7 @@ const CHANNEL_LABELS: Record<UpdateChannel, string> = {
 
 export function AboutSettings() {
   const updater = useUpdater()
+  const check = useUpdater((s) => s.check)
   const updateChannel = useWorkspaceStore((s) => s.updateChannel)
   const setUpdateChannel = useWorkspaceStore((s) => s.setUpdateChannel)
   const resetAllSettings = useWorkspaceStore((s) => s.resetAllSettings)
@@ -81,16 +82,21 @@ export function AboutSettings() {
             size="sm"
             className="h-7 text-xs"
             disabled={updater.state === 'checking' || updater.state === 'downloading'}
-            onClick={updater.checkAndInstall}
+            onClick={() => (updater.state === 'available' ? updater.install() : check())}
           >
             {updater.state === 'checking'
               ? 'Checking…'
               : updater.state === 'downloading'
                 ? `Downloading ${updater.version ?? ''}…`
-                : 'Check for updates'}
+                : updater.state === 'available'
+                  ? `Install ${updater.version ?? 'update'}`
+                  : 'Check for updates'}
           </Button>
           {updater.state === 'none' && (
             <span className="text-2xs text-muted-foreground">You are up to date.</span>
+          )}
+          {updater.state === 'available' && (
+            <span className="text-2xs text-accent-text">Version {updater.version} is ready to install.</span>
           )}
           {updater.state === 'error' && (
             <span className="text-2xs text-removed">Update check failed.</span>

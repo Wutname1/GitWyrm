@@ -1,5 +1,6 @@
-import { Minus, Plus, RotateCcw, Search } from 'lucide-react'
+import { Download, Loader2, Minus, Plus, RotateCcw, Search } from 'lucide-react'
 import { useBranches, useStatus } from '@/hooks/useGitQueries'
+import { useUpdater } from '@/hooks/useUpdater'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { branchSync } from '@/lib/branchActions'
 import {
@@ -107,6 +108,43 @@ function ZoomControl() {
   )
 }
 
+/**
+ * Centered "Update now" pill, shown only once a newer release is detected.
+ * Downloads, installs, and relaunches when clicked.
+ */
+function UpdateButton() {
+  const state = useUpdater((s) => s.state)
+  const version = useUpdater((s) => s.version)
+  const install = useUpdater((s) => s.install)
+
+  if (state !== 'available' && state !== 'downloading' && state !== 'ready') return null
+
+  const busy = state === 'downloading' || state === 'ready'
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 flex justify-center">
+      <button
+        type="button"
+        onClick={() => install()}
+        disabled={busy}
+        className="titlebar-no-drag pointer-events-auto flex h-[18px] items-center gap-1.5 rounded-full bg-blue-600 px-3 font-sans text-2xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 disabled:opacity-80"
+      >
+        {busy ? (
+          <>
+            <Loader2 className="size-3 animate-spin" />
+            {state === 'ready' ? 'Restarting…' : `Downloading ${version ?? ''}…`}
+          </>
+        ) : (
+          <>
+            <Download className="size-3" />
+            Update now{version ? ` to ${version}` : ''}
+          </>
+        )}
+      </button>
+    </div>
+  )
+}
+
 export function StatusBar() {
   const repo = useActiveRepo()
   const status = useStatus(repo?.id ?? null)
@@ -117,10 +155,11 @@ export function StatusBar() {
   const total = (status.data?.staged.length ?? 0) + (status.data?.unstaged.length ?? 0)
 
   return (
-    <div data-dim-on-drag className="flex h-6 flex-none items-center gap-4 border-t border-border bg-panel2 px-3 font-mono text-2xs text-sub">
+    <div data-dim-on-drag className="relative flex h-6 flex-none items-center gap-4 border-t border-border bg-panel2 px-3 font-mono text-2xs text-sub">
       {sync?.text ? <span title={sync.title ?? undefined}>{sync.text}</span> : null}
       <span className="text-muted-foreground">{total} changes</span>
       <div className="flex-1" />
+      <UpdateButton />
       {repo && <span className="text-muted-foreground">{repo.path}</span>}
       <ZoomControl />
     </div>

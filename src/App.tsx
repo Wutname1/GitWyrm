@@ -18,6 +18,7 @@ import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { useTheme } from '@/hooks/useTheme'
 import { useFont } from '@/hooks/useFont'
+import { AUTO_CHECK_INTERVAL_MS, useUpdater } from '@/hooks/useUpdater'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { useUiStore } from '@/stores/uiStore'
@@ -75,6 +76,11 @@ function AppInner() {
       const { hydrate, addRepo, setActiveRepo, finishRepoRestore } = useWorkspaceStore.getState()
       const settings = await hydrate()
 
+      // Look for a newer release now that the channel setting is loaded. Silent:
+      // a successful "up to date" says nothing; an available update surfaces as
+      // the Update button in the status bar.
+      void useUpdater.getState().check(true)
+
       const openReposList = settings.open_repos ?? []
       const recents = settings.recents ?? []
       const toReopen =
@@ -104,6 +110,11 @@ function AppInner() {
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Keep looking for a newer release while the app stays open, so long-running
+  // sessions still get the Update button without a restart. The launch check
+  // above covers app start; this covers the hours after.
+  useEffect(() => useUpdater.getState().startAutoCheck(AUTO_CHECK_INTERVAL_MS), [])
 
   // Auto-enable the worktree feature the first time we see a repo that already
   // has linked worktrees, so existing worktree users get the UI without hunting

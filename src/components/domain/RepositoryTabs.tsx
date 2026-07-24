@@ -7,8 +7,11 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
+  type ReactNode,
 } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -37,6 +40,7 @@ import {
   type TabOrderItem,
 } from "@/stores/workspaceStore";
 import { useUiStore } from "@/stores/uiStore";
+import { useRepoTabStatus } from "@/hooks/useGitQueries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormDialog } from "@/components/ui/form-dialog";
@@ -65,6 +69,9 @@ export type TabOrientation = "horizontal" | "vertical";
 const MAX_HORIZONTAL_TAB_WIDTH = 208;
 const ICON_ONLY_TAB_WIDTH = 38;
 const VERTICAL_ICON_ONLY_WIDTH = 72;
+// Under this width a horizontal tab is too tight for the numbered status
+// badges, so they collapse to pulsing glyphs.
+const STATUS_NUMBERS_MIN_WIDTH = 116;
 
 type DragItem = { type: "repo"; path: string } | { type: "group"; id: string };
 
@@ -485,6 +492,91 @@ function AddRepoTab({
   );
 }
 
+function StatusBadge({
+  icon,
+  count,
+  color,
+  label,
+  collapsed,
+}: {
+  icon: ReactNode;
+  count: number;
+  color: string;
+  label: string;
+  /** Shrunk tab: hide the number and show only the glyph. */
+  collapsed: boolean;
+}) {
+  return (
+    <span
+      className="flex flex-none items-center gap-0.5 font-mono text-[10px] font-semibold leading-none tabular-nums"
+      style={{ color }}
+      aria-label={`${count} ${label}`}
+      title={`${count} ${label}`}
+    >
+      {icon}
+      {!collapsed && count}
+    </span>
+  );
+}
+
+/**
+ * The push / pull / uncommitted badges a repository tab shows on its right side.
+ * Each badge only appears when its count is above zero, so a clean repo shows
+ * nothing. When the tab is shrunk to icons the numbers drop away and a pulsing
+ * green ring wraps the cluster to keep the pending state noticeable -- except on
+ * the active tab, which the user is already looking at.
+ */
+function TabStatusIcons({
+  repoId,
+  collapsed,
+  pulse,
+}: {
+  repoId: string;
+  collapsed: boolean;
+  pulse: boolean;
+}) {
+  const { ahead, behind, uncommitted } = useRepoTabStatus(repoId);
+  if (ahead === 0 && behind === 0 && uncommitted === 0) return null;
+
+  return (
+    <span
+      className={cn(
+        "flex flex-none items-center gap-1",
+        collapsed ? "px-0.5" : "gap-1.5",
+        pulse && "wyrm-tab-status-pulse",
+      )}
+    >
+      {ahead > 0 && (
+        <StatusBadge
+          icon={<ArrowUp size={11} strokeWidth={2.4} />}
+          count={ahead}
+          color="var(--gw-blue)"
+          label="to push"
+          collapsed={collapsed}
+        />
+      )}
+      {behind > 0 && (
+        <StatusBadge
+          icon={<ArrowDown size={11} strokeWidth={2.4} />}
+          count={behind}
+          color="var(--gw-red)"
+          label="to pull"
+          collapsed={collapsed}
+        />
+      )}
+      {uncommitted > 0 && (
+        <StatusBadge
+          icon={<Pencil size={10} strokeWidth={2.4} />}
+          count={uncommitted}
+          color="var(--gw-amber)"
+          label="uncommitted"
+          collapsed={collapsed}
+        />
+      )}
+    </span>
+  );
+}
+
 export function RepositoryTabs({
   orientation,
 }: {
@@ -726,6 +818,12 @@ export function RepositoryTabs({
     const horizontalWidth = tabIconOnly && hovered
       ? MAX_HORIZONTAL_TAB_WIDTH
       : adaptiveHorizontalTabWidth;
+    // Below the size that fits a numbered badge the status icons drop their
+    // counts and pulse instead. Named vertical tabs always have room; horizontal
+    // tabs collapse once the shared width budget squeezes them narrow.
+    const statusCollapsed = showName
+      ? orientation === "horizontal" && horizontalWidth < STATUS_NUMBERS_MIN_WIDTH
+      : true;
     const horizontalDropGap =
       orientation === "horizontal" && (target === "before" || target === "after") ? 100 : 0;
     const tabStyle: CSSProperties | undefined = orientation === "horizontal"
@@ -849,22 +947,29 @@ export function RepositoryTabs({
                   {repoName(repo)}
                 </span>
               )}
-              <TooltipButton
-                draggable={false}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  closeRepo(repo);
-                }}
-                className={cn(
-                  "ml-auto flex flex-none items-center justify-center overflow-hidden rounded text-muted-foreground transition-[width,opacity,margin] duration-150 hover:bg-panel3 hover:text-foreground",
-                  "w-0 opacity-0 group-hover/repo:w-[15px] group-hover/repo:opacity-100 group-focus-within/repo:w-[15px] group-focus-within/repo:opacity-100",
-                  orientation === "horizontal" &&
-                    "-ml-[7px] group-hover/repo:ml-0 group-focus-within/repo:ml-0",
-                )}
-                tooltip="Close repository"
-              >
-                <X size={11} />
-              </TooltipButton>
+              <span className="ml-auto flex flex-none items-center gap-1.5">
+                <TabStatusIcons
+                  repoId={repo.id}
+                  collapsed={statusCollapsed}
+                  pulse={statusCollapsed && !active}
+                />
+                <TooltipButton
+                  draggable={false}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    closeRepo(repo);
+                  }}
+                  className={cn(
+                    "flex flex-none items-center justify-center overflow-hidden rounded text-muted-foreground transition-[width,opacity,margin] duration-150 hover:bg-panel3 hover:text-foreground",
+                    "w-0 opacity-0 group-hover/repo:w-[15px] group-hover/repo:opacity-100 group-focus-within/repo:w-[15px] group-focus-within/repo:opacity-100",
+                    orientation === "horizontal" &&
+                      "-ml-[7px] group-hover/repo:ml-0 group-focus-within/repo:ml-0",
+                  )}
+                  tooltip="Close repository"
+                >
+                  <X size={11} />
+                </TooltipButton>
+              </span>
                 </div>
               </TooltipTrigger>
             </ContextMenuTrigger>

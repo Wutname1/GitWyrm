@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { commands, type DiffSource } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { detectProvider, providerLabel } from '@/lib/remoteProvider'
+import { branchSync } from '@/lib/branchActions'
 
 const LOG_PAGE_SIZE = 200
 
@@ -32,6 +33,33 @@ export function useBranches(repoId: string | null) {
     enabled: repoId != null,
     queryFn: async () => unwrap(await commands.listBranches(repoId!)),
   })
+}
+
+/** Commits to send/get and uncommitted files for a single repo's tab badges. */
+export interface RepoTabStatus {
+  /** Commits ahead of upstream, waiting to push. */
+  ahead: number
+  /** Commits behind upstream, waiting to pull. */
+  behind: number
+  /** Staged plus unstaged files: the uncommitted-work count. */
+  uncommitted: number
+}
+
+/**
+ * The push/pull/uncommitted counts a repository tab shows at a glance. Reuses
+ * the cached status and branch queries so every open tab reflects live data
+ * without an extra backend call, and the repo watcher keeps them current.
+ */
+export function useRepoTabStatus(repoId: string | null): RepoTabStatus {
+  const status = useStatus(repoId)
+  const branches = useBranches(repoId)
+
+  const head = branches.data?.local.find((b) => b.is_head)
+  const sync = head ? branchSync(head) : null
+  const uncommitted =
+    (status.data?.staged.length ?? 0) + (status.data?.unstaged.length ?? 0)
+
+  return { ahead: sync?.ahead ?? 0, behind: sync?.behind ?? 0, uncommitted }
 }
 
 export function useTags(repoId: string | null) {
