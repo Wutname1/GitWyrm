@@ -26,7 +26,9 @@ export const WIP_SHA = '__wip__'
 export function GraphView() {
   const repo = useActiveRepo()
   const selectedSha = useUiStore((s) => s.selectedSha)
+  const selectedShas = useUiStore((s) => s.selectedShas)
   const selectCommit = useUiStore((s) => s.selectCommit)
+  const setSelection = useUiStore((s) => s.setSelection)
   const focusChanges = useUiStore((s) => s.focusChanges)
   const revealRef = useUiStore((s) => s.revealRef)
   const revealSha = useUiStore((s) => s.revealSha)
@@ -159,6 +161,48 @@ export function GraphView() {
     if (!query) setSearchMatchStatus(null, null)
     else setSearchMatchStatus(matchCount, selectedMatchOrdinal)
   }, [query, matchCount, selectedMatchOrdinal, setSearchMatchStatus])
+
+  // Multi-select: Shift-click ranges from the anchor (last plain-clicked
+  // commit), Ctrl/Cmd-click toggles one commit in or out. The selection is
+  // kept in graph (newest-first) order so the actions menu can replay commits
+  // oldest-first without re-sorting. Only real commits join a multi-selection;
+  // the WIP and stash rows always select alone.
+  const selectedSet = useMemo(() => new Set(selectedShas), [selectedShas])
+  const multiSelection = useMemo(
+    () => (selectedShas.length > 1 ? commits.filter((c) => selectedSet.has(c.sha)) : null),
+    [selectedShas, commits, selectedSet]
+  )
+  const handleCommitClick = (sha: string, mods: { shift: boolean; ctrl: boolean }) => {
+    const order = commits.map((c) => c.sha)
+    if (mods.shift && selectedSha) {
+      const a = order.indexOf(selectedSha)
+      const b = order.indexOf(sha)
+      if (a >= 0 && b >= 0) {
+        const [lo, hi] = a < b ? [a, b] : [b, a]
+        setSelection(order.slice(lo, hi + 1), selectedSha)
+        return
+      }
+      // Anchor isn't a loaded commit (stash/WIP): fall through to plain select.
+    }
+    if (mods.ctrl) {
+      const pos = new Map(order.map((s, i) => [s, i]))
+      const next = selectedSet.has(sha)
+        ? selectedShas.filter((s) => s !== sha)
+        : [...selectedShas.filter((s) => pos.has(s)), sha]
+      next.sort((x, y) => (pos.get(x) ?? 0) - (pos.get(y) ?? 0))
+      // Removing the anchor hands the anchor role to the clicked side's
+      // nearest neighbor; adding makes the clicked commit the new anchor.
+      const anchor = selectedSet.has(sha)
+        ? selectedSha === sha
+          ? (next[next.length - 1] ?? null)
+          : selectedSha
+        : sha
+      setSelection(next, anchor)
+      return
+    }
+    // Plain click: select just this commit, or clear when it was the only one.
+    selectCommit(selectedShas.length === 1 && selectedSha === sha ? null : sha)
+  }
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -402,13 +446,14 @@ export function GraphView() {
               )
             }
             const commit = row.commit
-            const selected = selectedSha === commit.sha
+            const selected = selectedSet.has(commit.sha)
             return (
               <CommitRow
                 key={commit.sha}
                 commit={commit}
                 selected={selected}
-                onSelect={() => selectCommit(selected ? null : commit.sha)}
+                onSelect={(mods) => handleCommitClick(commit.sha, mods)}
+                multiSelection={selected ? multiSelection : null}
                 rowHeight={rowHeight}
                 dimmed={matchRows != null && !matchRows.has(vi.index)}
                 style={rowStyle}

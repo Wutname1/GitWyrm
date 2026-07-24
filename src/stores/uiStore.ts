@@ -55,6 +55,13 @@ export interface FileTarget {
 interface UiState {
   centerView: CenterView
   selectedSha: string | null
+  /**
+   * Every selected commit sha in graph (newest-first) order. Holds one entry
+   * for a plain click and grows via Ctrl-click (toggle one) or Shift-click
+   * (range from the last plain-clicked commit). `selectedSha` is always the
+   * anchor the next Shift-click ranges from, and stays inside this list.
+   */
+  selectedShas: string[]
   diffRequest: DiffRequest | null
   conflictPath: string | null
   /** File shown by the history / blame views. */
@@ -135,6 +142,13 @@ interface UiState {
   stashTracks: Record<string, number>
 
   selectCommit: (sha: string | null) => void
+  /**
+   * Replace the multi-selection wholesale (graph order, newest first). The
+   * graph computes ranges/toggles since it owns the row order; `anchor` is the
+   * commit the next Shift-click ranges from and must be in `shas` (or null
+   * when the list is empty).
+   */
+  setSelection: (shas: string[], anchor: string | null) => void
   /** Publish the graph's stash lane assignment. No-ops when nothing changed. */
   setStashTracks: (tracks: Record<string, number>) => void
   /** Drop view state tied to one repo. Call when the active repo changes. */
@@ -197,6 +211,7 @@ const REPO_SCOPED_VIEWS = new Set<CenterView>([
 export const useUiStore = create<UiState>((set) => ({
   centerView: 'graph',
   selectedSha: null,
+  selectedShas: [],
   diffRequest: null,
   conflictPath: null,
   fileTarget: null,
@@ -233,7 +248,9 @@ export const useUiStore = create<UiState>((set) => ({
   repoPickerOpen: false,
   stashTracks: {},
 
-  selectCommit: (sha) => set({ selectedSha: sha }),
+  selectCommit: (sha) => set({ selectedSha: sha, selectedShas: sha ? [sha] : [] }),
+  setSelection: (shas, anchor) =>
+    set({ selectedShas: shas, selectedSha: shas.length > 0 ? anchor : null }),
   setStashTracks: (tracks) =>
     set((s) => {
       const prev = s.stashTracks
@@ -245,6 +262,7 @@ export const useUiStore = create<UiState>((set) => ({
   resetForRepoSwitch: () =>
     set((s) => ({
       selectedSha: null,
+      selectedShas: [],
       diffRequest: null,
       conflictPath: null,
       fileTarget: null,

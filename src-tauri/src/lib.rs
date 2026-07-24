@@ -8,6 +8,7 @@ mod watcher;
 
 pub use error::AppError;
 pub use git::graph as git_graph;
+pub use git::history as git_history;
 pub use git::merge_ops as git_merge_ops;
 pub use git::types as git_types;
 pub use git::refs as git_refs;
@@ -76,6 +77,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::branch::reword_commit,
     commands::branch::revert_commit,
     commands::branch::drop_commit,
+    commands::branch::squash_commits,
+    commands::branch::drop_commits,
     commands::branch::has_worktrees,
     commands::branch::commit_web_url,
     commands::stash::stash_save,

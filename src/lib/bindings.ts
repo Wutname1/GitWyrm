@@ -618,6 +618,35 @@ async dropCommit(repoId: string, sha: string) : Promise<Result<RefMove, string>>
 }
 },
 /**
+ * Combine several commits into one. The selected commits are applied in order
+ * onto the oldest one's parent and committed once with `message`; any other
+ * commits in the same stretch of history (between and above the selected
+ * ones) are replayed on top, keeping their own messages and authors. Only
+ * works on a linear stretch; any conflict aborts and restores the branch.
+ */
+async squashCommits(repoId: string, shas: string[], message: string) : Promise<Result<RefMove, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("squash_commits", { repoId, shas, message }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Drop several commits from the current branch in one rewrite: replay the
+ * stretch of history from the oldest selected commit's parent up to HEAD,
+ * skipping every selected commit. Only works on a linear stretch; any
+ * conflict aborts and restores the branch.
+ */
+async dropCommits(repoId: string, shas: string[]) : Promise<Result<RefMove, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("drop_commits", { repoId, shas }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * True when the repo has at least one linked worktree. Backs the auto-enable
  * of the worktree feature so users who already work with worktrees see the UI.
  */

@@ -13,6 +13,7 @@ import { GithubView } from '@/views/GithubView'
 import { FileHistoryView } from '@/views/FileHistoryView'
 import { BlameView } from '@/views/BlameView'
 import { CommitDrawer } from '@/components/domain/graph/CommitDrawer'
+import { MultiCommitDrawer } from '@/components/domain/graph/MultiCommitDrawer'
 import { useUiStore } from '@/stores/uiStore'
 import {
   useActiveRepo,
@@ -48,8 +49,11 @@ function CommitDrawerSlot() {
   const repo = useActiveRepo()
   const view = useUiStore((s) => s.centerView)
   const selectedSha = useUiStore((s) => s.selectedSha)
+  const selectedShas = useUiStore((s) => s.selectedShas)
   if (!repo || view === 'settings') return null
   if (selectedSha == null || selectedSha === WIP_SHA) return null
+  // Two or more selected commits: show every change they made, combined.
+  if (selectedShas.length > 1) return <MultiCommitDrawer repoId={repo.id} shas={selectedShas} />
   return <CommitDrawer repoId={repo.id} sha={selectedSha} />
 }
 

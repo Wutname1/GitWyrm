@@ -811,6 +811,88 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Multi-commit actions from the graph's multi-selection. `shas` arrives in
+  // graph order (newest first) everywhere below.
+
+  // Cherry-pick several commits onto the current branch, oldest-first so they
+  // land in their original order. The first conflict stops the loop: the
+  // shared conflict flow takes over that pick and the rest stay unapplied.
+  const cherryPickMany = useMutation({
+    mutationFn: async (shas: string[]) => {
+      const ordered = [...shas].reverse()
+      let done = 0
+      for (const sha of ordered) {
+        const result = unwrap(await commands.cherryPick(id, sha))
+        if (result.conflicts.length > 0) {
+          return { done, total: ordered.length, conflictSha: sha, conflicts: result.conflicts.length }
+        }
+        done++
+      }
+      return { done, total: ordered.length, conflictSha: null as string | null, conflicts: 0 }
+    },
+    onSuccess: (r) => {
+      if (r.conflictSha) {
+        toast.warning(
+          `Cherry-picked ${r.done} of ${commitCount(r.total)}, then ${shortSha(r.conflictSha)} hit ${plural(r.conflicts, 'conflict')} to resolve`
+        )
+      } else {
+        toast(`Cherry-picked ${commitCount(r.done)}`)
+      }
+    },
+    onError,
+    // A mid-loop failure leaves the earlier picks applied, so refresh on both
+    // outcomes or the graph would hide work that already happened.
+    onSettled: () => invalidate(qc, id, ['status', 'log', 'branches', 'mergeState']),
+  })
+
+  // Revert several commits, newest-first so each inverse applies to a tree the
+  // later commits haven't touched yet. Same stop-at-first-conflict shape as
+  // cherryPickMany.
+  const revertMany = useMutation({
+    mutationFn: async (shas: string[]) => {
+      let done = 0
+      for (const sha of shas) {
+        const result = unwrap(await commands.revertCommit(id, sha))
+        if (result.conflicts.length > 0) {
+          return { done, total: shas.length, conflictSha: sha, conflicts: result.conflicts.length }
+        }
+        done++
+      }
+      return { done, total: shas.length, conflictSha: null as string | null, conflicts: 0 }
+    },
+    onSuccess: (r) => {
+      if (r.conflictSha) {
+        toast.warning(
+          `Reverted ${r.done} of ${commitCount(r.total)}, then ${shortSha(r.conflictSha)} hit ${plural(r.conflicts, 'conflict')} to resolve`
+        )
+      } else {
+        toast(`Reverted ${commitCount(r.done)}`)
+      }
+    },
+    onError,
+    onSettled: () => invalidate(qc, id, ['status', 'log', 'branches', 'mergeState']),
+  })
+
+  const squashCommits = useMutation({
+    mutationFn: async (args: { shas: string[]; message: string }) => ({
+      count: args.shas.length,
+      move: unwrap(await commands.squashCommits(id, args.shas, args.message)),
+    }),
+    onSuccess: ({ count, move }) =>
+      afterRefMove(move.previous_sha, `Combined ${commitCount(count)} — was at`, 'Hard'),
+    onError,
+  })
+
+  const dropCommits = useMutation({
+    mutationFn: async (shas: string[]) => ({
+      count: shas.length,
+      move: unwrap(await commands.dropCommits(id, shas)),
+    }),
+    onSuccess: ({ count, move }) =>
+      afterRefMove(move.previous_sha, `Dropped ${commitCount(count)} — was at`, 'Hard'),
+    onError,
+  })
+
   const rebaseContinue = useMutation({
     mutationFn: async () => unwrap(await commands.rebaseContinue(id)),
     onSuccess: (result) => {
@@ -951,6 +1033,10 @@ export function useGitMutations(repoId: string | null) {
     rewordCommit,
     revertCommit,
     dropCommit,
+    cherryPickMany,
+    revertMany,
+    squashCommits,
+    dropCommits,
     abortMerge,
     rebaseContinue,
     rebaseAbort,

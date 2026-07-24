@@ -15,12 +15,26 @@ import { AuthorHoverCard } from "./AuthorHoverCard";
 import { RefBadge } from "./RefBadge";
 import { RefStack } from "./RefStack";
 import { CommitContextMenu } from "./CommitContextMenu";
+import { MultiCommitContextMenu } from "./MultiCommitContextMenu";
 import { ChangeSizeIndicator } from "./ChangeSizeIndicator";
+
+/** Modifier keys held on a row click, for multi-select. */
+export interface SelectModifiers {
+  shift: boolean;
+  /** Ctrl on Windows/Linux, Cmd on macOS. */
+  ctrl: boolean;
+}
 
 interface CommitRowProps {
   commit: CommitEntry;
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (mods: SelectModifiers) => void;
+  /**
+   * All selected commits (graph order, newest first) when this row is part of
+   * a multi-selection of 2+ commits; null otherwise. Switches the right-click
+   * menu to actions that apply to the whole selection.
+   */
+  multiSelection?: CommitEntry[] | null;
   rowHeight: number;
   /** Faded out because a commit search is active and this row doesn't match. */
   dimmed?: boolean;
@@ -31,6 +45,7 @@ export const CommitRow = memo(function CommitRow({
   commit,
   selected,
   onSelect,
+  multiSelection,
   rowHeight,
   dimmed,
   style,
@@ -134,10 +149,9 @@ export const CommitRow = memo(function CommitRow({
     ),
   };
 
-  return (
-    <CommitContextMenu commit={commit} onViewDetails={onSelect}>
+  const row = (
       <div
-        onClick={onSelect}
+        onClick={(e) => onSelect({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
         style={{
           height: rowHeight,
           gridTemplateColumns: gridTemplate(order, effectiveHidden, widths),
@@ -155,6 +169,17 @@ export const CommitRow = memo(function CommitRow({
           </div>
         ))}
       </div>
+  );
+
+  if (multiSelection && multiSelection.length > 1) {
+    return <MultiCommitContextMenu commits={multiSelection}>{row}</MultiCommitContextMenu>;
+  }
+  return (
+    <CommitContextMenu
+      commit={commit}
+      onViewDetails={() => onSelect({ shift: false, ctrl: false })}
+    >
+      {row}
     </CommitContextMenu>
   );
 });

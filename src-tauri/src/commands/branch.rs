@@ -977,6 +977,44 @@ pub async fn drop_commit(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Combine several commits into one, replaying the rest of the stretch on
+/// top. See `git::history::squash_commits` for the algorithm; it lives there
+/// so the rewrite logic is testable against scratch repos.
+#[tauri::command]
+#[specta::specta]
+pub async fn squash_commits(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  shas: Vec<String>,
+  message: String,
+) -> Result<RefMove, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    crate::git::history::squash_commits(&repo, &shas, &message)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Drop several commits from the current branch in one rewrite. See
+/// `git::history::drop_commits` for the algorithm.
+#[tauri::command]
+#[specta::specta]
+pub async fn drop_commits(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  shas: Vec<String>,
+) -> Result<RefMove, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    crate::git::history::drop_commits(&repo, &shas)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// True when the repo has at least one linked worktree. Backs the auto-enable
 /// of the worktree feature so users who already work with worktrees see the UI.
 #[tauri::command]

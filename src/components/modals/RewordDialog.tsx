@@ -11,6 +11,10 @@ interface RewordDialogProps {
   initialBody: string
   pending: boolean
   onConfirm: (message: string) => void
+  /** Dialog title; defaults to editing a single commit's message. */
+  title?: string
+  submitLabel?: string
+  pendingLabel?: string
 }
 
 /** Edit a commit's message. Summary on one line, an optional body below; they
@@ -22,6 +26,9 @@ export function RewordDialog({
   initialBody,
   pending,
   onConfirm,
+  title = 'Edit commit message',
+  submitLabel = 'Save message',
+  pendingLabel = 'Saving…',
 }: RewordDialogProps) {
   const [summary, setSummary] = useState(initialSummary)
   const [body, setBody] = useState(initialBody)
@@ -47,9 +54,9 @@ export function RewordDialog({
       open={open}
       onOpenChange={onOpenChange}
       icon={<Pencil size={15} strokeWidth={1.9} />}
-      title="Edit commit message"
-      submitLabel="Save message"
-      pendingLabel="Saving…"
+      title={title}
+      submitLabel={submitLabel}
+      pendingLabel={pendingLabel}
       canSubmit={ready}
       pending={pending}
       onSubmit={submit}
