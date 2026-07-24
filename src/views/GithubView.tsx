@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { CircleDot, Copy, ExternalLink, GitPullRequest, RefreshCw, X } from 'lucide-react'
+import { Copy, ExternalLink, RefreshCw, X } from 'lucide-react'
+import { GithubItemIcon } from '@/lib/githubDisplay'
 import { useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -263,8 +264,8 @@ export function GithubView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <header className="flex min-h-[52px] flex-none items-center gap-3 border-b border-border bg-panel/70 px-4 py-2">
-        <span className="flex size-8 flex-none items-center justify-center rounded-md border border-primary/30 bg-soft text-accent-text">
-          {isPr ? <GitPullRequest size={15} /> : <CircleDot size={15} />}
+        <span className="flex size-8 flex-none items-center justify-center rounded-md border border-primary/30 bg-soft">
+          <GithubItemIcon kind={isPr ? 'pr' : 'issue'} size={15} />
         </span>
         <div className="min-w-0">
           <h2 className="truncate font-wordmark text-[0.8125rem] font-semibold text-foreground">
@@ -343,7 +344,7 @@ export function GithubView() {
           {detail && (
             <>
               <div className="flex items-center gap-2 text-2xs text-muted-foreground">
-                {isPr ? <GitPullRequest size={13} /> : <CircleDot size={13} />}
+                <GithubItemIcon kind={isPr ? 'pr' : 'issue'} size={13} />
                 <span>{kindLabel}</span>
                 <span className="ml-auto font-mono">#{detail.number}</span>
               </div>

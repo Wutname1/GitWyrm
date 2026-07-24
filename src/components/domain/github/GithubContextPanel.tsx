@@ -1,12 +1,6 @@
 import { useState } from 'react'
-import {
-  ArrowLeftRight,
-  Check,
-  ChevronDown,
-  CircleDot,
-  ExternalLink,
-  GitPullRequest,
-} from 'lucide-react'
+import { ArrowLeftRight, Check, ChevronDown, ExternalLink } from 'lucide-react'
+import { GithubItemIcon } from '@/lib/githubDisplay'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { Input } from '@/components/ui/input'
@@ -77,7 +71,7 @@ function PanelShell({
   return (
     <div className="grid flex-none gap-2 border-b-2 border-border bg-panel2/60 px-3 py-2.5">
       <div className="flex items-center gap-2">
-        <span className="text-accent-text">{icon}</span>
+        <span className="flex-none">{icon}</span>
         <span className="text-2xs font-bold text-foreground">{title}</span>
         <span className="ml-auto text-2xs uppercase tracking-wide text-muted-foreground">
           {status}
@@ -101,7 +95,7 @@ function PrPanel({ number }: { number: number }) {
 
   if (!pr.data) {
     return (
-      <PanelShell icon={<GitPullRequest size={14} />} title={`Pull request #${number}`} status="">
+      <PanelShell icon={<GithubItemIcon kind="pr" size={14} />} title={`Pull request #${number}`} status="">
         <div className="flex items-center gap-2 py-1 text-2xs text-muted-foreground">
           <PendingIndicator /> Loading…
         </div>
@@ -137,7 +131,7 @@ function PrPanel({ number }: { number: number }) {
 
   return (
     <PanelShell
-      icon={<GitPullRequest size={14} />}
+      icon={<GithubItemIcon kind="pr" size={14} />}
       title={`Pull request #${number}`}
       status={merged ? 'Merged' : closed ? 'Closed' : detail.draft ? 'Draft' : 'Open'}
     >
@@ -260,7 +254,7 @@ function IssuePanel({ number }: { number: number }) {
 
   if (!issue.data) {
     return (
-      <PanelShell icon={<CircleDot size={14} />} title={`Issue #${number}`} status="">
+      <PanelShell icon={<GithubItemIcon kind="issue" size={14} />} title={`Issue #${number}`} status="">
         <div className="flex items-center gap-2 py-1 text-2xs text-muted-foreground">
           <PendingIndicator /> Loading…
         </div>
@@ -276,7 +270,7 @@ function IssuePanel({ number }: { number: number }) {
 
   return (
     <PanelShell
-      icon={<CircleDot size={14} />}
+      icon={<GithubItemIcon kind="issue" size={14} />}
       title={`Issue #${number}`}
       status={closed ? 'Closed' : 'Open'}
     >
