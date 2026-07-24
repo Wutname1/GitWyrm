@@ -7,6 +7,7 @@ import { StatusBar } from '@/components/domain/StatusBar'
 import { GraphView, WIP_SHA } from '@/views/GraphView'
 import { DiffView } from '@/views/DiffView'
 import { SettingsView } from '@/views/SettingsView'
+import { RepoPickerView } from '@/components/modals/RepoPickerModal'
 import { ConflictView } from '@/views/ConflictView'
 import { GithubView } from '@/views/GithubView'
 import { FileHistoryView } from '@/views/FileHistoryView'
@@ -58,7 +59,9 @@ export function WorkspaceLayout() {
   const rightPanelWidth = useWorkspaceStore((state) => state.rightPanelWidth)
   const setLeftPanelWidth = useWorkspaceStore((state) => state.setLeftPanelWidth)
   const setRightPanelWidth = useWorkspaceStore((state) => state.setRightPanelWidth)
-  const inSettings = useUiStore((s) => s.centerView === 'settings')
+  const centerView = useUiStore((s) => s.centerView)
+  const inSettings = centerView === 'settings'
+  const inRepoPicker = centerView === 'repoPicker'
 
   const panelRow = (
     <div className="flex min-h-0 flex-1">
@@ -94,14 +97,22 @@ export function WorkspaceLayout() {
     </div>
   )
 
+  const centerBody = inRepoPicker ? (
+    <RepoPickerView />
+  ) : inSettings ? (
+    <SettingsView />
+  ) : (
+    panelRow
+  )
+
   const workspaceBody = (
     <div
       data-repository-preview-root
       className="flex min-h-0 flex-1 flex-col bg-background"
     >
-      <Toolbar />
-      <MergeBanner />
-      {inSettings ? <SettingsView /> : panelRow}
+      {!inRepoPicker && <Toolbar />}
+      {!inRepoPicker && <MergeBanner />}
+      {centerBody}
       <StatusBar />
     </div>
   )

@@ -67,10 +67,10 @@ function Wordmark() {
         letterSpacing: "-0.035em",
       }}
     >
-      <span data-tauri-drag-region style={{ color: "#D7DEE7" }}>
+      <span data-tauri-drag-region style={{ color: "var(--gw-text)" }}>
         Git
       </span>
-      <span data-tauri-drag-region style={{ color: "#2DD4A7" }}>
+      <span data-tauri-drag-region style={{ color: "var(--gw-accent)" }}>
         Wyrm
       </span>
     </span>
@@ -292,11 +292,11 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
 }
 
 function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
-  const openModal = useUiStore((state) => state.openModal);
+  const showRepoPicker = useUiStore((state) => state.showRepoPicker);
   const openRepo = useOpenRepo();
   return (
     <TooltipButton
-      onClick={() => openModal("clone")}
+      onClick={() => showRepoPicker()}
       className={
         compact
           ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
@@ -452,7 +452,7 @@ export function VerticalTabRail() {
   return (
     <aside
       className={cn(
-        "relative z-20 flex min-h-0 flex-none flex-col border-r border-border bg-[color:#0d1218]",
+        "relative z-20 flex min-h-0 flex-none flex-col border-r border-border bg-panel",
         resizing && "select-none",
       )}
       style={{ width: verticalTabWidth }}
@@ -495,7 +495,7 @@ export function VerticalTabRail() {
         ) : (
           <button
             type="button"
-            onClick={() => useUiStore.getState().openModal("clone")}
+            onClick={() => useUiStore.getState().showRepoPicker()}
             className="flex h-[31px] flex-1 items-center justify-center gap-1.5 rounded-[5px] border border-border bg-panel2 text-2xs text-foreground hover:border-muted-foreground hover:bg-panel3"
           >
             <Plus size={13} />

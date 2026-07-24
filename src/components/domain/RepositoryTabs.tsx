@@ -16,6 +16,7 @@ import {
   ImageIcon,
   Layers3,
   Pencil,
+  Plus,
   Save,
   Settings2,
   Trash2,
@@ -370,6 +371,135 @@ function RepoTabPreview({
   );
 }
 
+/**
+ * The trailing "Add a repository" tab. Once opened it behaves like a real tab:
+ * it stays put while the user clicks over to a repository and back, and only
+ * goes away when they close it or finish adding a repository. It is deliberately
+ * NOT part of tabOrder -- it never reorders, groups, or persists, so it lives
+ * outside the drag system entirely. It is still marked draggable so we can catch
+ * the drag attempt and, instead of moving it, nudge the picker view with a
+ * little "nuh uh, over here" wiggle.
+ */
+function AddRepoTab({
+  orientation,
+  iconOnly,
+  width,
+}: {
+  orientation: TabOrientation;
+  iconOnly: boolean;
+  width: number;
+}) {
+  const open = useUiStore((state) => state.repoPickerOpen);
+  const active = useUiStore((state) => state.centerView === "repoPicker");
+  const showRepoPicker = useUiStore((state) => state.showRepoPicker);
+  const closeRepoPicker = useUiStore((state) => state.closeRepoPicker);
+  const wiggleRepoPicker = useUiStore((state) => state.wiggleRepoPicker);
+  const [hovered, setHovered] = useState(false);
+
+  const nudge = (event: DragEvent<HTMLElement>) => {
+    // Cancel the drag before it starts, then wiggle the picker into view.
+    event.preventDefault();
+    if (!active) showRepoPicker();
+    wiggleRepoPicker();
+  };
+
+  // Before it is opened it is just the trailing "+" button, not a tab.
+  if (!open) {
+    return (
+      <TooltipButton
+        onClick={() => showRepoPicker()}
+        aria-label="Add a repository"
+        className={cn(
+          "flex flex-none cursor-pointer items-center gap-1.5 text-xs text-sub transition-[border-color,background-color,color] hover:bg-panel2 hover:text-foreground",
+          orientation === "horizontal"
+            ? "h-full border-l border-border px-2.5"
+            : "mx-1.5 my-1 h-[31px] justify-center rounded-[5px] border border-dashed border-border px-2",
+        )}
+        tooltip="Add a repository"
+      >
+        <Plus size={13} strokeWidth={2.2} className="flex-none" />
+        {orientation === "vertical" && !iconOnly && <span>Add a repository</span>}
+      </TooltipButton>
+    );
+  }
+
+  const showName = !iconOnly || (orientation === "horizontal" && hovered);
+  const horizontalWidth =
+    iconOnly && hovered ? MAX_HORIZONTAL_TAB_WIDTH : width;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          role="button"
+          tabIndex={0}
+          draggable
+          onDragStart={nudge}
+          onClick={() => showRepoPicker()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              showRepoPicker();
+            }
+          }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          onMouseDown={(event) => {
+            if (event.button === 1) event.preventDefault();
+          }}
+          onAuxClick={(event) => {
+            if (event.button !== 1) return;
+            event.preventDefault();
+            event.stopPropagation();
+            closeRepoPicker();
+          }}
+          aria-label="Add a repository"
+          aria-current={active ? "page" : undefined}
+          className={cn(
+            "group/add relative flex min-w-0 cursor-pointer items-center gap-[7px] overflow-hidden border-border text-xs transition-[border-color,background-color,color]",
+            orientation === "horizontal"
+              ? "h-full flex-none border-l px-2.5"
+              : "mx-1.5 my-1 h-[31px] flex-none rounded-[5px] border border-dashed px-2",
+            iconOnly && orientation === "horizontal" && !hovered && "justify-center px-1",
+            active
+              ? "bg-panel font-semibold text-accent-text"
+              : "text-sub hover:bg-panel2 hover:text-foreground",
+          )}
+          style={
+            orientation === "horizontal" ? { width: horizontalWidth } : undefined
+          }
+        >
+          <Plus size={13} strokeWidth={2.2} className="flex-none" />
+          {showName && (
+            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+              Add a repository
+            </span>
+          )}
+          <TooltipButton
+            draggable={false}
+            onClick={(event) => {
+              event.stopPropagation();
+              closeRepoPicker();
+            }}
+            className={cn(
+              "ml-auto flex flex-none items-center justify-center overflow-hidden rounded text-muted-foreground transition-[width,opacity,margin] duration-150 hover:bg-panel3 hover:text-foreground",
+              "w-0 opacity-0 group-hover/add:w-[15px] group-hover/add:opacity-100 group-focus-within/add:w-[15px] group-focus-within/add:opacity-100",
+              orientation === "horizontal" &&
+                "-ml-[7px] group-hover/add:ml-0 group-focus-within/add:ml-0",
+            )}
+            tooltip="Close this tab"
+          >
+            <X size={11} />
+          </TooltipButton>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side={orientation === "vertical" ? "right" : "bottom"}>
+        Add a repository
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function RepositoryTabs({
   orientation,
 }: {
@@ -384,6 +514,7 @@ export function RepositoryTabs({
   const tabGroups = useWorkspaceStore((state) => state.tabGroups);
   const tabOrder = useWorkspaceStore((state) => state.tabOrder);
   const savedTabGroups = useWorkspaceStore((state) => state.savedTabGroups);
+  const repoPickerOpen = useUiStore((state) => state.repoPickerOpen);
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
   const [iconRepo, setIconRepo] = useState<RepoInfo | null>(null);
   const [hoveredRepoPath, setHoveredRepoPath] = useState<string | null>(null);
@@ -405,12 +536,14 @@ export function RepositoryTabs({
   const effectiveIconOnly = tabIconOnly || verticalIconOnly;
   const showTabIcons = showRepoIcons || effectiveIconOnly;
 
+  // The "Add a repository" tab claims a full tab's width once it is open, so it
+  // has to share the same budget or it pushes the repo tabs into overflow.
   const visibleRepoCount = tabOrder.reduce((count, item) => {
     if (item.type === "repo") return count + (findRepo(openRepos, item.path) ? 1 : 0);
     const group = tabGroups.find((candidate) => candidate.id === item.id);
     if (!group || group.collapsed) return count;
     return count + group.repoPaths.filter((path) => findRepo(openRepos, path)).length;
-  }, 0);
+  }, repoPickerOpen ? 1 : 0);
   const groupHeaderBudget = tabOrder.reduce((width, item) => {
     if (item.type !== "group") return width;
     const group = tabGroups.find((candidate) => candidate.id === item.id);
@@ -1216,6 +1349,11 @@ export function RepositoryTabs({
           </Fragment>
         ))}
         {renderOrderGap(tabOrder.length)}
+        <AddRepoTab
+          orientation={orientation}
+          iconOnly={effectiveIconOnly}
+          width={adaptiveHorizontalTabWidth}
+        />
       </div>
       {orientation === "horizontal" && (
         <ScrollArrow

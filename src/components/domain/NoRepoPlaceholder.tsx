@@ -10,7 +10,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
  * than a line of grey text pointing at the small one up in the tab bar.
  */
 export function NoRepoPlaceholder() {
-  const openModal = useUiStore((s) => s.openModal)
+  const showRepoPicker = useUiStore((s) => s.showRepoPicker)
   const recents = useWorkspaceStore((s) => s.recents)
   const openRepo = useOpenRepo()
 
@@ -26,7 +26,7 @@ export function NoRepoPlaceholder() {
       </div>
       <button
         type="button"
-        onClick={() => openModal('clone')}
+        onClick={() => showRepoPicker()}
         disabled={openRepo.isPending}
         className="flex h-10 items-center gap-2 rounded-[7px] bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
       >

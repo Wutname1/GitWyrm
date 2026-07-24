@@ -1,0 +1,2350 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GitWyrm - Add a repository mockup</title>
+  <style>
+    @font-face {
+      font-family: "Sora";
+      src: url("../src/assets/fonts/Sora-SemiBold.ttf") format("truetype");
+      font-weight: 600;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "IBM Plex Sans";
+      src: url("../src/assets/fonts/IBMPlexSans-VariableFont.ttf") format("truetype");
+      font-weight: 100 900;
+      font-display: swap;
+    }
+
+    :root {
+      color-scheme: dark;
+      --bg: #181818;
+      --panel: #1f1f1f;
+      --panel-2: #262626;
+      --panel-3: #2d2d2d;
+      --panel-4: #343434;
+      --border: #323232;
+      --border-bright: #434343;
+      --text: #ededed;
+      --sub: #b4b4b4;
+      --muted: #838383;
+      --faint: #606060;
+      --accent: #1db584;
+      --accent-hi: #3bcca0;
+      --accent-soft: rgba(29, 181, 132, .13);
+      --accent-line: rgba(29, 181, 132, .38);
+      --warn: #e6ae52;
+      --danger: #f07878;
+      --shadow: 0 22px 70px rgba(0, 0, 0, .38);
+      --radius: 7px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 13px;
+    }
+    button, input, select {
+      font: inherit;
+    }
+    button {
+      border: 0;
+    }
+    button, [role="button"] {
+      -webkit-tap-highlight-color: transparent;
+    }
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    svg { display: block; }
+
+    .app {
+      display: grid;
+      grid-template-rows: 38px minmax(0, 1fr) 25px;
+      width: 100%;
+      height: 100%;
+      min-width: 720px;
+      background: var(--bg);
+    }
+
+    /* A minimal app frame makes it possible to judge the screen at real scale. */
+    .tab-strip {
+      display: flex;
+      align-items: end;
+      gap: 2px;
+      padding: 5px 7px 0;
+      border-bottom: 1px solid var(--border);
+      background: #151515;
+      user-select: none;
+    }
+    .brand-mark {
+      display: grid;
+      width: 26px;
+      height: 28px;
+      place-items: center;
+      color: var(--accent);
+    }
+    .app-tab {
+      display: flex;
+      min-width: 0;
+      height: 30px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 11px;
+      border: 1px solid transparent;
+      border-bottom: 0;
+      border-radius: 7px 7px 0 0;
+      background: transparent;
+      color: var(--muted);
+    }
+    .app-tab.previous {
+      width: 176px;
+    }
+    .app-tab.active {
+      width: 194px;
+      border-color: var(--border);
+      background: var(--panel);
+      color: var(--text);
+    }
+    .app-tab .dot {
+      width: 7px;
+      height: 7px;
+      flex: none;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    .app-tab .tab-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11.5px;
+      font-weight: 550;
+    }
+    .tab-close {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1;
+    }
+    .window-spacer { flex: 1; }
+    .window-controls {
+      display: flex;
+      align-self: stretch;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .window-controls span {
+      display: grid;
+      width: 38px;
+      height: 28px;
+      place-items: center;
+    }
+
+    .launchpad {
+      display: grid;
+      min-height: 0;
+      grid-template-columns: 248px minmax(420px, 1fr) 334px;
+      overflow: hidden;
+    }
+
+    .route-rail {
+      position: relative;
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      padding: 28px 18px 18px;
+      border-right: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .rail-title {
+      margin: 0 10px 5px;
+      font: 600 17px/1.25 "Sora", sans-serif;
+      letter-spacing: -.02em;
+    }
+    .rail-subtitle {
+      margin: 0 10px 23px;
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 1.45;
+    }
+    .routes {
+      position: relative;
+      display: grid;
+      gap: 4px;
+    }
+    .routes::before {
+      position: absolute;
+      z-index: 0;
+      top: 23px;
+      bottom: 23px;
+      left: 27px;
+      width: 1px;
+      background: linear-gradient(
+        to bottom,
+        var(--accent-line),
+        rgba(29, 181, 132, .13) 68%,
+        transparent
+      );
+      content: "";
+    }
+    .route {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 34px 1fr auto;
+      width: 100%;
+      min-height: 54px;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 9px;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      background: transparent;
+      color: var(--sub);
+      cursor: pointer;
+      text-align: left;
+      transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    }
+    .route:hover {
+      background: var(--panel-3);
+      color: var(--text);
+    }
+    .route.active {
+      border-color: rgba(29, 181, 132, .24);
+      background: var(--accent-soft);
+      color: var(--text);
+    }
+    .route-icon {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid var(--border-bright);
+      border-radius: 50%;
+      background: var(--panel-2);
+      color: var(--muted);
+    }
+    .route.active .route-icon {
+      border-color: rgba(29, 181, 132, .55);
+      background: #18342b;
+      color: var(--accent-hi);
+      box-shadow: 0 0 0 3px rgba(29, 181, 132, .08);
+    }
+    .route-copy strong {
+      display: block;
+      margin-bottom: 2px;
+      color: inherit;
+      font-size: 12.5px;
+      font-weight: 650;
+    }
+    .route-copy small {
+      display: block;
+      color: var(--muted);
+      font-size: 10.5px;
+      line-height: 1.2;
+    }
+    .route-key {
+      color: var(--faint);
+      font: 500 10px/1 ui-monospace, "Cascadia Code", monospace;
+    }
+
+    .folder-watch {
+      margin-top: auto;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #1b1b1b;
+    }
+    .folder-watch-head {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--sub);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .folder-watch-path {
+      margin-top: 8px;
+      overflow: hidden;
+      color: var(--text);
+      font: 500 11px/1.35 ui-monospace, "Cascadia Code", monospace;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .folder-watch-note {
+      margin: 4px 0 10px;
+      color: var(--muted);
+      font-size: 10.5px;
+    }
+    .folder-actions { display: flex; gap: 6px; }
+
+    .main-pane {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      background: var(--bg);
+    }
+    .main-head {
+      padding: 28px 0 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .content-frame {
+      width: 100%;
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 0 30px;
+    }
+    .eyebrow {
+      margin-bottom: 7px;
+      color: var(--accent-hi);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .main-head h1 {
+      margin: 0;
+      font: 600 24px/1.2 "Sora", sans-serif;
+      letter-spacing: -.035em;
+    }
+    .main-head p {
+      max-width: 600px;
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
+    .search-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 960px;
+      margin-top: 18px;
+    }
+    .search-box {
+      position: relative;
+      flex: 1;
+    }
+    .search-box .icon {
+      position: absolute;
+      top: 50%;
+      left: 12px;
+      color: var(--muted);
+      transform: translateY(-50%);
+      pointer-events: none;
+    }
+    .search-box input,
+    .field input,
+    .field select {
+      width: 100%;
+      height: 36px;
+      border: 1px solid var(--border-bright);
+      border-radius: 6px;
+      background: #141414;
+      color: var(--text);
+      outline: 0;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+    .search-box input {
+      padding: 0 70px 0 37px;
+    }
+    .search-box input:focus,
+    .field input:focus,
+    .field select:focus {
+      border-color: rgba(29, 181, 132, .76);
+      box-shadow: 0 0 0 3px rgba(29, 181, 132, .1);
+    }
+    .search-hint {
+      position: absolute;
+      top: 50%;
+      right: 9px;
+      padding: 3px 6px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--faint);
+      font-size: 9.5px;
+      transform: translateY(-50%);
+    }
+    .button {
+      display: inline-flex;
+      height: 34px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 12px;
+      border: 1px solid var(--border-bright);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--sub);
+      cursor: pointer;
+      font-size: 11.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: background 120ms ease, color 120ms ease, transform 80ms ease;
+    }
+    .button:hover {
+      background: var(--panel-3);
+      color: var(--text);
+    }
+    .button:active { transform: translateY(1px); }
+    .button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #07130f;
+    }
+    .button.primary:hover { background: var(--accent-hi); }
+    .button.ghost {
+      height: 28px;
+      padding: 0 8px;
+      border-color: transparent;
+      background: transparent;
+    }
+    .button.compact {
+      height: 28px;
+      padding: 0 9px;
+      font-size: 10.5px;
+    }
+    .button.danger { color: #ef9999; }
+    .button:disabled {
+      cursor: default;
+      opacity: .42;
+      transform: none;
+    }
+
+    .drop-strip {
+      display: flex;
+      width: min(900px, calc(100% - 60px));
+      min-height: 44px;
+      align-items: center;
+      gap: 9px;
+      margin-right: auto;
+      margin-left: max(30px, calc((100% - 1600px) / 2 + 30px));
+      padding: 0 13px;
+      border: 1px dashed var(--border-bright);
+      border-top: 0;
+      border-radius: 0 0 7px 7px;
+      background: rgba(255, 255, 255, .012);
+      color: var(--muted);
+      font-size: 11px;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    .drop-strip.dragging {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent-hi);
+    }
+    .drop-strip strong { color: var(--sub); font-weight: 600; }
+    .drop-strip .spacer { flex: 1; }
+
+    .repo-scroll,
+    .workspace-scroll {
+      min-height: 0;
+      flex: 1;
+      overflow: auto;
+      padding: 18px 30px 28px;
+      scrollbar-color: var(--panel-4) transparent;
+      scrollbar-width: thin;
+    }
+    .library-layout {
+      display: grid;
+      grid-template-areas:
+        "groups"
+        "pinned"
+        "recent"
+        "all";
+      width: 100%;
+      max-width: 1540px;
+      margin: 0 auto;
+    }
+    .groups-section { grid-area: groups; }
+    .pinned-section { grid-area: pinned; }
+    .recent-section { grid-area: recent; }
+    .all-section { grid-area: all; }
+    .library-secondary {
+      display: contents;
+    }
+    .section-head {
+      display: flex;
+      height: 28px;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .075em;
+      text-transform: uppercase;
+    }
+    .section-head .count {
+      display: grid;
+      min-width: 18px;
+      height: 18px;
+      place-items: center;
+      padding: 0 5px;
+      border-radius: 9px;
+      background: var(--panel-3);
+      color: var(--sub);
+      font-size: 9px;
+      letter-spacing: 0;
+    }
+    .section-head .spacer { flex: 1; }
+    .section-note {
+      color: var(--faint);
+      font-size: 9.5px;
+      font-weight: 500;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    .repo-list {
+      display: grid;
+      gap: 3px;
+      margin-bottom: 18px;
+    }
+    .repo-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 30px;
+      min-height: 55px;
+      align-items: center;
+      padding-right: 8px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text);
+      transition: background 100ms ease, border-color 100ms ease;
+    }
+    .repo-row:hover {
+      background: var(--panel);
+    }
+    .repo-row.selected {
+      border-color: rgba(29, 181, 132, .36);
+      background: var(--accent-soft);
+    }
+    .repo-row.hidden { display: none; }
+    .repo-select {
+      display: grid;
+      grid-template-columns: 34px minmax(140px, 1fr) minmax(96px, .38fr) 74px;
+      min-width: 0;
+      min-height: 53px;
+      align-items: center;
+      gap: 11px;
+      padding: 7px 0 7px 10px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    .repo-glyph {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--sub);
+    }
+    .repo-row.selected .repo-glyph {
+      border-color: rgba(29, 181, 132, .32);
+      color: var(--accent-hi);
+    }
+    .repo-name {
+      min-width: 0;
+    }
+    .repo-name strong {
+      display: block;
+      overflow: hidden;
+      margin-bottom: 3px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12.5px;
+      font-weight: 650;
+    }
+    .repo-name small,
+    .repo-branch {
+      display: block;
+      overflow: hidden;
+      color: var(--muted);
+      font: 500 10.5px/1.2 ui-monospace, "Cascadia Code", monospace;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .repo-branch {
+      color: var(--sub);
+    }
+    .repo-state {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 10.5px;
+    }
+    .state-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--faint);
+    }
+    .state-dot.clean { background: var(--accent); }
+    .state-dot.changed { background: var(--warn); }
+    .pin {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--faint);
+      cursor: pointer;
+    }
+    .pin:hover { background: var(--panel-3); color: var(--sub); }
+    .pin.active { color: var(--accent-hi); }
+    .empty-results {
+      display: none;
+      grid-column: 1 / -1;
+      padding: 34px 10px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .empty-results.visible { display: block; }
+    .recent-list {
+      display: grid;
+      gap: 3px;
+      margin-bottom: 18px;
+    }
+    .recent-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 30px;
+      min-height: 48px;
+      align-items: center;
+      padding-right: 7px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+    }
+    .recent-row:hover { background: var(--panel); }
+    .recent-row.selected {
+      border-color: rgba(29, 181, 132, .36);
+      background: var(--accent-soft);
+    }
+    .recent-row.hidden { display: none; }
+    .recent-select {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      min-width: 0;
+      min-height: 46px;
+      align-items: center;
+      gap: 9px;
+      padding: 5px 0 5px 8px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+    }
+    .recent-select .repo-glyph {
+      width: 30px;
+      height: 30px;
+    }
+    .recent-when {
+      color: var(--muted);
+      font-size: 9.5px;
+      white-space: nowrap;
+    }
+
+    .detail-pane {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      border-left: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .detail-top {
+      display: flex;
+      height: 55px;
+      align-items: center;
+      padding: 0 20px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .075em;
+      text-transform: uppercase;
+    }
+    .detail-top .spacer { flex: 1; }
+    .detail-close {
+      display: none;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .detail-close:hover { background: var(--panel-3); color: var(--text); }
+    .detail-content {
+      min-height: 0;
+      flex: 1;
+      overflow: auto;
+      padding: 24px 22px;
+    }
+    .repo-hero-icon {
+      display: grid;
+      width: 48px;
+      height: 48px;
+      margin-bottom: 17px;
+      place-items: center;
+      border: 1px solid rgba(29, 181, 132, .28);
+      border-radius: 11px;
+      background: var(--accent-soft);
+      color: var(--accent-hi);
+    }
+    .detail-name {
+      margin: 0;
+      font: 600 18px/1.25 "Sora", sans-serif;
+      letter-spacing: -.025em;
+    }
+    .detail-path {
+      margin: 7px 0 0;
+      overflow-wrap: anywhere;
+      color: var(--muted);
+      font: 500 10.5px/1.5 ui-monospace, "Cascadia Code", monospace;
+    }
+    .detail-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 15px 0 0;
+    }
+    .tag {
+      display: inline-flex;
+      height: 23px;
+      align-items: center;
+      gap: 5px;
+      padding: 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel-2);
+      color: var(--sub);
+      font-size: 10px;
+    }
+    .detail-divider {
+      height: 1px;
+      margin: 21px 0;
+      background: var(--border);
+    }
+    .detail-stat {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      padding: 6px 0;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .detail-stat strong {
+      overflow: hidden;
+      color: var(--sub);
+      font-weight: 550;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .change-note {
+      display: flex;
+      gap: 9px;
+      margin-top: 16px;
+      padding: 11px;
+      border: 1px solid rgba(230, 174, 82, .23);
+      border-radius: 6px;
+      background: rgba(230, 174, 82, .075);
+      color: #cdb586;
+      font-size: 10.5px;
+      line-height: 1.45;
+    }
+    .detail-actions {
+      display: grid;
+      gap: 7px;
+      padding: 14px 18px;
+      border-top: 1px solid var(--border);
+    }
+    .detail-actions .button { width: 100%; }
+
+    /* Clone / new / groups share the same full-screen architecture. */
+    .form-layout {
+      display: grid;
+      grid-template-columns: minmax(420px, 680px) minmax(280px, 360px);
+      gap: 22px;
+      align-items: start;
+      width: 100%;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .form-card,
+    .suggestion-card,
+    .group-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .form-card { padding: 20px; }
+    .form-title {
+      margin: 0 0 4px;
+      font: 600 14px/1.3 "Sora", sans-serif;
+    }
+    .form-note {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .field label {
+      color: var(--sub);
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .field input,
+    .field select {
+      padding: 0 11px;
+    }
+    .field small {
+      color: var(--muted);
+      font-size: 10.5px;
+    }
+    .input-with-button {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 7px;
+    }
+    .path-preview {
+      margin: 17px 0;
+      padding: 11px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #161616;
+    }
+    .path-preview small {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: .065em;
+      text-transform: uppercase;
+    }
+    .path-preview code {
+      display: block;
+      overflow-wrap: anywhere;
+      color: var(--sub);
+      font: 500 10.5px/1.45 ui-monospace, "Cascadia Code", monospace;
+    }
+    .check-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      margin: 10px 0;
+      color: var(--sub);
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .check-row input {
+      width: 14px;
+      height: 14px;
+      margin: 1px 0 0;
+      accent-color: var(--accent);
+    }
+    .check-row small {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+    .form-footer {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 19px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .form-status {
+      flex: 1;
+      color: var(--muted);
+      font-size: 10.5px;
+    }
+    .suggestions {
+      display: grid;
+      gap: 9px;
+    }
+    .suggestion-card {
+      padding: 13px;
+      cursor: pointer;
+      text-align: left;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    .suggestion-card:hover {
+      border-color: var(--border-bright);
+      background: var(--panel-2);
+    }
+    .suggestion-card strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 11.5px;
+    }
+    .suggestion-card .connection-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .suggestion-card small {
+      display: block;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 10.5px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .suggestion-source {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 9px;
+      color: var(--sub);
+      font-size: 9.5px;
+    }
+    .template-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(78px, 1fr));
+      gap: 7px;
+    }
+    .template {
+      min-height: 62px;
+      padding: 9px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #191919;
+      color: var(--muted);
+      cursor: pointer;
+      text-align: left;
+    }
+    .template:hover { background: var(--panel-2); color: var(--sub); }
+    .template.active {
+      border-color: rgba(29, 181, 132, .5);
+      background: var(--accent-soft);
+      color: var(--text);
+    }
+    .template strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 10.5px;
+    }
+    .template small { font-size: 9.5px; }
+
+    .groups-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .groups-grid.combined {
+      grid-template-columns: repeat(3, minmax(170px, 1fr));
+      gap: 8px;
+      margin-bottom: 19px;
+    }
+    .group-card {
+      display: grid;
+      min-height: 124px;
+      padding: 15px;
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    .group-card:hover { background: var(--panel-2); }
+    .group-card.selected {
+      border-color: rgba(29, 181, 132, .45);
+      background: var(--accent-soft);
+    }
+    .group-card.hidden { display: none; }
+    .groups-grid.combined .group-card {
+      min-width: 0;
+      min-height: 102px;
+      padding: 12px;
+    }
+    .groups-grid.combined .group-repos {
+      flex-wrap: nowrap;
+      min-width: 0;
+      margin-top: 10px;
+      overflow: hidden;
+    }
+    .groups-grid.combined .repo-pill {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .groups-grid.combined .group-foot {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      justify-content: space-between;
+      margin-top: 11px;
+    }
+    .group-top {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .group-color {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    .group-card h3 {
+      margin: 0;
+      font-size: 12.5px;
+    }
+    .group-repos {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 13px;
+    }
+    .repo-pill {
+      padding: 4px 7px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: #171717;
+      color: var(--sub);
+      font: 500 9.5px/1 ui-monospace, "Cascadia Code", monospace;
+    }
+    .group-foot {
+      align-self: end;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .group-library-scrim {
+      position: absolute;
+      z-index: 70;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      background: rgba(7, 7, 7, .72);
+      backdrop-filter: blur(3px);
+      animation: toast-in 140ms ease-out;
+    }
+    .group-library {
+      display: flex;
+      width: min(920px, 100%);
+      max-height: min(720px, calc(100vh - 120px));
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--border-bright);
+      border-radius: 9px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .group-library-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 17px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .group-library-head h2 {
+      margin: 0;
+      font: 600 15px/1.2 "Sora", sans-serif;
+    }
+    .group-library-head p {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 10.5px;
+    }
+    .group-library-head .spacer { flex: 1; }
+    .group-library-search {
+      position: relative;
+      width: 250px;
+    }
+    .group-library-search svg {
+      position: absolute;
+      top: 50%;
+      left: 10px;
+      color: var(--muted);
+      transform: translateY(-50%);
+      pointer-events: none;
+    }
+    .group-library-search input {
+      width: 100%;
+      height: 32px;
+      padding: 0 10px 0 31px;
+      border: 1px solid var(--border-bright);
+      border-radius: 6px;
+      background: #161616;
+      color: var(--text);
+      outline: 0;
+    }
+    .group-library-close {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 18px;
+    }
+    .group-library-close:hover { background: var(--panel-3); color: var(--text); }
+    .group-library-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+      min-height: 0;
+      overflow: auto;
+      padding: 13px;
+    }
+    .group-library-row {
+      display: grid;
+      grid-template-columns: 9px minmax(0, 1fr) auto auto;
+      min-height: 61px;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #1b1b1b;
+    }
+    .group-library-row.hidden { display: none; }
+    .group-library-copy {
+      min-width: 0;
+    }
+    .group-library-copy strong,
+    .group-library-copy small {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .group-library-copy strong { margin-bottom: 3px; font-size: 11.5px; }
+    .group-library-copy small { color: var(--muted); font-size: 10px; }
+    .group-library-pin {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--faint);
+      cursor: pointer;
+    }
+    .group-library-pin:hover { background: var(--panel-3); color: var(--sub); }
+    .group-library-pin.active { color: var(--accent-hi); }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px;
+      border-top: 1px solid var(--border);
+      background: #151515;
+      color: var(--muted);
+      font-size: 9.5px;
+      user-select: none;
+    }
+    .status-bar .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .status-bar .spacer { flex: 1; }
+
+    .toast-stack {
+      position: fixed;
+      z-index: 90;
+      right: 18px;
+      bottom: 40px;
+      display: grid;
+      width: min(340px, calc(100vw - 36px));
+      gap: 8px;
+      pointer-events: none;
+    }
+    .toast {
+      display: grid;
+      grid-template-columns: 25px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 13px;
+      border: 1px solid var(--border-bright);
+      border-radius: 7px;
+      background: #242424;
+      box-shadow: var(--shadow);
+      animation: toast-in 170ms ease-out;
+    }
+    .toast-icon {
+      display: grid;
+      width: 25px;
+      height: 25px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      color: var(--accent-hi);
+    }
+    .toast strong {
+      display: block;
+      margin-bottom: 2px;
+      font-size: 11.5px;
+    }
+    .toast small { color: var(--muted); font-size: 10.5px; }
+    .progress-line {
+      position: fixed;
+      z-index: 95;
+      top: 38px;
+      right: 0;
+      left: 0;
+      height: 2px;
+      overflow: hidden;
+      background: transparent;
+      pointer-events: none;
+    }
+    .progress-line.active::after {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 36%;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+      content: "";
+      animation: progress 1.15s ease-in-out infinite;
+    }
+    .mobile-detail-button { display: none; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(8px) scale(.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes progress {
+      from { transform: translateX(-110%); }
+      to { transform: translateX(390%); }
+    }
+
+    @media (min-width: 2200px) {
+      .library-layout {
+        grid-template-columns: minmax(680px, 1fr) 390px;
+        grid-template-areas:
+          "pinned secondary"
+          "all secondary";
+        column-gap: 24px;
+        align-items: start;
+      }
+      .library-secondary {
+        display: grid;
+        grid-area: secondary;
+        gap: 14px;
+      }
+      .groups-section,
+      .recent-section {
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+      .groups-section { grid-area: auto; }
+      .recent-section { grid-area: auto; }
+      .groups-grid.combined {
+        grid-template-columns: 1fr;
+        margin-bottom: 0;
+      }
+      .groups-grid.combined .group-card {
+        min-height: 88px;
+        background: #1a1a1a;
+      }
+      .recent-list { margin-bottom: 0; }
+      .recent-row:hover { background: var(--panel-2); }
+      .pinned-section { padding-bottom: 5px; }
+    }
+
+    @media (max-width: 1080px) {
+      .launchpad { grid-template-columns: 224px minmax(420px, 1fr); }
+      .detail-pane {
+        position: fixed;
+        z-index: 50;
+        top: 38px;
+        right: 0;
+        bottom: 25px;
+        width: 334px;
+        box-shadow: -20px 0 60px rgba(0,0,0,.35);
+        transform: translateX(102%);
+        transition: transform 170ms ease;
+      }
+      .detail-pane.open { transform: translateX(0); }
+      .detail-close { display: grid; }
+      .mobile-detail-button { display: inline-flex; }
+      .form-layout { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 800px) {
+      body { overflow: auto; }
+      .app { min-width: 0; }
+      .app-tab.previous { display: none; }
+      .launchpad {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(0, 1fr);
+      }
+      .route-rail {
+        display: block;
+        padding: 13px 14px 10px;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .rail-title { display: inline; margin: 0 12px 0 0; font-size: 14px; }
+      .rail-subtitle, .folder-watch { display: none; }
+      .routes {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 5px;
+        margin-top: 10px;
+      }
+      .routes::before { display: none; }
+      .route {
+        display: flex;
+        min-height: 38px;
+        justify-content: center;
+        padding: 5px;
+      }
+      .route-icon { width: 26px; height: 26px; border-radius: 6px; }
+      .route-copy strong { margin: 0; font-size: 10.5px; }
+      .route-copy small, .route-key { display: none; }
+      .main-head { padding: 20px 0 14px; }
+      .content-frame { padding: 0 18px; }
+      .main-head h1 { font-size: 20px; }
+      .search-row { flex-wrap: wrap; }
+      .search-box { flex-basis: 100%; }
+      .drop-strip { margin: 0 18px; }
+      .drop-strip {
+        width: calc(100% - 36px);
+        margin-right: 18px;
+        margin-left: 18px;
+      }
+      .repo-scroll, .workspace-scroll { padding: 14px 18px 24px; }
+      .repo-row {
+        grid-template-columns: minmax(0, 1fr) 30px;
+        min-height: 51px;
+      }
+      .repo-select { grid-template-columns: 30px minmax(140px, 1fr); }
+      .repo-glyph { width: 30px; height: 30px; }
+      .repo-branch, .repo-state { display: none; }
+      .groups-grid { grid-template-columns: 1fr; }
+      .groups-grid.combined {
+        display: flex;
+        margin-right: -18px;
+        padding-right: 18px;
+        overflow-x: auto;
+        scroll-snap-type: x proximity;
+      }
+      .groups-grid.combined .group-card {
+        flex: 0 0 230px;
+        scroll-snap-align: start;
+      }
+      .template-grid { grid-template-columns: repeat(3, 1fr); }
+      .group-library-scrim { padding: 14px; }
+      .group-library-head { flex-wrap: wrap; }
+      .group-library-search { width: 100%; order: 3; }
+      .group-library-list { grid-template-columns: 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <svg class="sr-only" aria-hidden="true">
+    <symbol id="i-wyrm" viewBox="0 0 24 24">
+      <path d="M5 5.5h8.2a3.3 3.3 0 0 1 0 6.6H9.7a3.3 3.3 0 1 0 0 6.6H19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <circle cx="18.6" cy="18.7" r="1.7" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24">
+      <path d="M3.5 7.2h6l1.8 2h9.2v8.6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7.2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M3.5 7.2V5.8a1.6 1.6 0 0 1 1.6-1.6h4l2.1 2.1h7.2a2 2 0 0 1 2 2v1" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    </symbol>
+    <symbol id="i-download" viewBox="0 0 24 24">
+      <path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24">
+      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-stack" viewBox="0 0 24 24">
+      <path d="m4 8 8-4 8 4-8 4-8-4Zm0 4 8 4 8-4M4 16l8 4 8-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 24 24">
+      <circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <path d="m15.5 15.5 5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24">
+      <path d="m8 4 8 0-1 5 3 3H6l3-3-1-5Zm4 8v8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24">
+      <path d="M19 7V3l-2 2a8 8 0 1 0 2.2 9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24">
+      <path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24">
+      <path d="m5 12 4 4 10-10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24">
+      <circle cx="6" cy="5" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="6" cy="19" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="18" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M6 7v10M8 14c6 0 10-2 10-4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    </symbol>
+    <symbol id="i-github" viewBox="0 0 24 24">
+      <path d="M12 2.8a9.4 9.4 0 0 0-3 18.3c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 0 1.6 1.1 1.6 1.1.9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.7-1.4-2.3-.3-4.6-1.1-4.6-5a3.9 3.9 0 0 1 1-2.7c-.1-.3-.5-1.3.1-2.7 0 0 .9-.3 2.8 1a9.6 9.6 0 0 1 5.1 0c1.9-1.3 2.8-1 2.8-1 .6 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.8v2.7c0 .3.2.6.7.5A9.4 9.4 0 0 0 12 2.8Z" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-external" viewBox="0 0 24 24">
+      <path d="M14 4h6v6M20 4l-9 9M18 13v6H5V6h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24">
+      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    </symbol>
+    <symbol id="i-star" viewBox="0 0 24 24">
+      <path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    </symbol>
+  </svg>
+
+  <div class="app">
+    <header class="tab-strip">
+      <div class="brand-mark" aria-label="GitWyrm">
+        <svg width="19" height="19"><use href="#i-wyrm"/></svg>
+      </div>
+      <div class="app-tab previous">
+        <span class="dot"></span>
+        <span class="tab-label">GitWyrm</span>
+        <span class="tab-close">×</span>
+      </div>
+      <div class="app-tab active">
+        <svg width="14" height="14"><use href="#i-plus"/></svg>
+        <span class="tab-label">Add a repository</span>
+        <span class="tab-close">×</span>
+      </div>
+      <div class="window-spacer"></div>
+      <div class="window-controls" aria-hidden="true">
+        <span>−</span><span>□</span><span>×</span>
+      </div>
+    </header>
+
+    <main class="launchpad">
+      <aside class="route-rail">
+        <h2 class="rail-title">Add a repository</h2>
+        <p class="rail-subtitle">Open work on this computer or bring in something new.</p>
+
+        <nav class="routes" aria-label="Ways to add a repository">
+          <button class="route active" data-route="open" aria-pressed="true">
+            <span class="route-icon"><svg width="17" height="17"><use href="#i-folder"/></svg></span>
+            <span class="route-copy"><strong>On this computer</strong><small>Browse or search your folders</small></span>
+            <span class="route-key">1</span>
+          </button>
+          <button class="route" data-route="clone" aria-pressed="false">
+            <span class="route-icon"><svg width="17" height="17"><use href="#i-download"/></svg></span>
+            <span class="route-copy"><strong>From a web address</strong><small>Copy a project to this PC</small></span>
+            <span class="route-key">2</span>
+          </button>
+          <button class="route" data-route="new" aria-pressed="false">
+            <span class="route-icon"><svg width="17" height="17"><use href="#i-plus"/></svg></span>
+            <span class="route-copy"><strong>Start something new</strong><small>Create a ready-to-use folder</small></span>
+            <span class="route-key">3</span>
+          </button>
+        </nav>
+
+        <section class="folder-watch">
+          <div class="folder-watch-head">
+            <svg width="13" height="13"><use href="#i-eye"/></svg>
+            Watched folder
+          </div>
+          <div class="folder-watch-path">C:\code</div>
+          <p class="folder-watch-note">12 repositories found automatically</p>
+          <div class="folder-actions">
+            <button class="button compact" id="changeFolder">Change</button>
+            <button class="button compact ghost" id="rescan">
+              <svg width="12" height="12"><use href="#i-refresh"/></svg>
+              Rescan
+            </button>
+          </div>
+        </section>
+      </aside>
+
+      <section class="main-pane" id="mainPane" aria-live="polite"></section>
+      <aside class="detail-pane" id="detailPane"></aside>
+    </main>
+
+    <footer class="status-bar">
+      <span class="status-dot"></span>
+      <span>Ready</span>
+      <span class="spacer"></span>
+      <span>Mockup - no files will be changed</span>
+    </footer>
+  </div>
+
+  <div class="progress-line" id="progressLine"></div>
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+  <script>
+    const icon = (name, size = 16) =>
+      `<svg width="${size}" height="${size}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
+    const repos = [
+      { id: "gitwyrm", name: "GitWyrm", path: "C:\\code\\GitWyrm", branch: "main", state: "7 changed", kind: "changed", when: "Open now", pinned: true, isOpen: true, recent: false, remote: "github.com/jerem/GitWyrm", commits: "842 commits" },
+      { id: "hearth-core", name: "HearthShelf-Core", path: "C:\\code\\HearthShelf-Core", branch: "main", state: "Clean", kind: "clean", when: "Yesterday", pinned: true, isOpen: false, recent: false, remote: "github.com/hearthshelf/core", commits: "1,204 commits" },
+      { id: "hearth-mobile", name: "HearthShelf-Mobile", path: "C:\\code\\HearthShelf-Mobile", branch: "feature/stats", state: "2 changed", kind: "changed", when: "18 min ago", pinned: false, isOpen: false, recent: true, remote: "github.com/hearthshelf/mobile", commits: "691 commits" },
+      { id: "gitwyrm-site", name: "GitWyrm-Website", path: "C:\\code\\GitWyrm-Website", branch: "master", state: "Clean", kind: "clean", when: "Yesterday", pinned: false, isOpen: false, recent: true, remote: "github.com/jerem/gitwyrm.com", commits: "57 commits" },
+      { id: "hearth-web", name: "HearthShelf-WebApp", path: "C:\\code\\HearthShelf-WebApp", branch: "main", state: "Clean", kind: "clean", when: "Monday", pinned: false, isOpen: false, recent: true, remote: "github.com/hearthshelf/web", commits: "944 commits" },
+      { id: "docs", name: "Developer-Docs", path: "C:\\code\\Developer-Docs", branch: "main", state: "1 changed", kind: "changed", when: "July 18", pinned: false, isOpen: false, recent: true, remote: "gitlab.com/team/developer-docs", commits: "128 commits" },
+      { id: "api-gateway", name: "API-Gateway", path: "C:\\code\\API-Gateway", branch: "develop", state: "Clean", kind: "clean", when: "July 16", pinned: false, isOpen: false, recent: true, remote: "github.com/team/api-gateway", commits: "438 commits" },
+      { id: "hearth-server", name: "HearthShelf-Server", path: "C:\\code\\HearthShelf-Server", branch: "main", state: "Clean", kind: "clean", when: "July 9", pinned: false, isOpen: false, recent: false, remote: "github.com/hearthshelf/server", commits: "1,148 commits" },
+      { id: "media-tools", name: "Media-Tools", path: "C:\\code\\Media-Tools", branch: "main", state: "3 changed", kind: "changed", when: "June 28", pinned: false, isOpen: false, recent: false, remote: "gitlab.com/team/media-tools", commits: "304 commits" },
+      { id: "sandbox", name: "Sandbox-Runner", path: "C:\\code\\Sandbox-Runner", branch: "main", state: "Clean", kind: "clean", when: "June 11", pinned: false, isOpen: false, recent: false, remote: "github.com/team/sandbox-runner", commits: "223 commits" },
+      { id: "design-system", name: "Design-System", path: "C:\\code\\Design-System", branch: "main", state: "Clean", kind: "clean", when: "May 30", pinned: false, isOpen: false, recent: false, remote: "github.com/team/design-system", commits: "517 commits" },
+      { id: "release-scripts", name: "Release-Scripts", path: "C:\\code\\Release-Scripts", branch: "main", state: "Clean", kind: "clean", when: "May 17", pinned: false, isOpen: false, recent: false, remote: "gitlab.com/team/release-scripts", commits: "94 commits" }
+    ];
+
+    const groups = [
+      { id: "desktop", name: "GitWyrm desktop", color: "#1db584", repos: ["GitWyrm", "GitWyrm-Website"], last: "Opened yesterday", pinned: true, pinRank: 3 },
+      { id: "hearth", name: "HearthShelf apps", color: "#8b7cf6", repos: ["HearthShelf-Core", "HearthShelf-Mobile", "HearthShelf-WebApp"], last: "Opened Monday", pinned: true, pinRank: 2 },
+      { id: "release", name: "Release work", color: "#e6ae52", repos: ["GitWyrm", "Developer-Docs", "GitWyrm-Website"], last: "Opened July 15", pinned: true, pinRank: 1 },
+      { id: "server", name: "HearthShelf server", color: "#4ea1e8", repos: ["HearthShelf-Core", "HearthShelf-Server", "API-Gateway"], last: "Opened July 12", pinned: false },
+      { id: "mobile", name: "Mobile release", color: "#ed7fa5", repos: ["HearthShelf-Mobile", "HearthShelf-Core"], last: "Opened July 8", pinned: false },
+      { id: "web", name: "Web release", color: "#65c46f", repos: ["HearthShelf-WebApp", "HearthShelf-Core"], last: "Opened July 4", pinned: false },
+      { id: "docs-group", name: "Docs and website", color: "#df8a4e", repos: ["Developer-Docs", "GitWyrm-Website"], last: "Opened June 29", pinned: false },
+      { id: "platform", name: "Platform tools", color: "#46b8b0", repos: ["API-Gateway", "Sandbox-Runner", "Release-Scripts"], last: "Opened June 22", pinned: false },
+      { id: "media", name: "Media pipeline", color: "#bd83e6", repos: ["Media-Tools", "HearthShelf-Server"], last: "Opened June 18", pinned: false },
+      { id: "design", name: "Design system", color: "#e07171", repos: ["Design-System", "HearthShelf-WebApp"], last: "Opened June 10", pinned: false },
+      { id: "qa", name: "QA sweep", color: "#8b9fe8", repos: ["GitWyrm", "HearthShelf-Mobile", "HearthShelf-WebApp", "Sandbox-Runner"], last: "Opened May 30", pinned: false },
+      { id: "infra", name: "Infrastructure", color: "#6ebc8b", repos: ["API-Gateway", "Release-Scripts"], last: "Opened May 21", pinned: false },
+      { id: "archive", name: "Archive maintenance", color: "#a28e80", repos: ["Developer-Docs", "Media-Tools"], last: "Opened May 8", pinned: false },
+      { id: "launch", name: "Launch checklist", color: "#d6bf55", repos: ["GitWyrm", "GitWyrm-Website", "Developer-Docs", "Release-Scripts"], last: "Opened April 28", pinned: false },
+      { id: "experiments", name: "Experiments", color: "#58a7a1", repos: ["Sandbox-Runner", "Design-System"], last: "Opened April 11", pinned: false }
+    ];
+
+    let activeRoute = "open";
+    let selectedRepoId = "gitwyrm";
+    let selectedGroupId = "desktop";
+    let selectedItemType = "repo";
+    let currentFilter = "";
+    let recentCollapsed = false;
+    let detailOpen = false;
+
+    const mainPane = document.getElementById("mainPane");
+    const detailPane = document.getElementById("detailPane");
+    const progressLine = document.getElementById("progressLine");
+    const toastStack = document.getElementById("toastStack");
+
+    function toast(title, note) {
+      const node = document.createElement("div");
+      node.className = "toast";
+      node.innerHTML = `
+        <span class="toast-icon">${icon("check", 14)}</span>
+        <span><strong>${title}</strong><small>${note}</small></span>`;
+      toastStack.append(node);
+      window.setTimeout(() => node.remove(), 3300);
+    }
+
+    function runProgress(title, note, duration = 1300) {
+      progressLine.classList.add("active");
+      window.setTimeout(() => {
+        progressLine.classList.remove("active");
+        toast(title, note);
+      }, duration);
+    }
+
+    function setRoute(route) {
+      activeRoute = route;
+      detailOpen = false;
+      document.querySelectorAll(".route").forEach((button) => {
+        button.classList.toggle("active", button.dataset.route === route);
+        button.setAttribute("aria-pressed", String(button.dataset.route === route));
+      });
+      render();
+    }
+
+    function openHeader(title, eyebrow, copy, extra = "") {
+      return `
+        <header class="main-head">
+          <div class="content-frame">
+            <div class="eyebrow">${eyebrow}</div>
+            <h1>${title}</h1>
+            <p>${copy}</p>
+            ${extra}
+          </div>
+        </header>`;
+    }
+
+    function repoRow(repo) {
+      return `
+        <div class="repo-row ${selectedItemType === "repo" && repo.id === selectedRepoId ? "selected" : ""}"
+          data-repo="${repo.id}" data-search="${(repo.name + " " + repo.path + " " + repo.branch).toLowerCase()}">
+          <button class="repo-select" type="button" aria-pressed="${selectedItemType === "repo" && repo.id === selectedRepoId}">
+            <span class="repo-glyph">${icon("folder", 16)}</span>
+            <span class="repo-name"><strong>${repo.name}</strong><small>${repo.path}</small></span>
+            <span class="repo-branch">${icon("branch", 11)} ${repo.branch}</span>
+            <span class="repo-state"><span class="state-dot ${repo.kind}"></span>${repo.state}</span>
+          </button>
+          <button class="pin ${repo.pinned ? "active" : ""}" type="button"
+            aria-label="${repo.pinned ? "Unpin" : "Pin"} ${repo.name}" data-pin="${repo.id}">
+            ${icon("pin", 14)}
+          </button>
+        </div>`;
+    }
+
+    function recentRow(repo) {
+      return `
+        <div class="recent-row ${selectedItemType === "repo" && repo.id === selectedRepoId ? "selected" : ""}"
+          data-repo="${repo.id}" data-search="${(repo.name + " " + repo.path + " " + repo.branch).toLowerCase()}">
+          <button class="recent-select" type="button" aria-pressed="${selectedItemType === "repo" && repo.id === selectedRepoId}">
+            <span class="repo-glyph">${icon("folder", 14)}</span>
+            <span class="repo-name"><strong>${repo.name}</strong><small>${repo.path}</small></span>
+            <span class="recent-when">${repo.when}</span>
+          </button>
+          <button class="pin" type="button" aria-label="Pin ${repo.name}" data-pin="${repo.id}">
+            ${icon("pin", 13)}
+          </button>
+        </div>`;
+    }
+
+    function renderOpen() {
+      const pinned = repos.filter((repo) => repo.pinned);
+      const recent = repos.filter((repo) => repo.recent && !repo.isOpen && !repo.pinned).slice(0, 5);
+      const recentIds = new Set(recent.map((repo) => repo.id));
+      const others = repos.filter((repo) => !repo.pinned && !recentIds.has(repo.id));
+      const allPinnedGroups = groups
+        .filter((group) => group.pinned)
+        .sort((a, b) => (b.pinRank ?? 0) - (a.pinRank ?? 0));
+      const pinnedGroups = allPinnedGroups.slice(0, 3);
+      mainPane.innerHTML = `
+        ${openHeader(
+          "What are you working on?",
+          "On this computer",
+          "Open one repository, launch a saved group, or browse to another folder.",
+          `<div class="search-row">
+            <label class="search-box">
+              <span class="icon">${icon("search", 15)}</span>
+              <span class="sr-only">Find a repository or pinned group</span>
+              <input id="repoSearch" type="search" aria-label="Find a repository or pinned group" placeholder="Find a repository or pinned group" value="${currentFilter.replaceAll('"', '&quot;')}" autocomplete="off" />
+              <span class="search-hint">/</span>
+            </label>
+            <button class="button" id="browseButton">${icon("folder", 14)} Browse…</button>
+            <button class="button mobile-detail-button" id="showDetails">${icon("chevron", 13)} Details</button>
+          </div>`
+        )}
+        <div class="drop-strip" id="dropStrip">
+          ${icon("download", 14)}
+          <span><strong>Drop a project folder here</strong> to open it right away</span>
+          <span class="spacer"></span>
+          <span>Folder only</span>
+        </div>
+        <div class="repo-scroll" id="repoScroll">
+          <div class="library-layout">
+            <div class="library-secondary">
+              <section class="groups-section">
+                <div class="section-head">
+                  Pinned groups <span class="count">${allPinnedGroups.length}</span>
+                  ${allPinnedGroups.length > pinnedGroups.length ? `<span class="section-note">${pinnedGroups.length} shown</span>` : ""}
+                  <span class="spacer"></span>
+                  <button class="button ghost compact" id="openGroupLibrary">View all ${groups.length}</button>
+                  <button class="button ghost compact" id="newGroupButton">${icon("plus", 11)} New</button>
+                </div>
+                <div class="groups-grid combined">
+                  ${pinnedGroups.map((group) => `
+                    <button
+                      class="group-card ${selectedItemType === "group" && group.id === selectedGroupId ? "selected" : ""}"
+                      data-group="${group.id}"
+                      data-search="${(group.name + " " + group.repos.join(" ")).toLowerCase()}"
+                      aria-pressed="${selectedItemType === "group" && group.id === selectedGroupId}"
+                    >
+                      <span class="group-top">
+                        <span class="group-color" style="background:${group.color};box-shadow:0 0 0 3px ${group.color}22"></span>
+                        <h3>${group.name}</h3>
+                      </span>
+                      <span class="group-repos">
+                        ${group.repos.length <= 2
+                          ? group.repos.map((repo) => `<span class="repo-pill">${repo}</span>`).join("")
+                          : `<span class="repo-pill">${group.repos[0]}</span><span class="repo-pill">+${group.repos.length - 1} more</span>`}
+                      </span>
+                      <span class="group-foot">
+                        <span>${group.repos.length} repositories</span>
+                        <span>${icon("chevron", 11)}</span>
+                      </span>
+                    </button>`).join("")}
+                </div>
+              </section>
+              <section class="recent-section">
+                <div class="section-head">
+                  Recent <span class="count">${recent.length}</span>
+                  <span class="section-note">not open now</span>
+                  <span class="spacer"></span>
+                  <button class="button ghost compact" id="toggleRecent">${recentCollapsed ? "Show" : "Hide"}</button>
+                </div>
+                ${recentCollapsed ? "" : `<div class="recent-list">${recent.map(recentRow).join("")}</div>`}
+              </section>
+            </div>
+            <section class="pinned-section">
+              <div class="section-head">Pinned repositories <span class="count">${pinned.length}</span></div>
+              <div class="repo-list">${pinned.map(repoRow).join("")}</div>
+            </section>
+            <section class="all-section">
+              <div class="section-head">
+                In C:\\code <span class="count">${others.length}</span>
+                <span class="spacer"></span>
+                <button class="button ghost compact" id="sortButton">Last opened</button>
+              </div>
+              <div class="repo-list">${others.map(repoRow).join("")}</div>
+            </section>
+            <div class="empty-results" id="emptyResults">
+              <strong>No repositories or pinned groups match that search.</strong><br />
+              Try another name or browse to a folder.
+            </div>
+          </div>
+        </div>`;
+      renderOpenDetail();
+      bindOpen();
+      filterRows();
+    }
+
+    function renderOpenDetail() {
+      if (selectedItemType === "group") renderGroupDetail();
+      else renderRepoDetail();
+    }
+
+    function renderRepoDetail() {
+      const repo = repos.find((item) => item.id === selectedRepoId) || repos[0];
+      detailPane.className = `detail-pane ${detailOpen ? "open" : ""}`;
+      detailPane.innerHTML = `
+        <div class="detail-top">
+          Repository details
+          <span class="spacer"></span>
+          <button class="detail-close" type="button" aria-label="Close repository details">×</button>
+        </div>
+        <div class="detail-content">
+          <div class="repo-hero-icon">${icon("folder", 22)}</div>
+          <h2 class="detail-name">${repo.name}</h2>
+          <p class="detail-path">${repo.path}</p>
+          <div class="detail-tags">
+            <span class="tag">${icon("branch", 11)} ${repo.branch}</span>
+            <span class="tag">${repo.kind === "clean" ? "Ready" : repo.state}</span>
+            ${repo.isOpen ? `<span class="tag">Open now</span>` : ""}
+          </div>
+          <div class="detail-divider"></div>
+          <div class="detail-stat"><span>Last opened</span><strong>${repo.when}</strong></div>
+          <div class="detail-stat"><span>History</span><strong>${repo.commits}</strong></div>
+          <div class="detail-stat"><span>Web address</span><strong>${repo.remote}</strong></div>
+          ${repo.kind === "changed" ? `
+            <div class="change-note">
+              <span>${icon("branch", 15)}</span>
+              <span>Your unfinished changes are still here. Opening this repository will not change them.</span>
+            </div>` : ""}
+        </div>
+        <div class="detail-actions">
+          <button class="button primary" id="openRepoButton">${repo.isOpen ? "Jump to" : "Open"} ${repo.name}</button>
+          <button class="button" id="openExplorerButton">${icon("external", 13)} Show folder in Explorer</button>
+        </div>`;
+      bindDetail(repo);
+      bindDetailClose();
+    }
+
+    function filterRows() {
+      const query = currentFilter.trim().toLowerCase();
+      let visible = 0;
+      mainPane.querySelectorAll(".repo-row, .recent-row, .groups-grid.combined .group-card").forEach((item) => {
+        const show = !query || item.dataset.search.includes(query);
+        item.classList.toggle("hidden", !show);
+        if (show) visible += 1;
+      });
+      document.getElementById("emptyResults")?.classList.toggle("visible", visible === 0);
+    }
+
+    function bindOpen() {
+      const input = document.getElementById("repoSearch");
+      input?.addEventListener("input", (event) => {
+        currentFilter = event.target.value;
+        filterRows();
+      });
+      document.getElementById("browseButton")?.addEventListener("click", () => {
+        toast("Folder picker would open", "Choose one or more repository folders.");
+      });
+      document.getElementById("sortButton")?.addEventListener("click", (event) => {
+        event.currentTarget.textContent = event.currentTarget.textContent === "Last opened" ? "Name A–Z" : "Last opened";
+        toast("List sorted", `Repositories are sorted by ${event.currentTarget.textContent.toLowerCase()}.`);
+      });
+      document.getElementById("showDetails")?.addEventListener("click", () => {
+        detailOpen = true;
+        renderOpenDetail();
+      });
+      document.querySelectorAll(".repo-select, .recent-select").forEach((control) => {
+        const row = control.closest("[data-repo]");
+        control.addEventListener("click", () => {
+          selectedItemType = "repo";
+          selectedRepoId = row.dataset.repo;
+          document.querySelectorAll(".repo-row, .recent-row").forEach((item) => item.classList.toggle("selected", item === row));
+          document.querySelectorAll(".repo-select, .recent-select").forEach((item) => item.setAttribute("aria-pressed", String(item === control)));
+          document.querySelectorAll("[data-group]").forEach((item) => {
+            item.classList.remove("selected");
+            item.setAttribute("aria-pressed", "false");
+          });
+          renderRepoDetail();
+        });
+        control.addEventListener("dblclick", () => {
+          const repo = repos.find((item) => item.id === row.dataset.repo);
+          runProgress(`Opened ${repo.name}`, "The repository is ready in a new tab.", 650);
+        });
+      });
+      document.querySelectorAll("[data-group]").forEach((card) => {
+        card.addEventListener("click", () => {
+          selectedItemType = "group";
+          selectedGroupId = card.dataset.group;
+          document.querySelectorAll("[data-group]").forEach((item) => {
+            item.classList.toggle("selected", item === card);
+            item.setAttribute("aria-pressed", String(item === card));
+          });
+          document.querySelectorAll(".repo-row, .recent-row").forEach((item) => item.classList.remove("selected"));
+          document.querySelectorAll(".repo-select, .recent-select").forEach((item) => item.setAttribute("aria-pressed", "false"));
+          renderGroupDetail();
+        });
+        card.addEventListener("dblclick", () => {
+          const group = groups.find((item) => item.id === card.dataset.group);
+          runProgress(`Opened ${group.name}`, `${group.repos.length} repositories are ready.`, 850);
+        });
+      });
+      document.getElementById("newGroupButton")?.addEventListener("click", () => {
+        toast("Choose repositories for a group", "The repository list would switch into selection mode.");
+      });
+      document.getElementById("openGroupLibrary")?.addEventListener("click", renderGroupLibrary);
+      document.getElementById("toggleRecent")?.addEventListener("click", () => {
+        recentCollapsed = !recentCollapsed;
+        toast(recentCollapsed ? "Recent hidden" : "Recent shown", recentCollapsed ? "Use Show when you want those shortcuts back." : "The five latest unopened repositories are visible.");
+        renderOpen();
+      });
+      document.querySelectorAll("[data-pin]").forEach((button) => {
+        const activate = (event) => {
+          event.stopPropagation();
+          const repo = repos.find((item) => item.id === button.dataset.pin);
+          repo.pinned = !repo.pinned;
+          toast(repo.pinned ? `Pinned ${repo.name}` : `Unpinned ${repo.name}`, repo.pinned ? "It now stays at the top." : "It moved back into the main list.");
+          renderOpen();
+        };
+        button.addEventListener("click", activate);
+        button.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") activate(event);
+        });
+      });
+      const drop = document.getElementById("dropStrip");
+      ["dragenter", "dragover"].forEach((type) => drop?.addEventListener(type, (event) => {
+        event.preventDefault();
+        drop.classList.add("dragging");
+      }));
+      ["dragleave", "drop"].forEach((type) => drop?.addEventListener(type, (event) => {
+        event.preventDefault();
+        drop.classList.remove("dragging");
+        if (type === "drop") toast("Project folder recognized", "GitWyrm would open the dropped repository.");
+      }));
+    }
+
+    function renderGroupLibrary() {
+      const scrim = document.createElement("div");
+      scrim.className = "group-library-scrim";
+      scrim.innerHTML = `
+        <section class="group-library" role="dialog" aria-modal="true" aria-labelledby="groupLibraryTitle">
+          <header class="group-library-head">
+            <span>
+              <h2 id="groupLibraryTitle">Saved groups</h2>
+              <p>Pin the groups you want on the add screen.</p>
+            </span>
+            <span class="spacer"></span>
+            <label class="group-library-search">
+              ${icon("search", 13)}
+              <span class="sr-only">Find a saved group</span>
+              <input id="groupLibrarySearch" placeholder="Find a group" autocomplete="off" />
+            </label>
+            <button class="group-library-close" type="button" aria-label="Close saved groups">×</button>
+          </header>
+          <div class="group-library-list">
+            ${groups.map((group) => `
+              <article
+                class="group-library-row"
+                data-group-row="${group.id}"
+                data-group-search="${(group.name + " " + group.repos.join(" ")).toLowerCase()}"
+              >
+                <span class="group-color" style="background:${group.color};box-shadow:0 0 0 3px ${group.color}22"></span>
+                <span class="group-library-copy">
+                  <strong>${group.name}</strong>
+                  <small>${group.repos.length} repositories · ${group.repos.join(", ")}</small>
+                </span>
+                <button
+                  class="group-library-pin ${group.pinned ? "active" : ""}"
+                  type="button"
+                  data-group-pin="${group.id}"
+                  aria-label="${group.pinned ? "Unpin" : "Pin"} ${group.name}"
+                  aria-pressed="${group.pinned}"
+                >${icon("pin", 13)}</button>
+                <button class="button compact" type="button" data-group-open="${group.id}">Open</button>
+              </article>`).join("")}
+          </div>
+        </section>`;
+      mainPane.append(scrim);
+
+      const close = () => {
+        scrim.remove();
+        renderOpen();
+      };
+      scrim.querySelector(".group-library-close").addEventListener("click", close);
+      scrim.addEventListener("click", (event) => {
+        if (event.target === scrim) close();
+      });
+      const search = scrim.querySelector("#groupLibrarySearch");
+      search.addEventListener("input", () => {
+        const query = search.value.trim().toLowerCase();
+        scrim.querySelectorAll("[data-group-row]").forEach((row) => {
+          row.classList.toggle("hidden", Boolean(query) && !row.dataset.groupSearch.includes(query));
+        });
+      });
+      scrim.querySelectorAll("[data-group-pin]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const group = groups.find((item) => item.id === button.dataset.groupPin);
+          group.pinned = !group.pinned;
+          if (group.pinned) group.pinRank = Date.now();
+          button.classList.toggle("active", group.pinned);
+          button.setAttribute("aria-pressed", String(group.pinned));
+          button.setAttribute("aria-label", `${group.pinned ? "Unpin" : "Pin"} ${group.name}`);
+          toast(group.pinned ? `Pinned ${group.name}` : `Unpinned ${group.name}`, group.pinned ? "It will appear on the add screen." : "It remains available under View all.");
+        });
+      });
+      scrim.querySelectorAll("[data-group-open]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const group = groups.find((item) => item.id === button.dataset.groupOpen);
+          scrim.remove();
+          runProgress(`Opened ${group.name}`, `${group.repos.length} repositories are ready.`, 850);
+        });
+      });
+      search.focus();
+    }
+
+    function bindDetail(repo) {
+      document.getElementById("openRepoButton")?.addEventListener("click", () => {
+        if (repo.isOpen) toast(`Jumped to ${repo.name}`, "The existing repository tab is active.");
+        else runProgress(`Opened ${repo.name}`, "The repository is ready in a new tab.", 700);
+      });
+      document.getElementById("openExplorerButton")?.addEventListener("click", () => {
+        toast("Opened in Explorer", repo.path);
+      });
+    }
+
+    function bindDetailClose() {
+      document.querySelector(".detail-close")?.addEventListener("click", () => {
+        detailOpen = false;
+        detailPane.classList.remove("open");
+      });
+    }
+
+    function renderClone() {
+      mainPane.innerHTML = `
+        ${openHeader(
+          "Copy a repository to this computer",
+          "From a web address",
+          "Paste a link from GitHub, GitLab, Bitbucket, or any Git server. GitWyrm will remember where you keep cloned projects."
+        )}
+        <div class="workspace-scroll">
+          <div class="form-layout">
+            <form class="form-card" id="cloneForm">
+              <h2 class="form-title">Repository link</h2>
+              <p class="form-note">GitWyrm uses your normal Git sign-in if the project is private.</p>
+              <div class="field">
+                <label for="cloneUrl">Web address</label>
+                <div class="input-with-button">
+                  <input id="cloneUrl" placeholder="https://github.com/team/project.git" autocomplete="off" />
+                  <button class="button" type="button" id="pasteExample">Paste example</button>
+                </div>
+              </div>
+              <div class="field">
+                <label for="cloneFolder">Save in</label>
+                <div class="input-with-button">
+                  <input id="cloneFolder" value="C:\\code" />
+                  <button class="button" type="button" id="chooseCloneFolder">Browse…</button>
+                </div>
+              </div>
+              <div class="field">
+                <label for="cloneName">Folder name</label>
+                <input id="cloneName" placeholder="Filled from the link" />
+              </div>
+              <div class="path-preview">
+                <small>Will be saved to</small>
+                <code id="clonePath">C:\\code\\project</code>
+              </div>
+              <label class="check-row">
+                <input type="checkbox" checked />
+                <span>Open when finished<small>Shows the repository in a new tab as soon as it is ready.</small></span>
+              </label>
+              <div class="form-footer">
+                <span class="form-status" id="cloneStatus">Waiting for a repository link</span>
+                <button class="button primary" id="cloneButton" disabled>Copy repository</button>
+              </div>
+            </form>
+            <section class="online-repositories">
+              <div class="suggestion-card">
+                <strong class="connection-title">${icon("github", 13)} GitHub connected</strong>
+                <small>Repositories you can access are available below.</small>
+                <div class="suggestion-source">
+                  <button class="button ghost compact" type="button" id="connectGitlab">Connect GitLab</button>
+                </div>
+              </div>
+              <div class="section-head">
+                Starred online <span class="count">2</span>
+                <span class="section-note">shown first</span>
+              </div>
+              <div class="suggestions">
+                ${[
+                  ["openai / codex", "https://github.com/openai/codex", "Updated today"],
+                  ["shadcn-ui / ui", "https://github.com/shadcn-ui/ui", "Updated yesterday"]
+                ].map(([name, url, activity]) => `
+                  <button class="suggestion-card" data-clone="${url}">
+                    <strong>${name}</strong><small>${url}</small>
+                    <span class="suggestion-source">${icon("star", 13)} Starred · ${activity}</span>
+                  </button>`).join("")}
+              </div>
+              <div class="section-head">
+                Your GitHub repositories <span class="count">3</span>
+                <span class="section-note">recent activity</span>
+              </div>
+              <div class="suggestions">
+                ${[
+                  ["jerem / gitwyrm.com", "https://github.com/jerem/gitwyrm.com", "Pushed 2 hours ago"],
+                  ["hearthshelf / mobile", "https://github.com/hearthshelf/mobile", "Pushed yesterday"],
+                  ["hearthshelf / web", "https://github.com/hearthshelf/web", "Pushed Monday"]
+                ].map(([name, url, activity]) => `
+                  <button class="suggestion-card" data-clone="${url}">
+                    <strong>${name}</strong><small>${url}</small>
+                    <span class="suggestion-source">${icon("github", 13)} ${activity}</span>
+                  </button>`).join("")}
+              </div>
+            </section>
+          </div>
+        </div>`;
+      renderCloneDetail();
+      bindClone();
+    }
+
+    function renderCloneDetail() {
+      detailPane.className = "detail-pane";
+      detailPane.innerHTML = `
+        <div class="detail-top">What happens next</div>
+        <div class="detail-content">
+          <div class="repo-hero-icon">${icon("download", 22)}</div>
+          <h2 class="detail-name">GitWyrm copies the project</h2>
+          <p class="detail-path">The original stays online. You get a working copy in C:\\code.</p>
+          <div class="detail-divider"></div>
+          <div class="detail-stat"><span>Sign-in</span><strong>Your normal Git account</strong></div>
+          <div class="detail-stat"><span>Saved location</span><strong>Remembered next time</strong></div>
+          <div class="detail-stat"><span>After copying</span><strong>Opens automatically</strong></div>
+        </div>
+        <div class="detail-actions">
+          <button class="button" id="cloneHelp">${icon("external", 13)} Which link should I use?</button>
+        </div>`;
+      document.getElementById("cloneHelp")?.addEventListener("click", () => {
+        toast("Use the project’s Clone link", "HTTPS links work best with your normal sign-in.");
+      });
+    }
+
+    function bindClone() {
+      const url = document.getElementById("cloneUrl");
+      const folder = document.getElementById("cloneFolder");
+      const name = document.getElementById("cloneName");
+      const path = document.getElementById("clonePath");
+      const status = document.getElementById("cloneStatus");
+      const button = document.getElementById("cloneButton");
+      const update = () => {
+        const suggested = url.value.trim().split("/").pop()?.replace(/\.git$/i, "") || "project";
+        const finalName = name.value.trim() || suggested;
+        path.textContent = `${folder.value.replace(/[\\/]+$/, "")}\\${finalName}`;
+        const ready = /^https?:\/\/.+|^git@.+/.test(url.value.trim());
+        button.disabled = !ready;
+        status.textContent = ready ? "Ready to copy" : "Waiting for a repository link";
+      };
+      url.addEventListener("input", update);
+      folder.addEventListener("input", update);
+      name.addEventListener("input", update);
+      document.getElementById("pasteExample").addEventListener("click", () => {
+        url.value = "https://github.com/hearthshelf/mobile.git";
+        update();
+        url.focus();
+        toast("Link pasted", "The folder name was filled in for you.");
+      });
+      document.getElementById("chooseCloneFolder").addEventListener("click", () => {
+        toast("Folder picker would open", "Choose where copied repositories should go.");
+      });
+      document.getElementById("connectGitlab").addEventListener("click", () => {
+        toast("GitLab sign-in would open", "After connecting, member and starred projects would appear here.");
+      });
+      document.querySelectorAll("[data-clone]").forEach((card) => {
+        card.addEventListener("click", () => {
+          url.value = card.dataset.clone;
+          update();
+          url.focus();
+          toast("Repository selected", "Review the location, then copy it.");
+        });
+      });
+      document.getElementById("cloneForm").addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (button.disabled) return;
+        button.disabled = true;
+        button.textContent = "Copying…";
+        status.textContent = "Receiving files…";
+        runProgress("Repository copied", `${path.textContent} is ready to open.`, 1800);
+        window.setTimeout(() => {
+          button.textContent = "Copy repository";
+          update();
+          status.textContent = "Copy finished";
+        }, 1800);
+      });
+      update();
+    }
+
+    function renderNew() {
+      mainPane.innerHTML = `
+        ${openHeader(
+          "Start a new repository",
+          "New project",
+          "Create a folder that is ready for your first change. GitWyrm can add the common starter files for you."
+        )}
+        <div class="workspace-scroll">
+          <div class="form-layout">
+            <form class="form-card" id="newForm">
+              <h2 class="form-title">Project basics</h2>
+              <p class="form-note">You can change these files later. Nothing is sent online.</p>
+              <div class="field">
+                <label for="newName">Project name</label>
+                <input id="newName" placeholder="my-project" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="newFolder">Create in</label>
+                <div class="input-with-button">
+                  <input id="newFolder" value="C:\\code" />
+                  <button class="button" type="button" id="chooseNewFolder">Browse…</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Starter</label>
+                <div class="template-grid">
+                  <button type="button" class="template active" data-template="Blank"><strong>Blank</strong><small>Just the folder</small></button>
+                  <button type="button" class="template" data-template="Node"><strong>Node</strong><small>Ignores packages</small></button>
+                  <button type="button" class="template" data-template="Rust"><strong>Rust</strong><small>Ignores builds</small></button>
+                  <button type="button" class="template" data-template="C#"><strong>C#</strong><small>.NET and Visual Studio</small></button>
+                  <button type="button" class="template" data-template="All-in-one"><strong>All-in-one</strong><small>Covers most stacks</small></button>
+                </div>
+              </div>
+              <label class="check-row">
+                <input id="readmeCheck" type="checkbox" checked />
+                <span>Add a README<small>A simple front page for your project.</small></span>
+              </label>
+              <label class="check-row">
+                <input id="firstSaveCheck" type="checkbox" checked />
+                <span>Save the starter files to history<small>Gives the project a clean starting point.</small></span>
+              </label>
+              <div class="path-preview">
+                <small>Will create</small>
+                <code id="newPath">C:\\code\\my-project</code>
+              </div>
+              <div class="form-footer">
+                <span class="form-status" id="newStatus">Enter a project name</span>
+                <button class="button primary" id="newButton" disabled>Create project</button>
+              </div>
+            </form>
+            <section>
+              <div class="section-head">Included</div>
+              <div class="suggestion-card">
+                <strong id="starterSummary">Blank repository</strong>
+                <small id="starterFiles">README.md and the first saved version</small>
+                <div class="suggestion-source">${icon("branch", 13)} Starts on the main branch</div>
+              </div>
+            </section>
+          </div>
+        </div>`;
+      renderNewDetail();
+      bindNew();
+    }
+
+    function renderNewDetail() {
+      detailPane.className = "detail-pane";
+      detailPane.innerHTML = `
+        <div class="detail-top">A clean starting point</div>
+        <div class="detail-content">
+          <div class="repo-hero-icon">${icon("plus", 22)}</div>
+          <h2 class="detail-name">Ready for your first change</h2>
+          <p class="detail-path">GitWyrm sets up the folder and opens it in a new tab.</p>
+          <div class="detail-divider"></div>
+          <div class="detail-stat"><span>Default branch</span><strong>main</strong></div>
+          <div class="detail-stat"><span>Sent online</span><strong>No</strong></div>
+          <div class="detail-stat"><span>Can connect later</span><strong>Yes</strong></div>
+        </div>`;
+    }
+
+    function bindNew() {
+      let starter = "Blank";
+      const name = document.getElementById("newName");
+      const folder = document.getElementById("newFolder");
+      const path = document.getElementById("newPath");
+      const status = document.getElementById("newStatus");
+      const button = document.getElementById("newButton");
+      const readme = document.getElementById("readmeCheck");
+      const firstSave = document.getElementById("firstSaveCheck");
+      const update = () => {
+        const finalName = name.value.trim() || "my-project";
+        path.textContent = `${folder.value.replace(/[\\/]+$/, "")}\\${finalName}`;
+        button.disabled = !name.value.trim();
+        status.textContent = name.value.trim() ? "Ready to create" : "Enter a project name";
+        document.getElementById("starterSummary").textContent = `${starter} repository`;
+        const files = [];
+        const ignoreDescriptions = {
+          "Node": ".gitignore for Node",
+          "Rust": ".gitignore for Rust",
+          "C#": ".gitignore for .NET and Visual Studio",
+          "All-in-one": "broad .gitignore for common languages, editors, and operating systems"
+        };
+        if (starter !== "Blank") files.push(ignoreDescriptions[starter]);
+        if (readme.checked) files.push("README.md");
+        if (firstSave.checked) files.push("the first saved version");
+        document.getElementById("starterFiles").textContent = files.length ? files.join(", ") : "No starter files";
+      };
+      [name, folder, readme, firstSave].forEach((control) => control.addEventListener("input", update));
+      document.querySelectorAll("[data-template]").forEach((template) => {
+        template.addEventListener("click", () => {
+          starter = template.dataset.template;
+          document.querySelectorAll("[data-template]").forEach((item) => item.classList.toggle("active", item === template));
+          update();
+          toast(`${starter} starter selected`, "The included files were updated.");
+        });
+      });
+      document.getElementById("chooseNewFolder").addEventListener("click", () => {
+        toast("Folder picker would open", "Choose where the new project should live.");
+      });
+      document.getElementById("newForm").addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (button.disabled) return;
+        button.disabled = true;
+        button.textContent = "Creating…";
+        runProgress(`Created ${name.value.trim()}`, `${path.textContent} is ready in a new tab.`, 1100);
+        window.setTimeout(() => {
+          button.textContent = "Create project";
+          update();
+        }, 1100);
+      });
+      update();
+    }
+
+    function renderGroupDetail() {
+      const group = groups.find((item) => item.id === selectedGroupId) || groups[0];
+      detailPane.className = `detail-pane ${detailOpen ? "open" : ""}`;
+      detailPane.innerHTML = `
+        <div class="detail-top">
+          Group details
+          <span class="spacer"></span>
+          <button class="detail-close" type="button" aria-label="Close group details">×</button>
+        </div>
+        <div class="detail-content">
+          <div class="repo-hero-icon">${icon("stack", 22)}</div>
+          <h2 class="detail-name">${group.name}</h2>
+          <p class="detail-path">${group.repos.length} repositories open in their saved order.</p>
+          <div class="detail-divider"></div>
+          ${group.repos.map((repo, index) => `<div class="detail-stat"><span>${index + 1}</span><strong>${repo}</strong></div>`).join("")}
+        </div>
+        <div class="detail-actions">
+          <button class="button primary" id="openGroupButton">Open all ${group.repos.length}</button>
+          <button class="button" id="editGroupButton">Edit group</button>
+          <button class="button ghost danger" id="removeGroupButton">Remove saved group</button>
+        </div>`;
+      document.getElementById("openGroupButton")?.addEventListener("click", () => {
+        runProgress(`Opened ${group.name}`, `${group.repos.length} repositories are ready in their saved order.`, 1000);
+      });
+      document.getElementById("editGroupButton")?.addEventListener("click", () => {
+        toast("Group editor would open", "Add, remove, or reorder repositories.");
+      });
+      document.getElementById("removeGroupButton")?.addEventListener("click", () => {
+        toast("Remove group confirmation", "The repositories themselves would stay on your computer.");
+      });
+      bindDetailClose();
+    }
+
+    function render() {
+      if (activeRoute === "open") renderOpen();
+      if (activeRoute === "clone") renderClone();
+      if (activeRoute === "new") renderNew();
+    }
+
+    document.querySelectorAll(".route").forEach((button) => {
+      button.addEventListener("click", () => setRoute(button.dataset.route));
+    });
+    document.getElementById("changeFolder").addEventListener("click", () => {
+      toast("Folder picker would open", "Choose one folder for GitWyrm to watch.");
+    });
+    document.getElementById("rescan").addEventListener("click", (event) => {
+      event.currentTarget.querySelector("svg").style.animation = "progress 550ms linear";
+      runProgress("Scan finished", "12 repositories found in C:\\code.", 650);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key === "/" && activeRoute === "open" && document.activeElement?.tagName !== "INPUT") {
+        event.preventDefault();
+        document.getElementById("repoSearch")?.focus();
+      }
+      if (/^[1-3]$/.test(event.key) && document.activeElement?.tagName !== "INPUT") {
+        setRoute(["open", "clone", "new"][Number(event.key) - 1]);
+      }
+      if (event.key === "Escape" && document.querySelector(".group-library-scrim")) {
+        document.querySelector(".group-library-scrim").remove();
+        renderOpen();
+        return;
+      }
+      if (event.key === "Escape" && detailOpen) {
+        detailOpen = false;
+        detailPane.classList.remove("open");
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>

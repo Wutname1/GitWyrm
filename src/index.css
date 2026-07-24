@@ -232,6 +232,33 @@
   animation: wyrm-spring 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* "Nuh uh, over here" head-shake when the Add-a-repository tab is dragged. */
+@keyframes gw-repo-picker-wiggle {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15% {
+    transform: translateX(-9px) rotate(-0.6deg);
+  }
+  30% {
+    transform: translateX(8px) rotate(0.6deg);
+  }
+  45% {
+    transform: translateX(-6px) rotate(-0.4deg);
+  }
+  60% {
+    transform: translateX(5px) rotate(0.4deg);
+  }
+  75% {
+    transform: translateX(-3px);
+  }
+}
+
+.gw-repo-picker-wiggle {
+  animation: gw-repo-picker-wiggle 0.5s ease-in-out;
+}
+
 @keyframes wyrm-blast-logo {
   0% {
     transform: translate(-50%, -50%) scale(0.2) rotate(-8deg);

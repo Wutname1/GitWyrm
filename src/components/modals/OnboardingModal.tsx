@@ -44,7 +44,7 @@ const SLIDES: Slide[] = [
 export function OnboardingModal() {
   const open = useUiStore((s) => s.activeModal === 'onboarding')
   const closeModal = useUiStore((s) => s.closeModal)
-  const openModal = useUiStore((s) => s.openModal)
+  const showRepoPicker = useUiStore((s) => s.showRepoPicker)
   const [step, setStep] = useState(0)
 
   const slide = SLIDES[step]
@@ -52,7 +52,8 @@ export function OnboardingModal() {
 
   const finish = () => {
     setStep(0)
-    openModal('clone')
+    closeModal()
+    showRepoPicker()
   }
 
   const skip = () => {

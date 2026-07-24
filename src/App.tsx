@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { WorkspaceLayout } from '@/layouts/WorkspaceLayout'
-import { RepoPickerModal } from '@/components/modals/RepoPickerModal'
 import { OnboardingModal } from '@/components/modals/OnboardingModal'
 import { DirectionModal } from '@/components/modals/DirectionModal'
 import { RemoteSyncModal } from '@/components/modals/RemoteSyncModal'
@@ -135,7 +134,6 @@ function AppInner() {
     <>
       <WorkspaceLayout />
       <DragScrim />
-      <RepoPickerModal />
       <OnboardingModal />
       <DirectionModal />
       <RemoteSyncModal />
