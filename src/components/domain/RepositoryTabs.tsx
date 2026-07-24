@@ -58,6 +58,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { RepoIconDialog } from "@/components/domain/RepoIconDialog";
+import { onTitleBarDoubleClick } from "@/components/domain/titleBarDrag";
 
 export type TabOrientation = "horizontal" | "vertical";
 
@@ -1354,6 +1355,17 @@ export function RepositoryTabs({
           iconOnly={effectiveIconOnly}
           width={adaptiveHorizontalTabWidth}
         />
+        {/* The horizontal strip stretches across the app bar so tab widths can
+            be budgeted against the full width. Without this filler the leftover
+            space belongs to the scroll container, which is not a drag region,
+            and the window stops responding to drags and double-clicks there. */}
+        {orientation === "horizontal" && (
+          <div
+            data-tauri-drag-region
+            onDoubleClick={onTitleBarDoubleClick}
+            className="w-0 flex-1 basis-0"
+          />
+        )}
       </div>
       {orientation === "horizontal" && (
         <ScrollArrow

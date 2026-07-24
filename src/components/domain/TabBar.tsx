@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   BookOpen,
   ChevronDown,
@@ -16,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { WindowControls } from "@/components/domain/WindowControls";
 import { RepositoryTabs } from "@/components/domain/RepositoryTabs";
+import { onTitleBarDoubleClick } from "@/components/domain/titleBarDrag";
 import {
   WyrmExplosion,
   useWyrmEasterEgg,
@@ -316,20 +316,6 @@ function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
       )}
     </TooltipButton>
   );
-}
-
-/**
- * Double-clicking a title bar maximizes or restores the window everywhere else
- * on the desktop, so the app bar has to do it too. The check keeps the handler
- * off buttons and tabs inside the bar, which have their own double-click
- * behavior (renaming a tab, for one).
- */
-function onTitleBarDoubleClick(event: React.MouseEvent<HTMLElement>) {
-  if (!(event.target as HTMLElement).hasAttribute("data-tauri-drag-region"))
-    return;
-  void getCurrentWindow()
-    .toggleMaximize()
-    .catch(() => {});
 }
 
 function TabLayoutButtons() {
