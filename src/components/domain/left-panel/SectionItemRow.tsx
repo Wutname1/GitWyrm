@@ -1,4 +1,5 @@
 import { forwardRef, type ComponentPropsWithoutRef, type CSSProperties, type ReactNode } from 'react'
+import { Tag } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
@@ -6,8 +7,6 @@ import { TooltipButton } from '@/components/ui/tooltip'
 
 function markerStyle(section: SidebarSectionData, item: SectionItem, isCurrent: boolean): CSSProperties {
   switch (section.type) {
-    case 'tag':
-      return { background: 'var(--gw-amber)', transform: 'rotate(45deg)', borderRadius: 1 }
     case 'pr':
       return {
         borderRadius: '50%',
@@ -80,6 +79,8 @@ export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(fu
     >
       {pending ? (
         <PendingIndicator className="size-3 text-accent-text" />
+      ) : section.type === 'tag' ? (
+        <Tag aria-hidden className="size-2.5 flex-none text-[var(--gw-blue)]" />
       ) : (
         <span className="size-2 flex-none" style={markerStyle(section, item, isCurrent)} />
       )}
