@@ -67,6 +67,10 @@
   --gw-red: #f87171;
   --gw-amber: #fbbf24;
   --gw-blue: #60a5fa;
+  /* Issues and pull requests each get one fixed color everywhere they appear
+     (sidebar marker, view header, context panel) so the icon alone identifies
+     the kind. Purple matches the conventional pull-request color. */
+  --gw-purple: #a78bfa;
   --gw-lane0: #2dd4a7;
   --gw-lane1: #38bdf8;
   --gw-lane2: #f59e0b;
@@ -175,11 +179,13 @@
     height: 100%;
     overflow: hidden;
   }
+  html {
+    /* rem units resolve against the ROOT element, so the base size must live
+       here (not on body) for --gw-font-size to scale every rem label at once. */
+    font-size: var(--gw-font-size);
+  }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    /* Base size and weight come from the font settings vars (see :root). All app
-       text is rem, so changing --gw-font-size scales every label at once. */
-    font-size: var(--gw-font-size);
     font-weight: var(--gw-font-weight);
     user-select: none;
   }
