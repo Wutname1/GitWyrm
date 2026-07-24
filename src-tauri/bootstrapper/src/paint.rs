@@ -410,16 +410,35 @@ pub fn draw_logo(hdc: HDC, x: i32, y: i32, max_w: i32, max_h: i32) {
 }
 
 static WORDMARK_PNG: &[u8] = include_bytes!("images/wordmark.png");
+static WORDMARK_24_PNG: &[u8] = include_bytes!("images/wordmark-24.png");
+static WORDMARK_40_PNG: &[u8] = include_bytes!("images/wordmark-40.png");
 static WORDMARK_DECODED: OnceLock<BgraBitmap> = OnceLock::new();
+static WORDMARK_24_DECODED: OnceLock<BgraBitmap> = OnceLock::new();
+static WORDMARK_40_DECODED: OnceLock<BgraBitmap> = OnceLock::new();
 
 fn decode_wordmark() -> &'static BgraBitmap {
     WORDMARK_DECODED.get_or_init(|| decode_png_to_bgra(WORDMARK_PNG))
 }
 
+fn decode_wordmark_24() -> &'static BgraBitmap {
+    WORDMARK_24_DECODED.get_or_init(|| decode_png_to_bgra(WORDMARK_24_PNG))
+}
+
+fn decode_wordmark_40() -> &'static BgraBitmap {
+    WORDMARK_40_DECODED.get_or_init(|| decode_png_to_bgra(WORDMARK_40_PNG))
+}
+
 /// Draw the "GitWyrm" wordmark image scaled to `height` pixels tall, top-aligned at (x, y).
 /// Returns the width it occupied, so following text can be positioned after it.
 pub fn draw_wordmark_img(hdc: HDC, x: i32, y: i32, height: i32) -> i32 {
-    let wm = decode_wordmark();
+    // AlphaBlend uses low-quality sampling when it also resizes. Use assets
+    // prefiltered to the two UI sizes so their antialiasing reaches the screen
+    // unchanged. Keep the full-size fallback for any future call site.
+    let wm = match height {
+        24 => decode_wordmark_24(),
+        40 => decode_wordmark_40(),
+        _ => decode_wordmark(),
+    };
     let scale = height as f64 / wm.height as f64;
     let draw_w = (wm.width as f64 * scale) as i32;
     blit_bgra(hdc, wm, x, y, draw_w, height);
