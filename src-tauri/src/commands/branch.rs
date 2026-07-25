@@ -8,6 +8,7 @@ use crate::git::remote_url;
 use crate::git::types::{
   BranchInfo, BranchList, BranchRelation, CheckoutOutcome, RefMove, ResetMode, SyncState, TagInfo,
 };
+use crate::git::version_sort::compare_tag_names;
 use crate::settings::BranchSwitchMode;
 use crate::state::RepoManager;
 
@@ -366,7 +367,9 @@ pub async fn list_tags(
         Some(TagInfo { name: n.to_string(), target_sha, annotated: tag.is_some(), time })
       })
       .collect();
-    tags.sort_by(|a, b| b.name.cmp(&a.name));
+    // Newest first, comparing numeric runs as numbers so 0.0.11 lands above
+    // 0.0.2 the way a person reading version numbers expects.
+    tags.sort_by(|a, b| compare_tag_names(&b.name, &a.name));
     Ok(tags)
   })
   .await

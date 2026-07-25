@@ -6,3 +6,4 @@ pub mod remote_url;
 pub mod shell;
 pub mod submodule;
 pub mod types;
+pub mod version_sort;
