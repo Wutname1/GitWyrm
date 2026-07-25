@@ -16,6 +16,7 @@ pub use git::refs as git_refs;
 pub use git::submodule as git_submodule;
 
 use state::RepoManager;
+use tauri::{Emitter, Manager};
 use watcher::WatcherRegistry;
 
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
@@ -123,6 +124,9 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::patch::unstage_lines,
     commands::patch::discard_lines,
     commands::scan::scan_code_folder,
+    commands::shell_integration::context_menu_registered,
+    commands::shell_integration::set_context_menu_registered,
+    commands::app::launch_repo_path,
     commands::ai::ai_get_catalog,
     commands::ai::ai_list_configured,
     commands::ai::ai_set_api_key,
@@ -287,6 +291,27 @@ pub fn run() {
     .expect("failed to export typescript bindings");
 
   tauri::Builder::default()
+    // Must be registered before any other plugin (Tauri's requirement). When
+    // Explorer's right-click entry launches a second GitWyrm while one is
+    // already running, this hands that process's arguments to the original and
+    // exits, so the folder opens as a tab in the window the user already has
+    // instead of starting a duplicate app with its own file watchers.
+    .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+      let path = commands::app::repo_path_from_args(argv);
+      // The UI is already running in this case, so the event has a listener and
+      // no slot is needed.
+      if let Some(path) = path {
+        log::info!("Second launch asked for {path}; opening it in this window");
+        let _ = app.emit("open-repo-path", path);
+      }
+      // Bring the existing window forward -- otherwise the click appears to do
+      // nothing when GitWyrm is running but buried behind other windows.
+      if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+      }
+    }))
     // The log plugin is registered inside setup via `split()` so we can wrap
     // its logger with Sentry. `skip_logger()` keeps the plugin from claiming
     // the global logger slot before we get there.
@@ -321,6 +346,12 @@ pub fn run() {
       // Point git shell-outs at the saved executable (if any) before the first
       // git command runs.
       settings::apply_startup_git_executable(app.handle());
+
+      // Stash any folder Explorer passed us. The webview does not exist yet, so
+      // this waits in a slot for the frontend to collect once it is ready.
+      commands::app::set_pending_launch_path(commands::app::repo_path_from_args(
+        std::env::args(),
+      ));
       Ok(())
     })
     .manage(RepoManager::default())

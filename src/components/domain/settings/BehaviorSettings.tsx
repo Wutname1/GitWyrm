@@ -1,5 +1,6 @@
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { SettingRow } from './SettingRow'
+import { ContextMenuSetting } from './ContextMenuSetting'
 import { ResetToDefaults } from './ResetToDefaults'
 
 export function BehaviorSettings() {
@@ -22,6 +23,10 @@ export function BehaviorSettings() {
           Reopen my last tabs
         </label>
       </SettingRow>
+      {/* Registry-backed, so it is deliberately outside the "behavior" reset
+          group -- resetting preferences should not silently uninstall an
+          Explorer integration the user set up. */}
+      <ContextMenuSetting />
       <ResetToDefaults group="behavior" />
     </div>
   )

@@ -15,6 +15,7 @@ pub mod remote;
 pub mod repo;
 pub mod repo_icon;
 pub mod scan;
+pub mod shell_integration;
 pub mod staging;
 pub mod stash;
 pub mod status;

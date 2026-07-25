@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -19,8 +20,10 @@ import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { useTheme } from '@/hooks/useTheme'
 import { useFont } from '@/hooks/useFont'
 import { AUTO_CHECK_INTERVAL_MS, useUpdater } from '@/hooks/useUpdater'
-import { commands } from '@/lib/bindings'
+import { commands, type RepoInfo } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
+import { samePath } from '@/lib/paths'
+import { hideSplash, setSplashProgress } from '@/lib/splash'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -73,42 +76,138 @@ function AppInner() {
     launched = true
 
     void (async () => {
-      const { hydrate, addRepo, setActiveRepo, finishRepoRestore } = useWorkspaceStore.getState()
-      const settings = await hydrate()
+      // try/finally: the splash covers the whole window, so any path out of
+      // here -- including a throw -- has to lift it or the app is unreachable.
+      try {
+        const { hydrate, addReposInBackground, setActiveRepo, finishRepoRestore } =
+          useWorkspaceStore.getState()
+        const settings = await hydrate()
 
-      // Look for a newer release now that the channel setting is loaded. Silent:
-      // a successful "up to date" says nothing; an available update surfaces as
-      // the Update button in the status bar.
-      void useUpdater.getState().check(true)
+        // Look for a newer release now that the channel setting is loaded. Silent:
+        // a successful "up to date" says nothing; an available update surfaces as
+        // the Update button in the status bar.
+        void useUpdater.getState().check(true)
 
-      const openReposList = settings.open_repos ?? []
-      const recents = settings.recents ?? []
-      const toReopen =
-        openReposList.length > 0
-          ? openReposList
-          : recents.length > 0
-            ? [recents[0].path]
-            : []
+        // A folder from Explorer's right-click entry. Drained here rather than
+        // delivered as an event because the backend parses it before the webview
+        // exists, so an event would have had nobody listening.
+        const launchPath = await commands.launchRepoPath()
 
-      if (toReopen.length === 0) {
-        openModal('onboarding')
+        // Behavior > On startup. Off means start empty: no tabs are reopened, but
+        // the saved list is left alone so turning it back on restores them.
+        // A folder from the right-click menu still opens -- the user asked for
+        // that one explicitly, which outranks the "start empty" preference.
+        if (settings.restore_tabs === false && !launchPath) {
+          openModal('onboarding')
+          return
+        }
+
+        // With "reopen my last tabs" off we restore nothing; only the folder the
+        // user right-clicked (if any) opens.
+        let saved: string[] = []
+        if (settings.restore_tabs !== false) {
+          const openReposList = settings.open_repos ?? []
+          const recents = settings.recents ?? []
+          saved =
+            openReposList.length > 0
+              ? openReposList
+              : recents.length > 0
+                ? [recents[0].path]
+                : []
+        }
+
+        // The launched folder goes last so it ends up the focused tab below.
+        // Filtered first so a folder that is already in the saved set opens once.
+        const toReopen = launchPath
+          ? [...saved.filter((path) => !samePath(path, launchPath)), launchPath]
+          : saved
+
+        if (toReopen.length === 0) {
+          openModal('onboarding')
+          return
+        }
+
+        // Open every tab at once rather than one after another: each openRepo is
+        // an independent IPC round trip, so a serial loop made startup cost the
+        // sum of all of them. allSettled keeps its results in input order, so the
+        // tabs still land in the saved order no matter who answers first.
+        let done = 0
+        setSplashProgress(0, toReopen.length)
+        const results = await Promise.allSettled(
+          toReopen.map(async (path) => {
+            try {
+              return { path, repo: unwrap(await commands.openRepo(path)) }
+            } finally {
+              // Count settled, not succeeded: the bar has to reach the end even
+              // when a repo has been moved or deleted since last launch.
+              done += 1
+              setSplashProgress(done, toReopen.length)
+            }
+          }),
+        )
+
+        const opened: RepoInfo[] = []
+        let lastOpenedId: string | null = null
+        let launchedId: string | null = null
+        results.forEach((result, i) => {
+          if (result.status === 'fulfilled') {
+            opened.push(result.value.repo)
+            if (result.value.path === settings.active_repo_path) lastOpenedId = result.value.repo.id
+            if (launchPath && samePath(result.value.path, launchPath)) {
+              launchedId = result.value.repo.id
+            }
+          } else {
+            const reason = result.reason
+            const message = reason instanceof Error ? reason.message : String(reason)
+            toast.error(`Failed to reopen ${toReopen[i]}: ${message}`)
+          }
+        })
+
+        // addReposInBackground, not addRepo: addRepo focuses each repo as it
+        // arrives, which with parallel opens would hand the active tab to
+        // whichever one happened to finish last.
+        addReposInBackground(opened)
+        finishRepoRestore()
+        // The folder the user right-clicked wins over the tab that happened to
+        // be active last session -- they just asked for this one by name.
+        const focusId = launchedId ?? lastOpenedId
+        if (focusId) setActiveRepo(focusId)
+      } finally {
+        hideSplash()
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Right-clicking a folder while GitWyrm is already running starts a second
+  // process, which the single-instance plugin turns into this event before
+  // exiting. Opens the folder as a tab in the window the user already has.
+  useEffect(() => {
+    const unlisten = listen<string>('open-repo-path', (event) => {
+      const path = event.payload
+      const { openRepos, addRepo, setActiveRepo } = useWorkspaceStore.getState()
+
+      // Already open: focus that tab rather than opening a duplicate.
+      const existing = openRepos.find((repo) => samePath(repo.path, path))
+      if (existing) {
+        setActiveRepo(existing.id)
         return
       }
 
-      let lastOpenedId: string | null = null
-      for (const path of toReopen) {
+      void (async () => {
         try {
-          const repo = unwrap(await commands.openRepo(path))
-          addRepo(repo)
-          if (path === settings.active_repo_path) lastOpenedId = repo.id
-        } catch (e) {
-          toast.error(`Failed to reopen ${path}: ${(e as Error).message}`)
+          // addRepo, not addReposInBackground: this is a direct user action, so
+          // the new tab should take focus.
+          addRepo(unwrap(await commands.openRepo(path)))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          toast.error(`Could not open ${path}: ${message}`)
         }
-      }
-      finishRepoRestore()
-      if (lastOpenedId) setActiveRepo(lastOpenedId)
-    })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      })()
+    })
+    return () => {
+      unlisten.then((stop) => stop())
+    }
   }, [])
 
   // Keep looking for a newer release while the app stays open, so long-running

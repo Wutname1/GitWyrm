@@ -50,6 +50,14 @@ sentry = { version = "0.48.5", default-features = false, features = [
 # Bridges `log::error!`/`warn!` into Sentry events. Without this the backend
 # only ever reports panics, so command failures stayed local to gitwyrm.log.
 sentry-log = "0.48.5"
+# Reopens the folder in the running app when Explorer's "Open with GitWyrm"
+# launches a second process, instead of starting a duplicate window.
+tauri-plugin-single-instance = "2"
+
+# Explorer's right-click entry is a set of HKCU registry verbs, so the app can
+# add and remove it without elevation.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
 
 [dev-dependencies]
 tempfile = "3"
