@@ -98,7 +98,7 @@ pub async fn device_poll(device_code: &str, interval: u32) -> Result<PollOutcome
     Some("authorization_pending") => Ok(PollOutcome::Pending { interval }),
     // RFC 8628: on slow_down add 5s to the interval (GitHub may also send one).
     Some("slow_down") => Ok(PollOutcome::Pending {
-      interval: body.interval.unwrap_or(interval + 5),
+      interval: body.interval.unwrap_or(interval.saturating_add(5)),
     }),
     Some("expired_token") => Err(AppError::Other(
       "sign-in code expired, start over to get a new code".into(),

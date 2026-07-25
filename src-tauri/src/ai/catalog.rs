@@ -137,7 +137,11 @@ async fn fetch_raw(app: &tauri::AppHandle) -> Result<String, AppError> {
         .text()
         .await
         .map_err(|e| AppError::Other(format!("failed to read model catalog: {e}")))?;
-      let _ = fs::write(&path, &body);
+      // A failed cache write means every AI action pays a live round-trip;
+      // log it so that slowdown is diagnosable instead of invisible.
+      if let Err(e) = fs::write(&path, &body) {
+        log::warn!("could not cache model catalog: {e}");
+      }
       Ok(body)
     }
     // Offline or upstream down: fall back to a stale cache when we have one.

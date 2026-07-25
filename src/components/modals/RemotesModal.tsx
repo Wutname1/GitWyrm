@@ -209,11 +209,11 @@ function RemoteRow({
             disabled={remote.branches.length === 0 || upstreamPending}
             onSelect={(e) => {
               e.preventDefault()
-              onSetUpstream(`${remote.name}/${remote.branches[0]}`)
+              onSetUpstream(`${remote.name}/${remote.branches[0].name}`)
             }}
           >
-            {upstreamTarget === `${remote.name}/${remote.branches[0]}` ? <PendingIndicator /> : <Target />}
-            {upstreamTarget === `${remote.name}/${remote.branches[0]}` ? 'Setting target…' : 'Set target (upstream)'}
+            {upstreamTarget === `${remote.name}/${remote.branches[0].name}` ? <PendingIndicator /> : <Target />}
+            {upstreamTarget === `${remote.name}/${remote.branches[0].name}` ? 'Setting target…' : 'Set target (upstream)'}
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem disabled={upstreamPending} variant="destructive" onSelect={onDelete}>

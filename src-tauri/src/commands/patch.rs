@@ -104,7 +104,11 @@ fn parse_diff(text: &str) -> Result<ParsedDiff, AppError> {
     } else if !seen_hunk {
       preamble.push(line);
     } else {
-      hunks.last_mut().unwrap().lines.push(line);
+      hunks
+        .last_mut()
+        .ok_or_else(|| AppError::Other("diff body line before any hunk header".into()))?
+        .lines
+        .push(line);
     }
   }
 
@@ -389,6 +393,12 @@ fn diff_args_for(target: PatchTarget, path: &str) -> Vec<String> {
     "diff.indentHeuristic=false".into(),
     "-c".into(),
     "diff.algorithm=myers".into(),
+    // The a/ b/ prefixes must survive too: build_patch_from_raw copies the
+    // preamble verbatim and `git apply` rejects a patch whose header lacks them.
+    "-c".into(),
+    "diff.noprefix=false".into(),
+    "-c".into(),
+    "diff.mnemonicPrefix=false".into(),
     "diff".into(),
     "--no-color".into(),
     "--diff-algorithm=myers".into(),

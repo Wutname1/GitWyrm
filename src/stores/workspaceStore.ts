@@ -826,7 +826,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         : [...s.tabOrder, { type: "repo" as const, path: repo.path }];
       const recents = [
         { name: repo.name, path: repo.path },
-        ...s.recents.filter((r) => r.path !== repo.path),
+        ...s.recents.filter((r) => !samePath(r.path, repo.path)),
       ].slice(0, 10);
       return { openRepos, activeRepoId: repo.id, recents, tabOrder };
     });

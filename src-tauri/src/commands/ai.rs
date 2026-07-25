@@ -114,7 +114,9 @@ pub fn ai_default_instruction() -> String {
 }
 
 fn truncate_diff(diff: &str) -> String {
-  if diff.len() <= MAX_DIFF_CHARS {
+  // Count and cut in the same unit. Gating on bytes while cutting on chars let
+  // a multibyte diff (CJK comments, emoji) through at several times the limit.
+  if diff.chars().count() <= MAX_DIFF_CHARS {
     return diff.to_string();
   }
   let cut: String = diff.chars().take(MAX_DIFF_CHARS).collect();

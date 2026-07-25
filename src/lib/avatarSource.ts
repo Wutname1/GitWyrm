@@ -38,7 +38,10 @@ function load(): CacheMap {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object') store = parsed as CacheMap
+      // An array also passes `typeof === 'object'`, and string keys set on one
+      // are dropped by JSON.stringify - which would silently poison the cache
+      // forever, re-probing every avatar on every launch.
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) store = parsed as CacheMap
     }
   } catch {
     // A corrupt or unavailable cache is not worth surfacing; start empty.
