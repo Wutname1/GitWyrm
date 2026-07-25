@@ -5,7 +5,7 @@ import { FormDialog } from '@/components/ui/form-dialog'
 import { useTags } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useTagSync } from '@/hooks/useTagSync'
-import { shortSha } from '@/lib/gitDisplay'
+import { formatRelativeTime, shortSha } from '@/lib/gitDisplay'
 import { refNameError } from '@/lib/refName'
 import { bumpSemver, formatSemver, highestSemver } from '@/lib/semver'
 import { useUiStore } from '@/stores/uiStore'
@@ -24,20 +24,33 @@ export function NewTagModal() {
   // is open, so the remote lookup is gated on that.
   const { hostLabel, hasRemote } = useTagSync(repo?.id ?? null, open)
 
-  // The saved preference seeds the checkbox but is never written back from
-  // here: ticking it for one tag is a one-off, not a change of setting. It
-  // lives in Settings > Tags (this repository's rule, or the app default).
-  // Subscribe to both the app default and this repo's override so the seeded
-  // value stays reactive if either changes while the dialog is closed.
+  // The checkbox both reads and writes the saved preference, so whichever way
+  // the user left it last is how it comes back. Subscribe to the app default
+  // and this repo's override so the value stays reactive if either changes in
+  // Settings > Tags while the dialog is closed.
   const appPushOnCreate = useWorkspaceStore((s) => s.tagPushOnCreate)
   const repoPushOnCreate = useWorkspaceStore((s) =>
     repo ? s.tagOverridesByRepo[repo.path]?.pushOnCreate : undefined
   )
+  const setTagPushOnCreate = useWorkspaceStore((s) => s.setTagPushOnCreate)
+  const setRepoTagOverride = useWorkspaceStore((s) => s.setRepoTagOverride)
   const tagPushOnCreate = repoPushOnCreate ?? appPushOnCreate
 
   const [name, setName] = useState('')
   const [message, setMessage] = useState('')
   const [push, setPush] = useState(false)
+
+  // Remember the choice for next time. A repo that has its own rule keeps it --
+  // overwriting the app default from here would silently change every other
+  // repository that follows it.
+  const rememberPush = (next: boolean) => {
+    setPush(next)
+    if (repoPushOnCreate !== undefined && repo) {
+      setRepoTagOverride(repo.path, { pushOnCreate: next })
+    } else {
+      setTagPushOnCreate(next)
+    }
+  }
 
   // Blocks a second submit within the same tick -- `isPending` does not flip
   // synchronously after `mutate`, so an Enter keypress and a fast button click
@@ -69,6 +82,14 @@ export function NewTagModal() {
       value: formatSemver(bumpSemver(latest, bump)),
     }))
   }, [existing])
+
+  // The most recently created tag, by date rather than by name -- a repo can tag
+  // an old commit or use names that don't sort chronologically.
+  const lastTag = useMemo(() => {
+    const all = tags.data ?? []
+    if (all.length === 0) return null
+    return all.reduce((latest, t) => (t.time > latest.time ? t : latest))
+  }, [tags.data])
 
   const trimmed = name.trim()
   const error = refNameError(trimmed, [...existing], 'tag')
@@ -104,21 +125,6 @@ export function NewTagModal() {
     >
       <div className="grid gap-1.5">
         <label className="text-2xs font-semibold text-sub">Tag name</label>
-        {quickPicks.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {quickPicks.map((pick) => (
-              <button
-                key={pick.bump}
-                type="button"
-                onClick={() => setName(pick.value)}
-                className="flex items-baseline gap-1.5 rounded border border-border bg-panel px-2 py-1 text-2xs text-sub hover:border-primary hover:text-accent-text"
-              >
-                <span className="font-mono">{pick.value}</span>
-                <span className="capitalize text-muted-foreground">{pick.bump}</span>
-              </button>
-            ))}
-          </div>
-        )}
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -129,6 +135,42 @@ export function NewTagModal() {
           className="h-auto bg-background py-1.5 font-mono text-xs"
           autoFocus
         />
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          {quickPicks.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-2xs text-muted-foreground">Recommended:</span>
+              {quickPicks.map((pick) => {
+                const selected = trimmed === pick.value
+                return (
+                  <button
+                    key={pick.bump}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setName(pick.value)}
+                    className={
+                      selected
+                        ? 'flex items-baseline gap-1.5 rounded border border-primary bg-primary/15 px-2 py-1 text-2xs text-accent-text'
+                        : 'flex items-baseline gap-1.5 rounded border border-border bg-panel px-2 py-1 text-2xs text-sub hover:border-primary hover:text-accent-text'
+                    }
+                  >
+                    <span className="font-mono">{pick.value}</span>
+                    <span className="capitalize text-muted-foreground">{pick.bump}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {lastTag && (
+            <span className="text-2xs text-muted-foreground">
+              Last tag: <span className="font-mono text-sub">{lastTag.name}</span>
+              {', '}
+              {formatRelativeTime(lastTag.time)}
+            </span>
+          )}
+        </div>
+
         <p className="min-h-[15px] text-2xs leading-tight text-removed">{error ?? ''}</p>
       </div>
 
@@ -155,7 +197,7 @@ export function NewTagModal() {
           <input
             type="checkbox"
             checked={push}
-            onChange={(e) => setPush(e.target.checked)}
+            onChange={(e) => rememberPush(e.target.checked)}
             className="size-3.5 accent-[var(--gw-accent)]"
           />
           Also send it to {hostLabel} now
