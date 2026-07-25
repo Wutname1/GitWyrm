@@ -1,6 +1,23 @@
 import { toast } from 'sonner'
 import { log } from '@/lib/log'
+import type { RemoteProvider as BackendRemoteProvider } from '@/lib/bindings'
 import { detectProvider, providerLabel, type RemoteProvider } from '@/lib/remoteProvider'
+
+/**
+ * Rust (`git::remote_url`) knows more hosts than we draw glyphs for. Map its
+ * vocabulary onto the four we can badge; everything else falls back to the
+ * cloud icon and gets its host name as a label.
+ */
+const PROVIDER_FROM_BACKEND: Record<BackendRemoteProvider, RemoteProvider> = {
+  git_hub: 'github',
+  git_lab: 'gitlab',
+  bitbucket: 'bitbucket',
+  azure_dev_ops: 'azure',
+  gitea: 'unknown',
+  source_hut: 'unknown',
+  code_commit: 'unknown',
+  self_hosted: 'unknown',
+}
 
 export interface RemoteWebTarget {
   provider: RemoteProvider
@@ -71,12 +88,13 @@ function azureWebBase(remote: ParsedRemote): string | null {
  * the few call sites that only hold a URL.
  */
 export function remoteWebTarget(
-  remote: string | { url: string; provider?: RemoteProvider; web_base?: string | null },
+  remote: string | { url: string; provider?: BackendRemoteProvider; web_base?: string | null },
 ): RemoteWebTarget | null {
   if (typeof remote !== 'string' && remote.web_base && remote.provider) {
+    const provider = PROVIDER_FROM_BACKEND[remote.provider] ?? 'unknown'
     return {
-      provider: remote.provider,
-      label: providerLabel(remote.provider) ?? remote.web_base,
+      provider,
+      label: providerLabel(provider) ?? remote.web_base,
       repositoryUrl: remote.web_base,
     }
   }
