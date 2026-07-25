@@ -16,7 +16,7 @@ use crate::error::AppError;
 use crate::state::RepoManager;
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::git::shell::CREATE_NO_WINDOW;
 
 /// One commit that touched a given file, plus how the file changed in it.
 #[derive(Debug, Clone, Serialize, Type)]
@@ -65,7 +65,7 @@ pub struct FileBlame {
 /// Resolve a repo-relative path against the working directory, refusing
 /// anything that escapes the repo. The path comes from the UI, but a crafted
 /// `..` segment must never let a delete land outside the project.
-fn resolve_in_repo(workdir: &Path, rel: &str) -> Result<PathBuf, AppError> {
+pub(crate) fn resolve_in_repo(workdir: &Path, rel: &str) -> Result<PathBuf, AppError> {
   let rel_path = Path::new(rel);
   // `is_absolute` is not enough on Windows: a leading "/" has no drive prefix
   // there, so it reads as relative while `join` still resolves it from the

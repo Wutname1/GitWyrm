@@ -408,6 +408,7 @@ export function GithubView() {
               </section>
 
               <CommentThread
+                key={`${item.kind}-${item.number}`}
                 comments={detail.comments}
                 replyPlaceholder={isPr ? 'Write a reply…' : 'Ask for more details…'}
                 replying={m.comment.isPending}

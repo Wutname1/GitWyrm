@@ -79,7 +79,7 @@ fn branch_tracking_state(repo: &git2::Repository, branch_name: Option<&str>) -> 
 }
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::git::shell::CREATE_NO_WINDOW;
 
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct GitProgressPayload {
@@ -145,7 +145,9 @@ fn run_streaming(
   operation: &str,
   args: &[&str],
 ) -> Result<String, AppError> {
-  let mut cmd = Command::new("git");
+  // Honor the user's configured git.exe, same as git::shell::run_git. Without
+  // this, network operations ignore the Settings override that local ops respect.
+  let mut cmd = Command::new(crate::git::shell::git_program_name());
   if let Some(path) = repo_path {
     cmd.arg("-C").arg(path);
   }
@@ -985,7 +987,12 @@ pub async fn git_clone(
   destination: String,
 ) -> Result<String, AppError> {
   tauri::async_runtime::spawn_blocking(move || {
-    run_streaming(&app, "clone", None, "clone", &["clone", "--progress", &url, &destination])?;
+    // `--` keeps a URL that starts with `-` from being read as a git option.
+    // Without it, a pasted `--upload-pack=...` clone URL runs an arbitrary command.
+    if url.starts_with('-') {
+      return Err(AppError::Other("that clone address isn't valid".into()));
+    }
+    run_streaming(&app, "clone", None, "clone", &["clone", "--progress", "--", &url, &destination])?;
     Ok(destination)
   })
   .await

@@ -61,7 +61,10 @@ pub fn conflict_content(
     .any(|s| matches!(s, Some((_, true))));
 
   // Working-tree copy carries the conflict markers for manual editing.
-  let merged = std::fs::read_to_string(workdir.join(path)).unwrap_or_default();
+  let merged = crate::commands::file::resolve_in_repo(workdir, path)
+    .ok()
+    .and_then(|p| std::fs::read_to_string(p).ok())
+    .unwrap_or_default();
 
   Ok(ConflictContent {
     path: path.to_string(),
@@ -85,6 +88,9 @@ pub fn apply_resolution(
   resolution: &Resolution,
 ) -> Result<(), AppError> {
   let mut index = repo.index()?;
+  // `path` crosses the IPC boundary, so confine it before any write. On Windows
+  // an absolute `path` would otherwise replace `workdir` entirely in `join`.
+  let target = crate::commands::file::resolve_in_repo(workdir, path)?;
   let rel = Path::new(path);
 
   // Raw blob bytes so binary and non-UTF-8 files round-trip untouched.
@@ -96,13 +102,13 @@ pub fn apply_resolution(
 
   match bytes {
     Some(bytes) => {
-      std::fs::write(workdir.join(rel), &bytes).map_err(AppError::Io)?;
+      std::fs::write(&target, &bytes).map_err(AppError::Io)?;
       index.remove_path(rel)?;
       index.add_path(rel)?;
     }
     None => {
       // The chosen side deleted the file: remove it and stage the deletion.
-      match std::fs::remove_file(workdir.join(rel)) {
+      match std::fs::remove_file(&target) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(AppError::Io(e)),
