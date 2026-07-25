@@ -41,7 +41,32 @@ pub fn git_program_name() -> String {
 
 pub struct GitOutput {
   pub stdout: String,
+  /// Git's diagnostics from a SUCCESSFUL run. Callers take `.stdout` and drop
+  /// the rest, so `log_stderr` records this to gitwyrm.log instead of losing it:
+  /// git reports real warnings here even on exit 0 ("redirecting to a new URL",
+  /// ref-update notices, hook output), and those explain later surprises.
   pub stderr: String,
+}
+
+impl GitOutput {
+  /// Git's diagnostics with surrounding whitespace removed, or None when it said
+  /// nothing. Lets a caller surface a warning without re-trimming.
+  pub fn warning(&self) -> Option<&str> {
+    let trimmed = self.stderr.trim();
+    if trimmed.is_empty() {
+      None
+    } else {
+      Some(trimmed)
+    }
+  }
+}
+
+/// Log git's stderr from a successful run, so a warning is diagnosable rather
+/// than discarded. Failures already carry stderr in their error message.
+fn log_stderr(args: &[&str], out: &GitOutput) {
+  if let Some(warning) = out.warning() {
+    log::debug!("git {} warned: {}", args.first().unwrap_or(&""), warning);
+  }
 }
 
 pub fn run_git(repo_path: Option<&str>, args: &[&str]) -> Result<GitOutput, AppError> {
@@ -81,7 +106,9 @@ pub fn run_git(repo_path: Option<&str>, args: &[&str]) -> Result<GitOutput, AppE
     )));
   }
 
-  Ok(GitOutput { stdout, stderr })
+  let out = GitOutput { stdout, stderr };
+  log_stderr(args, &out);
+  Ok(out)
 }
 
 pub fn git_available() -> bool {
@@ -187,5 +214,7 @@ pub fn run_git_stdin(
     )));
   }
 
-  Ok(GitOutput { stdout, stderr })
+  let out = GitOutput { stdout, stderr };
+  log_stderr(args, &out);
+  Ok(out)
 }

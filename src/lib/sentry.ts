@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/react'
+import { scrubDeep, scrubText } from '@/lib/scrub'
 
 /**
  * Frontend crash reporting and observability. Mirrors the Rust backend's
@@ -55,7 +56,25 @@ export function initSentry() {
 
     // Keep a rolling window of the user's recent actions on every event.
     maxBreadcrumbs: 100,
+
+    // `sendDefaultPii: false` and the replay masking above do NOT touch event
+    // payloads: an exception message, a breadcrumb, or a request URL still
+    // carries whatever text it was built from. Scrub both on the way out, since
+    // error strings here routinely embed repo paths, author emails, and - when a
+    // provider echoes a bad key back in its error body - access tokens.
+    beforeSend(event) {
+      return scrubDeep(event)
+    },
+    beforeBreadcrumb(breadcrumb) {
+      return scrubDeep(breadcrumb)
+    },
   })
 }
+
+/**
+ * Redact a string before it is logged or shown. Re-exported so callers reach for
+ * one scrubber rather than importing the module directly.
+ */
+export { scrubText }
 
 export { Sentry }
