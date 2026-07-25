@@ -57,15 +57,20 @@ export function NewTagModal() {
   // could otherwise both fire the create before the first one registers.
   const submitting = useRef(false)
 
+  // Read through a ref so toggling the checkbox -- which saves the preference --
+  // does not re-run this effect and wipe the name the user is typing.
+  const rememberedPush = useRef(tagPushOnCreate)
+  rememberedPush.current = tagPushOnCreate
+
   useEffect(() => {
     if (open) {
       setName('')
       setMessage('')
       submitting.current = false
       // Start from the remembered choice each time the dialog opens.
-      setPush(tagPushOnCreate)
+      setPush(rememberedPush.current)
     }
-  }, [open, tagPushOnCreate])
+  }, [open])
 
   const existing = useMemo(
     () => new Set((tags.data ?? []).map((t) => t.name)),
