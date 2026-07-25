@@ -27,8 +27,17 @@ impl RepoManager {
       .to_path_buf();
 
     let id = repo_id(&workdir);
+
+    // Reuse the handle when this path is already open. Launch restore opens
+    // every tab at once, so two calls can race here; replacing a live handle
+    // would leave in-flight work holding a repository nobody can look up.
+    let mut repos = self.repos.lock().unwrap();
+    if let Some(existing) = repos.get(&id) {
+      return Ok((id, existing.clone()));
+    }
+
     let open = Arc::new(OpenRepo { path: workdir, repo: Mutex::new(repo) });
-    self.repos.lock().unwrap().insert(id.clone(), open.clone());
+    repos.insert(id.clone(), open.clone());
     Ok((id, open))
   }
 
