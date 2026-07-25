@@ -1,6 +1,7 @@
 import { AboutSettings } from '@/components/domain/settings/AboutSettings'
 import { AiSettings } from '@/components/domain/settings/AiSettings'
 import { AppearanceSettings } from '@/components/domain/settings/AppearanceSettings'
+import { BehaviorSettings } from '@/components/domain/settings/BehaviorSettings'
 import { GeneralSettings } from '@/components/domain/settings/GeneralSettings'
 import { LogsSettings } from '@/components/domain/settings/LogsSettings'
 import { RepositorySettings } from '@/components/domain/settings/RepositorySettings'
@@ -13,6 +14,7 @@ import { useUiStore } from '@/stores/uiStore'
 
 const TITLES: Record<SettingsSection, string> = {
   general: 'General',
+  behavior: 'Behavior',
   repository: 'Repository',
   repositoryTags: 'Tags',
   tags: 'Tags',
@@ -23,6 +25,7 @@ const TITLES: Record<SettingsSection, string> = {
 }
 
 const SUBTITLES: Partial<Record<SettingsSection, string>> = {
+  behavior: 'How GitWyrm acts while you work.',
   repository: 'These settings apply only to the repository open in the active tab.',
   repositoryTags: 'Tag rules for the repository open in the active tab.',
   tags: 'The default tag rules for every repository.',
@@ -30,6 +33,7 @@ const SUBTITLES: Partial<Record<SettingsSection, string>> = {
 
 const SECTION_BODIES: Record<SettingsSection, React.ComponentType> = {
   general: GeneralSettings,
+  behavior: BehaviorSettings,
   repository: RepositorySettings,
   repositoryTags: RepositoryTagsSettings,
   tags: TagsSettings,
