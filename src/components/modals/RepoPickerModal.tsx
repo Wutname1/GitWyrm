@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { useGithubAuth, useGithubRepositories } from "@/hooks/useGithub";
 import {
+  useCachedRepoIcons,
   useCodeFolderRepos,
   useOpenRepo,
   useOpenRepos,
@@ -71,6 +72,45 @@ interface LibraryRepo {
   name: string;
   path: string;
   headBranch: string | null;
+}
+
+/**
+ * A repository's remembered icon, or the folder glyph when GitWyrm has not
+ * discovered one yet. Icons only exist for repositories opened at least once,
+ * so a fresh library shows glyphs and fills in as repositories get used.
+ */
+function RepoRowIcon({
+  dataUrl,
+  size = 15,
+  className,
+}: {
+  dataUrl?: string;
+  size?: number;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const shell = cn(
+    "grid size-8 flex-none place-items-center overflow-hidden rounded-md border border-border",
+    className,
+  );
+
+  if (!dataUrl || failed) {
+    return (
+      <span className={cn(shell, "bg-panel3 text-sub")}>
+        <FolderGit2 size={size} strokeWidth={1.8} />
+      </span>
+    );
+  }
+  return (
+    <span className={cn(shell, "bg-background")}>
+      <img
+        src={dataUrl}
+        alt=""
+        className="size-full object-cover"
+        onError={() => setFailed(true)}
+      />
+    </span>
+  );
 }
 
 type SelectedItem =
@@ -244,6 +284,7 @@ function RouteButton({
 
 function RepoLibraryRow({
   repo,
+  iconUrl,
   pinned,
   openRepoId,
   selected,
@@ -256,6 +297,7 @@ function RepoLibraryRow({
   onJump,
 }: {
   repo: LibraryRepo;
+  iconUrl?: string;
   pinned: boolean;
   openRepoId?: string;
   selected: boolean;
@@ -303,9 +345,7 @@ function RepoLibraryRow({
         disabled={busy}
         className="flex min-w-0 select-none items-center gap-2.5 px-2.5 py-1.5 text-left disabled:opacity-50"
       >
-        <span className="grid size-8 flex-none place-items-center rounded-md border border-border bg-panel3 text-sub">
-          <FolderGit2 size={15} strokeWidth={1.8} />
-        </span>
+        <RepoRowIcon dataUrl={iconUrl} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-semibold text-foreground">
             {repo.name}
@@ -625,6 +665,7 @@ function RepoDetails({
   pinnedRepoPaths,
   openingGroupId,
   busy,
+  iconsByPath,
   onToggleRepoPin,
   onOpenRepo,
   onJumpToRepo,
@@ -637,6 +678,7 @@ function RepoDetails({
   pinnedRepoPaths: string[];
   openingGroupId: string | null;
   busy: boolean;
+  iconsByPath: Map<string, string>;
   onToggleRepoPin: (path: string) => void;
   onOpenRepo: (path: string) => void;
   onJumpToRepo: (id: string) => void;
@@ -668,7 +710,11 @@ function RepoDetails({
           <div className="mt-5 border-t border-border pt-3">
             {group.repoPaths.map((path) => (
               <div key={path} className="flex items-center gap-2 py-1.5">
-                <FolderGit2 size={13} className="flex-none text-sub" />
+                <RepoRowIcon
+                  dataUrl={iconsByPath.get(pathKey(path))}
+                  size={13}
+                  className="size-6 rounded"
+                />
                 <span className="min-w-0">
                   <strong className="block truncate text-xs text-foreground">
                     {pathName(path)}
@@ -726,9 +772,19 @@ function RepoDetails({
         Repository details
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5">
-        <span className="grid size-10 place-items-center rounded-lg border border-accent/25 bg-accent/10 text-accent-text">
-          <FolderGit2 size={20} />
-        </span>
+        {(() => {
+          const iconUrl = iconsByPath.get(pathKey(repo.path));
+          return iconUrl ? (
+            <RepoRowIcon
+              dataUrl={iconUrl}
+              className="size-10 rounded-lg border-accent/25"
+            />
+          ) : (
+            <span className="grid size-10 place-items-center rounded-lg border border-accent/25 bg-accent/10 text-accent-text">
+              <FolderGit2 size={20} />
+            </span>
+          );
+        })()}
         <h2 className="mt-4 truncate text-base font-semibold text-foreground">
           {repo.name}
         </h2>
@@ -903,6 +959,17 @@ function RepoPickerPanel({
     () => new Map(libraryRepos.map((repo) => [pathKey(repo.path), repo])),
     [libraryRepos],
   );
+
+  // Saved groups can name repositories the library list does not, so their
+  // paths join the lookup to keep group details iconed too.
+  const iconLookupPaths = useMemo(
+    () => [
+      ...libraryRepos.map((repo) => repo.path),
+      ...savedTabGroups.flatMap((group) => group.repoPaths),
+    ],
+    [libraryRepos, savedTabGroups],
+  );
+  const iconsByPath = useCachedRepoIcons(iconLookupPaths);
   const query = filter.trim().toLowerCase();
   const matches = (repo: LibraryRepo) =>
     !query ||
@@ -1348,6 +1415,7 @@ function RepoPickerPanel({
       <RepoLibraryRow
         key={key}
         repo={repo}
+        iconUrl={iconsByPath.get(key)}
         pinned={pinnedRepoPaths.some((path) => pathKey(path) === key)}
         openRepoId={open?.id}
         selected={
@@ -2397,6 +2465,7 @@ function RepoPickerPanel({
               pinnedRepoPaths={pinnedRepoPaths}
               openingGroupId={openingGroupId}
               busy={busy}
+              iconsByPath={iconsByPath}
               onToggleRepoPin={(path) => {
                 const repo = repoByPath.get(pathKey(path));
                 if (repo) toggleRepoPin(repo);

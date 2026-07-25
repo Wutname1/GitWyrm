@@ -364,6 +364,75 @@ impl Default for Settings {
   }
 }
 
+/// Compare repository paths the way the rest of the app does: case-insensitively
+/// with separators normalized, so `C:/code/app` and `C:\Code\App` are one repo.
+fn same_repo_path(left: &str, right: &str) -> bool {
+  normalize_repo_path(left) == normalize_repo_path(right)
+}
+
+/// Lowercase, backslash-separated, no trailing separator. The one spelling used
+/// whenever repository paths are compared or used as keys.
+pub fn normalize_repo_path(path: &str) -> String {
+  path
+    .replace('/', "\\")
+    .trim_end_matches('\\')
+    .to_ascii_lowercase()
+}
+
+impl Settings {
+  /// Forget everything tied to `paths`. Used by the missing-repository sweep;
+  /// the repository's icon files are removed by the caller.
+  pub fn forget_repos(&mut self, paths: &[String]) {
+    let gone = |candidate: &str| paths.iter().any(|path| same_repo_path(path, candidate));
+
+    self.open_repos.retain(|path| !gone(path));
+    self.recents.retain(|recent| !gone(&recent.path));
+    self.pinned_tab_paths.retain(|path| !gone(path));
+    self.pinned_repo_paths.retain(|path| !gone(path));
+    self.tab_order.retain(|entry| {
+      // Group markers are not repository paths and must survive the sweep.
+      entry.starts_with("group:") || !gone(entry)
+    });
+    self.tab_aliases.retain(|path, _| !gone(path));
+    self.tag_overrides_by_repo.retain(|path, _| !gone(path));
+    self.expanded_change_folders.retain(|key, _| {
+      let repo = key.rsplit_once('|').map(|(repo, _)| repo).unwrap_or(key);
+      !gone(repo)
+    });
+    for group in self
+      .tab_groups
+      .iter_mut()
+      .chain(self.saved_tab_groups.iter_mut())
+    {
+      group.repo_paths.retain(|path| !gone(path));
+    }
+    if self
+      .active_repo_path
+      .as_deref()
+      .is_some_and(|path| gone(path))
+    {
+      self.active_repo_path = None;
+    }
+  }
+
+  /// Every place a repository path can still be referenced. A repository absent
+  /// from this list is one GitWyrm no longer remembers at all.
+  pub fn referenced_repo_paths(&self) -> Vec<String> {
+    let mut paths: Vec<String> = self.recents.iter().map(|r| r.path.clone()).collect();
+    paths.extend(self.open_repos.iter().cloned());
+    paths.extend(self.pinned_repo_paths.iter().cloned());
+    paths.extend(self.pinned_tab_paths.iter().cloned());
+    paths.extend(self.tab_aliases.keys().cloned());
+    paths.extend(self.tag_overrides_by_repo.keys().cloned());
+    for group in self.tab_groups.iter().chain(self.saved_tab_groups.iter()) {
+      paths.extend(group.repo_paths.iter().cloned());
+    }
+    paths.sort_by_key(|path| normalize_repo_path(path));
+    paths.dedup_by_key(|path| normalize_repo_path(path));
+    paths
+  }
+}
+
 fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
   let dir = app
     .path()
@@ -380,7 +449,21 @@ pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, AppError> {
   let Ok(raw) = fs::read_to_string(&path) else {
     return Ok(Settings::default());
   };
-  Ok(serde_json::from_str(&raw).unwrap_or_default())
+  Ok(match serde_json::from_str(&raw) {
+    Ok(settings) => settings,
+    Err(error) => {
+      log::warn!("settings.json could not be parsed, using defaults: {error}");
+      Settings::default()
+    }
+  })
+}
+
+/// Write settings exactly as given.
+pub fn write_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(), AppError> {
+  let path = settings_path(app)?;
+  let json = serde_json::to_string_pretty(settings).map_err(|e| AppError::Other(e.to_string()))?;
+  fs::write(path, json)?;
+  Ok(())
 }
 
 #[tauri::command]
@@ -390,10 +473,7 @@ pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), Ap
   // restart. Every git shell-out reads this global.
   crate::git::shell::set_git_program(settings.git_executable.as_deref());
 
-  let path = settings_path(&app)?;
-  let json = serde_json::to_string_pretty(&settings).map_err(|e| AppError::Other(e.to_string()))?;
-  fs::write(path, json)?;
-  Ok(())
+  write_settings(&app, &settings)
 }
 
 /// Load the persisted git executable and apply it to the shell global. Called
@@ -407,6 +487,88 @@ pub fn apply_startup_git_executable(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn group(id: &str, repo_paths: &[&str]) -> TabGroupSetting {
+    TabGroupSetting {
+      id: id.into(),
+      name: id.into(),
+      color: "#000".into(),
+      collapsed: false,
+      repo_paths: repo_paths.iter().map(|p| (*p).to_string()).collect(),
+    }
+  }
+
+
+  #[test]
+  fn repo_paths_compare_case_and_separator_insensitively() {
+    assert!(same_repo_path("C:\\code\\App", "c:/code/app"));
+    assert!(same_repo_path("C:/code/app\\", "C:\\code\\app"));
+    assert!(!same_repo_path("C:\\code\\app", "C:\\code\\app2"));
+  }
+
+  #[test]
+  fn forgetting_a_repo_clears_every_place_it_is_stored() {
+    let gone = "C:\\code\\gone";
+    let kept = "C:\\code\\kept";
+    let mut settings = Settings {
+      open_repos: vec![gone.into(), kept.into()],
+      active_repo_path: Some(gone.into()),
+      recents: vec![
+        RecentRepo { name: "gone".into(), path: gone.into() },
+        RecentRepo { name: "kept".into(), path: kept.into() },
+      ],
+      pinned_tab_paths: vec![gone.into()],
+      pinned_repo_paths: vec![gone.into(), kept.into()],
+      // Group markers share this list with repository paths.
+      tab_order: vec!["group:g1".into(), gone.into(), kept.into()],
+      tab_groups: vec![group("g1", &[gone, kept])],
+      saved_tab_groups: vec![group("saved", &[gone])],
+      ..Settings::default()
+    };
+    settings.tab_aliases.insert(gone.into(), "Gone".into());
+    settings.tab_aliases.insert(kept.into(), "Kept".into());
+    settings
+      .tag_overrides_by_repo
+      .insert(gone.into(), TagOverrideSetting::default());
+    settings
+      .expanded_change_folders
+      .insert(format!("{gone}|staged"), vec!["src".into()]);
+    settings
+      .expanded_change_folders
+      .insert(format!("{kept}|staged"), vec!["src".into()]);
+
+    // Mixed case and separators still match the stored entries.
+    settings.forget_repos(&["c:/code/gone".to_string()]);
+
+    assert_eq!(settings.open_repos, vec![kept.to_string()]);
+    assert_eq!(settings.recents.len(), 1);
+    assert_eq!(settings.recents[0].path, kept);
+    assert!(settings.pinned_tab_paths.is_empty());
+    assert_eq!(settings.pinned_repo_paths, vec![kept.to_string()]);
+    assert_eq!(settings.tab_order, vec!["group:g1".to_string(), kept.to_string()]);
+    assert_eq!(settings.tab_groups[0].repo_paths, vec![kept.to_string()]);
+    assert!(settings.saved_tab_groups[0].repo_paths.is_empty());
+    assert_eq!(settings.tab_aliases.len(), 1);
+    assert!(settings.tab_aliases.contains_key(kept));
+    assert!(settings.tag_overrides_by_repo.is_empty());
+    assert_eq!(settings.expanded_change_folders.len(), 1);
+    assert!(settings.active_repo_path.is_none());
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   #[test]
   fn older_settings_default_tab_group_fields() {

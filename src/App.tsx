@@ -16,6 +16,7 @@ import { NewTagModal } from '@/components/modals/NewTagModal'
 import { PushTagsModal } from '@/components/modals/PushTagsModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
+import { noteRepoAvailability } from '@/hooks/useRepoActions'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { useTheme } from '@/hooks/useTheme'
 import { useFont } from '@/hooks/useFont'
@@ -147,6 +148,7 @@ function AppInner() {
         )
 
         const opened: RepoInfo[] = []
+        const unavailable: string[] = []
         let lastOpenedId: string | null = null
         let launchedId: string | null = null
         results.forEach((result, i) => {
@@ -159,9 +161,20 @@ function AppInner() {
           } else {
             const reason = result.reason
             const message = reason instanceof Error ? reason.message : String(reason)
+            unavailable.push(toReopen[i])
             toast.error(`Failed to reopen ${toReopen[i]}: ${message}`)
           }
         })
+
+        // Record what opened and what did not. A folder that has gone away is
+        // tagged so its settings can be dropped after a week, while one that
+        // reappears is untagged and keeps everything.
+        for (const path of opened.map((repo) => repo.path)) {
+          void noteRepoAvailability(path, true)
+        }
+        for (const path of unavailable) {
+          void noteRepoAvailability(path, false)
+        }
 
         // addReposInBackground, not addRepo: addRepo focuses each repo as it
         // arrives, which with parallel opens would hand the active tab to

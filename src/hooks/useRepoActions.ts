@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMemo } from 'react'
 import { toast } from 'sonner'
 import { commands, type RepoInfo } from '@/lib/bindings'
-import { normalizePath } from '@/lib/paths'
+import { normalizePath, pathKey } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
 import { Sentry } from '@/lib/sentry'
 import { useUiStore } from '@/stores/uiStore'
@@ -16,6 +17,54 @@ export function useCodeFolderRepos() {
     staleTime: 60_000,
     queryFn: async () => unwrap(await commands.scanCodeFolder(codeFolder!)),
   })
+}
+
+/**
+ * Icons for repositories GitWyrm has opened before, keyed by normalized path.
+ *
+ * Reads only what discovery already recorded, so listing a large library costs
+ * one file read per repository that has a known icon and nothing at all for the
+ * rest. Repositories never opened, and ones whose icon file has since been
+ * deleted, simply have no entry and fall back to the folder glyph.
+ */
+export function useCachedRepoIcons(paths: string[]) {
+  // Sorted so the key is stable however the caller ordered the list, and the
+  // scan-driven library list re-ordering itself does not refetch.
+  const sorted = [...new Set(paths.map(normalizePath))].sort()
+  const query = useQuery({
+    queryKey: ['cached-repo-icons', sorted],
+    enabled: sorted.length > 0,
+    staleTime: 60_000,
+    queryFn: async () => unwrap(await commands.getCachedRepoIcons(sorted)),
+  })
+
+  return useMemo(() => {
+    const byPath = new Map<string, string>()
+    for (const icon of query.data ?? []) {
+      byPath.set(pathKey(icon.repo_path), icon.data_url)
+    }
+    return byPath
+  }, [query.data])
+}
+
+/**
+ * Record whether a repository's folder is still on disk, so settings for a
+ * folder that has gone for good are eventually forgotten while a folder that
+ * comes back - a delete and re-clone, a reconnected drive - keeps everything.
+ *
+ * Only a genuinely absent folder counts as missing. A folder that is present
+ * but fails to open for some other reason (a broken repository, a permissions
+ * problem) keeps its settings, because the user has not thrown it away.
+ */
+export async function noteRepoAvailability(path: string, opened: boolean) {
+  try {
+    const missing = opened ? false : !(await commands.pathExists(path))
+    // Nothing to record for a present-but-unopenable folder.
+    if (!opened && !missing) return
+    await commands.markRepoMissing(path, missing)
+  } catch {
+    // Bookkeeping only: never turn this into a visible failure.
+  }
 }
 
 /** Opens a repo with loading feedback (toast while the backend works). */
@@ -45,9 +94,13 @@ export function useOpenRepo() {
       closeRepoPicker()
       addRepo(repo)
       closeModal()
+      void noteRepoAvailability(repo.path, true)
       toast.success(`Opened ${repo.name}`)
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error, rawPath) => {
+      void noteRepoAvailability(normalizePath(rawPath), false)
+      toast.error(e.message)
+    },
   })
 }
 
@@ -72,7 +125,9 @@ export function useOpenRepos() {
           const path = normalizePath(rawPath)
           try {
             opened.push(unwrap(await commands.openRepo(path)))
+            void noteRepoAvailability(path, true)
           } catch {
+            void noteRepoAvailability(path, false)
             failed.push(path.split('\\').pop() ?? path)
           }
         }

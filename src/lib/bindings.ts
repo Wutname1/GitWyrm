@@ -200,6 +200,18 @@ async saveSettings(settings: Settings) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Note that a repository's folder is gone, or that it is back. Called when an
+ * open attempt fails because the path is missing, and when one succeeds.
+ */
+async markRepoMissing(repoPath: string, missing: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mark_repo_missing", { repoPath, missing }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Run `<candidate> --version` to confirm a chosen git path works. Returns the
  * version banner (e.g. "git version 2.45.1") on success. Used by Settings to
  * give immediate feedback when the user picks or types a git executable.
@@ -253,6 +265,14 @@ async gitInit(path: string, starter: RepositoryStarter, addReadme: boolean, crea
 async getRepoIcon(repoPath: string) : Promise<Result<RepoIcon | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_repo_icon", { repoPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getCachedRepoIcons(repoPaths: string[]) : Promise<Result<CachedRepoIcon[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_cached_repo_icons", { repoPaths }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1441,6 +1461,11 @@ export type BranchSwitchMode =
  */
 "refuse"
 export type BuildInfo = { version: string; build_date: string; git_hash: string; debug: boolean }
+/**
+ * A repository path paired with the icon GitWyrm already knows about, for
+ * screens that list many repositories at once.
+ */
+export type CachedRepoIcon = { repo_path: string; data_url: string; custom: boolean }
 export type CatalogModel = { id: string; name: string; 
 /**
  * Whether the account can actually select this model. Always true for static
