@@ -6,6 +6,7 @@ import {
 } from '@/stores/workspaceStore'
 import { FolderSetting, SettingRow } from './SettingRow'
 import { GitExecutableSetting } from './GitExecutableSetting'
+import { EditorSetting } from './EditorSetting'
 import { ResetToDefaults } from './ResetToDefaults'
 
 const selectClass =
@@ -82,6 +83,12 @@ export function GeneralSettings() {
           <option value="commit">Commit only</option>
           <option value="commit_push">Commit and push</option>
         </select>
+      </SettingRow>
+      <SettingRow
+        label="Open in editor"
+        hint="Which editor the open button and the file right-click menu use. Only editors found on this computer are listed."
+      >
+        <EditorSetting />
       </SettingRow>
       <SettingRow
         label="Repository tabs"

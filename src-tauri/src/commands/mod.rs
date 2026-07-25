@@ -4,6 +4,7 @@ pub mod app;
 pub mod branch;
 pub mod commit;
 pub mod diff;
+pub mod editors;
 pub mod external;
 pub mod file;
 pub mod github;

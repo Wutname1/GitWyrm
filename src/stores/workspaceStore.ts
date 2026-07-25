@@ -1,5 +1,11 @@
 import { create } from 'zustand'
-import { commands, type BranchSwitchMode, type RepoInfo, type Settings } from '@/lib/bindings'
+import {
+  commands,
+  type BranchSwitchMode,
+  type EditorKind,
+  type RepoInfo,
+  type Settings,
+} from '@/lib/bindings'
 import { log } from '@/lib/log'
 import { normalizePath, pathKey, samePath } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
@@ -21,6 +27,15 @@ export interface RecentRepo {
 
 export type UpdateChannel = 'stable' | 'beta'
 export type CommitButtonMode = 'commit' | 'commit_push'
+/** Ids of the editors the open-in-editor actions can launch. */
+const EDITOR_KINDS = new Set<EditorKind>([
+  'vs_code',
+  'cursor',
+  'windsurf',
+  'jetbrains',
+  'zed',
+])
+export const DEFAULT_EDITOR: EditorKind = 'vs_code'
 export type ChangeSizeDisplay = 'row' | 'column'
 export type RepoPickerSection = 'pinned_groups' | 'pinned_repositories' | 'recent' | 'watched'
 
@@ -346,6 +361,8 @@ interface WorkspaceState {
   showChangeLineCounts: boolean
   /** Default action for the commit button (persisted). */
   commitButtonMode: CommitButtonMode
+  /** Editor the open-in-editor actions launch (persisted). */
+  defaultEditor: EditorKind
   /** App-wide default for whether a push offers to send local-only tags (persisted). */
   tagPushDefault: TagPushDefault
   /** App-wide default for whether the New Tag dialog's send box starts checked (persisted). */
@@ -429,6 +446,7 @@ interface WorkspaceState {
   setAiSelection: (provider: string | null, model: string | null) => void
   setAiInstruction: (instruction: string | null) => void
   setCommitButtonMode: (mode: CommitButtonMode) => void
+  setDefaultEditor: (editor: EditorKind) => void
   setTagPushDefault: (mode: TagPushDefault) => void
   setTagPushOnCreate: (enabled: boolean) => void
   /**
@@ -557,6 +575,7 @@ function toSettings(s: WorkspaceState): Settings {
     show_change_indicator: s.showChangeIndicator,
     show_change_line_counts: s.showChangeLineCounts,
     commit_button_mode: s.commitButtonMode,
+    default_editor: s.defaultEditor,
     tag_push_default: s.tagPushDefault,
     tag_push_on_create: s.tagPushOnCreate,
     tag_overrides_by_repo: serializeTagOverrides(s.tagOverridesByRepo),
@@ -758,6 +777,7 @@ export const SETTINGS_DEFAULTS = {
   updateChannel: "stable",
   branchSwitchMode: "auto_stash",
   commitButtonMode: "commit",
+  defaultEditor: DEFAULT_EDITOR,
   enableWorktrees: false,
   restoreTabs: true,
   tagPushDefault: "ask",
@@ -789,6 +809,7 @@ export const SETTINGS_GROUPS = {
     'gitExecutable',
     'branchSwitchMode',
     'commitButtonMode',
+    'defaultEditor',
     'enableWorktrees',
   ],
   behavior: ['restoreTabs'],
@@ -829,6 +850,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   showChangeIndicator: false,
   showChangeLineCounts: false,
   commitButtonMode: "commit",
+  defaultEditor: DEFAULT_EDITOR,
   tagPushDefault: "ask",
   tagPushOnCreate: false,
   tagOverridesByRepo: {},
@@ -1026,6 +1048,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setCommitButtonMode: (mode) => {
     set({ commitButtonMode: mode });
+    schedulePersist();
+  },
+  setDefaultEditor: (editor) => {
+    set({ defaultEditor: editor });
     schedulePersist();
   },
   setTagPushDefault: (mode) => {
@@ -1718,6 +1744,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.commit_button_mode === "commit_push"
             ? "commit_push"
             : "commit",
+        // An editor id this build does not know (older/newer settings file)
+        // falls back to VS Code rather than leaving the button unusable.
+        defaultEditor: EDITOR_KINDS.has(settings.default_editor as EditorKind)
+          ? (settings.default_editor as EditorKind)
+          : DEFAULT_EDITOR,
         tagPushDefault: normalizeTagPushDefault(settings.tag_push_default),
         tagPushOnCreate: settings.tag_push_on_create ?? false,
         tagOverridesByRepo: normalizeTagOverrides(

@@ -1,12 +1,16 @@
 //! Commands that hand a repository off to another program: the OS file
-//! manager, an editor (VS Code), and a terminal. All operate on the open
-//! repo's working directory.
+//! manager, a code editor, and a terminal. All operate on the open repo's
+//! working directory.
+//!
+//! Which editors exist and how they are launched lives in
+//! [`crate::commands::editors`]; this module only wires them to a repo.
 
 use std::process::Command;
 
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
+use crate::commands::editors::{self, EditorAvailability, EditorKind};
 use crate::error::AppError;
 use crate::state::RepoManager;
 use tauri::State;
@@ -35,43 +39,65 @@ pub fn reveal_in_file_manager(
     .map_err(|e| AppError::Other(e.to_string()))
 }
 
-/// Open the repo in VS Code via its `code` launcher. Requires `code` on PATH
-/// (VS Code's "Shell Command: Install 'code' command in PATH").
+/// Open the repo folder in the given editor. Each editor is launched through
+/// its command-line launcher, which has to be on PATH -- for VS Code that is
+/// the "Shell Command: Install 'code' command in PATH" step.
 #[tauri::command]
 #[specta::specta]
 pub fn open_in_editor(
   manager: State<'_, RepoManager>,
   repo_id: String,
+  editor: EditorKind,
 ) -> Result<(), AppError> {
   let path = repo_path(&manager, &repo_id)?;
+  editors::open_path_in(editor, &path)
+}
 
-  // On Windows `code` is a .cmd shim, so it must be launched through the shell;
-  // elsewhere it is a normal executable on PATH.
-  #[cfg(windows)]
-  let mut cmd = {
-    let mut c = Command::new("cmd");
-    c.args(["/C", "code", &path]);
-    use std::os::windows::process::CommandExt;
-    c.creation_flags(CREATE_NO_WINDOW);
-    c
-  };
-  #[cfg(not(windows))]
-  let mut cmd = {
-    let mut c = Command::new("code");
-    c.arg(&path);
-    c
-  };
+/// Which editors are installed, whether Visual Studio is available, and the
+/// solutions in this repo. Drives the toolbar's open button and the editor
+/// picker in Settings.
+#[tauri::command]
+#[specta::specta]
+pub fn get_editor_availability(
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
+) -> Result<EditorAvailability, AppError> {
+  let visual_studio = editors::detect_visual_studio();
 
-  cmd.spawn().map_err(|e| {
-    if e.kind() == std::io::ErrorKind::NotFound {
-      AppError::Other(
-        "Could not find VS Code. Install it, then run \"Shell Command: Install 'code' command in PATH\" from VS Code.".into(),
-      )
-    } else {
-      AppError::Io(e)
+  // Scanning for solutions is only worth the disk walk when there is a Visual
+  // Studio to open them with, and when a repo is actually open.
+  let solutions = match (&visual_studio, &repo_id) {
+    (Some(_), Some(id)) => {
+      let open = manager.get(id)?;
+      editors::find_solutions(&open.path)
     }
-  })?;
-  Ok(())
+    _ => Vec::new(),
+  };
+
+  Ok(EditorAvailability {
+    editors: editors::detect_editors(),
+    visual_studio,
+    solutions,
+  })
+}
+
+/// Open one of the repo's `.sln` files in Visual Studio. The path is checked
+/// against the repo's own solutions so an arbitrary path cannot be launched.
+#[tauri::command]
+#[specta::specta]
+pub fn open_solution_in_visual_studio(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  solution_path: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  let known = editors::find_solutions(&open.path);
+  if !known.iter().any(|s| s.absolute_path == solution_path) {
+    return Err(AppError::Other(format!(
+      "No solution named {solution_path} in this repository."
+    )));
+  }
+  editors::open_solution(&solution_path)
 }
 
 /// Open a terminal in the repo folder. Uses Windows Terminal if present,

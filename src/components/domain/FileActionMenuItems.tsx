@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { Code2, FolderOpen, History, Trash2, Undo2, UserSearch } from 'lucide-react'
+import { FolderOpen, History, Trash2, Undo2, UserSearch } from 'lucide-react'
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useNeverCommitted } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
-import { useActiveRepo } from '@/stores/workspaceStore'
+import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
+import { EditorGlyph, editorLabel } from '@/lib/editors'
 
 interface FileActionMenuItemsProps {
   path: string
@@ -27,6 +28,7 @@ interface FileActionMenuItemsProps {
 export function FileActionMenuItems({ path, sha = null }: FileActionMenuItemsProps) {
   const repo = useActiveRepo()
   const m = useGitMutations(repo?.id ?? null)
+  const defaultEditor = useWorkspaceStore((s) => s.defaultEditor)
   const openFileHistory = useUiStore((s) => s.openFileHistory)
   const openBlame = useUiStore((s) => s.openBlame)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -41,8 +43,8 @@ export function FileActionMenuItems({ path, sha = null }: FileActionMenuItemsPro
     <>
       <ContextMenuSeparator />
       <PendingMenuItem
-        icon={<Code2 />}
-        label="Open in VS Code"
+        icon={<EditorGlyph kind={defaultEditor} size={14} className="flex-none" />}
+        label={`Open in ${editorLabel(defaultEditor)}`}
         pendingLabel="Opening…"
         pending={m.openFileInEditor.isPending && m.openFileInEditor.variables === path}
         onRun={() => m.openFileInEditor.mutate(path)}

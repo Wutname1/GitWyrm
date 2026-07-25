@@ -61,12 +61,38 @@ async revealInFileManager(repoId: string) : Promise<Result<null, string>> {
 }
 },
 /**
- * Open the repo in VS Code via its `code` launcher. Requires `code` on PATH
- * (VS Code's "Shell Command: Install 'code' command in PATH").
+ * Open the repo folder in the given editor. Each editor is launched through
+ * its command-line launcher, which has to be on PATH -- for VS Code that is
+ * the "Shell Command: Install 'code' command in PATH" step.
  */
-async openInEditor(repoId: string) : Promise<Result<null, string>> {
+async openInEditor(repoId: string, editor: EditorKind) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("open_in_editor", { repoId }) };
+    return { status: "ok", data: await TAURI_INVOKE("open_in_editor", { repoId, editor }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Which editors are installed, whether Visual Studio is available, and the
+ * solutions in this repo. Drives the toolbar's open button and the editor
+ * picker in Settings.
+ */
+async getEditorAvailability(repoId: string | null) : Promise<Result<EditorAvailability, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_editor_availability", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Open one of the repo's `.sln` files in Visual Studio. The path is checked
+ * against the repo's own solutions so an arbitrary path cannot be launched.
+ */
+async openSolutionInVisualStudio(repoId: string, solutionPath: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_solution_in_visual_studio", { repoId, solutionPath }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -85,12 +111,12 @@ async openInTerminal(repoId: string) : Promise<Result<null, string>> {
 }
 },
 /**
- * Open a single file in VS Code. Mirrors `external::open_in_editor`, but
- * targets one file inside the repo rather than the repo folder.
+ * Open a single file in the given editor. Mirrors `external::open_in_editor`,
+ * but targets one file inside the repo rather than the repo folder.
  */
-async openFileInEditor(repoId: string, path: string) : Promise<Result<null, string>> {
+async openFileInEditor(repoId: string, path: string, editor: EditorKind) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("open_file_in_editor", { repoId, path }) };
+    return { status: "ok", data: await TAURI_INVOKE("open_file_in_editor", { repoId, path, editor }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1547,6 +1573,26 @@ sign: string; old_no: number | null; new_no: number | null; text: string;
  */
 hunk_index: number }
 export type DiffSource = { kind: "staged" } | { kind: "unstaged" } | { kind: "commit"; sha: string }
+/**
+ * What the toolbar's open button needs to draw itself: the editors that are
+ * installed, whether Visual Studio is available, and any solutions to offer.
+ */
+export type EditorAvailability = { editors: InstalledEditor[]; 
+/**
+ * Display name of the detected Visual Studio, e.g. "Visual Studio 2022".
+ * None when Visual Studio is not installed.
+ */
+visual_studio: string | null; 
+/**
+ * Solutions found in the repo. Always empty when `visual_studio` is None,
+ * since there would be nothing to open them with.
+ */
+solutions: SolutionFile[] }
+/**
+ * A folder-opening editor. Serialized as the ids the frontend stores in
+ * settings, so these names are part of the saved-settings format.
+ */
+export type EditorKind = "vs_code" | "cursor" | "windsurf" | "jetbrains" | "zed"
 export type FileBlame = { path: string; lines: BlameLine[]; 
 /**
  * Set instead of `lines` when the file can't be blamed line-by-line.
@@ -1595,6 +1641,18 @@ header: string }
  * rather than always claiming a line was written.
  */
 export type IgnoreOutcome = "added" | "already_present"
+/**
+ * One installed editor, as offered to the frontend.
+ */
+export type InstalledEditor = { kind: EditorKind; 
+/**
+ * Display name, e.g. "VS Code".
+ */
+label: string; 
+/**
+ * The launcher that was found, e.g. "code" or "rider".
+ */
+command: string }
 export type IssueDetail = { number: number; title: string; body: string; author: string; state: string; labels: string[]; assignee: string | null; comments: GithubComment[]; html_url: string; created_at: string; updated_at: string }
 export type IssueSummary = { number: number; title: string; author: string; labels: string[]; assignee: string | null; comments: number; updated_at: string; html_url: string }
 export type LogPage = { commits: CommitEntry[]; has_more: boolean }
@@ -1916,6 +1974,13 @@ show_change_line_counts?: boolean;
  */
 commit_button_mode?: string | null; 
 /**
+ * Editor the "open in editor" actions launch: "vs_code", "cursor",
+ * "windsurf", "jetbrains", or "zed". None falls back to VS Code. Kept as a
+ * string so a settings file naming an editor this build does not know is
+ * ignored rather than rejected.
+ */
+default_editor?: string | null; 
+/**
  * Show worktree actions and the worktree sidebar section. Off by default;
  * the frontend auto-enables it when a repo already has extra worktrees.
  */
@@ -2046,6 +2111,22 @@ mint_accent?: boolean;
  * |unstaged>`. Only open folders are stored; anything absent is collapsed.
  */
 expanded_change_folders?: Partial<{ [key in string]: string[] }> }
+/**
+ * One Visual Studio solution found inside a repository.
+ */
+export type SolutionFile = { 
+/**
+ * File name with extension, e.g. "MyApp.sln".
+ */
+name: string; 
+/**
+ * Path relative to the repo root, using forward slashes.
+ */
+relative_path: string; 
+/**
+ * Absolute path on disk, used to launch Visual Studio.
+ */
+absolute_path: string }
 export type StashInfo = { index: number; 
 /**
  * Raw stash message as git stores it, e.g. "On develop: auto-stash before...".

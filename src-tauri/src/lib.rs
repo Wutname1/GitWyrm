@@ -28,6 +28,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::app::open_logs_folder,
     commands::external::reveal_in_file_manager,
     commands::external::open_in_editor,
+    commands::external::get_editor_availability,
+    commands::external::open_solution_in_visual_studio,
     commands::external::open_in_terminal,
     commands::file::open_file_in_editor,
     commands::file::reveal_file_in_file_manager,

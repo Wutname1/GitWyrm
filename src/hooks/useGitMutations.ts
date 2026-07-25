@@ -2,6 +2,7 @@ import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-q
 import { toast } from 'sonner'
 import {
   commands,
+  type EditorKind,
   type PullResult,
   type PushResult,
   type Resolution,
@@ -221,7 +222,10 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const openFileInEditor = useMutation({
-    mutationFn: async (path: string) => unwrap(await commands.openFileInEditor(id, path)),
+    mutationFn: async (path: string) =>
+      unwrap(
+        await commands.openFileInEditor(id, path, useWorkspaceStore.getState().defaultEditor),
+      ),
     onError,
   })
 
@@ -377,7 +381,13 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const openInEditor = useMutation({
-    mutationFn: async () => unwrap(await commands.openInEditor(id)),
+    mutationFn: async (editor: EditorKind) => unwrap(await commands.openInEditor(id, editor)),
+    onError,
+  })
+
+  const openSolution = useMutation({
+    mutationFn: async (solutionPath: string) =>
+      unwrap(await commands.openSolutionInVisualStudio(id, solutionPath)),
     onError,
   })
 
@@ -1007,6 +1017,7 @@ export function useGitMutations(repoId: string | null) {
     deleteRemoteTag,
     revealInFileManager,
     openInEditor,
+    openSolution,
     openInTerminal,
     checkout,
     stashSave,

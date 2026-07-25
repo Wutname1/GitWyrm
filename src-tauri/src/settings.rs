@@ -161,6 +161,12 @@ pub struct Settings {
   /// falls back to plain commit. Validated on the frontend.
   #[serde(default)]
   pub commit_button_mode: Option<String>,
+  /// Editor the "open in editor" actions launch: "vs_code", "cursor",
+  /// "windsurf", "jetbrains", or "zed". None falls back to VS Code. Kept as a
+  /// string so a settings file naming an editor this build does not know is
+  /// ignored rather than rejected.
+  #[serde(default)]
+  pub default_editor: Option<String>,
   /// Show worktree actions and the worktree sidebar section. Off by default;
   /// the frontend auto-enables it when a repo already has extra worktrees.
   #[serde(default)]
@@ -325,6 +331,7 @@ impl Default for Settings {
       show_change_indicator: default_show_change_indicator(),
       show_change_line_counts: false,
       commit_button_mode: None,
+      default_editor: None,
       enable_worktrees: false,
       restore_tabs: true,
       ui_scale: None,
@@ -432,6 +439,22 @@ mod tests {
     assert!(settings.mint_accent);
     // Settings written before this key existed keep reopening their tabs.
     assert!(settings.restore_tabs);
+    // Settings written before the editor picker existed fall back to VS Code
+    // on the frontend.
+    assert!(settings.default_editor.is_none());
+  }
+
+  #[test]
+  fn default_editor_round_trips_through_settings_json() {
+    let settings = Settings {
+      default_editor: Some("cursor".to_string()),
+      ..Settings::default()
+    };
+
+    let json = serde_json::to_string(&settings).expect("settings should serialize");
+    let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
+
+    assert_eq!(restored.default_editor.as_deref(), Some("cursor"));
   }
 
   #[test]

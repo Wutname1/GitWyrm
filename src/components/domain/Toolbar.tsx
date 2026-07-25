@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   Folder,
+  FolderOpen,
   GitBranch,
   GitMerge,
   Search,
@@ -30,6 +31,7 @@ import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import { cn } from '@/lib/utils'
 import { branchSync } from '@/lib/branchActions'
 import { SyncBadge } from '@/components/domain/branch/SyncBadge'
+import { OpenInEditorButton } from '@/components/domain/OpenInEditorButton'
 import { useBranches, useRemotes, useStashes } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
@@ -233,7 +235,7 @@ function GhostButton({ icon, tooltip, onClick }: { icon: ReactNode; tooltip: str
     <TooltipButton
       onClick={onClick}
       tooltip={tooltip}
-      className="flex h-[30px] w-8 items-center justify-center rounded-md border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3"
+      className="group flex h-[30px] w-8 items-center justify-center rounded-md border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3"
     >
       {icon}
     </TooltipButton>
@@ -375,9 +377,11 @@ export function Toolbar() {
   const stashAction = m.stashSave.isPending ? 'stash' : m.stashPop.isPending ? 'pop' : null
   const stashPending = stashAction !== null
 
+  const noRepoNotice = () => toast('Open a repository first')
+
   const requireRepo = (fn: () => void) => () => {
     if (!repo) {
-      toast('Open a repository first')
+      noRepoNotice()
       return
     }
     fn()
@@ -476,20 +480,16 @@ export function Toolbar() {
       <CommitSearchBox />
 
       <GhostButton
-        icon={<Folder size={16} strokeWidth={1.9} />}
+        icon={
+          <span className="relative flex size-4 text-orange-400">
+            <Folder size={16} strokeWidth={1.9} className="group-hover:hidden" />
+            <FolderOpen size={16} strokeWidth={1.9} className="hidden group-hover:block" />
+          </span>
+        }
         tooltip="Show in file explorer"
         onClick={requireRepo(() => m.revealInFileManager.mutate())}
       />
-      <GhostButton
-        icon={
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 3l4 2v14l-4 2-9-8 9-8z" />
-            <path d="M17 3v18M8 11L3 8v8l5-3z" />
-          </svg>
-        }
-        tooltip="Open in VS Code"
-        onClick={requireRepo(() => m.openInEditor.mutate())}
-      />
+      <OpenInEditorButton onNoRepo={noRepoNotice} />
       <GhostButton
         icon={<SquareTerminal size={16} strokeWidth={1.9} />}
         tooltip="Open in terminal"

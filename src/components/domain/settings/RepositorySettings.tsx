@@ -244,7 +244,7 @@ export function RepositorySettings() {
               disabled={opening != null}
               onClick={() => void runShortcut(
                 'editor',
-                () => commands.openInEditor(repo.id),
+                () => commands.openInEditor(repo.id, useWorkspaceStore.getState().defaultEditor),
                 `Opened ${displayName} in your editor`,
               )}
             >

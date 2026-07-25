@@ -4,7 +4,6 @@
 //! blame).
 
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
 
 use git2::{BlameOptions, DiffOptions, Oid, Sort};
 use serde::Serialize;
@@ -12,11 +11,9 @@ use specta::Type;
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
+use crate::commands::editors::EditorKind;
 use crate::error::AppError;
 use crate::state::RepoManager;
-
-#[cfg(windows)]
-use crate::git::shell::CREATE_NO_WINDOW;
 
 /// One commit that touched a given file, plus how the file changed in it.
 #[derive(Debug, Clone, Serialize, Type)]
@@ -89,43 +86,18 @@ fn workdir(manager: &RepoManager, repo_id: &str) -> Result<PathBuf, AppError> {
   Ok(open.path.clone())
 }
 
-/// Open a single file in VS Code. Mirrors `external::open_in_editor`, but
-/// targets one file inside the repo rather than the repo folder.
+/// Open a single file in the given editor. Mirrors `external::open_in_editor`,
+/// but targets one file inside the repo rather than the repo folder.
 #[tauri::command]
 #[specta::specta]
 pub fn open_file_in_editor(
   manager: State<'_, RepoManager>,
   repo_id: String,
   path: String,
+  editor: EditorKind,
 ) -> Result<(), AppError> {
   let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
-  let full = full.to_string_lossy().into_owned();
-
-  #[cfg(windows)]
-  let mut cmd = {
-    let mut c = Command::new("cmd");
-    c.args(["/C", "code", &full]);
-    use std::os::windows::process::CommandExt;
-    c.creation_flags(CREATE_NO_WINDOW);
-    c
-  };
-  #[cfg(not(windows))]
-  let mut cmd = {
-    let mut c = Command::new("code");
-    c.arg(&full);
-    c
-  };
-
-  cmd.spawn().map_err(|e| {
-    if e.kind() == std::io::ErrorKind::NotFound {
-      AppError::Other(
-        "Could not find VS Code. Install it, then run \"Shell Command: Install 'code' command in PATH\" from VS Code.".into(),
-      )
-    } else {
-      AppError::Io(e)
-    }
-  })?;
-  Ok(())
+  crate::commands::editors::open_path_in(editor, &full.to_string_lossy())
 }
 
 /// Show a single file in the OS file manager, selected in its folder.
