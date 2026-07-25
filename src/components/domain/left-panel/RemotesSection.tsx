@@ -84,7 +84,7 @@ function BranchNode({
 
   const b = node.data
   const hasIncoming = !!b && b.ahead_of_local > 0
-  const webTarget = remoteWebTarget(remote.url)
+  const webTarget = remoteWebTarget(remote)
   const webUrl = webTarget && node.branch ? remoteBranchWebUrl(webTarget, node.branch) : null
 
   // A remote branch's actions are its local counterpart's: right-clicking
@@ -166,7 +166,7 @@ function RemoteNode({
     [remote.branches]
   )
   const provider = detectProvider(remote.url)
-  const webTarget = remoteWebTarget(remote.url)
+  const webTarget = remoteWebTarget(remote)
   const incoming = useMemo(
     () => remote.branches.filter((b) => b.ahead_of_local > 0).length,
     [remote.branches]

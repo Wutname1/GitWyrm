@@ -98,7 +98,7 @@ function BranchNode({
     </div>
   )
 
-  const webTarget = remoteWebTarget(remote.url)
+  const webTarget = remoteWebTarget(remote)
   const webUrl = webTarget && node.branch ? remoteBranchWebUrl(webTarget, node.branch) : null
   if (!webTarget || !webUrl) return row
 
@@ -142,7 +142,7 @@ function RemoteRow({
     [remote.branches]
   )
   const provider = detectProvider(remote.url)
-  const webTarget = remoteWebTarget(remote.url)
+  const webTarget = remoteWebTarget(remote)
 
   return (
     <div className="rounded-md border border-border bg-background">

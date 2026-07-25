@@ -111,7 +111,7 @@ export function BranchMenuItems({
   const hasRemoteAction = actions.push.show || actions.pull.show || actions.setUpstream.show
   const [upstreamRemoteName, ...upstreamBranchParts] = branch.upstream?.split('/') ?? []
   const upstreamRemote = remotes.data?.find((remote) => remote.name === upstreamRemoteName)
-  const webTarget = upstreamRemote ? remoteWebTarget(upstreamRemote.url) : null
+  const webTarget = upstreamRemote ? remoteWebTarget(upstreamRemote) : null
   const webUrl = webTarget && upstreamBranchParts.length > 0
     ? remoteBranchWebUrl(webTarget, upstreamBranchParts.join('/'))
     : null

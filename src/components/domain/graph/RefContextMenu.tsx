@@ -39,7 +39,7 @@ export function RefContextMenu({ refTag, children, onOpenChange }: RefContextMen
 
   const [remoteName, ...remoteBranchParts] = isRemote ? refTag.name.split('/') : []
   const remote = remotes.data?.find((item) => item.name === remoteName)
-  const webTarget = remote ? remoteWebTarget(remote.url) : null
+  const webTarget = remote ? remoteWebTarget(remote) : null
   const webUrl = webTarget && remoteBranchParts.length > 0
     ? remoteBranchWebUrl(webTarget, remoteBranchParts.join('/'))
     : null

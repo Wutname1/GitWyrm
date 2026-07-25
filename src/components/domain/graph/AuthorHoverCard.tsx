@@ -25,7 +25,7 @@ export function AuthorHoverCard({ name, email, initials, sha, children }: Author
   const repo = useActiveRepo()
   const remotes = useRemotes(repo?.id ?? null)
   const primary = remotes.data?.find((r) => r.name === 'origin') ?? remotes.data?.[0]
-  const target = primary ? remoteWebTarget(primary.url) : null
+  const target = primary ? remoteWebTarget(primary) : null
   const profile = target ? authorProfileLink(target.provider, email, target.repositoryUrl) : null
   const color = authorColor(email || name)
 

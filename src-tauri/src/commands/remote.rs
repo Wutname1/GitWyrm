@@ -716,7 +716,21 @@ pub async fn list_remotes(
       branches.sort_by(|a, b| a.name.cmp(&b.name));
 
       let missing_locally = branches.iter().filter(|b| b.local_only_missing).count() as u32;
-      remotes.push(RemoteInfo { name: name.to_string(), url, push_url, branches, missing_locally });
+      let parsed = crate::git::remote_url::parse(&url);
+      let provider = parsed
+        .as_ref()
+        .map(|p| p.provider)
+        .unwrap_or(crate::git::remote_url::RemoteProvider::SelfHosted);
+      let web_base = parsed.as_ref().map(|p| p.web_base());
+      remotes.push(RemoteInfo {
+        name: name.to_string(),
+        url,
+        push_url,
+        branches,
+        missing_locally,
+        provider,
+        web_base,
+      });
     }
 
     remotes.sort_by(|a, b| a.name.cmp(&b.name));
@@ -724,6 +738,15 @@ pub async fn list_remotes(
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// The host's page for one branch of a remote, or None when the host has no
+/// known web route. Provider routes live in `git::remote_url` so the frontend
+/// does not keep its own copy of them.
+#[tauri::command]
+#[specta::specta]
+pub fn remote_branch_web_url(remote_url_value: String, branch: String) -> Option<String> {
+  crate::git::remote_url::parse(&remote_url_value)?.branch_url(branch.trim())
 }
 
 /// Add a new remote. Fails if the name is already in use.

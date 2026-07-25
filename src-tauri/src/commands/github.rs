@@ -10,6 +10,7 @@ use tauri::State;
 
 use crate::ai::{auth, copilot};
 use crate::error::AppError;
+use crate::git::remote_url;
 use crate::state::RepoManager;
 
 const PROVIDER_ID: &str = "github";
@@ -249,30 +250,16 @@ pub async fn github_repo_slug(
 
 /// `git@github.com:o/r.git`, `ssh://git@github.com/o/r`, or
 /// `https://github.com/o/r.git` -> owner/repo. Non-GitHub hosts return None.
+/// Owner/repo for a github.com remote. Parsing lives in `git::remote_url`; this
+/// only applies the API-specific constraint that the host must be github.com
+/// proper - an Enterprise host has a different API base and is not supported here.
 fn parse_github_slug(url: &str) -> Option<GithubRepoRef> {
-  let (host, path) = if let Some(rest) = url.strip_prefix("git@") {
-    let (host, path) = rest.split_once(':')?;
-    (host, path)
-  } else if let Some(rest) = url.strip_prefix("ssh://git@") {
-    rest.split_once('/')?
-  } else if let Some(rest) = url.strip_prefix("https://") {
-    let rest = rest.strip_prefix("git@").unwrap_or(rest);
-    rest.split_once('/')?
-  } else {
-    return None;
-  };
-  if host != "github.com" {
+  let parsed = remote_url::parse(url)?;
+  if parsed.host != "github.com" {
     return None;
   }
-  let path = path.trim_end_matches('/').trim_end_matches(".git");
-  let (owner, repo) = path.split_once('/')?;
-  if owner.is_empty() || repo.is_empty() || repo.contains('/') {
-    return None;
-  }
-  Some(GithubRepoRef {
-    owner: owner.to_string(),
-    repo: repo.to_string(),
-  })
+  let (owner, repo) = parsed.owner_repo()?;
+  Some(GithubRepoRef { owner: owner.to_string(), repo: repo.to_string() })
 }
 
 // ---------------------------------------------------------------------------

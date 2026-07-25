@@ -61,21 +61,40 @@ function azureWebBase(remote: ParsedRemote): string | null {
   return null
 }
 
-/** Browser target for a configured remote, including self-hosted servers. */
-export function remoteWebTarget(url: string): RemoteWebTarget | null {
-  const remote = parseRemote(url)
-  if (!remote || !remote.host || !trimRepositorySuffix(remote.path)) return null
+/**
+ * Browser target for a configured remote, including self-hosted servers.
+ *
+ * Remote URL parsing is owned by Rust (`git::remote_url`), and `list_remotes`
+ * ships the parsed `provider` and `web_base` on every RemoteInfo. Prefer those:
+ * pass the whole remote so the UI and the backend can never disagree about which
+ * host a remote belongs to. The `string` overload re-parses here and is kept for
+ * the few call sites that only hold a URL.
+ */
+export function remoteWebTarget(
+  remote: string | { url: string; provider?: RemoteProvider; web_base?: string | null },
+): RemoteWebTarget | null {
+  if (typeof remote !== 'string' && remote.web_base && remote.provider) {
+    return {
+      provider: remote.provider,
+      label: providerLabel(remote.provider) ?? remote.web_base,
+      repositoryUrl: remote.web_base,
+    }
+  }
+
+  const url = typeof remote === 'string' ? remote : remote.url
+  const parsed = parseRemote(url)
+  if (!parsed || !parsed.host || !trimRepositorySuffix(parsed.path)) return null
 
   const provider = detectProvider(url)
   const repositoryUrl =
     provider === 'azure'
-      ? azureWebBase(remote)
-      : `${remote.protocol}://${remote.host}/${trimRepositorySuffix(remote.path)}`
+      ? azureWebBase(parsed)
+      : `${parsed.protocol}://${parsed.host}/${trimRepositorySuffix(parsed.path)}`
   if (!repositoryUrl) return null
 
   return {
     provider,
-    label: providerLabel(provider) ?? remote.host,
+    label: providerLabel(provider) ?? parsed.host,
     repositoryUrl,
   }
 }
