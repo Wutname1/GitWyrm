@@ -207,6 +207,11 @@ pub enum CheckoutOutcome {
   /// Changes were stashed, the switch happened, but the pop conflicted. The
   /// stash was KEPT as a backup; the working tree has conflict markers.
   StashPopConflict,
+  /// Changes were stashed and the switch happened, but re-applying them failed
+  /// for a reason other than conflicts. The stash was KEPT as a backup and the
+  /// working tree does NOT have the changes, so the user must be told where
+  /// their work went.
+  StashNotReapplied,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -280,6 +285,12 @@ pub struct RemoteInfo {
   pub branches: Vec<RemoteBranchInfo>,
   /// How many of `branches` have no local counterpart at all.
   pub missing_locally: u32,
+  /// Hosting product behind `url`, or `self_hosted` when the host has no known
+  /// web routes. Parsed in `git::remote_url` so the frontend never re-derives it.
+  pub provider: crate::git::remote_url::RemoteProvider,
+  /// The repository's page in a browser, or None when `url` isn't a parseable
+  /// remote (a local path, an unknown scheme).
+  pub web_base: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]

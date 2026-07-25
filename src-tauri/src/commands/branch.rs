@@ -2,7 +2,9 @@ use git2::{build::CheckoutBuilder, BranchType, Oid, ResetType};
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git::history;
 use crate::git::refs;
+use crate::git::remote_url;
 use crate::git::types::{
   BranchInfo, BranchList, BranchRelation, CheckoutOutcome, RefMove, ResetMode, SyncState, TagInfo,
 };
@@ -254,12 +256,32 @@ pub async fn checkout_branch(
         }
 
         // If the switch itself fails, restore the stash so nothing is lost.
+        // Apply-then-conditionally-drop for the same reason as below: a pop here
+        // would discard the backup on a conflicted apply, which is exactly the
+        // moment the user needs it most.
         if let Err(e) = switch_to(&repo, &name) {
-          let _ = repo.stash_pop(0, None);
+          match repo.stash_apply(0, None) {
+            // Restored cleanly, so the stash entry is redundant.
+            Ok(()) if !repo.index().map(|i| i.has_conflicts()).unwrap_or(true) => {
+              let _ = repo.stash_drop(0);
+            }
+            // Conflicted or failed: keep the stash and say so, since the
+            // original switch error alone would not explain the tree state.
+            _ => {
+              return Err(AppError::Other(format!(
+                "could not switch to {name}, and your changes could not be put back \
+                 automatically - they are safe in the most recent stash: {e}"
+              )));
+            }
+          }
           return Err(e);
         }
 
-        repo.stash_apply(0, None)?;
+        // A failed re-apply leaves the user on the new branch WITHOUT their
+        // changes. Report where the work went instead of propagating a raw error.
+        if repo.stash_apply(0, None).is_err() {
+          return Ok(CheckoutOutcome::StashNotReapplied);
+        }
 
         if repo.index()?.has_conflicts() {
           // Leave stash@{0} in place as a backup; the working tree has markers.
@@ -758,30 +780,12 @@ pub async fn reword_commit(
     let parent = target.parent(0)?;
     let previous_sha = head.id().to_string();
 
-    // Collect the commits from HEAD down to (not including) the target, newest
-    // first, so we can replay them oldest-first onto the reworded commit.
-    let mut to_replay = Vec::new();
-    let mut walk = repo.revwalk()?;
-    walk.push(head.id())?;
-    let mut found = false;
-    for step in walk {
-      let step_oid = step?;
-      if step_oid == target_oid {
-        found = true;
-        break;
-      }
-      let c = repo.find_commit(step_oid)?;
-      if c.parent_count() > 1 {
-        return Err(AppError::Other(
-          "there is a merge commit above this one; can't edit it safely".into(),
-        ));
-      }
-      to_replay.push(c);
-    }
-    if !found {
-      return Err(AppError::Other("that commit is not on the current branch".into()));
-    }
-    to_replay.reverse();
+    let to_replay = history::collect_span_above(
+      &repo,
+      target_oid,
+      "there is a merge commit above this one; can't edit it safely",
+      "that commit is not on the current branch",
+    )?;
 
     // Rebuild the target with the new message, same tree, parent, and author.
     let signature = repo.signature()?;
@@ -793,29 +797,16 @@ pub async fn reword_commit(
       &target.tree()?,
       &[&parent],
     )?;
-    let mut new_tip = repo.find_commit(new_target_oid)?;
     let reworded_sha = new_target_oid.to_string();
 
-    // Cherry-pick each later commit onto the growing new tip. Any conflict
-    // aborts: reset back to where we started so nothing is left half-done.
-    for commit in to_replay {
-      let mut index = repo
-        .cherrypick_commit(&commit, &new_tip, 0, None)
-        .map_err(AppError::Git)?;
-      if index.has_conflicts() {
-        let start_oid = Oid::from_str(&previous_sha).map_err(AppError::Git)?;
-        let head_obj = repo.find_object(start_oid, None)?;
-        repo.reset(&head_obj, ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
-        return Err(AppError::Other(
-          "editing this message causes conflicts in a later commit; nothing was changed".into(),
-        ));
-      }
-      let tree_oid = index.write_tree_to(&repo)?;
-      let tree = repo.find_tree(tree_oid)?;
-      let msg = commit.message().unwrap_or("");
-      let new_oid = repo.commit(None, &commit.author(), &signature, msg, &tree, &[&new_tip])?;
-      new_tip = repo.find_commit(new_oid)?;
-    }
+    let new_tip = history::replay_onto(
+      &repo,
+      &to_replay,
+      repo.find_commit(new_target_oid)?,
+      &signature,
+      &previous_sha,
+      "editing this message causes conflicts in a later commit; nothing was changed",
+    )?;
 
     // Point the branch at the rebuilt tip and sync the working tree.
     repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
@@ -912,61 +903,22 @@ pub async fn drop_commit(
     let parent = target.parent(0)?;
     let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
 
-    // Collect the commits from HEAD down to (not including) the target, newest
-    // first, so we can replay them oldest-first onto the target's parent.
-    let head_oid = repo.head()?.peel_to_commit()?.id();
-    let mut to_replay = Vec::new();
-    let mut walk = repo.revwalk()?;
-    walk.push(head_oid)?;
-    let mut found = false;
-    for step in walk {
-      let step_oid = step?;
-      if step_oid == target_oid {
-        found = true;
-        break;
-      }
-      let c = repo.find_commit(step_oid)?;
-      if c.parent_count() > 1 {
-        return Err(AppError::Other(
-          "there is a merge commit above this one; can't drop it safely".into(),
-        ));
-      }
-      to_replay.push(c);
-    }
-    if !found {
-      return Err(AppError::Other("that commit is not on the current branch".into()));
-    }
-    to_replay.reverse();
+    let to_replay = history::collect_span_above(
+      &repo,
+      target_oid,
+      "there is a merge commit above this one; can't drop it safely",
+      "that commit is not on the current branch",
+    )?;
 
-    // Cherry-pick each later commit onto the growing new tip. Any conflict
-    // aborts: reset back to where we started so nothing is left half-done.
     let signature = repo.signature()?;
-    let mut new_tip = parent;
-    for commit in to_replay {
-      let mut index = repo
-        .cherrypick_commit(&commit, &new_tip, 0, None)
-        .map_err(AppError::Git)?;
-      if index.has_conflicts() {
-        let start_oid = Oid::from_str(&previous_sha).map_err(AppError::Git)?;
-        let head_obj = repo.find_object(start_oid, None)?;
-        repo.reset(&head_obj, ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
-        return Err(AppError::Other(
-          "dropping this commit causes conflicts in a later commit; nothing was changed".into(),
-        ));
-      }
-      let tree_oid = index.write_tree_to(&repo)?;
-      let tree = repo.find_tree(tree_oid)?;
-      let message = commit.message().unwrap_or("");
-      let new_oid = repo.commit(
-        None,
-        &commit.author(),
-        &signature,
-        message,
-        &tree,
-        &[&new_tip],
-      )?;
-      new_tip = repo.find_commit(new_oid)?;
-    }
+    let new_tip = history::replay_onto(
+      &repo,
+      &to_replay,
+      parent,
+      &signature,
+      &previous_sha,
+      "dropping this commit causes conflicts in a later commit; nothing was changed",
+    )?;
 
     // Point the branch at the rebuilt tip and sync the working tree.
     repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
@@ -1050,7 +1002,7 @@ pub async fn commit_web_url(
       return Ok(None);
     };
     let Some(url) = remote.url() else { return Ok(None) };
-    let Some(base) = web_base_from_remote(url) else { return Ok(None) };
+    let Some(parsed) = remote_url::parse(url) else { return Ok(None) };
 
     // Only link commits that are reachable from a remote-tracking branch;
     // otherwise the host has never seen the sha and the URL would 404.
@@ -1059,37 +1011,12 @@ pub async fn commit_web_url(
       return Ok(None);
     }
 
-    Ok(Some(format!("{base}/commit/{}", oid)))
+    // Route per provider: GitLab uses /-/commit/, Bitbucket /commits/. A host
+    // with no known route returns None rather than a guessed URL that 404s.
+    Ok(parsed.commit_url(&oid.to_string()))
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
-}
-
-/// Normalize a git remote URL (ssh or https) to its web base, e.g.
-/// `git@github.com:o/r.git` / `https://github.com/o/r.git` -> `https://github.com/o/r`.
-fn web_base_from_remote(url: &str) -> Option<String> {
-  let known = ["github.com", "gitlab.com", "bitbucket.org"];
-
-  let (host, path) = if let Some(rest) = url.strip_prefix("git@") {
-    // scp-like: git@host:owner/repo(.git)
-    let (host, path) = rest.split_once(':')?;
-    (host.to_string(), path.to_string())
-  } else if let Some(rest) = url.strip_prefix("ssh://git@") {
-    let (host, path) = rest.split_once('/')?;
-    (host.to_string(), path.to_string())
-  } else if let Some(rest) = url.strip_prefix("https://") {
-    let rest = rest.strip_prefix("git@").unwrap_or(rest);
-    let (host, path) = rest.split_once('/')?;
-    (host.to_string(), path.to_string())
-  } else {
-    return None;
-  };
-
-  if !known.contains(&host.as_str()) {
-    return None;
-  }
-  let path = path.trim_end_matches('/').trim_end_matches(".git");
-  Some(format!("https://{host}/{path}"))
 }
 
 /// True when `oid` is reachable from any `refs/remotes/*` branch tip.

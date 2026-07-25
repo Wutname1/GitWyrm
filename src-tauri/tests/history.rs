@@ -158,3 +158,41 @@ fn dirty_tree_refuses_rewrite() {
   assert!(err.to_string().contains("working tree has changes"), "got: {err}");
   let _ = fs::remove_dir_all(&dir);
 }
+
+/// The span helper backs the single-commit reword and drop commands. It returns
+/// the commits ABOVE the target, oldest-first, with the target excluded.
+#[test]
+fn span_above_excludes_the_target_and_orders_oldest_first() {
+  let (dir, repo) = scratch_repo("span-above");
+  commit_file(&dir, &repo, "f.txt", "one\n", "initial");
+  let b = commit_file(&dir, &repo, "g.txt", "g\n", "add g");
+  commit_file(&dir, &repo, "h.txt", "h\n", "add h");
+  commit_file(&dir, &repo, "i.txt", "i\n", "add i");
+
+  let target = git2::Oid::from_str(&b).unwrap();
+  let span =
+    git_history::collect_span_above(&repo, target, "merge above", "not on branch").unwrap();
+
+  let msgs: Vec<String> = span
+    .iter()
+    .map(|c| c.summary().unwrap_or("").to_string())
+    .collect();
+  assert_eq!(msgs, vec!["add h".to_string(), "add i".to_string()]);
+  let _ = fs::remove_dir_all(&dir);
+}
+
+/// A sha that isn't on the current branch gets the caller's message, not a
+/// silent empty span that would make a rewrite drop history.
+#[test]
+fn span_above_rejects_a_commit_off_the_branch() {
+  let (dir, repo) = scratch_repo("span-off-branch");
+  commit_file(&dir, &repo, "f.txt", "one\n", "initial");
+  commit_file(&dir, &repo, "g.txt", "g\n", "add g");
+
+  // A well-formed sha that exists in no repo.
+  let absent = git2::Oid::from_str("0123456789012345678901234567890123456789").unwrap();
+  let err = git_history::collect_span_above(&repo, absent, "merge above", "not on branch")
+    .unwrap_err();
+  assert!(err.to_string().contains("not on branch"), "got: {err}");
+  let _ = fs::remove_dir_all(&dir);
+}

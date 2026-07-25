@@ -62,23 +62,83 @@ fn collect_linear_span<'r>(
   Ok(span)
 }
 
-/// Cherry-pick `commits` (oldest-first) one by one onto `new_tip`. Any conflict
-/// hard-resets the branch back to `previous_sha` and fails with `conflict_msg`,
-/// so the branch is never left half-rebased.
-fn replay_onto<'r>(
+/// Walk from HEAD down to (but NOT including) `target`, oldest-first. This is
+/// the single-target shape used by the reword and drop-one commands, where the
+/// target itself is replaced rather than replayed.
+pub fn collect_span_above<'r>(
+  repo: &'r git2::Repository,
+  target_oid: Oid,
+  merge_msg: &str,
+  missing_msg: &str,
+) -> Result<Vec<git2::Commit<'r>>, AppError> {
+  let head_oid = repo.head()?.peel_to_commit()?.id();
+  let mut span = Vec::new();
+  let mut walk = repo.revwalk()?;
+  walk.push(head_oid)?;
+  let mut found = false;
+  for step in walk {
+    let step_oid = step?;
+    if step_oid == target_oid {
+      found = true;
+      break;
+    }
+    let c = repo.find_commit(step_oid)?;
+    if c.parent_count() > 1 {
+      return Err(AppError::Other(merge_msg.into()));
+    }
+    span.push(c);
+  }
+  if !found {
+    return Err(AppError::Other(missing_msg.into()));
+  }
+  span.reverse();
+  Ok(span)
+}
+
+/// Hard-reset the branch back to `previous_sha`, undoing a partial replay.
+fn rewind_to(repo: &git2::Repository, previous_sha: &str) -> Result<(), AppError> {
+  let start_oid = Oid::from_str(previous_sha).map_err(AppError::Git)?;
+  let head_obj = repo.find_object(start_oid, None)?;
+  repo.reset(&head_obj, ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
+  Ok(())
+}
+
+/// Cherry-pick `commits` (oldest-first) one by one onto `new_tip`.
+///
+/// ANY failure - a conflict or an I/O error partway through - rewinds the branch
+/// to `previous_sha` before returning, so a rewrite is all-or-nothing. Only the
+/// conflict case gets `conflict_msg`; other failures keep their own error so the
+/// cause isn't hidden behind a generic message.
+pub fn replay_onto<'r>(
+  repo: &'r git2::Repository,
+  commits: &[git2::Commit<'r>],
+  new_tip: git2::Commit<'r>,
+  signature: &git2::Signature<'_>,
+  previous_sha: &str,
+  conflict_msg: &str,
+) -> Result<git2::Commit<'r>, AppError> {
+  match replay_steps(repo, commits, new_tip, signature, conflict_msg) {
+    Ok(tip) => Ok(tip),
+    Err(e) => {
+      // Best-effort rewind: report the original failure even if it also fails.
+      let _ = rewind_to(repo, previous_sha);
+      Err(e)
+    }
+  }
+}
+
+/// The replay itself, with no cleanup. `replay_onto` owns the rewind so every
+/// early exit here is covered by exactly one recovery path.
+fn replay_steps<'r>(
   repo: &'r git2::Repository,
   commits: &[git2::Commit<'r>],
   mut new_tip: git2::Commit<'r>,
   signature: &git2::Signature<'_>,
-  previous_sha: &str,
   conflict_msg: &str,
 ) -> Result<git2::Commit<'r>, AppError> {
   for commit in commits {
     let mut index = repo.cherrypick_commit(commit, &new_tip, 0, None).map_err(AppError::Git)?;
     if index.has_conflicts() {
-      let start_oid = Oid::from_str(previous_sha).map_err(AppError::Git)?;
-      let head_obj = repo.find_object(start_oid, None)?;
-      repo.reset(&head_obj, ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
       return Err(AppError::Other(conflict_msg.into()));
     }
     let tree_oid = index.write_tree_to(repo)?;

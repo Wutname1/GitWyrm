@@ -393,11 +393,18 @@ export function useGitMutations(repoId: string | null) {
     },
     onSuccess: ({ name, outcome }) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'stashes'])
-      if (outcome === 'stash_pop_conflict') {
+      // Compared as a string: `stash_not_reapplied` is a new backend variant and
+      // bindings.ts only picks it up on the next `tauri dev` regeneration.
+      const kind: string = outcome
+      if (kind === 'stash_pop_conflict') {
         toast.warning(
           `Switched to ${name}, but your changes conflict — resolve the markers. Your stash was kept as a backup.`
         )
-      } else if (outcome === 'stashed') {
+      } else if (kind === 'stash_not_reapplied') {
+        toast.warning(
+          `Switched to ${name}, but your changes could not be put back. They are saved in your most recent stash — open Stashes to restore them.`
+        )
+      } else if (kind === 'stashed') {
         toast(`Checked out ${name} with your changes`)
       } else {
         toast(`Checked out ${name}`)
