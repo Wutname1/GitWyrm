@@ -3,12 +3,229 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#111413" />
+    <meta name="theme-color" content="#121212" />
     <link rel="icon" href="/favicon.ico" />
+    <!-- Fetch the mark alongside the HTML so the splash paints whole, not in two steps. -->
+    <link rel="preload" as="image" href="/logo.png" />
     <title>GitWyrm — Interactive UI Study</title>
+    <!--
+      Inline, so it paints on the very first frame. A stylesheet or module would
+      have to load first, and that gap is exactly the white flash we're covering:
+      the webview shows its own default background until something says
+      otherwise. These are the Slate-dark values from index.css; the real theme
+      takes over the moment React mounts.
+
+      The animation follows the same vocabulary as the AI commit-message state
+      in index.css (.wyrm-ai-*): the wyrm mark with lit eyes, an energy ring,
+      and commit nodes lighting in sequence along a branch.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #121212;
+        color: #e5e5e5;
+      }
+
+      #splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: calc(var(--splash-size) * 0.09);
+        background: #121212;
+        /* Above the mounting app so there is no flicker mid-handoff. */
+        z-index: 9999;
+      }
+
+      #splash[data-hiding='true'] {
+        opacity: 0;
+        transition: opacity 220ms ease-out;
+        pointer-events: none;
+      }
+
+      /*
+        Sized against the viewport so the composition fills 30-50% of the window
+        at any size. min() against vw and vh keeps it from overflowing a short
+        or narrow window; the clamp floors it on small windows and caps it so it
+        never turns into wall art on an ultrawide.
+      */
+      #splash {
+        --splash-size: clamp(240px, min(42vw, 52vh), 620px);
+      }
+
+      .splash-mark {
+        position: relative;
+        display: grid;
+        width: var(--splash-size);
+        height: var(--splash-size);
+        place-items: center;
+      }
+
+      /* Slow breathing halo behind the mark. */
+      .splash-mark::after {
+        content: '';
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(29, 181, 132, 0.2) 0%, transparent 68%);
+        animation: splash-breathe 2.6s ease-in-out infinite;
+      }
+
+      .splash-ring {
+        position: absolute;
+        width: 92%;
+        height: 92%;
+        border: 2px solid transparent;
+        border-top-color: rgba(29, 181, 132, 0.85);
+        border-right-color: rgba(29, 181, 132, 0.28);
+        border-radius: 50%;
+        animation: splash-spin 2.4s linear infinite;
+      }
+
+      .splash-logo {
+        width: 58%;
+        height: 58%;
+        object-fit: contain;
+        /* The mark carries its own color; the glow ties it to the accent. */
+        filter: drop-shadow(0 0 calc(var(--splash-size) * 0.03) rgba(29, 181, 132, 0.5));
+        animation: splash-breathe 2.6s ease-in-out infinite;
+      }
+
+      /* The commit graph: a branch that forks and merges, nodes lighting along it. */
+      .splash-graph {
+        width: calc(var(--splash-size) * 1.15);
+        height: auto;
+        overflow: visible;
+      }
+
+      .splash-graph path {
+        fill: none;
+        stroke: rgba(29, 181, 132, 0.26);
+        stroke-width: 2;
+        stroke-linecap: round;
+      }
+
+      /* The lit segment travelling the branch, drawn by dash offset. */
+      .splash-graph .trace {
+        stroke: #1db584;
+        stroke-dasharray: 26 150;
+        animation: splash-trace 2.1s ease-in-out infinite;
+      }
+
+      .splash-graph circle {
+        fill: #13231f;
+        stroke: #1db584;
+        stroke-width: 1.5;
+      }
+
+      .splash-graph circle:nth-of-type(1) {
+        animation: splash-node 2.1s 0s ease-in-out infinite;
+      }
+      .splash-graph circle:nth-of-type(2) {
+        animation: splash-node 2.1s 0.36s ease-in-out infinite;
+      }
+      .splash-graph circle:nth-of-type(3) {
+        animation: splash-node 2.1s 0.72s ease-in-out infinite;
+      }
+      .splash-graph circle:nth-of-type(4) {
+        animation: splash-node 2.1s 1.08s ease-in-out infinite;
+      }
+
+      /*
+        Sora is bundled and not loaded yet at splash time, so name the same
+        fallbacks it degrades to rather than causing a font swap mid-load.
+      */
+      #splash-status {
+        min-height: 1.2em;
+        color: #9e9e9e;
+        font-family: 'Sora', 'Inter Variable', system-ui, sans-serif;
+        font-size: clamp(0.75rem, calc(var(--splash-size) * 0.038), 0.95rem);
+        letter-spacing: 0.06em;
+        text-align: center;
+      }
+
+      @keyframes splash-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes splash-breathe {
+        0%,
+        100% {
+          opacity: 0.72;
+          transform: scale(0.97);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.03);
+        }
+      }
+
+      @keyframes splash-trace {
+        from {
+          stroke-dashoffset: 176;
+        }
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+
+      @keyframes splash-node {
+        0%,
+        68%,
+        100% {
+          fill: #13231f;
+          filter: none;
+        }
+        22%,
+        46% {
+          fill: #8fffe2;
+          filter: drop-shadow(0 0 4px #1db584);
+        }
+      }
+
+      /*
+        Respect the OS setting: hold the composition still. The mark and graph
+        stay fully visible, so the screen still reads as deliberate, not broken.
+      */
+      @media (prefers-reduced-motion: reduce) {
+        #splash *,
+        #splash *::after {
+          animation: none !important;
+        }
+        .splash-graph .trace {
+          stroke-dasharray: none;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="splash" role="status" aria-label="Loading GitWyrm">
+      <div class="splash-mark">
+        <div class="splash-ring"></div>
+        <img src="/logo.png" alt="" class="splash-logo" />
+      </div>
+      <svg class="splash-graph" viewBox="0 0 132 30" aria-hidden="true">
+        <!-- Base branch, then a fork that rejoins: the shape of a merge. -->
+        <path d="M8 22h30c10 0 10-14 20-14h18c10 0 10 14 20 14h28" />
+        <path class="trace" d="M8 22h30c10 0 10-14 20-14h18c10 0 10 14 20 14h28" />
+        <circle cx="8" cy="22" r="3.5" />
+        <circle cx="58" cy="8" r="3.5" />
+        <circle cx="76" cy="8" r="3.5" />
+        <circle cx="124" cy="22" r="3.5" />
+      </svg>
+      <!--
+        Seeded here so the line is never blank while settings load; lib/splash.ts
+        swaps in "Reopening N of M repositories" once the restore knows the count.
+      -->
+      <div id="splash-status" aria-live="polite">Starting up</div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
