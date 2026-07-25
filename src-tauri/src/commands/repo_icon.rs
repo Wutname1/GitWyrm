@@ -38,10 +38,16 @@ pub struct RepoIcon {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CachedIcon {
     /// Absolute path of the image that won discovery, or of the custom icon.
+    /// Empty when the user turned the icon off.
+    #[serde(default)]
     icon_path: String,
     /// Whether `icon_path` is a user-chosen icon rather than a discovered one.
     #[serde(default)]
     custom: bool,
+    /// The user asked for no icon at all. Suppresses discovery so a repository
+    /// with a favicon in its files stays on the plain tab marker.
+    #[serde(default)]
+    hidden: bool,
 }
 
 /// A repository path paired with the icon GitWyrm already knows about, for
@@ -85,10 +91,13 @@ fn remember_icon(app: &tauri::AppHandle, repo_path: &str, icon: Option<&RepoIcon
             let entry = CachedIcon {
                 icon_path: icon.source_path.clone(),
                 custom: icon.custom,
+                hidden: false,
             };
             match index.get(&key) {
                 Some(current)
-                    if current.icon_path == entry.icon_path && current.custom == entry.custom =>
+                    if current.icon_path == entry.icon_path
+                        && current.custom == entry.custom
+                        && !current.hidden =>
                 {
                     false
                 }
@@ -103,6 +112,31 @@ fn remember_icon(app: &tauri::AppHandle, repo_path: &str, icon: Option<&RepoIcon
     if changed {
         write_icon_index(app, &index);
     }
+}
+
+/// Record that this repository should show no icon at all, so discovery stops
+/// re-finding one on the next open.
+fn remember_hidden_icon(app: &tauri::AppHandle, repo_path: &str) {
+    let mut index = read_icon_index(app);
+    let key = repo_key(repo_path);
+    if index.get(&key).is_some_and(|entry| entry.hidden) {
+        return;
+    }
+    index.insert(
+        key,
+        CachedIcon {
+            icon_path: String::new(),
+            custom: false,
+            hidden: true,
+        },
+    );
+    write_icon_index(app, &index);
+}
+
+fn icon_is_hidden(app: &tauri::AppHandle, repo_path: &str) -> bool {
+    read_icon_index(app)
+        .get(&repo_key(repo_path))
+        .is_some_and(|entry| entry.hidden)
 }
 
 /// Drop every remembered icon whose repository path hashes into `keys`.
@@ -399,6 +433,9 @@ fn get_repo_icon_sync(
     app: &tauri::AppHandle,
     repo_path: String,
 ) -> Result<Option<RepoIcon>, AppError> {
+    if icon_is_hidden(app, &repo_path) {
+        return Ok(None);
+    }
     if let Some(path) = existing_custom_icon(&app, &repo_path)? {
         let icon = file_data_url(&path, true, MAX_CUSTOM_BYTES)?;
         remember_icon(app, &repo_path, Some(&icon));
@@ -445,6 +482,9 @@ fn get_cached_repo_icons_sync(
         let Some(entry) = index.get(&key) else {
             continue;
         };
+        if entry.hidden {
+            continue;
+        }
         let max_bytes = if entry.custom {
             MAX_CUSTOM_BYTES
         } else {
@@ -553,8 +593,25 @@ fn clear_repo_icon_sync(
     repo_path: String,
 ) -> Result<Option<RepoIcon>, AppError> {
     clear_custom_icon_files(app, &repo_path)?;
-    // Fall back to discovery, which re-remembers whatever it finds.
+    // Drop any "no icon" choice too, so discovery is free to run again.
+    remember_icon(app, &repo_path, None);
     get_repo_icon_sync(app, repo_path)
+}
+
+/// Turn the icon off entirely: forget the custom image and stop discovery from
+/// picking one up again. The repository falls back to the plain tab marker.
+fn hide_repo_icon_sync(app: &tauri::AppHandle, repo_path: String) -> Result<(), AppError> {
+    clear_custom_icon_files(app, &repo_path)?;
+    remember_hidden_icon(app, &repo_path);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hide_repo_icon(app: tauri::AppHandle, repo_path: String) -> Result<(), AppError> {
+    tauri::async_runtime::spawn_blocking(move || hide_repo_icon_sync(&app, repo_path))
+        .await
+        .map_err(|error| AppError::Other(error.to_string()))?
 }
 
 #[tauri::command]
@@ -590,6 +647,34 @@ mod tests {
     #[test]
     fn unrelated_images_are_not_candidates() {
         assert!(icon_score(Path::new("C:\\repo"), Path::new("C:\\repo\\hero.png")).is_none());
+    }
+
+    #[test]
+    fn a_hidden_entry_survives_a_reread_of_the_index() {
+        // The "no icon" choice is the only entry with no icon path, so it has to
+        // round-trip through JSON without being mistaken for a corrupt record.
+        let mut index = HashMap::new();
+        index.insert(
+            repo_key("C:\\code\\app"),
+            CachedIcon {
+                icon_path: String::new(),
+                custom: false,
+                hidden: true,
+            },
+        );
+        let json = serde_json::to_string(&index).unwrap();
+        let restored: HashMap<String, CachedIcon> = serde_json::from_str(&json).unwrap();
+        assert!(restored[&repo_key("C:\\code\\app")].hidden);
+    }
+
+    #[test]
+    fn an_older_index_entry_is_not_hidden() {
+        // Entries written before the "no icon" option existed have no `hidden`
+        // field and must keep showing their icon.
+        let entry: CachedIcon =
+            serde_json::from_str(r#"{"icon_path":"C:\\code\\app\\favicon.png"}"#).unwrap();
+        assert!(!entry.hidden);
+        assert!(!entry.custom);
     }
 
     #[test]

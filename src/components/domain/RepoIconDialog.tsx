@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, ImageIcon, Loader2, RotateCcw } from 'lucide-react'
+import { Ban, FolderOpen, ImageIcon, Loader2, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { commands, type RepoIcon, type RepoInfo } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
@@ -31,6 +31,9 @@ export function RepoIconDialog({ repo, open, onOpenChange }: RepoIconDialogProps
   const [current, setCurrent] = useState<RepoIcon | null>(null)
   const [loading, setLoading] = useState(false)
   const [savingPath, setSavingPath] = useState<string | null>(null)
+  // An empty result means either "nothing found" or "the user turned it off",
+  // and only the second one makes "No icon" a no-op worth disabling.
+  const [hidden, setHidden] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -44,6 +47,9 @@ export function RepoIconDialog({ repo, open, onOpenChange }: RepoIconDialogProps
         if (!active) return
         setIcons(found)
         setCurrent(selected)
+        // Discovery found something but nothing is showing, so the only way to
+        // get here is the user having turned the icon off.
+        setHidden(selected == null && found.length > 0)
       })
       .catch((error: unknown) => {
         if (active) toast.error(`Could not look for icons: ${messageFrom(error)}`)
@@ -59,6 +65,7 @@ export function RepoIconDialog({ repo, open, onOpenChange }: RepoIconDialogProps
     try {
       const saved = unwrap(await commands.setRepoIcon(repo.path, sourcePath))
       setCurrent(saved)
+      setHidden(false)
       useWorkspaceStore.getState().refreshRepoIcon(repo.path)
       onOpenChange(false)
       toast.success(`${repo.name} now has a custom icon`)
@@ -88,6 +95,7 @@ export function RepoIconDialog({ repo, open, onOpenChange }: RepoIconDialogProps
     try {
       const found = unwrap(await commands.clearRepoIcon(repo.path))
       setCurrent(found)
+      setHidden(false)
       useWorkspaceStore.getState().refreshRepoIcon(repo.path)
       onOpenChange(false)
       toast.success(found
@@ -95,6 +103,22 @@ export function RepoIconDialog({ repo, open, onOpenChange }: RepoIconDialogProps
         : `${repo.name} is using the default tab marker`)
     } catch (error: unknown) {
       toast.error(`Could not reset the icon: ${messageFrom(error)}`)
+    } finally {
+      setSavingPath(null)
+    }
+  }
+
+  const useNoIcon = async () => {
+    setSavingPath('none')
+    try {
+      unwrap(await commands.hideRepoIcon(repo.path))
+      setCurrent(null)
+      setHidden(true)
+      useWorkspaceStore.getState().refreshRepoIcon(repo.path)
+      onOpenChange(false)
+      toast.success(`${repo.name} is using the default tab marker`)
+    } catch (error: unknown) {
+      toast.error(`Could not turn off the icon: ${messageFrom(error)}`)
     } finally {
       setSavingPath(null)
     }
@@ -180,18 +204,31 @@ export function RepoIconDialog({ repo, open, onOpenChange }: RepoIconDialogProps
           )}
         </div>
 
-        <DialogFooter className="items-center justify-between border-t border-border bg-panel/35 px-5 py-3 sm:justify-between">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!current?.custom || savingPath != null}
-            onClick={() => void useAutomaticIcon()}
-          >
-            {savingPath === 'automatic'
-              ? <Loader2 size={13} className="animate-spin" />
-              : <RotateCcw size={13} />}
-            Use automatic icon
-          </Button>
+        <DialogFooter className="items-center justify-between gap-2 border-t border-border bg-panel/35 px-5 py-3 sm:justify-between">
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={(!current?.custom && !hidden) || savingPath != null}
+              onClick={() => void useAutomaticIcon()}
+            >
+              {savingPath === 'automatic'
+                ? <Loader2 size={13} className="animate-spin" />
+                : <RotateCcw size={13} />}
+              Use automatic icon
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={hidden || savingPath != null}
+              onClick={() => void useNoIcon()}
+            >
+              {savingPath === 'none'
+                ? <Loader2 size={13} className="animate-spin" />
+                : <Ban size={13} />}
+              No icon
+            </Button>
+          </div>
           <Button size="sm" disabled={savingPath != null} onClick={() => void chooseFile()}>
             <FolderOpen size={13} />
             Choose image

@@ -199,10 +199,6 @@ async saveSettings(settings: Settings) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Note that a repository's folder is gone, or that it is back. Called when an
- * open attempt fails because the path is missing, and when one succeeds.
- */
 async markRepoMissing(repoPath: string, missing: boolean) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("mark_repo_missing", { repoPath, missing }) };
@@ -297,6 +293,14 @@ async setRepoIcon(repoPath: string, sourcePath: string) : Promise<Result<RepoIco
 async clearRepoIcon(repoPath: string) : Promise<Result<RepoIcon | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("clear_repo_icon", { repoPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async hideRepoIcon(repoPath: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("hide_repo_icon", { repoPath }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
