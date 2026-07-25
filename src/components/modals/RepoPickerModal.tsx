@@ -261,8 +261,8 @@ function RepoLibraryRow({
   selected: boolean;
   checked: boolean;
   busy: boolean;
-  onSelect: () => void;
-  onToggleChecked: () => void;
+  onSelect: (event: React.MouseEvent) => void;
+  onToggleChecked: (event: React.MouseEvent) => void;
   onTogglePin: () => void;
   onOpen: () => void;
   onJump: () => void;
@@ -301,7 +301,7 @@ function RepoLibraryRow({
         onClick={onSelect}
         onDoubleClick={openRepoId ? onJump : onOpen}
         disabled={busy}
-        className="flex min-w-0 items-center gap-2.5 px-2.5 py-1.5 text-left disabled:opacity-50"
+        className="flex min-w-0 select-none items-center gap-2.5 px-2.5 py-1.5 text-left disabled:opacity-50"
       >
         <span className="grid size-8 flex-none place-items-center rounded-md border border-border bg-panel3 text-sub">
           <FolderGit2 size={15} strokeWidth={1.8} />
@@ -858,6 +858,7 @@ function RepoPickerPanel({
     useState<ProjectPathStatus>("idle");
 
   const searchRef = useRef<HTMLInputElement>(null);
+  const selectionAnchor = useRef<string | null>(null);
   const busy = openRepo.isPending || openReposMutation.isPending;
   const isSectionCollapsed = (section: RepoPickerSection) =>
     repoPickerCollapsedSections.includes(section);
@@ -934,6 +935,14 @@ function RepoPickerPanel({
       return item ? [item] : [];
     })
     .filter((repo) => !hiddenKeys.has(pathKey(repo.path)) && matches(repo));
+
+  // Row order on screen, used to resolve shift-click ranges. Collapsed
+  // sections are left out so a range never reaches rows you cannot see.
+  const visibleRowKeys = [
+    ...(isSectionCollapsed("pinned_repositories") ? [] : pinnedRepos),
+    ...(isSectionCollapsed("recent") ? [] : recentRepos),
+    ...(isSectionCollapsed("watched") ? [] : otherRepos),
+  ].map((repo) => pathKey(repo.path));
 
   const pinnedGroups = pinnedSavedGroupIds
     .flatMap((id) => {
@@ -1081,12 +1090,34 @@ function RepoPickerPanel({
 
   const toggleSelectedPath = (path: string) => {
     const key = pathKey(path);
+    selectionAnchor.current = key;
     setSelectedPaths((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
+  };
+
+  // Shift-click checks every row between the last clicked row and this one, in
+  // the order the rows are drawn on screen (pinned, then recent, then watched).
+  const selectRangeTo = (path: string) => {
+    const key = pathKey(path);
+    const anchor = selectionAnchor.current;
+    const from = anchor ? visibleRowKeys.indexOf(anchor) : -1;
+    const to = visibleRowKeys.indexOf(key);
+    if (from === -1 || to === -1) {
+      toggleSelectedPath(path);
+      return;
+    }
+    const [start, end] = from <= to ? [from, to] : [to, from];
+    const range = visibleRowKeys.slice(start, end + 1);
+    setSelectedPaths((current) => new Set([...current, ...range]));
+  };
+
+  const handleRowCheck = (repo: LibraryRepo, event: React.MouseEvent) => {
+    if (event.shiftKey) selectRangeTo(repo.path);
+    else toggleSelectedPath(repo.path);
   };
 
   const selectedOriginalPaths = useMemo(
@@ -1324,8 +1355,14 @@ function RepoPickerPanel({
         }
         checked={selectedPaths.has(key)}
         busy={busy}
-        onSelect={() => setSelectedItem({ type: "repo", path: repo.path })}
-        onToggleChecked={() => toggleSelectedPath(repo.path)}
+        onSelect={(event) => {
+          if (event.shiftKey || event.ctrlKey || event.metaKey) {
+            handleRowCheck(repo, event);
+            return;
+          }
+          setSelectedItem({ type: "repo", path: repo.path });
+        }}
+        onToggleChecked={(event) => handleRowCheck(repo, event)}
         onTogglePin={() => toggleRepoPin(repo)}
         onOpen={() => openOne(repo.path)}
         onJump={() => open && jumpToRepo(open.id)}
@@ -1637,6 +1674,9 @@ function RepoPickerPanel({
               <>
                 <span className="text-xs text-muted-foreground">
                   {selectedOriginalPaths.length} checked
+                  <span className="ml-2 hidden text-2xs min-[1000px]:inline">
+                    Hold Shift and click to check a whole run of repositories.
+                  </span>
                 </span>
                 <span className="flex-1" />
                 <Button
