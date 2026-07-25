@@ -353,9 +353,17 @@ pub async fn list_tags(
         // Peel to the commit so annotated and lightweight tags both report the
         // commit they mark, not the intermediate tag object.
         let reference = repo.find_reference(&format!("refs/tags/{n}")).ok()?;
-        let target_sha = reference.peel_to_commit().ok()?.id().to_string();
-        let annotated = reference.peel_to_tag().is_ok();
-        Some(TagInfo { name: n.to_string(), target_sha, annotated })
+        let commit = reference.peel_to_commit().ok()?;
+        let target_sha = commit.id().to_string();
+        let tag = reference.peel_to_tag().ok();
+        // An annotated tag knows when it was made; a lightweight one doesn't, so
+        // fall back to the commit it marks.
+        let time = tag
+          .as_ref()
+          .and_then(|t| t.tagger())
+          .map(|sig| sig.when().seconds())
+          .unwrap_or_else(|| commit.time().seconds()) as f64;
+        Some(TagInfo { name: n.to_string(), target_sha, annotated: tag.is_some(), time })
       })
       .collect();
     tags.sort_by(|a, b| b.name.cmp(&a.name));

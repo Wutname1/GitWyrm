@@ -250,6 +250,10 @@ pub struct TagInfo {
   pub target_sha: String,
   /// Annotated tags carry an author and message; lightweight ones don't.
   pub annotated: bool,
+  /// When the tag was made, as a Unix timestamp. An annotated tag reports the
+  /// tagger's time; a lightweight tag has no date of its own, so it reports the
+  /// time of the commit it points at.
+  pub time: f64,
 }
 
 /// A tag on a remote, as reported by `git ls-remote --tags`.
