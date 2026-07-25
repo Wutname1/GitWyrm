@@ -165,6 +165,10 @@ pub struct Settings {
   /// the frontend auto-enables it when a repo already has extra worktrees.
   #[serde(default)]
   pub enable_worktrees: bool,
+  /// Reopen the tabs from the last session on launch. On by default; when off
+  /// the app starts with no repository open.
+  #[serde(default = "default_restore_tabs")]
+  pub restore_tabs: bool,
   /// Whole-app zoom factor (1.0 = 100%). None uses the default of 1.0.
   /// Clamped on the frontend before display.
   #[serde(default)]
@@ -206,6 +210,18 @@ pub struct Settings {
   /// `group:<id>` marker; every other entry is a repository path.
   #[serde(default)]
   pub tab_order: Vec<String>,
+  /// How the tab strip is arranged: "manual", "name", or "changes". Unknown
+  /// values fall back to manual on the frontend. Name and changes are display
+  /// views, so `tab_order` still holds the order the user dragged.
+  #[serde(default)]
+  pub tab_sort: Option<String>,
+  /// Which way `tab_sort` runs: "forward" or "reverse". None means forward.
+  /// Manual ignores it.
+  #[serde(default)]
+  pub tab_sort_direction: Option<String>,
+  /// Repository paths kept at the front of the tab strip, in pin order.
+  #[serde(default)]
+  pub pinned_tab_paths: Vec<String>,
   /// Reusable group snapshots shown in Open a repository > Groups.
   #[serde(default)]
   pub saved_tab_groups: Vec<TabGroupSetting>,
@@ -262,6 +278,10 @@ fn default_show_repo_icons() -> bool {
   true
 }
 
+fn default_restore_tabs() -> bool {
+  true
+}
+
 fn default_vertical_tab_width() -> f64 {
   248.0
 }
@@ -306,6 +326,7 @@ impl Default for Settings {
       show_change_line_counts: false,
       commit_button_mode: None,
       enable_worktrees: false,
+      restore_tabs: true,
       ui_scale: None,
       font_family: None,
       font_size: None,
@@ -318,6 +339,9 @@ impl Default for Settings {
       horizontal_tab_row: false,
       tab_groups: Vec::new(),
       tab_order: Vec::new(),
+      tab_sort: None,
+      tab_sort_direction: None,
+      pinned_tab_paths: Vec::new(),
       saved_tab_groups: Vec::new(),
       pinned_repo_paths: Vec::new(),
       pinned_saved_group_ids: None,
@@ -394,6 +418,9 @@ mod tests {
     assert!(!settings.show_change_line_counts);
     assert!(settings.tab_groups.is_empty());
     assert!(settings.tab_order.is_empty());
+    assert!(settings.tab_sort.is_none());
+    assert!(settings.tab_sort_direction.is_none());
+    assert!(settings.pinned_tab_paths.is_empty());
     assert!(settings.saved_tab_groups.is_empty());
     assert!(settings.pinned_repo_paths.is_empty());
     assert!(settings.pinned_saved_group_ids.is_none());
@@ -403,6 +430,8 @@ mod tests {
     assert!(settings.theme.is_none());
     assert!(settings.theme_mode.is_none());
     assert!(settings.mint_accent);
+    // Settings written before this key existed keep reopening their tabs.
+    assert!(settings.restore_tabs);
   }
 
   #[test]
@@ -427,6 +456,9 @@ mod tests {
     let mut settings = Settings {
       tab_layout: Some("vertical".to_string()),
       tab_order: vec!["group:work".to_string(), "C:\\code\\loose".to_string()],
+      tab_sort: Some("changes".to_string()),
+      tab_sort_direction: Some("reverse".to_string()),
+      pinned_tab_paths: vec!["C:\\code\\GitWyrm".to_string()],
       ..Settings::default()
     };
     settings.tab_groups.push(TabGroupSetting {
@@ -451,6 +483,9 @@ mod tests {
 
     assert_eq!(restored.tab_layout.as_deref(), Some("vertical"));
     assert_eq!(restored.tab_order, settings.tab_order);
+    assert_eq!(restored.tab_sort.as_deref(), Some("changes"));
+    assert_eq!(restored.tab_sort_direction.as_deref(), Some("reverse"));
+    assert_eq!(restored.pinned_tab_paths, vec!["C:\\code\\GitWyrm"]);
     assert_eq!(restored.tab_groups[0].name, "Work");
     assert!(restored.tab_groups[0].collapsed);
     assert_eq!(restored.saved_tab_groups[0].repo_paths, vec!["C:\\code\\GitWyrm"]);

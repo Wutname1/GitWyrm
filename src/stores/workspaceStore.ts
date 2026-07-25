@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { commands, type BranchSwitchMode, type RepoInfo, type Settings } from '@/lib/bindings'
 import { log } from '@/lib/log'
-import { normalizePath } from '@/lib/paths'
+import { normalizePath, pathKey, samePath } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
 import {
   DEFAULT_COLUMN_ORDER,
@@ -50,6 +50,32 @@ export interface ResolvedTagSettings {
 }
 export type TabLayout = 'horizontal' | 'vertical'
 export type TabDropPlacement = 'before' | 'after'
+
+/**
+ * How repository tabs are arranged. 'manual' is the drag-and-drop order the user
+ * built; the other two are computed views that leave that order untouched, so
+ * switching back to Manual restores exactly what they had.
+ */
+export type TabSort = 'manual' | 'name' | 'changes'
+
+/**
+ * Which way a sort runs. 'forward' is the natural reading of each rule -- A to Z
+ * for name, busiest first for changes. Manual has no reverse: it is the order
+ * the user dragged, so it ignores this entirely.
+ */
+export type TabSortDirection = 'forward' | 'reverse'
+
+const TAB_SORTS = new Set<TabSort>(['manual', 'name', 'changes'])
+
+export function normalizeTabSort(sort: string | null | undefined): TabSort {
+  return TAB_SORTS.has(sort as TabSort) ? (sort as TabSort) : 'manual'
+}
+
+export function normalizeTabSortDirection(
+  direction: string | null | undefined,
+): TabSortDirection {
+  return direction === 'reverse' ? 'reverse' : 'forward'
+}
 
 export interface TabGroup {
   id: string
@@ -159,14 +185,6 @@ export function clampDrawerHeight(height: number): number {
 export function clampDrawerListWidth(width: number): number {
   if (!Number.isFinite(width)) return DEFAULT_DRAWER_LIST_WIDTH
   return Math.round(Math.min(MAX_DRAWER_LIST_WIDTH, Math.max(MIN_DRAWER_LIST_WIDTH, width)))
-}
-
-function pathKey(path: string): string {
-  return normalizePath(path).toLowerCase()
-}
-
-function samePath(left: string, right: string): boolean {
-  return pathKey(left) === pathKey(right)
 }
 
 /**
@@ -340,6 +358,8 @@ interface WorkspaceState {
   tagOverridesByRepo: Record<string, TagOverride>
   /** Show worktree actions and the worktree sidebar section (persisted). */
   enableWorktrees: boolean
+  /** Reopen the last session's tabs on launch. Off starts with no tabs (persisted). */
+  restoreTabs: boolean
   /** Whole-app zoom factor, 1.0 = 100% (persisted). */
   uiScale: number
   /** Selected UI font id; see lib/fonts.ts. 'plex' is the default (persisted). */
@@ -372,6 +392,12 @@ interface WorkspaceState {
   tabGroups: TabGroup[]
   /** Shared order of loose repository tabs and complete groups (persisted). */
   tabOrder: TabOrderItem[]
+  /** How tabs are arranged for display. 'manual' uses tabOrder as-is (persisted). */
+  tabSort: TabSort
+  /** Which way the current sort runs. Ignored by 'manual' (persisted). */
+  tabSortDirection: TabSortDirection
+  /** Repo paths kept at the front of the tab strip, in pin order (persisted). */
+  pinnedTabPaths: string[]
   /** Reusable group snapshots available from the repository picker (persisted). */
   savedTabGroups: SavedTabGroup[]
   /** Repository shortcuts shown first in the repository picker (persisted, newest pin first). */
@@ -419,6 +445,7 @@ interface WorkspaceState {
   /** Resolve tag settings for a repo path: app-wide defaults with any override applied. */
   resolveTagSettings: (path: string | null | undefined) => ResolvedTagSettings
   setEnableWorktrees: (enabled: boolean) => void
+  setRestoreTabs: (enabled: boolean) => void
   setTabLayout: (layout: TabLayout) => void
   setHorizontalTabRow: (enabled: boolean) => void
   /** Set the whole-app zoom factor (clamped to the supported range). */
@@ -458,6 +485,19 @@ interface WorkspaceState {
    * folders are all collapsed.
    */
   setExpandedChangeFolders: (key: string, folders: string[]) => void
+  /**
+   * Choose how tabs are arranged. Manual restores the user's dragged order.
+   * Picking the sort that is already active flips its direction instead, so a
+   * second click on Name turns A-Z into Z-A. Returns the direction now in
+   * effect so the caller can say which way it went.
+   */
+  setTabSort: (sort: TabSort) => TabSortDirection
+  /**
+   * Pin or unpin a tab. Pinned tabs always render before unpinned ones, in the
+   * order they were pinned, whatever the sort is. Pinning a grouped repo pulls
+   * it out of its group -- a pinned tab lives at the front, not inside a group.
+   */
+  toggleTabPin: (repoPath: string) => void
   moveRepoBeside: (sourcePath: string, targetPath: string, placement: TabDropPlacement) => void
   moveRepoToOrder: (repoPath: string, orderIndex: number) => void
   moveGroupToOrder: (groupId: string, orderIndex: number) => void
@@ -521,6 +561,7 @@ function toSettings(s: WorkspaceState): Settings {
     tag_push_on_create: s.tagPushOnCreate,
     tag_overrides_by_repo: serializeTagOverrides(s.tagOverridesByRepo),
     enable_worktrees: s.enableWorktrees,
+    restore_tabs: s.restoreTabs,
     ui_scale: s.uiScale,
     font_family: s.fontFamily === DEFAULT_FONT_ID ? null : s.fontFamily,
     font_size: s.fontSize,
@@ -542,6 +583,9 @@ function toSettings(s: WorkspaceState): Settings {
       repo_paths: group.repoPaths,
     })),
     tab_order: serializeTabOrder(s.tabOrder),
+    tab_sort: s.tabSort,
+    tab_sort_direction: s.tabSortDirection,
+    pinned_tab_paths: s.pinnedTabPaths,
     saved_tab_groups: s.savedTabGroups.map((group) => ({
       id: group.id,
       name: group.name,
@@ -715,6 +759,7 @@ export const SETTINGS_DEFAULTS = {
   branchSwitchMode: "auto_stash",
   commitButtonMode: "commit",
   enableWorktrees: false,
+  restoreTabs: true,
   tagPushDefault: "ask",
   tagPushOnCreate: false,
   aiInstruction: null,
@@ -746,6 +791,7 @@ export const SETTINGS_GROUPS = {
     'commitButtonMode',
     'enableWorktrees',
   ],
+  behavior: ['restoreTabs'],
   tags: ['tagPushDefault', 'tagPushOnCreate'],
   ai: ['aiInstruction'],
   appearance: [
@@ -787,6 +833,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   tagPushOnCreate: false,
   tagOverridesByRepo: {},
   enableWorktrees: false,
+  restoreTabs: true,
   uiScale: DEFAULT_UI_SCALE,
   fontFamily: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
@@ -803,6 +850,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   horizontalTabRow: false,
   tabGroups: [],
   tabOrder: [],
+  tabSort: "manual",
+  tabSortDirection: "forward",
+  pinnedTabPaths: [],
   savedTabGroups: [],
   pinnedRepoPaths: [],
   pinnedSavedGroupIds: [],
@@ -897,6 +947,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         activeRepoId,
         tabGroups: workspace.groups,
         tabOrder: workspace.order,
+        // A closed tab keeps no pin; reopening it starts unpinned.
+        pinnedTabPaths: removed
+          ? s.pinnedTabPaths.filter((path) => !samePath(path, removed.path))
+          : s.pinnedTabPaths,
       };
     });
     schedulePersist();
@@ -1027,6 +1081,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setEnableWorktrees: (enabled) => {
     set({ enableWorktrees: enabled });
+    schedulePersist();
+  },
+  setRestoreTabs: (enabled) => {
+    set({ restoreTabs: enabled });
     schedulePersist();
   },
   setTabLayout: (layout) => {
@@ -1270,6 +1328,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         tabOrder: s.tabOrder.filter(
           (item) => !(item.type === "group" && item.id === groupId),
         ),
+        pinnedTabPaths: s.pinnedTabPaths.filter(
+          (path) => !closedKeys.has(pathKey(path)),
+        ),
       };
     });
     schedulePersist();
@@ -1382,6 +1443,46 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       if (folders.length === 0) delete next[key];
       else next[key] = folders;
       return { expandedChangeFolders: next };
+    });
+    schedulePersist();
+  },
+  setTabSort: (sort) => {
+    // Re-picking the active sort flips it; switching sorts starts forward, so
+    // Name always opens as A-Z rather than inheriting the last rule's direction.
+    const s = get();
+    const direction: TabSortDirection =
+      sort !== "manual" && s.tabSort === sort && s.tabSortDirection === "forward"
+        ? "reverse"
+        : "forward";
+    set({ tabSort: sort, tabSortDirection: direction });
+    schedulePersist();
+    return direction;
+  },
+  toggleTabPin: (repoPath) => {
+    const path = normalizePath(repoPath);
+    set((s) => {
+      const pinned = s.pinnedTabPaths.some((candidate) =>
+        samePath(candidate, path),
+      );
+      if (pinned) {
+        return {
+          pinnedTabPaths: s.pinnedTabPaths.filter(
+            (candidate) => !samePath(candidate, path),
+          ),
+        };
+      }
+      // Pinning pulls the repo to the front of the strip, so it cannot stay
+      // nested inside a group. Lift it out and place it first in tabOrder, which
+      // keeps Manual sort agreeing with what the user sees.
+      const workspace = removePathFromWorkspace(s.tabGroups, s.tabOrder, path);
+      return {
+        tabGroups: workspace.groups,
+        tabOrder: [{ type: "repo" as const, path }, ...workspace.order],
+        pinnedTabPaths: [
+          ...s.pinnedTabPaths.filter((candidate) => !samePath(candidate, path)),
+          path,
+        ],
+      };
     });
     schedulePersist();
   },
@@ -1499,7 +1600,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           tabOrder.push({ type: "repo", path: repo.path });
         }
       }
-      return { tabGroups, tabOrder };
+      return {
+        tabGroups,
+        tabOrder,
+        pinnedTabPaths: s.pinnedTabPaths.filter((path) =>
+          openKeys.has(pathKey(path)),
+        ),
+      };
     });
     schedulePersist();
   },
@@ -1617,6 +1724,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.tag_overrides_by_repo,
         ),
         enableWorktrees: settings.enable_worktrees ?? false,
+        restoreTabs: settings.restore_tabs ?? true,
         uiScale:
           settings.ui_scale != null
             ? clampUiScale(settings.ui_scale)
@@ -1644,6 +1752,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         horizontalTabRow: settings.horizontal_tab_row ?? false,
         tabGroups,
         tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),
+        tabSort: normalizeTabSort(settings.tab_sort),
+        tabSortDirection: normalizeTabSortDirection(settings.tab_sort_direction),
+        pinnedTabPaths: (settings.pinned_tab_paths ?? []).map(normalizePath),
         savedTabGroups,
         pinnedRepoPaths: settings.pinned_repo_paths ?? [],
         pinnedSavedGroupIds:

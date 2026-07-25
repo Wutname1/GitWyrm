@@ -873,6 +873,14 @@ async listRemotes(repoId: string) : Promise<Result<RemoteInfo[], string>> {
 }
 },
 /**
+ * The host's page for one branch of a remote, or None when the host has no
+ * known web route. Provider routes live in `git::remote_url` so the frontend
+ * does not keep its own copy of them.
+ */
+async remoteBranchWebUrl(remoteUrlValue: string, branch: string) : Promise<string | null> {
+    return await TAURI_INVOKE("remote_branch_web_url", { remoteUrlValue, branch });
+},
+/**
  * Tags the named remote already has. Hits the network via `git ls-remote`, so
  * callers should cache the result rather than polling it.
  */
@@ -1092,6 +1100,45 @@ async scanCodeFolder(folder: string) : Promise<Result<ScannedRepo[], string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Whether the right-click entry is currently registered.
+ * 
+ * Reports `true` only when every target is present, so a half-written state
+ * (an interrupted install, a hand-edited registry) shows as off and the
+ * toggle repairs it rather than reporting success it cannot back up.
+ */
+async contextMenuRegistered() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("context_menu_registered") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add or remove Explorer's "Open with GitWyrm" entry.
+ * 
+ * Registering rewrites the keys unconditionally so the command always points
+ * at the current executable -- an app that moved (or updated into a new
+ * versioned folder) repairs itself when the user toggles this off and on.
+ */
+async setContextMenuRegistered(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_context_menu_registered", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Take the folder GitWyrm was launched with, if any.
+ * 
+ * Draining, not peeking: the frontend calls this during startup, and leaving
+ * the value behind would reopen the same folder on every later read.
+ */
+async launchRepoPath() : Promise<string | null> {
+    return await TAURI_INVOKE("launch_repo_path");
 },
 async aiGetCatalog() : Promise<Result<CatalogProvider[], string>> {
     try {
@@ -1404,7 +1451,14 @@ export type CheckoutOutcome =
  * Changes were stashed, the switch happened, but the pop conflicted. The
  * stash was KEPT as a backup; the working tree has conflict markers.
  */
-"stash_pop_conflict"
+"stash_pop_conflict" | 
+/**
+ * Changes were stashed and the switch happened, but re-applying them failed
+ * for a reason other than conflicts. The stash was KEPT as a backup and the
+ * working tree does NOT have the changes, so the user must be told where
+ * their work went.
+ */
+"stash_not_reapplied"
 /**
  * Commit-graph column layout. Column ids are validated on the frontend, so
  * unknown values here are ignored rather than rejected.
@@ -1737,7 +1791,22 @@ branches: RemoteBranchInfo[];
 /**
  * How many of `branches` have no local counterpart at all.
  */
-missing_locally: number }
+missing_locally: number; 
+/**
+ * Hosting product behind `url`, or `self_hosted` when the host has no known
+ * web routes. Parsed in `git::remote_url` so the frontend never re-derives it.
+ */
+provider: RemoteProvider; 
+/**
+ * The repository's page in a browser, or None when `url` isn't a parseable
+ * remote (a local path, an unknown scheme).
+ */
+web_base: string | null }
+/**
+ * The hosting product behind a remote. `SelfHosted` means the URL parsed fine
+ * but the host isn't one we can build provider-specific deep links for.
+ */
+export type RemoteProvider = "git_hub" | "git_lab" | "bitbucket" | "azure_dev_ops" | "gitea" | "source_hut" | "code_commit" | "self_hosted"
 /**
  * A tag on a remote, as reported by `git ls-remote --tags`.
  */
@@ -1852,6 +1921,11 @@ commit_button_mode?: string | null;
  */
 enable_worktrees?: boolean; 
 /**
+ * Reopen the tabs from the last session on launch. On by default; when off
+ * the app starts with no repository open.
+ */
+restore_tabs?: boolean; 
+/**
  * Whole-app zoom factor (1.0 = 100%). None uses the default of 1.0.
  * Clamped on the frontend before display.
  */
@@ -1904,6 +1978,21 @@ tab_groups?: TabGroupSetting[];
  * `group:<id>` marker; every other entry is a repository path.
  */
 tab_order?: string[]; 
+/**
+ * How the tab strip is arranged: "manual", "name", or "changes". Unknown
+ * values fall back to manual on the frontend. Name and changes are display
+ * views, so `tab_order` still holds the order the user dragged.
+ */
+tab_sort?: string | null; 
+/**
+ * Which way `tab_sort` runs: "forward" or "reverse". None means forward.
+ * Manual ignores it.
+ */
+tab_sort_direction?: string | null; 
+/**
+ * Repository paths kept at the front of the tab strip, in pin order.
+ */
+pinned_tab_paths?: string[]; 
 /**
  * Reusable group snapshots shown in Open a repository > Groups.
  */
@@ -2050,7 +2139,13 @@ target_sha: string;
 /**
  * Annotated tags carry an author and message; lightweight ones don't.
  */
-annotated: boolean }
+annotated: boolean; 
+/**
+ * When the tag was made, as a Unix timestamp. An annotated tag reports the
+ * tagger's time; a lightweight tag has no date of its own, so it reports the
+ * time of the commit it points at.
+ */
+time: number }
 /**
  * One repository's tag-setting overrides, keyed by repo path in `Settings`.
  * Each field is optional: `Some` overrides the app-wide default for that repo,

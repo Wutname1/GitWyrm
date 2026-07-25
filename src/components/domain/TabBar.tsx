@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  ArrowDown10,
+  ArrowDownAZ,
+  ArrowUp01,
+  ArrowUpAZ,
   BookOpen,
+  Check,
   ChevronDown,
   Clock,
   Columns3,
   FolderOpen,
+  GripVertical,
   Loader2,
   PanelLeft,
   Plus,
@@ -32,6 +38,7 @@ import {
   MIN_VERTICAL_TAB_WIDTH,
   clampVerticalTabWidth,
   useWorkspaceStore,
+  type TabSort,
 } from "@/stores/workspaceStore";
 import {
   ContextMenu,
@@ -161,6 +168,124 @@ function RepoRow({
   );
 }
 
+const TAB_SORT_OPTIONS: {
+  value: TabSort;
+  label: string;
+  hint: string;
+  /** Shown while this sort is active and reversed. Absent means it cannot reverse. */
+  reverseHint?: string;
+  icon: ReactNode;
+  reverseIcon?: ReactNode;
+}[] = [
+  {
+    value: "manual",
+    label: "Manual",
+    hint: "The order you opened them in, until you drag one",
+    icon: <GripVertical size={13} strokeWidth={2} />,
+  },
+  {
+    value: "name",
+    label: "Name",
+    hint: "A to Z by tab name",
+    reverseHint: "Z to A by tab name",
+    icon: <ArrowDownAZ size={13} strokeWidth={2} />,
+    reverseIcon: <ArrowUpAZ size={13} strokeWidth={2} />,
+  },
+  {
+    value: "changes",
+    label: "Has changes",
+    hint: "The most waiting work comes first",
+    reverseHint: "The least waiting work comes first",
+    icon: <ArrowDown10 size={13} strokeWidth={2} />,
+    reverseIcon: <ArrowUp01 size={13} strokeWidth={2} />,
+  },
+];
+
+/**
+ * Sorting rules for the repository tab strip. Name and Has-changes are display
+ * views: they never rewrite the dragged order, so Manual always brings back
+ * exactly the arrangement the user built.
+ */
+function TabSortPicker() {
+  const tabSort = useWorkspaceStore((state) => state.tabSort);
+  const tabSortDirection = useWorkspaceStore((state) => state.tabSortDirection);
+  const setTabSort = useWorkspaceStore((state) => state.setTabSort);
+  const pinnedCount = useWorkspaceStore((state) => state.pinnedTabPaths.length);
+
+  return (
+    <div className="mb-1 border-b border-border pb-1.5">
+      <DropdownMenuLabel className="px-1.5 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">
+        SORT TABS BY
+      </DropdownMenuLabel>
+      <div className="grid gap-0.5">
+        {TAB_SORT_OPTIONS.map((option) => {
+          const selected = tabSort === option.value;
+          const canReverse = option.reverseHint != null;
+          const reversed = selected && canReverse && tabSortDirection === "reverse";
+          const hint = reversed ? option.reverseHint! : option.hint;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                // Clicking the active sort flips it; the store decides which way
+                // so the label and the strip can never disagree.
+                const direction = setTabSort(option.value);
+                if (option.value === "manual") {
+                  toast.success("Tabs back in the order you set");
+                  return;
+                }
+                const flipped = direction === "reverse";
+                toast.success(
+                  `Tabs sorted by ${option.label.toLowerCase()}, ${
+                    option.value === "name"
+                      ? flipped
+                        ? "Z to A"
+                        : "A to Z"
+                      : flipped
+                        ? "quietest first"
+                        : "busiest first"
+                  }`,
+                );
+              }}
+              aria-pressed={selected}
+              aria-label={
+                selected && canReverse
+                  ? `Sort tabs by ${option.label}, ${hint}. Click again to reverse.`
+                  : `Sort tabs by ${option.label}. ${hint}`
+              }
+              className={cn(
+                "flex w-full items-center gap-2 rounded-[5px] px-1.5 py-1.5 text-left text-xs outline-none",
+                selected
+                  ? "bg-soft text-accent-text"
+                  : "text-sub hover:bg-panel2 hover:text-foreground",
+              )}
+            >
+              <span className="flex-none">
+                {reversed ? (option.reverseIcon ?? option.icon) : option.icon}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium">{option.label}</span>
+                <span className="block text-2xs text-muted-foreground">
+                  {hint}
+                  {selected && canReverse && " · click to reverse"}
+                </span>
+              </span>
+              {selected && <Check size={13} strokeWidth={2.4} className="flex-none" />}
+            </button>
+          );
+        })}
+      </div>
+      {pinnedCount > 0 && (
+        <p className="px-1.5 pt-1 text-2xs text-muted-foreground">
+          {pinnedCount} pinned {pinnedCount === 1 ? "tab stays" : "tabs stay"} at
+          the front. Right-click a tab to pin or unpin it.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function RecentRepositories({ compact = false }: { compact?: boolean }) {
   const recents = useWorkspaceStore((state) => state.recents);
   const openRepos = useWorkspaceStore((state) => state.openRepos);
@@ -241,6 +366,8 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
               className="h-7 w-full rounded-[5px] border border-border bg-panel2 pl-7 pr-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-muted-foreground"
             />
           </div>
+
+          <TabSortPicker />
 
           <div className="max-h-[360px] overflow-y-auto">
             <DropdownMenuLabel className="px-1.5 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">

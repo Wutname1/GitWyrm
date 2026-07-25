@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -19,6 +20,8 @@ import {
   ImageIcon,
   Layers3,
   Pencil,
+  Pin,
+  PinOff,
   Plus,
   Save,
   Settings2,
@@ -39,6 +42,8 @@ import {
   type TabGroup,
   type TabOrderItem,
 } from "@/stores/workspaceStore";
+import { arrangeTabs } from "@/lib/tabSorting";
+import { useTabStatusStore } from "@/stores/tabStatusStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useRepoTabStatus } from "@/hooks/useGitQueries";
 import { Button } from "@/components/ui/button";
@@ -528,14 +533,29 @@ function StatusBadge({
  */
 function TabStatusIcons({
   repoId,
+  repoPath,
   collapsed,
   pulse,
 }: {
   repoId: string;
+  repoPath: string;
   collapsed: boolean;
   pulse: boolean;
 }) {
   const { ahead, behind, uncommitted } = useRepoTabStatus(repoId);
+
+  // Publish the total so the strip can sort by "has changes" without re-running
+  // these per-repo queries at the parent level.
+  useEffect(() => {
+    useTabStatusStore
+      .getState()
+      .reportChangeCount(repoPath, ahead + behind + uncommitted);
+  }, [repoPath, ahead, behind, uncommitted]);
+
+  useEffect(() => {
+    return () => useTabStatusStore.getState().clearChangeCount(repoPath);
+  }, [repoPath]);
+
   if (ahead === 0 && behind === 0 && uncommitted === 0) return null;
 
   return (
@@ -590,6 +610,10 @@ export function RepositoryTabs({
   const verticalTabWidth = useWorkspaceStore((state) => state.verticalTabWidth);
   const tabGroups = useWorkspaceStore((state) => state.tabGroups);
   const tabOrder = useWorkspaceStore((state) => state.tabOrder);
+  const tabSort = useWorkspaceStore((state) => state.tabSort);
+  const tabSortDirection = useWorkspaceStore((state) => state.tabSortDirection);
+  const pinnedTabPaths = useWorkspaceStore((state) => state.pinnedTabPaths);
+  const changeCounts = useTabStatusStore((state) => state.changeCounts);
   const savedTabGroups = useWorkspaceStore((state) => state.savedTabGroups);
   const repoPickerOpen = useUiStore((state) => state.repoPickerOpen);
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
@@ -608,6 +632,38 @@ export function RepositoryTabs({
   const repoName = (repo: RepoInfo) => tabAliases[repo.path] ?? repo.name;
   const isSaved = (groupId: string) =>
     savedTabGroups.some((group) => group.id === groupId);
+  const isPinned = (path: string) =>
+    pinnedTabPaths.some((candidate) => samePath(candidate, path));
+
+  const arrangement = useMemo(
+    () =>
+      arrangeTabs({
+        order: tabOrder,
+        groups: tabGroups,
+        sort: tabSort,
+        direction: tabSortDirection,
+        pinned: pinnedTabPaths,
+        aliases: tabAliases,
+        names: Object.fromEntries(
+          openRepos.map((repo) => [pathKey(repo.path), repo.name]),
+        ),
+        changeCounts,
+      }),
+    [
+      tabOrder,
+      tabGroups,
+      tabSort,
+      tabSortDirection,
+      pinnedTabPaths,
+      tabAliases,
+      openRepos,
+      changeCounts,
+    ],
+  );
+  // Pinned tabs render in their own strip; drag-to-reorder still addresses
+  // positions in tabOrder, so gaps only appear in the sortable remainder.
+  const displayOrder = arrangement.rest;
+  const pinnedOrder = arrangement.pinned;
   const verticalIconOnly =
     orientation === "vertical" && verticalTabWidth <= VERTICAL_ICON_ONLY_WIDTH;
   const effectiveIconOnly = tabIconOnly || verticalIconOnly;
@@ -801,7 +857,11 @@ export function RepositoryTabs({
     );
   };
 
-  const renderRepoTab = (repo: RepoInfo, group: TabGroup | null) => {
+  const renderRepoTab = (
+    repo: RepoInfo,
+    group: TabGroup | null,
+    pinned = false,
+  ) => {
     const target =
       dropTarget?.type === "repo" && samePath(dropTarget.path, repo.path)
         ? dropTarget.placement
@@ -814,10 +874,24 @@ export function RepositoryTabs({
     const pathOrder = orderedPaths(tabOrder, tabGroups);
     const pathIndex = pathOrder.findIndex((path) => samePath(path, repo.path));
     const hovered = hoveredRepoPath != null && samePath(hoveredRepoPath, repo.path);
-    const showName = !effectiveIconOnly || (orientation === "horizontal" && hovered);
-    const horizontalWidth = tabIconOnly && hovered
-      ? MAX_HORIZONTAL_TAB_WIDTH
-      : adaptiveHorizontalTabWidth;
+    // Pinned horizontal tabs carry double width, so their name still fits even
+    // when the rest of the strip has collapsed to icons.
+    const showName =
+      !effectiveIconOnly ||
+      (orientation === "horizontal" && (hovered || (pinned && !tabIconOnly)));
+    // A pinned tab is one the user singled out, so it keeps twice the room when
+    // the strip squeezes -- enough to stay readable while the others shrink to
+    // icons. Capped at the normal maximum so it never grows past a full tab.
+    const pinnedFloor = Math.min(
+      MAX_HORIZONTAL_TAB_WIDTH,
+      (tabIconOnly ? ICON_ONLY_TAB_WIDTH : minimumNamedTabWidth) * 2,
+    );
+    const horizontalWidth =
+      tabIconOnly && hovered
+        ? MAX_HORIZONTAL_TAB_WIDTH
+        : pinned
+          ? Math.max(adaptiveHorizontalTabWidth, pinnedFloor)
+          : adaptiveHorizontalTabWidth;
     // Below the size that fits a numbered badge the status icons drop their
     // counts and pulse instead. Named vertical tabs always have room; horizontal
     // tabs collapse once the shared width budget squeezes them narrow.
@@ -934,6 +1008,14 @@ export function RepositoryTabs({
               style={tabStyle}
               aria-label={repoName(repo)}
             >
+              {pinned && (
+                <Pin
+                  size={10}
+                  strokeWidth={2.4}
+                  aria-label="Pinned"
+                  className="flex-none rotate-45 text-accent-text"
+                />
+              )}
               {showTabIcons ? (
                 <RepoTabIcon
                   repoPath={repo.path}
@@ -950,6 +1032,7 @@ export function RepositoryTabs({
               <span className="ml-auto flex flex-none items-center gap-1.5">
                 <TabStatusIcons
                   repoId={repo.id}
+                  repoPath={repo.path}
                   collapsed={statusCollapsed}
                   pulse={statusCollapsed && !active}
                 />
@@ -1000,6 +1083,26 @@ export function RepositoryTabs({
             <ContextMenuItem onSelect={() => setIconRepo(repo)}>
               <ImageIcon size={13} strokeWidth={2} />
               Set icon
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() => {
+                const wasPinned = isPinned(repo.path);
+                useWorkspaceStore.getState().toggleTabPin(repo.path);
+                toast.success(
+                  wasPinned
+                    ? `${repoName(repo)} unpinned`
+                    : group
+                      ? `${repoName(repo)} pinned to the front, out of ${group.name}`
+                      : `${repoName(repo)} pinned to the front`,
+                );
+              }}
+            >
+              {isPinned(repo.path) ? (
+                <PinOff size={13} strokeWidth={2} />
+              ) : (
+                <Pin size={13} strokeWidth={2} />
+              )}
+              {isPinned(repo.path) ? "Unpin tab" : "Pin tab"}
             </ContextMenuItem>
             <ContextMenuItem onSelect={() => createGroup([repo.path])}>
               <Layers3 size={13} strokeWidth={2} />
@@ -1346,7 +1449,19 @@ export function RepositoryTabs({
     );
   };
 
+  /** Where a displayed item sits in tabOrder, which is what drops address. */
+  const orderIndexOf = (item: TabOrderItem) =>
+    tabOrder.findIndex((candidate) =>
+      item.type === "group"
+        ? candidate.type === "group" && candidate.id === item.id
+        : candidate.type === "repo" && samePath(candidate.path, item.path),
+    );
+
   const renderOrderGap = (index: number) => {
+    // Under Name or Has-changes the strip is a computed view, so a gap between
+    // two tabs does not map to a spot in the manual order. Reordering there
+    // would silently do nothing, so the gaps sit out until Manual is back.
+    if (tabSort !== "manual" || index < 0) return null;
     const active = dropTarget?.type === "order" && dropTarget.index === index;
     return (
       <div
@@ -1416,7 +1531,32 @@ export function RepositoryTabs({
         )}
         onDragEnd={finishDrag}
       >
-        {tabOrder.map((item, index) => (
+        {pinnedOrder.length > 0 && (
+          <div
+            data-pinned-tabs
+            className={cn(
+              "flex flex-none",
+              orientation === "horizontal"
+                ? // Pinned tabs stay put while the rest of the strip scrolls under them.
+                  "sticky left-0 z-20 h-full flex-row items-stretch border-r border-border bg-background"
+                : "w-full flex-col gap-0.5 border-b border-border pb-1",
+            )}
+          >
+            {pinnedOrder.map((item) =>
+              item.type === "repo"
+                ? (() => {
+                    const repo = findRepo(openRepos, item.path);
+                    return repo ? (
+                      <Fragment key={`pinned-${pathKey(item.path)}`}>
+                        {renderRepoTab(repo, null, true)}
+                      </Fragment>
+                    ) : null;
+                  })()
+                : null,
+            )}
+          </div>
+        )}
+        {displayOrder.map((item) => (
           <Fragment
             key={
               item.type === "group"
@@ -1424,7 +1564,7 @@ export function RepositoryTabs({
                 : `repo-${pathKey(item.path)}`
             }
           >
-            {renderOrderGap(index)}
+            {renderOrderGap(orderIndexOf(item))}
             {item.type === "group"
               ? (() => {
                   const group = tabGroups.find(

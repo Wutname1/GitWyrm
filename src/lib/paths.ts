@@ -7,6 +7,20 @@ export function normalizePath(input: string): string {
   return p
 }
 
+/**
+ * Canonical form for comparing two Windows paths: normalized and lowercased,
+ * because Windows paths are case-insensitive and "C:\Code\Repo" and
+ * "c:/code/repo/" name the same folder.
+ */
+export function pathKey(path: string): string {
+  return normalizePath(path).toLowerCase()
+}
+
+/** Whether two paths name the same folder, ignoring case and slash style. */
+export function samePath(left: string, right: string): boolean {
+  return pathKey(left) === pathKey(right)
+}
+
 /** Joins a base directory and a child name with exactly one backslash. */
 export function joinPath(base: string, child: string): string {
   const b = normalizePath(base)
