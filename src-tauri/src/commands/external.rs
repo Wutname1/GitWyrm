@@ -12,7 +12,7 @@ use crate::state::RepoManager;
 use tauri::State;
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::git::shell::CREATE_NO_WINDOW;
 
 /// Working directory of an open repo, as an owned String path.
 fn repo_path(manager: &RepoManager, repo_id: &str) -> Result<String, AppError> {

@@ -91,7 +91,7 @@ export function useAiMutations() {
         qc.invalidateQueries({ queryKey: keys.status(v.repoId) })
         qc.invalidateQueries({ queryKey: keys.log(v.repoId) })
         qc.invalidateQueries({ queryKey: keys.branches(v.repoId) })
-        qc.invalidateQueries({ queryKey: ['diff', v.repoId] })
+        qc.invalidateQueries({ queryKey: keys.fileDiffAll(v.repoId) })
       },
     }),
   }

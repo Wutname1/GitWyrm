@@ -7,8 +7,10 @@ use std::sync::RwLock;
 
 use crate::error::AppError;
 
+/// Keeps a spawned console process from flashing a window on Windows. Shared so
+/// the flag is declared once rather than copied into every module that spawns.
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// The git program invoked for every shell-out. Defaults to `git` (found on
 /// PATH); the user can point it at a specific git.exe in Settings. Held in a

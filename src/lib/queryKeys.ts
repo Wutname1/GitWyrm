@@ -16,6 +16,15 @@ export const keys = {
     ['fileBlame', repoId, path, sha] as const,
   mergeState: (repoId: string) => ['mergeState', repoId] as const,
   conflict: (repoId: string, path: string) => ['conflict', repoId, path] as const,
+
+  /**
+   * Prefixes for invalidating every entry of a kind for one repo, regardless of
+   * the trailing segments. Use these instead of hand-writing a shorter array:
+   * a literal bypasses the factory, so it silently stops matching if a key ever
+   * gains or reorders a segment.
+   */
+  remoteTagsAll: (repoId: string) => ['remoteTags', repoId] as const,
+  fileDiffAll: (repoId: string) => ['diff', repoId] as const,
 }
 
 /** Unwraps tauri-specta's Result<T, string> into T-or-throw for TanStack Query. */

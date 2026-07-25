@@ -1,22 +1,12 @@
 use std::collections::HashMap;
 
-use git2::{Delta, DiffOptions, Status, StatusOptions};
+use git2::{DiffOptions, Status, StatusOptions};
 use tauri::State;
 
 use crate::error::AppError;
 use crate::git::submodule::moved_submodules;
 use crate::git::types::{FileChange, StatusCode, WorkingStatus};
 use crate::state::RepoManager;
-
-fn code_for(delta: Delta) -> StatusCode {
-  match delta {
-    Delta::Added | Delta::Untracked => StatusCode::Added,
-    Delta::Deleted => StatusCode::Deleted,
-    Delta::Renamed => StatusCode::Renamed,
-    Delta::Conflicted => StatusCode::Conflicted,
-    _ => StatusCode::Modified,
-  }
-}
 
 /// Per-file +/- line counts for a diff.
 fn line_stats(diff: &git2::Diff) -> HashMap<String, (u32, u32)> {

@@ -32,7 +32,7 @@ const PLAN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 static TEMP_INDEX_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::git::shell::CREATE_NO_WINDOW;
 
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct AiCreatedCommit {

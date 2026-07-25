@@ -130,7 +130,7 @@ export function useGitMutations(repoId: string | null) {
         for (const tag of pending) {
           await unwrap(await commands.pushTag(id, tag.name, ''))
         }
-        qc.invalidateQueries({ queryKey: ['remoteTags', id] })
+        qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
         toast(`Sent ${plural(pending.length, 'tag')}`)
         return
       }
@@ -322,7 +322,7 @@ export function useGitMutations(repoId: string | null) {
     },
     onSuccess: (args) => {
       invalidate(qc, id, ['tags', 'log'])
-      if (args.push) qc.invalidateQueries({ queryKey: ['remoteTags', id] })
+      if (args.push) qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
       toast(args.push ? `Created and sent tag ${args.name}` : `Created tag ${args.name}`)
     },
     onError,
@@ -348,7 +348,7 @@ export function useGitMutations(repoId: string | null) {
     },
     onSuccess: (name) => {
       invalidate(qc, id, ['tags'])
-      qc.invalidateQueries({ queryKey: ['remoteTags', id] })
+      qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
       toast(`Sent tag ${name}`)
     },
     onError,
@@ -364,7 +364,7 @@ export function useGitMutations(repoId: string | null) {
       return args.name
     },
     onSuccess: (name) => {
-      qc.invalidateQueries({ queryKey: ['remoteTags', id] })
+      qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
       toast(`Removed tag ${name} from the remote`)
     },
     onError,
@@ -948,7 +948,7 @@ export function useGitMutations(repoId: string | null) {
   // Partial staging: refreshes status and every open file-diff view.
   const afterPatch = () => {
     invalidate(qc, id, ['status'])
-    qc.invalidateQueries({ queryKey: ['diff', id] })
+    qc.invalidateQueries({ queryKey: keys.fileDiffAll(id) })
   }
 
   const stageLines = useMutation({
