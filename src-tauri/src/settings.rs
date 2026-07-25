@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -433,37 +433,49 @@ impl Settings {
   }
 }
 
-fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+/// The app data directory, created if missing. Everything GitWyrm persists lives
+/// here; taking it as a parameter elsewhere in this module is what lets tests run
+/// the real read and write code against a temporary directory.
+pub fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
   let dir = app
     .path()
     .app_data_dir()
     .map_err(|e| AppError::Other(e.to_string()))?;
   fs::create_dir_all(&dir)?;
-  Ok(dir.join("settings.json"))
+  Ok(dir)
 }
 
-#[tauri::command]
-#[specta::specta]
-pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, AppError> {
-  let path = settings_path(&app)?;
-  let Ok(raw) = fs::read_to_string(&path) else {
-    return Ok(Settings::default());
+/// Read settings from `dir`, falling back to defaults when the file is absent or
+/// unreadable.
+pub fn read_settings_in(dir: &Path) -> Settings {
+  let Ok(raw) = fs::read_to_string(dir.join("settings.json")) else {
+    return Settings::default();
   };
-  Ok(match serde_json::from_str(&raw) {
+  match serde_json::from_str(&raw) {
     Ok(settings) => settings,
     Err(error) => {
       log::warn!("settings.json could not be parsed, using defaults: {error}");
       Settings::default()
     }
-  })
+  }
+}
+
+/// Write settings to `dir` exactly as given.
+pub fn write_settings_in(dir: &Path, settings: &Settings) -> Result<(), AppError> {
+  let json = serde_json::to_string_pretty(settings).map_err(|e| AppError::Other(e.to_string()))?;
+  fs::write(dir.join("settings.json"), json)?;
+  Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, AppError> {
+  Ok(read_settings_in(&app_data_dir(&app)?))
 }
 
 /// Write settings exactly as given.
 pub fn write_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(), AppError> {
-  let path = settings_path(app)?;
-  let json = serde_json::to_string_pretty(settings).map_err(|e| AppError::Other(e.to_string()))?;
-  fs::write(path, json)?;
-  Ok(())
+  write_settings_in(&app_data_dir(app)?, settings)
 }
 
 #[tauri::command]
