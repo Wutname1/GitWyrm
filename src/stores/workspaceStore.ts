@@ -327,8 +327,10 @@ interface WorkspaceState {
   codeFolder: string | null
   /** Default directory new clones go into (persisted; falls back to codeFolder). */
   cloneDirectory: string | null
-  /** Path to the git executable for fetch/pull/push/clone. Empty uses PATH's git (persisted). */
+  /** Path to the git executable for fetch/pull/push/clone. Empty lets GitWyrm pick: PATH, then its bundled copy (persisted). */
   gitExecutable: string
+  /** Path to the gpg executable used to sign commits. Empty lets GitWyrm pick: PATH, then its bundled copy (persisted). */
+  gpgExecutable: string
   /** Release channel used when checking for updates (persisted). */
   updateChannel: UpdateChannel
   /** What to do with uncommitted changes when switching branches (persisted). */
@@ -441,6 +443,7 @@ interface WorkspaceState {
   setCloneDirectory: (path: string | null) => void
   /** Set the git executable path. Empty/blank falls back to PATH's git. */
   setGitExecutable: (path: string) => void
+  setGpgExecutable: (path: string) => void
   setUpdateChannel: (channel: UpdateChannel) => void
   setBranchSwitchMode: (mode: BranchSwitchMode) => void
   setAiSelection: (provider: string | null, model: string | null) => void
@@ -561,6 +564,7 @@ function toSettings(s: WorkspaceState): Settings {
     code_folder: s.codeFolder,
     clone_directory: s.cloneDirectory,
     git_executable: s.gitExecutable.trim() ? s.gitExecutable.trim() : null,
+    gpg_executable: s.gpgExecutable.trim() ? s.gpgExecutable.trim() : null,
     update_channel: s.updateChannel === 'beta' ? 'beta' : 'stable',
     branch_switch_mode: s.branchSwitchMode,
     ai_provider: s.aiProvider,
@@ -773,6 +777,7 @@ export const SETTINGS_DEFAULTS = {
   cloneDirectory: null,
   repoPickerCollapsedSections: [],
   gitExecutable: "",
+  gpgExecutable: "",
   // Not in any per-screen group: only the global "Reset all" restores it.
   updateChannel: "stable",
   branchSwitchMode: "auto_stash",
@@ -807,6 +812,7 @@ export const SETTINGS_GROUPS = {
     'cloneDirectory',
     'repoPickerCollapsedSections',
     'gitExecutable',
+    'gpgExecutable',
     'branchSwitchMode',
     'commitButtonMode',
     'defaultEditor',
@@ -834,6 +840,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   codeFolder: null,
   cloneDirectory: null,
   gitExecutable: "",
+  gpgExecutable: "",
   updateChannel: "stable",
   branchSwitchMode: "auto_stash",
   aiProvider: null,
@@ -997,6 +1004,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setGitExecutable: (path) => {
     set({ gitExecutable: path });
+    schedulePersist();
+  },
+  setGpgExecutable: (path) => {
+    set({ gpgExecutable: path });
     schedulePersist();
   },
   resetSettingsGroup: (group) => {
@@ -1718,6 +1729,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         codeFolder: settings.code_folder ?? null,
         cloneDirectory: settings.clone_directory ?? null,
         gitExecutable: settings.git_executable ?? "",
+        gpgExecutable: settings.gpg_executable ?? "",
         updateChannel: settings.update_channel === "beta" ? "beta" : "stable",
         branchSwitchMode: settings.branch_switch_mode ?? "auto_stash",
         aiProvider: settings.ai_provider ?? null,

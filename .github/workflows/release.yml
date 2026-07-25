@@ -151,6 +151,35 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # GitWyrm ships its own git and gpg so a clean Windows machine can clone,
+      # commit, sign, and push with nothing else installed. Fetched fresh on
+      # every release rather than committed, so each build carries the current
+      # upstream version. At runtime a system install still wins; see
+      # src-tauri/src/git/bundled.rs.
+      - name: Fetch bundled git and gpg
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x .github/scripts/*.sh
+          .github/scripts/fetch-bundled-tools.sh ${{ matrix.arch }} src-tauri/resources
+
+      # Proves the bundle can actually sign a commit. fetch-bundled-tools.sh
+      # copies only the MSYS libraries GnuPG needs rather than all 73 in usr/bin;
+      # this is what catches an incomplete list, before it reaches a user.
+      # Skipped when cross-compiling, where the bundled binaries cannot run.
+      - name: Verify the bundled tools can sign a commit
+        if: matrix.arch == 'x86_64'
+        shell: pwsh
+        run: .github/scripts/smoke-test-bundled-tools.ps1 src-tauri/resources
+
+      # Checks the bundle's shape (agent, pinentry, credential manager present)
+      # rather than just that git.exe starts. Cheap, and catches an upstream
+      # layout change that would otherwise ship broken.
+      - name: Check the bundle contents
+        if: matrix.arch == 'x86_64'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test bundled_tools -- --ignored
+
       - name: Build and release (NSIS + updater manifest)
         uses: tauri-apps/tauri-action@v1
         env:

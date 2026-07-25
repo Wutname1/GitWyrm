@@ -41,6 +41,7 @@
     "active": true,
     "targets": ["nsis"],
     "createUpdaterArtifacts": true,
+    "resources": ["resources/**/*"],
     "windows": {
       "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ../.github/scripts/sign-windows.ps1 \"%1\"",
       "nsis": {

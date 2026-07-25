@@ -54,3 +54,11 @@ ds-bundle/
 .design-sync/learnings/
 .design-sync/node_modules
 src/components/_ds_barrel.ts
+
+# Bundled git and gpg, fetched at release time by
+# .github/scripts/fetch-bundled-tools.sh. Never committed: ~100 MB of
+# third-party binaries that must track the current upstream release.
+# The README stays, so the bundler's resources/**/* glob always matches
+# something - it fails the build outright when it matches nothing.
+src-tauri/resources/*
+!src-tauri/resources/README.md

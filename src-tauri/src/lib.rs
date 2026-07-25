@@ -41,10 +41,16 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     settings::get_settings,
     settings::save_settings,
     missing_repos::mark_repo_missing,
-    git::shell::verify_git_executable,
     commands::repo::open_repo,
     commands::repo::close_repo,
     commands::repo::git_available,
+    commands::signing::git_tool_info,
+    commands::signing::gpg_tool_info,
+    commands::signing::get_signing_status,
+    commands::signing::create_signing_key,
+    commands::signing::export_signing_key,
+    commands::signing::set_signing_enabled,
+    commands::signing::repair_signing_format,
     commands::repo::git_init,
     commands::repo_icon::get_repo_icon,
     commands::repo_icon::get_cached_repo_icons,
@@ -349,8 +355,19 @@ pub fn run() {
         std::env::consts::ARCH,
       );
 
-      // Point git shell-outs at the saved executable (if any) before the first
-      // git command runs.
+      // Tell the tool resolver where the bundled git and gpg live before any
+      // shell-out happens. Resources sit under the install dir in a packaged
+      // build and are simply absent in dev, where the system tools are used.
+      let bundle_root = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|dir| dir.join("resources"))
+        .filter(|dir| dir.is_dir());
+      git::bundled::set_bundle_root(bundle_root);
+
+      // Point git and gpg shell-outs at the saved executables (if any) before
+      // the first command runs.
       settings::apply_startup_git_executable(app.handle());
 
       // Reconcile repositories whose folder has gone away, and forget the ones

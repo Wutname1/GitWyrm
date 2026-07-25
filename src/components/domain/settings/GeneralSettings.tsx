@@ -5,7 +5,6 @@ import {
   type TabLayout,
 } from '@/stores/workspaceStore'
 import { FolderSetting, SettingRow } from './SettingRow'
-import { GitExecutableSetting } from './GitExecutableSetting'
 import { EditorSetting } from './EditorSetting'
 import { ResetToDefaults } from './ResetToDefaults'
 
@@ -41,12 +40,6 @@ export function GeneralSettings() {
 
   return (
     <div>
-      <SettingRow
-        label="Git executable"
-        hint="Used for fetch, pull, push, and clone. Leave blank to use the git on your PATH."
-      >
-        <GitExecutableSetting />
-      </SettingRow>
       <SettingRow label="Code folder" hint="Scanned for repositories to quick-launch from the open dialog.">
         <FolderSetting value={codeFolder} placeholder="e.g. C:\code" onCommit={setCodeFolder} />
       </SettingRow>

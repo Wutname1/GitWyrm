@@ -1,5 +1,10 @@
-//! Runs the system git.exe for network operations (fetch/pull/push/clone).
+//! Runs git.exe for network operations (fetch/pull/push/clone).
 //! Git Credential Manager handles auth; we never touch credentials.
+//!
+//! Which git runs is decided in `super::bundled`: the path set in Settings, the
+//! system git on PATH, then the copy bundled with GitWyrm. The bundled tree is
+//! MinGit, which carries Git Credential Manager too, so auth works the same way
+//! on a machine with no git installed.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -12,13 +17,14 @@ use crate::error::AppError;
 #[cfg(windows)]
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// The git program invoked for every shell-out. Defaults to `git` (found on
-/// PATH); the user can point it at a specific git.exe in Settings. Held in a
-/// process-global so call sites don't have to thread the path through.
+/// The git path the user set in Settings, if any. Held in a process-global so
+/// call sites don't have to thread it through. The actual program to run is
+/// decided by `git_program_name`, which falls back to PATH and then to the
+/// copy bundled with GitWyrm.
 static GIT_PROGRAM: RwLock<Option<String>> = RwLock::new(None);
 
 /// Set the git program used for all shell-outs. An empty or whitespace-only
-/// value clears the override, falling back to `git` on PATH.
+/// value clears the override, so resolution falls back to PATH then bundled.
 pub fn set_git_program(path: Option<&str>) {
   let cleaned = path
     .map(str::trim)
@@ -27,16 +33,22 @@ pub fn set_git_program(path: Option<&str>) {
   if let Ok(mut guard) = GIT_PROGRAM.write() {
     *guard = cleaned;
   }
+  // The choice changed, so the cached resolution is stale.
+  super::bundled::clear_git_cache();
 }
 
-/// The git program to invoke: the configured path, or `git` when unset.
-/// Public so other modules that spawn git directly (e.g. AI staging) share it.
+/// The git program to invoke: the configured path, the system git on PATH, or
+/// the bundled copy - whichever is found first. Public so other modules that
+/// spawn git directly (e.g. AI staging) share the same resolution.
 pub fn git_program_name() -> String {
-  GIT_PROGRAM
-    .read()
-    .ok()
-    .and_then(|g| g.clone())
-    .unwrap_or_else(|| "git".to_owned())
+  let configured = GIT_PROGRAM.read().ok().and_then(|g| g.clone());
+  super::bundled::resolve_git(configured.as_deref()).program
+}
+
+/// Which git the app is actually using, for display in Settings.
+pub fn git_source() -> super::bundled::ToolSource {
+  let configured = GIT_PROGRAM.read().ok().and_then(|g| g.clone());
+  super::bundled::resolve_git(configured.as_deref()).source
 }
 
 pub struct GitOutput {
@@ -113,50 +125,6 @@ pub fn run_git(repo_path: Option<&str>, args: &[&str]) -> Result<GitOutput, AppE
 
 pub fn git_available() -> bool {
   run_git(None, &["--version"]).is_ok()
-}
-
-/// Run `<candidate> --version` to confirm a chosen git path works. Returns the
-/// version banner (e.g. "git version 2.45.1") on success. Used by Settings to
-/// give immediate feedback when the user picks or types a git executable.
-/// An empty/blank candidate checks `git` on PATH.
-#[tauri::command]
-#[specta::specta]
-pub fn verify_git_executable(path: String) -> Result<String, AppError> {
-  let program = {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-      "git".to_owned()
-    } else {
-      trimmed.to_owned()
-    }
-  };
-
-  let mut cmd = Command::new(&program);
-  cmd.arg("--version");
-
-  #[cfg(windows)]
-  {
-    use std::os::windows::process::CommandExt;
-    cmd.creation_flags(CREATE_NO_WINDOW);
-  }
-
-  let out = cmd.output().map_err(|e| {
-    if e.kind() == std::io::ErrorKind::NotFound {
-      AppError::Other(format!("No git found at {program}"))
-    } else {
-      AppError::Io(e)
-    }
-  })?;
-
-  if !out.status.success() {
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    return Err(AppError::Other(format!(
-      "{program} is not a working git: {}",
-      stderr.trim()
-    )));
-  }
-
-  Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
 
 /// Runs git with `stdin` piped in as raw bytes. Used to feed a patch to

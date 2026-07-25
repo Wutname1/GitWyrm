@@ -6,6 +6,7 @@ import { GeneralSettings } from '@/components/domain/settings/GeneralSettings'
 import { LogsSettings } from '@/components/domain/settings/LogsSettings'
 import { RepositorySettings } from '@/components/domain/settings/RepositorySettings'
 import { RepositoryTagsSettings } from '@/components/domain/settings/RepositoryTagsSettings'
+import { SecuritySettings } from '@/components/domain/settings/SecuritySettings'
 import { SettingsNav } from '@/components/domain/settings/SettingsNav'
 import { TagsSettings } from '@/components/domain/settings/TagsSettings'
 import { Separator } from '@/components/ui/separator'
@@ -19,6 +20,7 @@ const TITLES: Record<SettingsSection, string> = {
   repositoryTags: 'Tags',
   tags: 'Tags',
   ai: 'AI',
+  security: 'Security',
   appearance: 'Appearance',
   logs: 'Logs',
   about: 'About',
@@ -29,6 +31,7 @@ const SUBTITLES: Partial<Record<SettingsSection, string>> = {
   repository: 'These settings apply only to the repository open in the active tab.',
   repositoryTags: 'Tag rules for the repository open in the active tab.',
   tags: 'The default tag rules for every repository.',
+  security: 'Prove your commits came from you, and choose the programs GitWyrm uses.',
 }
 
 const SECTION_BODIES: Record<SettingsSection, React.ComponentType> = {
@@ -38,6 +41,7 @@ const SECTION_BODIES: Record<SettingsSection, React.ComponentType> = {
   repositoryTags: RepositoryTagsSettings,
   tags: TagsSettings,
   ai: AiSettings,
+  security: SecuritySettings,
   appearance: AppearanceSettings,
   logs: LogsSettings,
   about: AboutSettings,

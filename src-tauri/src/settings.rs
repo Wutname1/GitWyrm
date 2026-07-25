@@ -118,9 +118,13 @@ pub struct Settings {
   #[serde(default)]
   pub clone_directory: Option<String>,
   /// Path to the git executable used for fetch, pull, push, and clone. None
-  /// (the default) uses `git` from PATH.
+  /// (the default) resolves git from PATH, then the copy bundled with GitWyrm.
   #[serde(default)]
   pub git_executable: Option<String>,
+  /// Path to the gpg executable used to sign commits. None (the default)
+  /// resolves gpg from PATH, then the copy bundled with GitWyrm.
+  #[serde(default)]
+  pub gpg_executable: Option<String>,
   #[serde(default = "default_update_channel")]
   pub update_channel: UpdateChannel,
   #[serde(default = "default_branch_switch_mode")]
@@ -317,6 +321,7 @@ impl Default for Settings {
       code_folder: None,
       clone_directory: None,
       git_executable: None,
+      gpg_executable: None,
       update_channel: default_update_channel(),
       branch_switch_mode: default_branch_switch_mode(),
       ai_provider: None,
@@ -481,9 +486,10 @@ pub fn write_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(),
 #[tauri::command]
 #[specta::specta]
 pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), AppError> {
-  // Apply the git executable immediately so a change takes effect without a
-  // restart. Every git shell-out reads this global.
+  // Apply the tool paths immediately so a change takes effect without a
+  // restart. Every shell-out reads these globals.
   crate::git::shell::set_git_program(settings.git_executable.as_deref());
+  crate::git::signing::set_gpg_program(settings.gpg_executable.as_deref());
 
   write_settings(&app, &settings)
 }
@@ -493,6 +499,7 @@ pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), Ap
 pub fn apply_startup_git_executable(app: &tauri::AppHandle) {
   if let Ok(settings) = get_settings(app.clone()) {
     crate::git::shell::set_git_program(settings.git_executable.as_deref());
+    crate::git::signing::set_gpg_program(settings.gpg_executable.as_deref());
   }
 }
 

@@ -207,20 +207,6 @@ async markRepoMissing(repoPath: string, missing: boolean) : Promise<Result<null,
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Run `<candidate> --version` to confirm a chosen git path works. Returns the
- * version banner (e.g. "git version 2.45.1") on success. Used by Settings to
- * give immediate feedback when the user picks or types a git executable.
- * An empty/blank candidate checks `git` on PATH.
- */
-async verifyGitExecutable(path: string) : Promise<Result<string, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("verify_git_executable", { path }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
 async openRepo(path: string) : Promise<Result<RepoInfo, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("open_repo", { path }) };
@@ -240,6 +226,62 @@ async closeRepo(repoId: string) : Promise<Result<null, string>> {
 async gitAvailable() : Promise<Result<boolean, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_available") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async gitToolInfo() : Promise<Result<ToolInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("git_tool_info") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async gpgToolInfo() : Promise<Result<ToolInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("gpg_tool_info") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getSigningStatus(repoPath: string) : Promise<Result<SigningStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_signing_status", { repoPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async createSigningKey(name: string, email: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_signing_key", { name, email }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async exportSigningKey(keyId: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_signing_key", { keyId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setSigningEnabled(repoPath: string, enabled: boolean, keyId: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_signing_enabled", { repoPath, enabled, keyId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async repairSigningFormat(repoPath: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("repair_signing_format", { repoPath }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1957,9 +1999,14 @@ open_repos?: string[];
 active_repo_path?: string | null; recents?: RecentRepo[]; code_folder?: string | null; clone_directory?: string | null; 
 /**
  * Path to the git executable used for fetch, pull, push, and clone. None
- * (the default) uses `git` from PATH.
+ * (the default) resolves git from PATH, then the copy bundled with GitWyrm.
  */
-git_executable?: string | null; update_channel?: UpdateChannel; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null; 
+git_executable?: string | null; 
+/**
+ * Path to the gpg executable used to sign commits. None (the default)
+ * resolves gpg from PATH, then the copy bundled with GitWyrm.
+ */
+gpg_executable?: string | null; update_channel?: UpdateChannel; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null; 
 /**
  * Custom system instruction for commit-message generation. None uses the
  * built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).
@@ -2141,6 +2188,55 @@ mint_accent?: boolean;
  */
 expanded_change_folders?: Partial<{ [key in string]: string[] }> }
 /**
+ * A signing key gpg knows about.
+ */
+export type SigningKey = { 
+/**
+ * Long key id, the value git wants for `user.signingkey`.
+ */
+id: string; 
+/**
+ * Full fingerprint, shown to the user for verification.
+ */
+fingerprint: string; 
+/**
+ * "Real Name <email>" as recorded on the key.
+ */
+uid: string }
+/**
+ * What the user's signing setup looks like right now, for the Security screen.
+ */
+export type SigningStatus = { 
+/**
+ * Whether a gpg was found at all.
+ */
+gpgAvailable: boolean; 
+/**
+ * Which gpg is in use.
+ */
+gpgSource: ToolSource; 
+/**
+ * gpg's version banner, when it answered.
+ */
+gpgVersion: string | null; 
+/**
+ * Signing keys gpg can see.
+ */
+keys: SigningKey[]; 
+/**
+ * Whether this repository signs commits by default.
+ */
+signingEnabled: boolean; 
+/**
+ * The key this repository is set to sign with.
+ */
+configuredKey: string | null; 
+/**
+ * Set when the user's git config has a `gpg.format` git refuses to accept.
+ * Git hard-fails every commit in this state, so the UI offers to repair it.
+ */
+brokenFormat: string | null }
+/**
  * One Visual Studio solution found inside a repository.
  */
 export type SolutionFile = { 
@@ -2271,6 +2367,32 @@ push_default?: string | null;
  * Per-repo default for the New Tag send box. None follows the app default.
  */
 push_on_create?: boolean | null }
+/**
+ * Which git and gpg the app resolved, and where each came from. Drives the
+ * "using the copy that came with GitWyrm" vs "using your own" line in Settings.
+ */
+export type ToolInfo = { program: string; source: ToolSource; version: string | null }
+/**
+ * Where a resolved executable came from. Surfaced in Settings so the user can
+ * see whether they are on their own install or ours.
+ */
+export type ToolSource = 
+/**
+ * The path the user typed or browsed to in Settings.
+ */
+"configured" | 
+/**
+ * Found on PATH - a system install.
+ */
+"system" | 
+/**
+ * The copy shipped inside GitWyrm.
+ */
+"bundled" | 
+/**
+ * Not found anywhere.
+ */
+"missing"
 /**
  * A local tag the given remote does not have, along with whether the remote
  * already holds the commit it points at. Tags on commits the remote lacks
