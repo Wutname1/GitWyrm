@@ -13,7 +13,6 @@ import {
   Zap,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import type { BranchInfo, ResetMode } from '@/lib/bindings'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
@@ -231,8 +230,10 @@ export function BranchMenuItems({
           View on {webTarget.label}
         </ContextMenuItem>
       )}
-      {/* TODO(github): needs the GitHub integration before it can run. */}
-      <ContextMenuItem onSelect={() => toast('GitHub integration is planned')}>
+      {/* TODO(github): needs the GitHub integration before it can run. The
+          "soon" badge already says why, so the item is simply inert rather than
+          answering a click with a toast. */}
+      <ContextMenuItem disabled>
         <GitPullRequestArrow />
         Start a pull request
         <ContextMenuShortcut className="text-2xs">soon</ContextMenuShortcut>

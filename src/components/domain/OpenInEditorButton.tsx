@@ -17,7 +17,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Tooltip, TooltipButton, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  DisabledHint,
+  Tooltip,
+  TooltipButton,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -32,7 +38,14 @@ const buttonClass =
  * listing each solution, because a C# repo is often more useful opened as a
  * solution than as a folder.
  */
-export function OpenInEditorButton({ onNoRepo }: { onNoRepo: () => void }) {
+export function OpenInEditorButton({
+  disabled,
+  disabledReason,
+}: {
+  disabled?: boolean
+  /** Why the button is off, shown on hover in place of the usual tooltip. */
+  disabledReason?: string
+}) {
   const repo = useActiveRepo()
   const m = useGitMutations(repo?.id ?? null)
   const defaultEditor = useWorkspaceStore((s) => s.defaultEditor)
@@ -50,23 +63,26 @@ export function OpenInEditorButton({ onNoRepo }: { onNoRepo: () => void }) {
   const hasSolutions = visualStudio != null && solutions.length > 0
 
   const label = editorLabel(defaultEditor)
-  const openEditor = () => {
-    if (!repo) {
-      onNoRepo()
-      return
-    }
-    m.openInEditor.mutate(defaultEditor)
-  }
+  const openEditor = () => m.openInEditor.mutate(defaultEditor)
+  const tooltip = disabled && disabledReason ? disabledReason : `Open in ${label}`
 
   if (!hasSolutions) {
     return (
-      <TooltipButton
-        onClick={openEditor}
-        tooltip={`Open in ${label}`}
-        className={cn(buttonClass, 'w-8 rounded-md')}
-      >
-        <EditorGlyph kind={defaultEditor} />
-      </TooltipButton>
+      <DisabledHint disabled={disabled} reason={disabledReason}>
+        <TooltipButton
+          onClick={openEditor}
+          tooltip={tooltip}
+          aria-label={`Open in ${label}`}
+          disabled={disabled}
+          className={cn(
+            buttonClass,
+            'w-8 rounded-md disabled:pointer-events-none',
+            disabled && 'opacity-35'
+          )}
+        >
+          <EditorGlyph kind={defaultEditor} />
+        </TooltipButton>
+      </DisabledHint>
     )
   }
 
@@ -105,13 +121,7 @@ export function OpenInEditorButton({ onNoRepo }: { onNoRepo: () => void }) {
             {solutions.map((solution: SolutionFile) => (
               <DropdownMenuItem
                 key={solution.absolute_path}
-                onSelect={() => {
-                  if (!repo) {
-                    onNoRepo()
-                    return
-                  }
-                  m.openSolution.mutate(solution.absolute_path)
-                }}
+                onSelect={() => m.openSolution.mutate(solution.absolute_path)}
               >
                 <span className="truncate">{solution.name}</span>
                 {/* Two solutions can share a name in different folders, so the

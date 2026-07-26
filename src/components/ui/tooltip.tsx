@@ -60,13 +60,17 @@ type TooltipButtonProps = Omit<React.ComponentProps<"button">, "title"> & {
 }
 
 function TooltipButton({ tooltip, tooltipSide, "aria-label": ariaLabel, ...props }: TooltipButtonProps) {
+  const label = ariaLabel ?? (typeof tooltip === "string" ? tooltip : undefined)
+  // A disabled button gets no pointer events, so this tooltip could never open
+  // anyway. Skipping it avoids doubling up with DisabledHint, which wraps the
+  // button to put a reachable hint on a hoverable span instead.
+  if (props.disabled) {
+    return <button aria-label={label} {...props} />
+  }
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          aria-label={ariaLabel ?? (typeof tooltip === "string" ? tooltip : undefined)}
-          {...props}
-        />
+        <button aria-label={label} {...props} />
       </TooltipTrigger>
       <TooltipContent side={tooltipSide}>{tooltip}</TooltipContent>
     </Tooltip>
@@ -88,6 +92,35 @@ function TooltipHint({ children, label, side }: TooltipHintProps) {
   )
 }
 
+/**
+ * Keeps a tooltip reachable on a disabled control.
+ *
+ * A disabled `<button>` receives no pointer events, so its own tooltip never
+ * opens -- which is precisely when the user most needs to be told why the
+ * control is off. Wrapping it in a hoverable span restores the hint. Renders
+ * the child untouched while enabled, or when no reason was given.
+ */
+function DisabledHint({
+  disabled,
+  reason,
+  className,
+  children,
+}: {
+  disabled?: boolean
+  reason?: React.ReactNode
+  /** Layout classes for the wrapper, when the child relies on being sized by
+   *  its parent (e.g. a `flex-1` button in a row). */
+  className?: string
+  children: React.ReactNode
+}) {
+  if (!disabled || !reason) return <>{children}</>
+  return (
+    <TooltipHint label={reason}>
+      <span className={cn("flex", className)}>{children}</span>
+    </TooltipHint>
+  )
+}
+
 export {
   Tooltip,
   TooltipTrigger,
@@ -95,4 +128,5 @@ export {
   TooltipProvider,
   TooltipButton,
   TooltipHint,
+  DisabledHint,
 }

@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  DisabledHint,
   Tooltip,
   TooltipButton,
   TooltipContent,
@@ -101,12 +102,24 @@ export function CommitMessageForm() {
     setDesc((d) => (d.trim().length > 0 ? d : headDetail.data.body));
   }, [amend, headDetail.data]);
 
+  // Why the commit button is off, shown on hover. The button is disabled in
+  // exactly these cases, so this is the only way the user learns what to fix.
+  const commitBlockedReason = m.createCommit.isPending
+    ? "Committing…"
+    : pushPending
+      ? "Pushing…"
+      : ai.generate.isPending
+        ? "Waiting for the generated message"
+        : amend && !canAmend
+          ? "No commit to amend"
+          : !hasWork
+            ? "Stage files to commit"
+            : msg.trim().length === 0
+              ? "Enter a commit message"
+              : undefined;
+
   const doCommit = (mode: CommitButtonMode = commitButtonMode) => {
-    if (!canCommit) {
-      if (amend && !canAmend) toast("No commit to amend");
-      else toast(hasWork ? "Enter a commit message" : "Stage files to commit");
-      return;
-    }
+    if (!canCommit) return;
     m.createCommit.mutate(
       { summary: msg, description: desc, amend },
       {
@@ -134,11 +147,7 @@ export function CommitMessageForm() {
       showSettings("ai");
       return;
     }
-    if (ai.generate.isPending) return;
-    if (!repo || stagedCount === 0) {
-      toast("Stage files to generate a message");
-      return;
-    }
+    if (ai.generate.isPending || !repo || stagedCount === 0) return;
     setJustGenerated(false);
     ai.generate.mutate(
       { repoId: repo.id, provider: aiProvider!, model: aiModel! },
@@ -160,6 +169,7 @@ export function CommitMessageForm() {
   };
 
   const generating = ai.generate.isPending;
+  const nothingToGenerateFrom = aiReady && (!repo || stagedCount === 0);
 
   return (
     <div className="flex-none border-t border-border bg-panel2 px-3 pb-[13px] pt-[11px]">
@@ -175,43 +185,56 @@ export function CommitMessageForm() {
               generating && "opacity-[0.18] saturate-[0.35]",
             )}
           />
-          <TooltipButton
-            onClick={doGenerate}
-            disabled={generating}
-            aria-label={
-              generating
-                ? "Generating commit message"
-                : "Generate commit message with AI"
-            }
-            tooltip={
-              generating
-                ? "Generating commit message"
-                : !aiReady
-                  ? "Set up an AI provider to generate messages"
-                  : stagedCount === 0
-                    ? "Stage files to generate a message"
-                    : "Generate commit message with AI"
-            }
-            className={cn(
-              "absolute right-1.5 top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center overflow-hidden rounded-[5px] border text-sub",
-              generating
-                ? "wyrm-ai-trigger-active cursor-wait border-transparent"
-                : justGenerated
-                  ? "border-primary/25 bg-soft text-accent-text"
-                  : aiReady && stagedCount > 0
-                    ? "cursor-pointer border-primary/50 bg-soft text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
-                    : "cursor-pointer border-transparent hover:bg-panel3 hover:text-foreground",
-            )}
+          {/* The wrapper takes over the button's absolute placement: a
+              `display:contents` span would have no box to hover, leaving the
+              hint unreachable. */}
+          <DisabledHint
+            disabled={nothingToGenerateFrom}
+            reason="Stage files to generate a message"
+            className="absolute right-1.5 top-1/2 z-20 -translate-y-1/2"
           >
-            {justGenerated && !generating ? (
-              <Check size={13} strokeWidth={2.3} />
-            ) : (
-              <Sparkles
-                size={13}
-                className={cn(generating && "wyrm-ai-spark")}
-              />
-            )}
-          </TooltipButton>
+            <TooltipButton
+              onClick={doGenerate}
+              // Clicking while unconfigured opens AI settings, which is useful, so
+              // that stays live. With nothing staged there is nothing to read, so
+              // the button switches off and says so on hover.
+              disabled={generating || nothingToGenerateFrom}
+              aria-label={
+                generating
+                  ? "Generating commit message"
+                  : "Generate commit message with AI"
+              }
+              tooltip={
+                generating
+                  ? "Generating commit message"
+                  : !aiReady
+                    ? "Set up an AI provider to generate messages"
+                    : "Generate commit message with AI"
+              }
+              className={cn(
+                "flex size-6 items-center justify-center overflow-hidden rounded-[5px] border text-sub",
+                // When disabled the wrapper supplies this placement instead.
+                !nothingToGenerateFrom &&
+                  "absolute right-1.5 top-1/2 z-20 -translate-y-1/2",
+                generating
+                  ? "wyrm-ai-trigger-active cursor-wait border-transparent"
+                  : justGenerated
+                    ? "border-primary/25 bg-soft text-accent-text"
+                    : aiReady && stagedCount > 0
+                      ? "cursor-pointer border-primary/50 bg-soft text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
+                      : "cursor-pointer border-transparent hover:bg-panel3 hover:text-foreground",
+              )}
+            >
+              {justGenerated && !generating ? (
+                <Check size={13} strokeWidth={2.3} />
+              ) : (
+                <Sparkles
+                  size={13}
+                  className={cn(generating && "wyrm-ai-spark")}
+                />
+              )}
+            </TooltipButton>
+          </DisabledHint>
         </div>
         <Textarea
           value={generating ? "" : desc}
@@ -279,31 +302,37 @@ export function CommitMessageForm() {
             : "cursor-not-allowed border-transparent bg-panel3 text-muted-foreground",
         )}
       >
-        <button
-          onClick={() => doCommit()}
+        <DisabledHint
           disabled={!canCommit}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-2 text-[0.78125rem] font-semibold transition-colors",
-            canCommit
-              ? "cursor-pointer hover:bg-primary hover:text-primary-foreground"
-              : "cursor-not-allowed",
-          )}
+          reason={commitBlockedReason}
+          className="min-w-0 flex-1"
         >
-          {amend ? (
-            <Pencil size={14} strokeWidth={2} />
-          ) : commitButtonMode === "commit_push" ? (
-            <Upload size={14} strokeWidth={2} />
-          ) : (
-            <GitCommitHorizontal size={15} strokeWidth={2} />
-          )}
-          {pushPending
-            ? "Pushing…"
-            : amend
-              ? `Amend commit on ${currentBranch}`
-              : commitButtonMode === "commit_push"
-                ? `Commit & push to ${currentBranch}`
-                : `Commit ${plural(stagedCount, "file")} to ${currentBranch}`}
-        </button>
+          <button
+            onClick={() => doCommit()}
+            disabled={!canCommit}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-2 text-[0.78125rem] font-semibold transition-colors",
+              canCommit
+                ? "cursor-pointer hover:bg-primary hover:text-primary-foreground"
+                : "cursor-not-allowed",
+            )}
+          >
+            {amend ? (
+              <Pencil size={14} strokeWidth={2} />
+            ) : commitButtonMode === "commit_push" ? (
+              <Upload size={14} strokeWidth={2} />
+            ) : (
+              <GitCommitHorizontal size={15} strokeWidth={2} />
+            )}
+            {pushPending
+              ? "Pushing…"
+              : amend
+                ? `Amend commit on ${currentBranch}`
+                : commitButtonMode === "commit_push"
+                  ? `Commit & push to ${currentBranch}`
+                  : `Commit ${plural(stagedCount, "file")} to ${currentBranch}`}
+          </button>
+        </DisabledHint>
         <Tooltip>
           <DropdownMenu>
             <TooltipTrigger asChild>

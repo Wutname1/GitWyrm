@@ -15,10 +15,9 @@ import {
   SquareTerminal,
   X,
 } from 'lucide-react'
-import { toast } from 'sonner'
 import { Separator } from '@/components/ui/separator'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
-import { TooltipButton } from '@/components/ui/tooltip'
+import { DisabledHint, TooltipButton } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,31 +43,39 @@ interface ToolbarButtonProps {
   onClick: () => void
   disabled?: boolean
   pending?: boolean
+  /** Why the button is off, shown on hover in place of the usual tooltip. */
+  reason?: string
 }
 
-function ToolbarButton({ icon, label, badge, onClick, disabled, pending }: ToolbarButtonProps) {
+function ToolbarButton({ icon, label, badge, onClick, disabled, pending, reason }: ToolbarButtonProps) {
   return (
-    <TooltipButton
-      onClick={onClick}
-      tooltip={label}
-      disabled={disabled}
-      aria-busy={pending || undefined}
-      className={cn(
-        'relative flex h-8 items-center gap-[7px] overflow-hidden rounded-md border border-transparent px-[11px] text-foreground transition-[border-color,background-color,color,opacity] hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none',
-        disabled && !pending && 'opacity-35',
-        pending && 'wyrm-operation-active border-primary/40 bg-soft text-accent-text'
-      )}
-    >
-      <span className="relative flex flex-none">
-        {pending ? <PendingIndicator /> : icon}
-        {badge && !pending && (
-          <span className="wyrm-sync-pulse absolute -right-[9px] -top-[7px] rounded-full bg-primary px-1 font-mono text-2xs font-bold leading-[1.3] text-primary-foreground">
-            {badge}
-          </span>
+    <DisabledHint disabled={disabled} reason={reason}>
+      <TooltipButton
+        onClick={onClick}
+        tooltip={disabled && reason ? reason : label}
+        // Keep the name describing what the button does. Without this the
+        // name would fall back to the reason, leaving every disabled button
+        // in the toolbar announced identically.
+        aria-label={label}
+        disabled={disabled}
+        aria-busy={pending || undefined}
+        className={cn(
+          'relative flex h-8 items-center gap-[7px] overflow-hidden rounded-md border border-transparent px-[11px] text-foreground transition-[border-color,background-color,color,opacity] hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none',
+          disabled && !pending && 'opacity-35',
+          pending && 'wyrm-operation-active border-primary/40 bg-soft text-accent-text'
         )}
-      </span>
-      <span className="text-xs font-medium">{label}</span>
-    </TooltipButton>
+      >
+        <span className="relative flex flex-none">
+          {pending ? <PendingIndicator /> : icon}
+          {badge && !pending && (
+            <span className="wyrm-sync-pulse absolute -right-[9px] -top-[7px] rounded-full bg-primary px-1 font-mono text-2xs font-bold leading-[1.3] text-primary-foreground">
+              {badge}
+            </span>
+          )}
+        </span>
+        <span className="text-xs font-medium">{label}</span>
+      </TooltipButton>
+    </DisabledHint>
   )
 }
 
@@ -230,15 +237,34 @@ function BranchSwitcher() {
   )
 }
 
-function GhostButton({ icon, tooltip, onClick }: { icon: ReactNode; tooltip: string; onClick: () => void }) {
+function GhostButton({
+  icon,
+  tooltip,
+  onClick,
+  disabled,
+  reason,
+}: {
+  icon: ReactNode
+  tooltip: string
+  onClick: () => void
+  disabled?: boolean
+  reason?: string
+}) {
   return (
-    <TooltipButton
-      onClick={onClick}
-      tooltip={tooltip}
-      className="group flex h-[30px] w-8 items-center justify-center rounded-md border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3"
-    >
-      {icon}
-    </TooltipButton>
+    <DisabledHint disabled={disabled} reason={reason}>
+      <TooltipButton
+        onClick={onClick}
+        tooltip={disabled && reason ? reason : tooltip}
+        aria-label={tooltip}
+        disabled={disabled}
+        className={cn(
+          'group flex h-[30px] w-8 items-center justify-center rounded-md border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none',
+          disabled && 'opacity-35'
+        )}
+      >
+        {icon}
+      </TooltipButton>
+    </DisabledHint>
   )
 }
 
@@ -377,31 +403,30 @@ export function Toolbar() {
   const stashAction = m.stashSave.isPending ? 'stash' : m.stashPop.isPending ? 'pop' : null
   const stashPending = stashAction !== null
 
-  const noRepoNotice = () => toast('Open a repository first')
-
-  const requireRepo = (fn: () => void) => () => {
-    if (!repo) {
-      noRepoNotice()
-      return
-    }
-    fn()
-  }
+  // With no repository open there is nothing for any of these to act on, so
+  // they are switched off outright and say why on hover, rather than looking
+  // live and answering a click with a toast.
+  const noRepo = !repo
+  const noRepoReason = 'Open a repository first'
+  const noStashes = (stashes.data?.length ?? 0) === 0
 
   return (
     <div data-dim-on-drag className="relative flex h-12 flex-none items-center gap-1 border-b border-border bg-panel px-2.5">
       <ToolbarButton
         icon={<ArrowDownToLine size={16} strokeWidth={1.9} />}
         label={m.fetch.isPending ? 'Fetching…' : 'Fetch'}
-        onClick={requireRepo(() => m.fetch.mutate())}
-        disabled={syncPending}
+        onClick={() => m.fetch.mutate()}
+        disabled={noRepo || syncPending}
+        reason={noRepoReason}
         pending={m.fetch.isPending}
       />
       <ToolbarButton
         icon={<ArrowDown size={16} strokeWidth={1.9} />}
         label={m.pull.isPending ? 'Pulling…' : 'Pull'}
         badge={headSync?.behind ? String(headSync.behind) : undefined}
-        onClick={requireRepo(() => m.pull.mutate())}
-        disabled={syncPending}
+        onClick={() => m.pull.mutate()}
+        disabled={noRepo || syncPending}
+        reason={noRepoReason}
         pending={m.pull.isPending}
       />
       <ToolbarButton
@@ -412,10 +437,11 @@ export function Toolbar() {
         // git refuses it as non-fast-forward. Catch that here and let the user
         // choose (get the cloud's changes first, or force past them) rather than
         // firing a push we know will be rejected.
-        onClick={requireRepo(() =>
+        onClick={() =>
           headSync && headSync.behind > 0 ? openModal('push-choice') : m.push.mutate()
-        )}
-        disabled={syncPending}
+        }
+        disabled={noRepo || syncPending}
+        reason={noRepoReason}
         pending={m.push.isPending}
       />
 
@@ -445,31 +471,31 @@ export function Toolbar() {
       <ToolbarButton
         icon={<GitBranch size={16} strokeWidth={1.9} />}
         label="Branch"
-        onClick={requireRepo(() => openModal('newBranch'))}
+        onClick={() => openModal('newBranch')}
+        disabled={noRepo}
+        reason={noRepoReason}
       />
       <ToolbarButton
         icon={<GitMerge size={16} strokeWidth={1.9} />}
         label="Merge"
-        onClick={requireRepo(() => openMerge())}
+        onClick={() => openMerge()}
+        disabled={noRepo}
+        reason={noRepoReason}
       />
       <ToolbarButton
         icon={<Archive size={16} strokeWidth={1.9} />}
         label={m.stashSave.isPending ? 'Stashing…' : 'Stash'}
-        onClick={requireRepo(() => m.stashSave.mutate(undefined))}
-        disabled={stashPending}
+        onClick={() => m.stashSave.mutate(undefined)}
+        disabled={noRepo || stashPending}
+        reason={noRepoReason}
         pending={m.stashSave.isPending}
       />
       <ToolbarButton
         icon={<ArchiveRestore size={16} strokeWidth={1.9} />}
         label={m.stashPop.isPending ? 'Restoring…' : 'Pop'}
-        onClick={requireRepo(() => {
-          if ((stashes.data?.length ?? 0) === 0) {
-            toast('No stashes')
-            return
-          }
-          m.stashPop.mutate(0)
-        })}
-        disabled={stashPending}
+        onClick={() => m.stashPop.mutate(0)}
+        disabled={noRepo || noStashes || stashPending}
+        reason={noRepo ? noRepoReason : 'Nothing stashed to restore'}
         pending={m.stashPop.isPending}
       />
 
@@ -487,13 +513,17 @@ export function Toolbar() {
           </span>
         }
         tooltip="Show in file explorer"
-        onClick={requireRepo(() => m.revealInFileManager.mutate())}
+        onClick={() => m.revealInFileManager.mutate()}
+        disabled={noRepo}
+        reason={noRepoReason}
       />
-      <OpenInEditorButton onNoRepo={noRepoNotice} />
+      <OpenInEditorButton disabled={noRepo} disabledReason={noRepoReason} />
       <GhostButton
         icon={<SquareTerminal size={16} strokeWidth={1.9} />}
         tooltip="Open in terminal"
-        onClick={requireRepo(() => m.openInTerminal.mutate())}
+        onClick={() => m.openInTerminal.mutate()}
+        disabled={noRepo}
+        reason={noRepoReason}
       />
     </div>
   )

@@ -1,6 +1,5 @@
 import { type ReactNode, useState } from 'react'
 import { ArchiveRestore, ArrowLeftRight, CloudOff, ExternalLink, Eye, Tag, Trash2, Upload } from 'lucide-react'
-import { toast } from 'sonner'
 import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { useBranches, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
@@ -127,6 +126,7 @@ export function LeftPanel() {
       // unknown status stays unmarked rather than guessing.
       items: (tags.data ?? []).map((t) => ({
         name: t.name,
+        sha: t.target_sha,
         ...(tagSync.stateOf(t.name) === 'local'
           ? { meta: 'not sent', metaTitle: `Only on your computer. Send it to ${tagSync.hostLabel}.` }
           : {}),
@@ -191,8 +191,10 @@ export function LeftPanel() {
         if (item.id == null) openModal('githubConnect')
         else openGithubItem(section.type === 'pr' ? 'pr' : 'issue', item.id)
         break
-      default:
-        toast(item.name)
+      // Tags scroll to the commit they point at, matching branches and stashes.
+      case 'tag':
+        if (item.sha) revealShaInGraph(item.sha)
+        break
     }
   }
 
