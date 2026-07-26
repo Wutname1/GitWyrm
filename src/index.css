@@ -40,6 +40,23 @@
   --tab-group-color: var(--gw-accent);
 }
 
+/* The group header is the handle: hovering it tints the whole group so it is
+   obvious that dragging picks up every tab inside, not just the header. */
+.gw-tab-group:has(.gw-tab-group-handle:hover) {
+  background-color: color-mix(
+    in srgb,
+    var(--tab-group-color) 12%,
+    transparent
+  );
+  cursor: grab;
+}
+
+/* While a group is being dragged, everything it can land on shows the move
+   cursor instead of the pointer the tabs normally use. */
+.gw-repository-tabs[data-dragging-group='true'] * {
+  cursor: grabbing !important;
+}
+
 :root {
   /* GitWyrm design tokens. These are the Slate-dark defaults (the app's default
      theme) used for first paint; the useTheme hook overrides these --gw-* values

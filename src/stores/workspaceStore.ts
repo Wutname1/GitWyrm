@@ -527,6 +527,15 @@ interface WorkspaceState {
   toggleTabPin: (repoPath: string) => void
   moveRepoBeside: (sourcePath: string, targetPath: string, placement: TabDropPlacement) => void
   moveRepoToOrder: (repoPath: string, orderIndex: number) => void
+  /**
+   * Adopt the arrangement currently on screen as the manual order and switch to
+   * Manual. Dragging a tab while a sort rule is active means the user wants to
+   * arrange things themselves, but writing straight to the stored order would
+   * reflow the whole strip -- the sorted view and the manual order are usually
+   * nothing alike. Freezing what they can see first makes the switch invisible,
+   * so only the tab they dragged appears to move.
+   */
+  adoptDisplayedTabOrder: (displayed: TabOrderItem[]) => void
   moveGroupToOrder: (groupId: string, orderIndex: number) => void
   /** Removes paths that failed to reopen after launch. */
   finishRepoRestore: () => void
@@ -1603,6 +1612,23 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         path: normalizePath(repoPath),
       });
       return { tabGroups: workspace.groups, tabOrder: order };
+    });
+    schedulePersist();
+  },
+  adoptDisplayedTabOrder: (displayed) => {
+    set((s) => {
+      const key = (item: TabOrderItem) =>
+        item.type === "group" ? `group:${item.id}` : `repo:${pathKey(item.path)}`;
+      const shown = new Set(displayed.map(key));
+      // Pinned tabs render in their own strip ahead of everything else, so they
+      // are not in the displayed list. Keep them at the front, in their stored
+      // sequence, and append anything else the caller did not account for.
+      const missing = s.tabOrder.filter((item) => !shown.has(key(item)));
+      return {
+        tabOrder: [...missing, ...displayed],
+        tabSort: "manual" as TabSort,
+        tabSortDirection: "forward" as TabSortDirection,
+      };
     });
     schedulePersist();
   },

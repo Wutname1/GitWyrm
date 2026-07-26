@@ -10,6 +10,7 @@ import { DiffLineMenu } from '@/components/domain/diff/DiffLineMenu'
 import { HunkBar } from '@/components/domain/diff/HunkBar'
 import { LineSelectionBar } from '@/components/domain/diff/LineSelectionBar'
 import type { DiffLineEntry, SelectedLine } from '@/lib/bindings'
+import { computeWordSpans } from '@/lib/wordDiff'
 
 /** Stable key for a changed line within a file diff. */
 function lineKey(l: DiffLineEntry): string {
@@ -51,6 +52,10 @@ export function DiffView() {
 
   // Only working-tree diffs are partially stageable; commit diffs are read-only.
   const canPatch = kind === 'staged' || kind === 'unstaged'
+
+  // Which parts of each edited line actually changed, so the view can highlight
+  // them instead of making the reader compare two long lines by eye.
+  const wordSpans = useMemo(() => computeWordSpans(lines), [lines])
 
   // Index of every changed line, for range selection.
   const changedIndices = useMemo(
@@ -229,6 +234,7 @@ export function DiffView() {
             >
               <DiffLineRow
                 line={line}
+                wordSpans={wordSpans.get(i)}
                 selectable
                 selected={selected.has(lineKey(line))}
                 contextActive={contextLine === lineKey(line)}
@@ -236,7 +242,7 @@ export function DiffView() {
               />
             </DiffLineMenu>
           ) : (
-            <DiffLineRow key={i} line={line} />
+            <DiffLineRow key={i} line={line} wordSpans={wordSpans.get(i)} />
           )
         )}
       </div>

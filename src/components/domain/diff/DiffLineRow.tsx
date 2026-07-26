@@ -1,9 +1,12 @@
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import type { DiffLineEntry } from '@/lib/bindings'
+import type { WordSpan } from '@/lib/wordDiff'
 
 interface DiffLineRowProps {
   line: DiffLineEntry
+  /** Which parts of this line changed, when it was edited rather than added or deleted whole. */
+  wordSpans?: WordSpan[]
   selectable?: boolean
   /** Left-click selected — the fully Active state. */
   selected?: boolean
@@ -16,6 +19,7 @@ interface DiffLineRowProps {
 
 export function DiffLineRow({
   line,
+  wordSpans,
   selectable,
   selected,
   contextActive,
@@ -76,7 +80,25 @@ export function DiffLineRow({
       >
         {line.sign === '-' ? '-' : isHunk ? '' : line.sign}
       </span>
-      <span className="whitespace-pre pr-5">{line.text}</span>
+      <span className="whitespace-pre pr-5">
+        {wordSpans
+          ? wordSpans.map((span, i) =>
+              span.changed ? (
+                <span
+                  key={i}
+                  className={cn(
+                    'rounded-[2px] font-medium',
+                    line.sign === '+' ? 'bg-added/30' : 'bg-removed/30'
+                  )}
+                >
+                  {span.text}
+                </span>
+              ) : (
+                <span key={i}>{span.text}</span>
+              )
+            )
+          : line.text}
+      </span>
       {children}
     </div>
   )
