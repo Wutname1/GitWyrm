@@ -83,7 +83,11 @@ type DragItem = { type: "repo"; path: string } | { type: "group"; id: string };
 type DropTarget =
   | { type: "order"; index: number }
   | { type: "repo"; path: string; placement: TabDropPlacement | "group" }
-  | { type: "group"; id: string };
+  | { type: "group"; id: string }
+  // A group being dragged over another group. The thin gaps between tabs are
+  // too small to aim a whole group at, so a group also lands on either side of
+  // another group depending on which half of it the pointer is over.
+  | { type: "groupSide"; id: string; placement: TabDropPlacement };
 
 interface RenameTarget {
   type: "tab" | "group";
@@ -525,6 +529,90 @@ function StatusBadge({
 }
 
 /**
+ * Publishes one repository's change count for the "Has changes" sort. This is
+ * mounted once per open repository, outside the tab strip's own markup, so a
+ * repo keeps reporting even while its tab is unmounted -- collapsing a group
+ * hides its member tabs, and without this the group's count would fall to zero
+ * and the group would jump to the bottom of the strip. Renders nothing; the
+ * queries it reads are shared with the visible tabs.
+ */
+function ChangeCountReporter({ repo }: { repo: RepoInfo }) {
+  const { ahead, behind, uncommitted } = useRepoTabStatus(repo.id);
+  const path = repo.path;
+
+  useEffect(() => {
+    useTabStatusStore
+      .getState()
+      .reportChangeCount(path, { ahead, behind, uncommitted });
+  }, [path, ahead, behind, uncommitted]);
+
+  return null;
+}
+
+/**
+ * The push / pull / uncommitted totals for every repository in a group, shown
+ * on the group header. Collapsed, it is the only sign of pending work inside;
+ * expanded, it summarises what the member tabs are each showing.
+ */
+function GroupStatusIcons({
+  group,
+  collapsed,
+}: {
+  group: TabGroup;
+  /** Shrunk header: show the glyphs without their numbers. */
+  collapsed: boolean;
+}) {
+  const breakdowns = useTabStatusStore((state) => state.changeBreakdowns);
+  const total = group.repoPaths.reduce(
+    (sum, path) => {
+      const counts = breakdowns[pathKey(path)];
+      if (!counts) return sum;
+      return {
+        ahead: sum.ahead + counts.ahead,
+        behind: sum.behind + counts.behind,
+        uncommitted: sum.uncommitted + counts.uncommitted,
+      };
+    },
+    { ahead: 0, behind: 0, uncommitted: 0 },
+  );
+
+  if (total.ahead === 0 && total.behind === 0 && total.uncommitted === 0)
+    return null;
+
+  return (
+    <span className="ml-auto flex flex-none items-center gap-1.5 pl-1">
+      {total.ahead > 0 && (
+        <StatusBadge
+          icon={<ArrowUp size={10} strokeWidth={2.4} />}
+          count={total.ahead}
+          color="var(--gw-blue)"
+          label="to push in this group"
+          collapsed={collapsed}
+        />
+      )}
+      {total.behind > 0 && (
+        <StatusBadge
+          icon={<ArrowDown size={10} strokeWidth={2.4} />}
+          count={total.behind}
+          color="var(--gw-red)"
+          label="to pull in this group"
+          collapsed={collapsed}
+        />
+      )}
+      {total.uncommitted > 0 && (
+        <StatusBadge
+          icon={<Pencil size={9} strokeWidth={2.4} />}
+          count={total.uncommitted}
+          color="var(--gw-amber)"
+          label="uncommitted in this group"
+          collapsed={collapsed}
+        />
+      )}
+    </span>
+  );
+}
+
+/**
  * The push / pull / uncommitted badges a repository tab shows on its right side.
  * Each badge only appears when its count is above zero, so a clean repo shows
  * nothing. When the tab is shrunk to icons the numbers drop away and a pulsing
@@ -533,28 +621,14 @@ function StatusBadge({
  */
 function TabStatusIcons({
   repoId,
-  repoPath,
   collapsed,
   pulse,
 }: {
   repoId: string;
-  repoPath: string;
   collapsed: boolean;
   pulse: boolean;
 }) {
   const { ahead, behind, uncommitted } = useRepoTabStatus(repoId);
-
-  // Publish the total so the strip can sort by "has changes" without re-running
-  // these per-repo queries at the parent level.
-  useEffect(() => {
-    useTabStatusStore
-      .getState()
-      .reportChangeCount(repoPath, ahead + behind + uncommitted);
-  }, [repoPath, ahead, behind, uncommitted]);
-
-  useEffect(() => {
-    return () => useTabStatusStore.getState().clearChangeCount(repoPath);
-  }, [repoPath]);
 
   if (ahead === 0 && behind === 0 && uncommitted === 0) return null;
 
@@ -660,6 +734,14 @@ export function RepositoryTabs({
       changeCounts,
     ],
   );
+  // Counts outlive their tabs on purpose (see ChangeCountReporter), so closing a
+  // repository is what forgets its count.
+  useEffect(() => {
+    useTabStatusStore
+      .getState()
+      .pruneChangeCounts(openRepos.map((repo) => repo.path));
+  }, [openRepos]);
+
   // Pinned tabs render in their own strip; drag-to-reorder still addresses
   // positions in tabOrder, so gaps only appear in the sortable remainder.
   const displayOrder = arrangement.rest;
@@ -680,7 +762,15 @@ export function RepositoryTabs({
   const groupHeaderBudget = tabOrder.reduce((width, item) => {
     if (item.type !== "group") return width;
     const group = tabGroups.find((candidate) => candidate.id === item.id);
-    return group ? width + Math.min(128, 48 + group.name.length * 6) : width;
+    if (!group) return width;
+    // Room for the rolled-up push / pull / uncommitted badges, so adding them
+    // does not quietly steal width from the repository tabs.
+    const rollup = group.repoPaths.some(
+      (path) => (changeCounts[pathKey(path)] ?? 0) > 0,
+    )
+      ? 56
+      : 0;
+    return width + Math.min(128, 48 + group.name.length * 6) + rollup;
   }, 0);
   const minimumNamedTabWidth = showTabIcons ? 74 : 52;
   const adaptiveHorizontalTabWidth = tabIconOnly
@@ -772,6 +862,68 @@ export function RepositoryTabs({
     }
     finishDrag();
   };
+
+  /**
+   * Land a dragged group on one side of another item in the manual order. The
+   * gaps between tabs are only a couple of pixels wide, which is fine for
+   * nudging a single tab but far too small to aim a whole group at, so groups
+   * also drop onto the near half of whatever they are hovering.
+   */
+  const dropGroupBeside = (
+    groupId: string,
+    isTarget: (item: TabOrderItem) => boolean,
+    placement: TabDropPlacement,
+  ) => {
+    const group = tabGroups.find((candidate) => candidate.id === groupId);
+    const store = useWorkspaceStore.getState();
+    // Under Name or Has-changes the strip is a computed view, so a move written
+    // to the manual order would not show up. Dragging is the user asking to
+    // arrange tabs themselves, so switch to Manual -- freezing the arrangement
+    // they can see first, or every other tab would jump as the sort let go.
+    const wasSorted = tabSort !== "manual";
+    if (wasSorted) store.adoptDisplayedTabOrder(displayOrder);
+    // Resolved after the freeze: adopting the displayed arrangement renumbers
+    // tabOrder, so an index taken beforehand would point at the wrong tab.
+    const targetIndex = useWorkspaceStore
+      .getState()
+      .tabOrder.findIndex(isTarget);
+    if (targetIndex < 0) {
+      finishDrag();
+      return;
+    }
+    store.moveGroupToOrder(
+      groupId,
+      placement === "before" ? targetIndex : targetIndex + 1,
+    );
+    toast.success(
+      wasSorted
+        ? `${group?.name ?? "Group"} moved. Tab order switched to Manual so your arrangement sticks.`
+        : `${group?.name ?? "Group"} moved`,
+    );
+    finishDrag();
+  };
+
+  const dropGroupBesideGroup = (
+    groupId: string,
+    targetGroupId: string,
+    placement: TabDropPlacement,
+  ) =>
+    dropGroupBeside(
+      groupId,
+      (item) => item.type === "group" && item.id === targetGroupId,
+      placement,
+    );
+
+  const dropGroupBesideRepo = (
+    groupId: string,
+    targetPath: string,
+    placement: TabDropPlacement,
+  ) =>
+    dropGroupBeside(
+      groupId,
+      (item) => item.type === "repo" && samePath(item.path, targetPath),
+      placement,
+    );
 
   const dropOnRepo = (
     targetPath: string,
@@ -924,6 +1076,25 @@ export function RepositoryTabs({
           )
         }
         onDragOver={(event) => {
+          // A group dragged over a loose tab lands on the near side of it. Over
+          // a grouped tab it is the parent group's section that decides, so let
+          // the event bubble there instead.
+          if (dragItem?.type === "group") {
+            if (inGroup) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const rect = event.currentTarget.getBoundingClientRect();
+            const ratio =
+              orientation === "horizontal"
+                ? (event.clientX - rect.left) / rect.width
+                : (event.clientY - rect.top) / rect.height;
+            setTarget({
+              type: "repo",
+              path: repo.path,
+              placement: ratio < 0.5 ? "before" : "after",
+            });
+            return;
+          }
           if (dragItem?.type !== "repo" || samePath(dragItem.path, repo.path))
             return;
           event.preventDefault();
@@ -952,6 +1123,17 @@ export function RepositoryTabs({
             setTarget(null);
         }}
         onDrop={(event) => {
+          if (dragItem?.type === "group") {
+            if (inGroup) return;
+            event.preventDefault();
+            event.stopPropagation();
+            dropGroupBesideRepo(
+              dragItem.id,
+              repo.path,
+              target === "before" ? "before" : "after",
+            );
+            return;
+          }
           event.preventDefault();
           event.stopPropagation();
           dropOnRepo(repo.path, target ?? "group");
@@ -1032,7 +1214,6 @@ export function RepositoryTabs({
               <span className="ml-auto flex flex-none items-center gap-1.5">
                 <TabStatusIcons
                   repoId={repo.id}
-                  repoPath={repo.path}
                   collapsed={statusCollapsed}
                   pulse={statusCollapsed && !active}
                 />
@@ -1185,6 +1366,11 @@ export function RepositoryTabs({
   const renderGroup = (group: TabGroup) => {
     const groupTarget =
       dropTarget?.type === "group" && dropTarget.id === group.id;
+    // Which side of this group a dragged group would land on, if any.
+    const sideTarget =
+      dropTarget?.type === "groupSide" && dropTarget.id === group.id
+        ? dropTarget.placement
+        : null;
     const saved = isSaved(group.id);
     const groupRepos = group.repoPaths.map((path) => ({
       path,
@@ -1205,8 +1391,51 @@ export function RepositoryTabs({
                 dragItem?.type === "group" &&
                   dragItem.id === group.id &&
                   "opacity-35",
+                // Landing edge for another group being dragged onto this one.
+                sideTarget === "before" &&
+                  (orientation === "horizontal"
+                    ? "border-l-2 border-l-primary"
+                    : "border-t-2 border-t-primary"),
+                sideTarget === "after" &&
+                  (orientation === "horizontal"
+                    ? "border-r-2 border-r-primary"
+                    : "border-b-2 border-b-primary"),
               )}
               style={groupStyle(group.color)}
+              onDragOver={(event) => {
+                // Only whole-group drags land here; a repo drag belongs to the
+                // header button or a member tab underneath.
+                if (dragItem?.type !== "group" || dragItem.id === group.id)
+                  return;
+                event.preventDefault();
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                const ratio =
+                  orientation === "horizontal"
+                    ? (event.clientX - rect.left) / rect.width
+                    : (event.clientY - rect.top) / rect.height;
+                setTarget({
+                  type: "groupSide",
+                  id: group.id,
+                  placement: ratio < 0.5 ? "before" : "after",
+                });
+              }}
+              onDragLeave={(event) => {
+                if (
+                  !event.currentTarget.contains(
+                    event.relatedTarget as Node | null,
+                  ) &&
+                  sideTarget
+                )
+                  setTarget(null);
+              }}
+              onDrop={(event) => {
+                if (dragItem?.type !== "group" || dragItem.id === group.id)
+                  return;
+                event.preventDefault();
+                event.stopPropagation();
+                dropGroupBesideGroup(dragItem.id, group.id, sideTarget ?? "after");
+              }}
             >
               <TooltipTrigger asChild>
                 <button
@@ -1247,12 +1476,9 @@ export function RepositoryTabs({
                       return;
                     }
                     useWorkspaceStore.getState().toggleTabGroup(group.id);
-                    toast.info(
-                      `${group.name} ${group.collapsed ? "expanded" : "collapsed"}`,
-                    );
                   }}
                   className={cn(
-                    "flex flex-none cursor-grab items-center gap-1.5 text-left font-semibold outline-none active:cursor-grabbing",
+                    "gw-tab-group-handle flex flex-none cursor-grab items-center gap-1.5 text-left font-semibold outline-none active:cursor-grabbing",
                     orientation === "horizontal"
                       ? "h-full min-w-8 px-2 text-2xs"
                       : effectiveIconOnly
@@ -1285,6 +1511,12 @@ export function RepositoryTabs({
                       </span>
                     </>
                   )}
+                  {/* Everything pending inside, rolled up. Matters most while
+                      the group is collapsed and its tabs are out of sight. */}
+                  <GroupStatusIcons
+                    group={group}
+                    collapsed={effectiveIconOnly && orientation === "vertical"}
+                  />
                 </button>
               </TooltipTrigger>
               {!group.collapsed && (
@@ -1311,9 +1543,6 @@ export function RepositoryTabs({
             <ContextMenuItem
               onSelect={() => {
                 useWorkspaceStore.getState().toggleTabGroup(group.id);
-                toast.info(
-                  `${group.name} ${group.collapsed ? "expanded" : "collapsed"}`,
-                );
               }}
             >
               <ChevronRight
@@ -1513,6 +1742,9 @@ export function RepositoryTabs({
 
   return (
     <>
+      {openRepos.map((repo) => (
+        <ChangeCountReporter key={`count-${pathKey(repo.path)}`} repo={repo} />
+      ))}
       {orientation === "horizontal" && (
         <ScrollArrow
           side="left"
@@ -1523,6 +1755,7 @@ export function RepositoryTabs({
       <div
         ref={scrollRef}
         data-dim-on-drag
+        data-dragging-group={dragItem?.type === "group" ? "true" : undefined}
         className={cn(
           "gw-repository-tabs flex min-h-0 min-w-0",
           orientation === "horizontal"

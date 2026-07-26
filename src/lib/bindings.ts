@@ -2186,7 +2186,7 @@ mint_accent?: boolean;
  * Folders left open in the changes trees, keyed by `<repo path>|<staged
  * |unstaged>`. Only open folders are stored; anything absent is collapsed.
  */
-expanded_change_folders?: Partial<{ [key in string]: string[] }>;
+expanded_change_folders?: Partial<{ [key in string]: string[] }>; 
 /**
  * How the changed-file lists are arranged: "tree" groups by folder, "list"
  * shows one flat row per file. None means tree. Validated on the frontend.
