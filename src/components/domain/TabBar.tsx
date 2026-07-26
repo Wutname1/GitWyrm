@@ -424,16 +424,18 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
 
 function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
   const showRepoPicker = useUiStore((state) => state.showRepoPicker);
+  const closeRepoPicker = useUiStore((state) => state.closeRepoPicker);
+  const pickerShowing = useUiStore((state) => state.centerView === "repoPicker");
   const openRepo = useOpenRepo();
   return (
     <TooltipButton
-      onClick={() => showRepoPicker()}
+      onClick={() => (pickerShowing ? closeRepoPicker() : showRepoPicker())}
       className={
         compact
           ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
           : "flex items-center px-2 text-sub hover:text-foreground"
       }
-      tooltip="Open or clone a repository"
+      tooltip={pickerShowing ? "Close" : "Open or clone a repository"}
       disabled={openRepo.isPending}
     >
       {openRepo.isPending ? (
