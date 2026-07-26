@@ -14,7 +14,7 @@ import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { IgnoreMenuItems } from '@/components/domain/commit-form/IgnoreMenuItems'
 import { useGitMutations } from '@/hooks/useGitMutations'
-import { changeTreeKey, useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
+import { changeTreeKey, useActiveRepo, useWorkspaceStore, type ChangesViewMode } from '@/stores/workspaceStore'
 import { cn } from '@/lib/utils'
 
 interface TreeNode {
@@ -60,12 +60,15 @@ interface FileChangeTreeProps {
   allFiles: FileChange[]
   treeId: string
   staged: boolean
+  /** 'list' skips folder grouping and shows one flat row per file. */
+  viewMode?: ChangesViewMode
   operationsDisabled?: boolean
   mutations: Pick<
     ReturnType<typeof useGitMutations>,
     'stageFiles' | 'unstageFiles' | 'discardFiles'
   >
-  renderFile: (file: FileChange, name: string, depth: number) => ReactNode
+  /** `depth` is undefined in list view, where rows are not tree items. */
+  renderFile: (file: FileChange, name: string, depth: number | undefined) => ReactNode
 }
 
 interface PendingFolderDiscard {
@@ -90,6 +93,7 @@ export function FileChangeTree({
   allFiles,
   treeId,
   staged,
+  viewMode = 'tree',
   operationsDisabled,
   mutations: m,
   renderFile,
@@ -230,9 +234,15 @@ export function FileChangeTree({
     )
   }
 
+  // Flat view: one row per file, full path as the label, no expand/collapse bar.
+  const flatFiles = useMemo(
+    () => [...files].sort((left, right) => left.path.localeCompare(right.path)),
+    [files],
+  )
+
   return (
     <>
-      {allFolderKeys.length > 0 && (
+      {viewMode === 'tree' && allFolderKeys.length > 0 && (
         <div className="flex items-center justify-end gap-1 border-b border-border/50 px-3.5 py-1">
           <button
             type="button"
@@ -246,9 +256,17 @@ export function FileChangeTree({
           </button>
         </div>
       )}
-      <div role="tree" aria-label={staged ? 'Staged changed files' : 'Unstaged changed files'}>
-        {renderNode(root, 0)}
-      </div>
+      {viewMode === 'list' ? (
+        <div role="list" aria-label={staged ? 'Staged changed files' : 'Unstaged changed files'}>
+          {flatFiles.map((file) => (
+            <div key={file.path} role="listitem">{renderFile(file, file.path, undefined)}</div>
+          ))}
+        </div>
+      ) : (
+        <div role="tree" aria-label={staged ? 'Staged changed files' : 'Unstaged changed files'}>
+          {renderNode(root, 0)}
+        </div>
+      )}
       <ConfirmDialog
         open={discardFolder != null}
         onOpenChange={(open) => !open && setDiscardFolder(null)}

@@ -1,13 +1,25 @@
 import { useState, type ReactNode } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import {
+  FolderTree,
+  GitCommitHorizontal,
+  List,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TooltipButton } from "@/components/ui/tooltip";
 import { PendingIndicator } from "@/components/ui/pending-indicator";
 import { ConfirmDialog } from "@/components/modals/ConfirmDialog";
-import { cn } from "@/lib/utils";
 import { useStatus } from "@/hooks/useGitQueries";
 import { useGitMutations } from "@/hooks/useGitMutations";
 import { useUiStore } from "@/stores/uiStore";
-import { useActiveRepo } from "@/stores/workspaceStore";
+import {
+  useActiveRepo,
+  useWorkspaceStore,
+  type ChangesViewMode,
+} from "@/stores/workspaceStore";
+import { plural } from "@/lib/gitDisplay";
+import { cn } from "@/lib/utils";
 import { FileChangeRow, StageToggle } from "../FileChangeRow";
 import { GenerateCommitsDialog } from "./GenerateCommitsDialog";
 import { FileChangeTree } from "./FileChangeTree";
@@ -26,12 +38,18 @@ function GroupHeader({
 }) {
   return (
     <ChangesMenu>
-      <div className="sticky top-0 z-[2] flex items-center gap-2 bg-panel px-3.5 py-[7px]">
+      {/* Sits below the sticky changes header, which is ~34px tall. */}
+      <div className="sticky top-[34px] z-[2] flex items-center gap-2 bg-panel2/40 px-3.5 py-[7px]">
         {tone === "staged" ? (
-          <span className="size-1.5 flex-none rounded-full bg-primary" />
+          <GitCommitHorizontal
+            size={16}
+            strokeWidth={2}
+            className="flex-none text-modified"
+            aria-hidden
+          />
         ) : (
           <Pencil
-            size={11}
+            size={15}
             strokeWidth={2}
             className="flex-none text-modified"
             aria-hidden
@@ -49,12 +67,70 @@ function GroupHeader({
   );
 }
 
+/** Two-way switch between the folder tree and the flat file list. */
+function ViewModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: ChangesViewMode;
+  onChange: (mode: ChangesViewMode) => void;
+}) {
+  const options: Array<{
+    value: ChangesViewMode;
+    label: string;
+    tooltip: string;
+    Icon: typeof FolderTree;
+  }> = [
+    {
+      value: "tree",
+      label: "Tree",
+      tooltip: "Group changed files by folder",
+      Icon: FolderTree,
+    },
+    {
+      value: "list",
+      label: "List",
+      tooltip: "Show every changed file in one flat list",
+      Icon: List,
+    },
+  ];
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Changed file layout"
+      className="flex items-center gap-0.5 rounded border border-border bg-panel2 p-0.5"
+    >
+      {options.map(({ value, label, tooltip, Icon }) => (
+        <TooltipButton
+          key={value}
+          type="button"
+          role="radio"
+          aria-checked={mode === value}
+          aria-label={label}
+          tooltip={tooltip}
+          tooltipSide="top"
+          onClick={() => onChange(value)}
+          className={cn(
+            "flex size-[18px] flex-none items-center justify-center rounded p-0 text-sub hover:bg-panel3 hover:text-foreground",
+            mode === value && "bg-soft text-accent-text hover:bg-soft",
+          )}
+        >
+          <Icon className="size-3" />
+        </TooltipButton>
+      ))}
+    </div>
+  );
+}
+
 export function ChangesList() {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const repo = useActiveRepo();
   const status = useStatus(repo?.id ?? null);
   const openDiff = useUiStore((s) => s.openDiff);
   const openConflict = useUiStore((s) => s.openConflict);
+  const changesViewMode = useWorkspaceStore((s) => s.changesViewMode);
+  const setChangesViewMode = useWorkspaceStore((s) => s.setChangesViewMode);
   const m = useGitMutations(repo?.id ?? null);
 
   const staged = status.data?.staged ?? [];
@@ -78,34 +154,43 @@ export function ChangesList() {
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <GroupHeader label="UNSTAGED" count={unstaged.length} tone="unstaged">
-          {hasChanges && (
-            <>
-              {unstaged.length > 0 && (
+        <ChangesMenu>
+          <div className="sticky top-0 z-[3] flex items-center gap-2 border-b border-border/70 bg-panel px-3.5 py-2">
+            <span className="text-xs font-semibold text-foreground">
+              {hasChanges ? plural(changedFiles, "change") : "No changes"}
+            </span>
+            <div className="ml-auto flex items-center gap-1">
+              <ViewModeToggle
+                mode={changesViewMode}
+                onChange={setChangesViewMode}
+              />
+              {hasChanges && (
                 <Button
-                  size="sm"
-                  onClick={() => m.stageAll.mutate()}
+                  variant="ghost"
+                  size="icon-xs"
+                  tooltip="Discard all changes"
+                  tooltipSide="top"
+                  onClick={() => setConfirmDiscard(true)}
                   disabled={stagingPending}
-                  className="h-auto rounded border border-primary/50 bg-soft px-2 py-0.5 text-2xs font-semibold text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
+                  className="h-5 w-5 rounded text-removed hover:bg-removed/10 hover:text-removed"
                 >
-                  {m.stageAll.isPending && (
-                    <PendingIndicator className="size-3" />
-                  )}
-                  {m.stageAll.isPending ? "Staging…" : "Stage all"}
+                  <Trash2 className="size-3" />
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                tooltip="Discard all changes"
-                tooltipSide="top"
-                onClick={() => setConfirmDiscard(true)}
-                disabled={stagingPending}
-                className="h-5 w-5 rounded text-removed hover:bg-removed/10 hover:text-removed"
-              >
-                <Trash2 className="size-3" />
-              </Button>
-            </>
+            </div>
+          </div>
+        </ChangesMenu>
+        <GroupHeader label="UNSTAGED" count={unstaged.length} tone="unstaged">
+          {unstaged.length > 0 && (
+            <Button
+              size="sm"
+              onClick={() => m.stageAll.mutate()}
+              disabled={stagingPending}
+              className="h-auto rounded border border-primary/50 bg-soft px-2 py-0.5 text-2xs font-semibold text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
+            >
+              {m.stageAll.isPending && <PendingIndicator className="size-3" />}
+              {m.stageAll.isPending ? "Staging…" : "Stage all"}
+            </Button>
           )}
         </GroupHeader>
         {unstaged.length > 0 && (
@@ -114,6 +199,7 @@ export function ChangesList() {
             allFiles={allFiles}
             treeId="unstaged"
             staged={false}
+            viewMode={changesViewMode}
             operationsDisabled={stagingPending}
             mutations={m}
             renderFile={(f, name, depth) =>
@@ -170,9 +256,7 @@ export function ChangesList() {
             Working tree clean
           </div>
         )}
-
         <div className="my-1 border-t-2 border-border/70" />
-
         <GroupHeader label="STAGED" count={staged.length} tone="staged">
           {staged.length > 0 && (
             <Button
@@ -180,7 +264,7 @@ export function ChangesList() {
               size="sm"
               onClick={() => m.unstageAll.mutate()}
               disabled={stagingPending}
-              className="h-auto rounded px-[7px] py-0.5 text-2xs text-sub hover:bg-panel3 hover:text-foreground"
+              className="h-auto rounded px-[7px] py-0.5 text-2xs text-sub hover:bg-panel3 hover:text-foreground border-primary/40 border"
             >
               {m.unstageAll.isPending && (
                 <PendingIndicator className="size-3" />
@@ -195,6 +279,7 @@ export function ChangesList() {
             allFiles={allFiles}
             treeId="staged"
             staged
+            viewMode={changesViewMode}
             operationsDisabled={stagingPending}
             mutations={m}
             renderFile={(f, name, depth) => (

@@ -37,7 +37,9 @@ const EDITOR_KINDS = new Set<EditorKind>([
 ])
 export const DEFAULT_EDITOR: EditorKind = 'vs_code'
 export type ChangeSizeDisplay = 'row' | 'column'
-export type RepoPickerSection = 'pinned_groups' | 'pinned_repositories' | 'recent' | 'watched'
+/** How the changed-file lists are arranged: grouped by folder, or one flat row per file. */
+export type ChangesViewMode = 'tree' | 'list'
+export type RepoPickerSection ='pinned_groups' | 'pinned_repositories' | 'recent' | 'watched'
 
 const REPO_PICKER_SECTIONS = new Set<RepoPickerSection>([
   'pinned_groups',
@@ -431,6 +433,8 @@ interface WorkspaceState {
    * collapsed and a deleted folder simply drops out on the next write (persisted).
    */
   expandedChangeFolders: Record<string, string[]>
+  /** Whether the changed-file lists group by folder or show one flat row per file (persisted). */
+  changesViewMode: ChangesViewMode
   /** True once settings.json has been read on launch. */
   hydrated: boolean
 
@@ -506,6 +510,8 @@ interface WorkspaceState {
    * folders are all collapsed.
    */
   setExpandedChangeFolders: (key: string, folders: string[]) => void
+  /** Switch the changed-file lists between the folder tree and the flat list. */
+  setChangesViewMode: (mode: ChangesViewMode) => void
   /**
    * Choose how tabs are arranged. Manual restores the user's dragged order.
    * Picking the sort that is already active flips its direction instead, so a
@@ -620,6 +626,7 @@ function toSettings(s: WorkspaceState): Settings {
     pinned_saved_group_ids: s.pinnedSavedGroupIds,
     repo_picker_collapsed_sections: s.repoPickerCollapsedSections,
     expanded_change_folders: s.expandedChangeFolders,
+    changes_view_mode: s.changesViewMode,
   }
 }
 
@@ -800,6 +807,7 @@ export const SETTINGS_DEFAULTS = {
   mintAccent: true,
   showRepoIcons: true,
   tabIconOnly: false,
+  changesViewMode: "tree",
 } satisfies Partial<WorkspaceState>;
 
 /** A resettable preference key. */
@@ -825,6 +833,7 @@ export const SETTINGS_GROUPS = {
     'changeSizeDisplay', 'showChangeIndicator', 'showChangeLineCounts',
     'uiScale', 'fontFamily', 'fontSize', 'fontWeight',
     'theme', 'themeMode', 'mintAccent', 'showRepoIcons', 'tabIconOnly',
+    'changesViewMode',
   ],
 } satisfies Record<string, SettingsKey[]>
 
@@ -887,6 +896,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   pinnedSavedGroupIds: [],
   repoPickerCollapsedSections: [],
   expandedChangeFolders: {},
+  changesViewMode: "tree",
   hydrated: false,
 
   addRepo: (repo) => {
@@ -1483,6 +1493,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     });
     schedulePersist();
   },
+  setChangesViewMode: (mode) => {
+    set({ changesViewMode: mode });
+    schedulePersist();
+  },
   setTabSort: (sort) => {
     // Re-picking the active sort flips it; switching sorts starts forward, so
     // Name always opens as A-Z rather than inheriting the last rule's direction.
@@ -1809,6 +1823,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         expandedChangeFolders: normalizeExpandedChangeFolders(
           settings.expanded_change_folders,
         ),
+        changesViewMode: settings.changes_view_mode === "list" ? "list" : "tree",
         hydrated: true,
       });
     }

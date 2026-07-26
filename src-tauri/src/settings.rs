@@ -274,6 +274,10 @@ pub struct Settings {
   /// |unstaged>`. Only open folders are stored; anything absent is collapsed.
   #[serde(default)]
   pub expanded_change_folders: HashMap<String, Vec<String>>,
+  /// How the changed-file lists are arranged: "tree" groups by folder, "list"
+  /// shows one flat row per file. None means tree. Validated on the frontend.
+  #[serde(default)]
+  pub changes_view_mode: Option<String>,
 }
 
 fn default_mint_accent() -> bool {
@@ -359,6 +363,7 @@ impl Default for Settings {
       pinned_saved_group_ids: None,
       repo_picker_collapsed_sections: Vec::new(),
       expanded_change_folders: HashMap::new(),
+      changes_view_mode: None,
       tag_push_default: None,
       tag_push_on_create: false,
       tag_overrides_by_repo: HashMap::new(),
@@ -703,6 +708,20 @@ mod tests {
       restored.expanded_change_folders["c:\\code\\gitwyrm|unstaged"],
       vec!["src".to_string(), "src/components".to_string()]
     );
+  }
+
+  #[test]
+  fn changes_view_mode_round_trips_through_settings_json() {
+    let settings = Settings {
+      changes_view_mode: Some("list".to_string()),
+      ..Settings::default()
+    };
+
+    let json = serde_json::to_string(&settings).expect("settings should serialize");
+    let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
+
+    assert_eq!(restored.changes_view_mode.as_deref(), Some("list"));
+    assert_eq!(Settings::default().changes_view_mode, None);
   }
 
   #[test]

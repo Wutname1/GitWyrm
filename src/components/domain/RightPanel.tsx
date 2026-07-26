@@ -1,21 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { useBranches, useStatus } from "@/hooks/useGitQueries";
 import { useUiStore } from "@/stores/uiStore";
-import { useActiveRepo } from "@/stores/workspaceStore";
 import { GithubContextPanel } from "./github/GithubContextPanel";
 import { ChangesList } from "./commit-form/ChangesList";
 import { CommitMessageForm } from "./commit-form/CommitMessageForm";
 
 export function RightPanel() {
-  const repo = useActiveRepo();
-  const status = useStatus(repo?.id ?? null);
-  const branches = useBranches(repo?.id ?? null);
   const changesFocusNonce = useUiStore((s) => s.changesFocusNonce);
-
-  const currentBranch = branches.data?.local.find((b) => b.is_head)?.name ?? "";
-  const total =
-    (status.data?.staged.length ?? 0) + (status.data?.unstaged.length ?? 0);
 
   const [flash, setFlash] = useState(false);
   const headerRef = useRef<HTMLDivElement>(null);
