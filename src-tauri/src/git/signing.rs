@@ -362,6 +362,17 @@ pub fn generate_key(name: &str, email: &str) -> Result<String, AppError> {
 
   ensure_bundled_gpg_configured()?;
 
+  // Which keys existed beforehand, so the new one can be identified by
+  // subtraction. gpg does not print the id of the key it just made, and its
+  // listing order follows keyring position rather than age - so "the last
+  // match" picks whichever key gpg happens to list last, which for someone
+  // with two keys on one address is the old one.
+  let before: std::collections::HashSet<String> = list_secret_keys()
+    .unwrap_or_default()
+    .into_iter()
+    .map(|k| k.id)
+    .collect();
+
   let uid = format!("{name} <{email}>");
   run_gpg(&[
     "--batch",
@@ -372,16 +383,68 @@ pub fn generate_key(name: &str, email: &str) -> Result<String, AppError> {
     "ed25519",
     "sign",
     "never",
-  ])?;
+  ])
+  .map_err(|e| {
+    // gpg refuses a duplicate identity. Say what to do about it rather than
+    // passing through a message that reads like a crash.
+    if e.to_string().contains("already exists") {
+      AppError::Other(format!(
+        "You already have a signing key for {email}. Pick it from the list, or use a different email."
+      ))
+    } else {
+      e
+    }
+  })?;
 
-  // gpg does not print the new key id, so read back the newest matching key.
-  let keys = list_secret_keys()?;
-  keys
+  let after = list_secret_keys()?;
+  after
     .into_iter()
-    .rev()
-    .find(|k| k.uid.contains(email))
+    .find(|k| !before.contains(&k.id))
     .map(|k| k.id)
     .ok_or_else(|| AppError::Other("The key was made but could not be found again.".into()))
+}
+
+/// Delete a signing key, secret half included.
+///
+/// Irreversible: the secret key is what signs, and gpg keeps no copy once it is
+/// gone. Anything already signed with it stays valid and verifiable by anyone
+/// holding the public half, but nothing new can ever be signed with it again.
+/// The caller is expected to have confirmed with the user first.
+///
+/// `--delete-secret-and-public-key` takes the fingerprint, not the key id: an
+/// id is only the tail of a fingerprint and can collide, and gpg refuses a
+/// non-unique specification rather than guessing.
+pub fn delete_key(fingerprint: &str) -> Result<(), AppError> {
+  let fingerprint = fingerprint.trim();
+  if fingerprint.is_empty() {
+    return Err(AppError::Other("No key was given to delete.".into()));
+  }
+
+  run_gpg(&[
+    "--batch",
+    "--yes",
+    "--delete-secret-and-public-key",
+    fingerprint,
+  ])?;
+  Ok(())
+}
+
+/// Clear a repository's signing config when it points at a key that is gone.
+///
+/// Without this, deleting the key a repository was signing with leaves git
+/// configured to sign with a key that no longer exists, and every commit fails
+/// with "secret key not available".
+pub fn forget_key_if_configured(repo_path: &str, key_id: &str) -> Result<(), AppError> {
+  let configured = git_config_value(repo_path, "user.signingkey");
+  let points_at_it = configured
+    .as_deref()
+    .is_some_and(|c| c.eq_ignore_ascii_case(key_id) || key_id.ends_with(c) || c.ends_with(key_id));
+
+  if points_at_it {
+    let _ = run_git(Some(repo_path), &["config", "--unset", "user.signingkey"]);
+    let _ = run_git(Some(repo_path), &["config", "commit.gpgsign", "false"]);
+  }
+  Ok(())
 }
 
 /// Export a public key in the armored form hosting providers expect.
@@ -511,6 +574,15 @@ fpr:::::::::FEDCBA9876543210FEDCBA9876543210FEDCBA98:";
   fn paths_that_are_not_drive_letters_pass_through() {
     // A UNC or already-POSIX path has no drive letter to rewrite.
     assert_eq!(to_cygdrive(Path::new("/tmp/keys")), "/tmp/keys");
+  }
+
+  #[test]
+  fn deleting_requires_a_key_to_delete() {
+    // Reached before any gpg call. A blank fingerprint passed through to
+    // `--delete-secret-and-public-key` would match nothing at best, and is not
+    // a request worth sending.
+    assert!(delete_key("").is_err());
+    assert!(delete_key("   ").is_err());
   }
 
   #[test]

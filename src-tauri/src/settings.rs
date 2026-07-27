@@ -188,6 +188,13 @@ pub struct Settings {
   /// anyone who keeps "reopen my last tabs" off.
   #[serde(default)]
   pub onboarding_seen: bool,
+  /// Fingerprints of signing keys the user has confirmed they uploaded to their
+  /// host. Drives the "finish setting this key up" checklist, which has to
+  /// survive a reload: a key is only half-usable until its public half is on the
+  /// host, and that is a job people leave half-done. Keys made before this
+  /// existed are treated as already handled rather than nagged about.
+  #[serde(default)]
+  pub signing_keys_published: Vec<String>,
   /// Whole-app zoom factor (1.0 = 100%). None uses the default of 1.0.
   /// Clamped on the frontend before display.
   #[serde(default)]
@@ -357,6 +364,7 @@ impl Default for Settings {
       enable_worktrees: false,
       restore_tabs: true,
       onboarding_seen: false,
+      signing_keys_published: Vec::new(),
       ui_scale: None,
       font_family: None,
       font_size: None,

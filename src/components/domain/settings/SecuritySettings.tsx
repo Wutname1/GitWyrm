@@ -8,11 +8,14 @@ import {
   Loader2,
   ShieldCheck,
   Sparkles,
+  Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { commands, type SigningKey, type SigningStatus } from '@/lib/bindings'
+import { cn } from '@/lib/utils'
 import { useGitIdentity } from '@/lib/useGitIdentity'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import { SettingRow } from './SettingRow'
@@ -41,28 +44,38 @@ export function SecuritySettings() {
 /* ------------------------------------------------------------------ signing */
 
 function SigningSection({ repoPath }: { repoPath: string | null }) {
-  // Bumped after any change that alters signing state, to re-read it.
-  const [nonce, setNonce] = useState(0)
-  const refresh = useCallback(() => setNonce((n) => n + 1), [])
-
   const [status, setStatus] = useState<SigningStatus | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useToolCheck(async (): Promise<ToolState> => {
+  // Loaded directly rather than through useToolCheck: that hook is for the
+  // git/gpg version probes and takes a fresh deps array on every render, so it
+  // could not tell a real refresh from a re-render. Making a key then left the
+  // panel showing pre-key state even though the backend had done the work.
+  const load = useCallback(async () => {
     if (!repoPath) {
+      setStatus(null)
       setLoading(false)
-      return { state: 'checking' }
+      return
     }
     setLoading(true)
     const res = await commands.getSigningStatus(repoPath)
     setLoading(false)
     if (res.status === 'ok') {
       setStatus(res.data)
-      return { state: 'ok', version: '', source: res.data.gpgSource }
+    } else {
+      setStatus(null)
+      toast.error(res.error)
     }
-    setStatus(null)
-    return { state: 'error', message: res.error }
-  }, [repoPath, nonce])
+  }, [repoPath])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  /** Re-read after anything that changes signing state. */
+  const refresh = useCallback(() => {
+    void load()
+  }, [load])
 
   if (!repoPath) {
     return (
@@ -393,13 +406,29 @@ function HasKey({
         </div>
       </SettingRow>
 
-      {active && <KeyCard keyInfo={active} />}
+      {active && <KeyCard keyInfo={active} repoPath={repoPath} onDeleted={onChanged} />}
     </div>
   )
 }
 
-function KeyCard({ keyInfo }: { keyInfo: SigningKey }) {
+function KeyCard({
+  keyInfo,
+  repoPath,
+  onDeleted,
+}: {
+  keyInfo: SigningKey
+  repoPath: string
+  onDeleted: () => void
+}) {
+  const published = useWorkspaceStore((s) => s.signingKeysPublished)
+  const markPublished = useWorkspaceStore((s) => s.markSigningKeyPublished)
+
   const [copied, setCopied] = useState(false)
+  const [opened, setOpened] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const isPublished = published.includes(keyInfo.fingerprint)
 
   const copyPublicKey = async () => {
     const res = await commands.exportSigningKey(keyInfo.id)
@@ -408,43 +437,177 @@ function KeyCard({ keyInfo }: { keyInfo: SigningKey }) {
       return
     }
     await navigator.clipboard.writeText(res.data)
-    // Rule #1: the button itself confirms, not just a toast that may be missed.
+    // Stays ticked. An earlier version cleared this on a timer, which undid the
+    // checkmark while the user was still on the host tab pasting it.
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-    toast.success('Public key copied. Paste it on your host to finish.')
+    toast.success('Public key copied. Now paste it on your host.')
   }
 
   const openHostSettings = async () => {
     const { openUrl } = await import('@tauri-apps/plugin-opener')
     await openUrl('https://github.com/settings/gpg/new')
+    setOpened(true)
+  }
+
+  const remove = async () => {
+    setDeleting(true)
+    const res = await commands.deleteSigningKey(repoPath, keyInfo.id, keyInfo.fingerprint)
+    setDeleting(false)
+    setConfirmDelete(false)
+    if (res.status !== 'ok') {
+      toast.error(res.error)
+      return
+    }
+    toast.success('Key deleted.')
+    onDeleted()
   }
 
   return (
     <div className="rounded-md border border-border bg-panel p-3">
-      <div className="flex items-center gap-2">
-        <KeyRound size={14} className="text-accent-text" />
-        <span className="truncate text-xs font-semibold text-foreground">
-          {keyInfo.uid || 'Your signing key'}
-        </span>
-      </div>
-      <div className="mt-1 font-mono text-2xs text-muted-foreground">{keyInfo.fingerprint}</div>
-
-      <p className="mt-2.5 text-2xs text-muted-foreground">
-        To get the Verified badge, your host needs the public half of this key. Copy it, then add
-        it in your account settings.
-      </p>
-
-      <div className="mt-2.5 flex flex-wrap gap-2">
-        <Button size="sm" variant="secondary" className="h-7" onClick={copyPublicKey}>
-          {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
-          {copied ? 'Copied' : 'Copy public key'}
+      <div className="flex items-start gap-2">
+        <KeyRound size={14} className="mt-0.5 flex-none text-accent-text" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-semibold text-foreground">
+            {keyInfo.uid || 'Your signing key'}
+          </div>
+          <div className="mt-0.5 font-mono text-2xs text-muted-foreground">
+            {keyInfo.fingerprint}
+          </div>
+        </div>
+        {isPublished && (
+          <span className="flex flex-none items-center gap-1 text-2xs text-emerald-500">
+            <ShieldCheck size={12} />
+            On your host
+          </span>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 flex-none text-muted-foreground hover:text-removed"
+          tooltip="Delete this key"
+          onClick={() => setConfirmDelete(true)}
+        >
+          <Trash2 size={12} />
         </Button>
-        <Button size="sm" variant="secondary" className="h-7" onClick={openHostSettings}>
-          <ExternalLink size={12} />
-          Add it on GitHub
-        </Button>
       </div>
+
+      {/* Only while the key still needs publishing. The key alone signs nothing
+          anyone can verify: until the public half is on the host, commits show
+          as Unverified, which reads as a bug rather than an unfinished setup.
+          Once the user says they have done it the panel goes quiet for good --
+          keys that predate this setting count as done, so nobody is nagged
+          about a key they set up years ago. */}
+      {!isPublished && (
+        <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+            <AlertTriangle size={13} className="flex-none text-amber-500" />
+            Two steps left, or your commits still show as unverified
+          </div>
+          <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
+            Your commits are being signed already. For GitHub to show the Verified badge, it needs
+            the public half of this key - GitWyrm cannot upload it for you.
+          </p>
+
+          <ol className="mt-2.5 grid gap-2">
+            <Step
+              done={copied}
+              index={1}
+              label="Copy the public key"
+              action={
+                <Button size="sm" variant="secondary" className="h-7" onClick={copyPublicKey}>
+                  {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                  {copied ? 'Copied' : 'Copy public key'}
+                </Button>
+              }
+            />
+            <Step
+              done={opened}
+              index={2}
+              label="Paste it on GitHub and save"
+              action={
+                <Button size="sm" variant="secondary" className="h-7" onClick={openHostSettings}>
+                  <ExternalLink size={12} />
+                  Open GitHub
+                </Button>
+              }
+            />
+          </ol>
+
+          <Button
+            size="sm"
+            className="mt-3 h-7 w-full"
+            onClick={() => {
+              markPublished(keyInfo.fingerprint)
+              toast.success('Nice. Your commits should show as Verified from now on.')
+            }}
+          >
+            <Check size={12} />
+            I have added it - stop reminding me
+          </Button>
+        </div>
+      )}
+
+      {isPublished && (
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" className="h-7" onClick={copyPublicKey}>
+            {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+            {copied ? 'Copied' : 'Copy public key'}
+          </Button>
+          <Button size="sm" variant="secondary" className="h-7" onClick={openHostSettings}>
+            <ExternalLink size={12} />
+            Open GitHub
+          </Button>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete this signing key?"
+        description="This cannot be undone. Commits you already signed stay valid, but nothing new can be signed with this key. If this repository is set to sign with it, signing is turned off."
+        confirmLabel="Delete key"
+        destructive
+        pending={deleting}
+        pendingLabel="Deleting..."
+        keepOpenOnConfirm
+        onConfirm={remove}
+      />
     </div>
+  )
+}
+
+/** One numbered step, ticked once the user has done it. */
+function Step({
+  done,
+  index,
+  label,
+  action,
+}: {
+  done: boolean
+  index: number
+  label: string
+  action: React.ReactNode
+}) {
+  return (
+    <li className="flex items-center gap-2.5">
+      <span
+        className={cn(
+          'grid size-4 flex-none place-items-center rounded-full text-[9px] font-bold',
+          done ? 'bg-emerald-500 text-white' : 'bg-border text-muted-foreground'
+        )}
+      >
+        {done ? <Check size={10} strokeWidth={3} /> : index}
+      </span>
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate text-2xs',
+          done ? 'text-muted-foreground line-through' : 'text-foreground'
+        )}
+      >
+        {label}
+      </span>
+      {action}
+    </li>
   )
 }
 

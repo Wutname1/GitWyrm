@@ -299,6 +299,21 @@ async setSigningEnabled(repoPath: string, enabled: boolean, keyId: string | null
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Delete a signing key for good. The UI confirms before calling this.
+ * 
+ * Takes the fingerprint (unique) rather than the key id (can collide), plus
+ * the id so a repository configured to sign with it can be cleaned up in the
+ * same step - otherwise its next commit fails with "secret key not available".
+ */
+async deleteSigningKey(repoPath: string, keyId: string, fingerprint: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_signing_key", { repoPath, keyId, fingerprint }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async repairSigningFormat(repoPath: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("repair_signing_format", { repoPath }) };
@@ -2097,6 +2112,14 @@ restore_tabs?: boolean;
  * anyone who keeps "reopen my last tabs" off.
  */
 onboarding_seen?: boolean; 
+/**
+ * Fingerprints of signing keys the user has confirmed they uploaded to their
+ * host. Drives the "finish setting this key up" checklist, which has to
+ * survive a reload: a key is only half-usable until its public half is on the
+ * host, and that is a job people leave half-done. Keys made before this
+ * existed are treated as already handled rather than nagged about.
+ */
+signing_keys_published?: string[]; 
 /**
  * Whole-app zoom factor (1.0 = 100%). None uses the default of 1.0.
  * Clamped on the frontend before display.

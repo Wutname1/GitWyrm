@@ -115,6 +115,26 @@ pub async fn set_signing_enabled(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Delete a signing key for good. The UI confirms before calling this.
+///
+/// Takes the fingerprint (unique) rather than the key id (can collide), plus
+/// the id so a repository configured to sign with it can be cleaned up in the
+/// same step - otherwise its next commit fails with "secret key not available".
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_signing_key(
+  repo_path: String,
+  key_id: String,
+  fingerprint: String,
+) -> Result<(), AppError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    signing::delete_key(&fingerprint)?;
+    signing::forget_key_if_configured(&repo_path, &key_id)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn repair_signing_format(repo_path: String) -> Result<(), AppError> {

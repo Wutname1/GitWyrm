@@ -101,6 +101,7 @@ tar -xjf "$WORK/git-portable.tar.bz2" -C "$WORK" \
   --wildcards \
   'usr/bin/gpg*.exe' \
   'usr/bin/pinentry*.exe' \
+  'usr/bin/ssh-keygen.exe' \
   'usr/bin/msys-*.dll' \
   'usr/lib/gnupg/*'
 
@@ -109,6 +110,11 @@ tar -xjf "$WORK/git-portable.tar.bz2" -C "$WORK" \
 # when its socket path grows too long).
 cp "$WORK"/usr/bin/gpg*.exe "$DEST/gpg/"
 cp "$WORK"/usr/bin/pinentry*.exe "$DEST/gpg/"
+
+# ssh-keygen is what signs commits when the user picks SSH over GPG, and it is
+# the one ssh tool MinGit leaves out (it ships ssh, ssh-add and ssh-agent, but
+# not keygen). Lives beside gpg so both signing backends resolve the same way.
+cp "$WORK"/usr/bin/ssh-keygen.exe "$DEST/gpg/"
 mkdir -p "$DEST/gpg/lib/gnupg"
 cp "$WORK"/usr/lib/gnupg/* "$DEST/gpg/lib/gnupg/" 2>/dev/null || true
 

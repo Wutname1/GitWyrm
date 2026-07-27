@@ -52,6 +52,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::signing::create_signing_key,
     commands::signing::export_signing_key,
     commands::signing::set_signing_enabled,
+    commands::signing::delete_signing_key,
     commands::signing::repair_signing_format,
     commands::repo::git_init,
     commands::repo_icon::get_repo_icon,
