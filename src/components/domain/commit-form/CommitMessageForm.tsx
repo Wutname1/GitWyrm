@@ -96,7 +96,31 @@ export function CommitMessageForm() {
     [],
   );
 
-  // When amend is turned on with empty fields, pre-fill the previous message.
+  // Amend swaps the box between two jobs: writing a new commit and rewriting
+  // the previous one. The fields always follow the toggle -- turning it on
+  // shows the previous message (replacing anything typed), turning it off
+  // clears back to an empty new commit.
+  const toggleAmend = (next: boolean) => {
+    setAmend(next);
+    if (!next) {
+      setMsg("");
+      setDesc("");
+      return;
+    }
+    // The previous commit may not be loaded yet on the first tick; the effect
+    // below fills it in as soon as it arrives.
+    if (headDetail.data) {
+      setMsg(headDetail.data.summary);
+      setDesc(headDetail.data.body);
+    } else {
+      setMsg("");
+      setDesc("");
+    }
+  };
+
+  // Covers the case above: amend was switched on before the previous commit
+  // had loaded. Only fills empty fields, so it never clobbers an edit the user
+  // started while the fetch was in flight.
   useEffect(() => {
     if (!amend || !headDetail.data) return;
     setMsg((m) => (m.trim().length > 0 ? m : headDetail.data.summary));
@@ -288,7 +312,7 @@ export function CommitMessageForm() {
           <input
             type="checkbox"
             checked={amend}
-            onChange={(e) => setAmend(e.target.checked)}
+            onChange={(e) => toggleAmend(e.target.checked)}
             className="size-3.5 accent-primary"
           />
           <Pencil size={12} strokeWidth={2} />
