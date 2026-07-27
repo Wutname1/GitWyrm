@@ -5,6 +5,7 @@ import { detectProvider, providerLabel } from '@/lib/remoteProvider'
 import { resolveDropPair, type DraggedRef } from '@/lib/refSync'
 import { cn } from '@/lib/utils'
 import { useBranches, useRemotes } from '@/hooks/useGitQueries'
+import { useGitMutations } from '@/hooks/useGitMutations'
 import { useDragStore } from '@/stores/dragStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -73,6 +74,7 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
   const remotes = useRemotes(repo?.id ?? null)
+  const m = useGitMutations(repo?.id ?? null)
   const draggingRef = useDragStore((s) => s.draggingRef)
   const [open, setOpen] = useState(false)
   const branchMenuOpen = useRef(false)
@@ -82,10 +84,22 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
     if (nextOpen) setOpen(true)
   }
 
+  // Same as double-clicking the chip itself: the checkout mutation maps a
+  // remote-tracking ref onto its local branch, so the full ref name works either way.
+  const switchTo = (name: string) => {
+    if (m.checkout.isPending) return
+    m.checkout.mutate(name)
+    setOpen(false)
+  }
+
   const primary = refs.find((ref) => ref.type === 'head') ?? refs.find((ref) => ref.type === 'branch') ?? refs[0]
   const ordered = sortedRefs(refs, primary)
   const hiddenCount = refs.length - 1
   const label = shortName(primary)
+
+  // When the only things folded away are tags, tint the count segment with the
+  // tag colour so the chip says "tags behind here" without opening it.
+  const hidesOnlyTags = refs.every((refTag) => refTag === primary || refTag.type === 'tag')
 
   const canAccept = (dragged: DraggedRef) =>
     !!branches.data &&
@@ -106,7 +120,11 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`${label} and ${hiddenCount} more ${hiddenCount === 1 ? 'name' : 'names'} on this commit`}
+          aria-label={
+            hidesOnlyTags
+              ? `${label} and ${hiddenCount} ${hiddenCount === 1 ? 'tag' : 'tags'} on this commit`
+              : `${label} and ${hiddenCount} more ${hiddenCount === 1 ? 'name' : 'names'} on this commit`
+          }
           aria-expanded={open}
           onClick={(event) => {
             event.stopPropagation()
@@ -124,7 +142,14 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
             <GitBranch aria-hidden className="size-2.5 flex-none" />
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
           </span>
-          <span className="ml-1 flex h-full flex-none items-center gap-0.5 border-l border-primary-foreground/20 bg-black/10 px-1">
+          <span
+            className={cn(
+              'ml-1 flex h-full flex-none items-center gap-0.5 border-l px-1',
+              hidesOnlyTags
+                ? 'border-black/20 bg-lane1 text-[var(--gw-accent-fg)]'
+                : 'border-primary-foreground/20 bg-black/10'
+            )}
+          >
             +{hiddenCount}
             <ChevronDown
               aria-hidden
@@ -146,36 +171,44 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
       >
         <div className="border-b border-border bg-panel px-3 py-2.5">
           <div className="font-medium text-foreground">{refs.length} labels on this commit</div>
-          <div className="mt-0.5 text-2xs text-sub">Right-click a branch for options.</div>
+          <div className="mt-0.5 text-2xs text-sub">
+            Double-click a branch to switch to it. Right-click for more options.
+          </div>
         </div>
         <div className="relative max-h-64 overflow-y-auto px-3 py-2">
           <div aria-hidden className="absolute top-3 bottom-3 left-[19px] w-px bg-border" />
           <div className="space-y-1">
             {ordered.map((refTag) => {
               const source = sourceDetails(refTag, remotes.data ?? [])
-              const row = (
-                <div className="relative flex min-h-8 items-center gap-2.5 rounded-[5px] px-1.5 py-1 hover:bg-panel3">
-                  <span className="relative z-10 grid size-4 flex-none place-items-center rounded-full bg-panel2">
-                    <span
-                      aria-hidden
-                      className={cn('size-1.5 rounded-full ring-4', markerStyles[refTag.type])}
-                    />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <RefBadge refTag={refTag} withContextMenu={false} />
-                    <div className="mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-sub">
-                      {source}
+              const canSwitch = refTag.type === 'branch' || refTag.type === 'remote'
+              return (
+                <RefContextMenu
+                  key={`${refTag.type}:${refTag.name}`}
+                  refTag={refTag}
+                  onOpenChange={branchMenuChanged}
+                >
+                  <div
+                    onDoubleClick={canSwitch ? () => switchTo(refTag.name) : undefined}
+                    title={canSwitch ? `Double-click to switch to ${refTag.name}` : undefined}
+                    className={cn(
+                      'relative flex min-h-8 items-center gap-2.5 rounded-[5px] px-1.5 py-1 hover:bg-panel3',
+                      canSwitch && 'cursor-pointer'
+                    )}
+                  >
+                    <span className="relative z-10 grid size-4 flex-none place-items-center rounded-full bg-panel2">
+                      <span
+                        aria-hidden
+                        className={cn('size-1.5 rounded-full ring-4', markerStyles[refTag.type])}
+                      />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <RefBadge refTag={refTag} withContextMenu={false} />
+                      <div className="mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-sub">
+                        {source}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-              const key = `${refTag.type}:${refTag.name}`
-              return refTag.type === 'head' || refTag.type === 'branch' ? (
-                <RefContextMenu key={key} refTag={refTag} onOpenChange={branchMenuChanged}>
-                  {row}
                 </RefContextMenu>
-              ) : (
-                <div key={key}>{row}</div>
               )
             })}
           </div>
