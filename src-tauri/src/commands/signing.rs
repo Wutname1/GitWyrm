@@ -3,7 +3,28 @@
 
 use crate::error::AppError;
 use crate::git::bundled::ToolSource;
+use crate::git::identity::{self, GitIdentity};
 use crate::git::signing::{self, SigningStatus};
+
+/// The name and email git puts on commits. Empty fields mean git has not been
+/// set up yet, which the UI treats as "ask for it" rather than an error.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_git_identity() -> Result<GitIdentity, AppError> {
+  let identity = identity::read_identity();
+  if !identity.is_complete() {
+    // Worth a log line: this is why a first commit gets refused, and it is the
+    // single most likely thing to be wrong on a fresh machine.
+    log::info!("git identity is incomplete; commits will be refused until it is set");
+  }
+  Ok(identity)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_git_identity(name: String, email: String) -> Result<(), AppError> {
+  identity::write_identity(&name, &email)
+}
 
 /// Which git and gpg the app resolved, and where each came from. Drives the
 /// "using the copy that came with GitWyrm" vs "using your own" line in Settings.

@@ -1,9 +1,14 @@
-import { useState, type ReactNode } from 'react'
-import { FolderGit2, GitMerge, Sparkles } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { FolderGit2, GitMerge, Loader2, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { commands } from '@/lib/bindings'
+import { useGitIdentity } from '@/lib/useGitIdentity'
 import { useUiStore } from '@/stores/uiStore'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 interface Slide {
   icon: ReactNode
@@ -11,7 +16,7 @@ interface Slide {
   body: ReactNode
 }
 
-const SLIDES: Slide[] = [
+const TOUR_SLIDES: Slide[] = [
   {
     icon: <Sparkles size={22} strokeWidth={1.8} />,
     title: 'Welcome to GitWyrm',
@@ -41,51 +46,84 @@ const SLIDES: Slide[] = [
   },
 ]
 
+/**
+ * First-launch tour, ending in the one thing GitWyrm cannot work without: the
+ * name and email git puts on commits.
+ *
+ * Asking here is the difference between setting it up in ten seconds and
+ * hitting a refusal at the first commit, which is where people used to meet it.
+ */
 export function OnboardingModal() {
   const open = useUiStore((s) => s.activeModal === 'onboarding')
   const closeModal = useUiStore((s) => s.closeModal)
   const showRepoPicker = useUiStore((s) => s.showRepoPicker)
+  const markOnboardingSeen = useWorkspaceStore((s) => s.markOnboardingSeen)
   const [step, setStep] = useState(0)
 
-  const slide = SLIDES[step]
-  const isLast = step === SLIDES.length - 1
+  const { identity, isComplete } = useGitIdentity()
+
+  // Someone who already has git set up does not need to be asked again, so the
+  // identity step only exists when there is something to fill in. Frozen on
+  // first read: saving during the step would otherwise remove the step the
+  // user is standing on.
+  const [needsIdentity, setNeedsIdentity] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (identity !== null && needsIdentity === null) {
+      setNeedsIdentity(!isComplete)
+    }
+  }, [identity, isComplete, needsIdentity])
+
+  const slides = TOUR_SLIDES
+  const identityStepIndex = needsIdentity ? slides.length : -1
+  const lastIndex = needsIdentity ? slides.length : slides.length - 1
+  const onIdentityStep = step === identityStepIndex
 
   const finish = () => {
     setStep(0)
+    markOnboardingSeen()
     closeModal()
     showRepoPicker()
   }
 
   const skip = () => {
     setStep(0)
+    // Skipping still counts as seen: someone who dismissed the tour does not
+    // want it again on the next launch.
+    markOnboardingSeen()
     closeModal()
   }
+
+  const slide = onIdentityStep ? null : slides[step]
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && skip()}>
       <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
-        <div className="flex flex-col items-center px-6 pb-5 pt-8 text-center">
-          <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-soft text-accent-text">
-            {slide.icon}
+        {onIdentityStep ? (
+          <IdentityStep onDone={finish} />
+        ) : (
+          <div className="flex flex-col items-center px-6 pb-5 pt-8 text-center">
+            <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-soft text-accent-text">
+              {slide?.icon}
+            </div>
+            <DialogTitle className="text-base font-semibold text-foreground">
+              {slide?.title}
+            </DialogTitle>
+            <p className="mt-2 max-w-sm text-[0.78125rem] leading-relaxed text-sub">{slide?.body}</p>
           </div>
-          <DialogTitle className="text-base font-semibold text-foreground">
-            {slide.title}
-          </DialogTitle>
-          <p className="mt-2 max-w-sm text-[0.78125rem] leading-relaxed text-sub">{slide.body}</p>
+        )}
 
-          <div className="mt-5 flex items-center gap-1.5">
-            {SLIDES.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => setStep(i)}
-                aria-label={`Go to step ${i + 1}`}
-                className={cn(
-                  'h-1.5 rounded-full transition-all',
-                  i === step ? 'w-5 bg-primary' : 'w-1.5 bg-border hover:bg-muted-foreground'
-                )}
-              />
-            ))}
-          </div>
+        <div className="flex items-center justify-center gap-1.5 pb-4">
+          {Array.from({ length: lastIndex + 1 }, (_, i) => (
+            <button
+              key={i}
+              onClick={() => setStep(i)}
+              aria-label={`Go to step ${i + 1}`}
+              className={cn(
+                'h-1.5 rounded-full transition-all',
+                i === step ? 'w-5 bg-primary' : 'w-1.5 bg-border hover:bg-muted-foreground'
+              )}
+            />
+          ))}
         </div>
 
         <div className="flex items-center justify-between border-t border-border px-4 py-3">
@@ -98,18 +136,130 @@ export function OnboardingModal() {
                 Back
               </Button>
             )}
-            {isLast ? (
-              <Button size="sm" onClick={finish}>
-                Open a repository
-              </Button>
-            ) : (
-              <Button size="sm" onClick={() => setStep((s) => s + 1)}>
-                Next
-              </Button>
-            )}
+            {/* The identity step owns its own primary button, because it saves. */}
+            {!onIdentityStep &&
+              (step === lastIndex ? (
+                <Button size="sm" onClick={finish}>
+                  Open a repository
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => setStep((s) => s + 1)}>
+                  Next
+                </Button>
+              ))}
           </div>
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Name, email, and an optional signing key.
+ *
+ * Signing is offered rather than assumed: it is genuinely useful, but it is
+ * also a concept a first-time user has not met yet, so it is one checkbox with
+ * a plain-language explanation and no jargon.
+ */
+function IdentityStep({ onDone }: { onDone: () => void }) {
+  const { save } = useGitIdentity()
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [wantSigning, setWantSigning] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const ready = name.trim().length > 0 && email.trim().length > 0 && !busy
+
+  const submit = async () => {
+    if (!ready) return
+    setBusy(true)
+
+    const saved = await save(name, email)
+    if (!saved.ok) {
+      setBusy(false)
+      toast.error(saved.error)
+      return
+    }
+
+    if (wantSigning) {
+      const made = await commands.createSigningKey(name, email)
+      if (made.status !== 'ok') {
+        // The identity saved, so this is a partial success, not a failure:
+        // let them through and say what did not happen rather than trapping
+        // them on the step.
+        setBusy(false)
+        toast.error(`Saved your name and email, but the signing key failed: ${made.error}`)
+        onDone()
+        return
+      }
+      toast.success('Signing key ready. Turn it on for a repository in Settings > Security.')
+    }
+
+    setBusy(false)
+    onDone()
+  }
+
+  return (
+    <div className="flex flex-col items-center px-6 pb-5 pt-8 text-center">
+      <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-soft text-accent-text">
+        <UserRound size={22} strokeWidth={1.8} />
+      </div>
+      <DialogTitle className="text-base font-semibold text-foreground">
+        Who should we put on your commits?
+      </DialogTitle>
+      <p className="mt-2 max-w-sm text-[0.78125rem] leading-relaxed text-sub">
+        Every commit records who made it. Git needs this before it will save any work.
+      </p>
+
+      <div className="mt-4 grid w-full gap-2">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          placeholder="Your name"
+          className="h-9 bg-background text-xs"
+          aria-label="Your name"
+          autoFocus
+        />
+        <Input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          placeholder="you@example.com"
+          className="h-9 bg-background text-xs"
+          aria-label="Your email"
+        />
+      </div>
+
+      <label className="mt-4 flex w-full cursor-pointer items-start gap-2 rounded-md border border-border bg-panel p-3 text-left">
+        <input
+          type="checkbox"
+          checked={wantSigning}
+          onChange={(e) => setWantSigning(e.target.checked)}
+          className="mt-0.5 size-3.5 flex-none accent-[var(--gw-accent)]"
+        />
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+            <ShieldCheck size={13} className="text-accent-text" />
+            Also prove my commits are really mine
+          </span>
+          <span className="mt-0.5 block text-2xs leading-relaxed text-muted-foreground">
+            Makes a signing key so hosts like GitHub can show a Verified badge on your work. You
+            can turn this on later instead.
+          </span>
+        </span>
+      </label>
+
+      <Button size="sm" className="mt-4 h-9 w-full" onClick={submit} disabled={!ready}>
+        {busy ? (
+          <>
+            <Loader2 size={14} className="animate-spin" />
+            {wantSigning ? 'Setting things up...' : 'Saving...'}
+          </>
+        ) : (
+          'Save and open a repository'
+        )}
+      </Button>
+    </div>
   )
 }

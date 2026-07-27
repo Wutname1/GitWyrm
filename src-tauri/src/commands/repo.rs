@@ -284,12 +284,12 @@ pub async fn git_init(
       let config = git2::Config::open_default()?;
       let name = config.get_string("user.name").map_err(|_| {
         AppError::Other(
-          "Git does not know your name. Set it in Git before saving the starter files to history".into(),
+          "Git does not know your name yet. Add it in Settings > General, then try again.".into(),
         )
       })?;
       let email = config.get_string("user.email").map_err(|_| {
         AppError::Other(
-          "Git does not know your email. Set it in Git before saving the starter files to history".into(),
+          "Git does not know your email yet. Add it in Settings > General, then try again.".into(),
         )
       })?;
       Some(git2::Signature::now(&name, &email)?)

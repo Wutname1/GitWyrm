@@ -20,7 +20,9 @@ pub async fn create_commit(
     let repo = open.repo.lock().unwrap();
 
     let signature = repo.signature().map_err(|_| {
-      AppError::Other("git user.name / user.email are not configured".into())
+      AppError::Other(
+        "Git does not know your name and email yet. Add them in Settings > General, then commit again.".into(),
+      )
     })?;
 
     let mut index = repo.index()?;

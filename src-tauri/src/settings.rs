@@ -183,6 +183,11 @@ pub struct Settings {
   /// the app starts with no repository open.
   #[serde(default = "default_restore_tabs")]
   pub restore_tabs: bool,
+  /// Whether the welcome tour has been shown. Without this the tour reopens on
+  /// every launch that starts with no repository, which is the normal state for
+  /// anyone who keeps "reopen my last tabs" off.
+  #[serde(default)]
+  pub onboarding_seen: bool,
   /// Whole-app zoom factor (1.0 = 100%). None uses the default of 1.0.
   /// Clamped on the frontend before display.
   #[serde(default)]
@@ -351,6 +356,7 @@ impl Default for Settings {
       default_editor: None,
       enable_worktrees: false,
       restore_tabs: true,
+      onboarding_seen: false,
       ui_scale: None,
       font_family: None,
       font_size: None,
@@ -634,6 +640,10 @@ mod tests {
     assert!(settings.mint_accent);
     // Settings written before this key existed keep reopening their tabs.
     assert!(settings.restore_tabs);
+    // An existing user's settings file has no onboarding flag, so it reads as
+    // false. They see the tour once, which is the intended one-time cost of
+    // adding the identity step to it.
+    assert!(!settings.onboarding_seen);
     // Settings written before the editor picker existed fall back to VS Code
     // on the frontend.
     assert!(settings.default_editor.is_none());

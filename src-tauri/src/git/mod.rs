@@ -1,5 +1,6 @@
 pub mod bundled;
 pub mod graph;
+pub mod identity;
 pub mod history;
 pub mod merge_ops;
 pub mod refs;

@@ -44,6 +44,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::repo::open_repo,
     commands::repo::close_repo,
     commands::repo::git_available,
+    commands::signing::get_git_identity,
+    commands::signing::set_git_identity,
     commands::signing::git_tool_info,
     commands::signing::gpg_tool_info,
     commands::signing::get_signing_status,

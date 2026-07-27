@@ -447,6 +447,12 @@ interface WorkspaceState {
   enableWorktrees: boolean;
   /** Reopen the last session's tabs on launch. Off starts with no tabs (persisted). */
   restoreTabs: boolean;
+  /**
+   * Whether the welcome tour has run. App lifecycle state, not a preference:
+   * deliberately absent from every reset group, since "reset my preferences"
+   * should not replay onboarding (persisted).
+   */
+  onboardingSeen: boolean;
   /** Whole-app zoom factor, 1.0 = 100% (persisted). */
   uiScale: number;
   /** Selected UI font id; see lib/fonts.ts. 'plex' is the default (persisted). */
@@ -542,6 +548,7 @@ interface WorkspaceState {
   resolveTagSettings: (path: string | null | undefined) => ResolvedTagSettings;
   setEnableWorktrees: (enabled: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
+  markOnboardingSeen: () => void;
   setTabLayout: (layout: TabLayout) => void;
   setHorizontalTabRow: (enabled: boolean) => void;
   /** Set the whole-app zoom factor (clamped to the supported range). */
@@ -686,6 +693,7 @@ function toSettings(s: WorkspaceState): Settings {
     tag_overrides_by_repo: serializeTagOverrides(s.tagOverridesByRepo),
     enable_worktrees: s.enableWorktrees,
     restore_tabs: s.restoreTabs,
+    onboarding_seen: s.onboardingSeen,
     ui_scale: s.uiScale,
     font_family: s.fontFamily === DEFAULT_FONT_ID ? null : s.fontFamily,
     font_size: s.fontSize,
@@ -918,6 +926,7 @@ export const SETTINGS_DEFAULTS = {
   defaultEditor: DEFAULT_EDITOR,
   enableWorktrees: false,
   restoreTabs: true,
+  onboardingSeen: false,
   tagPushDefault: "ask",
   tagPushOnCreate: true,
   tagDeleteOnRemote: true,
@@ -1009,6 +1018,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   tagOverridesByRepo: {},
   enableWorktrees: false,
   restoreTabs: true,
+  onboardingSeen: false,
   uiScale: DEFAULT_UI_SCALE,
   fontFamily: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
@@ -1279,6 +1289,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setRestoreTabs: (enabled) => {
     set({ restoreTabs: enabled });
+    schedulePersist();
+  },
+  markOnboardingSeen: () => {
+    // Persisted immediately rather than on the usual debounce: the tour closing
+    // is often followed by the user quitting, and a lost write replays it.
+    set({ onboardingSeen: true });
     schedulePersist();
   },
   setTabLayout: (layout) => {
@@ -1953,6 +1969,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ),
         enableWorktrees: settings.enable_worktrees ?? false,
         restoreTabs: settings.restore_tabs ?? true,
+        onboardingSeen: settings.onboarding_seen ?? false,
         uiScale:
           settings.ui_scale != null
             ? clampUiScale(settings.ui_scale)
