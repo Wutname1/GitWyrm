@@ -245,6 +245,30 @@ function groupForPath(groups: TabGroup[], path: string): TabGroup | undefined {
   );
 }
 
+/**
+ * Move `sourcePath` beside `targetPath` within the pinned list. Returns the
+ * list unchanged unless both paths are pinned, so dragging an unpinned tab next
+ * to a pinned one never pulls it into the pinned strip.
+ */
+function reorderPinned(
+  pinned: string[],
+  sourcePath: string,
+  targetPath: string,
+  placeAfter: boolean,
+): string[] {
+  const isPinned = (path: string) =>
+    pinned.some((candidate) => samePath(candidate, path));
+  if (!isPinned(sourcePath) || !isPinned(targetPath)) return pinned;
+  const rest = pinned.filter((candidate) => !samePath(candidate, sourcePath));
+  const targetIndex = rest.findIndex((candidate) =>
+    samePath(candidate, targetPath),
+  );
+  if (targetIndex < 0) return pinned;
+  const next = [...rest];
+  next.splice(targetIndex + (placeAfter ? 1 : 0), 0, normalizePath(sourcePath));
+  return next;
+}
+
 function orderedRepoPaths(
   state: Pick<WorkspaceState, "tabGroups" | "tabOrder">,
 ): string[] {
@@ -1790,7 +1814,18 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         type: "repo",
         path: normalizePath(sourcePath),
       });
-      return { tabGroups: workspace.groups, tabOrder: order };
+      return {
+        tabGroups: workspace.groups,
+        tabOrder: order,
+        // The pinned strip renders in pinnedTabPaths order, not tabOrder, so a
+        // pinned tab only appears to move once this list moves too.
+        pinnedTabPaths: reorderPinned(
+          s.pinnedTabPaths,
+          sourcePath,
+          targetPath,
+          placement === "after",
+        ),
+      };
     });
     schedulePersist();
   },
