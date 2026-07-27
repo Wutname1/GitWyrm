@@ -183,14 +183,21 @@ fn vswhere_path() -> Option<PathBuf> {
 /// so a machine whose only Visual Studio is, say, "Visual Studio Community
 /// 2026" (Insiders) looks like it has none.
 ///
-/// Installs are filtered on having a `productPath` rather than on
-/// `-requires Microsoft.VisualStudio.Component.CoreIde`. That component id is
-/// absent from VS 2026 (v18), so requiring it silently matches nothing there,
-/// while `productPath` is the direct evidence of a launchable devenv.exe --
-/// which is also what excludes Build Tools, that having no IDE to open a
-/// solution with.
+/// The product ids are listed explicitly rather than passing `-products *`.
+/// The VS installer also manages products that are not the IDE -- SQL Server
+/// Management Studio 21+ ships as a VS shell app and has its own
+/// `productPath` (Ssms.exe) -- so `*` lets `-latest` return something that
+/// cannot open a solution. Naming the IDE editions keeps Build Tools and the
+/// shell apps out on identity rather than on a heuristic.
 #[cfg(windows)]
-const VSWHERE_SELECT: [&str; 4] = ["-latest", "-prerelease", "-products", "*"];
+const VSWHERE_SELECT: [&str; 6] = [
+  "-latest",
+  "-prerelease",
+  "-products",
+  "Microsoft.VisualStudio.Product.Enterprise",
+  "Microsoft.VisualStudio.Product.Professional",
+  "Microsoft.VisualStudio.Product.Community",
+];
 
 /// Display name of the newest installed Visual Studio, e.g.
 /// "Visual Studio Community 2026". None when VS is not installed.
@@ -325,17 +332,24 @@ pub fn open_path_in(kind: EditorKind, path: &str) -> Result<(), AppError> {
   Ok(())
 }
 
-/// Launch a `.sln` in Visual Studio.
+/// Open a `.sln` with whatever the user has set to handle solution files.
+///
+/// This deliberately does not launch a devenv.exe resolved by vswhere. Windows
+/// associates `.sln` with VSLauncher.exe, which reads the version stamped in
+/// the solution header and starts the matching Visual Studio -- so a repo
+/// pinned to an older VS opens in that VS, not in the newest one installed.
+/// Handing the path to the shell keeps that behaviour, and honours the user's
+/// choice if they have pointed `.sln` somewhere else entirely.
+///
+/// `start` needs its first quoted argument treated as the window title, hence
+/// the empty `""` before the path; without it a quoted path becomes the title
+/// and nothing opens.
 #[cfg(windows)]
 pub fn open_solution(solution_path: &str) -> Result<(), AppError> {
   use std::os::windows::process::CommandExt;
 
-  let exe = visual_studio_exe().ok_or_else(|| {
-    AppError::Other("Could not find Visual Studio on this computer.".to_string())
-  })?;
-
-  Command::new(exe)
-    .arg(solution_path)
+  Command::new("cmd")
+    .args(["/C", "start", "", solution_path])
     .creation_flags(CREATE_NO_WINDOW)
     .spawn()
     .map_err(AppError::Io)?;
@@ -404,9 +418,19 @@ mod tests {
       "detection disagreed with vswhere about whether Visual Studio is installed"
     );
     if has_devenv {
-      assert!(
-        visual_studio_exe().is_some_and(|p| p.exists()),
-        "a detected Visual Studio must resolve to a devenv.exe that exists"
+      let exe = visual_studio_exe().expect("a detected Visual Studio must resolve to an exe");
+      assert!(exe.exists(), "resolved Visual Studio exe does not exist: {exe:?}");
+      // The product filter exists to keep non-IDE products that the VS
+      // installer also manages -- SSMS 21+ is the one that bit us -- from being
+      // detected as Visual Studio. Those resolve to their own exe (Ssms.exe),
+      // never devenv.exe, so this is the assertion that would have caught it.
+      let name = exe
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+      assert_eq!(
+        name, "devenv.exe",
+        "detected Visual Studio should be the IDE, got {exe:?}"
       );
     }
   }
