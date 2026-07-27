@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   AlertTriangle,
   Check,
@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { commands, type SigningKey, type SigningStatus } from '@/lib/bindings'
+import { useGitIdentity } from '@/lib/useGitIdentity'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import { SettingRow } from './SettingRow'
 import { ToolStatusRow, useToolCheck, type ToolState } from './ToolStatusRow'
@@ -97,7 +98,7 @@ function SigningSection({ repoPath }: { repoPath: string | null }) {
       )}
 
       {status && status.keys.length === 0 ? (
-        <NoKeyYet repoPath={repoPath} onCreated={refresh} />
+        <CreateKeyForm repoPath={repoPath} onCreated={refresh} />
       ) : (
         status && <HasKey repoPath={repoPath} status={status} onChanged={refresh} />
       )}
@@ -144,11 +145,36 @@ function BrokenFormatWarning({ repoPath, onFixed }: { repoPath: string; onFixed:
   )
 }
 
-/** The one-click path: no key exists, so offer to make one. */
-function NoKeyYet({ repoPath, onCreated }: { repoPath: string; onCreated: () => void }) {
+/**
+ * Make a key and sign with it. Used both for the first key and for adding
+ * another one later -- someone with a work key and a personal key needs to
+ * make the second one from inside the app, not on the command line.
+ */
+function CreateKeyForm({
+  repoPath,
+  onCreated,
+  onCancel,
+}: {
+  repoPath: string
+  onCreated: () => void
+  /** Shown as a Cancel button when this is an extra key, not the first. */
+  onCancel?: () => void
+}) {
+  const { identity } = useGitIdentity()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
+  const [touched, setTouched] = useState(false)
+
+  // Pre-fill from git, so the common case is one click rather than retyping
+  // what git already knows. Skipped once the user edits a field, or their
+  // typing would be overwritten when the identity finishes loading.
+  useEffect(() => {
+    if (identity && !touched) {
+      setName(identity.name)
+      setEmail(identity.email)
+    }
+  }, [identity, touched])
 
   const create = async () => {
     setBusy(true)
@@ -177,48 +203,68 @@ function NoKeyYet({ repoPath, onCreated }: { repoPath: string; onCreated: () => 
     <div className="rounded-md border border-border bg-panel p-4">
       <div className="flex items-center gap-2">
         <Sparkles size={15} className="text-accent-text" />
-        <div className="text-xs font-semibold text-foreground">Set up signing</div>
+        <div className="text-xs font-semibold text-foreground">
+          {onCancel ? 'Make another key' : 'Set up signing'}
+        </div>
       </div>
       <p className="mt-1.5 text-2xs text-muted-foreground">
-        GitWyrm can make a signing key for you. Use the same name and email you commit with, so
-        your host can match the key to you.
+        GitWyrm can make a signing key for you. Use the same name and email you commit with here,
+        so your host can match the key to you. Making a key also starts signing with it.
       </p>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <Input
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setTouched(true)
+            setName(e.target.value)
+          }}
           placeholder="Your name"
           className="h-8 bg-background text-xs"
           aria-label="Your name"
         />
         <Input
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setTouched(true)
+            setEmail(e.target.value)
+          }}
           placeholder="you@example.com"
           className="h-8 bg-background text-xs"
           aria-label="Your email"
         />
       </div>
 
-      <Button size="sm" className="mt-3 h-8" onClick={create} disabled={!ready}>
-        {busy ? (
-          <>
-            <Loader2 size={13} className="animate-spin" />
-            Making your key...
-          </>
-        ) : (
-          <>
-            <KeyRound size={13} />
-            Make a signing key
-          </>
+      <div className="mt-3 flex items-center gap-2">
+        <Button size="sm" className="h-8" onClick={create} disabled={!ready}>
+          {busy ? (
+            <>
+              <Loader2 size={13} className="animate-spin" />
+              Making your key...
+            </>
+          ) : (
+            <>
+              <KeyRound size={13} />
+              Make a signing key
+            </>
+          )}
+        </Button>
+        {onCancel && (
+          <Button size="sm" variant="ghost" className="h-8" onClick={onCancel} disabled={busy}>
+            Cancel
+          </Button>
         )}
-      </Button>
+      </div>
     </div>
   )
 }
 
-/** A key exists: show it, let signing be toggled, and help share the public half. */
+/** Pull the email out of a gpg uid ("Real Name <email>"). */
+function uidEmail(uid: string): string {
+  return uid.match(/<([^>]+)>/)?.[1]?.trim().toLowerCase() ?? ''
+}
+
+/** Keys exist: pick which one signs, toggle signing, and share the public half. */
 function HasKey({
   repoPath,
   status,
@@ -228,26 +274,53 @@ function HasKey({
   status: SigningStatus
   onChanged: () => void
 }) {
+  const { identity } = useGitIdentity()
   const [busy, setBusy] = useState(false)
-  const active =
-    status.keys.find((k) => k.id === status.configuredKey) ?? status.keys[0] ?? null
+  const [making, setMaking] = useState(false)
 
-  const toggle = async (on: boolean) => {
+  // Only a key git is actually configured with counts as active. Falling back
+  // to keys[0] would silently sign with whichever key gpg happened to list
+  // first -- a work key on a personal commit, with nothing on screen saying so.
+  const active = status.keys.find((k) => k.id === status.configuredKey) ?? null
+
+  // Signing with a key whose email is not the one on your commits gets you an
+  // unverified badge on the host, which is confusing to debug. Say it plainly.
+  const myEmail = identity?.email.trim().toLowerCase() ?? ''
+  const mismatch =
+    active && myEmail && uidEmail(active.uid) && uidEmail(active.uid) !== myEmail
+      ? uidEmail(active.uid)
+      : null
+
+  const apply = async (on: boolean, keyId: string | null) => {
     setBusy(true)
-    const res = await commands.setSigningEnabled(repoPath, on, active?.id ?? null)
+    const res = await commands.setSigningEnabled(repoPath, on, keyId)
     setBusy(false)
-    if (res.status === 'ok') {
-      toast.success(on ? 'New commits will be signed.' : 'Commits will no longer be signed.')
-      onChanged()
-    } else {
+    if (res.status !== 'ok') {
       toast.error(res.error)
+      return
     }
+    toast.success(on ? 'New commits will be signed.' : 'Commits will no longer be signed.')
+    onChanged()
+  }
+
+  const chooseKey = (keyId: string) => {
+    if (!keyId) return
+    // Picking a key is only meaningful if signing is on, so turn it on in the
+    // same step rather than leaving a chosen-but-inactive key on screen.
+    void apply(true, keyId)
+  }
+
+  if (making) {
+    return (
+      <CreateKeyForm repoPath={repoPath} onCreated={onChanged} onCancel={() => setMaking(false)} />
+    )
   }
 
   return (
     <div className="grid gap-3">
       <SettingRow
         label="Sign my commits"
+        searchId="signing-enabled"
         hint="Applies to the repository open in the active tab."
       >
         <div className="flex h-8 items-center gap-2">
@@ -255,8 +328,8 @@ function HasKey({
             <input
               type="checkbox"
               checked={status.signingEnabled}
-              onChange={(e) => toggle(e.target.checked)}
-              disabled={busy || !active}
+              onChange={(e) => apply(e.target.checked, active?.id ?? status.keys[0]?.id ?? null)}
+              disabled={busy}
               className="size-3.5 accent-[var(--gw-accent)]"
             />
             Sign every commit I make here
@@ -267,6 +340,55 @@ function HasKey({
               <ShieldCheck size={12} />
               On
             </span>
+          )}
+        </div>
+      </SettingRow>
+
+      <SettingRow
+        label="Key to sign with"
+        searchId="signing-key"
+        hint="The key your commits here are signed with. Your other repositories are not affected."
+      >
+        <div className="grid gap-2">
+          <div className="flex gap-2">
+            <select
+              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring"
+              value={active?.id ?? ''}
+              disabled={busy}
+              aria-label="Key to sign with"
+              onChange={(e) => chooseKey(e.target.value)}
+            >
+              {!active && <option value="">Pick a key…</option>}
+              {status.keys.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.uid || k.id}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-8 flex-none"
+              disabled={busy}
+              onClick={() => setMaking(true)}
+            >
+              <KeyRound size={12} />
+              New key
+            </Button>
+          </div>
+
+          {mismatch && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2">
+              <AlertTriangle size={13} className="mt-0.5 flex-none text-amber-500" />
+              <div className="min-w-0 text-2xs leading-relaxed text-muted-foreground">
+                This key belongs to{' '}
+                <span className="font-medium text-foreground">{mismatch}</span>, but your commits
+                here are made as{' '}
+                <span className="font-medium text-foreground">{identity?.email}</span>. Your host
+                will not show these commits as verified. Pick a key with the matching email, or
+                make one.
+              </div>
+            </div>
           )}
         </div>
       </SettingRow>
@@ -371,6 +493,7 @@ function ToolsSection() {
     >
       <SettingRow
         label="Git"
+        searchId="git-executable"
         hint="Used to fetch, pull, push, and clone. Leave blank to let GitWyrm decide."
       >
         <ToolStatusRow
@@ -384,6 +507,7 @@ function ToolsSection() {
 
       <SettingRow
         label="GPG"
+        searchId="gpg-executable"
         hint="Used to sign commits. Leave blank to let GitWyrm decide."
       >
         <ToolStatusRow

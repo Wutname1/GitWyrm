@@ -71,6 +71,7 @@ export function RepositoryTagsSettings() {
 
       <SettingRow
         label="Custom tag settings"
+        searchId="repo-tag-override"
         hint="When off, this repository follows whatever you set under Application > Tags."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
@@ -116,6 +117,7 @@ export function RepositoryTagsSettings() {
         <>
           <SettingRow
             label="After pushing"
+            searchId="repo-tag-push"
             hint="What this repository does with local-only tags after a push."
           >
             <select
@@ -133,6 +135,7 @@ export function RepositoryTagsSettings() {
 
           <SettingRow
             label="New tags"
+            searchId="repo-tag-on-create"
             hint="How the send box starts out in the New tag window for this repository."
           >
             <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
@@ -150,6 +153,7 @@ export function RepositoryTagsSettings() {
 
           <SettingRow
             label="Deleting tags"
+            searchId="repo-tag-delete"
             hint="How the remove-from-remote box starts out in the Delete tag window for this repository."
           >
             <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">

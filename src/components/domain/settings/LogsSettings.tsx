@@ -12,7 +12,7 @@ export function LogsSettings() {
 
   return (
     <div>
-      <SettingRow label="Application log" hint="Diagnostic output written to the app log folder.">
+      <SettingRow label="Application log" searchId="application-log" hint="Diagnostic output written to the app log folder.">
         <div className="flex items-center gap-2">
           <Button
             variant="secondary"

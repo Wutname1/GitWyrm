@@ -211,37 +211,40 @@ export function AppearanceSettings() {
 
   return (
     <div>
-      <SettingRow label="Mode" hint="Use light, dark, or match your system setting.">
+      <SettingRow label="Mode" searchId="theme-mode" hint="Use light, dark, or match your system setting.">
         <ModeSetting />
       </SettingRow>
-      <SettingRow label="Theme" hint="Pick a color scheme. Auto follows the mode above.">
+      <SettingRow label="Theme" searchId="theme" hint="Pick a color scheme. Auto follows the mode above.">
         <ThemeSetting />
       </SettingRow>
       <SettingRow
         label="Mint accent"
+        searchId="mint-accent"
         hint="Keep GitWyrm's mint highlight, or let each theme show its own accent color."
       >
         <MintSetting />
       </SettingRow>
       <SettingRow
         label="Font"
+        searchId="font"
         hint="Choose the font used across GitWyrm. Included fonts always work; you can also pick any font installed on this PC."
       >
         <FontFamilySetting />
       </SettingRow>
-      <SettingRow label="Text size" hint="Makes all text bigger or smaller. App zoom still applies on top of this.">
+      <SettingRow label="Text size" searchId="text-size" hint="Makes all text bigger or smaller. App zoom still applies on top of this.">
         <FontSizeSetting />
       </SettingRow>
-      <SettingRow label="Text weight" hint="Makes text lighter or bolder throughout the app.">
+      <SettingRow label="Text weight" searchId="text-weight" hint="Makes text lighter or bolder throughout the app.">
         <FontWeightSetting />
       </SettingRow>
-      <SettingRow label="Reset fonts" hint="Put the font, size, and weight back to GitWyrm's defaults.">
+      <SettingRow label="Reset fonts" searchId="reset-fonts" hint="Put the font, size, and weight back to GitWyrm's defaults.">
         <Button variant="outline" size="sm" onClick={resetFonts}>
           Reset all font settings
         </Button>
       </SettingRow>
       <SettingRow
         label="Repository icons"
+        searchId="repo-icons"
         hint="Shows a favicon or logo beside each repository tab when one is available."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
@@ -256,6 +259,7 @@ export function AppearanceSettings() {
       </SettingRow>
       <SettingRow
         label="Icon-only tabs"
+        searchId="icon-only-tabs"
         hint="Fits more repositories by hiding tab names. Point at a tab to expand its name."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
@@ -270,11 +274,12 @@ export function AppearanceSettings() {
       </SettingRow>
       <SettingRow
         label="Commit change size"
+        searchId="change-size"
         hint="See how large each commit is without opening it."
       >
         <ChangeSizeSettings />
       </SettingRow>
-      <SettingRow label="App zoom" hint="Makes everything in GitWyrm bigger or smaller.">
+      <SettingRow label="App zoom" searchId="app-zoom" hint="Makes everything in GitWyrm bigger or smaller.">
         <ZoomSetting />
       </SettingRow>
       <ResetToDefaults group="appearance" />

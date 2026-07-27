@@ -11,7 +11,8 @@ import { Button } from '@/components/ui/button'
 import { useUpdater } from '@/hooks/useUpdater'
 import { commands, type BuildInfo } from '@/lib/bindings'
 import { useWorkspaceStore, type UpdateChannel } from '@/stores/workspaceStore'
-import { SettingRow } from './SettingRow'
+import { cn } from '@/lib/utils'
+import { SettingRow, useRevealHighlight } from './SettingRow'
 
 const CHANNEL_LABELS: Record<UpdateChannel, string> = {
   stable: 'Stable',
@@ -26,6 +27,7 @@ export function AboutSettings() {
   const resetAllSettings = useWorkspaceStore((s) => s.resetAllSettings)
   const restoreSettings = useWorkspaceStore((s) => s.restoreSettings)
   const [build, setBuild] = useState<BuildInfo | null>(null)
+  const resetReveal = useRevealHighlight('reset-all')
 
   const resetEverything = () => {
     const snapshot = resetAllSettings()
@@ -44,7 +46,7 @@ export function AboutSettings() {
 
   return (
     <div>
-      <SettingRow label="Version">
+      <SettingRow label="Version" searchId="version">
         <div className="text-xs text-sub">
           <span className="font-mono text-foreground">{build ? `v${build.version}` : '—'}</span>
           {build && (
@@ -57,6 +59,7 @@ export function AboutSettings() {
       </SettingRow>
       <SettingRow
         label="Update channel"
+        searchId="update-channel"
         hint="Beta receives pre-release builds. Updates are delivered from GitHub releases."
       >
         <DropdownMenu>
@@ -75,7 +78,7 @@ export function AboutSettings() {
           </DropdownMenuContent>
         </DropdownMenu>
       </SettingRow>
-      <SettingRow label="Updates">
+      <SettingRow label="Updates" searchId="updates">
         <div className="flex items-center gap-3">
           <Button
             variant="secondary"
@@ -104,7 +107,13 @@ export function AboutSettings() {
         </div>
       </SettingRow>
 
-      <div className="mt-8 rounded-xl border border-red-500/30 bg-red-500/[.03] p-4">
+      <div
+        ref={resetReveal.ref}
+        className={cn(
+          'mt-8 scroll-mt-6 rounded-xl border border-red-500/30 bg-red-500/[.03] p-4 transition-shadow duration-500',
+          resetReveal.flash && 'ring-1 ring-primary/50'
+        )}
+      >
         <div className="flex items-center gap-2">
           <AlertTriangle size={15} className="text-red-400" />
           <h3 className="text-xs font-bold uppercase tracking-[.06em] text-red-400">Danger</h3>

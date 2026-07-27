@@ -11,6 +11,7 @@ export function BehaviorSettings() {
     <div>
       <SettingRow
         label="On startup"
+        searchId="restore-tabs"
         hint="Reopen the repositories you had open when you last closed GitWyrm. Turn this off to start with a clean slate and pick a repository yourself."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">

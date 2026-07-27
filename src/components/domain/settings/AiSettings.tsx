@@ -3,6 +3,7 @@ import { Check, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
 import { ResetToDefaults } from './ResetToDefaults'
+import { settingRowClass, useRevealHighlight } from './SettingRow'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -40,6 +41,8 @@ export function AiSettings() {
 
   const [keyDraft, setKeyDraft] = useState('')
   const copilot = useCopilotSignIn()
+  const providerReveal = useRevealHighlight('ai-provider')
+  const modelReveal = useRevealHighlight('ai-model')
 
   const providers = catalog.data ?? []
   const provider = providers.find((p) => p.id === aiProvider) ?? null
@@ -132,7 +135,7 @@ export function AiSettings() {
 
   return (
     <div className="space-y-0">
-      <div className="flex items-start gap-6 py-3">
+      <div ref={providerReveal.ref} className={settingRowClass(providerReveal.flash)}>
         <div className="w-52 flex-none">
           <div className="text-xs font-semibold text-foreground">Provider</div>
           <div className="mt-0.5 text-2xs text-muted-foreground">
@@ -285,7 +288,7 @@ export function AiSettings() {
       </div>
 
       {provider && (
-        <div className="flex items-start gap-6 py-3">
+        <div ref={modelReveal.ref} className={settingRowClass(modelReveal.flash)}>
           <div className="w-52 flex-none">
             <div className="text-xs font-semibold text-foreground">Model</div>
             <div className="mt-0.5 text-2xs text-muted-foreground">
@@ -340,6 +343,7 @@ function InstructionSetting() {
   // Local draft so typing is smooth; committed to the store on blur.
   const [draft, setDraft] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const reveal = useRevealHighlight('ai-instruction')
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const value = draft ?? aiInstruction ?? defaultText
   const isCustom = aiInstruction != null && aiInstruction.trim() !== ''
@@ -369,7 +373,7 @@ function InstructionSetting() {
   )
 
   return (
-    <div className="flex items-start gap-6 py-3">
+    <div ref={reveal.ref} className={settingRowClass(reveal.flash)}>
       <div className="w-52 flex-none">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-foreground">Instructions</span>

@@ -28,7 +28,7 @@ export function TagsSettings() {
         Tags.
       </p>
 
-      <SettingRow label="After pushing" hint={tagPushHints[tagPushDefault]}>
+      <SettingRow label="After pushing" searchId="tag-push-default" hint={tagPushHints[tagPushDefault]}>
         <select
           className={selectClass}
           value={tagPushDefault}
@@ -42,6 +42,7 @@ export function TagsSettings() {
 
       <SettingRow
         label="New tags"
+        searchId="tag-push-on-create"
         hint="Sets how the box starts out in the New tag window. You can still change it for any one tag."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
@@ -57,6 +58,7 @@ export function TagsSettings() {
 
       <SettingRow
         label="Deleting tags"
+        searchId="tag-delete-on-remote"
         hint="Sets how the box starts out in the Delete tag window. You can still change it for any one tag."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">

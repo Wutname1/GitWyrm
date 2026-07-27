@@ -142,6 +142,7 @@ export function RepositorySettings() {
 
       <SettingRow
         label="Tab name"
+        searchId="repo-tab-name"
         hint="This changes only the name shown in GitWyrm. Your folder keeps its original name."
       >
         <form
@@ -185,6 +186,7 @@ export function RepositorySettings() {
 
       <SettingRow
         label="Tab icon"
+        searchId="repo-tab-icon"
         hint="GitWyrm can find a favicon or logo in this repository, or you can choose your own image."
       >
         <div className="grid gap-2">
@@ -221,7 +223,7 @@ export function RepositorySettings() {
         </div>
       </SettingRow>
 
-      <SettingRow label="Repository folder" hint="Quick ways to open this repository outside GitWyrm.">
+      <SettingRow label="Repository folder" searchId="repo-folder" hint="Quick ways to open this repository outside GitWyrm.">
         <div className="grid gap-2">
           <Input readOnly value={repo.path} className="h-8 bg-background font-mono text-xs" />
           <div className="flex flex-wrap gap-2">

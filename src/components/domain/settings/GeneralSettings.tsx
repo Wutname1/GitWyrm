@@ -5,6 +5,7 @@ import {
   type TabLayout,
 } from '@/stores/workspaceStore'
 import { FolderSetting, SettingRow } from './SettingRow'
+import { IdentitySetting } from './IdentitySetting'
 import { EditorSetting } from './EditorSetting'
 import { ResetToDefaults } from './ResetToDefaults'
 
@@ -40,11 +41,19 @@ export function GeneralSettings() {
 
   return (
     <div>
-      <SettingRow label="Code folder" hint="Scanned for repositories to quick-launch from the open dialog.">
+      <SettingRow
+        label="Your name and email"
+        searchId="git-identity"
+        hint="Goes on every commit you make, so other people can see who did the work. Shared with git itself, so other git tools see it too."
+      >
+        <IdentitySetting />
+      </SettingRow>
+      <SettingRow label="Code folder" searchId="code-folder" hint="Scanned for repositories to quick-launch from the open dialog.">
         <FolderSetting value={codeFolder} placeholder="e.g. C:\code" onCommit={setCodeFolder} />
       </SettingRow>
       <SettingRow
         label="Default clone directory"
+        searchId="clone-directory"
         hint="Where new clones go. Falls back to the code folder when empty."
       >
         <FolderSetting
@@ -55,6 +64,7 @@ export function GeneralSettings() {
       </SettingRow>
       <SettingRow
         label="When switching branches"
+        searchId="branch-switch-mode"
         hint={branchSwitchHints[branchSwitchMode]}
       >
         <select
@@ -67,7 +77,7 @@ export function GeneralSettings() {
           <option value="refuse">Don't let me switch with changes</option>
         </select>
       </SettingRow>
-      <SettingRow label="Commit button" hint={commitButtonHints[commitButtonMode]}>
+      <SettingRow label="Commit button" searchId="commit-button-mode" hint={commitButtonHints[commitButtonMode]}>
         <select
           className={selectClass}
           value={commitButtonMode}
@@ -79,12 +89,14 @@ export function GeneralSettings() {
       </SettingRow>
       <SettingRow
         label="Open in editor"
+        searchId="editor"
         hint="Which editor the open button and the file right-click menu use. Only editors found on this computer are listed."
       >
         <EditorSetting />
       </SettingRow>
       <SettingRow
         label="Repository tabs"
+        searchId="tab-layout"
         hint="Put repository tabs across the top or in a scrollable list on the left. Groups work in both layouts."
       >
         <select
@@ -99,6 +111,7 @@ export function GeneralSettings() {
       {tabLayout === 'horizontal' && (
         <SettingRow
           label="Tab row"
+          searchId="tab-row"
           hint="Give the tabs a row of their own under the app bar, so long repository names have the full width to themselves."
         >
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
@@ -114,6 +127,7 @@ export function GeneralSettings() {
       )}
       <SettingRow
         label="Worktrees"
+        searchId="worktrees"
         hint="Worktrees let you check out more than one branch at once, each in its own folder. An advanced feature, off by default. Turns on by itself if this repo already uses them."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
