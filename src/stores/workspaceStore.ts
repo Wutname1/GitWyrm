@@ -453,6 +453,12 @@ interface WorkspaceState {
    * should not replay onboarding (persisted).
    */
   onboardingSeen: boolean;
+  /**
+   * Fingerprints of signing keys the user confirmed they uploaded to their
+   * host. A key is only half-set-up until its public half is published, and
+   * that state has to outlive a reload (persisted).
+   */
+  signingKeysPublished: string[];
   /** Whole-app zoom factor, 1.0 = 100% (persisted). */
   uiScale: number;
   /** Selected UI font id; see lib/fonts.ts. 'plex' is the default (persisted). */
@@ -549,6 +555,7 @@ interface WorkspaceState {
   setEnableWorktrees: (enabled: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
   markOnboardingSeen: () => void;
+  markSigningKeyPublished: (fingerprint: string) => void;
   setTabLayout: (layout: TabLayout) => void;
   setHorizontalTabRow: (enabled: boolean) => void;
   /** Set the whole-app zoom factor (clamped to the supported range). */
@@ -583,6 +590,16 @@ interface WorkspaceState {
   createSavedTabGroup: (repoPaths: string[], name: string) => string | null;
   deleteSavedTabGroup: (groupId: string) => void;
   togglePinnedRepo: (repoPath: string) => void;
+  /**
+   * Move a pinned repo so it sits directly before `targetPath` in the pinned
+   * list. Dropping onto the last row appends instead, so a repo can be dragged
+   * to the very bottom.
+   */
+  reorderPinnedRepo: (
+    repoPath: string,
+    targetPath: string,
+    placeAfter?: boolean,
+  ) => void;
   togglePinnedSavedGroup: (groupId: string) => void;
   toggleRepoPickerSection: (section: RepoPickerSection) => void;
   /**
@@ -694,6 +711,7 @@ function toSettings(s: WorkspaceState): Settings {
     enable_worktrees: s.enableWorktrees,
     restore_tabs: s.restoreTabs,
     onboarding_seen: s.onboardingSeen,
+    signing_keys_published: s.signingKeysPublished,
     ui_scale: s.uiScale,
     font_family: s.fontFamily === DEFAULT_FONT_ID ? null : s.fontFamily,
     font_size: s.fontSize,
@@ -927,6 +945,7 @@ export const SETTINGS_DEFAULTS = {
   enableWorktrees: false,
   restoreTabs: true,
   onboardingSeen: false,
+  signingKeysPublished: [],
   tagPushDefault: "ask",
   tagPushOnCreate: true,
   tagDeleteOnRemote: true,
@@ -1019,6 +1038,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   enableWorktrees: false,
   restoreTabs: true,
   onboardingSeen: false,
+  signingKeysPublished: [],
   uiScale: DEFAULT_UI_SCALE,
   fontFamily: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
@@ -1289,6 +1309,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setRestoreTabs: (enabled) => {
     set({ restoreTabs: enabled });
+    schedulePersist();
+  },
+  markSigningKeyPublished: (fingerprint) => {
+    set((s) =>
+      s.signingKeysPublished.includes(fingerprint)
+        ? s
+        : { signingKeysPublished: [...s.signingKeysPublished, fingerprint] }
+    );
     schedulePersist();
   },
   markOnboardingSeen: () => {
@@ -1620,6 +1648,28 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
                 (candidate) => !samePath(candidate, path),
               ),
             ],
+      };
+    });
+    schedulePersist();
+  },
+  reorderPinnedRepo: (repoPath, targetPath, placeAfter = false) => {
+    const from = normalizePath(repoPath);
+    const to = normalizePath(targetPath);
+    if (samePath(from, to)) return;
+    set((s) => {
+      const rest = s.pinnedRepoPaths.filter(
+        (candidate) => !samePath(candidate, from),
+      );
+      if (rest.length === s.pinnedRepoPaths.length) return {};
+      const targetIndex = rest.findIndex((candidate) => samePath(candidate, to));
+      if (targetIndex === -1) return {};
+      const insertAt = placeAfter ? targetIndex + 1 : targetIndex;
+      return {
+        pinnedRepoPaths: [
+          ...rest.slice(0, insertAt),
+          from,
+          ...rest.slice(insertAt),
+        ],
       };
     });
     schedulePersist();
@@ -1970,6 +2020,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         enableWorktrees: settings.enable_worktrees ?? false,
         restoreTabs: settings.restore_tabs ?? true,
         onboardingSeen: settings.onboarding_seen ?? false,
+        signingKeysPublished: settings.signing_keys_published ?? [],
         uiScale:
           settings.ui_scale != null
             ? clampUiScale(settings.ui_scale)

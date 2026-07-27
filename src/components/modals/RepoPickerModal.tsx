@@ -11,6 +11,7 @@ import {
   FolderGit2,
   FolderPlus,
   FolderSearch,
+  GripVertical,
   Layers3,
   Loader2,
   Pin,
@@ -282,6 +283,22 @@ function RouteButton({
   );
 }
 
+/**
+ * Drag-to-reorder wiring handed to a pinned repo row. Only pinned rows get
+ * this; every other row renders without drag handlers.
+ */
+interface PinnedReorderRow {
+  draggable: boolean;
+  isSource: boolean;
+  /** Which edge of this row shows the insertion line, if any. */
+  dropEdge: "before" | "after" | null;
+  onDragStart: (event: React.DragEvent) => void;
+  onDragEnd: () => void;
+  onDragOver: (event: React.DragEvent) => void;
+  onDragLeave: () => void;
+  onDrop: (event: React.DragEvent) => void;
+}
+
 function RepoLibraryRow({
   repo,
   iconUrl,
@@ -295,6 +312,7 @@ function RepoLibraryRow({
   onTogglePin,
   onOpen,
   onJump,
+  reorder,
 }: {
   repo: LibraryRepo;
   iconUrl?: string;
@@ -308,16 +326,37 @@ function RepoLibraryRow({
   onTogglePin: () => void;
   onOpen: () => void;
   onJump: () => void;
+  reorder?: PinnedReorderRow;
 }) {
   return (
     <div
+      draggable={reorder?.draggable}
+      onDragStart={reorder?.onDragStart}
+      onDragEnd={reorder?.onDragEnd}
+      onDragOver={reorder?.onDragOver}
+      onDragLeave={reorder?.onDragLeave}
+      onDrop={reorder?.onDrop}
       className={cn(
-        "group/repo grid min-h-12 grid-cols-[auto_minmax(0,1fr)_auto] items-center rounded-md border pr-1.5 transition-colors",
+        "group/repo relative grid min-h-12 grid-cols-[auto_minmax(0,1fr)_auto] items-center rounded-md border pr-1.5 transition-colors",
         selected
           ? "border-accent/35 bg-soft"
           : "border-transparent hover:border-border/70 hover:bg-panel",
+        reorder?.isSource && "opacity-40",
+        reorder?.dropEdge === "before" &&
+          "before:absolute before:-top-px before:left-1 before:right-1 before:h-0.5 before:rounded-full before:bg-accent",
+        reorder?.dropEdge === "after" &&
+          "after:absolute after:-bottom-px after:left-1 after:right-1 after:h-0.5 after:rounded-full after:bg-accent",
       )}
     >
+      {reorder && (
+        <span
+          aria-hidden
+          title="Drag to reorder"
+          className="absolute left-0 grid h-full w-2.5 cursor-grab place-items-center text-muted-foreground opacity-0 group-hover/repo:opacity-100 active:cursor-grabbing"
+        >
+          <GripVertical size={11} />
+        </span>
+      )}
       <button
         type="button"
         aria-label={`${checked ? "Uncheck" : "Check"} ${repo.name}`}
@@ -869,6 +908,14 @@ function RepoPickerPanel({
     (state) => state.deleteSavedTabGroup,
   );
   const togglePinnedRepo = useWorkspaceStore((state) => state.togglePinnedRepo);
+  const reorderPinnedRepo = useWorkspaceStore(
+    (state) => state.reorderPinnedRepo,
+  );
+  const [dragPinnedPath, setDragPinnedPath] = useState<string | null>(null);
+  const [dragPinnedOver, setDragPinnedOver] = useState<{
+    key: string;
+    edge: "before" | "after";
+  } | null>(null);
   const togglePinnedSavedGroup = useWorkspaceStore(
     (state) => state.togglePinnedSavedGroup,
   );
@@ -1223,6 +1270,57 @@ function RepoPickerPanel({
     openMany(paths);
   };
 
+  /**
+   * Build the drag-to-reorder wiring for a pinned repo row, or undefined for
+   * rows in the recent/watched sections (those keep their own ordering).
+   */
+  const pinnedReorder = (repo: LibraryRepo): PinnedReorderRow | undefined => {
+    const key = pathKey(repo.path);
+    if (!pinnedRepoPaths.some((path) => pathKey(path) === key)) return undefined;
+    const isSource = dragPinnedPath === repo.path;
+    return {
+      draggable: !busy,
+      isSource,
+      dropEdge: dragPinnedOver?.key === key ? dragPinnedOver.edge : null,
+      onDragStart: (event) => {
+        event.dataTransfer.effectAllowed = "move";
+        // Firefox refuses to start a drag without payload; the path itself is
+        // the payload so an external drop target sees something sensible.
+        event.dataTransfer.setData("text/plain", repo.path);
+        setDragPinnedPath(repo.path);
+      },
+      onDragEnd: () => {
+        setDragPinnedPath(null);
+        setDragPinnedOver(null);
+      },
+      onDragOver: (event) => {
+        if (!dragPinnedPath || isSource) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const edge =
+          event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+        setDragPinnedOver((current) =>
+          current?.key === key && current.edge === edge
+            ? current
+            : { key, edge },
+        );
+      },
+      onDragLeave: () => {
+        setDragPinnedOver((current) => (current?.key === key ? null : current));
+      },
+      onDrop: (event) => {
+        if (!dragPinnedPath || isSource) return;
+        event.preventDefault();
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const placeAfter = event.clientY >= bounds.top + bounds.height / 2;
+        reorderPinnedRepo(dragPinnedPath, repo.path, placeAfter);
+        setDragPinnedPath(null);
+        setDragPinnedOver(null);
+      },
+    };
+  };
+
   const toggleRepoPin = (repo: LibraryRepo) => {
     const pinned = pinnedRepoPaths.some(
       (path) => pathKey(path) === pathKey(repo.path),
@@ -1414,6 +1512,7 @@ function RepoPickerPanel({
     return (
       <RepoLibraryRow
         key={key}
+        reorder={pinnedReorder(repo)}
         repo={repo}
         iconUrl={iconsByPath.get(key)}
         pinned={pinnedRepoPaths.some((path) => pathKey(path) === key)}
