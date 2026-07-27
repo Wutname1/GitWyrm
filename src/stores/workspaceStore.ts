@@ -1,209 +1,230 @@
-import { create } from 'zustand'
+import { create } from "zustand";
 import {
   commands,
   type BranchSwitchMode,
   type EditorKind,
   type RepoInfo,
   type Settings,
-} from '@/lib/bindings'
-import { log } from '@/lib/log'
-import { normalizePath, pathKey, samePath } from '@/lib/paths'
-import { unwrap } from '@/lib/queryKeys'
+} from "@/lib/bindings";
+import { log } from "@/lib/log";
+import { normalizePath, pathKey, samePath } from "@/lib/paths";
+import { unwrap } from "@/lib/queryKeys";
 import {
   DEFAULT_COLUMN_ORDER,
   clampColumnWidth,
   normalizeColumnWidths,
   type ColumnId,
   type ColumnWidths,
-} from '@/lib/graphColumns'
-import { useUiStore } from '@/stores/uiStore'
-import type { ThemeId, ThemeMode } from '@/lib/themes'
-import { DEFAULT_FONT_ID } from '@/lib/fonts'
+} from "@/lib/graphColumns";
+import { useUiStore } from "@/stores/uiStore";
+import type { ThemeId, ThemeMode } from "@/lib/themes";
+import { DEFAULT_FONT_ID } from "@/lib/fonts";
 
 export interface RecentRepo {
-  name: string
-  path: string
+  name: string;
+  path: string;
 }
 
-export type UpdateChannel = 'stable' | 'beta'
-export type CommitButtonMode = 'commit' | 'commit_push'
+export type UpdateChannel = "stable" | "beta";
+export type CommitButtonMode = "commit" | "commit_push";
 /** Ids of the editors the open-in-editor actions can launch. */
 const EDITOR_KINDS = new Set<EditorKind>([
-  'vs_code',
-  'cursor',
-  'windsurf',
-  'jetbrains',
-  'zed',
-])
-export const DEFAULT_EDITOR: EditorKind = 'vs_code'
-export type ChangeSizeDisplay = 'row' | 'column'
+  "vs_code",
+  "cursor",
+  "windsurf",
+  "jetbrains",
+  "zed",
+]);
+export const DEFAULT_EDITOR: EditorKind = "vs_code";
+export type ChangeSizeDisplay = "row" | "column";
 /** How the changed-file lists are arranged: grouped by folder, or one flat row per file. */
-export type ChangesViewMode = 'tree' | 'list'
-export type RepoPickerSection ='pinned_groups' | 'pinned_repositories' | 'recent' | 'watched'
+export type ChangesViewMode = "tree" | "list";
+export type RepoPickerSection =
+  | "pinned_groups"
+  | "pinned_repositories"
+  | "recent"
+  | "watched";
 
 const REPO_PICKER_SECTIONS = new Set<RepoPickerSection>([
-  'pinned_groups',
-  'pinned_repositories',
-  'recent',
-  'watched',
-])
+  "pinned_groups",
+  "pinned_repositories",
+  "recent",
+  "watched",
+]);
 
 /** What to do about local-only tags after a push. */
-export type TagPushDefault = 'ask' | 'always' | 'never'
+export type TagPushDefault = "ask" | "always" | "never";
 
 /**
  * A single repo's tag-setting overrides. Each field is optional: present means
  * this repo overrides that setting; absent means it follows the app-wide default.
  */
 export interface TagOverride {
-  pushDefault?: TagPushDefault
-  pushOnCreate?: boolean
-  deleteOnRemote?: boolean
+  pushDefault?: TagPushDefault;
+  pushOnCreate?: boolean;
+  deleteOnRemote?: boolean;
 }
 
 /** Tag settings resolved for one repo: app-wide default with any repo override applied. */
 export interface ResolvedTagSettings {
-  pushDefault: TagPushDefault
-  pushOnCreate: boolean
-  deleteOnRemote: boolean
+  pushDefault: TagPushDefault;
+  pushOnCreate: boolean;
+  deleteOnRemote: boolean;
 }
-export type TabLayout = 'horizontal' | 'vertical'
-export type TabDropPlacement = 'before' | 'after'
+export type TabLayout = "horizontal" | "vertical";
+export type TabDropPlacement = "before" | "after";
 
 /**
  * How repository tabs are arranged. 'manual' is the drag-and-drop order the user
  * built; the other two are computed views that leave that order untouched, so
  * switching back to Manual restores exactly what they had.
  */
-export type TabSort = 'manual' | 'name' | 'changes'
+export type TabSort = "manual" | "name" | "changes";
 
 /**
  * Which way a sort runs. 'forward' is the natural reading of each rule -- A to Z
  * for name, busiest first for changes. Manual has no reverse: it is the order
  * the user dragged, so it ignores this entirely.
  */
-export type TabSortDirection = 'forward' | 'reverse'
+export type TabSortDirection = "forward" | "reverse";
 
-const TAB_SORTS = new Set<TabSort>(['manual', 'name', 'changes'])
+const TAB_SORTS = new Set<TabSort>(["manual", "name", "changes"]);
 
 export function normalizeTabSort(sort: string | null | undefined): TabSort {
-  return TAB_SORTS.has(sort as TabSort) ? (sort as TabSort) : 'manual'
+  return TAB_SORTS.has(sort as TabSort) ? (sort as TabSort) : "manual";
 }
 
 export function normalizeTabSortDirection(
   direction: string | null | undefined,
 ): TabSortDirection {
-  return direction === 'reverse' ? 'reverse' : 'forward'
+  return direction === "reverse" ? "reverse" : "forward";
 }
 
 export interface TabGroup {
-  id: string
-  name: string
-  color: string
-  collapsed: boolean
-  repoPaths: string[]
+  id: string;
+  name: string;
+  color: string;
+  collapsed: boolean;
+  repoPaths: string[];
 }
 
 export interface SavedTabGroup {
-  id: string
-  name: string
-  color: string
-  repoPaths: string[]
+  id: string;
+  name: string;
+  color: string;
+  repoPaths: string[];
 }
 
 export type TabOrderItem =
-  | { type: 'repo'; path: string }
-  | { type: 'group'; id: string }
+  | { type: "repo"; path: string }
+  | { type: "group"; id: string };
 
-export const TAB_GROUP_COLORS = ['#2dd4a7', '#38bdf8', '#a78bfa', '#f59e0b', '#f472b6', '#f87171'] as const
-export type { BranchSwitchMode }
+export const TAB_GROUP_COLORS = [
+  "#2dd4a7",
+  "#38bdf8",
+  "#a78bfa",
+  "#f59e0b",
+  "#f472b6",
+  "#f87171",
+] as const;
+export type { BranchSwitchMode };
 
 /** Whole-app zoom limits and step, shared by the store and the status-bar control. */
-export const MIN_UI_SCALE = 0.5
-export const MAX_UI_SCALE = 2.0
-export const UI_SCALE_STEP = 0.1
-export const DEFAULT_UI_SCALE = 1.0
+export const MIN_UI_SCALE = 0.5;
+export const MAX_UI_SCALE = 2.0;
+export const UI_SCALE_STEP = 0.1;
+export const DEFAULT_UI_SCALE = 1.0;
 
 /**
  * Base UI text size in rem, before the whole-app zoom applies. The default
  * matches the original hard-coded body size (0.84375rem = 13.5px at a 16px root).
  */
-export const MIN_FONT_SIZE = 0.6875
-export const MAX_FONT_SIZE = 1.125
-export const FONT_SIZE_STEP = 0.03125
-export const DEFAULT_FONT_SIZE = 0.84375
+export const MIN_FONT_SIZE = 0.6875;
+export const MAX_FONT_SIZE = 1.125;
+export const FONT_SIZE_STEP = 0.03125;
+export const DEFAULT_FONT_SIZE = 0.875;
 
 /** Base UI text weight. The default matches the original body weight. */
-export const MIN_FONT_WEIGHT = 300
-export const MAX_FONT_WEIGHT = 600
-export const FONT_WEIGHT_STEP = 50
-export const DEFAULT_FONT_WEIGHT = 450
+export const MIN_FONT_WEIGHT = 300;
+export const MAX_FONT_WEIGHT = 600;
+export const FONT_WEIGHT_STEP = 50;
+export const DEFAULT_FONT_WEIGHT = 450;
 
 /** Clamps and rounds a base font size (rem) into the supported range. */
 export function clampFontSize(size: number): number {
-  if (!Number.isFinite(size)) return DEFAULT_FONT_SIZE
-  const clamped = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size))
-  return Math.round(clamped / FONT_SIZE_STEP) * FONT_SIZE_STEP
+  if (!Number.isFinite(size)) return DEFAULT_FONT_SIZE;
+  const clamped = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size));
+  return Math.round(clamped / FONT_SIZE_STEP) * FONT_SIZE_STEP;
 }
 
 /** Clamps and snaps a font weight into the supported range. */
 export function clampFontWeight(weight: number): number {
-  if (!Number.isFinite(weight)) return DEFAULT_FONT_WEIGHT
-  const clamped = Math.min(MAX_FONT_WEIGHT, Math.max(MIN_FONT_WEIGHT, weight))
-  return Math.round(clamped / FONT_WEIGHT_STEP) * FONT_WEIGHT_STEP
+  if (!Number.isFinite(weight)) return DEFAULT_FONT_WEIGHT;
+  const clamped = Math.min(MAX_FONT_WEIGHT, Math.max(MIN_FONT_WEIGHT, weight));
+  return Math.round(clamped / FONT_WEIGHT_STEP) * FONT_WEIGHT_STEP;
 }
 
 /** Saved width limits for the vertical repository rail. */
-export const MIN_VERTICAL_TAB_WIDTH = 48
-export const MAX_VERTICAL_TAB_WIDTH = 420
-export const DEFAULT_VERTICAL_TAB_WIDTH = 248
+export const MIN_VERTICAL_TAB_WIDTH = 48;
+export const MAX_VERTICAL_TAB_WIDTH = 420;
+export const DEFAULT_VERTICAL_TAB_WIDTH = 248;
 
 /** Saved width limits for the main workspace panes. */
-export const MIN_LEFT_PANEL_WIDTH = 176
-export const MAX_LEFT_PANEL_WIDTH = 420
-export const DEFAULT_LEFT_PANEL_WIDTH = 240
-export const MIN_RIGHT_PANEL_WIDTH = 240
-export const MAX_RIGHT_PANEL_WIDTH = 520
-export const DEFAULT_RIGHT_PANEL_WIDTH = 320
+export const MIN_LEFT_PANEL_WIDTH = 176;
+export const MAX_LEFT_PANEL_WIDTH = 420;
+export const DEFAULT_LEFT_PANEL_WIDTH = 240;
+export const MIN_RIGHT_PANEL_WIDTH = 240;
+export const MAX_RIGHT_PANEL_WIDTH = 520;
+export const DEFAULT_RIGHT_PANEL_WIDTH = 320;
 
 /** Clamps a scale into the supported range and rounds to whole percent. */
 export function clampUiScale(scale: number): number {
-  if (!Number.isFinite(scale)) return DEFAULT_UI_SCALE
-  const clamped = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, scale))
-  return Math.round(clamped * 100) / 100
+  if (!Number.isFinite(scale)) return DEFAULT_UI_SCALE;
+  const clamped = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, scale));
+  return Math.round(clamped * 100) / 100;
 }
 
 export function clampVerticalTabWidth(width: number): number {
-  if (!Number.isFinite(width)) return DEFAULT_VERTICAL_TAB_WIDTH
-  return Math.round(Math.min(MAX_VERTICAL_TAB_WIDTH, Math.max(MIN_VERTICAL_TAB_WIDTH, width)))
+  if (!Number.isFinite(width)) return DEFAULT_VERTICAL_TAB_WIDTH;
+  return Math.round(
+    Math.min(MAX_VERTICAL_TAB_WIDTH, Math.max(MIN_VERTICAL_TAB_WIDTH, width)),
+  );
 }
 
 export function clampLeftPanelWidth(width: number): number {
-  if (!Number.isFinite(width)) return DEFAULT_LEFT_PANEL_WIDTH
-  return Math.round(Math.min(MAX_LEFT_PANEL_WIDTH, Math.max(MIN_LEFT_PANEL_WIDTH, width)))
+  if (!Number.isFinite(width)) return DEFAULT_LEFT_PANEL_WIDTH;
+  return Math.round(
+    Math.min(MAX_LEFT_PANEL_WIDTH, Math.max(MIN_LEFT_PANEL_WIDTH, width)),
+  );
 }
 
 export function clampRightPanelWidth(width: number): number {
-  if (!Number.isFinite(width)) return DEFAULT_RIGHT_PANEL_WIDTH
-  return Math.round(Math.min(MAX_RIGHT_PANEL_WIDTH, Math.max(MIN_RIGHT_PANEL_WIDTH, width)))
+  if (!Number.isFinite(width)) return DEFAULT_RIGHT_PANEL_WIDTH;
+  return Math.round(
+    Math.min(MAX_RIGHT_PANEL_WIDTH, Math.max(MIN_RIGHT_PANEL_WIDTH, width)),
+  );
 }
 
 /** Saved size limits for the commit details drawer under the graph. */
-export const MIN_DRAWER_HEIGHT = 120
-export const MAX_DRAWER_HEIGHT = 560
-export const DEFAULT_DRAWER_HEIGHT = 212
-export const MIN_DRAWER_LIST_WIDTH = 160
-export const MAX_DRAWER_LIST_WIDTH = 520
-export const DEFAULT_DRAWER_LIST_WIDTH = 280
+export const MIN_DRAWER_HEIGHT = 120;
+export const MAX_DRAWER_HEIGHT = 560;
+export const DEFAULT_DRAWER_HEIGHT = 212;
+export const MIN_DRAWER_LIST_WIDTH = 160;
+export const MAX_DRAWER_LIST_WIDTH = 520;
+export const DEFAULT_DRAWER_LIST_WIDTH = 280;
 
 export function clampDrawerHeight(height: number): number {
-  if (!Number.isFinite(height)) return DEFAULT_DRAWER_HEIGHT
-  return Math.round(Math.min(MAX_DRAWER_HEIGHT, Math.max(MIN_DRAWER_HEIGHT, height)))
+  if (!Number.isFinite(height)) return DEFAULT_DRAWER_HEIGHT;
+  return Math.round(
+    Math.min(MAX_DRAWER_HEIGHT, Math.max(MIN_DRAWER_HEIGHT, height)),
+  );
 }
 
 export function clampDrawerListWidth(width: number): number {
-  if (!Number.isFinite(width)) return DEFAULT_DRAWER_LIST_WIDTH
-  return Math.round(Math.min(MAX_DRAWER_LIST_WIDTH, Math.max(MIN_DRAWER_LIST_WIDTH, width)))
+  if (!Number.isFinite(width)) return DEFAULT_DRAWER_LIST_WIDTH;
+  return Math.round(
+    Math.min(MAX_DRAWER_LIST_WIDTH, Math.max(MIN_DRAWER_LIST_WIDTH, width)),
+  );
 }
 
 /**
@@ -211,86 +232,115 @@ export function clampDrawerListWidth(width: number): number {
  * with the same folder names keep their own open/closed state.
  */
 export function changeTreeKey(repoPath: string, treeId: string): string {
-  return `${pathKey(repoPath)}|${treeId}`
+  return `${pathKey(repoPath)}|${treeId}`;
 }
 
 function groupMarker(groupId: string): string {
-  return `group:${groupId}`
+  return `group:${groupId}`;
 }
 
 function groupForPath(groups: TabGroup[], path: string): TabGroup | undefined {
-  return groups.find((group) => group.repoPaths.some((candidate) => samePath(candidate, path)))
+  return groups.find((group) =>
+    group.repoPaths.some((candidate) => samePath(candidate, path)),
+  );
 }
 
-function orderedRepoPaths(state: Pick<WorkspaceState, 'tabGroups' | 'tabOrder'>): string[] {
+function orderedRepoPaths(
+  state: Pick<WorkspaceState, "tabGroups" | "tabOrder">,
+): string[] {
   return state.tabOrder.flatMap((item) => {
-    if (item.type === 'repo') return [item.path]
-    return state.tabGroups.find((group) => group.id === item.id)?.repoPaths ?? []
-  })
+    if (item.type === "repo") return [item.path];
+    return (
+      state.tabGroups.find((group) => group.id === item.id)?.repoPaths ?? []
+    );
+  });
 }
 
 function serializeTabOrder(order: TabOrderItem[]): string[] {
-  return order.map((item) => item.type === 'group' ? groupMarker(item.id) : item.path)
+  return order.map((item) =>
+    item.type === "group" ? groupMarker(item.id) : item.path,
+  );
 }
 
 interface StoredTabGroup {
-  id: string
-  name: string
-  color: string
-  collapsed?: boolean
-  repo_paths?: string[]
+  id: string;
+  name: string;
+  color: string;
+  collapsed?: boolean;
+  repo_paths?: string[];
 }
 
-function deserializeTabGroups(groups: StoredTabGroup[] | undefined): TabGroup[] {
-  const seen = new Set<string>()
-  const result: TabGroup[] = []
+function deserializeTabGroups(
+  groups: StoredTabGroup[] | undefined,
+): TabGroup[] {
+  const seen = new Set<string>();
+  const result: TabGroup[] = [];
   for (const group of groups ?? []) {
-    if (!group.id || seen.has(group.id)) continue
-    const repoPaths = [...new Map((group.repo_paths ?? []).map((path) => [pathKey(path), normalizePath(path)])).values()]
-    if (repoPaths.length === 0) continue
-    seen.add(group.id)
+    if (!group.id || seen.has(group.id)) continue;
+    const repoPaths = [
+      ...new Map(
+        (group.repo_paths ?? []).map((path) => [
+          pathKey(path),
+          normalizePath(path),
+        ]),
+      ).values(),
+    ];
+    if (repoPaths.length === 0) continue;
+    seen.add(group.id);
     result.push({
       id: group.id,
-      name: group.name.trim() || 'New group',
+      name: group.name.trim() || "New group",
       color: group.color || TAB_GROUP_COLORS[0],
       collapsed: group.collapsed ?? false,
       repoPaths,
-    })
+    });
   }
-  return result
+  return result;
 }
 
-function deserializeSavedTabGroups(groups: StoredTabGroup[] | undefined): SavedTabGroup[] {
-  return deserializeTabGroups(groups).map(({ id, name, color, repoPaths }) => ({ id, name, color, repoPaths }))
+function deserializeSavedTabGroups(
+  groups: StoredTabGroup[] | undefined,
+): SavedTabGroup[] {
+  return deserializeTabGroups(groups).map(({ id, name, color, repoPaths }) => ({
+    id,
+    name,
+    color,
+    repoPaths,
+  }));
 }
 
-function deserializeTabOrder(order: string[] | undefined, groups: TabGroup[]): TabOrderItem[] {
-  const result: TabOrderItem[] = []
-  const seenGroups = new Set<string>()
-  const seenRepos = new Set<string>()
-  const groupedPaths = new Set(groups.flatMap((group) => group.repoPaths.map(pathKey)))
-  const groupIds = new Set(groups.map((group) => group.id))
+function deserializeTabOrder(
+  order: string[] | undefined,
+  groups: TabGroup[],
+): TabOrderItem[] {
+  const result: TabOrderItem[] = [];
+  const seenGroups = new Set<string>();
+  const seenRepos = new Set<string>();
+  const groupedPaths = new Set(
+    groups.flatMap((group) => group.repoPaths.map(pathKey)),
+  );
+  const groupIds = new Set(groups.map((group) => group.id));
 
   for (const value of order ?? []) {
-    if (value.startsWith('group:')) {
-      const id = value.slice('group:'.length)
+    if (value.startsWith("group:")) {
+      const id = value.slice("group:".length);
       if (groupIds.has(id) && !seenGroups.has(id)) {
-        seenGroups.add(id)
-        result.push({ type: 'group', id })
+        seenGroups.add(id);
+        result.push({ type: "group", id });
       }
-      continue
+      continue;
     }
-    const normalized = normalizePath(value)
-    const key = pathKey(normalized)
+    const normalized = normalizePath(value);
+    const key = pathKey(normalized);
     if (!groupedPaths.has(key) && !seenRepos.has(key)) {
-      seenRepos.add(key)
-      result.push({ type: 'repo', path: normalized })
+      seenRepos.add(key);
+      result.push({ type: "repo", path: normalized });
     }
   }
   for (const group of groups) {
-    if (!seenGroups.has(group.id)) result.push({ type: 'group', id: group.id })
+    if (!seenGroups.has(group.id)) result.push({ type: "group", id: group.id });
   }
-  return result
+  return result;
 }
 
 function removePathFromWorkspace(
@@ -299,171 +349,180 @@ function removePathFromWorkspace(
   repoPath: string,
 ): { groups: TabGroup[]; order: TabOrderItem[] } {
   const nextGroups = groups
-    .map((group) => ({ ...group, repoPaths: group.repoPaths.filter((path) => !samePath(path, repoPath)) }))
-    .filter((group) => group.repoPaths.length > 0)
-  const survivingGroups = new Set(nextGroups.map((group) => group.id))
+    .map((group) => ({
+      ...group,
+      repoPaths: group.repoPaths.filter((path) => !samePath(path, repoPath)),
+    }))
+    .filter((group) => group.repoPaths.length > 0);
+  const survivingGroups = new Set(nextGroups.map((group) => group.id));
   const nextOrder = order.filter((item) => {
-    if (item.type === 'repo') return !samePath(item.path, repoPath)
-    return survivingGroups.has(item.id)
-  })
-  return { groups: nextGroups, order: nextOrder }
+    if (item.type === "repo") return !samePath(item.path, repoPath);
+    return survivingGroups.has(item.id);
+  });
+  return { groups: nextGroups, order: nextOrder };
 }
 
-function workspaceIndexForPath(groups: TabGroup[], order: TabOrderItem[], repoPath: string): number {
-  const group = groupForPath(groups, repoPath)
-  return order.findIndex((item) => group
-    ? item.type === 'group' && item.id === group.id
-    : item.type === 'repo' && samePath(item.path, repoPath))
+function workspaceIndexForPath(
+  groups: TabGroup[],
+  order: TabOrderItem[],
+  repoPath: string,
+): number {
+  const group = groupForPath(groups, repoPath);
+  return order.findIndex((item) =>
+    group
+      ? item.type === "group" && item.id === group.id
+      : item.type === "repo" && samePath(item.path, repoPath),
+  );
 }
 
 function newGroupId(): string {
-  return `group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  return `group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
 interface WorkspaceState {
   /** Repos currently open in tabs. */
-  openRepos: RepoInfo[]
+  openRepos: RepoInfo[];
   /** Active repo id (tab). */
-  activeRepoId: string | null
+  activeRepoId: string | null;
   /** Recently opened repo paths, most recent first (persisted). */
-  recents: RecentRepo[]
+  recents: RecentRepo[];
   /** User-selected code folder scanned for quick-launch repos (persisted). */
-  codeFolder: string | null
+  codeFolder: string | null;
   /** Default directory new clones go into (persisted; falls back to codeFolder). */
-  cloneDirectory: string | null
+  cloneDirectory: string | null;
   /** Path to the git executable for fetch/pull/push/clone. Empty lets GitWyrm pick: PATH, then its bundled copy (persisted). */
-  gitExecutable: string
+  gitExecutable: string;
   /** Path to the gpg executable used to sign commits. Empty lets GitWyrm pick: PATH, then its bundled copy (persisted). */
-  gpgExecutable: string
+  gpgExecutable: string;
   /** Release channel used when checking for updates (persisted). */
-  updateChannel: UpdateChannel
+  updateChannel: UpdateChannel;
   /** What to do with uncommitted changes when switching branches (persisted). */
-  branchSwitchMode: BranchSwitchMode
+  branchSwitchMode: BranchSwitchMode;
   /** AI provider id used for commit message generation (persisted). */
-  aiProvider: string | null
+  aiProvider: string | null;
   /** Model id within the selected AI provider (persisted). */
-  aiModel: string | null
+  aiModel: string | null;
   /** Custom commit-generation instruction; null uses the built-in default (persisted). */
-  aiInstruction: string | null
+  aiInstruction: string | null;
   /** Commit-graph column order (persisted). */
-  columnOrder: ColumnId[]
+  columnOrder: ColumnId[];
   /** Commit-graph columns the user has hidden (persisted). */
-  hiddenColumns: ColumnId[]
+  hiddenColumns: ColumnId[];
   /** Explicit commit-graph column widths (persisted). */
-  columnWidths: ColumnWidths
+  columnWidths: ColumnWidths;
   /** Width of the branches and tags pane (persisted). */
-  leftPanelWidth: number
+  leftPanelWidth: number;
   /** Width of the changes and commit pane (persisted). */
-  rightPanelWidth: number
+  rightPanelWidth: number;
   /** Height of the commit details drawer under the graph (persisted). */
-  drawerHeight: number
+  drawerHeight: number;
   /** Width of the commit list pane inside the multi-select drawer (persisted). */
-  drawerListWidth: number
+  drawerListWidth: number;
   /** Where change size appears in the commit graph (persisted). */
-  changeSizeDisplay: ChangeSizeDisplay
+  changeSizeDisplay: ChangeSizeDisplay;
   /** Whether commit rows show a change-size indicator (persisted). */
-  showChangeIndicator: boolean
+  showChangeIndicator: boolean;
   /** Whether the change-size indicator includes exact line counts (persisted). */
-  showChangeLineCounts: boolean
+  showChangeLineCounts: boolean;
   /** Default action for the commit button (persisted). */
-  commitButtonMode: CommitButtonMode
+  commitButtonMode: CommitButtonMode;
   /** Editor the open-in-editor actions launch (persisted). */
-  defaultEditor: EditorKind
+  defaultEditor: EditorKind;
   /** App-wide default for whether a push offers to send local-only tags (persisted). */
-  tagPushDefault: TagPushDefault
+  tagPushDefault: TagPushDefault;
   /** App-wide default for whether the New Tag dialog's send box starts checked (persisted). */
-  tagPushOnCreate: boolean
+  tagPushOnCreate: boolean;
   /**
    * App-wide default for whether the Delete Tag dialog's "also remove it from
    * the remote" box starts checked (persisted).
    */
-  tagDeleteOnRemote: boolean
+  tagDeleteOnRemote: boolean;
   /**
    * Per-repo tag settings that override the app-wide defaults, keyed by repo path.
    * A field is present only when that repo overrides it; absent fields follow the
    * app-wide default. A repo with no entry follows the defaults entirely (persisted).
    */
-  tagOverridesByRepo: Record<string, TagOverride>
+  tagOverridesByRepo: Record<string, TagOverride>;
   /** Show worktree actions and the worktree sidebar section (persisted). */
-  enableWorktrees: boolean
+  enableWorktrees: boolean;
   /** Reopen the last session's tabs on launch. Off starts with no tabs (persisted). */
-  restoreTabs: boolean
+  restoreTabs: boolean;
   /** Whole-app zoom factor, 1.0 = 100% (persisted). */
-  uiScale: number
+  uiScale: number;
   /** Selected UI font id; see lib/fonts.ts. 'plex' is the default (persisted). */
-  fontFamily: string
+  fontFamily: string;
   /** Base UI text size in rem, before whole-app zoom (persisted). */
-  fontSize: number
+  fontSize: number;
   /** Base UI text weight (persisted). */
-  fontWeight: number
+  fontWeight: number;
   /** Custom tab names, keyed by repo path. Missing paths use the repo folder name (persisted). */
-  tabAliases: Record<string, string>
+  tabAliases: Record<string, string>;
   /** Selected color theme; 'auto' picks Slate (dark) or Paper (light) (persisted). */
-  theme: ThemeId
+  theme: ThemeId;
   /** Light/dark preference; 'system' follows the OS (persisted). */
-  themeMode: ThemeMode
+  themeMode: ThemeMode;
   /** Use the mint accent across every theme; off reveals native accents (persisted). */
-  mintAccent: boolean
+  mintAccent: boolean;
   /** Show favicon or logo images in repository tabs (persisted). */
-  showRepoIcons: boolean
+  showRepoIcons: boolean;
   /** Hide repository names until a tab is hovered (persisted). */
-  tabIconOnly: boolean
+  tabIconOnly: boolean;
   /** Width of the vertical repository rail in pixels (persisted). */
-  verticalTabWidth: number
+  verticalTabWidth: number;
   /** In-memory change counters used to refresh an icon everywhere it is shown. */
-  repoIconRevisions: Record<string, number>
+  repoIconRevisions: Record<string, number>;
   /** Whether repository tabs run across the top or down the left side (persisted). */
-  tabLayout: TabLayout
+  tabLayout: TabLayout;
   /** Give horizontal tabs their own row under the app bar instead of sharing it (persisted). */
-  horizontalTabRow: boolean
+  horizontalTabRow: boolean;
   /** Groups that currently wrap open repository tabs (persisted while open). */
-  tabGroups: TabGroup[]
+  tabGroups: TabGroup[];
   /** Shared order of loose repository tabs and complete groups (persisted). */
-  tabOrder: TabOrderItem[]
+  tabOrder: TabOrderItem[];
   /** How tabs are arranged for display. 'manual' uses tabOrder as-is (persisted). */
-  tabSort: TabSort
+  tabSort: TabSort;
   /** Which way the current sort runs. Ignored by 'manual' (persisted). */
-  tabSortDirection: TabSortDirection
+  tabSortDirection: TabSortDirection;
   /** Repo paths kept at the front of the tab strip, in pin order (persisted). */
-  pinnedTabPaths: string[]
+  pinnedTabPaths: string[];
   /** Reusable group snapshots available from the repository picker (persisted). */
-  savedTabGroups: SavedTabGroup[]
+  savedTabGroups: SavedTabGroup[];
   /** Repository shortcuts shown first in the repository picker (persisted, newest pin first). */
-  pinnedRepoPaths: string[]
+  pinnedRepoPaths: string[];
   /** Saved-group shortcuts shown first in the repository picker (persisted, newest pin first). */
-  pinnedSavedGroupIds: string[]
+  pinnedSavedGroupIds: string[];
   /** Repository-picker sections the user has hidden (persisted). */
-  repoPickerCollapsedSections: RepoPickerSection[]
+  repoPickerCollapsedSections: RepoPickerSection[];
   /**
    * Folders left open in the changes trees, keyed by `changeTreeKey(repo, tree)`.
    * Only open folders are stored, so a folder the user never touched stays
    * collapsed and a deleted folder simply drops out on the next write (persisted).
    */
-  expandedChangeFolders: Record<string, string[]>
+  expandedChangeFolders: Record<string, string[]>;
   /** Whether the changed-file lists group by folder or show one flat row per file (persisted). */
-  changesViewMode: ChangesViewMode
+  changesViewMode: ChangesViewMode;
   /** True once settings.json has been read on launch. */
-  hydrated: boolean
+  hydrated: boolean;
 
-  addRepo: (repo: RepoInfo) => void
+  addRepo: (repo: RepoInfo) => void;
   /** Opens several repos as tabs at once without changing which tab is active. */
-  addReposInBackground: (repos: RepoInfo[]) => void
-  removeRepo: (id: string) => void
-  setActiveRepo: (id: string) => void
-  setCodeFolder: (path: string | null) => void
-  setCloneDirectory: (path: string | null) => void
+  addReposInBackground: (repos: RepoInfo[]) => void;
+  removeRepo: (id: string) => void;
+  setActiveRepo: (id: string) => void;
+  setCodeFolder: (path: string | null) => void;
+  setCloneDirectory: (path: string | null) => void;
   /** Set the git executable path. Empty/blank falls back to PATH's git. */
-  setGitExecutable: (path: string) => void
-  setGpgExecutable: (path: string) => void
-  setUpdateChannel: (channel: UpdateChannel) => void
-  setBranchSwitchMode: (mode: BranchSwitchMode) => void
-  setAiSelection: (provider: string | null, model: string | null) => void
-  setAiInstruction: (instruction: string | null) => void
-  setCommitButtonMode: (mode: CommitButtonMode) => void
-  setDefaultEditor: (editor: EditorKind) => void
-  setTagPushDefault: (mode: TagPushDefault) => void
-  setTagPushOnCreate: (enabled: boolean) => void
-  setTagDeleteOnRemote: (enabled: boolean) => void
+  setGitExecutable: (path: string) => void;
+  setGpgExecutable: (path: string) => void;
+  setUpdateChannel: (channel: UpdateChannel) => void;
+  setBranchSwitchMode: (mode: BranchSwitchMode) => void;
+  setAiSelection: (provider: string | null, model: string | null) => void;
+  setAiInstruction: (instruction: string | null) => void;
+  setCommitButtonMode: (mode: CommitButtonMode) => void;
+  setDefaultEditor: (editor: EditorKind) => void;
+  setTagPushDefault: (mode: TagPushDefault) => void;
+  setTagPushOnCreate: (enabled: boolean) => void;
+  setTagDeleteOnRemote: (enabled: boolean) => void;
   /**
    * Patch one repo's tag override. For each key, a value overrides that setting
    * for this repo; null clears it back to the app default. When no overridden
@@ -472,73 +531,80 @@ interface WorkspaceState {
   setRepoTagOverride: (
     path: string,
     patch: {
-      pushDefault?: TagPushDefault | null
-      pushOnCreate?: boolean | null
-      deleteOnRemote?: boolean | null
+      pushDefault?: TagPushDefault | null;
+      pushOnCreate?: boolean | null;
+      deleteOnRemote?: boolean | null;
     },
-  ) => void
+  ) => void;
   /** Remove a repo's override entirely so it follows the app-wide defaults. */
-  clearRepoTagOverride: (path: string) => void
+  clearRepoTagOverride: (path: string) => void;
   /** Resolve tag settings for a repo path: app-wide defaults with any override applied. */
-  resolveTagSettings: (path: string | null | undefined) => ResolvedTagSettings
-  setEnableWorktrees: (enabled: boolean) => void
-  setRestoreTabs: (enabled: boolean) => void
-  setTabLayout: (layout: TabLayout) => void
-  setHorizontalTabRow: (enabled: boolean) => void
+  resolveTagSettings: (path: string | null | undefined) => ResolvedTagSettings;
+  setEnableWorktrees: (enabled: boolean) => void;
+  setRestoreTabs: (enabled: boolean) => void;
+  setTabLayout: (layout: TabLayout) => void;
+  setHorizontalTabRow: (enabled: boolean) => void;
   /** Set the whole-app zoom factor (clamped to the supported range). */
-  setUiScale: (scale: number) => void
+  setUiScale: (scale: number) => void;
   /** Set the UI font by id (see lib/fonts.ts). */
-  setFontFamily: (id: string) => void
+  setFontFamily: (id: string) => void;
   /** Set the base UI text size in rem (clamped to the supported range). */
-  setFontSize: (size: number) => void
+  setFontSize: (size: number) => void;
   /** Set the base UI text weight (clamped to the supported range). */
-  setFontWeight: (weight: number) => void
+  setFontWeight: (weight: number) => void;
   /** Rename a tab by repo path. An empty/blank alias clears it (back to the folder name). */
-  setTabAlias: (path: string, alias: string) => void
-  setTheme: (theme: ThemeId) => void
-  setThemeMode: (mode: ThemeMode) => void
-  setMintAccent: (enabled: boolean) => void
-  setShowRepoIcons: (enabled: boolean) => void
-  setTabIconOnly: (enabled: boolean) => void
-  setVerticalTabWidth: (width: number) => void
-  refreshRepoIcon: (path: string) => void
-  createTabGroup: (repoPaths: string[], options?: { name?: string; color?: string; id?: string }) => string
-  addRepoToGroup: (repoPath: string, groupId: string) => void
-  removeRepoFromGroup: (repoPath: string) => void
-  renameTabGroup: (groupId: string, name: string) => void
-  setTabGroupColor: (groupId: string, color: string) => void
-  toggleTabGroup: (groupId: string) => void
-  ungroupTabGroup: (groupId: string) => void
-  removeTabGroup: (groupId: string) => void
-  saveTabGroup: (groupId: string) => void
-  createSavedTabGroup: (repoPaths: string[], name: string) => string | null
-  deleteSavedTabGroup: (groupId: string) => void
-  togglePinnedRepo: (repoPath: string) => void
-  togglePinnedSavedGroup: (groupId: string) => void
-  toggleRepoPickerSection: (section: RepoPickerSection) => void
+  setTabAlias: (path: string, alias: string) => void;
+  setTheme: (theme: ThemeId) => void;
+  setThemeMode: (mode: ThemeMode) => void;
+  setMintAccent: (enabled: boolean) => void;
+  setShowRepoIcons: (enabled: boolean) => void;
+  setTabIconOnly: (enabled: boolean) => void;
+  setVerticalTabWidth: (width: number) => void;
+  refreshRepoIcon: (path: string) => void;
+  createTabGroup: (
+    repoPaths: string[],
+    options?: { name?: string; color?: string; id?: string },
+  ) => string;
+  addRepoToGroup: (repoPath: string, groupId: string) => void;
+  removeRepoFromGroup: (repoPath: string) => void;
+  renameTabGroup: (groupId: string, name: string) => void;
+  setTabGroupColor: (groupId: string, color: string) => void;
+  toggleTabGroup: (groupId: string) => void;
+  ungroupTabGroup: (groupId: string) => void;
+  removeTabGroup: (groupId: string) => void;
+  saveTabGroup: (groupId: string) => void;
+  createSavedTabGroup: (repoPaths: string[], name: string) => string | null;
+  deleteSavedTabGroup: (groupId: string) => void;
+  togglePinnedRepo: (repoPath: string) => void;
+  togglePinnedSavedGroup: (groupId: string) => void;
+  toggleRepoPickerSection: (section: RepoPickerSection) => void;
   /**
    * Replace the open-folder set for one changes tree. An empty list drops the
    * entry entirely so settings.json does not accumulate keys for repos whose
    * folders are all collapsed.
    */
-  setExpandedChangeFolders: (key: string, folders: string[]) => void
+  setExpandedChangeFolders: (key: string, folders: string[]) => void;
   /** Switch the changed-file lists between the folder tree and the flat list. */
-  setChangesViewMode: (mode: ChangesViewMode) => void
+  setChangesViewMode: (mode: ChangesViewMode) => void;
   /**
    * Choose how tabs are arranged. Manual restores the user's dragged order.
    * Picking the sort that is already active flips its direction instead, so a
    * second click on Name turns A-Z into Z-A. Returns the direction now in
    * effect so the caller can say which way it went.
    */
-  setTabSort: (sort: TabSort) => TabSortDirection
+  setTabSort: (sort: TabSort) => TabSortDirection;
   /**
    * Pin or unpin a tab. Pinned tabs always render before unpinned ones, in the
    * order they were pinned, whatever the sort is. Pinning a grouped repo pulls
    * it out of its group -- a pinned tab lives at the front, not inside a group.
    */
-  toggleTabPin: (repoPath: string) => void
-  moveRepoBeside: (sourcePath: string, targetPath: string, placement: TabDropPlacement) => void
-  moveRepoToOrder: (repoPath: string, orderIndex: number) => void
+  toggleTabPin: (repoPath: string) => void;
+  moveRepoBeside: (
+    sourcePath: string,
+    targetPath: string,
+    placement: TabDropPlacement,
+  ) => void;
+  moveRepoToOrder: (repoPath: string, orderIndex: number) => void;
   /**
    * Adopt the arrangement currently on screen as the manual order and switch to
    * Manual. Dragging a tab while a sort rule is active means the user wants to
@@ -547,57 +613,64 @@ interface WorkspaceState {
    * nothing alike. Freezing what they can see first makes the switch invisible,
    * so only the tab they dragged appears to move.
    */
-  adoptDisplayedTabOrder: (displayed: TabOrderItem[]) => void
-  moveGroupToOrder: (groupId: string, orderIndex: number) => void
+  adoptDisplayedTabOrder: (displayed: TabOrderItem[]) => void;
+  moveGroupToOrder: (groupId: string, orderIndex: number) => void;
   /** Removes paths that failed to reopen after launch. */
-  finishRepoRestore: () => void
+  finishRepoRestore: () => void;
   /** Move a column to a new index in the display order. */
-  reorderColumn: (id: ColumnId, toIndex: number) => void
+  reorderColumn: (id: ColumnId, toIndex: number) => void;
   /** Show or hide a column. */
-  toggleColumn: (id: ColumnId) => void
+  toggleColumn: (id: ColumnId) => void;
   /**
    * Reset one settings screen's preferences to their defaults. Returns a
    * snapshot of the prior values so the UI can offer an undo. Does not touch
    * open repos, groups, or other runtime state.
    */
-  resetSettingsGroup: (group: SettingsGroup) => SettingsSnapshot
+  resetSettingsGroup: (group: SettingsGroup) => SettingsSnapshot;
   /** Reset every preference to its default. Returns a snapshot for undo. */
-  resetAllSettings: () => SettingsSnapshot
+  resetAllSettings: () => SettingsSnapshot;
   /** Re-apply a captured snapshot of settings values (used to undo a reset). */
-  restoreSettings: (snapshot: SettingsSnapshot) => void
+  restoreSettings: (snapshot: SettingsSnapshot) => void;
   /** Restore the default column order and show every column. */
-  resetColumns: () => void
+  resetColumns: () => void;
   /** Resize one graph column. */
-  setColumnWidth: (id: ColumnId, width: number) => void
+  setColumnWidth: (id: ColumnId, width: number) => void;
   /** Return one graph column to its default sizing behavior. */
-  resetColumnWidth: (id: ColumnId) => void
-  setLeftPanelWidth: (width: number) => void
-  setRightPanelWidth: (width: number) => void
-  setDrawerHeight: (height: number) => void
-  setDrawerListWidth: (width: number) => void
-  setChangeSizeDisplay: (display: ChangeSizeDisplay) => void
-  setShowChangeIndicator: (enabled: boolean) => void
-  setShowChangeLineCounts: (enabled: boolean) => void
+  resetColumnWidth: (id: ColumnId) => void;
+  setLeftPanelWidth: (width: number) => void;
+  setRightPanelWidth: (width: number) => void;
+  setDrawerHeight: (height: number) => void;
+  setDrawerListWidth: (width: number) => void;
+  setChangeSizeDisplay: (display: ChangeSizeDisplay) => void;
+  setShowChangeIndicator: (enabled: boolean) => void;
+  setShowChangeLineCounts: (enabled: boolean) => void;
   /** Reads settings.json once and hydrates the store; returns the raw settings for launch-time restore. */
-  hydrate: () => Promise<Settings>
+  hydrate: () => Promise<Settings>;
 }
 
 /** Fields persisted to settings.json (excludes in-memory-only state like openRepos handles). */
 function toSettings(s: WorkspaceState): Settings {
   return {
-    open_repos: orderedRepoPaths(s).filter((path) => s.openRepos.some((repo) => samePath(repo.path, path))),
-    active_repo_path: s.openRepos.find((r) => r.id === s.activeRepoId)?.path ?? null,
+    open_repos: orderedRepoPaths(s).filter((path) =>
+      s.openRepos.some((repo) => samePath(repo.path, path)),
+    ),
+    active_repo_path:
+      s.openRepos.find((r) => r.id === s.activeRepoId)?.path ?? null,
     recents: s.recents.map((r) => ({ name: r.name, path: r.path })),
     code_folder: s.codeFolder,
     clone_directory: s.cloneDirectory,
     git_executable: s.gitExecutable.trim() ? s.gitExecutable.trim() : null,
     gpg_executable: s.gpgExecutable.trim() ? s.gpgExecutable.trim() : null,
-    update_channel: s.updateChannel === 'beta' ? 'beta' : 'stable',
+    update_channel: s.updateChannel === "beta" ? "beta" : "stable",
     branch_switch_mode: s.branchSwitchMode,
     ai_provider: s.aiProvider,
     ai_model: s.aiModel,
     ai_instruction: s.aiInstruction,
-    column_layout: { order: s.columnOrder, hidden: s.hiddenColumns, widths: s.columnWidths },
+    column_layout: {
+      order: s.columnOrder,
+      hidden: s.hiddenColumns,
+      widths: s.columnWidths,
+    },
     left_panel_width: s.leftPanelWidth,
     right_panel_width: s.rightPanelWidth,
     drawer_height: s.drawerHeight,
@@ -618,8 +691,8 @@ function toSettings(s: WorkspaceState): Settings {
     font_size: s.fontSize,
     font_weight: s.fontWeight,
     tab_aliases: s.tabAliases,
-    theme: s.theme === 'auto' ? null : s.theme,
-    theme_mode: s.themeMode === 'system' ? null : s.themeMode,
+    theme: s.theme === "auto" ? null : s.theme,
+    theme_mode: s.themeMode === "system" ? null : s.themeMode,
     mint_accent: s.mintAccent,
     show_repo_icons: s.showRepoIcons,
     tab_icon_only: s.tabIconOnly,
@@ -649,11 +722,11 @@ function toSettings(s: WorkspaceState): Settings {
     repo_picker_collapsed_sections: s.repoPickerCollapsedSections,
     expanded_change_folders: s.expandedChangeFolders,
     changes_view_mode: s.changesViewMode,
-  }
+  };
 }
 
 /** Column ids known to this build; anything else in persisted layout is dropped. */
-const KNOWN_COLUMNS = new Set<ColumnId>(DEFAULT_COLUMN_ORDER)
+const KNOWN_COLUMNS = new Set<ColumnId>(DEFAULT_COLUMN_ORDER);
 
 /**
  * Sanitizes a persisted order: keeps only known ids, drops duplicates, and
@@ -661,71 +734,79 @@ const KNOWN_COLUMNS = new Set<ColumnId>(DEFAULT_COLUMN_ORDER)
  * so every column stays reachable.
  */
 function normalizeOrder(order: string[] | undefined): ColumnId[] {
-  const seen = new Set<ColumnId>()
-  const result: ColumnId[] = []
+  const seen = new Set<ColumnId>();
+  const result: ColumnId[] = [];
   for (const id of order ?? []) {
     if (isColumnId(id) && !seen.has(id)) {
-      seen.add(id)
-      result.push(id)
+      seen.add(id);
+      result.push(id);
     }
   }
   // Older settings have no Changes column. Place it beside Author, matching
   // the new default, while preserving every other saved column position.
-  if (!seen.has('changes')) {
-    const authorIndex = result.indexOf('author')
+  if (!seen.has("changes")) {
+    const authorIndex = result.indexOf("author");
     if (authorIndex >= 0) {
-      result.splice(authorIndex + 1, 0, 'changes')
-      seen.add('changes')
+      result.splice(authorIndex + 1, 0, "changes");
+      seen.add("changes");
     }
   }
   for (const id of DEFAULT_COLUMN_ORDER) {
-    if (!seen.has(id)) result.push(id)
+    if (!seen.has(id)) result.push(id);
   }
-  return result
+  return result;
 }
 
 function normalizeHidden(hidden: string[] | undefined): ColumnId[] {
-  return (hidden ?? []).filter(isColumnId)
+  return (hidden ?? []).filter(isColumnId);
 }
 
 function isColumnId(id: string): id is ColumnId {
-  return KNOWN_COLUMNS.has(id as ColumnId)
+  return KNOWN_COLUMNS.has(id as ColumnId);
 }
 
 /** Unknown or missing values fall back to asking, the safest of the three. */
-function normalizeTagPushDefault(mode: string | null | undefined): TagPushDefault {
-  return mode === 'always' || mode === 'never' ? mode : 'ask'
+function normalizeTagPushDefault(
+  mode: string | null | undefined,
+): TagPushDefault {
+  return mode === "always" || mode === "never" ? mode : "ask";
 }
 
-function normalizeRepoPickerSections(sections: string[] | undefined): RepoPickerSection[] {
-  return (sections ?? []).filter(
-    (section): section is RepoPickerSection =>
-      REPO_PICKER_SECTIONS.has(section as RepoPickerSection),
-  )
+function normalizeRepoPickerSections(
+  sections: string[] | undefined,
+): RepoPickerSection[] {
+  return (sections ?? []).filter((section): section is RepoPickerSection =>
+    REPO_PICKER_SECTIONS.has(section as RepoPickerSection),
+  );
 }
 
 /** Validate a stored theme id; unknown/absent falls back to Auto. */
 function normalizeTheme(theme: string | null | undefined): ThemeId {
-  return theme === 'slate' || theme === 'onyx' || theme === 'midnight' || theme === 'paper'
+  return theme === "slate" ||
+    theme === "onyx" ||
+    theme === "midnight" ||
+    theme === "paper"
     ? theme
-    : 'auto'
+    : "auto";
 }
 
 /** Validate a stored theme mode; unknown/absent falls back to system. */
 function normalizeThemeMode(mode: string | null | undefined): ThemeMode {
-  return mode === 'light' || mode === 'dark' ? mode : 'system'
+  return mode === "light" || mode === "dark" ? mode : "system";
 }
 
 /**
  * Settings map values arrive as `string | undefined` (a Rust HashMap maps to a
  * Partial record). Drop the empty entries so the store holds a plain map.
  */
-function normalizeAliases(aliases: Partial<Record<string, string>> | undefined): Record<string, string> {
-  const out: Record<string, string> = {}
+function normalizeAliases(
+  aliases: Partial<Record<string, string>> | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {};
   for (const [path, alias] of Object.entries(aliases ?? {})) {
-    if (alias) out[path] = alias
+    if (alias) out[path] = alias;
   }
-  return out
+  return out;
 }
 
 /**
@@ -736,79 +817,86 @@ function normalizeAliases(aliases: Partial<Record<string, string>> | undefined):
 function normalizeExpandedChangeFolders(
   folders: Partial<Record<string, string[]>> | undefined,
 ): Record<string, string[]> {
-  const out: Record<string, string[]> = {}
+  const out: Record<string, string[]> = {};
   for (const [key, value] of Object.entries(folders ?? {})) {
-    if (value && value.length > 0) out[key] = value
+    if (value && value.length > 0) out[key] = value;
   }
-  return out
+  return out;
 }
 
 /** Wire shape of a per-repo tag override as stored in settings.json (snake_case, nullable fields). */
 type StoredTagOverride = {
-  push_default?: string | null
-  push_on_create?: boolean | null
-  delete_on_remote?: boolean | null
-}
+  push_default?: string | null;
+  push_on_create?: boolean | null;
+  delete_on_remote?: boolean | null;
+};
 
 /** Serialize the override map for persistence. Empty overrides are dropped. */
 function serializeTagOverrides(
   overrides: Record<string, TagOverride>,
 ): Record<string, StoredTagOverride> {
-  const out: Record<string, StoredTagOverride> = {}
+  const out: Record<string, StoredTagOverride> = {};
   for (const [path, value] of Object.entries(overrides)) {
-    const stored: StoredTagOverride = {}
-    if (value.pushDefault !== undefined) stored.push_default = value.pushDefault
-    if (value.pushOnCreate !== undefined) stored.push_on_create = value.pushOnCreate
-    if (value.deleteOnRemote !== undefined) stored.delete_on_remote = value.deleteOnRemote
+    const stored: StoredTagOverride = {};
+    if (value.pushDefault !== undefined)
+      stored.push_default = value.pushDefault;
+    if (value.pushOnCreate !== undefined)
+      stored.push_on_create = value.pushOnCreate;
+    if (value.deleteOnRemote !== undefined)
+      stored.delete_on_remote = value.deleteOnRemote;
     if (
       stored.push_default !== undefined ||
       stored.push_on_create !== undefined ||
       stored.delete_on_remote !== undefined
     ) {
-      out[path] = stored
+      out[path] = stored;
     }
   }
-  return out
+  return out;
 }
 
 /** Read the override map back from settings, dropping empty or invalid entries. */
 function normalizeTagOverrides(
   overrides: Partial<Record<string, StoredTagOverride>> | undefined,
 ): Record<string, TagOverride> {
-  const out: Record<string, TagOverride> = {}
+  const out: Record<string, TagOverride> = {};
   for (const [path, stored] of Object.entries(overrides ?? {})) {
-    if (!stored) continue
-    const value: TagOverride = {}
-    if (stored.push_default === 'ask' || stored.push_default === 'always' || stored.push_default === 'never') {
-      value.pushDefault = stored.push_default
+    if (!stored) continue;
+    const value: TagOverride = {};
+    if (
+      stored.push_default === "ask" ||
+      stored.push_default === "always" ||
+      stored.push_default === "never"
+    ) {
+      value.pushDefault = stored.push_default;
     }
-    if (typeof stored.push_on_create === 'boolean') {
-      value.pushOnCreate = stored.push_on_create
+    if (typeof stored.push_on_create === "boolean") {
+      value.pushOnCreate = stored.push_on_create;
     }
-    if (typeof stored.delete_on_remote === 'boolean') {
-      value.deleteOnRemote = stored.delete_on_remote
+    if (typeof stored.delete_on_remote === "boolean") {
+      value.deleteOnRemote = stored.delete_on_remote;
     }
     if (
       value.pushDefault !== undefined ||
       value.pushOnCreate !== undefined ||
       value.deleteOnRemote !== undefined
     ) {
-      out[path] = value
+      out[path] = value;
     }
   }
-  return out
+  return out;
 }
 
-let persistTimer: ReturnType<typeof setTimeout> | null = null
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Debounced write-through to settings.json; skipped until hydration completes. */
 function schedulePersist() {
-  const s = useWorkspaceStore.getState()
-  if (!s.hydrated) return
-  if (persistTimer) clearTimeout(persistTimer)
+  const s = useWorkspaceStore.getState();
+  if (!s.hydrated) return;
+  if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
-    void commands.saveSettings(toSettings(useWorkspaceStore.getState()))
-  }, 300)
+    void commands.saveSettings(toSettings(useWorkspaceStore.getState()));
+  }, 300);
 }
 
 /**
@@ -831,8 +919,8 @@ export const SETTINGS_DEFAULTS = {
   enableWorktrees: false,
   restoreTabs: true,
   tagPushDefault: "ask",
-  tagPushOnCreate: false,
-  tagDeleteOnRemote: false,
+  tagPushOnCreate: true,
+  tagDeleteOnRemote: true,
   aiInstruction: null,
   changeSizeDisplay: "column",
   showChangeIndicator: false,
@@ -850,36 +938,45 @@ export const SETTINGS_DEFAULTS = {
 } satisfies Partial<WorkspaceState>;
 
 /** A resettable preference key. */
-export type SettingsKey = keyof typeof SETTINGS_DEFAULTS
+export type SettingsKey = keyof typeof SETTINGS_DEFAULTS;
 
 /** Which preference keys each settings screen owns, for per-screen reset. */
 export const SETTINGS_GROUPS = {
   general: [
-    'codeFolder',
-    'cloneDirectory',
-    'repoPickerCollapsedSections',
-    'gitExecutable',
-    'gpgExecutable',
-    'branchSwitchMode',
-    'commitButtonMode',
-    'defaultEditor',
-    'enableWorktrees',
+    "codeFolder",
+    "cloneDirectory",
+    "repoPickerCollapsedSections",
+    "gitExecutable",
+    "gpgExecutable",
+    "branchSwitchMode",
+    "commitButtonMode",
+    "defaultEditor",
+    "enableWorktrees",
   ],
-  behavior: ['restoreTabs'],
-  tags: ['tagPushDefault', 'tagPushOnCreate', 'tagDeleteOnRemote'],
-  ai: ['aiInstruction'],
+  behavior: ["restoreTabs"],
+  tags: ["tagPushDefault", "tagPushOnCreate", "tagDeleteOnRemote"],
+  ai: ["aiInstruction"],
   appearance: [
-    'changeSizeDisplay', 'showChangeIndicator', 'showChangeLineCounts',
-    'uiScale', 'fontFamily', 'fontSize', 'fontWeight',
-    'theme', 'themeMode', 'mintAccent', 'showRepoIcons', 'tabIconOnly',
-    'changesViewMode',
+    "changeSizeDisplay",
+    "showChangeIndicator",
+    "showChangeLineCounts",
+    "uiScale",
+    "fontFamily",
+    "fontSize",
+    "fontWeight",
+    "theme",
+    "themeMode",
+    "mintAccent",
+    "showRepoIcons",
+    "tabIconOnly",
+    "changesViewMode",
   ],
-} satisfies Record<string, SettingsKey[]>
+} satisfies Record<string, SettingsKey[]>;
 
-export type SettingsGroup = keyof typeof SETTINGS_GROUPS
+export type SettingsGroup = keyof typeof SETTINGS_GROUPS;
 
 /** A captured slice of settings values, used to undo a reset. */
-export type SettingsSnapshot = Partial<Pick<WorkspaceState, SettingsKey>>
+export type SettingsSnapshot = Partial<Pick<WorkspaceState, SettingsKey>>;
 
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   openRepos: [],
@@ -907,8 +1004,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   commitButtonMode: "commit",
   defaultEditor: DEFAULT_EDITOR,
   tagPushDefault: "ask",
-  tagPushOnCreate: false,
-  tagDeleteOnRemote: false,
+  tagPushOnCreate: true,
+  tagDeleteOnRemote: true,
   tagOverridesByRepo: {},
   enableWorktrees: false,
   restoreTabs: true,
@@ -1552,7 +1649,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     // Name always opens as A-Z rather than inheriting the last rule's direction.
     const s = get();
     const direction: TabSortDirection =
-      sort !== "manual" && s.tabSort === sort && s.tabSortDirection === "forward"
+      sort !== "manual" &&
+      s.tabSort === sort &&
+      s.tabSortDirection === "forward"
         ? "reverse"
         : "forward";
     set({ tabSort: sort, tabSortDirection: direction });
@@ -1659,7 +1758,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   adoptDisplayedTabOrder: (displayed) => {
     set((s) => {
       const key = (item: TabOrderItem) =>
-        item.type === "group" ? `group:${item.id}` : `repo:${pathKey(item.path)}`;
+        item.type === "group"
+          ? `group:${item.id}`
+          : `repo:${pathKey(item.path)}`;
       const shown = new Set(displayed.map(key));
       // Pinned tabs render in their own strip ahead of everything else, so they
       // are not in the displayed list. Keep them at the front, in their stored
@@ -1825,7 +1926,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         rightPanelWidth: clampRightPanelWidth(
           settings.right_panel_width ?? DEFAULT_RIGHT_PANEL_WIDTH,
         ),
-        drawerHeight: clampDrawerHeight(settings.drawer_height ?? DEFAULT_DRAWER_HEIGHT),
+        drawerHeight: clampDrawerHeight(
+          settings.drawer_height ?? DEFAULT_DRAWER_HEIGHT,
+        ),
         drawerListWidth: clampDrawerListWidth(
           settings.drawer_commit_list_width ?? DEFAULT_DRAWER_LIST_WIDTH,
         ),
@@ -1878,7 +1981,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         tabGroups,
         tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),
         tabSort: normalizeTabSort(settings.tab_sort),
-        tabSortDirection: normalizeTabSortDirection(settings.tab_sort_direction),
+        tabSortDirection: normalizeTabSortDirection(
+          settings.tab_sort_direction,
+        ),
         pinnedTabPaths: (settings.pinned_tab_paths ?? []).map(normalizePath),
         savedTabGroups,
         pinnedRepoPaths: settings.pinned_repo_paths ?? [],
@@ -1891,7 +1996,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         expandedChangeFolders: normalizeExpandedChangeFolders(
           settings.expanded_change_folders,
         ),
-        changesViewMode: settings.changes_view_mode === "list" ? "list" : "tree",
+        changesViewMode:
+          settings.changes_view_mode === "list" ? "list" : "tree",
         hydrated: true,
       });
     }
@@ -1903,13 +2009,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 // active repo changes - tab click, close, group close - drop them so the graph
 // never queries the new repo for the old repo's objects.
 useWorkspaceStore.subscribe((s, prev) => {
-  if (s.activeRepoId !== prev.activeRepoId) useUiStore.getState().resetForRepoSwitch()
-})
+  if (s.activeRepoId !== prev.activeRepoId)
+    useUiStore.getState().resetForRepoSwitch();
+});
 
 export function useActiveRepo(): RepoInfo | null {
-  const openRepos = useWorkspaceStore((s) => s.openRepos)
-  const activeRepoId = useWorkspaceStore((s) => s.activeRepoId)
-  return openRepos.find((r) => r.id === activeRepoId) ?? null
+  const openRepos = useWorkspaceStore((s) => s.openRepos);
+  const activeRepoId = useWorkspaceStore((s) => s.activeRepoId);
+  return openRepos.find((r) => r.id === activeRepoId) ?? null;
 }
 
 // Dev-only: `openRepos` holds live repo handles that cannot be serialized, so a
@@ -1918,11 +2025,13 @@ export function useActiveRepo(): RepoInfo | null {
 // the state across reloads so editing a component never closes the user's repos.
 // Production builds never run this.
 if (import.meta.hot) {
-  const carried = import.meta.hot.data.workspaceState as WorkspaceState | undefined
+  const carried = import.meta.hot.data.workspaceState as
+    | WorkspaceState
+    | undefined;
   if (carried) {
-    useWorkspaceStore.setState(carried, true)
+    useWorkspaceStore.setState(carried, true);
   }
   import.meta.hot.dispose((data) => {
-    data.workspaceState = useWorkspaceStore.getState()
-  })
+    data.workspaceState = useWorkspaceStore.getState();
+  });
 }
