@@ -384,9 +384,19 @@ function HasKey({
   status: SigningStatus
   onChanged: () => void
 }) {
-  const { identity } = useGitIdentity()
   const [busy, setBusy] = useState(false)
   const [making, setMaking] = useState(false)
+  const [commitEmail, setCommitEmail] = useState('')
+
+  // The email commits in THIS repository actually carry, which a profile
+  // override or folder rule can make different from the global identity. The
+  // warning below is only true if it compares against what git will really use.
+  useEffect(() => {
+    void (async () => {
+      const res = await commands.getEffectiveIdentity(repoPath)
+      setCommitEmail(res.status === 'ok' ? res.data.email : '')
+    })()
+  }, [repoPath, status])
 
   // Only a key git is actually configured with counts as active. Falling back
   // to keys[0] would silently sign with whichever key gpg happened to list
@@ -395,7 +405,7 @@ function HasKey({
 
   // Signing with a key whose email is not the one on your commits gets you an
   // unverified badge on the host, which is confusing to debug. Say it plainly.
-  const myEmail = identity?.email.trim().toLowerCase() ?? ''
+  const myEmail = commitEmail.trim().toLowerCase()
   const mismatch =
     active && myEmail && uidEmail(active.uid) && uidEmail(active.uid) !== myEmail
       ? uidEmail(active.uid)
@@ -494,9 +504,9 @@ function HasKey({
                 This key belongs to{' '}
                 <span className="font-medium text-foreground">{mismatch}</span>, but your commits
                 here are made as{' '}
-                <span className="font-medium text-foreground">{identity?.email}</span>. Your host
-                will not show these commits as verified. Pick a key with the matching email, or
-                make one.
+                <span className="font-medium text-foreground">{commitEmail}</span>. Your host will
+                not show these commits as verified. Pick a key with the matching email, or make
+                one.
               </div>
             </div>
           )}

@@ -76,6 +76,16 @@ pub fn write_identity(name: &str, email: &str) -> Result<(), AppError> {
   Ok(())
 }
 
+/// Path to the user's global config, creating nothing but naming where it goes.
+///
+/// Shared with the profiles module, which writes the same file when the active
+/// profile changes.
+pub fn global_config_path() -> Result<std::path::PathBuf, AppError> {
+  git2::Config::find_global()
+    .or_else(|_| default_global_config_path())
+    .map_err(|e| AppError::Other(format!("Could not find your git settings file: {e}")))
+}
+
 /// Where the global config lives when git has never written one.
 ///
 /// `find_global` fails if `~/.gitconfig` does not exist yet, which is exactly

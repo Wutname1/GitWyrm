@@ -12,6 +12,7 @@ import logoUrl from "@/assets/logo.png";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { ProfileSwitcher } from "@/components/domain/ProfileSwitcher";
 import {
   DisabledHint,
   Tooltip,
@@ -294,6 +295,7 @@ export function CommitMessageForm() {
           <span className="font-semibold">Amend previous commit</span>
         </label>
       )}
+      <ProfileSwitcher />
       <div
         className={cn(
           "flex h-[34px] w-full overflow-hidden rounded-md border transition-colors",

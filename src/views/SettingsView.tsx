@@ -4,6 +4,7 @@ import { AppearanceSettings } from '@/components/domain/settings/AppearanceSetti
 import { BehaviorSettings } from '@/components/domain/settings/BehaviorSettings'
 import { GeneralSettings } from '@/components/domain/settings/GeneralSettings'
 import { LogsSettings } from '@/components/domain/settings/LogsSettings'
+import { ProfilesSettings } from '@/components/domain/settings/ProfilesSettings'
 import { RepositorySettings } from '@/components/domain/settings/RepositorySettings'
 import { RepositoryTagsSettings } from '@/components/domain/settings/RepositoryTagsSettings'
 import { SecuritySettings } from '@/components/domain/settings/SecuritySettings'
@@ -19,6 +20,7 @@ const TITLES: Record<SettingsSection, string> = {
   repository: 'Repository',
   repositoryTags: 'Tags',
   tags: 'Tags',
+  profiles: 'Profiles',
   ai: 'AI',
   security: 'Security',
   appearance: 'Appearance',
@@ -31,6 +33,7 @@ const SUBTITLES: Partial<Record<SettingsSection, string>> = {
   repository: 'These settings apply only to the repository open in the active tab.',
   repositoryTags: 'Tag rules for the repository open in the active tab.',
   tags: 'The default tag rules for every repository.',
+  profiles: 'Who you commit as, and the key you sign with.',
   security: 'Prove your commits came from you, and choose the programs GitWyrm uses.',
 }
 
@@ -40,6 +43,7 @@ const SECTION_BODIES: Record<SettingsSection, React.ComponentType> = {
   repository: RepositorySettings,
   repositoryTags: RepositoryTagsSettings,
   tags: TagsSettings,
+  profiles: ProfilesSettings,
   ai: AiSettings,
   security: SecuritySettings,
   appearance: AppearanceSettings,

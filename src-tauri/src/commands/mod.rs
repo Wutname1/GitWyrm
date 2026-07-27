@@ -12,6 +12,7 @@ pub mod gitignore;
 pub mod log;
 pub mod merge;
 pub mod patch;
+pub mod profiles;
 pub mod remote;
 pub mod repo;
 pub mod repo_icon;

@@ -188,6 +188,13 @@ pub struct Settings {
   /// anyone who keeps "reopen my last tabs" off.
   #[serde(default)]
   pub onboarding_seen: bool,
+  /// Named identities: who you commit as and the key you sign with.
+  #[serde(default)]
+  pub profiles: Vec<crate::git::profiles::Profile>,
+  /// Id of the profile applied to the global git config. None means the user
+  /// has not adopted profiles, so their existing git config is left alone.
+  #[serde(default)]
+  pub active_profile_id: Option<String>,
   /// Fingerprints of signing keys the user has confirmed they uploaded to their
   /// host. Drives the "finish setting this key up" checklist, which has to
   /// survive a reload: a key is only half-usable until its public half is on the
@@ -364,6 +371,8 @@ impl Default for Settings {
       enable_worktrees: false,
       restore_tabs: true,
       onboarding_seen: false,
+      profiles: Vec::new(),
+      active_profile_id: None,
       signing_keys_published: Vec::new(),
       ui_scale: None,
       font_family: None,

@@ -392,6 +392,127 @@ async repairSigningFormat(repoPath: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Every profile the user has defined.
+ */
+async listProfiles() : Promise<Result<Profile[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_profiles") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The id of the profile currently written to the global git config.
+ */
+async getActiveProfileId() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_active_profile_id") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Create or update a profile, then refresh the folder rules it owns.
+ */
+async saveProfile(profile: Profile) : Promise<Result<Profile[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_profile", { profile }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove a profile. Repositories overridden to it keep their local config,
+ * which stays valid git even with the profile gone.
+ */
+async deleteProfile(id: string) : Promise<Result<Profile[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_profile", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Make a profile the global default. This is the switcher.
+ */
+async setActiveProfile(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_active_profile", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Pin one repository to a profile, whatever the active profile is.
+ */
+async setRepoProfile(repoPath: string, id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_repo_profile", { repoPath, id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Drop a repository's override so it follows the active profile again.
+ */
+async clearRepoProfile(repoPath: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_repo_profile", { repoPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Build a first profile from the git config the user already has.
+ * 
+ * Adopting profiles should not mean retyping what git already knows, and it
+ * must not change any behavior on its own: this only proposes a profile from
+ * the current global values. Nothing is written until the user saves it.
+ */
+async profileFromCurrentConfig() : Promise<Result<Profile, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("profile_from_current_config") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Every gpg signing key on this machine.
+ * 
+ * Separate from `get_signing_status`, which needs a repository: profiles are
+ * global, and the user may be picking a key with no repository open.
+ */
+async listSigningKeys() : Promise<Result<SigningKey[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_signing_keys") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * What git actually resolves for this repository right now.
+ * 
+ * Read from git rather than inferred from our settings, so a hand-edited
+ * config or an include we did not write still shows the truth.
+ */
+async getEffectiveIdentity(repoPath: string) : Promise<Result<GitIdentitySnapshot, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_effective_identity", { repoPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Create a brand-new git repository and its requested starter files. The
  * folder must be new or empty so existing work is never overwritten. Returns
  * the working-directory path so the caller can immediately open it.
@@ -1804,6 +1925,14 @@ export type GeneratedCommitMessage = { summary: string; description: string }
  * been set up, which is the normal state on a fresh machine.
  */
 export type GitIdentity = { name: string; email: string }
+/**
+ * What git resolves for a repository right now.
+ */
+export type GitIdentitySnapshot = { name: string; email: string; signingKey: string | null; format: string | null; signCommits: boolean; 
+/**
+ * True when the repository's own config sets the identity.
+ */
+overridden: boolean }
 export type GitProgressPayload = { repo_id: string; operation: string; line: string }
 export type GithubComment = { author: string; author_is_bot: boolean; body: string; created_at: string }
 export type GithubRepoRef = { owner: string; repo: string }
@@ -1919,6 +2048,27 @@ export type PollResult =
 { status: "pending"; interval: number }
 export type PrDetail = { number: number; title: string; body: string; author: string; author_is_bot: boolean; state: string; draft: boolean; merged: boolean; mergeable: boolean | null; head_ref: string; base_ref: string; additions: number; deletions: number; changed_files: number; comments: GithubComment[]; html_url: string; created_at: string; updated_at: string }
 export type PrSummary = { number: number; title: string; author: string; author_is_bot: boolean; draft: boolean; head_ref: string; base_ref: string; updated_at: string; html_url: string }
+/**
+ * One identity you commit under.
+ */
+export type Profile = { 
+/**
+ * Stable id, referenced by repository overrides and folder rules.
+ */
+id: string; 
+/**
+ * What the user calls it: "Work", "Personal".
+ */
+label: string; name: string; email: string; signing?: SigningMethod; 
+/**
+ * Sign every commit made under this profile.
+ */
+signCommits?: boolean; 
+/**
+ * Folders whose repositories use this profile automatically. Written as
+ * `includeIf` rules so the terminal and other git tools agree.
+ */
+folders?: string[] }
 /**
  * Outcome of a pull, measured the same way as `PushResult`.
  */
@@ -2182,6 +2332,15 @@ restore_tabs?: boolean;
  */
 onboarding_seen?: boolean; 
 /**
+ * Named identities: who you commit as and the key you sign with.
+ */
+profiles?: Profile[]; 
+/**
+ * Id of the profile applied to the global git config. None means the user
+ * has not adopted profiles, so their existing git config is left alone.
+ */
+active_profile_id?: string | null; 
+/**
  * Fingerprints of signing keys the user has confirmed they uploaded to their
  * host. Drives the "finish setting this key up" checklist, which has to
  * survive a reload: a key is only half-usable until its public half is on the
@@ -2336,6 +2495,22 @@ fingerprint: string;
  * "Real Name <email>" as recorded on the key.
  */
 uid: string }
+/**
+ * How a profile signs commits.
+ */
+export type SigningMethod = 
+/**
+ * Not set up. Commits are made but not signed.
+ */
+{ kind: "none" } | 
+/**
+ * A gpg key id, the value git wants for `user.signingkey`.
+ */
+{ kind: "gpg"; value: string } | 
+/**
+ * Path to an SSH public key.
+ */
+{ kind: "ssh"; value: string }
 /**
  * What the user's signing setup looks like right now, for the Security screen.
  */

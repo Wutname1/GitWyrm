@@ -24,6 +24,7 @@ export const SECTION_LABELS: Record<SettingsSection, string> = {
   repository: 'Repository',
   repositoryTags: 'Tags (this repository)',
   tags: 'Tags',
+  profiles: 'Profiles',
   ai: 'AI',
   security: 'Security',
   appearance: 'Appearance',
@@ -142,6 +143,41 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     label: 'Commit instructions',
     hint: 'What you want the generated commit messages to look like.',
     keywords: ['prompt', 'system prompt', 'style', 'commit message', 'format'],
+  },
+
+  // -------------------------------------------------------------- profiles
+  {
+    // Section-level: opens Profiles rather than flashing one row, since the
+    // list itself is the thing you are looking for.
+    id: 'profiles-list',
+    section: 'profiles',
+    label: 'Profiles',
+    hint: 'Named identities: the name, email, and signing key that go on your commits.',
+    keywords: [
+      'profile',
+      'account',
+      'identity',
+      'work',
+      'personal',
+      'switch account',
+      'multiple accounts',
+      'name',
+      'email',
+    ],
+  },
+  {
+    id: 'profile-folders',
+    section: 'profiles',
+    label: 'Use for these folders',
+    hint: 'Repositories inside a folder use a profile automatically, in GitWyrm and your terminal.',
+    keywords: ['folder', 'includeif', 'gitdir', 'automatic', 'per folder', 'rule'],
+  },
+  {
+    id: 'repo-profile',
+    section: 'profiles',
+    label: 'Commit as (this repository)',
+    hint: 'Pin one repository to a profile, whatever your active profile is.',
+    keywords: ['override', 'pin', 'per repository', 'identity', 'commit as'],
   },
 
   // -------------------------------------------------------------- security

@@ -3,6 +3,7 @@ pub mod graph;
 pub mod identity;
 pub mod history;
 pub mod merge_ops;
+pub mod profiles;
 pub mod refs;
 pub mod remote_url;
 pub mod shell;
