@@ -28,6 +28,22 @@ async readLog() : Promise<Result<string, string>> {
 }
 },
 /**
+ * Returns the tail of the log for attaching to a bug report.
+ * 
+ * Reports want recent history, not the whole rotating file, so this trims to
+ * the last `REPORT_LOG_BYTES` and drops the leading partial line so the result
+ * always starts on a real log entry. The frontend scrubs the text before it
+ * leaves the machine.
+ */
+async readLogTail() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_log_tail") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Truncates the log file in place so the logger's open handle stays valid.
  */
 async clearLog() : Promise<Result<null, string>> {

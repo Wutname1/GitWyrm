@@ -374,6 +374,25 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
 
   // ------------------------------------------------------------------ logs
   {
+    id: 'report-problem',
+    section: 'logs',
+    label: 'Report a problem',
+    hint: 'Send us what went wrong, with your log attached automatically.',
+    keywords: [
+      'bug',
+      'bug report',
+      'report',
+      'feedback',
+      'support',
+      'help',
+      'broken',
+      'issue',
+      'contact',
+      'send logs',
+      'something is wrong',
+    ],
+  },
+  {
     id: 'application-log',
     section: 'logs',
     label: 'Application log',

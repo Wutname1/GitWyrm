@@ -102,6 +102,43 @@ pub fn read_log(app: tauri::AppHandle) -> Result<String, AppError> {
   Ok(fs::read_to_string(path).unwrap_or_default())
 }
 
+/// How much of the log a bug report carries. Big enough to hold app startup
+/// plus a whole AI model-detection cycle, small enough to upload quickly.
+const REPORT_LOG_BYTES: usize = 200_000;
+
+/// Returns the tail of the log for attaching to a bug report.
+///
+/// Reports want recent history, not the whole rotating file, so this trims to
+/// the last `REPORT_LOG_BYTES` and drops the leading partial line so the result
+/// always starts on a real log entry. The frontend scrubs the text before it
+/// leaves the machine.
+#[tauri::command]
+#[specta::specta]
+pub fn read_log_tail(app: tauri::AppHandle) -> Result<String, AppError> {
+  let path = log_path(&app)?;
+  let text = fs::read_to_string(path).unwrap_or_default();
+  Ok(tail_from_line_boundary(&text, REPORT_LOG_BYTES))
+}
+
+/// Keep the last `max_bytes` of `text`, starting at the next line boundary so
+/// the first entry is never a fragment. Returns the whole input when it fits.
+fn tail_from_line_boundary(text: &str, max_bytes: usize) -> String {
+  if text.len() <= max_bytes {
+    return text.to_string();
+  }
+  // Slice on a char boundary first: the cut point can land mid-UTF-8, and
+  // indexing a &str there panics.
+  let mut start = text.len() - max_bytes;
+  while start < text.len() && !text.is_char_boundary(start) {
+    start += 1;
+  }
+  let cut = &text[start..];
+  match cut.find('\n') {
+    Some(nl) => cut[nl + 1..].to_string(),
+    None => cut.to_string(),
+  }
+}
+
 /// Truncates the log file in place so the logger's open handle stays valid.
 #[tauri::command]
 #[specta::specta]
@@ -132,7 +169,41 @@ pub fn open_logs_folder(app: tauri::AppHandle) -> Result<(), AppError> {
 
 #[cfg(test)]
 mod tests {
-  use super::{path_exists, repo_path_from_args};
+  use super::{path_exists, repo_path_from_args, tail_from_line_boundary};
+
+  #[test]
+  fn short_logs_are_returned_whole() {
+    let text = "[INFO] one\n[INFO] two\n";
+    assert_eq!(tail_from_line_boundary(text, 1000), text);
+  }
+
+  #[test]
+  fn long_logs_start_on_a_whole_entry() {
+    let text = "[INFO] aaaaaaaaaa\n[INFO] bbbbbbbbbb\n[INFO] cccccccccc\n";
+    // Cuts inside the second line; the partial entry must be dropped.
+    let out = tail_from_line_boundary(text, 25);
+    assert!(out.starts_with("[INFO] "), "got {out:?}");
+    assert!(out.ends_with("[INFO] cccccccccc\n"));
+    assert!(!out.contains("aaaaaaaaaa"));
+  }
+
+  #[test]
+  fn multibyte_text_does_not_panic_at_the_cut() {
+    // A cut landing mid-UTF-8 would panic on a naive slice.
+    let text = "[INFO] ✅✅✅✅✅✅✅✅✅✅\n[INFO] done\n";
+    for max in 1..text.len() {
+      let out = tail_from_line_boundary(text, max);
+      assert!(text.ends_with(&out) || out.is_empty(), "max={max}");
+    }
+  }
+
+  #[test]
+  fn a_single_huge_line_is_still_trimmed() {
+    // No newline to cut on: return the tail rather than the whole line.
+    let text = format!("[INFO] {}", "x".repeat(500));
+    let out = tail_from_line_boundary(&text, 100);
+    assert_eq!(out.len(), 100);
+  }
 
   #[test]
   fn path_exists_reports_existing_and_missing_paths() {

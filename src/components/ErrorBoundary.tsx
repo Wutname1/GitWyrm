@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { log, describeError } from '../lib/log'
 import { Sentry } from '../lib/sentry'
 import { CrashTitleBar } from './CrashTitleBar'
+import { ReportProblemModal } from './modals/ReportProblemModal'
 
 interface Props {
   children: ReactNode
@@ -11,6 +12,7 @@ interface State {
   error: Error | null
   info: ErrorInfo | null
   copied: boolean
+  reporting: boolean
 }
 
 /**
@@ -20,7 +22,7 @@ interface State {
  * no visible cause.
  */
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null, info: null, copied: false }
+  state: State = { error: null, info: null, copied: false, reporting: false }
 
   static getDerivedStateFromError(error: Error): Partial<State> {
     return { error }
@@ -64,23 +66,6 @@ export class ErrorBoundary extends Component<Props, State> {
     ].join('\n')
   }
 
-  /**
-   * GitHub rejects issue URLs beyond ~8k characters, so the prefilled body is
-   * trimmed. The full report is still available via "Copy bug report".
-   */
-  private handleReport = () => {
-    const body = this.bugReport()
-    const trimmed =
-      body.length > 6000
-        ? `${body.slice(0, 6000)}\n\n_(truncated -- use "Copy bug report" for the full details)_`
-        : body
-    const url =
-      'https://github.com/Wutname1/GitWyrm/issues/new' +
-      `?title=${encodeURIComponent(`Crash: ${this.state.error?.message ?? 'Something went wrong'}`)}` +
-      `&body=${encodeURIComponent(trimmed)}`
-    void import('@tauri-apps/plugin-opener').then(({ openUrl }) => openUrl(url))
-  }
-
   private handleCopy = () => {
     navigator.clipboard.writeText(this.bugReport()).then(
       () => {
@@ -94,7 +79,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   render() {
-    const { error, info, copied } = this.state
+    const { error, info, copied, reporting } = this.state
     if (!error) return this.props.children
 
     return (
@@ -118,10 +103,10 @@ export class ErrorBoundary extends Component<Props, State> {
             {copied ? 'Copied!' : 'Copy bug report'}
           </button>
           <button
-            onClick={this.handleReport}
-            className="rounded border border-border bg-panel3 px-3 py-1.5 text-xs text-foreground hover:border-muted-foreground"
+            onClick={() => this.setState({ reporting: true })}
+            className="rounded border border-primary/60 bg-primary/10 px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary"
           >
-            Report on GitHub
+            Report this problem
           </button>
           <button
             onClick={() => this.setState({ error: null, info: null, copied: false })}
@@ -131,6 +116,14 @@ export class ErrorBoundary extends Component<Props, State> {
           </button>
         </div>
         </div>
+
+        {/* Prefilled with the crash details so a report needs one click, not a
+            retyped description of what the user just saw. */}
+        <ReportProblemModal
+          open={reporting}
+          onClose={() => this.setState({ reporting: false })}
+          initialDescription={`GitWyrm crashed with: ${error.message}`}
+        />
       </div>
     )
   }
