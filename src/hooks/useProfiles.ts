@@ -3,6 +3,29 @@ import { toast } from 'sonner'
 import { commands, type Profile } from '@/lib/bindings'
 
 /**
+ * A profile with the always-present fields actually marked as present.
+ *
+ * `signing` and `folders` are `#[serde(default)]` on the Rust side, which is
+ * about tolerating older settings files on the way in -- the backend always
+ * sends both. specta renders any `serde(default)` field as optional, so the
+ * generated `Profile` overstates it and every read site would otherwise have
+ * to defend against an `undefined` that never arrives.
+ */
+export type LoadedProfile = Profile & {
+  signing: NonNullable<Profile['signing']>
+  folders: NonNullable<Profile['folders']>
+}
+
+/** Fill in what the backend guarantees but the generated type does not. */
+export function normalizeProfile(profile: Profile): LoadedProfile {
+  return {
+    ...profile,
+    signing: profile.signing ?? { kind: 'none' },
+    folders: profile.folders ?? [],
+  }
+}
+
+/**
  * The user's named identities and which one is active.
  *
  * Profiles live in GitWyrm's settings, but applying one writes real git config.
@@ -10,7 +33,7 @@ import { commands, type Profile } from '@/lib/bindings'
  * always shows what git will actually do rather than what we hoped it would.
  */
 export function useProfiles() {
-  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [profiles, setProfiles] = useState<LoadedProfile[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -20,7 +43,7 @@ export function useProfiles() {
         commands.listProfiles(),
         commands.getActiveProfileId(),
       ])
-      if (list.status === 'ok') setProfiles(list.data)
+      if (list.status === 'ok') setProfiles(list.data.map(normalizeProfile))
       else toast.error(list.error)
       if (active.status === 'ok') setActiveId(active.data)
     } catch (e) {
@@ -43,7 +66,7 @@ export function useProfiles() {
         toast.error(res.error)
         return false
       }
-      setProfiles(res.data)
+      setProfiles(res.data.map(normalizeProfile))
       return true
     },
     []
@@ -55,7 +78,7 @@ export function useProfiles() {
       toast.error(res.error)
       return false
     }
-    setProfiles(res.data)
+    setProfiles(res.data.map(normalizeProfile))
     await reload()
     return true
   }, [reload])

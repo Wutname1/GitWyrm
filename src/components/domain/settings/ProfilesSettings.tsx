@@ -4,10 +4,9 @@ import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useProfiles } from '@/hooks/useProfiles'
+import { useProfiles, normalizeProfile, type LoadedProfile } from '@/hooks/useProfiles'
 import {
   commands,
-  type Profile,
   type SigningKey,
   type SigningMethod,
   type SshKey,
@@ -24,7 +23,7 @@ function newId() {
   return `p${Date.now().toString(36)}`
 }
 
-function emptyProfile(): Profile {
+function emptyProfile(): LoadedProfile {
   return {
     id: newId(),
     label: '',
@@ -45,8 +44,8 @@ function emptyProfile(): Profile {
  */
 export function ProfilesSettings() {
   const { profiles, activeId, loading, save, remove, activate } = useProfiles()
-  const [editing, setEditing] = useState<Profile | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState<Profile | null>(null)
+  const [editing, setEditing] = useState<LoadedProfile | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<LoadedProfile | null>(null)
 
   if (loading) {
     return <div className="py-4 text-xs text-muted-foreground">Loading your profiles…</div>
@@ -94,7 +93,7 @@ export function ProfilesSettings() {
                 let seed = emptyProfile()
                 try {
                   const res = await commands.profileFromCurrentConfig()
-                  if (res.status === 'ok') seed = { ...res.data, id: newId() }
+                  if (res.status === 'ok') seed = normalizeProfile({ ...res.data, id: newId() })
                 } catch {
                   // Fall through to the blank form.
                 }
@@ -166,7 +165,7 @@ function ProfileCard({
   onEdit,
   onDelete,
 }: {
-  profile: Profile
+  profile: LoadedProfile
   active: boolean
   onUse: () => void
   onEdit: () => void
@@ -239,7 +238,7 @@ function ProfileCard({
   )
 }
 
-function describeSigning(profile: Profile): string {
+function describeSigning(profile: LoadedProfile): string {
   if (profile.signing.kind === 'none') return 'Not signing'
   const how = profile.signing.kind === 'gpg' ? 'GPG key' : 'SSH key'
   return profile.signCommits ? `Signs with a ${how}` : `${how} set, signing off`
@@ -252,11 +251,11 @@ function ProfileEditor({
   onSave,
   onCancel,
 }: {
-  profile: Profile
-  onSave: (p: Profile) => void
+  profile: LoadedProfile
+  onSave: (p: LoadedProfile) => void
   onCancel: () => void
 }) {
-  const [draft, setDraft] = useState<Profile>(profile)
+  const [draft, setDraft] = useState<LoadedProfile>(profile)
   const [gpgKeys, setGpgKeys] = useState<SigningKey[]>([])
   const [sshKeys, setSshKeys] = useState<SshKey[]>([])
 
@@ -274,7 +273,7 @@ function ProfileEditor({
     })()
   }, [])
 
-  const set = <K extends keyof Profile>(key: K, value: Profile[K]) =>
+  const set = <K extends keyof LoadedProfile>(key: K, value: LoadedProfile[K]) =>
     setDraft((d) => ({ ...d, [key]: value }))
 
   const ready = draft.label.trim() && draft.name.trim() && draft.email.trim()
@@ -402,9 +401,12 @@ function parseSigning(raw: string): SigningMethod {
 }
 
 /** Email on the chosen key, when we can tell. SSH keys carry no address. */
-function signingKeyEmail(profile: Profile, gpgKeys: SigningKey[]): string | null {
-  if (profile.signing.kind !== 'gpg') return null
-  const key = gpgKeys.find((k) => k.id === profile.signing.value)
+function signingKeyEmail(profile: LoadedProfile, gpgKeys: SigningKey[]): string | null {
+  const signing = profile.signing
+  if (signing.kind !== 'gpg') return null
+  // Bound to a local first: narrowing a property does not survive into the
+  // callback, where TypeScript has to assume it could have changed.
+  const key = gpgKeys.find((k) => k.id === signing.value)
   return key?.uid.match(/<([^>]+)>/)?.[1]?.trim().toLowerCase() ?? null
 }
 
@@ -473,7 +475,7 @@ function FolderRules({
  * Writes that repository's own config, which outranks both the active profile
  * and any folder rule -- so this always wins, whatever else is set up.
  */
-function RepoOverride({ profiles }: { profiles: Profile[] }) {
+function RepoOverride({ profiles }: { profiles: LoadedProfile[] }) {
   const repo = useActiveRepo()
   const [effective, setEffective] = useState<{ email: string; overridden: boolean } | null>(null)
 
