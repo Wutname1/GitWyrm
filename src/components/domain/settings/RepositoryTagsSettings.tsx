@@ -22,6 +22,7 @@ export function RepositoryTagsSettings() {
   const repo = useActiveRepo()
   const appPushDefault = useWorkspaceStore((s) => s.tagPushDefault)
   const appPushOnCreate = useWorkspaceStore((s) => s.tagPushOnCreate)
+  const appDeleteOnRemote = useWorkspaceStore((s) => s.tagDeleteOnRemote)
   const override = useWorkspaceStore((s) => (repo ? s.tagOverridesByRepo[repo.path] : undefined))
   const setRepoTagOverride = useWorkspaceStore((s) => s.setRepoTagOverride)
   const clearRepoTagOverride = useWorkspaceStore((s) => s.clearRepoTagOverride)
@@ -44,6 +45,7 @@ export function RepositoryTagsSettings() {
   // The values shown in the controls: the repo's own choice, or the app default it inherits.
   const effectivePushDefault = override?.pushDefault ?? appPushDefault
   const effectivePushOnCreate = override?.pushOnCreate ?? appPushOnCreate
+  const effectiveDeleteOnRemote = override?.deleteOnRemote ?? appDeleteOnRemote
 
   const enableOverride = (on: boolean) => {
     if (on) {
@@ -52,6 +54,7 @@ export function RepositoryTagsSettings() {
       setRepoTagOverride(repo.path, {
         pushDefault: appPushDefault,
         pushOnCreate: appPushOnCreate,
+        deleteOnRemote: appDeleteOnRemote,
       })
     } else {
       clearRepoTagOverride(repo.path)
@@ -91,6 +94,13 @@ export function RepositoryTagsSettings() {
             </div>
             <div>
               New tags start {appPushOnCreate ? 'with the send box checked' : 'with the send box unchecked'}.
+            </div>
+            <div>
+              Deleting a tag starts{' '}
+              {appDeleteOnRemote
+                ? 'with the remove-from-remote box checked'
+                : 'with the remove-from-remote box unchecked'}
+              .
             </div>
             <Button
               variant="link"
@@ -135,6 +145,23 @@ export function RepositoryTagsSettings() {
                 className="size-3.5 accent-[var(--gw-accent)]"
               />
               Send a new tag as soon as I make it
+            </label>
+          </SettingRow>
+
+          <SettingRow
+            label="Deleting tags"
+            hint="How the remove-from-remote box starts out in the Delete tag window for this repository."
+          >
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+              <input
+                type="checkbox"
+                checked={effectiveDeleteOnRemote}
+                onChange={(e) =>
+                  setRepoTagOverride(repo.path, { deleteOnRemote: e.target.checked })
+                }
+                className="size-3.5 accent-[var(--gw-accent)]"
+              />
+              Also remove the tag from the remote
             </label>
           </SettingRow>
 

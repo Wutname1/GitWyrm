@@ -58,12 +58,14 @@ export type TagPushDefault = 'ask' | 'always' | 'never'
 export interface TagOverride {
   pushDefault?: TagPushDefault
   pushOnCreate?: boolean
+  deleteOnRemote?: boolean
 }
 
 /** Tag settings resolved for one repo: app-wide default with any repo override applied. */
 export interface ResolvedTagSettings {
   pushDefault: TagPushDefault
   pushOnCreate: boolean
+  deleteOnRemote: boolean
 }
 export type TabLayout = 'horizontal' | 'vertical'
 export type TabDropPlacement = 'before' | 'after'
@@ -372,6 +374,11 @@ interface WorkspaceState {
   /** App-wide default for whether the New Tag dialog's send box starts checked (persisted). */
   tagPushOnCreate: boolean
   /**
+   * App-wide default for whether the Delete Tag dialog's "also remove it from
+   * the remote" box starts checked (persisted).
+   */
+  tagDeleteOnRemote: boolean
+  /**
    * Per-repo tag settings that override the app-wide defaults, keyed by repo path.
    * A field is present only when that repo overrides it; absent fields follow the
    * app-wide default. A repo with no entry follows the defaults entirely (persisted).
@@ -456,6 +463,7 @@ interface WorkspaceState {
   setDefaultEditor: (editor: EditorKind) => void
   setTagPushDefault: (mode: TagPushDefault) => void
   setTagPushOnCreate: (enabled: boolean) => void
+  setTagDeleteOnRemote: (enabled: boolean) => void
   /**
    * Patch one repo's tag override. For each key, a value overrides that setting
    * for this repo; null clears it back to the app default. When no overridden
@@ -463,7 +471,11 @@ interface WorkspaceState {
    */
   setRepoTagOverride: (
     path: string,
-    patch: { pushDefault?: TagPushDefault | null; pushOnCreate?: boolean | null },
+    patch: {
+      pushDefault?: TagPushDefault | null
+      pushOnCreate?: boolean | null
+      deleteOnRemote?: boolean | null
+    },
   ) => void
   /** Remove a repo's override entirely so it follows the app-wide defaults. */
   clearRepoTagOverride: (path: string) => void
@@ -597,6 +609,7 @@ function toSettings(s: WorkspaceState): Settings {
     default_editor: s.defaultEditor,
     tag_push_default: s.tagPushDefault,
     tag_push_on_create: s.tagPushOnCreate,
+    tag_delete_on_remote: s.tagDeleteOnRemote,
     tag_overrides_by_repo: serializeTagOverrides(s.tagOverridesByRepo),
     enable_worktrees: s.enableWorktrees,
     restore_tabs: s.restoreTabs,
@@ -731,7 +744,11 @@ function normalizeExpandedChangeFolders(
 }
 
 /** Wire shape of a per-repo tag override as stored in settings.json (snake_case, nullable fields). */
-type StoredTagOverride = { push_default?: string | null; push_on_create?: boolean | null }
+type StoredTagOverride = {
+  push_default?: string | null
+  push_on_create?: boolean | null
+  delete_on_remote?: boolean | null
+}
 
 /** Serialize the override map for persistence. Empty overrides are dropped. */
 function serializeTagOverrides(
@@ -742,7 +759,12 @@ function serializeTagOverrides(
     const stored: StoredTagOverride = {}
     if (value.pushDefault !== undefined) stored.push_default = value.pushDefault
     if (value.pushOnCreate !== undefined) stored.push_on_create = value.pushOnCreate
-    if (stored.push_default !== undefined || stored.push_on_create !== undefined) {
+    if (value.deleteOnRemote !== undefined) stored.delete_on_remote = value.deleteOnRemote
+    if (
+      stored.push_default !== undefined ||
+      stored.push_on_create !== undefined ||
+      stored.delete_on_remote !== undefined
+    ) {
       out[path] = stored
     }
   }
@@ -763,7 +785,14 @@ function normalizeTagOverrides(
     if (typeof stored.push_on_create === 'boolean') {
       value.pushOnCreate = stored.push_on_create
     }
-    if (value.pushDefault !== undefined || value.pushOnCreate !== undefined) {
+    if (typeof stored.delete_on_remote === 'boolean') {
+      value.deleteOnRemote = stored.delete_on_remote
+    }
+    if (
+      value.pushDefault !== undefined ||
+      value.pushOnCreate !== undefined ||
+      value.deleteOnRemote !== undefined
+    ) {
       out[path] = value
     }
   }
@@ -803,6 +832,7 @@ export const SETTINGS_DEFAULTS = {
   restoreTabs: true,
   tagPushDefault: "ask",
   tagPushOnCreate: false,
+  tagDeleteOnRemote: false,
   aiInstruction: null,
   changeSizeDisplay: "column",
   showChangeIndicator: false,
@@ -836,7 +866,7 @@ export const SETTINGS_GROUPS = {
     'enableWorktrees',
   ],
   behavior: ['restoreTabs'],
-  tags: ['tagPushDefault', 'tagPushOnCreate'],
+  tags: ['tagPushDefault', 'tagPushOnCreate', 'tagDeleteOnRemote'],
   ai: ['aiInstruction'],
   appearance: [
     'changeSizeDisplay', 'showChangeIndicator', 'showChangeLineCounts',
@@ -878,6 +908,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   defaultEditor: DEFAULT_EDITOR,
   tagPushDefault: "ask",
   tagPushOnCreate: false,
+  tagDeleteOnRemote: false,
   tagOverridesByRepo: {},
   enableWorktrees: false,
   restoreTabs: true,
@@ -1092,6 +1123,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ tagPushOnCreate: enabled });
     schedulePersist();
   },
+  setTagDeleteOnRemote: (enabled) => {
+    set({ tagDeleteOnRemote: enabled });
+    schedulePersist();
+  },
   setRepoTagOverride: (path, patch) => {
     set((s) => {
       const next = { ...s.tagOverridesByRepo };
@@ -1105,10 +1140,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         if (patch.pushOnCreate == null) delete current.pushOnCreate;
         else current.pushOnCreate = patch.pushOnCreate;
       }
+      if ("deleteOnRemote" in patch) {
+        if (patch.deleteOnRemote == null) delete current.deleteOnRemote;
+        else current.deleteOnRemote = patch.deleteOnRemote;
+      }
 
       if (
         current.pushDefault === undefined &&
-        current.pushOnCreate === undefined
+        current.pushOnCreate === undefined &&
+        current.deleteOnRemote === undefined
       ) {
         delete next[path];
       } else {
@@ -1133,6 +1173,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     return {
       pushDefault: override?.pushDefault ?? s.tagPushDefault,
       pushOnCreate: override?.pushOnCreate ?? s.tagPushOnCreate,
+      deleteOnRemote: override?.deleteOnRemote ?? s.tagDeleteOnRemote,
     };
   },
   setEnableWorktrees: (enabled) => {
@@ -1803,6 +1844,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           : DEFAULT_EDITOR,
         tagPushDefault: normalizeTagPushDefault(settings.tag_push_default),
         tagPushOnCreate: settings.tag_push_on_create ?? false,
+        tagDeleteOnRemote: settings.tag_delete_on_remote ?? false,
         tagOverridesByRepo: normalizeTagOverrides(
           settings.tag_overrides_by_repo,
         ),

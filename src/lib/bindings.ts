@@ -2162,8 +2162,13 @@ tag_push_default?: string | null;
  */
 tag_push_on_create?: boolean; 
 /**
+ * Whether the Delete Tag dialog's "also remove it from the remote" box
+ * starts checked.
+ */
+tag_delete_on_remote?: boolean; 
+/**
  * Per-repo tag overrides, keyed by repo path. Absent repos follow the
- * app-wide `tag_push_default` / `tag_push_on_create`.
+ * app-wide `tag_push_default` / `tag_push_on_create` / `tag_delete_on_remote`.
  */
 tag_overrides_by_repo?: Partial<{ [key in string]: TagOverrideSetting }>; 
 /**
@@ -2371,7 +2376,12 @@ push_default?: string | null;
 /**
  * Per-repo default for the New Tag send box. None follows the app default.
  */
-push_on_create?: boolean | null }
+push_on_create?: boolean | null; 
+/**
+ * Per-repo default for the Delete Tag "also remove from the remote" box.
+ * None follows the app default.
+ */
+delete_on_remote?: boolean | null }
 /**
  * Which git and gpg the app resolved, and where each came from. Drives the
  * "using the copy that came with GitWyrm" vs "using your own" line in Settings.

@@ -332,14 +332,24 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  /**
+   * Delete a tag locally, and optionally from the remote in the same action so
+   * the two never drift apart in the UI. The remote goes first: if it fails the
+   * tag is still here to try again, whereas the reverse would leave a published
+   * tag with no local copy to delete it from.
+   */
   const deleteTag = useMutation({
-    mutationFn: async (name: string) => {
-      await unwrap(await commands.deleteTag(id, name))
-      return name
+    mutationFn: async (args: { name: string; alsoRemote?: boolean; remote?: string }) => {
+      if (args.alsoRemote) {
+        await unwrap(await commands.deleteRemoteTag(id, args.name, args.remote ?? ''))
+      }
+      await unwrap(await commands.deleteTag(id, args.name))
+      return args
     },
-    onSuccess: (name) => {
+    onSuccess: (args) => {
       invalidate(qc, id, ['tags', 'log'])
-      toast(`Deleted tag ${name}`)
+      if (args.alsoRemote) qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
+      toast(args.alsoRemote ? `Deleted tag ${args.name} everywhere` : `Deleted tag ${args.name}`)
     },
     onError,
   })

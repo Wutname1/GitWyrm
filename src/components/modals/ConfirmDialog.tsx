@@ -7,6 +7,8 @@ interface ConfirmDialogProps {
   onOpenChange: (open: boolean) => void
   title: string
   description: React.ReactNode
+  /** Optional controls shown below the description, e.g. an opt-in checkbox. */
+  extra?: React.ReactNode
   confirmLabel: string
   destructive?: boolean
   onConfirm: () => void
@@ -20,6 +22,7 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
+  extra,
   confirmLabel,
   destructive,
   onConfirm,
@@ -45,6 +48,7 @@ export function ConfirmDialog({
       <DialogDescription className="text-xs leading-relaxed text-sub">
         {description}
       </DialogDescription>
+      {extra}
     </FormDialog>
   )
 }

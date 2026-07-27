@@ -7,7 +7,7 @@ import { useGitMutations } from '@/hooks/useGitMutations'
 import { useTagSync } from '@/hooks/useTagSync'
 import { useGithubAuth, useGithubIssues, useGithubPrs, useGithubSlug } from '@/hooks/useGithub'
 import { useUiStore } from '@/stores/uiStore'
-import { useActiveRepo } from '@/stores/workspaceStore'
+import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -54,6 +54,32 @@ export function LeftPanel() {
   const [toDelete, setToDelete] = useState<{ kind: 'branch' | 'tag'; name: string } | null>(null)
   /** Tag pending a remote-only delete; the local copy is untouched. */
   const [toRemoveFromRemote, setToRemoveFromRemote] = useState<string | null>(null)
+  /** Opt-in to also removing the tag from the remote when deleting it here. */
+  const [deleteTagFromRemote, setDeleteTagFromRemote] = useState(false)
+
+  // The checkbox both reads and writes the saved preference, so whichever way
+  // the user left it last is how it comes back. Subscribe to the app default and
+  // this repo's override so the value stays reactive if either changes in
+  // Settings > Tags while the dialog is closed.
+  const appDeleteOnRemote = useWorkspaceStore((s) => s.tagDeleteOnRemote)
+  const repoDeleteOnRemote = useWorkspaceStore((s) =>
+    repo ? s.tagOverridesByRepo[repo.path]?.deleteOnRemote : undefined
+  )
+  const setTagDeleteOnRemote = useWorkspaceStore((s) => s.setTagDeleteOnRemote)
+  const setRepoTagOverride = useWorkspaceStore((s) => s.setRepoTagOverride)
+  const tagDeleteOnRemote = repoDeleteOnRemote ?? appDeleteOnRemote
+
+  // Remember the choice for next time. A repo that has its own rule keeps it --
+  // overwriting the app default from here would silently change every other
+  // repository that follows it.
+  const rememberDeleteFromRemote = (next: boolean) => {
+    setDeleteTagFromRemote(next)
+    if (repoDeleteOnRemote !== undefined && repo) {
+      setRepoTagOverride(repo.path, { deleteOnRemote: next })
+    } else {
+      setTagDeleteOnRemote(next)
+    }
+  }
   const branchToRename = useUiStore((s) => s.branchToRename)
   const branchToDelete = useUiStore((s) => s.branchToDelete)
   const branchToResetTo = useUiStore((s) => s.branchToResetTo)
@@ -63,6 +89,11 @@ export function LeftPanel() {
 
   const currentBranch =
     branches.data?.local.find((b) => b.is_head)?.name ?? repo?.head_branch ?? ''
+
+  // Only offer the remote checkbox when we have confirmed the tag is published;
+  // an unknown status shouldn't invite an action that would just fail.
+  const tagOnRemote =
+    toDelete?.kind === 'tag' && tagSync.hasRemote && tagSync.stateOf(toDelete.name) === 'synced'
 
   const sections: SidebarSectionData[] = [
     {
@@ -294,7 +325,11 @@ export function LeftPanel() {
             )}
             <ContextMenuItem
               variant="destructive"
-              onSelect={() => setToDelete({ kind: 'tag', name: item.name })}
+              onSelect={() => {
+                // Start from the remembered choice each time the dialog opens.
+                setDeleteTagFromRemote(tagDeleteOnRemote)
+                setToDelete({ kind: 'tag', name: item.name })
+              }}
             >
               <Trash2 />
               Delete tag
@@ -456,8 +491,37 @@ export function LeftPanel() {
             repository.
           </>
         }
-        confirmLabel="Delete tag"
-        onConfirm={() => toDelete && m.deleteTag.mutate(toDelete.name)}
+        extra={
+          tagOnRemote ? (
+            <label className="flex cursor-pointer items-start gap-2 text-xs text-sub">
+              <input
+                type="checkbox"
+                checked={deleteTagFromRemote}
+                onChange={(e) => rememberDeleteFromRemote(e.target.checked)}
+                className="mt-0.5 size-3.5 accent-[var(--gw-accent)]"
+              />
+              <span>
+                Also remove it from {tagSync.hostLabel}
+                <span className="block text-2xs text-muted-foreground">
+                  Anyone else using this project will lose it too.
+                </span>
+              </span>
+            </label>
+          ) : undefined
+        }
+        confirmLabel={
+          tagOnRemote && deleteTagFromRemote ? 'Delete everywhere' : 'Delete tag'
+        }
+        pending={m.deleteTag.isPending}
+        pendingLabel="Deleting…"
+        keepOpenOnConfirm
+        onConfirm={() =>
+          toDelete &&
+          m.deleteTag.mutate(
+            { name: toDelete.name, alsoRemote: tagOnRemote && deleteTagFromRemote },
+            { onSuccess: () => setToDelete(null) }
+          )
+        }
       />
 
       <ConfirmDialog

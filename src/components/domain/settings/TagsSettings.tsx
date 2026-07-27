@@ -16,6 +16,8 @@ export function TagsSettings() {
   const setTagPushDefault = useWorkspaceStore((s) => s.setTagPushDefault)
   const tagPushOnCreate = useWorkspaceStore((s) => s.tagPushOnCreate)
   const setTagPushOnCreate = useWorkspaceStore((s) => s.setTagPushOnCreate)
+  const tagDeleteOnRemote = useWorkspaceStore((s) => s.tagDeleteOnRemote)
+  const setTagDeleteOnRemote = useWorkspaceStore((s) => s.setTagDeleteOnRemote)
 
   return (
     <div>
@@ -50,6 +52,21 @@ export function TagsSettings() {
             className="size-3.5 accent-[var(--gw-accent)]"
           />
           Send a new tag as soon as I make it
+        </label>
+      </SettingRow>
+
+      <SettingRow
+        label="Deleting tags"
+        hint="Sets how the box starts out in the Delete tag window. You can still change it for any one tag."
+      >
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+          <input
+            type="checkbox"
+            checked={tagDeleteOnRemote}
+            onChange={(e) => setTagDeleteOnRemote(e.target.checked)}
+            className="size-3.5 accent-[var(--gw-accent)]"
+          />
+          Also remove the tag from the remote
         </label>
       </SettingRow>
       <ResetToDefaults group="tags" />

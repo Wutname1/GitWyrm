@@ -101,6 +101,10 @@ pub struct TagOverrideSetting {
   /// Per-repo default for the New Tag send box. None follows the app default.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub push_on_create: Option<bool>,
+  /// Per-repo default for the Delete Tag "also remove from the remote" box.
+  /// None follows the app default.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub delete_on_remote: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -253,8 +257,12 @@ pub struct Settings {
   /// Whether the New Tag dialog's "send it to the remote" box starts checked.
   #[serde(default)]
   pub tag_push_on_create: bool,
+  /// Whether the Delete Tag dialog's "also remove it from the remote" box
+  /// starts checked.
+  #[serde(default)]
+  pub tag_delete_on_remote: bool,
   /// Per-repo tag overrides, keyed by repo path. Absent repos follow the
-  /// app-wide `tag_push_default` / `tag_push_on_create`.
+  /// app-wide `tag_push_default` / `tag_push_on_create` / `tag_delete_on_remote`.
   #[serde(default)]
   pub tag_overrides_by_repo: HashMap<String, TagOverrideSetting>,
   /// Selected color theme id ("slate", "onyx", "midnight", "paper"). None means
@@ -366,6 +374,7 @@ impl Default for Settings {
       changes_view_mode: None,
       tag_push_default: None,
       tag_push_on_create: false,
+      tag_delete_on_remote: false,
       tag_overrides_by_repo: HashMap::new(),
       theme: None,
       theme_mode: None,
