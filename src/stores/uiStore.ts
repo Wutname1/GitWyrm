@@ -88,6 +88,11 @@ interface UiState {
    */
   branchToResetTo: string | null
   settingsSection: SettingsSection
+  /**
+   * Setting the settings view should scroll to and flash, set when a search
+   * result is picked. The bumped nonce re-triggers the flash on a repeat pick.
+   */
+  revealSetting: { id: string; nonce: number } | null
   changesFocusNonce: number
   /** Ref (branch/tag) the graph should scroll to and highlight; bumped nonce re-triggers. */
   revealRef: { name: string; nonce: number } | null
@@ -140,8 +145,18 @@ interface UiState {
    * the graph, and falls back to a neutral marker for stashes not drawn yet.
    */
   stashTracks: Record<string, number>
+  /**
+   * Sha of a commit that was just created and has not appeared in the graph
+   * yet. Committing clears the working tree before the commit log has been
+   * re-read, so the graph would drop its "Uncommitted changes" row and only
+   * push the new commit in a beat later -- two jolts for one action. The graph
+   * keeps drawing the row until this sha shows up, then swaps them in one step.
+   */
+  awaitingCommitSha: string | null
 
   selectCommit: (sha: string | null) => void
+  /** Announce a fresh commit the graph should hold its WIP row for. */
+  commitLanding: (sha: string | null) => void
   /**
    * Replace the multi-selection wholesale (graph order, newest first). The
    * graph computes ranges/toggles since it owns the row order; `anchor` is the
@@ -194,6 +209,8 @@ interface UiState {
   openModal: (kind: Exclude<ModalKind, null>) => void
   closeModal: () => void
   setSettingsSection: (section: SettingsSection) => void
+  /** Jump to the section holding a setting and flash that row. */
+  revealSettingById: (section: SettingsSection, id: string) => void
 }
 
 /**
@@ -235,6 +252,7 @@ export const useUiStore = create<UiState>((set) => ({
   branchToDelete: null,
   branchToResetTo: null,
   settingsSection: 'general',
+  revealSetting: null,
   changesFocusNonce: 0,
   revealRef: null,
   revealSha: null,
@@ -247,8 +265,10 @@ export const useUiStore = create<UiState>((set) => ({
   repoPickerWiggleNonce: 0,
   repoPickerOpen: false,
   stashTracks: {},
+  awaitingCommitSha: null,
 
   selectCommit: (sha) => set({ selectedSha: sha, selectedShas: sha ? [sha] : [] }),
+  commitLanding: (sha) => set({ awaitingCommitSha: sha }),
   setSelection: (shas, anchor) =>
     set({ selectedShas: shas, selectedSha: shas.length > 0 ? anchor : null }),
   setStashTracks: (tracks) =>
@@ -273,6 +293,7 @@ export const useUiStore = create<UiState>((set) => ({
       searchMatchIndex: null,
       githubItem: null,
       stashTracks: {},
+      awaitingCommitSha: null,
       centerView: REPO_SCOPED_VIEWS.has(s.centerView) ? 'graph' : s.centerView,
     })),
   focusChanges: () => set((s) => ({ changesFocusNonce: s.changesFocusNonce + 1 })),
@@ -359,5 +380,11 @@ export const useUiStore = create<UiState>((set) => ({
       tagTargetSha: null,
       branchTargetSha: null,
     }),
-  setSettingsSection: (section) => set({ settingsSection: section }),
+  setSettingsSection: (section) => set({ settingsSection: section, revealSetting: null }),
+  revealSettingById: (section, id) =>
+    set((s) => ({
+      centerView: 'settings',
+      settingsSection: section,
+      revealSetting: { id, nonce: (s.revealSetting?.nonce ?? 0) + 1 },
+    })),
 }))

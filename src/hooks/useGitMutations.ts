@@ -36,9 +36,27 @@ interface FolderFilesArgs {
 const REFS: QueryName[] = ['branches', 'log']
 const REMOTE_REFS: QueryName[] = ['remotes', 'branches', 'log']
 
+/**
+ * Refresh the named queries for one repo.
+ *
+ * Refreshing `status` also drops every cached working-tree diff. A diff's key
+ * is (repo, path, staged-or-unstaged) -- nothing in it changes when HEAD moves,
+ * so after a rewind or a branch switch the *same* key now means a different
+ * diff. Without this, the file list correctly re-reads from `status` while the
+ * diff pane keeps serving the pre-rewind cached copy: a file that just became
+ * an add still shows its old modification.
+ *
+ * Committed diffs (`DiffSource::Commit`) are immutable and share the same key
+ * prefix, so they get dropped too. That costs a refetch when a commit is
+ * reopened and is well worth not having to reason about which mutations can
+ * strand a working-tree diff -- every one that touches `status` can.
+ */
 function invalidate(qc: QueryClient, repoId: string, which: QueryName[]) {
   for (const k of which) {
     qc.invalidateQueries({ queryKey: keys[k](repoId) })
+  }
+  if (which.includes('status')) {
+    qc.invalidateQueries({ queryKey: keys.fileDiffAll(repoId) })
   }
 }
 

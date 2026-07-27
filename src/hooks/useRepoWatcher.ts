@@ -15,6 +15,10 @@ export function useRepoWatcher() {
     const unlisten = listen<RepoChangedPayload>('repo-changed', (event) => {
       const repoId = event.payload.repo_id
       queryClient.invalidateQueries({ queryKey: keys.status(repoId) })
+      // Cached diffs are keyed by path and staged/unstaged only, so a rewind or
+      // branch switch made outside the app leaves them pointing at the wrong
+      // content under an unchanged key. Drop them alongside status.
+      queryClient.invalidateQueries({ queryKey: keys.fileDiffAll(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.log(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.branches(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.stashes(repoId) })

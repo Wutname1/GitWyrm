@@ -231,6 +231,26 @@ async gitAvailable() : Promise<Result<boolean, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * The name and email git puts on commits. Empty fields mean git has not been
+ * set up yet, which the UI treats as "ask for it" rather than an error.
+ */
+async getGitIdentity() : Promise<Result<GitIdentity, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_git_identity") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setGitIdentity(name: string, email: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_git_identity", { name, email }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async gitToolInfo() : Promise<Result<ToolInfo, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_tool_info") };
@@ -1695,6 +1715,11 @@ export type FileHistoryEntry = { sha: string; short_sha: string; summary: string
  */
 old_path: string | null }
 export type GeneratedCommitMessage = { summary: string; description: string }
+/**
+ * Who git thinks the user is. Either field can be empty when git has never
+ * been set up, which is the normal state on a fresh machine.
+ */
+export type GitIdentity = { name: string; email: string }
 export type GitProgressPayload = { repo_id: string; operation: string; line: string }
 export type GithubComment = { author: string; author_is_bot: boolean; body: string; created_at: string }
 export type GithubRepoRef = { owner: string; repo: string }
@@ -2066,6 +2091,12 @@ enable_worktrees?: boolean;
  * the app starts with no repository open.
  */
 restore_tabs?: boolean; 
+/**
+ * Whether the welcome tour has been shown. Without this the tour reopens on
+ * every launch that starts with no repository, which is the normal state for
+ * anyone who keeps "reopen my last tabs" off.
+ */
+onboarding_seen?: boolean; 
 /**
  * Whole-app zoom factor (1.0 = 100%). None uses the default of 1.0.
  * Clamped on the frontend before display.
