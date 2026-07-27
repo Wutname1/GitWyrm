@@ -138,6 +138,7 @@ export function useGitMutations(repoId: string | null) {
   const repoPath = useWorkspaceStore((s) => s.openRepos.find((r) => r.id === repoId)?.path ?? null)
   const resolveTagSettings = useWorkspaceStore((s) => s.resolveTagSettings)
   const promptPushTags = useUiStore((s) => s.promptPushTags)
+  const commitLanding = useUiStore((s) => s.commitLanding)
 
   /**
    * After a push, deal with tags the remote still lacks.
@@ -316,6 +317,11 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async (args: { summary: string; description: string; amend?: boolean }) =>
       unwrap(await commands.createCommit(id, args.summary, args.description, args.amend ?? false)),
     onSuccess: (sha, args) => {
+      // Tell the graph to keep its "Uncommitted changes" row up until this
+      // commit is actually in the log. `status` comes back before `log` does,
+      // so without this the row would vanish and the graph would collapse a
+      // row, then push everything back down when the commit finally arrives.
+      commitLanding(sha)
       invalidate(qc, id, ['status', 'log', 'branches'])
       toast(args.amend ? `Amended ${shortSha(sha)}` : `Committed ${shortSha(sha)}`)
     },
@@ -1015,11 +1021,10 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
-  // Partial staging: refreshes status and every open file-diff view.
-  const afterPatch = () => {
-    invalidate(qc, id, ['status'])
-    qc.invalidateQueries({ queryKey: keys.fileDiffAll(id) })
-  }
+  // Partial staging: refreshes status, which carries the open file-diff views
+  // with it -- moving lines between the index and the workdir rewrites both
+  // sides of the same file.
+  const afterPatch = () => invalidate(qc, id, ['status'])
 
   const stageLines = useMutation({
     mutationFn: async (args: { path: string; selection: SelectedLine[] }) =>

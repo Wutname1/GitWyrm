@@ -44,6 +44,24 @@ const queryClient = new QueryClient({
 // the user had deliberately closed.
 let launched = false
 
+/**
+ * Show the welcome tour only when it is still useful.
+ *
+ * Two conditions, either of which is enough:
+ *  - the tour has never been completed, or
+ *  - git still has no name and email, so the user cannot commit yet.
+ *
+ * The second matters for people who installed GitWyrm before the tour asked for
+ * an identity: they have seen it, but never been asked, and would otherwise
+ * meet the problem at their first commit instead.
+ */
+async function shouldShowOnboarding(seen: boolean): Promise<boolean> {
+  if (!seen) return true
+  const res = await commands.getGitIdentity()
+  if (res.status !== 'ok') return false
+  return !res.data.name.trim() || !res.data.email.trim()
+}
+
 function AppInner() {
   useRepoWatcher()
   useTheme()
@@ -76,6 +94,14 @@ function AppInner() {
     if (launched) return
     launched = true
 
+    // Opens the tour only when it still has something to offer. Wraps the
+    // module-level predicate so the openModal from this render is used.
+    const maybeShowOnboarding = async (settings: { onboarding_seen?: boolean | null }) => {
+      if (await shouldShowOnboarding(settings.onboarding_seen ?? false)) {
+        openModal('onboarding')
+      }
+    }
+
     void (async () => {
       // try/finally: the splash covers the whole window, so any path out of
       // here -- including a throw -- has to lift it or the app is unreachable.
@@ -99,7 +125,7 @@ function AppInner() {
         // A folder from the right-click menu still opens -- the user asked for
         // that one explicitly, which outranks the "start empty" preference.
         if (settings.restore_tabs === false && !launchPath) {
-          openModal('onboarding')
+          await maybeShowOnboarding(settings)
           return
         }
 
@@ -124,7 +150,7 @@ function AppInner() {
           : saved
 
         if (toReopen.length === 0) {
-          openModal('onboarding')
+          await maybeShowOnboarding(settings)
           return
         }
 

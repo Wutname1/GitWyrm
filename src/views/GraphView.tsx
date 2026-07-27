@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { CommitEntry, StashInfo } from '@/lib/bindings'
 import { GRAPH_ROW_HEIGHT, GRAPH_ROW_WITH_CHANGES_HEIGHT } from '@/lib/gitDisplay'
 import { useCommitLog, useStashes, useStatus } from '@/hooks/useGitQueries'
+import { usePendingRowHold } from '@/hooks/usePendingRowHold'
 import { useGraphLoadSpan } from '@/lib/perf'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
@@ -75,13 +76,27 @@ export function GraphView() {
     [log.data]
   )
 
-  const stagedCount = status.data?.staged.length ?? 0
-  const unstagedCount = status.data?.unstaged.length ?? 0
   const pendingFiles = [...(status.data?.staged ?? []), ...(status.data?.unstaged ?? [])]
-  const pendingFileCount = new Set(pendingFiles.map((file) => file.path)).size
-  const pendingAdditions = pendingFiles.reduce((total, file) => total + file.additions, 0)
-  const pendingDeletions = pendingFiles.reduce((total, file) => total + file.deletions, 0)
-  const pending = commits.length > 0 && stagedCount + unstagedCount > 0
+  const liveSnapshot = useMemo(
+    () => ({
+      stagedCount: status.data?.staged.length ?? 0,
+      unstagedCount: status.data?.unstaged.length ?? 0,
+      filesChanged: new Set(pendingFiles.map((file) => file.path)).size,
+      additions: pendingFiles.reduce((total, file) => total + file.additions, 0),
+      deletions: pendingFiles.reduce((total, file) => total + file.deletions, 0),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [status.data]
+  )
+
+  // Held across a commit so the row is replaced in one step instead of
+  // vanishing and letting the graph collapse while the new commit loads.
+  const hasChanges = liveSnapshot.stagedCount + liveSnapshot.unstagedCount > 0
+  const loadedShas = useMemo(() => new Set(commits.map((c) => c.sha)), [commits])
+  const isLoaded = useCallback((sha: string) => loadedShas.has(sha), [loadedShas])
+  const held = usePendingRowHold(hasChanges, liveSnapshot, isLoaded)
+  const pendingSnapshot = held.snapshot
+  const pending = commits.length > 0 && held.show
   const headCommitLoaded = commits.some((commit) =>
     commit.refs.some((ref) => ref.type === 'head')
   )
@@ -417,11 +432,11 @@ export function GraphView() {
               return (
                 <PendingRow
                   key="__wip"
-                  stagedCount={stagedCount}
-                  unstagedCount={unstagedCount}
-                  filesChanged={pendingFileCount}
-                  additions={pendingAdditions}
-                  deletions={pendingDeletions}
+                  stagedCount={pendingSnapshot.stagedCount}
+                  unstagedCount={pendingSnapshot.unstagedCount}
+                  filesChanged={pendingSnapshot.filesChanged}
+                  additions={pendingSnapshot.additions}
+                  deletions={pendingSnapshot.deletions}
                   rowHeight={rowHeight}
                   selected={selectedSha === WIP_SHA}
                   onSelect={() => {
