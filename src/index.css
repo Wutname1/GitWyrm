@@ -396,6 +396,53 @@
   margin-left: -1px;
 }
 
+/* Progress modal panel. A backing panel sits behind the text at all times so
+   the title and subtext stay readable over whatever the dim overlay lets
+   through. On failure it grows to take the error block, and the border warms
+   to red. */
+.wyrm-progress-panel {
+  border: 1px solid transparent;
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--gw-panel) 92%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  transition:
+    border-color 260ms ease-out,
+    background-color 260ms ease-out,
+    box-shadow 260ms ease-out;
+}
+
+.wyrm-progress-panel-failed {
+  border-color: color-mix(in srgb, var(--gw-red) 45%, transparent);
+  background: var(--gw-modal);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* height:auto is not animatable, so the error block lives in a grid row that
+   goes 0fr -> 1fr. The child needs min-height:0 + overflow:hidden for the
+   collapsed state to actually clip. */
+.wyrm-progress-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  width: 100%;
+  transition: grid-template-rows 300ms ease-out;
+}
+
+.wyrm-progress-reveal-open {
+  grid-template-rows: 1fr;
+}
+
+.wyrm-progress-reveal > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wyrm-progress-panel,
+  .wyrm-progress-reveal {
+    transition: none;
+  }
+}
+
 /* Failed progress state: the logo stops thinking and takes a red cast, so the
    error reads at a glance before any text is parsed. */
 .wyrm-ai-logo-failed {

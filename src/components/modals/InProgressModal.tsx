@@ -2,6 +2,7 @@ import { CircleAlert, Copy } from 'lucide-react'
 import logoUrl from '@/assets/logo.png'
 import { Button } from '@/components/ui/button'
 import { copyToClipboard } from '@/lib/clipboard'
+import { cn } from '@/lib/utils'
 import {
   Dialog,
   DialogContent,
@@ -58,11 +59,10 @@ export function InProgressModal({
         aria-describedby={subtext || error ? 'in-progress-subtext' : undefined}
       >
         <div
-          className={
-            failed
-              ? 'grid justify-items-center gap-0 rounded-xl border border-removed/40 bg-modal px-6 py-6 text-center shadow-lg shadow-black/60'
-              : 'grid justify-items-center gap-0 px-6 py-6 text-center'
-          }
+          className={cn(
+            'wyrm-progress-panel grid justify-items-center gap-0 px-6 py-6 text-center',
+            failed && 'wyrm-progress-panel-failed'
+          )}
           role="status"
           aria-live="polite"
         >
@@ -99,8 +99,18 @@ export function InProgressModal({
             </DialogDescription>
           )}
 
-          {failed && (
-            <>
+          {/* Stays mounted so the panel has a height to grow from. */}
+          <div
+            className={cn(
+              'wyrm-progress-reveal',
+              failed && 'wyrm-progress-reveal-open'
+            )}
+            // Collapsed, it is visually gone but still in the DOM: hide it from
+            // the accessibility tree and take its buttons out of the tab order.
+            aria-hidden={!failed}
+            inert={!failed}
+          >
+            <div>
               <pre className="mt-3 max-h-40 w-full overflow-auto rounded-md border border-border bg-panel2 px-3 py-2 text-left font-mono text-2xs leading-relaxed whitespace-pre-wrap break-words text-sub">
                 {error}
               </pre>
@@ -108,7 +118,7 @@ export function InProgressModal({
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => void copyToClipboard(error, 'Copied the error')}
+                  onClick={() => error && void copyToClipboard(error, 'Copied the error')}
                 >
                   <Copy />
                   Copy error
@@ -117,8 +127,8 @@ export function InProgressModal({
                   Close
                 </Button>
               </div>
-            </>
-          )}
+            </div>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
