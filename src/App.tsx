@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -23,10 +24,11 @@ import { useFont } from '@/hooks/useFont'
 import { AUTO_CHECK_INTERVAL_MS, useUpdater } from '@/hooks/useUpdater'
 import { commands, type RepoInfo } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
+import { log } from '@/lib/log'
 import { samePath } from '@/lib/paths'
-import { hideSplash, setSplashProgress } from '@/lib/splash'
+import { hideSplash, setSplashProgress, setSplashStatus } from '@/lib/splash'
 import { useUiStore } from '@/stores/uiStore'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { flushPendingSettings, useWorkspaceStore } from '@/stores/workspaceStore'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -119,10 +121,14 @@ function AppInner() {
           // start empty and the Profiles screen offers to fill them in.
         })
 
-        // Look for a newer release now that the channel setting is loaded. Silent:
-        // a successful "up to date" says nothing; an available update surfaces as
-        // the Update button in the status bar.
-        void useUpdater.getState().check(true)
+        // Update while the splash is still up, now that the channel and
+        // auto-update settings are loaded. Awaited on purpose: installing
+        // before any repository work starts means nothing is half-open when
+        // the app relaunches. With auto-update off this only checks, and the
+        // status-bar button offers the install instead.
+        await useUpdater
+          .getState()
+          .runLaunchUpdate(settings.auto_update !== false, setSplashStatus)
 
         // A folder from Explorer's right-click entry. Drained here rather than
         // delivered as an event because the backend parses it before the webview
@@ -189,7 +195,15 @@ function AppInner() {
         results.forEach((result, i) => {
           if (result.status === 'fulfilled') {
             opened.push(result.value.repo)
-            if (result.value.path === settings.active_repo_path) lastOpenedId = result.value.repo.id
+            // samePath, not ===: the saved path came from a previous session and
+            // can differ in case or slash style from what openRepo hands back,
+            // which would silently drop the user on the wrong tab.
+            if (
+              settings.active_repo_path &&
+              samePath(result.value.path, settings.active_repo_path)
+            ) {
+              lastOpenedId = result.value.repo.id
+            }
             if (launchPath && samePath(result.value.path, launchPath)) {
               launchedId = result.value.repo.id
             }
@@ -218,13 +232,43 @@ function AppInner() {
         finishRepoRestore()
         // The folder the user right-clicked wins over the tab that happened to
         // be active last session -- they just asked for this one by name.
-        const focusId = launchedId ?? lastOpenedId
+        //
+        // Last fallback: the repo that was active is gone (moved, deleted, or it
+        // failed to open), so land on the first tab that did come back. toReopen
+        // is in saved tab order, so that is the leftmost surviving tab rather
+        // than whichever repo happened to finish opening first.
+        if (settings.active_repo_path && !lastOpenedId) {
+          log.warn(
+            `Last active repo did not reopen: ${settings.active_repo_path}`,
+          )
+        }
+        const firstSurvivingId = toReopen.reduce<string | null>(
+          (found, path) =>
+            found ??
+            opened.find((repo) => samePath(repo.path, path))?.id ??
+            null,
+          null,
+        )
+        const focusId = launchedId ?? lastOpenedId ?? firstSurvivingId
         if (focusId) setActiveRepo(focusId)
       } finally {
         hideSplash()
       }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Settings are written on a short debounce, so switching tabs and quitting
+  // right away would lose the change and reopen the tab before last. Flush
+  // whatever is pending as the window closes. Covers both the title bar's close
+  // button and the OS one, since both raise this event.
+  useEffect(() => {
+    const pending = getCurrentWindow().onCloseRequested(() => {
+      void flushPendingSettings()
+    })
+    return () => {
+      void pending.then((unlisten) => unlisten())
+    }
   }, [])
 
   // Right-clicking a folder while GitWyrm is already running starts a second

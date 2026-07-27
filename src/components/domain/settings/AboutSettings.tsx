@@ -24,6 +24,8 @@ export function AboutSettings() {
   const check = useUpdater((s) => s.check)
   const updateChannel = useWorkspaceStore((s) => s.updateChannel)
   const setUpdateChannel = useWorkspaceStore((s) => s.setUpdateChannel)
+  const autoUpdate = useWorkspaceStore((s) => s.autoUpdate)
+  const setAutoUpdate = useWorkspaceStore((s) => s.setAutoUpdate)
   const resetAllSettings = useWorkspaceStore((s) => s.resetAllSettings)
   const restoreSettings = useWorkspaceStore((s) => s.restoreSettings)
   const [build, setBuild] = useState<BuildInfo | null>(null)
@@ -77,6 +79,21 @@ export function AboutSettings() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+      </SettingRow>
+      <SettingRow
+        label="Auto update"
+        searchId="auto-update"
+        hint="GitWyrm installs new versions on the loading screen when it starts, then opens straight into the new one. Turn this off to be asked first."
+      >
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+          <input
+            type="checkbox"
+            checked={autoUpdate}
+            onChange={(e) => setAutoUpdate(e.target.checked)}
+            className="size-3.5 accent-[var(--gw-accent)]"
+          />
+          Install updates automatically
+        </label>
       </SettingRow>
       <SettingRow label="Updates" searchId="updates">
         <div className="flex items-center gap-3">

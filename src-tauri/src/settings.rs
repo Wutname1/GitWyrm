@@ -131,6 +131,10 @@ pub struct Settings {
   pub gpg_executable: Option<String>,
   #[serde(default = "default_update_channel")]
   pub update_channel: UpdateChannel,
+  /// Install updates automatically on the launch splash instead of waiting for
+  /// the user to press the update button. On by default.
+  #[serde(default = "default_auto_update")]
+  pub auto_update: bool,
   #[serde(default = "default_branch_switch_mode")]
   pub branch_switch_mode: BranchSwitchMode,
   #[serde(default)]
@@ -323,6 +327,10 @@ fn default_update_channel() -> UpdateChannel {
   UpdateChannel::Stable
 }
 
+fn default_auto_update() -> bool {
+  true
+}
+
 fn default_show_repo_icons() -> bool {
   true
 }
@@ -366,6 +374,7 @@ impl Default for Settings {
       git_executable: None,
       gpg_executable: None,
       update_channel: default_update_channel(),
+      auto_update: default_auto_update(),
       branch_switch_mode: default_branch_switch_mode(),
       ai_provider: None,
       ai_model: None,

@@ -19,6 +19,16 @@ interface UpdaterStore {
   /** Check and, if an update exists, install it in one shot (manual trigger). */
   checkAndInstall: () => Promise<void>
   /**
+   * The launch path, run while the splash is still covering the window: check
+   * and, when auto-update is on, install and relaunch before the app is ever
+   * shown. Reports progress through `onStatus` so the splash line can narrate
+   * it, and never toasts -- there is no app behind the splash to toast onto.
+   *
+   * Resolves once it is safe to carry on booting. When an update does install
+   * this never resolves in practice: the process relaunches instead.
+   */
+  runLaunchUpdate: (auto: boolean, onStatus: (message: string) => void) => Promise<void>
+  /**
    * Begin re-checking for updates every `intervalMs`. Returns a cleanup that
    * stops the timer. Once an update is found the timer stops on its own -- the
    * status-bar button is showing, so there is nothing more to look for.
@@ -50,11 +60,18 @@ async function runInstall(
   await relaunch()
 }
 
-async function fetchUpdate() {
+async function fetchUpdate(timeout?: number) {
   const { check } = await import('@tauri-apps/plugin-updater')
   const channel = useWorkspaceStore.getState().updateChannel
-  return check({ headers: { 'X-Update-Channel': channel } })
+  return check({ headers: { 'X-Update-Channel': channel }, timeout })
 }
+
+/**
+ * How long the launch check may take before booting carries on without it. The
+ * splash is covering the window for the whole wait, so an unreachable update
+ * server has to cost a few seconds, not the whole startup.
+ */
+const LAUNCH_CHECK_TIMEOUT_MS = 8000
 
 /** Shared updater state so a launch check and the status-bar button agree. */
 export const useUpdater = create<UpdaterStore>((set, get) => ({
@@ -101,6 +118,44 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
 
   checkAndInstall: async () => {
     await get().install()
+  },
+
+  runLaunchUpdate: async (auto, onStatus) => {
+    // Dev builds always look out of date against a real release, so a launch
+    // install would replace the build being worked on with a shipped one.
+    if (import.meta.env.DEV) {
+      set({ state: 'none' })
+      return
+    }
+
+    set({ state: 'checking' })
+    onStatus('Checking for updates')
+    try {
+      const update = await fetchUpdate(LAUNCH_CHECK_TIMEOUT_MS)
+      if (!update) {
+        set({ state: 'none', version: null })
+        return
+      }
+
+      // Auto-update off: note the update and let the status-bar button offer
+      // it, rather than holding the splash on something the user declined.
+      if (!auto) {
+        set({ state: 'available', version: update.version })
+        return
+      }
+
+      set({ state: 'downloading', version: update.version })
+      onStatus(`Installing update ${update.version}`)
+      await update.downloadAndInstall()
+      set({ state: 'ready' })
+      onStatus('Restarting to finish the update')
+      const { relaunch } = await import('@tauri-apps/plugin-process')
+      await relaunch()
+    } catch {
+      // A failed update must never keep someone out of their repositories:
+      // fall through to a normal boot and let them retry from Settings.
+      set({ state: 'error' })
+    }
   },
 
   startAutoCheck: (intervalMs) => {

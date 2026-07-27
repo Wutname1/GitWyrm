@@ -397,6 +397,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['beta', 'stable', 'prerelease', 'updates'],
   },
   {
+    id: 'auto-update',
+    section: 'about',
+    label: 'Auto update',
+    hint: 'Install new versions on the loading screen at startup.',
+    keywords: ['automatic', 'auto update', 'background', 'silent', 'startup'],
+  },
+  {
     id: 'updates',
     section: 'about',
     label: 'Updates',

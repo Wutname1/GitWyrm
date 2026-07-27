@@ -11,12 +11,16 @@ function el(): HTMLElement | null {
   return document.getElementById('splash')
 }
 
+/** Replace the line under the mark, e.g. "Checking for updates". */
+export function setSplashStatus(message: string) {
+  const status = document.getElementById('splash-status')
+  if (status) status.textContent = message
+}
+
 /** Show "Reopening 2 of 3 repositories" under the mark. */
 export function setSplashProgress(done: number, total: number) {
-  const status = document.getElementById('splash-status')
-  if (!status) return
   const noun = total === 1 ? 'repository' : 'repositories'
-  status.textContent = `Reopening ${done} of ${total} ${noun}`
+  setSplashStatus(`Reopening ${done} of ${total} ${noun}`)
 }
 
 /**

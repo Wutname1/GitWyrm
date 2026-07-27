@@ -2300,7 +2300,12 @@ git_executable?: string | null;
  * Path to the gpg executable used to sign commits. None (the default)
  * resolves gpg from PATH, then the copy bundled with GitWyrm.
  */
-gpg_executable?: string | null; update_channel?: UpdateChannel; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null; 
+gpg_executable?: string | null; update_channel?: UpdateChannel; 
+/**
+ * Install updates automatically on the launch splash instead of waiting for
+ * the user to press the update button. On by default.
+ */
+auto_update?: boolean; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null; 
 /**
  * Custom system instruction for commit-message generation. None uses the
  * built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).

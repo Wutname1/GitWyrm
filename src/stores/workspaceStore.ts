@@ -436,6 +436,8 @@ interface WorkspaceState {
   gpgExecutable: string;
   /** Release channel used when checking for updates (persisted). */
   updateChannel: UpdateChannel;
+  /** Install updates on the launch splash without asking (persisted). */
+  autoUpdate: boolean;
   /** What to do with uncommitted changes when switching branches (persisted). */
   branchSwitchMode: BranchSwitchMode;
   /** AI provider id used for commit message generation (persisted). */
@@ -569,6 +571,7 @@ interface WorkspaceState {
   setGitExecutable: (path: string) => void;
   setGpgExecutable: (path: string) => void;
   setUpdateChannel: (channel: UpdateChannel) => void;
+  setAutoUpdate: (enabled: boolean) => void;
   setBranchSwitchMode: (mode: BranchSwitchMode) => void;
   setAiSelection: (provider: string | null, model: string | null) => void;
   setAiInstruction: (instruction: string | null) => void;
@@ -721,14 +724,20 @@ function toSettings(s: WorkspaceState): Settings {
     open_repos: orderedRepoPaths(s).filter((path) =>
       s.openRepos.some((repo) => samePath(repo.path, path)),
     ),
-    active_repo_path:
-      s.openRepos.find((r) => r.id === s.activeRepoId)?.path ?? null,
+    // Normalized like open_repos above: this path comes straight off a RepoInfo,
+    // which can carry the slash style the user typed ("C:/code/repo/"), and the
+    // launch-time restore has to be able to match it against the reopened tabs.
+    active_repo_path: (() => {
+      const active = s.openRepos.find((r) => r.id === s.activeRepoId);
+      return active ? normalizePath(active.path) : null;
+    })(),
     recents: s.recents.map((r) => ({ name: r.name, path: r.path })),
     code_folder: s.codeFolder,
     clone_directory: s.cloneDirectory,
     git_executable: s.gitExecutable.trim() ? s.gitExecutable.trim() : null,
     gpg_executable: s.gpgExecutable.trim() ? s.gpgExecutable.trim() : null,
     update_channel: s.updateChannel === "beta" ? "beta" : "stable",
+    auto_update: s.autoUpdate,
     branch_switch_mode: s.branchSwitchMode,
     ai_provider: s.aiProvider,
     ai_model: s.aiModel,
@@ -965,8 +974,23 @@ function schedulePersist() {
   if (!s.hydrated) return;
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
+    persistTimer = null;
     void commands.saveSettings(toSettings(useWorkspaceStore.getState()));
   }, 300);
+}
+
+/**
+ * Write any pending settings immediately. Called as the window closes: switching
+ * tabs and quitting straight away is a normal thing to do, and without this the
+ * debounced write never fires, so the next launch reopens the tab before last.
+ */
+export function flushPendingSettings(): Promise<unknown> {
+  if (!useWorkspaceStore.getState().hydrated) return Promise.resolve();
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  return commands.saveSettings(toSettings(useWorkspaceStore.getState()));
 }
 
 /**
@@ -981,8 +1005,9 @@ export const SETTINGS_DEFAULTS = {
   repoPickerCollapsedSections: [],
   gitExecutable: "",
   gpgExecutable: "",
-  // Not in any per-screen group: only the global "Reset all" restores it.
+  // Not in any per-screen group: only the global "Reset all" restores them.
   updateChannel: "stable",
+  autoUpdate: true,
   branchSwitchMode: "auto_stash",
   commitButtonMode: "commit",
   defaultEditor: DEFAULT_EDITOR,
@@ -1059,6 +1084,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   gitExecutable: "",
   gpgExecutable: "",
   updateChannel: "stable",
+  autoUpdate: true,
   branchSwitchMode: "auto_stash",
   aiProvider: null,
   aiModel: null,
@@ -1265,6 +1291,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setUpdateChannel: (channel) => {
     set({ updateChannel: channel });
+    schedulePersist();
+  },
+  setAutoUpdate: (enabled) => {
+    set({ autoUpdate: enabled });
     schedulePersist();
   },
   setBranchSwitchMode: (mode) => {
@@ -2039,6 +2069,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         gitExecutable: settings.git_executable ?? "",
         gpgExecutable: settings.gpg_executable ?? "",
         updateChannel: settings.update_channel === "beta" ? "beta" : "stable",
+        autoUpdate: settings.auto_update !== false,
         branchSwitchMode: settings.branch_switch_mode ?? "auto_stash",
         aiProvider: settings.ai_provider ?? null,
         aiModel: settings.ai_model ?? null,
