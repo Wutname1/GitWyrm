@@ -186,15 +186,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Authenticode signing (Certum SimplySign) for the NSIS installer, the app
-          # exe, and the uninstaller. tauri-action runs bundle.windows.signCommand,
-          # which is sign-windows.ps1; it reads these and no-ops when they are empty,
-          # so builds keep working unsigned until the certificate is activated.
-          CERTUM_PKCS11_MODULE: ${{ secrets.CERTUM_PKCS11_MODULE }}
-          CERTUM_KEY_CONTAINER: ${{ secrets.CERTUM_KEY_CONTAINER }}
-          CERTUM_CERT_SHA1: ${{ secrets.CERTUM_CERT_SHA1 }}
-          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
-          CERTUM_TIMESTAMP_URL: ${{ secrets.CERTUM_TIMESTAMP_URL }}
           # Lets the Sentry vite plugin upload JS source maps during the frontend
           # build (gitwyrm-frontend project). Absent token = upload silently skipped.
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}

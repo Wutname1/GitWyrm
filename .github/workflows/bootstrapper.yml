@@ -41,21 +41,6 @@ jobs:
         shell: bash
         run: cp src-tauri/bootstrapper/target/${{ matrix.rust_target }}/release/gitwyrm-setup.exe "${{ matrix.output_name }}"
 
-      # Authenticode-sign before upload. This is the single most trust-sensitive
-      # binary in the project: it is the public "Download for Windows" button and
-      # what SmartScreen judges by publisher name. sign-windows.ps1 no-ops while the
-      # CERTUM_* secrets are empty, so this step is safe to ship before the cert is
-      # active - it just passes the unsigned exe through until then.
-      - name: Sign bootstrapper
-        shell: pwsh
-        env:
-          CERTUM_PKCS11_MODULE: ${{ secrets.CERTUM_PKCS11_MODULE }}
-          CERTUM_KEY_CONTAINER: ${{ secrets.CERTUM_KEY_CONTAINER }}
-          CERTUM_CERT_SHA1: ${{ secrets.CERTUM_CERT_SHA1 }}
-          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
-          CERTUM_TIMESTAMP_URL: ${{ secrets.CERTUM_TIMESTAMP_URL }}
-        run: .github/scripts/sign-windows.ps1 "${{ matrix.output_name }}"
-
       # The bootstrapper filename never changes across versions, so this is the one link the
       # public "Download for Windows" button points at - its download count stays intact
       # regardless of how many app releases ship behind it.

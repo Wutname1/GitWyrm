@@ -43,7 +43,6 @@
     "createUpdaterArtifacts": true,
     "resources": ["resources/**/*"],
     "windows": {
-      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ../.github/scripts/sign-windows.ps1 \"%1\"",
       "nsis": {
         "installMode": "currentUser",
         "installerHooks": "installer-hooks.nsh"
