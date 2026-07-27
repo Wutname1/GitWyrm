@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   FolderTree,
   GitCommitHorizontal,
@@ -14,10 +14,14 @@ import { useStatus } from "@/hooks/useGitQueries";
 import { useGitMutations } from "@/hooks/useGitMutations";
 import { useUiStore } from "@/stores/uiStore";
 import {
+  DEFAULT_CHANGES_SPLIT,
+  MAX_CHANGES_SPLIT,
+  MIN_CHANGES_SPLIT,
   useActiveRepo,
   useWorkspaceStore,
   type ChangesViewMode,
 } from "@/stores/workspaceStore";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { plural } from "@/lib/gitDisplay";
 import { cn } from "@/lib/utils";
 import { FileChangeRow, StageToggle } from "../FileChangeRow";
@@ -38,8 +42,7 @@ function GroupHeader({
 }) {
   return (
     <ChangesMenu>
-      {/* Sits below the sticky changes header, which is ~34px tall. */}
-      <div className="sticky top-[34px] z-[2] flex items-center gap-2 bg-panel2/40 px-3.5 py-[7px]">
+      <div className="flex flex-none items-center gap-2 bg-panel2/40 px-3.5 py-[7px]">
         {tone === "staged" ? (
           <GitCommitHorizontal
             size={16}
@@ -131,7 +134,16 @@ export function ChangesList() {
   const openConflict = useUiStore((s) => s.openConflict);
   const changesViewMode = useWorkspaceStore((s) => s.changesViewMode);
   const setChangesViewMode = useWorkspaceStore((s) => s.setChangesViewMode);
+  const changesSplit = useWorkspaceStore((s) => s.changesSplit);
+  const setChangesSplit = useWorkspaceStore((s) => s.setChangesSplit);
+  const splitRef = useRef<HTMLDivElement>(null);
   const m = useGitMutations(repo?.id ?? null);
+
+  /** Drag distance in pixels as a share of the height the two lists split. */
+  const pixelsToSplit = (pixels: number) => {
+    const height = splitRef.current?.clientHeight ?? 0;
+    return height > 0 ? (pixels / height) * 100 : 0;
+  };
 
   const staged = status.data?.staged ?? [];
   const unstaged = status.data?.unstaged ?? [];
@@ -153,9 +165,9 @@ export function ChangesList() {
 
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={splitRef} className="flex min-h-0 flex-1 flex-col">
         <ChangesMenu>
-          <div className="sticky top-0 z-[3] flex items-center gap-2 border-b border-border/70 bg-panel px-3.5 py-2">
+          <div className="flex flex-none items-center gap-2 border-b border-border/70 bg-panel px-3.5 py-2">
             <span className="text-xs font-semibold text-foreground">
               {hasChanges ? plural(changedFiles, "change") : "No changes"}
             </span>
@@ -180,140 +192,173 @@ export function ChangesList() {
             </div>
           </div>
         </ChangesMenu>
-        <GroupHeader label="UNSTAGED" count={unstaged.length} tone="unstaged">
-          {unstaged.length > 0 && (
-            <Button
-              size="sm"
-              onClick={() => m.stageAll.mutate()}
-              disabled={stagingPending}
-              className="h-auto rounded border border-primary/50 bg-soft px-2 py-0.5 text-2xs font-semibold text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
-            >
-              {m.stageAll.isPending && <PendingIndicator className="size-3" />}
-              {m.stageAll.isPending ? "Staging…" : "Stage all"}
-            </Button>
-          )}
-        </GroupHeader>
-        {unstaged.length > 0 && (
-          <FileChangeTree
-            files={unstaged}
-            allFiles={allFiles}
-            treeId="unstaged"
-            staged={false}
-            viewMode={changesViewMode}
-            operationsDisabled={stagingPending}
-            mutations={m}
-            renderFile={(f, name, depth) =>
-              f.conflicted ? (
-                <FileChangeRow
-                  file={f}
-                  displayPath={name}
-                  treeDepth={depth}
-                  menuStaged={false}
-                  nameClassName="text-removed"
-                  onOpen={() => openConflict(f.path)}
-                  action={
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openConflict(f.path);
-                      }}
-                      className="flex-none rounded border border-removed/50 bg-removed/10 px-1.5 py-0.5 text-2xs font-semibold text-removed hover:bg-removed/20"
-                    >
-                      Resolve
-                    </button>
-                  }
-                />
-              ) : (
-                <FileChangeRow
-                  file={f}
-                  displayPath={name}
-                  treeDepth={depth}
-                  menuStaged={false}
-                  onOpen={() =>
-                    openDiff({ path: f.path, source: { kind: "unstaged" } })
-                  }
-                  action={
-                    <StageToggle
-                      direction="stage"
-                      disabled={stagingPending}
-                      pending={
-                        m.stageFile.isPending &&
-                        m.stageFile.variables === f.path
+        {/*
+          The two lists split the leftover height between them. Each header is
+          outside its own scroll area, so both stay visible no matter how long
+          either list gets, and neither list can be squeezed below 30%.
+        */}
+        <div
+          className="flex min-h-0 flex-col"
+          style={{ flex: `${changesSplit} 1 0%` }}
+        >
+          <GroupHeader label="UNSTAGED" count={unstaged.length} tone="unstaged">
+            {unstaged.length > 0 && (
+              <Button
+                size="sm"
+                onClick={() => m.stageAll.mutate()}
+                disabled={stagingPending}
+                className="h-auto rounded border border-primary/50 bg-soft px-2 py-0.5 text-2xs font-semibold text-accent-text hover:border-primary hover:bg-primary hover:text-primary-foreground"
+              >
+                {m.stageAll.isPending && <PendingIndicator className="size-3" />}
+                {m.stageAll.isPending ? "Staging…" : "Stage all"}
+              </Button>
+            )}
+          </GroupHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {unstaged.length > 0 && (
+              <FileChangeTree
+                files={unstaged}
+                allFiles={allFiles}
+                treeId="unstaged"
+                staged={false}
+                viewMode={changesViewMode}
+                operationsDisabled={stagingPending}
+                mutations={m}
+                renderFile={(f, name, depth) =>
+                  f.conflicted ? (
+                    <FileChangeRow
+                      file={f}
+                      displayPath={name}
+                      treeDepth={depth}
+                      menuStaged={false}
+                      nameClassName="text-removed"
+                      onOpen={() => openConflict(f.path)}
+                      action={
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openConflict(f.path);
+                          }}
+                          className="flex-none rounded border border-removed/50 bg-removed/10 px-1.5 py-0.5 text-2xs font-semibold text-removed hover:bg-removed/20"
+                        >
+                          Resolve
+                        </button>
                       }
-                      onToggle={(e) => {
-                        e.stopPropagation();
-                        m.stageFile.mutate(f.path);
-                      }}
                     />
-                  }
-                />
-              )
-            }
-          />
-        )}
-        {status.data && !hasChanges && (
-          <div className="p-4 text-center text-2xs text-muted-foreground">
-            Working tree clean
-          </div>
-        )}
-        <div className="my-1 border-t-2 border-border/70" />
-        <GroupHeader label="STAGED" count={staged.length} tone="staged">
-          {staged.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => m.unstageAll.mutate()}
-              disabled={stagingPending}
-              className="h-auto rounded px-[7px] py-0.5 text-2xs text-sub hover:bg-panel3 hover:text-foreground border-primary/40 border"
-            >
-              {m.unstageAll.isPending && (
-                <PendingIndicator className="size-3" />
-              )}
-              {m.unstageAll.isPending ? "Unstaging…" : "Unstage all"}
-            </Button>
-          )}
-        </GroupHeader>
-        {staged.length > 0 && (
-          <FileChangeTree
-            files={staged}
-            allFiles={allFiles}
-            treeId="staged"
-            staged
-            viewMode={changesViewMode}
-            operationsDisabled={stagingPending}
-            mutations={m}
-            renderFile={(f, name, depth) => (
-              <FileChangeRow
-                file={f}
-                displayPath={name}
-                treeDepth={depth}
-                menuStaged
-                onOpen={() =>
-                  openDiff({ path: f.path, source: { kind: "staged" } })
-                }
-                action={
-                  <StageToggle
-                    direction="unstage"
-                    disabled={stagingPending}
-                    pending={
-                      m.unstageFile.isPending &&
-                      m.unstageFile.variables === f.path
-                    }
-                    onToggle={(e) => {
-                      e.stopPropagation();
-                      m.unstageFile.mutate(f.path);
-                    }}
-                  />
+                  ) : (
+                    <FileChangeRow
+                      file={f}
+                      displayPath={name}
+                      treeDepth={depth}
+                      menuStaged={false}
+                      onOpen={() =>
+                        openDiff({ path: f.path, source: { kind: "unstaged" } })
+                      }
+                      action={
+                        <StageToggle
+                          direction="stage"
+                          disabled={stagingPending}
+                          pending={
+                            m.stageFile.isPending &&
+                            m.stageFile.variables === f.path
+                          }
+                          onToggle={(e) => {
+                            e.stopPropagation();
+                            m.stageFile.mutate(f.path);
+                          }}
+                        />
+                      }
+                    />
+                  )
                 }
               />
             )}
-          />
-        )}
-        {staged.length === 0 && hasChanges && (
-          <div className="px-3.5 py-1.5 text-2xs italic text-muted-foreground">
-            Nothing staged yet
+            {status.data && !hasChanges && (
+              <div className="p-4 text-center text-2xs text-muted-foreground">
+                Working tree clean
+              </div>
+            )}
           </div>
-        )}
+        </div>
+
+        <div className="relative h-0 flex-none border-t-2 border-border/70">
+          <ResizeHandle
+            ariaLabel="Resize unstaged and staged lists"
+            axis="y"
+            value={changesSplit}
+            min={MIN_CHANGES_SPLIT}
+            max={MAX_CHANGES_SPLIT}
+            defaultValue={DEFAULT_CHANGES_SPLIT}
+            onChange={setChangesSplit}
+            toValue={pixelsToSplit}
+            className="-top-1"
+          />
+        </div>
+
+        <div
+          className="flex min-h-0 flex-col"
+          style={{ flex: `${100 - changesSplit} 1 0%` }}
+        >
+          <GroupHeader label="STAGED" count={staged.length} tone="staged">
+            {staged.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => m.unstageAll.mutate()}
+                disabled={stagingPending}
+                className="h-auto rounded px-[7px] py-0.5 text-2xs text-sub hover:bg-panel3 hover:text-foreground border-primary/40 border"
+              >
+                {m.unstageAll.isPending && (
+                  <PendingIndicator className="size-3" />
+                )}
+                {m.unstageAll.isPending ? "Unstaging…" : "Unstage all"}
+              </Button>
+            )}
+          </GroupHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {staged.length > 0 && (
+              <FileChangeTree
+                files={staged}
+                allFiles={allFiles}
+                treeId="staged"
+                staged
+                viewMode={changesViewMode}
+                operationsDisabled={stagingPending}
+                mutations={m}
+                renderFile={(f, name, depth) => (
+                  <FileChangeRow
+                    file={f}
+                    displayPath={name}
+                    treeDepth={depth}
+                    menuStaged
+                    onOpen={() =>
+                      openDiff({ path: f.path, source: { kind: "staged" } })
+                    }
+                    action={
+                      <StageToggle
+                        direction="unstage"
+                        disabled={stagingPending}
+                        pending={
+                          m.unstageFile.isPending &&
+                          m.unstageFile.variables === f.path
+                        }
+                        onToggle={(e) => {
+                          e.stopPropagation();
+                          m.unstageFile.mutate(f.path);
+                        }}
+                      />
+                    }
+                  />
+                )}
+              />
+            )}
+            {staged.length === 0 && hasChanges && (
+              <div className="px-3.5 py-1.5 text-2xs italic text-muted-foreground">
+                Nothing staged yet
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <GenerateCommitsDialog

@@ -228,6 +228,22 @@ export function clampDrawerListWidth(width: number): number {
 }
 
 /**
+ * Share of the changes pane given to the unstaged list, as a percentage of the
+ * space the two lists share. Both ends are capped so neither list can shrink
+ * past 30% and push the other off screen.
+ */
+export const MIN_CHANGES_SPLIT = 30;
+export const MAX_CHANGES_SPLIT = 70;
+export const DEFAULT_CHANGES_SPLIT = 50;
+
+export function clampChangesSplit(split: number): number {
+  if (!Number.isFinite(split)) return DEFAULT_CHANGES_SPLIT;
+  return Math.round(
+    Math.min(MAX_CHANGES_SPLIT, Math.max(MIN_CHANGES_SPLIT, split)),
+  );
+}
+
+/**
  * Key for one repo's staged or unstaged changes tree. Repo-scoped so two repos
  * with the same folder names keep their own open/closed state.
  */
@@ -442,6 +458,8 @@ interface WorkspaceState {
   drawerHeight: number;
   /** Width of the commit list pane inside the multi-select drawer (persisted). */
   drawerListWidth: number;
+  /** Percent of the changes pane given to the unstaged list (persisted). */
+  changesSplit: number;
   /** Where change size appears in the commit graph (persisted). */
   changeSizeDisplay: ChangeSizeDisplay;
   /** Whether commit rows show a change-size indicator (persisted). */
@@ -689,6 +707,7 @@ interface WorkspaceState {
   setRightPanelWidth: (width: number) => void;
   setDrawerHeight: (height: number) => void;
   setDrawerListWidth: (width: number) => void;
+  setChangesSplit: (split: number) => void;
   setChangeSizeDisplay: (display: ChangeSizeDisplay) => void;
   setShowChangeIndicator: (enabled: boolean) => void;
   setShowChangeLineCounts: (enabled: boolean) => void;
@@ -723,6 +742,7 @@ function toSettings(s: WorkspaceState): Settings {
     right_panel_width: s.rightPanelWidth,
     drawer_height: s.drawerHeight,
     drawer_commit_list_width: s.drawerListWidth,
+    changes_split: s.changesSplit,
     change_size_display: s.changeSizeDisplay,
     show_change_indicator: s.showChangeIndicator,
     show_change_line_counts: s.showChangeLineCounts,
@@ -1050,6 +1070,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
   drawerHeight: DEFAULT_DRAWER_HEIGHT,
   drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
+  changesSplit: DEFAULT_CHANGES_SPLIT,
   changeSizeDisplay: "column",
   showChangeIndicator: false,
   showChangeLineCounts: false,
@@ -1987,6 +2008,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ drawerListWidth: clampDrawerListWidth(width) });
     schedulePersist();
   },
+  setChangesSplit: (split) => {
+    set({ changesSplit: clampChangesSplit(split) });
+    schedulePersist();
+  },
   setChangeSizeDisplay: (display) => {
     set({ changeSizeDisplay: display });
     schedulePersist();
@@ -2032,6 +2057,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ),
         drawerListWidth: clampDrawerListWidth(
           settings.drawer_commit_list_width ?? DEFAULT_DRAWER_LIST_WIDTH,
+        ),
+        changesSplit: clampChangesSplit(
+          settings.changes_split ?? DEFAULT_CHANGES_SPLIT,
         ),
         changeSizeDisplay:
           settings.change_size_display === "row" ? "row" : "column",

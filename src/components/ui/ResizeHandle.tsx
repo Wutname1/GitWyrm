@@ -17,6 +17,12 @@ interface ResizeHandleProps {
   /** 'x' resizes a width (default); 'y' resizes a height. */
   axis?: 'x' | 'y'
   getCurrentValue?: (handle: HTMLDivElement) => number
+  /**
+   * Converts a drag distance in pixels into the units `value` is measured in.
+   * Defaults to 1:1 (the value is a pixel size); a percentage-based split
+   * passes a converter that divides by the container size.
+   */
+  toValue?: (pixels: number) => number
   className?: string
 }
 
@@ -40,6 +46,7 @@ export function ResizeHandle({
   direction = 1,
   axis = 'x',
   getCurrentValue,
+  toValue = (pixels) => pixels,
   className,
 }: ResizeHandleProps) {
   const dragStart = useRef<{ pointerId: number; x: number; y: number; value: number } | null>(null)
@@ -87,7 +94,7 @@ export function ResizeHandle({
         const start = dragStart.current
         if (!start || start.pointerId !== event.pointerId) return
         const delta = axis === 'y' ? event.clientY - start.y : event.clientX - start.x
-        onChange(clamp(start.value + delta * direction, min, max))
+        onChange(clamp(start.value + toValue(delta) * direction, min, max))
       }}
       onPointerUp={finishResize}
       onPointerCancel={(event) => {
@@ -105,7 +112,7 @@ export function ResizeHandle({
         if (event.key !== growKey && event.key !== shrinkKey) return
         event.preventDefault()
         event.stopPropagation()
-        const delta = event.key === shrinkKey ? -8 : 8
+        const delta = toValue(event.key === shrinkKey ? -8 : 8)
         onChange(clamp(currentValue(event.currentTarget) + delta * direction, min, max))
       }}
       onClick={(event) => event.stopPropagation()}
