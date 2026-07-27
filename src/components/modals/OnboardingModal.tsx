@@ -175,7 +175,9 @@ async function recordProfile(name: string, email: string, signing: SigningMethod
     if (seed.status !== 'ok') return
     await commands.addProfileWithoutApplying({
       ...seed.data,
-      label: 'My identity',
+      // Named after the identity it holds; a profile called "My identity"
+      // means nothing the moment there are two of them.
+      label: email.trim(),
       name: name.trim(),
       email: email.trim(),
       signing,

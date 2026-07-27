@@ -143,6 +143,21 @@ pub async fn clear_repo_profile(repo_path: String) -> Result<(), AppError> {
 #[specta::specta]
 pub async fn seed_profile_from_config(app: tauri::AppHandle) -> Result<Option<Profile>, AppError> {
   let mut settings = load(&app)?;
+
+  // Early seeded profiles were labelled "My identity", which says nothing once
+  // there are two of them. Rename in place rather than stranding anyone who
+  // already adopted one; a label the user chose themselves is left alone.
+  let mut renamed = false;
+  for profile in &mut settings.profiles {
+    if profile.label == "My identity" && !profile.email.trim().is_empty() {
+      profile.label = profile.email.trim().to_string();
+      renamed = true;
+    }
+  }
+  if renamed {
+    store(&app, &settings)?;
+  }
+
   let seeded = profile_from_current_config().await?;
   if !profiles::should_seed(settings.profiles_seeded, settings.profiles.len(), &seeded) {
     return Ok(None);
@@ -214,7 +229,10 @@ pub async fn profile_from_current_config() -> Result<Profile, AppError> {
         .map(|d| d.as_millis())
         .unwrap_or(0)
     ),
-    label: "My identity".into(),
+    // Named after the identity it holds rather than something invented like
+    // "My identity", which says nothing once there are two of them. The email
+    // is what a host matches commits by, so it is the meaningful half.
+    label: identity.email.trim().to_string(),
     name: identity.name,
     email: identity.email,
     signing,

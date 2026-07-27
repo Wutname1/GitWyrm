@@ -46,9 +46,18 @@ export function ProfileSwitcher() {
   // Nothing configured at all: say so plainly, because git will refuse the
   // commit and the error it gives names config keys most people never set.
   const missing = !effective?.email
-  const label = missing
-    ? 'Set who you commit as'
-    : (profiles.find((p) => p.id === activeId)?.label ?? effective.email)
+
+  // With one identity and nothing unusual about it there is no decision to
+  // surface, and a line restating the only possible answer above every commit
+  // is noise. It comes back the moment the answer could surprise: more than one
+  // profile to choose between, a repository pinned to something other than the
+  // active profile, or nothing set up at all.
+  const worthShowing = missing || profiles.length > 1 || Boolean(effective?.overridden)
+  if (!worthShowing) return null
+
+  // The email, not the profile label: it is what a host matches commits by, and
+  // it stays meaningful even when the label is something the user never chose.
+  const label = missing ? 'Set who you commit as' : effective.email
 
   const pick = async (id: string) => {
     if (!(await activate(id))) return
@@ -83,7 +92,7 @@ export function ProfileSwitcher() {
               missing ? 'font-medium text-amber-500' : 'text-muted-foreground'
             )}
           >
-            {missing ? label : <>Committing as <span className="text-foreground">{label}</span></>}
+            {missing ? label : <span className="text-foreground">{label}</span>}
           </span>
           {effective?.overridden && (
             <Pin size={9} className="flex-none text-muted-foreground" aria-label="Pinned to this repository" />

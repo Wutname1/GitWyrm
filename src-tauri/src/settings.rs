@@ -743,7 +743,7 @@ mod tests {
     let mut seeded = Settings::default();
     seeded.profiles.push(crate::git::profiles::Profile {
       id: "p1".into(),
-      label: "My identity".into(),
+      label: "jeremy12@gmail.com".into(),
       name: "Wutname1".into(),
       email: "jeremy12@gmail.com".into(),
       signing: crate::git::profiles::SigningMethod::None,
