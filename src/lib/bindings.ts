@@ -485,6 +485,41 @@ async profileFromCurrentConfig() : Promise<Result<Profile, string>> {
 }
 },
 /**
+ * Adopt the user's existing git setup as their first profile.
+ * 
+ * For someone who has been using git for years, profiles should start already
+ * describing them rather than empty. Deliberately a pure read of git config:
+ * their setup is already correct, and rewriting `~/.gitconfig` to "adopt" it
+ * would be a side effect they never asked for. The profile is recorded as
+ * active because it already describes what git does.
+ * 
+ * Runs at most once. A user who deletes the seeded profile should not find it
+ * back on the next launch.
+ */
+async seedProfileFromConfig() : Promise<Result<Profile | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("seed_profile_from_config") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Record a profile without touching git config.
+ * 
+ * Used by onboarding, which has already written the identity to git itself.
+ * Applying it again would be redundant, and would fight the wizard's own
+ * signing setup.
+ */
+async addProfileWithoutApplying(profile: Profile) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_profile_without_applying", { profile }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Every gpg signing key on this machine.
  * 
  * Separate from `get_signing_status`, which needs a repository: profiles are
@@ -2292,6 +2327,10 @@ drawer_height?: number;
  */
 drawer_commit_list_width?: number; 
 /**
+ * Percent of the changes pane given to the unstaged list (30-70).
+ */
+changes_split?: number; 
+/**
  * Whether change size appears below the message or in its own column.
  */
 change_size_display?: ChangeSizeDisplay; 
@@ -2340,6 +2379,12 @@ profiles?: Profile[];
  * has not adopted profiles, so their existing git config is left alone.
  */
 active_profile_id?: string | null; 
+/**
+ * Whether the first profile has been seeded from an existing git config.
+ * Without this a user who deletes the seeded profile gets it back on the
+ * next launch, which reads as the app ignoring them.
+ */
+profiles_seeded?: boolean; 
 /**
  * Fingerprints of signing keys the user has confirmed they uploaded to their
  * host. Drives the "finish setting this key up" checklist, which has to

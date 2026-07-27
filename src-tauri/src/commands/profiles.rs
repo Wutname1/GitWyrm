@@ -129,6 +129,53 @@ pub async fn clear_repo_profile(repo_path: String) -> Result<(), AppError> {
   profiles::clear_repo_override(&repo_path)
 }
 
+/// Adopt the user's existing git setup as their first profile.
+///
+/// For someone who has been using git for years, profiles should start already
+/// describing them rather than empty. Deliberately a pure read of git config:
+/// their setup is already correct, and rewriting `~/.gitconfig` to "adopt" it
+/// would be a side effect they never asked for. The profile is recorded as
+/// active because it already describes what git does.
+///
+/// Runs at most once. A user who deletes the seeded profile should not find it
+/// back on the next launch.
+#[tauri::command]
+#[specta::specta]
+pub async fn seed_profile_from_config(app: tauri::AppHandle) -> Result<Option<Profile>, AppError> {
+  let mut settings = load(&app)?;
+  let seeded = profile_from_current_config().await?;
+  if !profiles::should_seed(settings.profiles_seeded, settings.profiles.len(), &seeded) {
+    return Ok(None);
+  }
+  log::info!("adopted the existing git identity as a first profile");
+
+  settings.active_profile_id = Some(seeded.id.clone());
+  settings.profiles.push(seeded.clone());
+  settings.profiles_seeded = true;
+  store(&app, &settings)?;
+  Ok(Some(seeded))
+}
+
+/// Record a profile without touching git config.
+///
+/// Used by onboarding, which has already written the identity to git itself.
+/// Applying it again would be redundant, and would fight the wizard's own
+/// signing setup.
+#[tauri::command]
+#[specta::specta]
+pub async fn add_profile_without_applying(
+  app: tauri::AppHandle,
+  profile: Profile,
+) -> Result<(), AppError> {
+  let mut settings = load(&app)?;
+  settings.profiles.retain(|p| p.id != profile.id);
+  settings.active_profile_id = Some(profile.id.clone());
+  settings.profiles.push(profile);
+  settings.profiles_seeded = true;
+  store(&app, &settings)?;
+  Ok(())
+}
+
 /// Build a first profile from the git config the user already has.
 ///
 /// Adopting profiles should not mean retyping what git already knows, and it

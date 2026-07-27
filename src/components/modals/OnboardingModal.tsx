@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { commands } from '@/lib/bindings'
+import { commands, type SigningMethod } from '@/lib/bindings'
 import { useGitIdentity } from '@/lib/useGitIdentity'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
@@ -161,6 +161,31 @@ export function OnboardingModal() {
  * also a concept a first-time user has not met yet, so it is one checkbox with
  * a plain-language explanation and no jargon.
  */
+/**
+ * Record what the wizard just set up as the user's first profile.
+ *
+ * Does not re-apply to git: `save()` above already wrote the identity, and the
+ * signing key was made against it. Failing here is not worth interrupting the
+ * wizard -- the identity is saved either way, and the Profiles screen offers to
+ * adopt it later.
+ */
+async function recordProfile(name: string, email: string, signing: SigningMethod) {
+  try {
+    const seed = await commands.profileFromCurrentConfig()
+    if (seed.status !== 'ok') return
+    await commands.addProfileWithoutApplying({
+      ...seed.data,
+      label: 'My identity',
+      name: name.trim(),
+      email: email.trim(),
+      signing,
+      signCommits: signing.kind !== 'none',
+    })
+  } catch {
+    // Profiles are a convenience here; git itself is already configured.
+  }
+}
+
 function IdentityStep({ onDone }: { onDone: () => void }) {
   const { save } = useGitIdentity()
   const [name, setName] = useState('')
@@ -181,6 +206,7 @@ function IdentityStep({ onDone }: { onDone: () => void }) {
       return
     }
 
+    let signing: SigningMethod = { kind: 'none' }
     if (wantSigning) {
       const made = await commands.createSigningKey(name, email)
       if (made.status !== 'ok') {
@@ -189,11 +215,18 @@ function IdentityStep({ onDone }: { onDone: () => void }) {
         // them on the step.
         setBusy(false)
         toast.error(`Saved your name and email, but the signing key failed: ${made.error}`)
+        await recordProfile(name, email, signing)
         onDone()
         return
       }
+      signing = { kind: 'gpg', value: made.data }
       toast.success('Signing key ready. Turn it on for a repository in Settings > Security.')
     }
+
+    // Leave the wizard with one profile rather than none, so the switcher has
+    // something to show and a second identity is an "add" rather than a
+    // "set the whole thing up".
+    await recordProfile(name, email, signing)
 
     setBusy(false)
     onDone()

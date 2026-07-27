@@ -156,6 +156,9 @@ pub struct Settings {
   /// Saved width of the commit list pane inside the multi-select drawer.
   #[serde(default = "default_drawer_commit_list_width")]
   pub drawer_commit_list_width: f64,
+  /// Percent of the changes pane given to the unstaged list (30-70).
+  #[serde(default = "default_changes_split")]
+  pub changes_split: f64,
   /// Whether change size appears below the message or in its own column.
   #[serde(default = "default_change_size_display")]
   pub change_size_display: ChangeSizeDisplay,
@@ -195,6 +198,11 @@ pub struct Settings {
   /// has not adopted profiles, so their existing git config is left alone.
   #[serde(default)]
   pub active_profile_id: Option<String>,
+  /// Whether the first profile has been seeded from an existing git config.
+  /// Without this a user who deletes the seeded profile gets it back on the
+  /// next launch, which reads as the app ignoring them.
+  #[serde(default)]
+  pub profiles_seeded: bool,
   /// Fingerprints of signing keys the user has confirmed they uploaded to their
   /// host. Drives the "finish setting this key up" checklist, which has to
   /// survive a reload: a key is only half-usable until its public half is on the
@@ -343,6 +351,10 @@ fn default_drawer_commit_list_width() -> f64 {
   280.0
 }
 
+fn default_changes_split() -> f64 {
+  50.0
+}
+
 impl Default for Settings {
   fn default() -> Self {
     Self {
@@ -363,6 +375,7 @@ impl Default for Settings {
       right_panel_width: default_right_panel_width(),
       drawer_height: default_drawer_height(),
       drawer_commit_list_width: default_drawer_commit_list_width(),
+      changes_split: default_changes_split(),
       change_size_display: default_change_size_display(),
       show_change_indicator: default_show_change_indicator(),
       show_change_line_counts: false,
@@ -373,6 +386,7 @@ impl Default for Settings {
       onboarding_seen: false,
       profiles: Vec::new(),
       active_profile_id: None,
+      profiles_seeded: false,
       signing_keys_published: Vec::new(),
       ui_scale: None,
       font_family: None,
@@ -502,6 +516,18 @@ pub fn read_settings_in(dir: &Path) -> Settings {
   }
 }
 
+/// Carry over the fields the backend owns and the frontend never sends.
+///
+/// The frontend rebuilds the whole settings object from its own store, which
+/// has no concept of profiles. Writing that object as-is would erase them every
+/// time any unrelated preference changed -- silently, and long after the profile
+/// was created.
+pub fn keep_backend_owned_fields(incoming: &mut Settings, stored: &Settings) {
+  incoming.profiles = stored.profiles.clone();
+  incoming.active_profile_id = stored.active_profile_id.clone();
+  incoming.profiles_seeded = stored.profiles_seeded;
+}
+
 /// Write settings to `dir` exactly as given.
 pub fn write_settings_in(dir: &Path, settings: &Settings) -> Result<(), AppError> {
   let json = serde_json::to_string_pretty(settings).map_err(|e| AppError::Other(e.to_string()))?;
@@ -522,13 +548,15 @@ pub fn write_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(),
 
 #[tauri::command]
 #[specta::specta]
-pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), AppError> {
+pub fn save_settings(app: tauri::AppHandle, mut settings: Settings) -> Result<(), AppError> {
   // Apply the tool paths immediately so a change takes effect without a
   // restart. Every shell-out reads these globals.
   crate::git::shell::set_git_program(settings.git_executable.as_deref());
   crate::git::signing::set_gpg_program(settings.gpg_executable.as_deref());
 
-  write_settings(&app, &settings)
+  let dir = app_data_dir(&app)?;
+  keep_backend_owned_fields(&mut settings, &read_settings_in(&dir));
+  write_settings_in(&dir, &settings)
 }
 
 /// Load the persisted git executable and apply it to the shell global. Called
@@ -638,6 +666,7 @@ mod tests {
     assert_eq!(settings.right_panel_width, 320.0);
     assert_eq!(settings.drawer_height, 212.0);
     assert_eq!(settings.drawer_commit_list_width, 280.0);
+    assert_eq!(settings.changes_split, 50.0);
     assert_eq!(settings.change_size_display, ChangeSizeDisplay::Column);
     assert!(settings.show_change_indicator);
     assert!(!settings.show_change_line_counts);
@@ -694,6 +723,77 @@ mod tests {
     assert_eq!(restored.theme.as_deref(), Some("midnight"));
     assert_eq!(restored.theme_mode.as_deref(), Some("dark"));
     assert!(!restored.mint_accent);
+  }
+
+  #[test]
+  fn profiles_survive_a_write_and_reread() {
+    // The seed writes profiles, then the frontend's debounced save fires.
+    // This is that exact sequence against a real file.
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let mut seeded = Settings::default();
+    seeded.profiles.push(crate::git::profiles::Profile {
+      id: "p1".into(),
+      label: "My identity".into(),
+      name: "Wutname1".into(),
+      email: "jeremy12@gmail.com".into(),
+      signing: crate::git::profiles::SigningMethod::None,
+      sign_commits: false,
+      folders: vec![],
+    });
+    seeded.active_profile_id = Some("p1".into());
+    seeded.profiles_seeded = true;
+    write_settings_in(dir.path(), &seeded).expect("seed write");
+
+    // Frontend save: rebuilt from its own store, so profiles arrive empty.
+    let mut from_frontend = Settings {
+      code_folder: Some("C:\\code".into()),
+      ..Settings::default()
+    };
+    keep_backend_owned_fields(&mut from_frontend, &read_settings_in(dir.path()));
+    write_settings_in(dir.path(), &from_frontend).expect("frontend write");
+
+    let after = read_settings_in(dir.path());
+    assert_eq!(after.profiles.len(), 1, "profile survived the frontend save");
+    assert_eq!(after.profiles[0].email, "jeremy12@gmail.com");
+    assert!(after.profiles_seeded);
+    assert_eq!(after.code_folder.as_deref(), Some("C:\\code"));
+  }
+
+  #[test]
+  fn saving_preferences_does_not_erase_profiles() {
+    // The frontend store has no profiles field, so every save sends them empty.
+    // Without the carry-over a user's profiles vanish the next time they change
+    // any unrelated setting -- silently, long after they set them up.
+    let stored = Settings {
+      profiles: vec![crate::git::profiles::Profile {
+        id: "p1".into(),
+        label: "Personal".into(),
+        name: "Wutname1".into(),
+        email: "jeremy12@gmail.com".into(),
+        signing: crate::git::profiles::SigningMethod::None,
+        sign_commits: false,
+        folders: vec![],
+      }],
+      active_profile_id: Some("p1".into()),
+      profiles_seeded: true,
+      ..Settings::default()
+    };
+
+    let mut incoming = Settings {
+      code_folder: Some("C:\\code".into()),
+      ..Settings::default()
+    };
+    assert!(incoming.profiles.is_empty(), "frontend sends no profiles");
+
+    keep_backend_owned_fields(&mut incoming, &stored);
+
+    assert_eq!(incoming.profiles.len(), 1);
+    assert_eq!(incoming.profiles[0].email, "jeremy12@gmail.com");
+    assert_eq!(incoming.active_profile_id.as_deref(), Some("p1"));
+    assert!(incoming.profiles_seeded);
+    // The preference the user actually changed still goes through.
+    assert_eq!(incoming.code_folder.as_deref(), Some("C:\\code"));
   }
 
   #[test]
@@ -806,6 +906,7 @@ mod tests {
       }),
       left_panel_width: 276.0,
       right_panel_width: 388.0,
+      changes_split: 64.0,
       ..Settings::default()
     };
 
@@ -814,6 +915,7 @@ mod tests {
 
     assert_eq!(restored.left_panel_width, 276.0);
     assert_eq!(restored.right_panel_width, 388.0);
+    assert_eq!(restored.changes_split, 64.0);
     assert_eq!(restored.column_layout.unwrap().widths.get("graph"), Some(&184.0));
   }
 }

@@ -258,6 +258,16 @@ pub fn effective_identity(repo_path: &str) -> GitIdentitySnapshot {
   }
 }
 
+/// Whether to adopt the user's existing git config as their first profile.
+///
+/// Split out from the command so the rule is testable without an AppHandle.
+/// Three ways to say no, each for a different reason: already seeded (they may
+/// have deleted it deliberately), profiles exist (nothing to seed), or git was
+/// never set up (nothing to adopt -- onboarding handles that case instead).
+pub fn should_seed(already_seeded: bool, existing: usize, candidate: &Profile) -> bool {
+  !already_seeded && existing == 0 && candidate.is_complete()
+}
+
 /// Marker bounding the block of `includeIf` rules GitWyrm manages.
 const BEGIN: &str = "# >>> GitWyrm profiles >>>";
 const END: &str = "# <<< GitWyrm profiles <<<";
@@ -453,6 +463,31 @@ mod tests {
   fn a_profile_with_no_folders_contributes_no_rules() {
     let dir = Path::new("C:/cfg");
     assert!(folder_rules_block(&[profile()], dir).is_empty());
+  }
+
+  #[test]
+  fn an_existing_git_setup_is_adopted_once() {
+    assert!(should_seed(false, 0, &profile()));
+  }
+
+  #[test]
+  fn a_deleted_seed_does_not_come_back() {
+    // The flag, not the profile count, is what stops it: someone who deletes
+    // the seeded profile would otherwise find it again on the next launch.
+    assert!(!should_seed(true, 0, &profile()));
+  }
+
+  #[test]
+  fn seeding_leaves_existing_profiles_alone() {
+    assert!(!should_seed(false, 2, &profile()));
+  }
+
+  #[test]
+  fn a_machine_without_git_configured_is_left_to_onboarding() {
+    let mut blank = profile();
+    blank.name = String::new();
+    blank.email = String::new();
+    assert!(!should_seed(false, 0, &blank));
   }
 
   #[test]

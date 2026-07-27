@@ -68,6 +68,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::profiles::set_repo_profile,
     commands::profiles::clear_repo_profile,
     commands::profiles::profile_from_current_config,
+    commands::profiles::seed_profile_from_config,
+    commands::profiles::add_profile_without_applying,
     commands::profiles::list_signing_keys,
     commands::profiles::get_effective_identity,
     commands::repo::git_init,

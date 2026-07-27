@@ -110,6 +110,15 @@ function AppInner() {
           useWorkspaceStore.getState()
         const settings = await hydrate()
 
+        // Someone who has used git for years should find profiles already
+        // describing them rather than empty. Pure read of their git config --
+        // it adopts what is already there without rewriting anything, and
+        // no-ops once seeded or if they have made a profile themselves.
+        void commands.seedProfileFromConfig().catch(() => {
+          // Never worth blocking startup: profiles still work, they just
+          // start empty and the Profiles screen offers to fill them in.
+        })
+
         // Look for a newer release now that the channel setting is loaded. Silent:
         // a successful "up to date" says nothing; an available update surfaces as
         // the Update button in the status bar.
