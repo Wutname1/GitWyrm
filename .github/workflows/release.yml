@@ -238,10 +238,12 @@ jobs:
           }
           gh release upload ${{ github.ref_name }} gitwyrm-portable${{ matrix.portable_suffix }}.exe --clobber
 
-      # Republishes the just-built NSIS installer to a stable per-arch filename at the CDN root so
-      # the bootstrapper (see .github/workflows/bootstrapper.yml) and the README download links
-      # always fetch the newest build without the URL ever changing.
-      - name: Upload installer to CDN latest path
+      # Only the version-pinned copy is written here. The "latest" path a user
+      # actually downloads from is published by the promote-cdn-latest job, which
+      # waits for every arch: these legs run independently with fail-fast disabled,
+      # so a leg that succeeds while another fails would otherwise leave the two
+      # architectures on different versions.
+      - name: Upload versioned installer to CDN
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -260,34 +262,77 @@ jobs:
           if [ "${{ matrix.arch }}" = "aarch64" ]; then
             SUFFIX="-ARM64"
           fi
-          # The "latest installer" path the bootstrapper downloads from. This must
-          # stay under installers/ and never at the bucket root: the root holds
-          # GitWyrm-Setup.exe, which is the bootstrapper itself and the single URL
-          # the website's download button has always pointed at. Publishing the raw
-          # NSIS installer over it replaces the bootstrapper, and the browser-trust
-          # reputation built up on that unchanging filename is lost with it.
-          # Betas must never land here either, or everyone gets a prerelease.
-          if [ "${{ steps.channel.outputs.is_beta }}" = "true" ]; then
-            echo "Beta build - leaving the latest installer path untouched"
-          else
-            aws s3 cp "$NSIS_EXE" \
-              "s3://gitwyrm-cdn/installers/latest/GitWyrm-Setup${SUFFIX}.exe" \
-              --endpoint-url "$R2_ENDPOINT" \
-              --cache-control "no-cache, no-store"
-          fi
-          # Immutable per-version copy, so a specific build stays fetchable after
-          # the latest path moves on. Useful for pinned corporate deployments.
+          # Immutable per-version copy. Safe to write per-leg: it is scoped to this
+          # tag, so a half-finished release leaves an unreferenced directory rather
+          # than a mismatched download. Also the source promote-cdn-latest copies
+          # from, so a specific build stays fetchable after latest moves on.
           aws s3 cp "$NSIS_EXE" \
             "s3://gitwyrm-cdn/releases/${{ github.ref_name }}/GitWyrm-Setup${SUFFIX}.exe" \
             --endpoint-url "$R2_ENDPOINT" \
             --cache-control "public, max-age=31536000, immutable"
+
+  # Moves the CDN "latest installer" pointers, which is what the bootstrapper and
+  # the website download button resolve to. Gated on the whole build matrix: with
+  # fail-fast disabled a passing leg would otherwise promote its arch while the
+  # other failed, leaving x64 and ARM64 users on different versions. Promotes by
+  # copying the immutable per-version objects each leg already uploaded, so the
+  # bytes served are provably the ones from this tag's build.
+  promote-cdn-latest:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine channel
+        id: channel
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_name }}" == *"-beta."* ]]; then
+            echo "is_beta=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_beta=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Promote this build to the CDN latest path
+        # Betas must never land on the latest path, or everyone downloading
+        # GitWyrm-Setup.exe gets a prerelease.
+        if: steps.channel.outputs.is_beta == 'false'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          pip install awscli
+
+          SRC="s3://gitwyrm-cdn/releases/${TAG}"
+
+          # Both arches must exist before either pointer moves. Promoting one
+          # without the other is the split-version state this job exists to avoid.
+          for suffix in "" "-ARM64"; do
+            if ! aws s3 ls "${SRC}/GitWyrm-Setup${suffix}.exe" \
+                 --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
+              echo "::error::Missing ${SRC}/GitWyrm-Setup${suffix}.exe - refusing to move the latest pointers."
+              exit 1
+            fi
+          done
+
+          # Server-side copy: no re-upload, and the promoted bytes are exactly the
+          # ones the build produced rather than a second transfer that could differ.
+          for suffix in "" "-ARM64"; do
+            aws s3 cp "${SRC}/GitWyrm-Setup${suffix}.exe" \
+              "s3://gitwyrm-cdn/installers/latest/GitWyrm-Setup${suffix}.exe" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --cache-control "no-cache, no-store"
+            echo "Promoted GitWyrm-Setup${suffix}.exe from ${TAG}"
+          done
 
   # Both build legs share one release, so publishing is a separate job that runs
   # only after every arch has finished and attached its assets. The updater
   # endpoint resolves /releases/latest, which ignores drafts - so the release is
   # not live to users, and updates are not offered, until this job runs.
   publish:
-    needs: release
+    needs: [release, promote-cdn-latest]
     runs-on: ubuntu-latest
     permissions:
       contents: write
