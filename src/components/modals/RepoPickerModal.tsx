@@ -965,10 +965,7 @@ function RepoPickerPanel({
   const busy = openRepo.isPending || openReposMutation.isPending;
   const isSectionCollapsed = (section: RepoPickerSection) =>
     repoPickerCollapsedSections.includes(section);
-  const toggleLibrarySection = (
-    section: RepoPickerSection,
-    label: string,
-  ) => {
+  const toggleLibrarySection = (section: RepoPickerSection, label: string) => {
     const collapsed = isSectionCollapsed(section);
     toggleRepoPickerSection(section);
     toast(`${label} ${collapsed ? "shown" : "hidden"}`);
@@ -1276,7 +1273,8 @@ function RepoPickerPanel({
    */
   const pinnedReorder = (repo: LibraryRepo): PinnedReorderRow | undefined => {
     const key = pathKey(repo.path);
-    if (!pinnedRepoPaths.some((path) => pathKey(path) === key)) return undefined;
+    if (!pinnedRepoPaths.some((path) => pathKey(path) === key))
+      return undefined;
     const isSource = dragPinnedPath === repo.path;
     return {
       draggable: !busy,
@@ -1580,17 +1578,6 @@ function RepoPickerPanel({
               /
             </kbd>
           </label>
-          {savedTabGroups.length > 0 && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-9 flex-none gap-1.5 text-xs"
-              onClick={() => setGroupLibraryOpen(true)}
-            >
-              <Layers3 size={13} />
-              Groups
-            </Button>
-          )}
           <Button
             variant="secondary"
             size="sm"
@@ -1718,7 +1705,9 @@ function RepoPickerPanel({
               count={recentRepos.length}
               note="not open now"
               collapsed={isSectionCollapsed("recent")}
-              onToggle={() => toggleLibrarySection("recent", "Recent repositories")}
+              onToggle={() =>
+                toggleLibrarySection("recent", "Recent repositories")
+              }
             >
               Recent
             </SectionHeading>
@@ -2165,8 +2154,7 @@ function RepoPickerPanel({
           <form
             className={cn(
               "self-start rounded-lg border bg-panel transition-[border-color,box-shadow]",
-              projectPathStatus === "exists" ||
-                projectPathStatus === "error"
+              projectPathStatus === "exists" || projectPathStatus === "error"
                 ? "border-removed/80 shadow-[0_0_0_1px_color-mix(in_srgb,var(--gw-removed)_30%,transparent)]"
                 : projectPathStatus === "available"
                   ? "border-accent/65 shadow-[0_0_0_1px_color-mix(in_srgb,var(--gw-accent)_20%,transparent)]"
