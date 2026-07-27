@@ -5,6 +5,7 @@ use crate::error::AppError;
 use crate::git::bundled::ToolSource;
 use crate::git::identity::{self, GitIdentity};
 use crate::git::signing::{self, SigningStatus};
+use crate::git::ssh_signing;
 
 /// The name and email git puts on commits. Empty fields mean git has not been
 /// set up yet, which the UI treats as "ask for it" rather than an error.
@@ -133,6 +134,78 @@ pub async fn delete_signing_key(
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/* ------------------------------------------------------------ SSH signing */
+
+/// SSH keys that could sign commits, read from `~/.ssh`.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_ssh_keys() -> Result<Vec<ssh_signing::SshKey>, AppError> {
+  tauri::async_runtime::spawn_blocking(ssh_signing::list_keys)
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Make a new ed25519 SSH key in `~/.ssh` and return it.
+#[tauri::command]
+#[specta::specta]
+pub async fn create_ssh_key(
+  name: String,
+  comment: String,
+) -> Result<ssh_signing::SshKey, AppError> {
+  tauri::async_runtime::spawn_blocking(move || ssh_signing::generate_key(&name, &comment))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Delete an SSH key pair. The UI confirms first; this cannot be undone.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_ssh_key(public_path: String) -> Result<(), AppError> {
+  tauri::async_runtime::spawn_blocking(move || ssh_signing::delete_key(&public_path))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// The public half of an SSH key, for pasting into a host's settings.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_ssh_public_key(public_path: String) -> Result<String, AppError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    std::fs::read_to_string(&public_path)
+      .map(|s| s.trim().to_owned())
+      .map_err(AppError::Io)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Sign this repository's commits with an SSH key.
+///
+/// The email is recorded alongside the key in the allowed-signers file, without
+/// which git signs but then reports "No signature" reading its own commits back.
+#[tauri::command]
+#[specta::specta]
+pub async fn enable_ssh_signing(
+  repo_path: String,
+  public_path: String,
+  email: String,
+) -> Result<(), AppError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    ssh_signing::enable_ssh_signing(&repo_path, &public_path, &email)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Switch a repository back to GPG signing.
+#[tauri::command]
+#[specta::specta]
+pub async fn use_gpg_signing(repo_path: String) -> Result<(), AppError> {
+  tauri::async_runtime::spawn_blocking(move || ssh_signing::use_gpg_format(&repo_path))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 #[tauri::command]

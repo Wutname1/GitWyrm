@@ -160,6 +160,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['gpg', 'key', 'choose key', 'switch key', 'work', 'personal', 'new key', 'generate'],
   },
   {
+    id: 'ssh-signing-key',
+    section: 'security',
+    label: 'Key to sign with (SSH)',
+    hint: 'Sign commits with an SSH key instead of GPG. Most people already have one.',
+    keywords: ['ssh', 'ssh key', 'ed25519', 'signing', 'verified', 'allowed signers'],
+  },
+  {
     id: 'git-executable',
     section: 'security',
     label: 'Git',

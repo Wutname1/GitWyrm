@@ -137,3 +137,41 @@ fn a_relocated_gpg_can_generate_a_key_and_sign() {
   assert!(out.status.success(), "key generation failed: {text}");
   let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+#[ignore]
+fn bundled_ssh_keygen_can_make_a_signing_key() {
+  // SSH signing is the second backend, and ssh-keygen is the one ssh tool
+  // MinGit leaves out - so this checks the copy carved from the portable tree
+  // is actually present and works.
+  let Some(root) = bundle() else {
+    eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
+    return;
+  };
+
+  let keygen = root.join("gpg/ssh-keygen.exe");
+  assert!(keygen.is_file(), "ssh-keygen.exe missing from the bundle");
+
+  let dir = std::env::temp_dir().join("gwsshtest");
+  let _ = std::fs::remove_dir_all(&dir);
+  std::fs::create_dir_all(&dir).unwrap();
+  let target = dir.join("id_test").to_string_lossy().replace('\\', "/");
+
+  let (ok, out) = run(
+    &keygen,
+    &["-t", "ed25519", "-C", "test@gitwyrm.invalid", "-f", &target, "-N", "", "-q"],
+  );
+  assert!(ok, "ssh-keygen could not generate a key: {out}");
+  assert!(
+    PathBuf::from(format!("{target}.pub")).is_file(),
+    "no public key was written"
+  );
+
+  // And that the fingerprint reads back, which is what the key list depends on.
+  let (ok, listed) = run(&keygen, &["-lf", &format!("{target}.pub")]);
+  assert!(ok, "ssh-keygen could not read the key back: {listed}");
+  assert!(listed.contains("SHA256:"), "unexpected output: {listed}");
+  assert!(listed.contains("ED25519"), "unexpected key type: {listed}");
+
+  let _ = std::fs::remove_dir_all(&dir);
+}

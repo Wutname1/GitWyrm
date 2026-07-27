@@ -7,6 +7,7 @@ pub mod refs;
 pub mod remote_url;
 pub mod shell;
 pub mod signing;
+pub mod ssh_signing;
 pub mod submodule;
 pub mod types;
 pub mod version_sort;

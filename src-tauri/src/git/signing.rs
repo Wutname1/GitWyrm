@@ -281,6 +281,11 @@ pub struct SigningStatus {
   /// Set when the user's git config has a `gpg.format` git refuses to accept.
   /// Git hard-fails every commit in this state, so the UI offers to repair it.
   pub broken_format: Option<String>,
+  /// True when this repository signs with an SSH key rather than GPG
+  /// (`gpg.format = ssh`). Decides which half of the Security screen is shown.
+  pub uses_ssh: bool,
+  /// The SSH public key this repository signs with, when it is in SSH mode.
+  pub ssh_key_path: Option<String>,
 }
 
 /// Read the user's current signing configuration.
@@ -296,6 +301,17 @@ pub fn signing_status(repo_path: &str) -> SigningStatus {
     .map(|v| v.eq_ignore_ascii_case("true"))
     .unwrap_or(false);
 
+  // In SSH mode `user.signingkey` holds a path to a public key rather than a
+  // gpg key id, so the two are reported separately - reading one as the other
+  // makes the UI show a file path where a key id belongs.
+  let uses_ssh = git_config_value(repo_path, "gpg.format")
+    .is_some_and(|f| f.eq_ignore_ascii_case("ssh"));
+  let ssh_key_path = if uses_ssh {
+    configured_key.clone()
+  } else {
+    None
+  };
+
   SigningStatus {
     gpg_available: version.is_some(),
     gpg_source: gpg_source(),
@@ -304,6 +320,8 @@ pub fn signing_status(repo_path: &str) -> SigningStatus {
     signing_enabled,
     configured_key,
     broken_format: detect_broken_format(repo_path),
+    uses_ssh,
+    ssh_key_path,
   }
 }
 

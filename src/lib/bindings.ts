@@ -314,6 +314,75 @@ async deleteSigningKey(repoPath: string, keyId: string, fingerprint: string) : P
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * SSH keys that could sign commits, read from `~/.ssh`.
+ */
+async listSshKeys() : Promise<Result<SshKey[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_ssh_keys") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Make a new ed25519 SSH key in `~/.ssh` and return it.
+ */
+async createSshKey(name: string, comment: string) : Promise<Result<SshKey, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_ssh_key", { name, comment }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete an SSH key pair. The UI confirms first; this cannot be undone.
+ */
+async deleteSshKey(publicPath: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_ssh_key", { publicPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The public half of an SSH key, for pasting into a host's settings.
+ */
+async readSshPublicKey(publicPath: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_ssh_public_key", { publicPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Sign this repository's commits with an SSH key.
+ * 
+ * The email is recorded alongside the key in the allowed-signers file, without
+ * which git signs but then reports "No signature" reading its own commits back.
+ */
+async enableSshSigning(repoPath: string, publicPath: string, email: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("enable_ssh_signing", { repoPath, publicPath, email }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Switch a repository back to GPG signing.
+ */
+async useGpgSigning(repoPath: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("use_gpg_signing", { repoPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async repairSigningFormat(repoPath: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("repair_signing_format", { repoPath }) };
@@ -2299,7 +2368,16 @@ configuredKey: string | null;
  * Set when the user's git config has a `gpg.format` git refuses to accept.
  * Git hard-fails every commit in this state, so the UI offers to repair it.
  */
-brokenFormat: string | null }
+brokenFormat: string | null; 
+/**
+ * True when this repository signs with an SSH key rather than GPG
+ * (`gpg.format = ssh`). Decides which half of the Security screen is shown.
+ */
+usesSsh: boolean; 
+/**
+ * The SSH public key this repository signs with, when it is in SSH mode.
+ */
+sshKeyPath: string | null }
 /**
  * One Visual Studio solution found inside a repository.
  */
@@ -2316,6 +2394,31 @@ relative_path: string;
  * Absolute path on disk, used to launch Visual Studio.
  */
 absolute_path: string }
+/**
+ * An SSH key that can sign commits.
+ */
+export type SshKey = { 
+/**
+ * Absolute path to the public half, which is what git wants for
+ * `user.signingkey`.
+ */
+path: string; 
+/**
+ * File name, for showing in a list ("id_ed25519.pub").
+ */
+name: string; 
+/**
+ * SHA256 fingerprint, the value hosts display next to an uploaded key.
+ */
+fingerprint: string; 
+/**
+ * The trailing comment, usually an email or "user@machine".
+ */
+comment: string; 
+/**
+ * Key type as ssh-keygen reports it (ED25519, RSA...).
+ */
+algorithm: string }
 export type StashInfo = { index: number; 
 /**
  * Raw stash message as git stores it, e.g. "On develop: auto-stash before...".

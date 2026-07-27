@@ -18,7 +18,9 @@ import { commands, type SigningKey, type SigningStatus } from '@/lib/bindings'
 import { cn } from '@/lib/utils'
 import { useGitIdentity } from '@/lib/useGitIdentity'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
+import { PublishSteps } from './PublishSteps'
 import { SettingRow } from './SettingRow'
+import { SshSigning } from './SshSigning'
 import { ToolStatusRow, useToolCheck, type ToolState } from './ToolStatusRow'
 
 /**
@@ -110,12 +112,107 @@ function SigningSection({ repoPath }: { repoPath: string | null }) {
         <BrokenFormatWarning repoPath={repoPath} onFixed={refresh} />
       )}
 
-      {status && status.keys.length === 0 ? (
-        <CreateKeyForm repoPath={repoPath} onCreated={refresh} />
-      ) : (
-        status && <HasKey repoPath={repoPath} status={status} onChanged={refresh} />
+      {status && (
+        <>
+          <MethodPicker repoPath={repoPath} status={status} onChanged={refresh} />
+          {status.usesSsh ? (
+            <SshSigning repoPath={repoPath} status={status} onChanged={refresh} />
+          ) : status.keys.length === 0 ? (
+            <CreateKeyForm repoPath={repoPath} onCreated={refresh} />
+          ) : (
+            <HasKey repoPath={repoPath} status={status} onChanged={refresh} />
+          )}
+        </>
       )}
     </Section>
+  )
+}
+
+/**
+ * Choose between the two ways git can sign.
+ *
+ * Both produce a Verified badge; the difference only matters if you already
+ * have one kind of key. Described in terms of what the user has rather than
+ * what the formats are, since "OpenPGP vs SSH signature format" means nothing
+ * to someone who has never signed a commit (Rule #2).
+ */
+function MethodPicker({
+  repoPath,
+  status,
+  onChanged,
+}: {
+  repoPath: string
+  status: SigningStatus
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+
+  const choose = async (ssh: boolean) => {
+    if (ssh === status.usesSsh || busy) return
+    setBusy(true)
+    // Switching to SSH only sets the format once a key is picked - flipping
+    // gpg.format with no key would leave commits failing until they choose one.
+    const res = ssh
+      ? { status: 'ok' as const }
+      : await commands.useGpgSigning(repoPath)
+    setBusy(false)
+    if (res.status !== 'ok') {
+      toast.error(res.error)
+      return
+    }
+    onChanged()
+  }
+
+  return (
+    <div className="mb-3 flex gap-2">
+      <MethodButton
+        active={!status.usesSsh}
+        disabled={busy}
+        onClick={() => choose(false)}
+        title="Security key (GPG)"
+        blurb="The traditional way. Works everywhere."
+      />
+      <MethodButton
+        active={status.usesSsh}
+        disabled={busy}
+        onClick={() => choose(true)}
+        title="SSH key"
+        blurb="Simpler, and you may already have one."
+      />
+    </div>
+  )
+}
+
+function MethodButton({
+  active,
+  disabled,
+  onClick,
+  title,
+  blurb,
+}: {
+  active: boolean
+  disabled: boolean
+  onClick: () => void
+  title: string
+  blurb: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'flex-1 rounded-md border px-3 py-2 text-left transition-colors',
+        active
+          ? 'border-primary bg-primary/10'
+          : 'border-border bg-panel hover:border-muted-foreground'
+      )}
+    >
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+        {active && <Check size={12} className="text-accent-text" />}
+        {title}
+      </div>
+      <div className="mt-0.5 text-2xs text-muted-foreground">{blurb}</div>
+    </button>
   )
 }
 
@@ -508,30 +605,12 @@ function KeyCard({
             the public half of this key - GitWyrm cannot upload it for you.
           </p>
 
-          <ol className="mt-2.5 grid gap-2">
-            <Step
-              done={copied}
-              index={1}
-              label="Copy the public key"
-              action={
-                <Button size="sm" variant="secondary" className="h-7" onClick={copyPublicKey}>
-                  {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
-                  {copied ? 'Copied' : 'Copy public key'}
-                </Button>
-              }
-            />
-            <Step
-              done={opened}
-              index={2}
-              label="Paste it on GitHub and save"
-              action={
-                <Button size="sm" variant="secondary" className="h-7" onClick={openHostSettings}>
-                  <ExternalLink size={12} />
-                  Open GitHub
-                </Button>
-              }
-            />
-          </ol>
+          <PublishSteps
+            copied={copied}
+            opened={opened}
+            onCopy={copyPublicKey}
+            onOpen={openHostSettings}
+          />
 
           <Button
             size="sm"
@@ -576,40 +655,6 @@ function KeyCard({
   )
 }
 
-/** One numbered step, ticked once the user has done it. */
-function Step({
-  done,
-  index,
-  label,
-  action,
-}: {
-  done: boolean
-  index: number
-  label: string
-  action: React.ReactNode
-}) {
-  return (
-    <li className="flex items-center gap-2.5">
-      <span
-        className={cn(
-          'grid size-4 flex-none place-items-center rounded-full text-[9px] font-bold',
-          done ? 'bg-emerald-500 text-white' : 'bg-border text-muted-foreground'
-        )}
-      >
-        {done ? <Check size={10} strokeWidth={3} /> : index}
-      </span>
-      <span
-        className={cn(
-          'min-w-0 flex-1 truncate text-2xs',
-          done ? 'text-muted-foreground line-through' : 'text-foreground'
-        )}
-      >
-        {label}
-      </span>
-      {action}
-    </li>
-  )
-}
 
 /* -------------------------------------------------------------------- tools */
 

@@ -29,6 +29,7 @@ static BUNDLE_ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
 /// Cached resolution for each tool, cleared when the user changes a path.
 static GIT_RESOLVED: RwLock<Option<Resolved>> = RwLock::new(None);
 static GPG_RESOLVED: RwLock<Option<Resolved>> = RwLock::new(None);
+static SSH_KEYGEN_RESOLVED: RwLock<Option<Resolved>> = RwLock::new(None);
 
 /// Where a resolved executable came from. Surfaced in Settings so the user can
 /// see whether they are on their own install or ours.
@@ -145,6 +146,10 @@ fn resolve(configured: Option<&str>, on_path: &str, bundled_rel: &str) -> Resolv
 /// step unpacks; changing one means changing the other.
 const GIT_BUNDLED_REL: &str = "git/cmd/git.exe";
 const GPG_BUNDLED_REL: &str = "gpg/gpg.exe";
+/// Beside gpg rather than under git/: MinGit ships ssh, ssh-add and ssh-agent
+/// but not ssh-keygen, so this one is carved out of the portable tree with the
+/// GnuPG files.
+const SSH_KEYGEN_BUNDLED_REL: &str = "gpg/ssh-keygen.exe";
 
 /// Resolve a tool, reusing the cached answer when one exists.
 fn cached(
@@ -192,6 +197,71 @@ pub fn resolve_git(configured: Option<&str>) -> Resolved {
 
 pub fn resolve_gpg(configured: Option<&str>) -> Resolved {
   cached(&GPG_RESOLVED, configured, "gpg", GPG_BUNDLED_REL)
+}
+
+/// Resolve ssh-keygen, used to make and inspect SSH signing keys.
+///
+/// Cannot go through the shared `cached` path: that probes with `--version`,
+/// which ssh-keygen does not support - it prints usage and exits 1, so a
+/// perfectly good ssh-keygen would be judged broken. Existence plus the
+/// help-text check below is the honest test here.
+pub fn resolve_ssh_keygen() -> Resolved {
+  if let Ok(guard) = SSH_KEYGEN_RESOLVED.read() {
+    if let Some(hit) = guard.as_ref() {
+      return hit.clone();
+    }
+  }
+
+  let resolved = if responds_to_help("ssh-keygen") {
+    Resolved {
+      program: "ssh-keygen".to_owned(),
+      source: ToolSource::System,
+    }
+  } else if let Some(path) = bundled_path(SSH_KEYGEN_BUNDLED_REL) {
+    Resolved {
+      program: path,
+      source: ToolSource::Bundled,
+    }
+  } else {
+    Resolved::missing("ssh-keygen")
+  };
+
+  log::info!(
+    "resolved ssh-keygen: {} ({:?})",
+    resolved.program,
+    resolved.source
+  );
+  if let Ok(mut guard) = SSH_KEYGEN_RESOLVED.write() {
+    *guard = Some(resolved.clone());
+  }
+  resolved
+}
+
+/// True when running the program produces ssh-keygen's usage text.
+///
+/// It has no `--version`; an unrecognised flag makes it print usage and exit
+/// non-zero, so the output is what identifies it rather than the exit code.
+fn responds_to_help(program: &str) -> bool {
+  let mut cmd = Command::new(program);
+  cmd.arg("-?");
+
+  #[cfg(windows)]
+  {
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(super::shell::CREATE_NO_WINDOW);
+  }
+
+  cmd
+    .output()
+    .map(|out| {
+      let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+      );
+      text.contains("ssh-keygen")
+    })
+    .unwrap_or(false)
 }
 
 #[cfg(test)]
