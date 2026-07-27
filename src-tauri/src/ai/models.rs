@@ -100,13 +100,26 @@ async fn fetch_live(
   app: &tauri::AppHandle,
   provider: &CatalogProvider,
 ) -> Result<Vec<CatalogModel>, AppError> {
+  // These are info! rather than debug! on purpose: release builds log at Info,
+  // and when a user reports "my models are wrong" the credential shape and the
+  // URL we called are the first two things needed to tell their machine apart
+  // from a working one. `fingerprint` identifies a token without revealing it,
+  // so two machines can be compared to see if they hold the same credential.
   let bearer = match auth::get(app, &provider.id)? {
     Some(auth::AuthInfo::Api { key }) => {
-      log::debug!("model detection auth: provider={}, source=api-key", provider.id);
+      log::info!(
+        "model detection auth: provider={}, source=api-key, token={}",
+        provider.id,
+        token_fingerprint(&key)
+      );
       key
     }
     Some(auth::AuthInfo::Oauth { refresh, .. }) => {
-      log::debug!("model detection auth: provider={}, source=oauth", provider.id);
+      log::info!(
+        "model detection auth: provider={}, source=oauth, token={}",
+        provider.id,
+        token_fingerprint(&refresh)
+      );
       refresh
     }
     None => {
@@ -134,7 +147,7 @@ async fn fetch_live(
     }
   };
 
-  log::debug!("model detection request: provider={}, url={}", provider.id, url);
+  log::info!("model detection request: provider={}, url={}", provider.id, url);
 
   let res = client::extra_headers(&provider.id, builder)
     .timeout(TIMEOUT)
@@ -201,14 +214,50 @@ async fn fetch_live(
     }
   }
   let models = parse_models(provider, &body);
-  log::debug!(
+  log::info!(
     "model detection parsed: provider={}, status={}, raw_items={}, parsed={}",
     provider.id,
     status,
     raw_count,
     models.len()
   );
+  // `raw_items > parsed` means the endpoint answered but items failed to
+  // deserialize -- a schema change on their side, not a token problem. Without
+  // this the two look identical in a user's log.
+  if raw_count > models.len() {
+    log::warn!(
+      "model detection dropped items that did not match the expected shape: provider={}, raw_items={}, parsed={}",
+      provider.id,
+      raw_count,
+      models.len()
+    );
+  }
   Ok(models)
+}
+
+/// A stable, non-reversible label for a credential: length plus a short hash.
+///
+/// Inconsistent Copilot detection across two machines is almost always two
+/// different tokens (different account, or one issued before a subscription
+/// change). Logging the token itself would leak it into a bug report, and
+/// logging nothing makes the two cases indistinguishable -- so log a shape that
+/// is equal when the tokens are equal and different otherwise.
+fn token_fingerprint(token: &str) -> String {
+  use std::hash::{Hash, Hasher};
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  token.hash(&mut hasher);
+  // 32 bits is plenty to tell two tokens apart while staying far too short to
+  // brute-force back to the original.
+  let short = (hasher.finish() >> 32) as u32;
+  // The prefix up to the first underscore is the token's type marker (ghu_,
+  // gho_, github_pat_) and carries no secret material -- it says which kind of
+  // credential this is, which is itself a common cause of the two machines
+  // behaving differently.
+  let kind = match token.find('_') {
+    Some(i) => &token[..=i],
+    None => "",
+  };
+  format!("{}…len={} hash={:08x}", kind, token.len(), short)
 }
 
 // OpenAI-dialect /models item. Copilot labels each model in `name` (plain
@@ -262,5 +311,61 @@ fn parse_models(provider: &CatalogProvider, body: &Value) -> Vec<CatalogModel> {
         enabled: m.model_picker_enabled.unwrap_or(true),
       })
       .collect(),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::{dedupe_by_id, token_fingerprint};
+  use crate::ai::catalog::CatalogModel;
+
+  fn model(id: &str, enabled: bool) -> CatalogModel {
+    CatalogModel {
+      name: id.to_string(),
+      id: id.to_string(),
+      enabled,
+    }
+  }
+
+  #[test]
+  fn duplicate_ids_collapse_and_enabled_wins() {
+    // Copilot lists the same id more than once and only one copy may carry the
+    // picker flag; the model is usable if any copy says so.
+    let out = dedupe_by_id(vec![
+      model("gpt-4", false),
+      model("gpt-4", true),
+      model("claude", false),
+    ]);
+    assert_eq!(out.len(), 2);
+    assert!(out[0].enabled, "gpt-4 should be enabled via the OR");
+    assert!(!out[1].enabled);
+    // First-seen order is preserved.
+    assert_eq!(out[0].id, "gpt-4");
+    assert_eq!(out[1].id, "claude");
+  }
+
+  #[test]
+  fn identical_tokens_fingerprint_identically() {
+    assert_eq!(token_fingerprint("ghu_abc123"), token_fingerprint("ghu_abc123"));
+  }
+
+  #[test]
+  fn different_tokens_fingerprint_differently() {
+    assert_ne!(token_fingerprint("ghu_abc123"), token_fingerprint("ghu_xyz789"));
+  }
+
+  #[test]
+  fn fingerprint_keeps_the_kind_but_never_the_secret() {
+    let fp = token_fingerprint("ghu_supersecretvalue");
+    assert!(fp.starts_with("ghu_"), "kind marker should survive: {fp}");
+    assert!(!fp.contains("supersecret"), "secret leaked: {fp}");
+    assert!(fp.contains("len=20"));
+  }
+
+  #[test]
+  fn fingerprint_handles_a_token_with_no_kind_marker() {
+    let fp = token_fingerprint("plainsecret");
+    assert!(!fp.contains("plainsecret"), "secret leaked: {fp}");
+    assert!(fp.contains("len=11"));
   }
 }
