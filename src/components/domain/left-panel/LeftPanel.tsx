@@ -16,6 +16,8 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { InProgressModal } from '@/components/modals/InProgressModal'
+import { classifyError } from '@/lib/errorClass'
 import { RenameBranchDialog } from '@/components/modals/RenameBranchDialog'
 import { branchSync } from '@/lib/branchActions'
 import { openWebUrl } from '@/lib/remoteWeb'
@@ -56,6 +58,13 @@ export function LeftPanel() {
   const [toRemoveFromRemote, setToRemoveFromRemote] = useState<string | null>(null)
   /** Opt-in to also removing the tag from the remote when deleting it here. */
   const [deleteTagFromRemote, setDeleteTagFromRemote] = useState(false)
+  /** The delete that replaced the confirm dialog; `error` is null while working. */
+  const [deleteRun, setDeleteRun] = useState<{
+    name: string
+    alsoRemote: boolean
+    error: string | null
+    friendly?: string
+  } | null>(null)
 
   // The checkbox both reads and writes the saved preference, so whichever way
   // the user left it last is how it comes back. Subscribe to the app default and
@@ -512,16 +521,47 @@ export function LeftPanel() {
         confirmLabel={
           tagOnRemote && deleteTagFromRemote ? 'Delete everywhere' : 'Delete tag'
         }
-        pending={m.deleteTag.isPending}
-        pendingLabel="Deleting…"
-        keepOpenOnConfirm
-        onConfirm={() =>
-          toDelete &&
+        onConfirm={() => {
+          if (!toDelete) return
+          const alsoRemote = tagOnRemote && deleteTagFromRemote
+          // Hand off to the progress modal so the wait (and any failure) has
+          // somewhere to live; the confirm dialog closes on its own.
+          setDeleteRun({ name: toDelete.name, alsoRemote, error: null })
           m.deleteTag.mutate(
-            { name: toDelete.name, alsoRemote: tagOnRemote && deleteTagFromRemote },
-            { onSuccess: () => setToDelete(null) }
+            { name: toDelete.name, alsoRemote, quiet: true },
+            {
+              onSuccess: () => setDeleteRun(null),
+              onError: (reason) => {
+                const { message: friendly, raw } = classifyError(reason)
+                setDeleteRun((current) =>
+                  current ? { ...current, error: raw, friendly } : current
+                )
+              },
+            }
           )
+        }}
+      />
+
+      <InProgressModal
+        open={deleteRun != null}
+        title={
+          deleteRun?.alsoRemote
+            ? `Deleting ${deleteRun.name} everywhere`
+            : `Deleting tag ${deleteRun?.name ?? ''}`
         }
+        subtext={
+          deleteRun?.error != null
+            ? deleteRun.friendly
+            : deleteRun?.alsoRemote
+              ? `Removing it from ${tagSync.hostLabel} too.`
+              : 'This only takes a moment.'
+        }
+        error={deleteRun?.error ?? null}
+        errorTitle="Could not delete the tag"
+        onClose={() => {
+          m.deleteTag.reset()
+          setDeleteRun(null)
+        }}
       />
 
       <ConfirmDialog

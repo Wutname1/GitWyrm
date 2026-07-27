@@ -58,6 +58,18 @@ const onError = (e: Error) => {
   else toast.error(message)
 }
 
+/**
+ * Failure path for callers that surface the error themselves (a progress modal
+ * with a copyable message). The durable log trace still happens -- only the
+ * toast is dropped, so the same failure is never reported twice.
+ */
+const logQuietFailure = (e: Error) => {
+  const { severity, raw } = classifyError(e)
+  log[severity === 'info' ? 'info' : severity === 'warning' ? 'warn' : 'error'](
+    `mutation failed [${severity}, reported by caller]: ${raw}`
+  )
+}
+
 const commitCount = (n: number) => plural(n, 'commit')
 
 /**
@@ -315,7 +327,14 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const createTag = useMutation({
-    mutationFn: async (args: { name: string; sha: string; message: string; push?: boolean }) => {
+    mutationFn: async (args: {
+      name: string
+      sha: string
+      message: string
+      push?: boolean
+      /** Caller reports the failure itself (a progress modal); skip the toast. */
+      quiet?: boolean
+    }) => {
       await unwrap(await commands.createTag(id, args.name, args.sha, args.message))
       // Push inside the same mutation so the two never drift apart in the UI:
       // one action, one toast, one settled state.
@@ -329,7 +348,7 @@ export function useGitMutations(repoId: string | null) {
       if (args.push) qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
       toast(args.push ? `Created and sent tag ${args.name}` : `Created tag ${args.name}`)
     },
-    onError,
+    onError: (e, args) => (args.quiet ? logQuietFailure(e) : onError(e)),
   })
 
   /**
@@ -339,7 +358,13 @@ export function useGitMutations(repoId: string | null) {
    * tag with no local copy to delete it from.
    */
   const deleteTag = useMutation({
-    mutationFn: async (args: { name: string; alsoRemote?: boolean; remote?: string }) => {
+    mutationFn: async (args: {
+      name: string
+      alsoRemote?: boolean
+      remote?: string
+      /** Caller reports the failure itself (a progress modal); skip the toast. */
+      quiet?: boolean
+    }) => {
       if (args.alsoRemote) {
         await unwrap(await commands.deleteRemoteTag(id, args.name, args.remote ?? ''))
       }
@@ -351,7 +376,7 @@ export function useGitMutations(repoId: string | null) {
       if (args.alsoRemote) qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
       toast(args.alsoRemote ? `Deleted tag ${args.name} everywhere` : `Deleted tag ${args.name}`)
     },
-    onError,
+    onError: (e, args) => (args.quiet ? logQuietFailure(e) : onError(e)),
   })
 
   /** Send one tag to a remote. Empty `remote` targets the default one. */

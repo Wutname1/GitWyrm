@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Tag } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { FormDialog } from '@/components/ui/form-dialog'
+import { InProgressModal } from '@/components/modals/InProgressModal'
+import { classifyError } from '@/lib/errorClass'
 import { useTags } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useTagSync } from '@/hooks/useTagSync'
@@ -39,6 +41,18 @@ export function NewTagModal() {
   const [name, setName] = useState('')
   const [message, setMessage] = useState('')
   const [push, setPush] = useState(false)
+  /**
+   * The run that replaced this dialog. Set on submit and cleared when the
+   * progress modal is dismissed; `error` is null until the mutation fails.
+   */
+  const [run, setRun] = useState<{
+    name: string
+    push: boolean
+    /** Raw failure text, shown in the copyable block. Null while still working. */
+    error: string | null
+    /** Plain-language version of the same failure, shown as the subtext. */
+    friendly?: string
+  } | null>(null)
 
   // Remember the choice for next time. A repo that has its own rule keeps it --
   // overwriting the app default from here would silently change every other
@@ -105,14 +119,47 @@ export function NewTagModal() {
   const create = () => {
     if (!canCreate || submitting.current) return
     submitting.current = true
+    // Hand off to the progress modal and close this one immediately. Beyond
+    // showing the wait, this is what stops the "there's already a tag called X"
+    // flash: creating the tag refetches the tag list, and this dialog would
+    // otherwise still be mounted with the name typed in, seeing its own new tag
+    // as a collision for the frame before it closed.
+    setRun({ name: trimmed, push: sendIt, error: null })
+    closeModal()
     m.createTag.mutate(
-      { name: trimmed, sha: targetSha ?? '', message: message.trim(), push: sendIt },
+      { name: trimmed, sha: targetSha ?? '', message: message.trim(), push: sendIt, quiet: true },
       {
-        onSuccess: () => closeModal(),
-        onError: () => {
+        onSuccess: () => setRun(null),
+        onError: (reason) => {
           submitting.current = false
+          const { message: friendly, raw } = classifyError(reason)
+          setRun((current) => (current ? { ...current, error: raw, friendly } : current))
         },
       }
+    )
+  }
+
+  // The two are mutually exclusive: submitting closes this dialog and opens the
+  // progress modal, so only one is ever mounted.
+  if (run != null) {
+    return (
+      <InProgressModal
+        open
+        title={run.push ? `Creating and sending ${run.name}` : `Creating tag ${run.name}`}
+        subtext={
+          run.error != null
+            ? run.friendly
+            : run.push
+              ? `Sending it to ${hostLabel}.`
+              : 'This only takes a moment.'
+        }
+        error={run.error}
+        errorTitle="Could not create the tag"
+        onClose={() => {
+          m.createTag.reset()
+          setRun(null)
+        }}
+      />
     )
   }
 
