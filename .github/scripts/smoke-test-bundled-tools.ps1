@@ -20,6 +20,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Resolved to absolute up front. The commit test runs under Push-Location, and a
+# relative exe path stops resolving the moment the working directory moves -
+# PowerShell then reports the unresolvable command as "the module 'src-tauri'
+# could not be loaded", which points nowhere near the actual cause.
+$ResourcesDir = (Resolve-Path $ResourcesDir).Path
 $gitExe = Join-Path $ResourcesDir 'git\cmd\git.exe'
 $gpgExe = Join-Path $ResourcesDir 'gpg\gpg.exe'
 $gpgAgent = Join-Path $ResourcesDir 'gpg\gpg-agent.exe'
