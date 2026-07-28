@@ -1,3 +1,4 @@
+import type { QueryClient } from '@tanstack/react-query'
 import type { DiffSource } from './bindings'
 
 export const keys = {
@@ -25,6 +26,27 @@ export const keys = {
    */
   remoteTagsAll: (repoId: string) => ['remoteTags', repoId] as const,
   fileDiffAll: (repoId: string) => ['diff', repoId] as const,
+}
+
+/**
+ * Drop all but the first page of the commit log before it refetches.
+ *
+ * An infinite query refetches every page it is holding, one after another,
+ * because each page's offset comes from the page before it. `get_log` also
+ * re-walks history from the start to reach its offset, so page five costs five
+ * times page one. Together that makes a refresh of a deeply scrolled graph slow
+ * enough to lag visibly behind the toast and the file list -- the graph appears
+ * to update late even though it was invalidated at the same moment.
+ *
+ * Trimming first means the refresh is always one page. The graph snaps back to
+ * the top of history, which is where a rewind, commit or merge has just moved
+ * things anyway, and scrolling down reloads the rest on demand.
+ */
+export function trimLogToFirstPage(qc: QueryClient, repoId: string) {
+  qc.setQueryData<{ pages: unknown[]; pageParams: unknown[] }>(keys.log(repoId), (data) => {
+    if (!data || data.pages.length <= 1) return data
+    return { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) }
+  })
 }
 
 /** Unwraps tauri-specta's Result<T, string> into T-or-throw for TanStack Query. */

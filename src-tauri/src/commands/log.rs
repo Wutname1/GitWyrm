@@ -7,7 +7,7 @@ use crate::error::AppError;
 use crate::git::graph::{initials, LaneState};
 use crate::git::refs;
 use crate::git::types::{CommitEntry, LogPage, RefInfo, RefKind};
-use crate::state::RepoManager;
+use crate::state::{OpenRepo, RepoManager};
 
 fn collect_refs(repo: &git2::Repository) -> HashMap<Oid, Vec<RefInfo>> {
   let mut map: HashMap<Oid, Vec<RefInfo>> = HashMap::new();
@@ -101,6 +101,30 @@ fn collect_log_roots(repo: &git2::Repository) -> Vec<Oid> {
   roots
 }
 
+/// [`commit_change_stats`], memoized on the open repository.
+///
+/// A log page needs stats for every commit on it, and each one is a tree-to-tree
+/// diff with rename detection -- by far the most expensive part of building the
+/// page. Refreshing the graph after a rewind or a commit asks for the same
+/// commits again, so without this the whole cost is paid over from scratch every
+/// time and the graph visibly trails the rest of the UI.
+///
+/// A miss still computes and stores, so the first view of any commit costs the
+/// same as before; only repeat views get cheaper.
+pub(crate) fn cached_change_stats(
+  open: &OpenRepo,
+  repo: &git2::Repository,
+  commit: &Commit<'_>,
+) -> Result<(u32, u32, u32), git2::Error> {
+  let oid = commit.id();
+  if let Some(hit) = open.cached_stats(oid) {
+    return Ok(hit);
+  }
+  let stats = commit_change_stats(repo, commit)?;
+  open.store_stats(oid, stats);
+  Ok(stats)
+}
+
 /// Summarize a commit against its first parent, matching the comparison used
 /// by the commit-details view. Root commits compare against an empty tree.
 pub(crate) fn commit_change_stats(
@@ -170,7 +194,7 @@ pub async fn get_log(
 
       let author = commit.author();
       let name = author.name().unwrap_or("unknown").to_string();
-      let (files_changed, additions, deletions) = commit_change_stats(&repo, &commit)?;
+      let (files_changed, additions, deletions) = cached_change_stats(&open, &repo, &commit)?;
       commits.push(CommitEntry {
         sha: oid.to_string(),
         short_sha: oid.to_string()[..7].to_string(),
@@ -232,6 +256,39 @@ mod tests {
         &parent_refs,
       )
       .expect("commit")
+  }
+
+  /// The cache must be a pure speedup: a hit has to return exactly what a fresh
+  /// computation would, and it must not bleed one commit's stats into another.
+  #[test]
+  fn cached_stats_match_a_fresh_computation_per_commit() {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    // Two commits with different shapes, so a mixed-up key is visible.
+    let first = commit_file(&repo, "a.txt", "one\n", "add a");
+    let second = commit_file(&repo, "b.txt", "one\ntwo\nthree\n", "add b");
+
+    let open = OpenRepo::for_test(repo);
+    let repo = open.repo.lock().unwrap();
+
+    for oid in [first, second] {
+      let commit = repo.find_commit(oid).expect("commit");
+      let expected = commit_change_stats(&repo, &commit).expect("uncached stats");
+
+      // Cold: computes and stores.
+      assert!(open.cached_stats(oid).is_none(), "cache should start empty");
+      let cold = cached_change_stats(&open, &repo, &commit).expect("cold stats");
+      assert_eq!(cold, expected, "a miss must match a fresh computation");
+
+      // Warm: served from the cache, same answer.
+      assert_eq!(open.cached_stats(oid), Some(expected), "miss must store");
+      let warm = cached_change_stats(&open, &repo, &commit).expect("warm stats");
+      assert_eq!(warm, expected, "a hit must match a fresh computation");
+    }
+
+    let a = open.cached_stats(first).expect("first cached");
+    let b = open.cached_stats(second).expect("second cached");
+    assert_ne!(a, b, "distinct commits must not share a cache entry");
   }
 
   #[test]

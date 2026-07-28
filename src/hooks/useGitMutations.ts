@@ -9,7 +9,7 @@ import {
   type ResetMode,
   type SelectedLine,
 } from '@/lib/bindings'
-import { keys, unwrap } from '@/lib/queryKeys'
+import { keys, trimLogToFirstPage, unwrap } from '@/lib/queryKeys'
 import { useHostResolver } from '@/hooks/useGitQueries'
 import { classifyError } from '@/lib/errorClass'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -52,6 +52,7 @@ const REMOTE_REFS: QueryName[] = ['remotes', 'branches', 'log']
  * strand a working-tree diff -- every one that touches `status` can.
  */
 function invalidate(qc: QueryClient, repoId: string, which: QueryName[]) {
+  if (which.includes('log')) trimLogToFirstPage(qc, repoId)
   for (const k of which) {
     qc.invalidateQueries({ queryKey: keys[k](repoId) })
   }

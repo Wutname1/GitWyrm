@@ -14,8 +14,10 @@ export function useCommitLog(repoId: string | null) {
     initialPageParam: 0,
     queryFn: async ({ pageParam }) =>
       unwrap(await commands.getLog(repoId!, pageParam, LOG_PAGE_SIZE)),
-    getNextPageParam: (lastPage, pages) =>
-      lastPage.has_more ? pages.length * LOG_PAGE_SIZE : undefined,
+    // Derived from the last page's own param rather than `pages.length` so the
+    // offset stays correct no matter how many pages the cache is holding.
+    getNextPageParam: (lastPage, _pages, lastPageParam) =>
+      lastPage.has_more ? lastPageParam + LOG_PAGE_SIZE : undefined,
   })
 }
 

@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::commands::log::commit_change_stats;
+use crate::commands::log::cached_change_stats;
 use crate::error::AppError;
 use crate::git::types::{StashInfo, StashOutcome};
 use crate::state::RepoManager;
@@ -136,7 +136,7 @@ pub async fn list_stashes(
         .map(|p| p.to_string())
         .unwrap_or_default();
       let (files_changed, additions, deletions) =
-        commit_change_stats(&repo, &commit).unwrap_or((0, 0, 0));
+        cached_change_stats(&open, &repo, &commit).unwrap_or((0, 0, 0));
       let (branch, summary) = parse_stash_message(&message);
       stashes.push(StashInfo {
         index,

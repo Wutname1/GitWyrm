@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { listen } from '@tauri-apps/api/event'
-import { keys } from '@/lib/queryKeys'
+import { keys, trimLogToFirstPage } from '@/lib/queryKeys'
 
 interface RepoChangedPayload {
   repo_id: string
@@ -19,6 +19,7 @@ export function useRepoWatcher() {
       // branch switch made outside the app leaves them pointing at the wrong
       // content under an unchanged key. Drop them alongside status.
       queryClient.invalidateQueries({ queryKey: keys.fileDiffAll(repoId) })
+      trimLogToFirstPage(queryClient, repoId)
       queryClient.invalidateQueries({ queryKey: keys.log(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.branches(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.stashes(repoId) })
