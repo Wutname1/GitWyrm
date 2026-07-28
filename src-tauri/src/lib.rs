@@ -15,6 +15,9 @@ pub use git::merge_ops as git_merge_ops;
 pub use git::types as git_types;
 pub use git::refs as git_refs;
 pub use git::submodule as git_submodule;
+/// Exposed for the ssh_config integration test: this rewrites a file the app
+/// does not own, so it is tested against real config shapes.
+pub use git::ssh::rewrite_config as ssh_config_rewrite;
 
 use state::RepoManager;
 use tauri::{Emitter, Manager};
@@ -58,8 +61,9 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::signing::create_ssh_key,
     commands::signing::delete_ssh_key,
     commands::signing::read_ssh_public_key,
-    commands::signing::enable_ssh_signing,
-    commands::signing::use_gpg_signing,
+    commands::signing::test_ssh_host,
+    commands::signing::ssh_key_for_host,
+    commands::signing::set_ssh_key_for_host,
     commands::signing::repair_signing_format,
     commands::profiles::list_profiles,
     commands::profiles::get_active_profile_id,

@@ -5,7 +5,7 @@ use crate::error::AppError;
 use crate::git::bundled::ToolSource;
 use crate::git::identity::{self, GitIdentity};
 use crate::git::signing::{self, SigningStatus};
-use crate::git::ssh_signing;
+use crate::git::ssh;
 
 /// The name and email git puts on commits. Empty fields mean git has not been
 /// set up yet, which the UI treats as "ask for it" rather than an error.
@@ -136,25 +136,22 @@ pub async fn delete_signing_key(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/* ------------------------------------------------------------ SSH signing */
+/* ------------------------------------------------- SSH access (push/pull) */
 
-/// SSH keys that could sign commits, read from `~/.ssh`.
+/// SSH keys on this computer, from `~/.ssh`.
 #[tauri::command]
 #[specta::specta]
-pub async fn list_ssh_keys() -> Result<Vec<ssh_signing::SshKey>, AppError> {
-  tauri::async_runtime::spawn_blocking(ssh_signing::list_keys)
+pub async fn list_ssh_keys() -> Result<Vec<ssh::SshKey>, AppError> {
+  tauri::async_runtime::spawn_blocking(|| ssh::list_keys())
     .await
     .map_err(|e| AppError::Other(e.to_string()))
 }
 
-/// Make a new ed25519 SSH key in `~/.ssh` and return it.
+/// Make a new ed25519 SSH key in `~/.ssh`.
 #[tauri::command]
 #[specta::specta]
-pub async fn create_ssh_key(
-  name: String,
-  comment: String,
-) -> Result<ssh_signing::SshKey, AppError> {
-  tauri::async_runtime::spawn_blocking(move || ssh_signing::generate_key(&name, &comment))
+pub async fn create_ssh_key(name: String, comment: String) -> Result<ssh::SshKey, AppError> {
+  tauri::async_runtime::spawn_blocking(move || ssh::generate_key(&name, &comment))
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
 }
@@ -163,7 +160,7 @@ pub async fn create_ssh_key(
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_ssh_key(public_path: String) -> Result<(), AppError> {
-  tauri::async_runtime::spawn_blocking(move || ssh_signing::delete_key(&public_path))
+  tauri::async_runtime::spawn_blocking(move || ssh::delete_key(&public_path))
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
 }
@@ -181,29 +178,36 @@ pub async fn read_ssh_public_key(public_path: String) -> Result<String, AppError
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// Sign this repository's commits with an SSH key.
+/// Try to connect to a host over SSH and report what happened.
 ///
-/// The email is recorded alongside the key in the allowed-signers file, without
-/// which git signs but then reports "No signature" reading its own commits back.
+/// Spawns ssh once per key in the worst case, so it can take a few seconds -
+/// the UI shows a spinner rather than calling this on a timer.
 #[tauri::command]
 #[specta::specta]
-pub async fn enable_ssh_signing(
-  repo_path: String,
-  public_path: String,
-  email: String,
-) -> Result<(), AppError> {
-  tauri::async_runtime::spawn_blocking(move || {
-    ssh_signing::enable_ssh_signing(&repo_path, &public_path, &email)
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+pub async fn test_ssh_host(host: String) -> Result<ssh::SshTestResult, AppError> {
+  tauri::async_runtime::spawn_blocking(move || ssh::test_host(&host))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
 }
 
-/// Switch a repository back to GPG signing.
+/// Which key `~/.ssh/config` sends to a host, if it names one.
 #[tauri::command]
 #[specta::specta]
-pub async fn use_gpg_signing(repo_path: String) -> Result<(), AppError> {
-  tauri::async_runtime::spawn_blocking(move || ssh_signing::use_gpg_format(&repo_path))
+pub async fn ssh_key_for_host(host: String) -> Result<Option<String>, AppError> {
+  tauri::async_runtime::spawn_blocking(move || ssh::configured_key_for(&host))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Point a host at a key in `~/.ssh/config`, backing the file up first.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_ssh_key_for_host(
+  host: String,
+  key_path: String,
+  stamp: String,
+) -> Result<(), AppError> {
+  tauri::async_runtime::spawn_blocking(move || ssh::set_key_for_host(&host, &key_path, &stamp))
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
 }

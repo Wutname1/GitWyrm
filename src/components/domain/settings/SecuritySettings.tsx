@@ -20,7 +20,7 @@ import { useGitIdentity } from '@/lib/useGitIdentity'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import { PublishSteps } from './PublishSteps'
 import { SettingRow } from './SettingRow'
-import { SshSigning } from './SshSigning'
+import { SshAccess } from './SshAccess'
 import { ToolStatusRow, useToolCheck, type ToolState } from './ToolStatusRow'
 
 /**
@@ -38,6 +38,12 @@ export function SecuritySettings() {
   return (
     <div className="grid gap-8">
       <SigningSection repoPath={repo?.path ?? null} />
+      <Section
+        title="Connecting over SSH"
+        blurb="How this computer proves who it is when it pushes and pulls. Separate from signing: this is about getting access, not about proving a commit is yours."
+      >
+        <SshAccess />
+      </Section>
       <ToolsSection />
     </div>
   )
@@ -112,107 +118,12 @@ function SigningSection({ repoPath }: { repoPath: string | null }) {
         <BrokenFormatWarning repoPath={repoPath} onFixed={refresh} />
       )}
 
-      {status && (
-        <>
-          <MethodPicker repoPath={repoPath} status={status} onChanged={refresh} />
-          {status.usesSsh ? (
-            <SshSigning repoPath={repoPath} status={status} onChanged={refresh} />
-          ) : status.keys.length === 0 ? (
-            <CreateKeyForm repoPath={repoPath} onCreated={refresh} />
-          ) : (
-            <HasKey repoPath={repoPath} status={status} onChanged={refresh} />
-          )}
-        </>
+      {status && status.keys.length === 0 ? (
+        <CreateKeyForm repoPath={repoPath} onCreated={refresh} />
+      ) : (
+        status && <HasKey repoPath={repoPath} status={status} onChanged={refresh} />
       )}
     </Section>
-  )
-}
-
-/**
- * Choose between the two ways git can sign.
- *
- * Both produce a Verified badge; the difference only matters if you already
- * have one kind of key. Described in terms of what the user has rather than
- * what the formats are, since "OpenPGP vs SSH signature format" means nothing
- * to someone who has never signed a commit (Rule #2).
- */
-function MethodPicker({
-  repoPath,
-  status,
-  onChanged,
-}: {
-  repoPath: string
-  status: SigningStatus
-  onChanged: () => void
-}) {
-  const [busy, setBusy] = useState(false)
-
-  const choose = async (ssh: boolean) => {
-    if (ssh === status.usesSsh || busy) return
-    setBusy(true)
-    // Switching to SSH only sets the format once a key is picked - flipping
-    // gpg.format with no key would leave commits failing until they choose one.
-    const res = ssh
-      ? { status: 'ok' as const }
-      : await commands.useGpgSigning(repoPath)
-    setBusy(false)
-    if (res.status !== 'ok') {
-      toast.error(res.error)
-      return
-    }
-    onChanged()
-  }
-
-  return (
-    <div className="mb-3 flex gap-2">
-      <MethodButton
-        active={!status.usesSsh}
-        disabled={busy}
-        onClick={() => choose(false)}
-        title="Security key (GPG)"
-        blurb="The traditional way. Works everywhere."
-      />
-      <MethodButton
-        active={status.usesSsh}
-        disabled={busy}
-        onClick={() => choose(true)}
-        title="SSH key"
-        blurb="Simpler, and you may already have one."
-      />
-    </div>
-  )
-}
-
-function MethodButton({
-  active,
-  disabled,
-  onClick,
-  title,
-  blurb,
-}: {
-  active: boolean
-  disabled: boolean
-  onClick: () => void
-  title: string
-  blurb: string
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        'flex-1 rounded-md border px-3 py-2 text-left transition-colors',
-        active
-          ? 'border-primary bg-primary/10'
-          : 'border-border bg-panel hover:border-muted-foreground'
-      )}
-    >
-      <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-        {active && <Check size={12} className="text-accent-text" />}
-        {title}
-      </div>
-      <div className="mt-0.5 text-2xs text-muted-foreground">{blurb}</div>
-    </button>
   )
 }
 

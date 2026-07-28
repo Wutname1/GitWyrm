@@ -331,7 +331,7 @@ async deleteSigningKey(repoPath: string, keyId: string, fingerprint: string) : P
 }
 },
 /**
- * SSH keys that could sign commits, read from `~/.ssh`.
+ * SSH keys on this computer, from `~/.ssh`.
  */
 async listSshKeys() : Promise<Result<SshKey[], string>> {
     try {
@@ -342,7 +342,7 @@ async listSshKeys() : Promise<Result<SshKey[], string>> {
 }
 },
 /**
- * Make a new ed25519 SSH key in `~/.ssh` and return it.
+ * Make a new ed25519 SSH key in `~/.ssh`.
  */
 async createSshKey(name: string, comment: string) : Promise<Result<SshKey, string>> {
     try {
@@ -375,25 +375,36 @@ async readSshPublicKey(publicPath: string) : Promise<Result<string, string>> {
 }
 },
 /**
- * Sign this repository's commits with an SSH key.
+ * Try to connect to a host over SSH and report what happened.
  * 
- * The email is recorded alongside the key in the allowed-signers file, without
- * which git signs but then reports "No signature" reading its own commits back.
+ * Spawns ssh once per key in the worst case, so it can take a few seconds -
+ * the UI shows a spinner rather than calling this on a timer.
  */
-async enableSshSigning(repoPath: string, publicPath: string, email: string) : Promise<Result<null, string>> {
+async testSshHost(host: string) : Promise<Result<SshTestResult, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("enable_ssh_signing", { repoPath, publicPath, email }) };
+    return { status: "ok", data: await TAURI_INVOKE("test_ssh_host", { host }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
 /**
- * Switch a repository back to GPG signing.
+ * Which key `~/.ssh/config` sends to a host, if it names one.
  */
-async useGpgSigning(repoPath: string) : Promise<Result<null, string>> {
+async sshKeyForHost(host: string) : Promise<Result<string | null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("use_gpg_signing", { repoPath }) };
+    return { status: "ok", data: await TAURI_INVOKE("ssh_key_for_host", { host }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Point a host at a key in `~/.ssh/config`, backing the file up first.
+ */
+async setSshKeyForHost(host: string, keyPath: string, stamp: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_ssh_key_for_host", { host, keyPath, stamp }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2609,16 +2620,7 @@ configuredKey: string | null;
  * Set when the user's git config has a `gpg.format` git refuses to accept.
  * Git hard-fails every commit in this state, so the UI offers to repair it.
  */
-brokenFormat: string | null; 
-/**
- * True when this repository signs with an SSH key rather than GPG
- * (`gpg.format = ssh`). Decides which half of the Security screen is shown.
- */
-usesSsh: boolean; 
-/**
- * The SSH public key this repository signs with, when it is in SSH mode.
- */
-sshKeyPath: string | null }
+brokenFormat: string | null }
 /**
  * One Visual Studio solution found inside a repository.
  */
@@ -2660,6 +2662,28 @@ comment: string;
  * Key type as ssh-keygen reports it (ED25519, RSA...).
  */
 algorithm: string }
+/**
+ * What happened when we tried to reach a host over SSH.
+ */
+export type SshTestResult = { 
+/**
+ * True when the host recognised the key.
+ */
+ok: boolean; 
+/**
+ * Plain-language outcome for the user.
+ */
+message: string; 
+/**
+ * Who the host said we are, when it said so ("Wutname1" on GitHub).
+ */
+identity: string | null; 
+/**
+ * A key in ~/.ssh that this host WOULD accept, when the current one failed.
+ * This is the whole point: git only ever reports "Permission denied", never
+ * that a different key on the same machine would have worked.
+ */
+workingKey: string | null }
 export type StashInfo = { index: number; 
 /**
  * Raw stash message as git stores it, e.g. "On develop: auto-stash before...".
