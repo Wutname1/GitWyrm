@@ -64,6 +64,19 @@ export function tutorialFileId(path: string): string | undefined {
   return path === TUTORIAL_DIRTY_FILE ? 'changes-file-row' : undefined
 }
 
+/**
+ * True for the tutorial's practice repository.
+ *
+ * Matched on the folder names the Rust seed creates rather than an exact path,
+ * because the app-data root differs per machine and the frontend never learns
+ * it. Anything under a real project called "practice-repo" would have to sit
+ * inside a "tutorial" folder too, which is specific enough not to misfire.
+ */
+export function isTutorialRepoPath(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/').toLowerCase()
+  return normalized.includes('/tutorial/practice-repo')
+}
+
 export interface Lesson {
   id: string
   /**

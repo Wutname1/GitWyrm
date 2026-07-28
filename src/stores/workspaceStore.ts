@@ -8,6 +8,7 @@ import {
 } from "@/lib/bindings";
 import { log } from "@/lib/log";
 import { normalizePath, pathKey, samePath } from "@/lib/paths";
+import { isTutorialRepoPath } from "@/lib/tutorialLessons";
 import { unwrap } from "@/lib/queryKeys";
 import {
   DEFAULT_COLUMN_ORDER,
@@ -498,6 +499,12 @@ interface WorkspaceState {
    */
   onboardingSeen: boolean;
   /**
+   * Organizations whose "blocks third-party OAuth apps" explainer has been
+   * dismissed. Only an org admin can lift the block, so once the user has been
+   * told there is nothing gained by telling them again (persisted).
+   */
+  githubOrgRestrictionDismissed: string[];
+  /**
    * Fingerprints of signing keys the user confirmed they uploaded to their
    * host. A key is only half-set-up until its public half is published, and
    * that state has to outlive a reload (persisted).
@@ -600,6 +607,8 @@ interface WorkspaceState {
   setEnableWorktrees: (enabled: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
   markOnboardingSeen: () => void;
+  /** Stop showing the OAuth-restriction explainer for this organization. */
+  dismissGithubOrgRestriction: (org: string) => void;
   markSigningKeyPublished: (fingerprint: string) => void;
   setTabLayout: (layout: TabLayout) => void;
   setHorizontalTabRow: (enabled: boolean) => void;
@@ -764,6 +773,7 @@ function toSettings(s: WorkspaceState): Settings {
     enable_worktrees: s.enableWorktrees,
     restore_tabs: s.restoreTabs,
     onboarding_seen: s.onboardingSeen,
+    github_org_restriction_dismissed: s.githubOrgRestrictionDismissed,
     signing_keys_published: s.signingKeysPublished,
     ui_scale: s.uiScale,
     font_family: s.fontFamily === DEFAULT_FONT_ID ? null : s.fontFamily,
@@ -1014,6 +1024,7 @@ export const SETTINGS_DEFAULTS = {
   enableWorktrees: false,
   restoreTabs: true,
   onboardingSeen: false,
+  githubOrgRestrictionDismissed: [],
   signingKeysPublished: [],
   tagPushDefault: "ask",
   tagPushOnCreate: true,
@@ -1109,6 +1120,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   enableWorktrees: false,
   restoreTabs: true,
   onboardingSeen: false,
+  githubOrgRestrictionDismissed: [],
   signingKeysPublished: [],
   uiScale: DEFAULT_UI_SCALE,
   fontFamily: DEFAULT_FONT_ID,
@@ -1151,10 +1163,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       const tabOrder = represented
         ? s.tabOrder
         : [...s.tabOrder, { type: "repo" as const, path: repo.path }];
-      const recents = [
-        { name: repo.name, path: repo.path },
-        ...s.recents.filter((r) => !samePath(r.path, repo.path)),
-      ].slice(0, 10);
+      // The tutorial's practice repo is deleted when the tour ends, so putting
+      // it in recents would leave a row pointing at a folder that is gone.
+      const recents = isTutorialRepoPath(repo.path)
+        ? s.recents
+        : [
+            { name: repo.name, path: repo.path },
+            ...s.recents.filter((r) => !samePath(r.path, repo.path)),
+          ].slice(0, 10);
       return { openRepos, activeRepoId: repo.id, recents, tabOrder };
     });
     schedulePersist();
@@ -1398,6 +1414,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     // Persisted immediately rather than on the usual debounce: the tour closing
     // is often followed by the user quitting, and a lost write replays it.
     set({ onboardingSeen: true });
+    schedulePersist();
+  },
+  dismissGithubOrgRestriction: (org) => {
+    set((s) =>
+      s.githubOrgRestrictionDismissed.includes(org)
+        ? s
+        : { githubOrgRestrictionDismissed: [...s.githubOrgRestrictionDismissed, org] }
+    );
     schedulePersist();
   },
   setTabLayout: (layout) => {
@@ -2114,6 +2138,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         enableWorktrees: settings.enable_worktrees ?? false,
         restoreTabs: settings.restore_tabs ?? true,
         onboardingSeen: settings.onboarding_seen ?? false,
+        githubOrgRestrictionDismissed: settings.github_org_restriction_dismissed ?? [],
         signingKeysPublished: settings.signing_keys_published ?? [],
         uiScale:
           settings.ui_scale != null

@@ -12,7 +12,7 @@
 //! both. A tidy repo would make the sync lesson meaningless, because dragging
 //! one branch onto another would have nothing to offer.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::Serialize;
 use specta::Type;
@@ -177,12 +177,20 @@ fn commit_files(
 #[specta::specta]
 pub async fn create_tutorial_repo(app: AppHandle) -> Result<TutorialRepo, AppError> {
   let root = tutorial_root(&app)?;
+  tauri::async_runtime::spawn_blocking(move || seed_tutorial_repo(&root))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
 
-  tauri::async_runtime::spawn_blocking(move || {
+/// Build the practice repo under `root`. Split out from the command so the
+/// seeding the lessons depend on can be tested against a real repository
+/// without standing up a Tauri app handle.
+fn seed_tutorial_repo(root: &std::path::Path) -> Result<TutorialRepo, AppError> {
+  {
     if root.exists() {
-      std::fs::remove_dir_all(&root)?;
+      std::fs::remove_dir_all(root)?;
     }
-    std::fs::create_dir_all(&root)?;
+    std::fs::create_dir_all(root)?;
 
     let work = root.join("practice-repo");
     let remote = root.join("origin.git");
@@ -269,9 +277,7 @@ pub async fn create_tutorial_repo(app: AppHandle) -> Result<TutorialRepo, AppErr
       path: work.to_string_lossy().into_owned(),
       feature_branch: feature_branch.to_string(),
     })
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+  }
 }
 
 /// Delete the practice repository.
@@ -295,86 +301,73 @@ pub async fn discard_tutorial_repo(app: AppHandle) -> Result<(), AppError> {
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// True when the given path is inside the tutorial folder.
-///
-/// Lets the UI recognise the practice repo it is looking at without threading
-/// the path through every layer, which matters for the "this is practice" badge
-/// and for refusing to treat it as a real recent repo.
-pub fn is_tutorial_path(app: &AppHandle, path: &Path) -> bool {
-  let Ok(root) = tutorial_root(app) else {
-    return false;
-  };
-  path.starts_with(root)
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
 
-  /// The shape the lessons depend on: diverged branches and a remote that is
-  /// behind. If this drifts, the sync lesson silently stops teaching anything,
-  /// so it is worth asserting rather than eyeballing in the UI.
+  /// Drives the real seeding path and asserts the shape every lesson depends
+  /// on. If this drifts, the lessons silently stop teaching anything -- the
+  /// sync step in particular becomes a no-op dialog -- so it is worth pinning
+  /// down here rather than eyeballing it in the UI each time.
   #[test]
-  fn seeded_repo_has_diverged_branches_and_dirty_tree() {
+  fn seeded_repo_matches_what_the_lessons_expect() {
     let temp = tempfile::tempdir().unwrap();
-    let work = temp.path().join("practice-repo");
-    std::fs::create_dir_all(&work).unwrap();
+    let seeded = seed_tutorial_repo(&temp.path().join("tutorial")).unwrap();
 
-    let signature =
-      git2::Signature::now("Tutorial Test", "tutorial@example.com").unwrap();
-    let mut options = git2::RepositoryInitOptions::new();
-    options.initial_head("main");
-    let repo = git2::Repository::init_opts(&work, &options).unwrap();
+    let repo = git2::Repository::open(&seeded.path).unwrap();
 
-    commit_files(
-      &repo,
-      &signature,
-      "Start the trail notes",
-      &[("notes.md", NOTES_FIRST), ("supplies.md", SUPPLIES)],
-    )
-    .unwrap();
-    let shared_tip =
-      commit_files(&repo, &signature, "Add day three", &[("notes.md", NOTES_THIRD)])
-        .unwrap();
+    // Lesson 1 switches onto this branch, so it has to exist by this name.
+    assert_eq!(seeded.feature_branch, "feature/lamp-upgrade");
+    let feature = repo
+      .find_branch(&seeded.feature_branch, git2::BranchType::Local)
+      .expect("the practice feature branch should exist");
+    let main = repo.find_branch("main", git2::BranchType::Local).unwrap();
 
-    let feature = "feature/lamp-upgrade";
-    let tip = repo.find_commit(shared_tip).unwrap();
-    repo.branch(feature, &tip, false).unwrap();
-    repo.set_head(&format!("refs/heads/{feature}")).unwrap();
-    repo
-      .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-      .unwrap();
-    let feature_tip = commit_files(
-      &repo,
-      &signature,
-      "Pack a longer rope",
-      &[("supplies.md", SUPPLIES_FEATURE)],
-    )
-    .unwrap();
-
-    repo.set_head("refs/heads/main").unwrap();
-    repo
-      .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-      .unwrap();
-    let main_tip = commit_files(
-      &repo,
-      &signature,
-      "Note the cold air",
-      &[("supplies.md", SUPPLIES)],
-    )
-    .unwrap();
-
-    // Neither branch contains the other: that is what "diverged" means, and it
-    // is what makes the drag-to-sync lesson show a real choice.
+    // Lesson 2 drags one onto the other: with either branch an ancestor of the
+    // other there is nothing to reconcile and the sync panel has no choice to
+    // offer, which is exactly the failure this guards.
+    let feature_tip = feature.get().peel_to_commit().unwrap().id();
+    let main_tip = main.get().peel_to_commit().unwrap().id();
     let (ahead, behind) = repo.graph_ahead_behind(main_tip, feature_tip).unwrap();
-    assert_eq!(ahead, 1, "main should have one commit feature lacks");
-    assert_eq!(behind, 1, "feature should have one commit main lacks");
+    assert!(ahead > 0 && behind > 0, "branches must have diverged, got {ahead}/{behind}");
 
-    std::fs::write(work.join("notes.md"), NOTES_WORKING).unwrap();
+    // The stand-in remote: real enough that push/pull states render.
+    let origin = repo.find_remote("origin").expect("origin should be configured");
+    assert!(origin.url().is_some());
+    assert!(
+      repo.find_reference("refs/remotes/origin/main").is_ok(),
+      "origin/main should be recorded so the graph can draw it"
+    );
+
+    // Lesson 3 needs at least two commits to range-select between.
+    let mut walk = repo.revwalk().unwrap();
+    walk.push_head().unwrap();
+    assert!(walk.count() >= 2, "need enough history to multi-select");
+
+    // Lesson 5 opens this file's diff, so it must start dirty.
     let statuses = repo.statuses(None).unwrap();
     assert!(
       statuses.iter().any(|s| s.status().is_wt_modified()),
-      "the working tree should have an unstaged edit to practice staging on"
+      "the working tree needs an unstaged edit for the staging lesson"
+    );
+  }
+
+  /// Re-running the tour must not trip over the previous run's folder.
+  #[test]
+  fn seeding_twice_starts_clean() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("tutorial");
+    let first = seed_tutorial_repo(&root).unwrap();
+    std::fs::write(
+      std::path::Path::new(&first.path).join("leftover.txt"),
+      "from the previous run",
+    )
+    .unwrap();
+
+    let second = seed_tutorial_repo(&root).unwrap();
+    assert!(
+      !std::path::Path::new(&second.path).join("leftover.txt").exists(),
+      "a second run should wipe the previous practice repo"
     );
   }
 }
