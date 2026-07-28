@@ -78,6 +78,14 @@ interface UiState {
    * Null when there is nothing to ask about.
    */
   tagsToPush: PendingTag[] | null
+  /**
+   * Remote the manage-remotes modal should open straight into editing, set from
+   * the sidebar's Edit so the name/URL boxes are one click away. Null opens the
+   * plain list.
+   */
+  remoteToEdit: string | null
+  /** Remote the manage-remotes modal should open straight into deleting. */
+  remoteToDelete: string | null
   /** Branch pending a rename / delete confirm, set from any branch menu. */
   branchToRename: string | null
   branchToDelete: string | null
@@ -207,6 +215,10 @@ interface UiState {
   closeGithubItem: () => void
   toggleSection: (key: SectionKey) => void
   openModal: (kind: Exclude<ModalKind, null>) => void
+  /** Open the remotes modal with one remote already in its edit form. */
+  editRemotePrompt: (name: string) => void
+  /** Open the remotes modal with one remote's delete confirm already up. */
+  deleteRemotePrompt: (name: string) => void
   closeModal: () => void
   setSettingsSection: (section: SettingsSection) => void
   /** Jump to the section holding a setting and flash that row. */
@@ -248,6 +260,8 @@ export const useUiStore = create<UiState>((set) => ({
   tagTargetSha: null,
   branchTargetSha: null,
   tagsToPush: null,
+  remoteToEdit: null,
+  remoteToDelete: null,
   branchToRename: null,
   branchToDelete: null,
   branchToResetTo: null,
@@ -371,7 +385,11 @@ export const useUiStore = create<UiState>((set) => ({
   closeGithubItem: () => set({ centerView: 'graph', githubItem: null }),
   toggleSection: (key) =>
     set((s) => ({ sectionOpen: { ...s.sectionOpen, [key]: !s.sectionOpen[key] } })),
-  openModal: (kind) => set({ activeModal: kind }),
+  openModal: (kind) => set({ activeModal: kind, remoteToEdit: null, remoteToDelete: null }),
+  editRemotePrompt: (name) =>
+    set({ activeModal: 'remotes', remoteToEdit: name, remoteToDelete: null }),
+  deleteRemotePrompt: (name) =>
+    set({ activeModal: 'remotes', remoteToDelete: name, remoteToEdit: null }),
   closeModal: () =>
     set({
       activeModal: null,
@@ -379,6 +397,8 @@ export const useUiStore = create<UiState>((set) => ({
       syncTarget: null,
       tagTargetSha: null,
       branchTargetSha: null,
+      remoteToEdit: null,
+      remoteToDelete: null,
     }),
   setSettingsSection: (section) => set({ settingsSection: section, revealSetting: null }),
   revealSettingById: (section, id) =>

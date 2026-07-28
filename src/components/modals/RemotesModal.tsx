@@ -255,6 +255,8 @@ type Editing = { name: string; url: string; original: string } | null
 export function RemotesModal() {
   const open = useUiStore((s) => s.activeModal === 'remotes')
   const closeModal = useUiStore((s) => s.closeModal)
+  const remoteToEdit = useUiStore((s) => s.remoteToEdit)
+  const remoteToDelete = useUiStore((s) => s.remoteToDelete)
 
   const repo = useActiveRepo()
   const remotes = useRemotes(repo?.id ?? null)
@@ -275,6 +277,20 @@ export function RemotesModal() {
       setDeleteTarget(null)
     }
   }, [open])
+
+  // Opened straight from a remote's Edit / Delete: land on that remote's form
+  // instead of making the user hunt for it in the list. Waits for the remotes
+  // query, which may still be loading when the modal opens.
+  const remoteRows = remotes.data
+  useEffect(() => {
+    if (!open || !remoteToEdit || !remoteRows) return
+    const r = remoteRows.find((x) => x.name === remoteToEdit)
+    if (r) setEditing({ name: r.name, url: r.url, original: r.name })
+  }, [open, remoteToEdit, remoteRows])
+
+  useEffect(() => {
+    if (open && remoteToDelete) setDeleteTarget(remoteToDelete)
+  }, [open, remoteToDelete])
 
   const existingNames = useMemo(
     () => new Set((remotes.data ?? []).map((r) => r.name)),

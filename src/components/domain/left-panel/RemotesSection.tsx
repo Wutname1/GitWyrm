@@ -151,16 +151,12 @@ function BranchNode({
   )
 }
 
-function RemoteNode({
-  remote,
-  onManage,
-}: {
-  remote: RemoteInfo
-  onManage: () => void
-}) {
+function RemoteNode({ remote }: { remote: RemoteInfo }) {
   const [open, setOpen] = useState(true)
   const repo = useActiveRepo()
   const m = useGitMutations(repo?.id ?? null)
+  const editRemotePrompt = useUiStore((s) => s.editRemotePrompt)
+  const deleteRemotePrompt = useUiStore((s) => s.deleteRemotePrompt)
   const tree = useMemo(
     () => buildBranchTreeFrom(remote.branches, (b) => b.name),
     [remote.branches]
@@ -215,7 +211,7 @@ function RemoteNode({
               <ContextMenuSeparator />
             </>
           )}
-          <ContextMenuItem onSelect={onManage}>
+          <ContextMenuItem onSelect={() => editRemotePrompt(remote.name)}>
             <Pencil />
             Edit
           </ContextMenuItem>
@@ -228,7 +224,7 @@ function RemoteNode({
             onRun={() => m.setUpstream.mutate(`${remote.name}/${remote.branches[0].name}`)}
           />
           <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onSelect={onManage}>
+          <ContextMenuItem variant="destructive" onSelect={() => deleteRemotePrompt(remote.name)}>
             <Trash2 />
             Delete
           </ContextMenuItem>
@@ -297,7 +293,7 @@ export function RemotesSection({
               Add a remote
             </button>
           ) : (
-            remotes.map((r) => <RemoteNode key={r.name} remote={r} onManage={onManage} />)
+            remotes.map((r) => <RemoteNode key={r.name} remote={r} />)
           )}
         </div>
       )}
