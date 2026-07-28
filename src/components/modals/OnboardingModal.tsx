@@ -10,6 +10,7 @@ import { useGitIdentity } from '@/lib/useGitIdentity'
 import { unwrap } from '@/lib/queryKeys'
 import { useUiStore } from '@/stores/uiStore'
 import { useTutorialStore } from '@/stores/tutorialStore'
+import { TUTORIAL_ENABLED } from '@/lib/tutorialEnabled'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 interface Slide {
@@ -80,8 +81,18 @@ export function OnboardingModal() {
   // The hands-on offer always comes last, after the identity is settled: it
   // opens a practice repo, and doing that before git knows who the user is
   // would leave them unable to commit in the very repo built for practising.
-  const practiceStepIndex = identityStepIndex >= 0 ? identityStepIndex + 1 : slides.length
-  const lastIndex = practiceStepIndex
+  // -1 drops the step entirely while the tour is off: no index can equal it, so
+  // `onPracticeStep` is never true and the wizard ends on the step before it.
+  const practiceStepIndex = !TUTORIAL_ENABLED
+    ? -1
+    : identityStepIndex >= 0
+      ? identityStepIndex + 1
+      : slides.length
+  const lastIndex = TUTORIAL_ENABLED
+    ? practiceStepIndex
+    : identityStepIndex >= 0
+      ? identityStepIndex
+      : slides.length - 1
   const onIdentityStep = step === identityStepIndex
   const onPracticeStep = step === practiceStepIndex
 

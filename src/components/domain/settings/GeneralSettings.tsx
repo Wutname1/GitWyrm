@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { useTutorialStore } from '@/stores/tutorialStore'
+import { TUTORIAL_ENABLED } from '@/lib/tutorialEnabled'
 import { FolderSetting, SettingRow } from './SettingRow'
 import { IdentitySetting } from './IdentitySetting'
 import { EditorSetting } from './EditorSetting'
@@ -144,13 +145,15 @@ export function GeneralSettings() {
           Enable worktrees
         </label>
       </SettingRow>
-      <SettingRow
-        label="Hands-on tour"
-        searchId="tutorial"
-        hint="Builds a small practice repository and walks you through the gestures that are quick but easy to miss: double-click, drag, and right-click. Deleted when you finish."
-      >
-        <ReplayTutorialButton />
-      </SettingRow>
+      {TUTORIAL_ENABLED && (
+        <SettingRow
+          label="Hands-on tour"
+          searchId="tutorial"
+          hint="Builds a small practice repository and walks you through the gestures that are quick but easy to miss: double-click, drag, and right-click. Deleted when you finish."
+        >
+          <ReplayTutorialButton />
+        </SettingRow>
+      )}
       <ResetToDefaults group="general" />
     </div>
   )
