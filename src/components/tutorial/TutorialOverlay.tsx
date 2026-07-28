@@ -9,8 +9,19 @@ import { useTutorialTargets, type TargetRect } from './useTutorialTarget'
 const RADIUS = 8
 
 interface TutorialOverlayProps {
-  /** Ids to leave lit. The first anchors the coach card and the ghost. */
+  /** Ids to leave undimmed and clickable. The first anchors the coach card. */
   targetIds: string[]
+  /**
+   * Groups of `targetIds` to ring. Each group gets one ring around its
+   * combined bounds. Defaults to one ring per target.
+   */
+  ringTargetIds?: string[][]
+  /** Indexes into `targetIds` the ghost drag runs between. */
+  dragFromIndex?: number
+  dropTargetIndex?: number
+  /** A second drag path mimed alongside the first. */
+  secondaryDragFromIndex?: number
+  secondaryDropTargetIndex?: number
   gesture: GestureKind
   /** Bumped when the gesture lands, to play the success flare. */
   successNonce: number
@@ -33,13 +44,30 @@ interface TutorialOverlayProps {
  */
 export function TutorialOverlay({
   targetIds,
+  ringTargetIds,
+  dragFromIndex = 0,
+  dropTargetIndex,
+  secondaryDragFromIndex,
+  secondaryDropTargetIndex,
   gesture,
   successNonce,
   children,
 }: TutorialOverlayProps) {
   const rects = useTutorialTargets(targetIds, true)
-  const rect = rects[0] ?? null
-  const dropRect = rects[1] ?? null
+  // The coach card anchors to the first ringed target when there is one: with a
+  // whole panel kept live, target 0 is that panel, and placing the card
+  // relative to it would push it off beside the window rather than next to the
+  // thing the user has to touch.
+  const anchorIndex = ringTargetIds?.[0]?.[0]
+    ? targetIds.indexOf(ringTargetIds[0][0])
+    : 0
+  const rect = rects[anchorIndex] ?? rects[0] ?? null
+  const dragRect = rects[dragFromIndex] ?? rect
+  const dropRect = dropTargetIndex == null ? null : (rects[dropTargetIndex] ?? null)
+  const secondDragRect =
+    secondaryDragFromIndex == null ? null : (rects[secondaryDragFromIndex] ?? null)
+  const secondDropRect =
+    secondaryDropTargetIndex == null ? null : (rects[secondaryDropTargetIndex] ?? null)
 
   // Replay the flare whenever a gesture lands. Keyed off the nonce so a repeat
   // of the same lesson still animates.
@@ -71,14 +99,102 @@ export function TutorialOverlay({
     [rects]
   )
 
+  // Rings point at the thing to touch; cutouts decide what stays usable. They
+  // differ whenever a lesson keeps a whole panel live -- ringing that panel
+  // would draw a pulsing box around half the window instead of an instruction.
+  const ringRects = useMemo(() => {
+    if (!ringTargetIds?.length) return cutouts
+    // One ring per group, drawn around everything in it. Groups whose members
+    // have not rendered yet contribute nothing rather than a zero-size ring.
+    return ringTargetIds
+      .map((group) => {
+        const members = group
+          .map((id) => rects[targetIds.indexOf(id)] ?? null)
+          .filter((r): r is TargetRect => r !== null)
+        if (members.length === 0) return null
+        const top = Math.min(...members.map((m) => m.top))
+        const left = Math.min(...members.map((m) => m.left))
+        const right = Math.max(...members.map((m) => m.left + m.width))
+        const bottom = Math.max(...members.map((m) => m.top + m.height))
+        return { top, left, width: right - left, height: bottom - top }
+      })
+      .filter((r): r is TargetRect => r !== null)
+  }, [ringTargetIds, targetIds, rects, cutouts])
+
+  /**
+   * Bands walling off everything that is not a lit target.
+   *
+   * Computed by slicing the full window against each cutout in turn, rather
+   * than taking one bounding box around all of them. The bounding-box version
+   * looked right for two adjacent sidebar rows but opened a corridor spanning
+   * everything between them the moment the targets were far apart -- lesson
+   * one lights a sidebar row and a graph pill, and the band between the two
+   * left commit rows clickable, so a double-click could land on a commit and
+   * the lesson would never see its branch switch.
+   *
+   * Slicing keeps exactly the targets open and nothing else, and because the
+   * cutouts already carry padding, adjacent targets still leave a usable
+   * corridor between them for a drag to cross.
+   *
+   * With nothing measured yet the whole window is blocked, which is the safe
+   * side to fail on -- the app stays inert rather than half-usable under a
+   * scrim the user cannot see through.
+   */
+  const blockers = useMemo(() => {
+    const { width, height } = viewport
+    let bands = [{ top: 0, left: 0, width, height }]
+
+    for (const hole of cutouts) {
+      const next = []
+      for (const b of bands) {
+        const bRight = b.left + b.width
+        const bBottom = b.top + b.height
+        const hRight = hole.left + hole.width
+        const hBottom = hole.top + hole.height
+
+        // No overlap: this band is unaffected by the hole.
+        if (hole.left >= bRight || hRight <= b.left || hole.top >= bBottom || hBottom <= b.top) {
+          next.push(b)
+          continue
+        }
+
+        // Split the band into up to four pieces around the hole.
+        if (hole.top > b.top) {
+          next.push({ top: b.top, left: b.left, width: b.width, height: hole.top - b.top })
+        }
+        if (hBottom < bBottom) {
+          next.push({ top: hBottom, left: b.left, width: b.width, height: bBottom - hBottom })
+        }
+        const midTop = Math.max(b.top, hole.top)
+        const midBottom = Math.min(bBottom, hBottom)
+        const midHeight = midBottom - midTop
+        if (midHeight > 0) {
+          if (hole.left > b.left) {
+            next.push({ top: midTop, left: b.left, width: hole.left - b.left, height: midHeight })
+          }
+          if (hRight < bRight) {
+            next.push({ top: midTop, left: hRight, width: bRight - hRight, height: midHeight })
+          }
+        }
+      }
+      bands = next
+    }
+
+    return bands
+  }, [cutouts, viewport])
+
   const overlay = (
     <div className="pointer-events-none fixed inset-0 z-[200]">
-      {/* The scrim. pointer-events-auto so it eats clicks aimed at the dimmed
-          UI; the holes below re-open only the target. */}
+      {/* The dimming, drawn as one masked shape so the hole has soft corners
+          and no seams. Painting only -- `pointer-events-none` is essential: an
+          SVG mask controls what is drawn, never what is clickable, so leaving
+          this interactive made the scrim swallow every click across the whole
+          window and the "hole" was purely cosmetic. The blockers below are what
+          actually gate input. */}
       <svg
         width={viewport.width}
         height={viewport.height}
-        className="pointer-events-auto absolute inset-0"
+        className="pointer-events-none absolute inset-0"
         aria-hidden
       >
         <defs>
@@ -108,9 +224,20 @@ export function TutorialOverlay({
         />
       </svg>
 
-      {/* Transparent windows over each hole. These sit above the scrim and let
-          pointer events fall through to the real element beneath. */}
-      {cutouts.map((c, i) => (
+      {/* The actual input gate: four bands around the lit area, leaving the
+          target itself uncovered so the real element receives the gesture. */}
+      {blockers.map((b, i) => (
+        <div
+          key={`block-${i}`}
+          className="pointer-events-auto absolute"
+          style={{ top: b.top, left: b.left, width: b.width, height: b.height }}
+          aria-hidden
+        />
+      ))}
+
+      {/* Rings around the thing to touch. Never interactive -- they sit
+          directly over the element the user has to click. */}
+      {ringRects.map((c, i) => (
         <div
           key={i}
           className="pointer-events-none absolute"
@@ -126,8 +253,11 @@ export function TutorialOverlay({
         </div>
       ))}
 
-      {rect && (
-        <GhostGesture gesture={gesture} from={rect} to={dropRect ?? undefined} />
+      {dragRect && (
+        <GhostGesture gesture={gesture} from={dragRect} to={dropRect ?? undefined} />
+      )}
+      {secondDragRect && secondDropRect && (
+        <GhostGesture gesture={gesture} from={secondDragRect} to={secondDropRect} />
       )}
 
       {children(rect)}

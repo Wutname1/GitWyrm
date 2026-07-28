@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { commands } from '@/lib/bindings'
 import { log } from '@/lib/log'
 import { unwrap } from '@/lib/queryKeys'
+import { useUiStore } from '@/stores/uiStore'
 
 /** How the tutorial ended, so the closing card can say the right thing. */
 export type TutorialOutcome = 'finished' | 'exited' | null
@@ -64,6 +65,12 @@ export const useTutorialStore = create<TutorialState>((set, get) => ({
     try {
       const seeded = unwrap(await commands.createTutorialRepo())
       const repoId = await openRepo(seeded.path)
+      // Every lesson points at the graph, the sidebar, or the changes list --
+      // none of which exist while Settings is up. Started from Settings (the
+      // replay button), the spotlight would otherwise dim a screen with no
+      // target on it. Done here rather than at the call site so any future way
+      // of starting the tour lands somewhere the lessons can actually work.
+      useUiStore.getState().showGraph()
       set({
         starting: false,
         active: true,

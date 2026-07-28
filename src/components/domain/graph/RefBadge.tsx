@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import type { RefInfo, RefKind } from '@/lib/bindings'
 import { type DraggedRef } from '@/lib/refSync'
 import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
+import { tutorialRefPillId } from '@/lib/tutorialLessons'
 import { useRemotes } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useRefDnd } from '@/hooks/useRefDnd'
@@ -84,6 +85,7 @@ export function RefBadge({
   const badge = (
     <span
       {...dnd.props}
+      data-tutorial-id={tutorialRefPillId(refTag.name, refTag.type)}
       onDoubleClick={canSwitch ? handleDoubleClick : undefined}
       title={canSwitch ? `Double-click to switch to ${refTag.name}` : undefined}
       className={cn(

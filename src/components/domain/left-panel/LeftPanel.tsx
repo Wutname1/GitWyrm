@@ -392,6 +392,7 @@ export function LeftPanel() {
   return (
     <div
       data-drag-scroll
+      data-tutorial-id="branch-sidebar"
       className="h-full w-full overflow-y-auto border-r border-border bg-panel pb-6 pt-1.5"
     >
       <SidebarSection

@@ -7,7 +7,6 @@ import { usePendingRowHold } from '@/hooks/usePendingRowHold'
 import { useGraphLoadSpan } from '@/lib/perf'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
-import { tutorialCommitId } from '@/lib/tutorialLessons'
 import { CommitRow } from '@/components/domain/graph/CommitRow'
 import { PendingRow } from '@/components/domain/graph/PendingRow'
 import { StashRow } from '@/components/domain/graph/StashRow'
@@ -391,6 +390,7 @@ export function GraphView() {
 
       <div
         ref={scrollRef}
+        data-tutorial-id="graph-commit-list"
         onScroll={handleScroll}
         className="relative min-h-0 flex-1 overflow-auto pl-3"
       >
@@ -473,7 +473,6 @@ export function GraphView() {
                 rowHeight={rowHeight}
                 dimmed={matchRows != null && !matchRows.has(vi.index)}
                 style={rowStyle}
-                tutorialId={tutorialCommitId(vi.index)}
               />
             )
           })}
