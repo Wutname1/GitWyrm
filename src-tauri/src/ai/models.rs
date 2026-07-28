@@ -100,6 +100,21 @@ async fn fetch_live(
   app: &tauri::AppHandle,
   provider: &CatalogProvider,
 ) -> Result<Vec<CatalogModel>, AppError> {
+  // Copilot does not answer our own OAuth app with real entitlements (see
+  // ai/copilot_sdk.rs); asking over HTTP returns a list with nothing enabled.
+  // Route it through the SDK, which reaches the account's actual plan.
+  if provider.id == super::copilot_sdk::PROVIDER_ID {
+    let token = match auth::get(app, &provider.id)? {
+      Some(auth::AuthInfo::Api { key }) => key,
+      Some(auth::AuthInfo::Oauth { refresh, .. }) => refresh,
+      None => {
+        log::info!("model detection: no credential configured for provider={}", provider.id);
+        return Ok(Vec::new());
+      }
+    };
+    return super::copilot_sdk::list_models(&token).await;
+  }
+
   // These are info! rather than debug! on purpose: release builds log at Info,
   // and when a user reports "my models are wrong" the credential shape and the
   // URL we called are the first two things needed to tell their machine apart

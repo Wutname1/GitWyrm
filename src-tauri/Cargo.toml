@@ -5,7 +5,11 @@ version = "0.0.0"
 description = "GitWyrm - a targeted Git client for Windows"
 authors = ["Jeremy"]
 edition = "2021"
-rust-version = "1.77.2"
+# Raised from 1.77.2 for github-copilot-sdk, which requires 1.94.0. Cargo caps
+# dependency resolution at this value, and when it cannot satisfy a crate it
+# silently substitutes a stub 0.0.0 placeholder instead of failing, so this must
+# stay >= the highest dependency requirement.
+rust-version = "1.94.0"
 
 [lib]
 name = "gitwyrm_lib"
@@ -53,6 +57,17 @@ sentry-log = "0.48.5"
 # Reopens the folder in the running app when Explorer's "Open with GitWyrm"
 # launches a second process, instead of starting a duplicate window.
 tauri-plugin-single-instance = "2"
+# GitHub's own Copilot SDK. Copilot only returns real model entitlements to
+# clients on its approved allowlist, which GitWyrm's OAuth app is not on -- our
+# own device-flow token sees zero enabled models. The SDK talks to the Copilot
+# CLI, which is approved, so a user's existing seat works.
+#
+# `bundled-cli` (a default feature) is required, not a convenience: the SDK's
+# resolver does no PATH scanning and has no downloader, so without the embedded
+# copy it fails with BinaryNotFound unless COPILOT_CLI_PATH is set. The cost is
+# real -- it takes the release binary from 20.3 MB to 114.5 MB -- but turning it
+# off produces a build that cannot run.
+github-copilot-sdk = "1.0.8"
 
 # Explorer's right-click entry is a set of HKCU registry verbs, so the app can
 # add and remove it without elevation.

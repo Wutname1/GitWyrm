@@ -1,0 +1,6 @@
+[toolchain]
+# github-copilot-sdk requires 1.94.0. Without this pin, an older toolchain
+# resolves it to a stub 0.0.0 placeholder and fails at link time with no useful
+# error, so pin the floor rather than leaving it to whatever is installed.
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]

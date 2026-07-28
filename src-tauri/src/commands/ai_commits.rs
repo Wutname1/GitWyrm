@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{Emitter, State};
 
-use crate::ai::{auth, catalog, client, prompt};
+use crate::ai::{auth, catalog, client, copilot_sdk, prompt};
 use crate::commands::patch::{self, SelectedLine};
 use crate::error::AppError;
 use crate::settings;
@@ -774,16 +774,22 @@ Recent commit subjects:\n{}\n\nChange units:{}",
     format!("Planning {requested} commits"),
     "AI is deciding which changes belong together and writing clear messages.",
   );
-  let response = client::chat(client::ChatRequest {
-    provider: &provider_config,
-    bearer: bearer_for(&info),
-    model: &model,
-    system: &system,
-    user: &user,
-    max_tokens: PLAN_MAX_TOKENS,
-    timeout: PLAN_TIMEOUT,
-  })
-  .await?;
+  // Copilot cannot use the HTTP chat dialects with our own OAuth app, so it
+  // goes through the bundled CLI instead. See ai/copilot_sdk.rs.
+  let response = if provider == copilot_sdk::PROVIDER_ID {
+    copilot_sdk::complete(bearer_for(&info), &model, &system, &user).await?
+  } else {
+    client::chat(client::ChatRequest {
+      provider: &provider_config,
+      bearer: bearer_for(&info),
+      model: &model,
+      system: &system,
+      user: &user,
+      max_tokens: PLAN_MAX_TOKENS,
+      timeout: PLAN_TIMEOUT,
+    })
+    .await?
+  };
   emit_progress(
     &app,
     &repo_id,

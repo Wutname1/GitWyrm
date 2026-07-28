@@ -194,7 +194,7 @@ export function AiSettings() {
                           variant="ghost"
                           size="sm"
                           className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                          tooltip="Sign in again to refresh which models your plan can use"
+                          tooltip="Sign in to GitHub Copilot again"
                           disabled={copilot.status.state === 'starting'}
                           onClick={copilot.start}
                         >
@@ -308,7 +308,7 @@ export function AiSettings() {
               {models.map((mo) => (
                 <option key={mo.id} value={mo.id} disabled={!mo.enabled}>
                   {mo.name}
-                  {mo.enabled ? '' : ' - needs an active Copilot subscription'}
+                  {mo.enabled ? '' : ' - not available to your account'}
                 </option>
               ))}
             </select>

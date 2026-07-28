@@ -6,7 +6,7 @@ use serde::Serialize;
 use specta::Type;
 use tauri::State;
 
-use crate::ai::{auth, catalog, client, copilot, models, prompt};
+use crate::ai::{auth, catalog, client, copilot, copilot_sdk, models, prompt};
 use crate::settings;
 use crate::error::AppError;
 use crate::git::shell::run_git;
@@ -185,16 +185,22 @@ pub async fn generate_commit_message(
     truncate_diff(&diff)
   );
 
-  let text = client::chat(client::ChatRequest {
-    provider: &cat,
-    bearer: bearer_for(&info),
-    model: &model,
-    system: &system,
-    user: &user,
-    max_tokens: 1024,
-    timeout: client::DEFAULT_TIMEOUT,
-  })
-  .await?;
+  let text = if provider == copilot_sdk::PROVIDER_ID {
+    // Copilot goes through the SDK rather than the HTTP dialects; our own
+    // OAuth app is not entitled to the chat endpoint. See ai/copilot_sdk.rs.
+    copilot_sdk::complete(bearer_for(&info), &model, &system, &user).await?
+  } else {
+    client::chat(client::ChatRequest {
+      provider: &cat,
+      bearer: bearer_for(&info),
+      model: &model,
+      system: &system,
+      user: &user,
+      max_tokens: 1024,
+      timeout: client::DEFAULT_TIMEOUT,
+    })
+    .await?
+  };
 
   Ok(split_message(&text))
 }
