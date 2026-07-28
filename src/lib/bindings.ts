@@ -150,6 +150,19 @@ async revealFileInFileManager(repoId: string, path: string) : Promise<Result<nul
 }
 },
 /**
+ * Open a folder inside the repo in the OS file manager. Unlike
+ * `reveal_file_in_file_manager`, which selects an item in its parent, this
+ * opens the folder itself so its contents are on screen.
+ */
+async openFolderInFileManager(repoId: string, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_folder_in_file_manager", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Send a file to the OS Recycle Bin / Trash. Recoverable on purpose: the
  * menu entry sits next to "Discard changes", and an unrecoverable delete a
  * click away from a routine action is too sharp an edge.
@@ -1079,6 +1092,19 @@ async commitWebUrl(repoId: string, sha: string) : Promise<Result<string | null, 
 async stashSave(repoId: string, message: string | null) : Promise<Result<StashOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("stash_save", { repoId, message }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stash only the changes under one folder, leaving the rest of the working
+ * tree alone. git2 has no pathspec-scoped stash, so this shells out to git,
+ * which supports `stash push -- <pathspec>`.
+ */
+async stashFolder(repoId: string, folder: string, message: string | null) : Promise<Result<StashOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stash_folder", { repoId, folder, message }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

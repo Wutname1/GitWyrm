@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, MinusCircle, PlusCircle, Trash2 } from 'lucide-react'
-import type { FileChange } from '@/lib/bindings'
+import { Archive, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FolderOpen, MinusCircle, PlusCircle, Trash2 } from 'lucide-react'
+import type { FileChange, StatusCode } from '@/lib/bindings'
+import { statusColor } from '@/lib/gitDisplay'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -65,7 +66,7 @@ interface FileChangeTreeProps {
   operationsDisabled?: boolean
   mutations: Pick<
     ReturnType<typeof useGitMutations>,
-    'stageFiles' | 'unstageFiles' | 'discardFiles'
+    'stageFiles' | 'unstageFiles' | 'discardFiles' | 'stashFolder' | 'openFolder'
   >
   /** `depth` is undefined in list view, where rows are not tree items. */
   renderFile: (file: FileChange, name: string, depth: number | undefined) => ReactNode
@@ -85,6 +86,59 @@ function filesInFolder(files: FileChange[], folder: string): FileChange[] {
     if (normalized.startsWith(prefix)) unique.set(normalized, file)
   }
   return [...unique.values()]
+}
+
+interface FolderRollup {
+  added: number
+  removed: number
+  modified: number
+}
+
+/**
+ * How many files under a folder were added, removed, or edited. Renames count
+ * as modified: the file is still there, just under a new name, and splitting
+ * them into their own bucket adds a word without adding meaning.
+ */
+function rollup(files: FileChange[]): FolderRollup {
+  const counts: FolderRollup = { added: 0, removed: 0, modified: 0 }
+  for (const file of files) {
+    if (file.status === 'A') counts.added += 1
+    else if (file.status === 'D') counts.removed += 1
+    else counts.modified += 1
+  }
+  return counts
+}
+
+/**
+ * Per-folder tally on the folder row. Only non-zero buckets are drawn, so a
+ * folder of plain edits shows one number rather than two zeroes. The counts are
+ * files, not lines -- the +/- pair on a file row already means lines, so these
+ * use letters to avoid reading as the same thing.
+ */
+function FolderCounts({ counts }: { counts: FolderRollup }) {
+  const parts: Array<{ code: StatusCode; n: number; word: string }> = [
+    { code: 'A', n: counts.added, word: 'added' },
+    { code: 'D', n: counts.removed, word: 'removed' },
+    { code: 'M', n: counts.modified, word: 'modified' },
+  ]
+  const shown = parts.filter((part) => part.n > 0)
+  if (shown.length === 0) return null
+  // The letters are shorthand a screen reader would spell out mid-name, so the
+  // group carries the words and the glyphs themselves are hidden from it.
+  const spoken = shown.map((part) => `${part.n} ${part.word}`).join(', ')
+  return (
+    <span
+      className="flex flex-none items-center gap-1.5 font-mono text-2xs tabular-nums"
+      aria-label={spoken}
+      title={spoken}
+    >
+      {shown.map((part) => (
+        <span key={part.code} aria-hidden style={{ color: statusColor(part.code) }}>
+          {part.n}{part.code}
+        </span>
+      ))}
+    </span>
+  )
 }
 
 /** Folder grouping without folder icons; nesting carries the path context. */
@@ -148,6 +202,7 @@ export function FileChangeTree({
           const groupPaths = groupFiles.map((file) => file.path)
           const discardPaths = discardFiles.map((file) => file.path)
           const hasConflicts = groupFiles.some((file) => file.conflicted)
+          const counts = rollup(groupFiles)
           const isFolderPending =
             (m.stageFiles.isPending && m.stageFiles.variables?.folder === directory.path) ||
             (m.unstageFiles.isPending && m.unstageFiles.variables?.folder === directory.path) ||
@@ -172,6 +227,7 @@ export function FileChangeTree({
                       ? <ChevronDown aria-hidden className="size-3 flex-none" />
                       : <ChevronRight aria-hidden className="size-3 flex-none" />}
                     <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{directory.name}</span>
+                    <FolderCounts counts={counts} />
                     {isFolderPending && <PendingIndicator className="size-3 flex-none" />}
                   </button>
                 </ContextMenuTrigger>
@@ -199,10 +255,26 @@ export function FileChangeTree({
                       onRun={() => m.stageFiles.mutate({ folder: directory.path, paths: groupPaths })}
                     />
                   )}
+                  <PendingMenuItem
+                    icon={<Archive />}
+                    label="Stash this folder"
+                    pendingLabel="Stashing folder…"
+                    pending={m.stashFolder.isPending && m.stashFolder.variables?.folder === directory.path}
+                    disabled={operationsDisabled || m.stashFolder.isPending}
+                    onRun={() => m.stashFolder.mutate({ folder: directory.path })}
+                  />
                   <IgnoreMenuItems
                     path={directory.path}
                     isFolder
                     disabled={operationsDisabled}
+                  />
+                  <ContextMenuSeparator />
+                  <PendingMenuItem
+                    icon={<FolderOpen />}
+                    label="Open in Explorer"
+                    pendingLabel="Opening…"
+                    pending={m.openFolder.isPending && m.openFolder.variables === directory.path}
+                    onRun={() => m.openFolder.mutate(directory.path)}
                   />
                   <ContextMenuSeparator />
                   <ContextMenuItem

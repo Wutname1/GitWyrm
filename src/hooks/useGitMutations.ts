@@ -266,6 +266,11 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  const openFolder = useMutation({
+    mutationFn: async (folder: string) => unwrap(await commands.openFolderInFileManager(id, folder)),
+    onError,
+  })
+
   const discardFiles = useMutation({
     mutationFn: async ({ paths }: FolderFilesArgs) => unwrap(await commands.discardFiles(id, paths)),
     onSuccess: (_data, { folder, paths }) => {
@@ -493,6 +498,20 @@ export function useGitMutations(repoId: string | null) {
         toast.info('Nothing to stash -- your working tree is already clean.')
       } else {
         toast('Stashed changes')
+      }
+    },
+    onError,
+  })
+
+  const stashFolder = useMutation({
+    mutationFn: async ({ folder }: { folder: string }) =>
+      unwrap(await commands.stashFolder(id, folder, null)),
+    onSuccess: (outcome, { folder }) => {
+      invalidate(qc, id, ['status', 'stashes', 'log'])
+      if (outcome === 'nothing_to_stash') {
+        toast.info(`Nothing to stash -- no changes in ${folder}.`)
+      } else {
+        toast(`Stashed changes in ${folder}`)
       }
     },
     onError,
@@ -1063,6 +1082,7 @@ export function useGitMutations(repoId: string | null) {
     restoreFile,
     openFileInEditor,
     revealFile,
+    openFolder,
     discardFiles,
     discardAll,
     addToGitignore,
@@ -1080,6 +1100,7 @@ export function useGitMutations(repoId: string | null) {
     openInTerminal,
     checkout,
     stashSave,
+    stashFolder,
     stashPop,
     stashApply,
     stashDrop,

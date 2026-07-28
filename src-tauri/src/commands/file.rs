@@ -116,6 +116,27 @@ pub fn reveal_file_in_file_manager(
     .map_err(|e| AppError::Other(e.to_string()))
 }
 
+/// Open a folder inside the repo in the OS file manager. Unlike
+/// `reveal_file_in_file_manager`, which selects an item in its parent, this
+/// opens the folder itself so its contents are on screen.
+#[tauri::command]
+#[specta::specta]
+pub fn open_folder_in_file_manager(
+  app: AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  path: String,
+) -> Result<(), AppError> {
+  let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
+  if !full.is_dir() {
+    return Err(AppError::Other(format!("{path} is not a folder")));
+  }
+  app
+    .opener()
+    .open_path(full.to_string_lossy(), None::<&str>)
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
 /// Send a file to the OS Recycle Bin / Trash. Recoverable on purpose: the
 /// menu entry sits next to "Discard changes", and an unrecoverable delete a
 /// click away from a routine action is too sharp an edge.

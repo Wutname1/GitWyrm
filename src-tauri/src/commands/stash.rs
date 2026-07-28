@@ -32,6 +32,48 @@ pub async fn stash_save(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Stash only the changes under one folder, leaving the rest of the working
+/// tree alone. git2 has no pathspec-scoped stash, so this shells out to git,
+/// which supports `stash push -- <pathspec>`.
+#[tauri::command]
+#[specta::specta]
+pub async fn stash_folder(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  folder: String,
+  message: Option<String>,
+) -> Result<StashOutcome, AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    let msg = message.unwrap_or_else(|| format!("WIP in {folder}"));
+    // `--include-untracked` matches the whole-tree stash, so a new file in the
+    // folder is saved rather than silently left behind. The pathspec is passed
+    // after `--` so a folder named like a flag can't be read as one.
+    let pathspec = format!("{}/", folder.trim_end_matches('/'));
+    let out = crate::git::shell::run_git(
+      Some(&path),
+      &[
+        "stash",
+        "push",
+        "--include-untracked",
+        "-m",
+        &msg,
+        "--",
+        &pathspec,
+      ],
+    )?;
+    // git reports a clean subtree on stdout rather than as a failure.
+    if out.stdout.contains("No local changes to save") {
+      Ok(StashOutcome::NothingToStash)
+    } else {
+      Ok(StashOutcome::Stashed)
+    }
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn stash_pop(
