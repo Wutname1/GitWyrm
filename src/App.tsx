@@ -264,6 +264,13 @@ function AppInner() {
   // right away would lose the change and reopen the tab before last. Flush
   // whatever is pending as the window closes. Covers both the title bar's close
   // button and the OS one, since both raise this event.
+  //
+  // Registering this listener hands the whole close to JS: Tauri stops closing
+  // the window itself and the API wrapper finishes the job by calling
+  // `destroy()` after the handler runs (window.js, onCloseRequested). That
+  // makes `core:window:allow-destroy` load-bearing for closing the app at all.
+  // It was once removed for looking unused -- no code of ours calls destroy --
+  // and every close then died as an ACL denial with the window staying open.
   useEffect(() => {
     const pending = getCurrentWindow().onCloseRequested(() => {
       void flushPendingSettings()
