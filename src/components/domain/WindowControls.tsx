@@ -7,48 +7,25 @@ import { describeError, log } from '@/lib/log'
 const inTauri = '__TAURI_INTERNALS__' in window
 
 /**
- * How long to let a normal close finish before forcing it. Long enough for the
- * settings flush on `closeRequested` to complete on a slow disk, short enough
- * that a user who clicked X is not left looking at a window that ignored them.
- */
-const CLOSE_GRACE_MS = 1500
-
-/**
- * Close the window, and actually mean it.
+ * Close the window, reporting a refusal instead of hiding it.
  *
- * `close()` raises `closeRequested`, so anything listening on that event -- or
- * any failure inside it -- can leave the window open with nothing to show the
- * user why. This previously swallowed its rejection entirely, which read as a
- * dead button and left no trace in gitwyrm.log.
- *
- * So: log what went wrong, then fall back to `destroy()`, which skips the
- * close-requested path and tears the window down unconditionally. Losing the
- * settings flush that rides on `closeRequested` is a far better outcome than a
- * window the user cannot close.
+ * A `destroy()` fallback was tried here and removed: it needs
+ * `core:window:allow-destroy`, so on any host built before that permission was
+ * granted every click raised an unhandled "not allowed by ACL" rejection, which
+ * is a worse failure than the one it was meant to cover. Nothing in the app
+ * vetoes a close anyway -- the `closeRequested` listener in App.tsx only
+ * flushes settings and never calls `preventDefault` -- so `close()` is the whole
+ * mechanism, and a failure is worth surfacing rather than working around.
  */
 async function closeWindow() {
-  const win = getCurrentWindow()
   try {
-    await win.close()
+    await getCurrentWindow().close()
   } catch (e) {
-    log.error(`window close failed, forcing destroy: ${describeError(e)}`)
-    await force(win)
-    return
-  }
-  // `close()` resolving only means the request was delivered, not honoured: a
-  // listener that blocks the close leaves the window up with no rejection to
-  // catch. If we are still here after a moment, the request did not take.
-  window.setTimeout(() => {
-    log.error('window still open after close(); forcing destroy')
-    void force(win)
-  }, CLOSE_GRACE_MS)
-}
-
-async function force(win: ReturnType<typeof getCurrentWindow>) {
-  try {
-    await win.destroy()
-  } catch (e) {
-    log.error(`window destroy also failed: ${describeError(e)}`)
+    // Swallowing this is what made the button look dead with nothing in
+    // gitwyrm.log to explain it. Report it instead: the message names the cause
+    // (an ACL refusal, a listener that vetoed the close) far better than a
+    // guess made here could.
+    log.error(`window close failed: ${describeError(e)}`)
   }
 }
 
