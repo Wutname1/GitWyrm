@@ -156,6 +156,17 @@ export const CommitRow = memo(function CommitRow({
       <div
         data-tutorial-id={tutorialId}
         onClick={(e) => onSelect({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
+        // Right-clicking acts on the row under the cursor, so focus has to move
+        // there or the menu describes one commit while the drawer shows another.
+        // Radix opens on pointerdown, so this runs first and the menu is built
+        // from the new selection.
+        //
+        // Already-selected rows are skipped, which also protects a
+        // multi-selection: every row in one is `selected`, so right-clicking a
+        // group keeps it intact instead of collapsing to the clicked commit.
+        onContextMenu={() => {
+          if (!selected) onSelect({ shift: false, ctrl: false });
+        }}
         style={{
           height: rowHeight,
           gridTemplateColumns: gridTemplate(order, effectiveHidden, widths),

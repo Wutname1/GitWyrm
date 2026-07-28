@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { TabBar, VerticalTabRail } from '@/components/domain/TabBar'
 import { Toolbar } from '@/components/domain/Toolbar'
 import { MergeBanner } from '@/components/domain/MergeBanner'
@@ -29,6 +30,7 @@ import {
   useWorkspaceStore,
 } from '@/stores/workspaceStore'
 import { ResizeHandle } from '@/components/ui/ResizeHandle'
+import { cn } from '@/lib/utils'
 import { RepositoryPreviewCapture } from '@/components/domain/RepositoryPreviewCapture'
 
 function CenterView() {
@@ -55,10 +57,29 @@ function CommitDrawerSlot() {
   const selectedShas = useUiStore((s) => s.selectedShas)
   const drawerHeight = useWorkspaceStore((s) => s.drawerHeight)
   const setDrawerHeight = useWorkspaceStore((s) => s.setDrawerHeight)
+  const multiCount = selectedShas.length > 1 ? selectedShas.length : 0
+  // Shift/Ctrl-clicking builds the selection up in the graph, far from this
+  // panel, so the combined view can change without anything drawing the eye to
+  // it. Flash the edge whenever the group's size changes -- including each
+  // extra commit added, not just the jump from one to many.
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    if (multiCount === 0) return
+    setFlash(true)
+    const timer = window.setTimeout(() => setFlash(false), 1200)
+    return () => window.clearTimeout(timer)
+  }, [multiCount])
+
   if (!repo || view === 'settings') return null
   if (selectedSha == null || selectedSha === WIP_SHA) return null
   return (
-    <div className="relative flex-none" style={{ height: drawerHeight }}>
+    <div
+      className={cn(
+        'relative flex-none transition-[box-shadow,background-color] duration-500',
+        flash && 'bg-primary/5 shadow-[inset_0_2px_0_var(--gw-accent),inset_0_-1px_0_var(--gw-accent)]'
+      )}
+      style={{ height: drawerHeight }}
+    >
       {/* Handle on the drawer's top edge: dragging up makes it taller. */}
       <ResizeHandle
         ariaLabel="Resize commit details"

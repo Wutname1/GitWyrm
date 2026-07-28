@@ -451,34 +451,41 @@ function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function TabLayoutButtons() {
+function VerticalTabsButton() {
   const setTabLayout = useWorkspaceStore((state) => state.setTabLayout);
+  return (
+    <TooltipButton
+      onClick={() => {
+        setTabLayout("vertical");
+        toast.success("Repository tabs moved to the left side");
+      }}
+      className="flex items-center px-2 text-sub hover:text-foreground"
+      tooltip="Use vertical tabs"
+    >
+      <PanelLeft size={15} strokeWidth={1.9} />
+    </TooltipButton>
+  );
+}
+
+/**
+ * Lives in the app bar next to the window buttons in every tab layout, so the
+ * gear never moves when tabs do.
+ */
+function SettingsButton() {
   const showSettings = useUiStore((state) => state.showSettings);
   const showGraph = useUiStore((state) => state.showGraph);
   const inSettings = useUiStore((state) => state.centerView === "settings");
   return (
-    <>
-      <TooltipButton
-        onClick={() => {
-          setTabLayout("vertical");
-          toast.success("Repository tabs moved to the left side");
-        }}
-        className="flex items-center px-2 text-sub hover:text-foreground"
-        tooltip="Use vertical tabs"
-      >
-        <PanelLeft size={15} strokeWidth={1.9} />
-      </TooltipButton>
-      <TooltipButton
-        onClick={() => (inSettings ? showGraph() : showSettings())}
-        className={cn(
-          "flex items-center px-2 hover:text-foreground",
-          inSettings ? "text-accent-text" : "text-sub",
-        )}
-        tooltip={inSettings ? "Close settings" : "Settings"}
-      >
-        <Settings size={15} strokeWidth={1.9} />
-      </TooltipButton>
-    </>
+    <TooltipButton
+      onClick={() => (inSettings ? showGraph() : showSettings())}
+      className={cn(
+        "flex items-center px-2 hover:text-foreground",
+        inSettings ? "text-accent-text" : "text-sub",
+      )}
+      tooltip={inSettings ? "Close settings" : "Settings"}
+    >
+      <Settings size={15} strokeWidth={1.9} />
+    </TooltipButton>
   );
 }
 
@@ -487,7 +494,7 @@ export function TabBar() {
   const horizontalTabRow = useWorkspaceStore((state) => state.horizontalTabRow);
 
   // Vertical tabs, or horizontal tabs moved to their own row below: either way
-  // the app bar itself holds only the logo and the window buttons.
+  // the app bar itself holds only the logo, the gear, and the window buttons.
   if (tabLayout === "vertical" || horizontalTabRow) {
     return (
       <>
@@ -501,7 +508,8 @@ export function TabBar() {
             <BrandMark />
           </div>
           <div data-tauri-drag-region className="min-w-0 flex-1" />
-          {tabLayout === "horizontal" && <TabLayoutButtons />}
+          {tabLayout === "horizontal" && <VerticalTabsButton />}
+          <SettingsButton />
           <WindowControls />
         </div>
         {tabLayout === "horizontal" && (
@@ -532,7 +540,8 @@ export function TabBar() {
       <RecentRepositories />
       <OpenRepositoryButton />
       <div data-tauri-drag-region className="min-w-3 flex-none" />
-      <TabLayoutButtons />
+      <VerticalTabsButton />
+      <SettingsButton />
       <WindowControls />
     </div>
   );
