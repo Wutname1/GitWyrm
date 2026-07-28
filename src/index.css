@@ -850,3 +850,124 @@ body.wyrm-dragging .gw-refs-cell {
       0 0 10px 2px color-mix(in srgb, var(--gw-accent) 45%, transparent);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Tutorial spotlight
+
+   The dim layer is a single SVG with a rounded rect knocked out of it, so the
+   hole has genuinely soft corners rather than four abutting divs. Pointer
+   events are off on the scrim itself and the cutout is a separate transparent
+   element, which is what lets clicks reach the real UI underneath while
+   everything outside stays inert.
+   --------------------------------------------------------------------------- */
+
+@keyframes wyrm-tutorial-ring {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px var(--gw-accent),
+      0 0 0 5px color-mix(in srgb, var(--gw-accent) 40%, transparent),
+      0 0 18px 4px color-mix(in srgb, var(--gw-accent) 45%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px var(--gw-accent),
+      0 0 0 9px color-mix(in srgb, var(--gw-accent) 0%, transparent),
+      0 0 8px 0 color-mix(in srgb, var(--gw-accent) 20%, transparent);
+  }
+}
+
+.wyrm-tutorial-ring {
+  animation: wyrm-tutorial-ring 1.6s ease-in-out infinite;
+}
+
+/* The success beat: one quick green flare when the gesture is detected, so the
+   lesson visibly acknowledges the action before the panel moves on. */
+@keyframes wyrm-tutorial-hit {
+  0% {
+    box-shadow:
+      0 0 0 2px var(--gw-green),
+      0 0 0 0 color-mix(in srgb, var(--gw-green) 70%, transparent);
+  }
+  100% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--gw-green) 0%, transparent),
+      0 0 0 16px color-mix(in srgb, var(--gw-green) 0%, transparent);
+  }
+}
+
+.wyrm-tutorial-hit {
+  animation: wyrm-tutorial-hit 0.5s ease-out forwards;
+}
+
+/* Ghost cursor. Travels source -> target for a drag lesson, and pulses in place
+   for a click lesson. The pointer glyph and the chip it tows are separate
+   elements sharing one animation so they stay glued together. */
+@keyframes wyrm-tutorial-travel {
+  0%,
+  8% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  14% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  70% {
+    transform: translate(var(--gw-travel-x), var(--gw-travel-y));
+    opacity: 1;
+  }
+  84% {
+    transform: translate(var(--gw-travel-x), var(--gw-travel-y));
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--gw-travel-x), var(--gw-travel-y));
+    opacity: 0;
+  }
+}
+
+.wyrm-tutorial-travel {
+  animation: wyrm-tutorial-travel 2.8s ease-in-out infinite;
+}
+
+@keyframes wyrm-tutorial-tap {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  20%,
+  40% {
+    transform: scale(0.82);
+    opacity: 1;
+  }
+  30% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.wyrm-tutorial-tap {
+  animation: wyrm-tutorial-tap 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wyrm-tutorial-ring,
+  .wyrm-tutorial-hit,
+  .wyrm-tutorial-travel,
+  .wyrm-tutorial-tap {
+    animation: none;
+  }
+  /* Keep a static ring so the spotlight still reads as "look here". */
+  .wyrm-tutorial-ring {
+    box-shadow:
+      0 0 0 2px var(--gw-accent),
+      0 0 14px 3px color-mix(in srgb, var(--gw-accent) 45%, transparent);
+  }
+  /* The ghost is pure decoration; with motion off it has nothing to say. */
+  .wyrm-tutorial-travel,
+  .wyrm-tutorial-tap {
+    display: none;
+  }
+}

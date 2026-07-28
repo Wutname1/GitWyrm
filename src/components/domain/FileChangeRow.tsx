@@ -43,6 +43,8 @@ interface FileChangeRowProps {
   menuSha?: string
   /** Marks the row as the file currently open in the diff view. */
   active?: boolean
+  /** Marks this row as a tutorial spotlight target. */
+  tutorialId?: string
 }
 
 export function FileChangeRow({
@@ -56,10 +58,12 @@ export function FileChangeRow({
   menuStaged,
   menuSha,
   active,
+  tutorialId,
 }: FileChangeRowProps) {
   const sub = file.submodule
   const row = (
     <div
+      data-tutorial-id={tutorialId}
       onClick={onOpen}
       role={treeDepth == null ? undefined : 'treeitem'}
       aria-level={treeDepth == null ? undefined : treeDepth + 1}

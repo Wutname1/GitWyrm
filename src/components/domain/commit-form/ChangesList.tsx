@@ -24,6 +24,7 @@ import {
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { plural } from "@/lib/gitDisplay";
 import { cn } from "@/lib/utils";
+import { tutorialFileId } from "@/lib/tutorialLessons";
 import { FileChangeRow, StageToggle } from "../FileChangeRow";
 import { GenerateCommitsDialog } from "./GenerateCommitsDialog";
 import { FileChangeTree } from "./FileChangeTree";
@@ -251,6 +252,7 @@ export function ChangesList() {
                       displayPath={name}
                       treeDepth={depth}
                       menuStaged={false}
+                      tutorialId={tutorialFileId(f.path)}
                       onOpen={() =>
                         openDiff({ path: f.path, source: { kind: "unstaged" } })
                       }

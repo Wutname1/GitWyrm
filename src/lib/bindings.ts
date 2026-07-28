@@ -587,6 +587,36 @@ async gitInit(path: string, starter: RepositoryStarter, addReadme: boolean, crea
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Build the practice repository from scratch.
+ * 
+ * Always starts clean: a half-finished repo from an interrupted run would put
+ * the lessons in a state they do not expect, and there is nothing here worth
+ * preserving between runs.
+ */
+async createTutorialRepo() : Promise<Result<TutorialRepo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_tutorial_repo") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete the practice repository.
+ * 
+ * Best-effort on purpose: the caller has already closed the tab, and a file
+ * still held open by a watcher should not surface an error for a folder the
+ * user never knew existed. A later run recreates it from scratch anyway.
+ */
+async discardTutorialRepo() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("discard_tutorial_repo") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getRepoIcon(repoPath: string) : Promise<Result<RepoIcon | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_repo_icon", { repoPath }) };
@@ -2830,6 +2860,16 @@ export type ToolSource =
  * Not found anywhere.
  */
 "missing"
+export type TutorialRepo = { 
+/**
+ * Working directory to open as a tab.
+ */
+path: string; 
+/**
+ * The branch that has diverged from `main`, so the UI can point lessons at
+ * it by name instead of guessing.
+ */
+feature_branch: string }
 /**
  * A local tag the given remote does not have, along with whether the remote
  * already holds the commit it points at. Tags on commits the remote lacks

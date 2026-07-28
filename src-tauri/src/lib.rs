@@ -78,6 +78,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::profiles::list_signing_keys,
     commands::profiles::get_effective_identity,
     commands::repo::git_init,
+    commands::tutorial::create_tutorial_repo,
+    commands::tutorial::discard_tutorial_repo,
     commands::repo_icon::get_repo_icon,
     commands::repo_icon::get_cached_repo_icons,
     commands::repo_icon::find_repo_icons,

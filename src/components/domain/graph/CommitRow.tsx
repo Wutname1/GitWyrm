@@ -39,6 +39,8 @@ interface CommitRowProps {
   /** Faded out because a commit search is active and this row doesn't match. */
   dimmed?: boolean;
   style?: React.CSSProperties;
+  /** Marks this row as a tutorial spotlight target. */
+  tutorialId?: string;
 }
 
 export const CommitRow = memo(function CommitRow({
@@ -49,6 +51,7 @@ export const CommitRow = memo(function CommitRow({
   rowHeight,
   dimmed,
   style,
+  tutorialId,
 }: CommitRowProps) {
   const order = useWorkspaceStore((s) => s.columnOrder);
   const hidden = useWorkspaceStore((s) => s.hiddenColumns);
@@ -151,6 +154,7 @@ export const CommitRow = memo(function CommitRow({
 
   const row = (
       <div
+        data-tutorial-id={tutorialId}
         onClick={(e) => onSelect({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
         style={{
           height: rowHeight,

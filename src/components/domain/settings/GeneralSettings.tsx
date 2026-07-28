@@ -4,6 +4,10 @@ import {
   type CommitButtonMode,
   type TabLayout,
 } from '@/stores/workspaceStore'
+import { Button } from '@/components/ui/button'
+import { commands } from '@/lib/bindings'
+import { unwrap } from '@/lib/queryKeys'
+import { useTutorialStore } from '@/stores/tutorialStore'
 import { FolderSetting, SettingRow } from './SettingRow'
 import { IdentitySetting } from './IdentitySetting'
 import { EditorSetting } from './EditorSetting'
@@ -140,7 +144,40 @@ export function GeneralSettings() {
           Enable worktrees
         </label>
       </SettingRow>
+      <SettingRow
+        label="Hands-on tour"
+        searchId="tutorial"
+        hint="Builds a small practice repository and walks you through the gestures that are quick but easy to miss: double-click, drag, and right-click. Deleted when you finish."
+      >
+        <ReplayTutorialButton />
+      </SettingRow>
       <ResetToDefaults group="general" />
     </div>
+  )
+}
+
+/**
+ * Re-runs the practice tour from Settings.
+ *
+ * Worth having because the tour is offered exactly once, at the end of
+ * onboarding, which is the moment a new user is least able to judge whether
+ * they want it. This is the second chance.
+ */
+function ReplayTutorialButton() {
+  const starting = useTutorialStore((s) => s.starting)
+  const active = useTutorialStore((s) => s.active)
+
+  const run = () => {
+    void useTutorialStore.getState().start(async (path) => {
+      const repo = unwrap(await commands.openRepo(path))
+      useWorkspaceStore.getState().addRepo(repo)
+      return repo.id
+    })
+  }
+
+  return (
+    <Button size="sm" variant="secondary" onClick={run} disabled={starting || active}>
+      {starting ? 'Setting up...' : 'Start the tour'}
+    </Button>
   )
 }

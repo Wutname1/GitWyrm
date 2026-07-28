@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { FolderGit2, GitMerge, Loader2, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
+import { FolderGit2, GitMerge, Hand, Loader2, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -7,7 +7,9 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { commands, type SigningMethod } from '@/lib/bindings'
 import { useGitIdentity } from '@/lib/useGitIdentity'
+import { unwrap } from '@/lib/queryKeys'
 import { useUiStore } from '@/stores/uiStore'
+import { useTutorialStore } from '@/stores/tutorialStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 interface Slide {
@@ -75,14 +77,31 @@ export function OnboardingModal() {
 
   const slides = TOUR_SLIDES
   const identityStepIndex = needsIdentity ? slides.length : -1
-  const lastIndex = needsIdentity ? slides.length : slides.length - 1
+  // The hands-on offer always comes last, after the identity is settled: it
+  // opens a practice repo, and doing that before git knows who the user is
+  // would leave them unable to commit in the very repo built for practising.
+  const practiceStepIndex = identityStepIndex >= 0 ? identityStepIndex + 1 : slides.length
+  const lastIndex = practiceStepIndex
   const onIdentityStep = step === identityStepIndex
+  const onPracticeStep = step === practiceStepIndex
 
   const finish = () => {
     setStep(0)
     markOnboardingSeen()
     closeModal()
     showRepoPicker()
+  }
+
+  /** Close the wizard and hand off to the tutorial instead of the repo picker. */
+  const startPractice = () => {
+    setStep(0)
+    markOnboardingSeen()
+    closeModal()
+    void useTutorialStore.getState().start(async (path) => {
+      const repo = unwrap(await commands.openRepo(path))
+      useWorkspaceStore.getState().addRepo(repo)
+      return repo.id
+    })
   }
 
   const skip = () => {
@@ -93,13 +112,15 @@ export function OnboardingModal() {
     closeModal()
   }
 
-  const slide = onIdentityStep ? null : slides[step]
+  const slide = onIdentityStep || onPracticeStep ? null : slides[step]
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && skip()}>
       <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
         {onIdentityStep ? (
-          <IdentityStep onDone={finish} />
+          <IdentityStep onDone={() => setStep(practiceStepIndex)} />
+        ) : onPracticeStep ? (
+          <PracticeStep onAccept={startPractice} onDecline={finish} />
         ) : (
           <div className="flex flex-col items-center px-6 pb-5 pt-8 text-center">
             <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-soft text-accent-text">
@@ -136,21 +157,73 @@ export function OnboardingModal() {
                 Back
               </Button>
             )}
-            {/* The identity step owns its own primary button, because it saves. */}
-            {!onIdentityStep &&
-              (step === lastIndex ? (
-                <Button size="sm" onClick={finish}>
-                  Open a repository
-                </Button>
-              ) : (
-                <Button size="sm" onClick={() => setStep((s) => s + 1)}>
-                  Next
-                </Button>
-              ))}
+            {/* The identity and practice steps own their primary buttons: one
+                saves, the other picks between two different destinations. */}
+            {!onIdentityStep && !onPracticeStep && (
+              <Button size="sm" onClick={() => setStep((s) => s + 1)}>
+                Next
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * The opt-in for the hands-on tour.
+ *
+ * Offered rather than started automatically, and phrased so declining is an
+ * equal choice: someone who already knows git does not need five lessons on
+ * gestures, and forcing them through it is a worse first impression than not
+ * offering at all. The practice repo is named as throwaway right here, because
+ * "we made you a repository" is alarming if you do not know it is disposable.
+ */
+function PracticeStep({
+  onAccept,
+  onDecline,
+}: {
+  onAccept: () => void
+  onDecline: () => void
+}) {
+  const starting = useTutorialStore((s) => s.starting)
+
+  return (
+    <div className="flex flex-col items-center px-6 pb-5 pt-8 text-center">
+      <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-soft text-accent-text">
+        <Hand size={22} strokeWidth={1.8} />
+      </div>
+      <DialogTitle className="text-base font-semibold text-foreground">
+        Want to try the hidden shortcuts?
+      </DialogTitle>
+      <p className="mt-2 max-w-sm text-[0.78125rem] leading-relaxed text-sub">
+        Some of the fastest things in GitWyrm are gestures: double-click, drag,
+        right-click. We can set up a small practice repository and walk you
+        through five of them, about two minutes. Nothing touches your own code,
+        and it is deleted when you finish.
+      </p>
+
+      <Button size="sm" className="mt-5 h-9 w-full" onClick={onAccept} disabled={starting}>
+        {starting ? (
+          <>
+            <Loader2 size={14} className="animate-spin" />
+            Setting up practice...
+          </>
+        ) : (
+          'Yes, show me'
+        )}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mt-1.5 h-8 w-full text-sub"
+        onClick={onDecline}
+        disabled={starting}
+      >
+        No thanks, open a repository
+      </Button>
+    </div>
   )
 }
 

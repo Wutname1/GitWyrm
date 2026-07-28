@@ -7,6 +7,8 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { WorkspaceLayout } from '@/layouts/WorkspaceLayout'
 import { OnboardingModal } from '@/components/modals/OnboardingModal'
+import { TutorialHost } from '@/components/tutorial/TutorialHost'
+import { TutorialOutcomeDialog } from '@/components/tutorial/TutorialOutcomeDialog'
 import { DirectionModal } from '@/components/modals/DirectionModal'
 import { RemoteSyncModal } from '@/components/modals/RemoteSyncModal'
 import { PushChoiceModal } from '@/components/modals/PushChoiceModal'
@@ -350,6 +352,10 @@ function AppInner() {
       <WorkspaceLayout />
       <DragScrim />
       <OnboardingModal />
+      {/* Above the workspace but below the modals: a lesson dims the app, and
+          any dialog the lesson opens (the sync panel) must still sit on top. */}
+      <TutorialHost />
+      <TutorialOutcomeDialog />
       <DirectionModal />
       <RemoteSyncModal />
       <PushChoiceModal />

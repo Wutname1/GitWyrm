@@ -20,6 +20,7 @@ import { InProgressModal } from '@/components/modals/InProgressModal'
 import { classifyError } from '@/lib/errorClass'
 import { RenameBranchDialog } from '@/components/modals/RenameBranchDialog'
 import { branchSync } from '@/lib/branchActions'
+import { tutorialBranchId } from '@/lib/tutorialLessons'
 import { openWebUrl } from '@/lib/remoteWeb'
 import { BranchMenu } from '@/components/domain/branch/BranchMenu'
 import { StashContextMenu } from '@/components/domain/graph/StashRow'
@@ -372,6 +373,7 @@ export function LeftPanel() {
         disabled={isItemDisabled(section, item)}
         pendingLabel={getPendingLabel(section, item)}
         renderMenu={ctx.renderMenu}
+        tutorialId={tutorialBranchId(item.name)}
       />
     )
   }

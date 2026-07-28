@@ -18,6 +18,8 @@ interface BranchSidebarItemProps {
   hoverAction?: { icon: ReactNode; title: string; onClick: () => void }
   /** Wraps the row in its right-click menu. */
   renderMenu?: (row: ReactNode) => ReactNode
+  /** Marks this row as a tutorial spotlight target. */
+  tutorialId?: string
 }
 
 /**
@@ -38,6 +40,7 @@ export function BranchSidebarItem({
   pendingLabel,
   hoverAction,
   renderMenu,
+  tutorialId,
 }: BranchSidebarItemProps) {
   // The checked-out branch's ref is `head`; every other local branch is `branch`.
   const self: DraggedRef = { name: item.name, type: item.name === currentBranch ? 'head' : 'branch' }
@@ -46,6 +49,7 @@ export function BranchSidebarItem({
   const row = (
     <SectionItemRow
       {...dnd.props}
+      data-tutorial-id={tutorialId}
       section={section}
       item={item}
       isCurrent={isCurrent}
