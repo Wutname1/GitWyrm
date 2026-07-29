@@ -504,9 +504,30 @@ pub async fn rename_branch(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// Reset the current branch to a commit. Hard reset discards uncommitted work,
-/// so it is refused over a dirty tree. Returns where the branch pointed before
-/// the reset, so the caller can offer an undo. Soft/Mixed keep the working tree.
+/// Set aside any uncommitted tracked changes in a stash so a ref move can go
+/// through instead of failing. The stash is kept in the list -- nothing is
+/// lost, and the caller reports it via [`RefMove::stashed`]. Returns true when
+/// a stash was created.
+fn stash_changes_aside(repo: &mut git2::Repository, why: &str) -> Result<bool, AppError> {
+  if !refs::tracked_changes_present(repo)? {
+    return Ok(false);
+  }
+  let signature = repo.signature()?;
+  match repo.stash_save(&signature, &format!("gitwyrm: changes set aside before {why}"), None) {
+    Ok(_) => Ok(true),
+    // Nothing git can stash (e.g. only a submodule pointer move). The move
+    // itself won't touch it, so proceed rather than error.
+    Err(e) if e.class() == git2::ErrorClass::Stash && e.code() == git2::ErrorCode::NotFound => {
+      Ok(false)
+    }
+    Err(e) => Err(e.into()),
+  }
+}
+
+/// Reset the current branch to a commit. A hard reset over a dirty tree sets
+/// the uncommitted work aside in a stash first, so the rewind always goes
+/// through and nothing is silently lost. Returns where the branch pointed
+/// before the reset, so the caller can offer an undo.
 #[tauri::command]
 #[specta::specta]
 pub async fn reset_current(
@@ -517,10 +538,9 @@ pub async fn reset_current(
 ) -> Result<RefMove, AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
+    let mut repo = open.repo.lock().unwrap();
     let target_oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
-    let commit = repo.find_commit(target_oid)?;
-    reset_current_to_commit(&repo, &commit, mode)
+    reset_current_to_commit(&mut repo, target_oid, mode)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
@@ -529,8 +549,8 @@ pub async fn reset_current(
 /// Reset the current branch to another ref (a branch name or any revspec),
 /// resolving it to its tip commit. This backs "reset this branch to that
 /// branch": while `<current>` is checked out, right-clicking or dropping onto
-/// `<other>` rewinds `<current>` to wherever `<other>` points. Same discard
-/// rules as [`reset_current`] - a hard reset is refused over a dirty tree.
+/// `<other>` rewinds `<current>` to wherever `<other>` points. Same stash-aside
+/// rules as [`reset_current`].
 #[tauri::command]
 #[specta::specta]
 pub async fn reset_current_to_ref(
@@ -541,30 +561,30 @@ pub async fn reset_current_to_ref(
 ) -> Result<RefMove, AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    let object = repo.revparse_single(target_ref.trim())?;
-    let commit = object.peel_to_commit()?;
-    reset_current_to_commit(&repo, &commit, mode)
+    let mut repo = open.repo.lock().unwrap();
+    let target_oid = repo.revparse_single(target_ref.trim())?.peel_to_commit()?.id();
+    reset_current_to_commit(&mut repo, target_oid, mode)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Shared core for the reset commands: rewind the checked-out branch to a
-/// resolved commit and report where it pointed before. Refuses a hard reset
-/// over a dirty tree so committed-but-not-yet-saved work is never silently lost.
+/// resolved commit and report where it pointed before. A hard reset over a
+/// dirty tree stashes the uncommitted work first instead of refusing, so
+/// not-yet-saved work is never silently lost and the move never errors.
 fn reset_current_to_commit(
-  repo: &git2::Repository,
-  commit: &git2::Commit,
+  repo: &mut git2::Repository,
+  target_oid: Oid,
   mode: ResetMode,
 ) -> Result<RefMove, AppError> {
   let branch = current_branch_name(repo)?;
 
-  if mode == ResetMode::Hard && refs::tracked_changes_present(repo)? {
-    return Err(AppError::Other(
-      "working tree has changes; a hard reset would discard them - commit or stash first".into(),
-    ));
-  }
+  let stashed = if mode == ResetMode::Hard {
+    stash_changes_aside(repo, &format!("rewinding {branch}"))?
+  } else {
+    false
+  };
 
   let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
 
@@ -573,17 +593,19 @@ fn reset_current_to_commit(
     ResetMode::Mixed => ResetType::Mixed,
     ResetMode::Hard => ResetType::Hard,
   };
+  let commit = repo.find_commit(target_oid)?;
   let mut checkout = CheckoutBuilder::new();
   checkout.force();
   let checkout = if mode == ResetMode::Hard { Some(&mut checkout) } else { None };
   repo.reset(commit.as_object(), kind, checkout)?;
 
-  Ok(RefMove { branch, previous_sha })
+  Ok(RefMove { branch, previous_sha, stashed })
 }
 
 /// Move the current branch ref to a commit without touching the working tree
-/// (like `git branch -f <current> <sha>` re-pointing HEAD's branch). Refused
-/// over a dirty tree so the tree never silently diverges from the new tip.
+/// (like `git branch -f <current> <sha>` re-pointing HEAD's branch). A dirty
+/// tree no longer blocks the move: the changes are set aside in a stash first
+/// so the tree never silently diverges from the new tip.
 #[tauri::command]
 #[specta::specta]
 pub async fn move_current_branch(
@@ -593,14 +615,10 @@ pub async fn move_current_branch(
 ) -> Result<RefMove, AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
+    let mut repo = open.repo.lock().unwrap();
     let branch = current_branch_name(&repo)?;
 
-    if refs::tracked_changes_present(&repo)? {
-      return Err(AppError::Other(
-        "working tree has changes; commit or stash before moving the branch".into(),
-      ));
-    }
+    let stashed = stash_changes_aside(&mut repo, &format!("moving {branch}"))?;
 
     let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
     let target_oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
@@ -609,7 +627,7 @@ pub async fn move_current_branch(
     let target = repo.find_object(target_oid, None)?;
     repo.reset(&target, ResetType::Soft, None)?;
 
-    Ok(RefMove { branch, previous_sha })
+    Ok(RefMove { branch, previous_sha, stashed })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
@@ -704,7 +722,7 @@ pub async fn fast_forward_branch(
       repo.reference(&refname, target_oid, true, "fast-forward")?;
     }
 
-    Ok(RefMove { branch: branch.trim().to_string(), previous_sha })
+    Ok(RefMove { branch: branch.trim().to_string(), previous_sha, stashed: false })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
@@ -934,7 +952,7 @@ pub async fn drop_commit(
     // Point the branch at the rebuilt tip and sync the working tree.
     repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
 
-    Ok(RefMove { branch, previous_sha })
+    Ok(RefMove { branch, previous_sha, stashed: false })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
@@ -1041,4 +1059,81 @@ fn commit_on_any_remote(repo: &git2::Repository, oid: Oid) -> Result<bool, AppEr
     }
   }
   Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+  use std::fs;
+
+  use git2::{Repository, Signature};
+
+  use super::*;
+
+  fn commit_file(repo: &Repository, name: &str, contents: &str, message: &str) -> Oid {
+    let workdir = repo.workdir().expect("workdir");
+    fs::write(workdir.join(name), contents).expect("write fixture");
+    let mut index = repo.index().expect("index");
+    index.add_path(std::path::Path::new(name)).expect("add fixture");
+    index.write().expect("write index");
+    let tree_id = index.write_tree().expect("tree id");
+    let tree = repo.find_tree(tree_id).expect("tree");
+    let signature = Signature::now("Branch Test", "branch@example.com").expect("signature");
+    let parents = repo
+      .head()
+      .ok()
+      .and_then(|head| head.peel_to_commit().ok())
+      .into_iter()
+      .collect::<Vec<_>>();
+    let parent_refs = parents.iter().collect::<Vec<_>>();
+    repo
+      .commit(Some("HEAD"), &signature, &signature, message, &tree, &parent_refs)
+      .expect("commit")
+  }
+
+  fn test_repo() -> (tempfile::TempDir, Repository) {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    let mut config = repo.config().expect("config");
+    config.set_str("user.name", "Branch Test").expect("name");
+    config.set_str("user.email", "branch@example.com").expect("email");
+    (dir, repo)
+  }
+
+  #[test]
+  fn hard_reset_over_dirty_tree_stashes_and_moves() {
+    let (dir, mut repo) = test_repo();
+    let base = commit_file(&repo, "a.txt", "a", "base");
+    commit_file(&repo, "a.txt", "b", "second");
+    fs::write(dir.path().join("a.txt"), "uncommitted work").expect("dirty tree");
+
+    let result = reset_current_to_commit(&mut repo, base, ResetMode::Hard).expect("reset");
+
+    assert!(result.stashed, "dirty tree must be set aside, not refused");
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id(), base);
+    assert_eq!(
+      fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+      "a",
+      "tree must land clean at the target commit"
+    );
+    let mut stashes = 0;
+    repo
+      .stash_foreach(|_, _, _| {
+        stashes += 1;
+        true
+      })
+      .expect("stash list");
+    assert_eq!(stashes, 1, "the uncommitted work must be recoverable");
+  }
+
+  #[test]
+  fn hard_reset_over_clean_tree_reports_no_stash() {
+    let (_dir, mut repo) = test_repo();
+    let base = commit_file(&repo, "a.txt", "a", "base");
+    commit_file(&repo, "a.txt", "b", "second");
+
+    let result = reset_current_to_commit(&mut repo, base, ResetMode::Hard).expect("reset");
+
+    assert!(!result.stashed, "a clean tree needs no stash");
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id(), base);
+  }
 }

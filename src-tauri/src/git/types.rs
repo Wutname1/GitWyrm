@@ -428,6 +428,9 @@ pub struct RefMove {
   pub branch: String,
   /// Full sha the branch pointed at before the move.
   pub previous_sha: String,
+  /// Uncommitted changes were set aside in a stash so the move could proceed.
+  /// The stash is kept, so the frontend must tell the user where the work went.
+  pub stashed: bool,
 }
 
 /// Current in-progress operation state of the repo (merge or cherry-pick).

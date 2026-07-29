@@ -222,7 +222,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
               <ContextMenuItem variant="destructive" onSelect={() => runReset('Hard')}>
                 <div className="flex flex-col">
                   <span>Undo and erase the later changes</span>
-                  <span className="text-2xs opacity-80">Can't be undone easily</span>
+                  <span className="text-2xs opacity-80">Uncommitted work is saved to a stash</span>
                 </div>
               </ContextMenuItem>
             </ContextMenuSubContent>
@@ -309,9 +309,10 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
         description={
           <>
             This rewinds <span className="font-mono text-foreground">{branchName}</span> to{' '}
-            <span className="font-mono text-foreground">{commit.short_sha}</span> and{' '}
-            <span className="text-removed">erases any work you haven't committed</span>. The commits
-            made after this point will also be removed. This is hard to undo.
+            <span className="font-mono text-foreground">{commit.short_sha}</span>.{' '}
+            <span className="text-removed">The commits made after this point are removed</span> from
+            the branch. Any work you haven't committed is saved to a stash first, so nothing is
+            lost. You can undo this right after.
           </>
         }
         confirmLabel="Erase and rewind"
