@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   Brain,
+  Bug,
   Check,
   CircleAlert,
+  Copy,
   FileSearch,
   GitCommitHorizontal,
   Layers3,
@@ -15,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import logoUrl from "@/assets/logo.png";
+import { ReportProblemModal } from "@/components/modals/ReportProblemModal";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +30,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useAiConfigured, useAiMutations } from "@/hooks/useAi";
 import type { AiCreatedCommit } from "@/lib/bindings";
+import { copyToClipboard } from "@/lib/clipboard";
 import { describeError, log } from "@/lib/log";
 import { useActiveRepo, useWorkspaceStore } from "@/stores/workspaceStore";
 
@@ -72,6 +76,45 @@ function shortSha(sha: string) {
   return sha.slice(0, 7);
 }
 
+/**
+ * Describe a failed run in the form a maintainer needs.
+ *
+ * The error message alone rarely explains an AI failure - which provider and
+ * model answered, and how far the run got before it stopped, are what separate
+ * "this model cannot follow the format" from "this repo broke the scan". So the
+ * whole activity trail rides along, not just the last line.
+ */
+function failureReport(
+  error: string,
+  provider: string | null,
+  model: string | null,
+  count: number,
+  fileLabel: string,
+  instructions: string,
+  activity: AiCommitProgressPayload[],
+): string {
+  const lines = [
+    'AI commit generation failed.',
+    '',
+    `- Provider: ${provider ?? 'unknown'}`,
+    `- Model: ${model ?? 'unknown'}`,
+    `- Commits requested: ${count}`,
+    `- Changes: ${fileLabel}`,
+    `- Special instructions: ${instructions.trim() || '(none)'}`,
+    '',
+    `Error: ${error}`,
+  ];
+
+  if (activity.length > 0) {
+    lines.push('', 'Steps:');
+    for (const item of activity) {
+      lines.push(`- [${item.kind}] ${item.message} - ${item.detail}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 export function GenerateCommitsDialog({
   changedFiles,
   hasConflicts,
@@ -100,6 +143,7 @@ export function GenerateCommitsDialog({
   const [activity, setActivity] = useState<AiCommitProgressPayload[]>([]);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [reporting, setReporting] = useState(false);
   const activityRef = useRef<HTMLDivElement>(null);
   const pending = ai.generateCommits.isPending;
   const working = pending && error == null;
@@ -147,6 +191,22 @@ export function GenerateCommitsDialog({
   const fileLabel = useMemo(
     () => `${openedWith} changed file${openedWith === 1 ? "" : "s"}`,
     [openedWith],
+  );
+
+  const report = useMemo(
+    () =>
+      error == null
+        ? ""
+        : failureReport(
+            error,
+            aiProvider,
+            aiModel,
+            count,
+            fileLabel,
+            instructions,
+            activity,
+          ),
+    [error, aiProvider, aiModel, count, fileLabel, instructions, activity],
   );
 
   // Once open, the dialog outlives the conditions that offered it.
@@ -448,18 +508,39 @@ export function GenerateCommitsDialog({
               Done
             </Button>
           ) : error ? (
-            <Button
-              size="sm"
-              onClick={() => {
-                ai.generateCommits.reset();
-                setError(null);
-                setActivity([]);
-                setStartedAt(null);
-                setElapsedSeconds(0);
-              }}
-            >
-              Review and try again
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  void copyToClipboard(report, "Error details copied")
+                }
+              >
+                <Copy />
+                Copy details
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setReporting(true)}
+              >
+                <Bug />
+                Report a problem
+              </Button>
+              <div className="flex-1" />
+              <Button
+                size="sm"
+                onClick={() => {
+                  ai.generateCommits.reset();
+                  setError(null);
+                  setActivity([]);
+                  setStartedAt(null);
+                  setElapsedSeconds(0);
+                }}
+              >
+                Review and try again
+              </Button>
+            </>
           ) : (
             <>
               <Button
@@ -482,6 +563,14 @@ export function GenerateCommitsDialog({
           )}
         </DialogFooter>
       </DialogContent>
+
+      {/* Prefilled with the run details so reporting is one click, not a
+          retyped account of a failure the user cannot see the inside of. */}
+      <ReportProblemModal
+        open={reporting}
+        onClose={() => setReporting(false)}
+        initialDescription={report}
+      />
     </Dialog>
   );
 }
