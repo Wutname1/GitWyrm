@@ -4,6 +4,7 @@
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
+use git2::BranchType;
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Emitter, State};
@@ -654,6 +655,52 @@ pub async fn delete_remote_tag(
       "push",
       &["push", "--progress", "--delete", &remote, &refspec],
     )?;
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Delete a branch from a remote. `name` is the branch as it exists on the
+/// remote (`feature/x`), without the remote prefix. The local branch of the
+/// same name, if any, is left alone -- callers that want both gone delete the
+/// local copy separately.
+///
+/// The stale remote-tracking ref is pruned so the branch stops showing in the
+/// sidebar and graph immediately; without this the ref lingers until the next
+/// fetch and the row looks undeleted.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_remote_branch(
+  app: AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  name: String,
+  remote: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    let remote = { resolve_remote(&open.repo.lock().unwrap(), &remote)? };
+    let name = name.trim().to_string();
+    if name.is_empty() {
+      return Err(AppError::Other("no branch name given".into()));
+    }
+    let refspec = format!("refs/heads/{name}");
+    run_streaming(
+      &app,
+      &repo_id,
+      Some(&path),
+      "push",
+      &["push", "--progress", "--delete", &remote, &refspec],
+    )?;
+
+    // The push succeeded, so the branch is gone from the server. Dropping the
+    // tracking ref is bookkeeping: report success even if it is already absent.
+    let repo = open.repo.lock().unwrap();
+    if let Ok(mut branch) = repo.find_branch(&format!("{remote}/{name}"), BranchType::Remote) {
+      let _ = branch.delete();
+    }
     Ok(())
   })
   .await

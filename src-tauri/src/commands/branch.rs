@@ -321,8 +321,14 @@ pub async fn create_branch(
         .peel_to_commit()
         .map_err(|_| AppError::Other("repository has no commits yet".into()))?
     } else {
-      let oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
-      repo.find_commit(oid)?
+      // revparse, not `Oid::from_str`: callers pass whatever sha they have on
+      // hand, and several carry the abbreviated form (remote branch tips are
+      // stored 7 chars wide). revparse resolves both, and a ref name too.
+      repo
+        .revparse_single(sha.trim())
+        .map_err(|_| AppError::Other(format!("could not find commit {}", sha.trim())))?
+        .peel_to_commit()
+        .map_err(|_| AppError::Other(format!("{} is not a commit", sha.trim())))?
     };
     repo.branch(name, &target, false)?;
     if checkout {

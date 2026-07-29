@@ -90,6 +90,13 @@ interface UiState {
   branchToRename: string | null
   branchToDelete: string | null
   /**
+   * Remote branch pending a delete confirm, split into the remote and the
+   * branch as it exists there (`origin` + `feature/x`). Deleting on the server
+   * affects everyone, so this always goes through a confirm rather than
+   * running straight from the menu.
+   */
+  remoteBranchToDelete: { remote: string; branch: string } | null
+  /**
    * Branch the current branch will be hard-reset to, pending confirm. Set from
    * any branch menu or a branch-onto-branch drop; the target names where the
    * checked-out branch will be rewound to.
@@ -194,6 +201,7 @@ interface UiState {
   promptPushTags: (tags: PendingTag[]) => void
   renameBranchPrompt: (name: string | null) => void
   deleteBranchPrompt: (name: string | null) => void
+  deleteRemoteBranchPrompt: (target: { remote: string; branch: string } | null) => void
   resetToBranchPrompt: (name: string | null) => void
   openRemoteSync: (source: string, target: string) => void
   /** Flip the sync direction in the open Sync modal (source <-> target). */
@@ -264,6 +272,7 @@ export const useUiStore = create<UiState>((set) => ({
   remoteToDelete: null,
   branchToRename: null,
   branchToDelete: null,
+  remoteBranchToDelete: null,
   branchToResetTo: null,
   settingsSection: 'general',
   revealSetting: null,
@@ -336,6 +345,7 @@ export const useUiStore = create<UiState>((set) => ({
   promptPushTags: (tags) => set({ tagsToPush: tags.length > 0 ? tags : null }),
   renameBranchPrompt: (name) => set({ branchToRename: name }),
   deleteBranchPrompt: (name) => set({ branchToDelete: name }),
+  deleteRemoteBranchPrompt: (target) => set({ remoteBranchToDelete: target }),
   resetToBranchPrompt: (name) => set({ branchToResetTo: name }),
   openRemoteSync: (source, target) =>
     set({ activeModal: 'remote-sync', syncSource: source, syncTarget: target }),

@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { ArchiveRestore, ArrowLeftRight, CloudOff, ExternalLink, Eye, Tag, Trash2, Upload } from 'lucide-react'
 import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
@@ -93,9 +93,25 @@ export function LeftPanel() {
   const branchToRename = useUiStore((s) => s.branchToRename)
   const branchToDelete = useUiStore((s) => s.branchToDelete)
   const branchToResetTo = useUiStore((s) => s.branchToResetTo)
+  const remoteBranchToDelete = useUiStore((s) => s.remoteBranchToDelete)
   const renameBranchPrompt = useUiStore((s) => s.renameBranchPrompt)
   const deleteBranchPrompt = useUiStore((s) => s.deleteBranchPrompt)
+  const deleteRemoteBranchPrompt = useUiStore((s) => s.deleteRemoteBranchPrompt)
   const resetToBranchPrompt = useUiStore((s) => s.resetToBranchPrompt)
+
+  // Opt-in to also deleting the local branch of the same name. Reset whenever a
+  // different branch is queued up, so one branch's choice never carries over.
+  const [alsoDeleteLocal, setAlsoDeleteLocal] = useState(false)
+  useEffect(() => {
+    setAlsoDeleteLocal(false)
+  }, [remoteBranchToDelete?.remote, remoteBranchToDelete?.branch])
+
+  // Only offer the local checkbox when a local branch of that name exists, and
+  // never when it is the one checked out -- git cannot delete that.
+  const remoteDeleteLocalCopy = remoteBranchToDelete
+    ? branches.data?.local.find((b) => b.name === remoteBranchToDelete.branch)
+    : undefined
+  const canAlsoDeleteLocal = !!remoteDeleteLocalCopy && !remoteDeleteLocalCopy.is_head
 
   const currentBranch =
     branches.data?.local.find((b) => b.is_head)?.name ?? repo?.head_branch ?? ''
@@ -444,6 +460,58 @@ export function LeftPanel() {
         }
         confirmLabel="Delete branch"
         onConfirm={() => branchToDelete && m.deleteBranch.mutate(branchToDelete)}
+      />
+
+      <ConfirmDialog
+        open={remoteBranchToDelete !== null}
+        onOpenChange={(o) => !o && deleteRemoteBranchPrompt(null)}
+        destructive
+        title="Delete this branch from the server?"
+        description={
+          <>
+            This removes{' '}
+            <span className="font-mono text-foreground">
+              {remoteBranchToDelete?.remote}/{remoteBranchToDelete?.branch}
+            </span>{' '}
+            from <span className="text-foreground">{remoteBranchToDelete?.remote}</span>, so{' '}
+            <span className="text-removed">it disappears for everyone using it</span>. Anyone with a
+            copy on their computer keeps it.
+          </>
+        }
+        extra={
+          canAlsoDeleteLocal ? (
+            <label className="flex cursor-pointer items-start gap-2 text-xs text-sub">
+              <input
+                type="checkbox"
+                checked={alsoDeleteLocal}
+                onChange={(e) => setAlsoDeleteLocal(e.target.checked)}
+                className="mt-0.5 size-3.5 accent-[var(--gw-accent)]"
+              />
+              <span>
+                Also delete my copy{' '}
+                <span className="font-mono text-foreground">{remoteBranchToDelete?.branch}</span>
+                <span className="block text-2xs text-muted-foreground">
+                  Commits only on it may become hard to find
+                </span>
+              </span>
+            </label>
+          ) : undefined
+        }
+        confirmLabel="Delete branch"
+        pending={m.deleteRemoteBranch.isPending}
+        pendingLabel="Deleting…"
+        keepOpenOnConfirm
+        onConfirm={() =>
+          remoteBranchToDelete &&
+          m.deleteRemoteBranch.mutate(
+            {
+              name: remoteBranchToDelete.branch,
+              remote: remoteBranchToDelete.remote,
+              alsoLocal: canAlsoDeleteLocal && alsoDeleteLocal,
+            },
+            { onSuccess: () => deleteRemoteBranchPrompt(null) }
+          )
+        }
       />
 
       <ConfirmDialog

@@ -441,6 +441,46 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  /**
+   * Remove a branch from the remote, and optionally the local copy too.
+   *
+   * The remote goes first for the same reason as tags: if it fails, the branch
+   * is still on the server and still here, so the user can try again. Deleting
+   * the local copy first would leave a published branch with nothing local to
+   * delete it from. A local delete that fails (unmerged commits) is reported
+   * without undoing the remote delete -- that half already succeeded, and
+   * saying so is more honest than a blanket failure.
+   */
+  const deleteRemoteBranch = useMutation({
+    mutationFn: async (args: { name: string; remote: string; alsoLocal?: boolean }) => {
+      await unwrap(await commands.deleteRemoteBranch(id, args.name, args.remote))
+      let localFailed = false
+      if (args.alsoLocal) {
+        try {
+          await unwrap(await commands.deleteBranch(id, args.name))
+        } catch (e) {
+          localFailed = true
+          logQuietFailure(e as Error)
+        }
+      }
+      return { ...args, localFailed }
+    },
+    onSuccess: (args) => {
+      invalidate(qc, id, REMOTE_REFS)
+      const where = `${args.remote}/${args.name}`
+      if (args.localFailed) {
+        toast.warning(
+          `Deleted ${where} from the remote, but the copy on your computer could not be deleted - it may have commits that aren't saved anywhere else.`
+        )
+      } else if (args.alsoLocal) {
+        toast(`Deleted ${args.name} here and on ${args.remote}`)
+      } else {
+        toast(`Deleted ${where} from the remote`)
+      }
+    },
+    onError,
+  })
+
   // Hand the repo off to an external program. No cache to touch.
   const revealInFileManager = useMutation({
     mutationFn: async () => unwrap(await commands.revealInFileManager(id)),
@@ -1101,6 +1141,7 @@ export function useGitMutations(repoId: string | null) {
     deleteTag,
     pushTag,
     deleteRemoteTag,
+    deleteRemoteBranch,
     revealInFileManager,
     openInEditor,
     openSolution,

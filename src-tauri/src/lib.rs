@@ -148,6 +148,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::remote::unpushed_tags,
     commands::remote::push_tag,
     commands::remote::delete_remote_tag,
+    commands::remote::delete_remote_branch,
     commands::remote::add_remote,
     commands::remote::rename_remote,
     commands::remote::set_remote_url,

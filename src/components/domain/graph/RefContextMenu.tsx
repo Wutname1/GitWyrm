@@ -8,11 +8,10 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import { ExternalLink } from 'lucide-react'
-import { useMergeState, useRemotes } from '@/hooks/useGitQueries'
+import { useBranches, useMergeState, useRemotes } from '@/hooks/useGitQueries'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { BranchMenu } from '@/components/domain/branch/BranchMenu'
-import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
+import { RemoteBranchMenuItems } from '@/components/domain/branch/RemoteBranchMenuItems'
 
 interface RefContextMenuProps {
   refTag: RefInfo
@@ -32,18 +31,28 @@ export function RefContextMenu({ refTag, children, onOpenChange }: RefContextMen
   const repo = useActiveRepo()
   const mergeState = useMergeState(repo?.id ?? null)
   const remotes = useRemotes(repo?.id ?? null)
+  const branches = useBranches(repo?.id ?? null)
 
   const isBranch = refTag.type === 'branch' || refTag.type === 'head'
   const isRemote = refTag.type === 'remote'
   if (!isBranch && !isRemote) return <>{children}</>
 
+  // `origin/feature/x` -> remote `origin`, branch `feature/x`. Only the first
+  // segment is the remote; the rest is the branch, slashes and all.
   const [remoteName, ...remoteBranchParts] = isRemote ? refTag.name.split('/') : []
+  const remoteBranch = remoteBranchParts.join('/')
   const remote = remotes.data?.find((item) => item.name === remoteName)
-  const webTarget = remote ? remoteWebTarget(remote) : null
-  const webUrl = webTarget && remoteBranchParts.length > 0
-    ? remoteBranchWebUrl(webTarget, remoteBranchParts.join('/'))
-    : null
-  if (isRemote && (!webTarget || !webUrl)) return <>{children}</>
+  // Without the remote record there is nothing to act on -- fall through to a
+  // plain chip rather than an empty menu.
+  if (isRemote && (!remote || !remoteBranch)) return <>{children}</>
+
+  const record = remote?.branches.find((b) => b.name === remoteBranch)
+  // The remotes query knows the counterpart; fall back to a name match so the
+  // menu still reads correctly before that query settles.
+  const localCounterpart =
+    record?.local_counterpart ??
+    branches.data?.local.find((b) => b.name === remoteBranch)?.name ??
+    null
 
   const opInProgress = mergeState.data?.merging ?? false
 
@@ -55,11 +64,15 @@ export function RefContextMenu({ refTag, children, onOpenChange }: RefContextMen
         <ContextMenuSeparator />
         {isBranch ? (
           <BranchMenu branch={refTag.name} opInProgress={opInProgress} />
-        ) : webTarget && webUrl ? (
-          <ContextMenuItem onSelect={() => openWebUrl(webUrl, webTarget.label)}>
-            <ExternalLink />
-            View on {webTarget.label}
-          </ContextMenuItem>
+        ) : remote ? (
+          <RemoteBranchMenuItems
+            remote={remote}
+            branch={remoteBranch}
+            repoId={repo?.id ?? null}
+            localCounterpart={localCounterpart}
+            tip={record?.tip}
+            opInProgress={opInProgress}
+          />
         ) : null}
       </ContextMenuContent>
     </ContextMenu>

@@ -20,7 +20,8 @@ import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { BranchMenu } from '@/components/domain/branch/BranchMenu'
 import { TooltipButton } from '@/components/ui/tooltip'
-import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
+import { openWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
+import { RemoteBranchMenuItems } from '@/components/domain/branch/RemoteBranchMenuItems'
 
 /** Plain-language summary of what a remote branch means for the user. */
 function branchTooltip(b: RemoteBranchInfo): string {
@@ -52,10 +53,12 @@ function BranchNode({
   node,
   depth,
   remote,
+  repoId,
 }: {
   node: BranchTreeNode<RemoteBranchInfo>
   depth: number
   remote: RemoteInfo
+  repoId: string | null
 }) {
   const [open, setOpen] = useState(true)
   const pad = 24 + depth * 12
@@ -76,7 +79,13 @@ function BranchNode({
           <span className="truncate text-2xs text-sub">{node.name}</span>
         </button>
         {open && node.children.map((c) => (
-          <BranchNode key={c.branch ?? c.name} node={c} depth={depth + 1} remote={remote} />
+          <BranchNode
+            key={c.branch ?? c.name}
+            node={c}
+            depth={depth + 1}
+            remote={remote}
+            repoId={repoId}
+          />
         ))}
       </div>
     )
@@ -84,13 +93,7 @@ function BranchNode({
 
   const b = node.data
   const hasIncoming = !!b && b.ahead_of_local > 0
-  const webTarget = remoteWebTarget(remote)
-  const webUrl = webTarget && node.branch ? remoteBranchWebUrl(webTarget, node.branch) : null
 
-  // A remote branch's actions are its local counterpart's: right-clicking
-  // origin/main offers to send the commits sitting on local main. Without a
-  // local copy there is nothing local to act on, and BranchMenu renders
-  // nothing.
   const row = (
     <div
       style={{ paddingLeft: pad + 14 }}
@@ -128,24 +131,37 @@ function BranchNode({
     </div>
   )
 
-  if (!webTarget && !b?.local_counterpart) return row
+  // A folder node has no branch of its own to act on.
+  if (!node.branch) return row
 
+  // The remote branch's own actions come first -- check it out, merge it, delete
+  // it from the server. Where a local copy exists its actions follow, since
+  // "send my local foo" is a different thing from anything above and the user
+  // may want either from the one right-click.
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-      <ContextMenuContent className="w-60">
+      <ContextMenuContent className="w-64">
         <ContextMenuLabel className="font-mono text-2xs text-sub">
           {remote.name}/{node.branch}
         </ContextMenuLabel>
         <ContextMenuSeparator />
-        {webTarget && webUrl && (
-          <ContextMenuItem onSelect={() => openWebUrl(webUrl, webTarget.label)}>
-            <ExternalLink />
-            View on {webTarget.label}
-          </ContextMenuItem>
+        <RemoteBranchMenuItems
+          remote={remote}
+          branch={node.branch}
+          repoId={repoId}
+          localCounterpart={b?.local_counterpart}
+          tip={b?.tip}
+        />
+        {b?.local_counterpart && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuLabel className="text-2xs text-muted-foreground">
+              Your copy: {b.local_counterpart}
+            </ContextMenuLabel>
+            <BranchMenu branch={b.local_counterpart} showWebLink={false} />
+          </>
         )}
-        {webTarget && webUrl && b?.local_counterpart && <ContextMenuSeparator />}
-        {b?.local_counterpart && <BranchMenu branch={b.local_counterpart} showWebLink={false} />}
       </ContextMenuContent>
     </ContextMenu>
   )
@@ -236,7 +252,13 @@ function RemoteNode({ remote }: { remote: RemoteInfo }) {
             <p className="py-0.5 pl-9 pr-3 text-2xs text-muted-foreground">No branches</p>
           ) : (
             tree.map((n) => (
-              <BranchNode key={n.branch ?? n.name} node={n} depth={0} remote={remote} />
+              <BranchNode
+                key={n.branch ?? n.name}
+                node={n}
+                depth={0}
+                remote={remote}
+                repoId={repo?.id ?? null}
+              />
             ))
           )}
         </div>

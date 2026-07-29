@@ -921,9 +921,10 @@ async deleteTag(repoId: string, name: string) : Promise<Result<null, string>> {
 }
 },
 /**
- * Reset the current branch to a commit. Hard reset discards uncommitted work,
- * so it is refused over a dirty tree. Returns where the branch pointed before
- * the reset, so the caller can offer an undo. Soft/Mixed keep the working tree.
+ * Reset the current branch to a commit. A hard reset over a dirty tree sets
+ * the uncommitted work aside in a stash first, so the rewind always goes
+ * through and nothing is silently lost. Returns where the branch pointed
+ * before the reset, so the caller can offer an undo.
  */
 async resetCurrent(repoId: string, sha: string, mode: ResetMode) : Promise<Result<RefMove, string>> {
     try {
@@ -937,8 +938,8 @@ async resetCurrent(repoId: string, sha: string, mode: ResetMode) : Promise<Resul
  * Reset the current branch to another ref (a branch name or any revspec),
  * resolving it to its tip commit. This backs "reset this branch to that
  * branch": while `<current>` is checked out, right-clicking or dropping onto
- * `<other>` rewinds `<current>` to wherever `<other>` points. Same discard
- * rules as [`reset_current`] - a hard reset is refused over a dirty tree.
+ * `<other>` rewinds `<current>` to wherever `<other>` points. Same stash-aside
+ * rules as [`reset_current`].
  */
 async resetCurrentToRef(repoId: string, targetRef: string, mode: ResetMode) : Promise<Result<RefMove, string>> {
     try {
@@ -950,8 +951,9 @@ async resetCurrentToRef(repoId: string, targetRef: string, mode: ResetMode) : Pr
 },
 /**
  * Move the current branch ref to a commit without touching the working tree
- * (like `git branch -f <current> <sha>` re-pointing HEAD's branch). Refused
- * over a dirty tree so the tree never silently diverges from the new tip.
+ * (like `git branch -f <current> <sha>` re-pointing HEAD's branch). A dirty
+ * tree no longer blocks the move: the changes are set aside in a stash first
+ * so the tree never silently diverges from the new tip.
  */
 async moveCurrentBranch(repoId: string, sha: string) : Promise<Result<RefMove, string>> {
     try {
@@ -1358,6 +1360,24 @@ async pushTag(repoId: string, name: string, remote: string) : Promise<Result<nul
 async deleteRemoteTag(repoId: string, name: string, remote: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_remote_tag", { repoId, name, remote }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a branch from a remote. `name` is the branch as it exists on the
+ * remote (`feature/x`), without the remote prefix. The local branch of the
+ * same name, if any, is left alone -- callers that want both gone delete the
+ * local copy separately.
+ * 
+ * The stale remote-tracking ref is pruned so the branch stops showing in the
+ * sidebar and graph immediately; without this the ref lingers until the next
+ * fetch and the row looks undeleted.
+ */
+async deleteRemoteBranch(repoId: string, name: string, remote: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_remote_branch", { repoId, name, remote }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2241,7 +2261,12 @@ branch: string;
 /**
  * Full sha the branch pointed at before the move.
  */
-previous_sha: string }
+previous_sha: string; 
+/**
+ * Uncommitted changes were set aside in a stash so the move could proceed.
+ * The stash is kept, so the frontend must tell the user where the work went.
+ */
+stashed: boolean }
 /**
  * How a remote-tracking branch relates to the local repo. This is what makes a
  * remote branch legible without checking it out.
@@ -2418,6 +2443,14 @@ drawer_commit_list_width?: number;
  * Percent of the changes pane given to the unstaged list (30-70).
  */
 changes_split?: number; 
+/**
+ * Percent of the conflict view's width given to the OURS pane (20-80).
+ */
+conflict_side_split?: number; 
+/**
+ * Percent of the conflict view's height given to OURS/THEIRS (20-80).
+ */
+conflict_result_split?: number; 
 /**
  * Whether change size appears below the message or in its own column.
  */
