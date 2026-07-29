@@ -163,6 +163,12 @@ pub struct Settings {
   /// Percent of the changes pane given to the unstaged list (30-70).
   #[serde(default = "default_changes_split")]
   pub changes_split: f64,
+  /// Percent of the conflict view's width given to the OURS pane (20-80).
+  #[serde(default = "default_conflict_side_split")]
+  pub conflict_side_split: f64,
+  /// Percent of the conflict view's height given to OURS/THEIRS (20-80).
+  #[serde(default = "default_conflict_result_split")]
+  pub conflict_result_split: f64,
   /// Whether change size appears below the message or in its own column.
   #[serde(default = "default_change_size_display")]
   pub change_size_display: ChangeSizeDisplay,
@@ -371,6 +377,14 @@ fn default_changes_split() -> f64 {
   50.0
 }
 
+fn default_conflict_side_split() -> f64 {
+  50.0
+}
+
+fn default_conflict_result_split() -> f64 {
+  45.0
+}
+
 impl Default for Settings {
   fn default() -> Self {
     Self {
@@ -393,6 +407,8 @@ impl Default for Settings {
       drawer_height: default_drawer_height(),
       drawer_commit_list_width: default_drawer_commit_list_width(),
       changes_split: default_changes_split(),
+      conflict_side_split: default_conflict_side_split(),
+      conflict_result_split: default_conflict_result_split(),
       change_size_display: default_change_size_display(),
       show_change_indicator: default_show_change_indicator(),
       show_change_line_counts: false,

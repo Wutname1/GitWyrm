@@ -245,6 +245,42 @@ export function clampChangesSplit(split: number): number {
 }
 
 /**
+ * Share of the conflict view's width given to the OURS pane, as a percentage
+ * of the space OURS and THEIRS share.
+ */
+export const MIN_CONFLICT_SIDE_SPLIT = 20;
+export const MAX_CONFLICT_SIDE_SPLIT = 80;
+export const DEFAULT_CONFLICT_SIDE_SPLIT = 50;
+
+export function clampConflictSideSplit(split: number): number {
+  if (!Number.isFinite(split)) return DEFAULT_CONFLICT_SIDE_SPLIT;
+  return Math.round(
+    Math.min(
+      MAX_CONFLICT_SIDE_SPLIT,
+      Math.max(MIN_CONFLICT_SIDE_SPLIT, split),
+    ),
+  );
+}
+
+/**
+ * Share of the conflict view's height given to the OURS/THEIRS reference row,
+ * as a percentage of the space it shares with the editable RESULT pane.
+ */
+export const MIN_CONFLICT_RESULT_SPLIT = 20;
+export const MAX_CONFLICT_RESULT_SPLIT = 80;
+export const DEFAULT_CONFLICT_RESULT_SPLIT = 45;
+
+export function clampConflictResultSplit(split: number): number {
+  if (!Number.isFinite(split)) return DEFAULT_CONFLICT_RESULT_SPLIT;
+  return Math.round(
+    Math.min(
+      MAX_CONFLICT_RESULT_SPLIT,
+      Math.max(MIN_CONFLICT_RESULT_SPLIT, split),
+    ),
+  );
+}
+
+/**
  * Key for one repo's staged or unstaged changes tree. Repo-scoped so two repos
  * with the same folder names keep their own open/closed state.
  */
@@ -463,6 +499,10 @@ interface WorkspaceState {
   drawerListWidth: number;
   /** Percent of the changes pane given to the unstaged list (persisted). */
   changesSplit: number;
+  /** Percent of the conflict view's width given to the OURS pane (persisted). */
+  conflictSideSplit: number;
+  /** Percent of the conflict view's height given to OURS/THEIRS (persisted). */
+  conflictResultSplit: number;
   /** Where change size appears in the commit graph (persisted). */
   changeSizeDisplay: ChangeSizeDisplay;
   /** Whether commit rows show a change-size indicator (persisted). */
@@ -715,6 +755,8 @@ interface WorkspaceState {
   setDrawerHeight: (height: number) => void;
   setDrawerListWidth: (width: number) => void;
   setChangesSplit: (split: number) => void;
+  setConflictSideSplit: (split: number) => void;
+  setConflictResultSplit: (split: number) => void;
   setChangeSizeDisplay: (display: ChangeSizeDisplay) => void;
   setShowChangeIndicator: (enabled: boolean) => void;
   setShowChangeLineCounts: (enabled: boolean) => void;
@@ -756,6 +798,8 @@ function toSettings(s: WorkspaceState): Settings {
     drawer_height: s.drawerHeight,
     drawer_commit_list_width: s.drawerListWidth,
     changes_split: s.changesSplit,
+    conflict_side_split: s.conflictSideSplit,
+    conflict_result_split: s.conflictResultSplit,
     change_size_display: s.changeSizeDisplay,
     show_change_indicator: s.showChangeIndicator,
     show_change_line_counts: s.showChangeLineCounts,
@@ -1103,6 +1147,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   drawerHeight: DEFAULT_DRAWER_HEIGHT,
   drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
   changesSplit: DEFAULT_CHANGES_SPLIT,
+  conflictSideSplit: DEFAULT_CONFLICT_SIDE_SPLIT,
+  conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
   changeSizeDisplay: "column",
   showChangeIndicator: false,
   showChangeLineCounts: false,
@@ -2057,6 +2103,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ changesSplit: clampChangesSplit(split) });
     schedulePersist();
   },
+  setConflictSideSplit: (split) => {
+    set({ conflictSideSplit: clampConflictSideSplit(split) });
+    schedulePersist();
+  },
+  setConflictResultSplit: (split) => {
+    set({ conflictResultSplit: clampConflictResultSplit(split) });
+    schedulePersist();
+  },
   setChangeSizeDisplay: (display) => {
     set({ changeSizeDisplay: display });
     schedulePersist();
@@ -2106,6 +2160,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ),
         changesSplit: clampChangesSplit(
           settings.changes_split ?? DEFAULT_CHANGES_SPLIT,
+        ),
+        conflictSideSplit: clampConflictSideSplit(
+          settings.conflict_side_split ?? DEFAULT_CONFLICT_SIDE_SPLIT,
+        ),
+        conflictResultSplit: clampConflictResultSplit(
+          settings.conflict_result_split ?? DEFAULT_CONFLICT_RESULT_SPLIT,
         ),
         changeSizeDisplay:
           settings.change_size_display === "row" ? "row" : "column",

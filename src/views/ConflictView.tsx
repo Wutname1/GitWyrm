@@ -1,14 +1,27 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, FileWarning } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
+import { ResizeHandle } from '@/components/ui/ResizeHandle'
 import { useConflict, useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
-import { useActiveRepo } from '@/stores/workspaceStore'
+import {
+  DEFAULT_CONFLICT_RESULT_SPLIT,
+  DEFAULT_CONFLICT_SIDE_SPLIT,
+  MAX_CONFLICT_RESULT_SPLIT,
+  MAX_CONFLICT_SIDE_SPLIT,
+  MIN_CONFLICT_RESULT_SPLIT,
+  MIN_CONFLICT_SIDE_SPLIT,
+  useActiveRepo,
+  useWorkspaceStore,
+} from '@/stores/workspaceStore'
 
-/** Read-only side panel showing one version's text. */
+/** Shared type ramp so gutter digits and code sit on the same baseline. */
+const CODE_LINE = 'font-mono text-2xs leading-[1.7]'
+
+/** Read-only side panel showing one version's text, with line numbers. */
 function SidePanel({
   title,
   tone,
@@ -20,8 +33,10 @@ function SidePanel({
   text: string
   deleted: boolean
 }) {
+  const lines = useMemo(() => text.split('\n'), [text])
+
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-border last:border-r-0">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div
         className={cn(
           'flex-none border-b border-border px-3 py-1.5 text-2xs font-bold tracking-[.05em]',
@@ -30,15 +45,63 @@ function SidePanel({
       >
         {title}
       </div>
-      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-2xs leading-[1.7] text-sub">
-        {deleted ? (
-          <span className="italic text-removed">
-            This side deleted the file. Choosing it removes the file.
-          </span>
-        ) : (
-          text || <span className="italic text-muted-foreground">(empty)</span>
-        )}
-      </pre>
+      {deleted ? (
+        <div className={cn('min-h-0 flex-1 overflow-auto px-3 py-2 italic text-removed', CODE_LINE)}>
+          This side deleted the file. Choosing it removes the file.
+        </div>
+      ) : text === '' ? (
+        <div
+          className={cn(
+            'min-h-0 flex-1 overflow-auto px-3 py-2 italic text-muted-foreground',
+            CODE_LINE
+          )}
+        >
+          (empty)
+        </div>
+      ) : (
+        // One scroll container holding a sticky gutter, so the numbers stay put
+        // horizontally while long lines scroll under them.
+        <div className="min-h-0 flex-1 overflow-auto py-2">
+          <div className="flex min-w-max">
+            <div
+              aria-hidden
+              className={cn(
+                'sticky left-0 z-10 flex-none select-none bg-background px-2 text-right text-muted-foreground',
+                CODE_LINE
+              )}
+            >
+              {lines.map((_, i) => (
+                <div key={i}>{i + 1}</div>
+              ))}
+            </div>
+            <div className={cn('flex-1 whitespace-pre pr-3 text-sub', CODE_LINE)}>
+              {lines.map((line, i) => (
+                <div key={i}>{line === '' ? ' ' : line}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Line-number gutter for the editable RESULT pane. A textarea can't render its
+ * own gutter, so this mirrors it in a sibling column kept in vertical sync by
+ * the textarea's scroll handler.
+ */
+function ResultGutter({ count, scrollTop }: { count: number; scrollTop: number }) {
+  return (
+    <div
+      aria-hidden
+      className="relative flex-none select-none overflow-hidden border-r border-border bg-panel/40 px-2 py-2 text-right"
+    >
+      <div className={cn('text-muted-foreground', CODE_LINE)} style={{ transform: `translateY(${-scrollTop}px)` }}>
+        {Array.from({ length: count }, (_, i) => (
+          <div key={i}>{i + 1}</div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -55,6 +118,30 @@ export function ConflictView() {
 
   const conflicts = merge.data?.conflicts ?? []
   const [draft, setDraft] = useState('')
+
+  const conflictSideSplit = useWorkspaceStore((s) => s.conflictSideSplit)
+  const setConflictSideSplit = useWorkspaceStore((s) => s.setConflictSideSplit)
+  const conflictResultSplit = useWorkspaceStore((s) => s.conflictResultSplit)
+  const setConflictResultSplit = useWorkspaceStore((s) => s.setConflictResultSplit)
+
+  const hSplitRef = useRef<HTMLDivElement>(null)
+  const vSplitRef = useRef<HTMLDivElement>(null)
+
+  /** Drag distance in pixels as a share of the width OURS and THEIRS split. */
+  const pixelsToSideSplit = (pixels: number) => {
+    const width = hSplitRef.current?.clientWidth ?? 0
+    return width > 0 ? (pixels / width) * 100 : 0
+  }
+
+  /** Drag distance in pixels as a share of the height the rows split. */
+  const pixelsToResultSplit = (pixels: number) => {
+    const height = vSplitRef.current?.clientHeight ?? 0
+    return height > 0 ? (pixels / height) * 100 : 0
+  }
+
+  // The RESULT gutter can't scroll itself; it mirrors the textarea's offset.
+  const [resultScrollTop, setResultScrollTop] = useState(0)
+  const draftLineCount = useMemo(() => draft.split('\n').length, [draft])
 
   // Load the marker text into the editable draft only when the shown file
   // changes, so a background refetch never wipes in-progress hand edits.
@@ -206,33 +293,81 @@ export function ConflictView() {
         )}
 
         {data && !data.binary && (
-          <div className="flex min-h-0 flex-1 flex-col">
-            {/* Ours / Theirs reference panes */}
-            <div className="flex min-h-0 flex-1 border-b border-border">
-              <SidePanel
-                title="OURS (current)"
-                tone="ours"
-                text={data.ours}
-                deleted={data.ours_deleted}
-              />
-              <SidePanel
-                title="THEIRS (incoming)"
-                tone="theirs"
-                text={data.theirs}
-                deleted={data.theirs_deleted}
-              />
+          <div ref={vSplitRef} className="flex min-h-0 flex-1 flex-col">
+            {/* Ours / Theirs reference panes, split left-to-right */}
+            <div
+              ref={hSplitRef}
+              className="flex min-h-0"
+              style={{ flex: `${conflictResultSplit} 1 0%` }}
+            >
+              <div
+                className="relative flex min-h-0 min-w-0 border-r border-border"
+                style={{ flex: `${conflictSideSplit} 1 0%` }}
+              >
+                <SidePanel
+                  title="OURS (current)"
+                  tone="ours"
+                  text={data.ours}
+                  deleted={data.ours_deleted}
+                />
+                <ResizeHandle
+                  ariaLabel="Resize ours and theirs panes"
+                  value={conflictSideSplit}
+                  min={MIN_CONFLICT_SIDE_SPLIT}
+                  max={MAX_CONFLICT_SIDE_SPLIT}
+                  defaultValue={DEFAULT_CONFLICT_SIDE_SPLIT}
+                  onChange={setConflictSideSplit}
+                  toValue={pixelsToSideSplit}
+                  className="-right-1"
+                />
+              </div>
+              <div
+                className="flex min-h-0 min-w-0"
+                style={{ flex: `${100 - conflictSideSplit} 1 0%` }}
+              >
+                <SidePanel
+                  title="THEIRS (incoming)"
+                  tone="theirs"
+                  text={data.theirs}
+                  deleted={data.theirs_deleted}
+                />
+              </div>
             </div>
+
             {/* Editable merged result */}
-            <div className="flex min-h-0 flex-[1.2] flex-col">
+            <div
+              className="relative flex min-h-0 flex-col border-t border-border"
+              style={{ flex: `${100 - conflictResultSplit} 1 0%` }}
+            >
+              <ResizeHandle
+                ariaLabel="Resize result pane"
+                axis="y"
+                direction={-1}
+                value={100 - conflictResultSplit}
+                min={100 - MAX_CONFLICT_RESULT_SPLIT}
+                max={100 - MIN_CONFLICT_RESULT_SPLIT}
+                defaultValue={100 - DEFAULT_CONFLICT_RESULT_SPLIT}
+                onChange={(v) => setConflictResultSplit(100 - v)}
+                toValue={pixelsToResultSplit}
+                className="-top-1"
+              />
               <div className="flex-none border-b border-border bg-panel2 px-3 py-1.5 text-2xs font-bold tracking-[.05em] text-sub">
                 RESULT — edit to resolve, then “Mark resolved”
               </div>
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                spellCheck={false}
-                className="min-h-0 flex-1 resize-none bg-background px-3 py-2 font-mono text-xs leading-[1.7] text-foreground outline-none"
-              />
+              <div className="flex min-h-0 flex-1">
+                <ResultGutter count={draftLineCount} scrollTop={resultScrollTop} />
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onScroll={(e) => setResultScrollTop(e.currentTarget.scrollTop)}
+                  spellCheck={false}
+                  wrap="off"
+                  className={cn(
+                    'min-h-0 flex-1 resize-none bg-background px-3 py-2 text-foreground outline-none',
+                    CODE_LINE
+                  )}
+                />
+              </div>
             </div>
           </div>
         )}
