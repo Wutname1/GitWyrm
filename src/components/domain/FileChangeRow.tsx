@@ -85,7 +85,12 @@ export function FileChangeRow({
         {sub && <Package className="size-3 flex-none text-sub" aria-label="Submodule" />}
         <span className="overflow-hidden text-ellipsis">{displayPath ?? file.path}</span>
       </span>
-      {sub ? (
+      {file.conflicted ? (
+        // An unmerged path has three index stages, not one diff, so there are no
+        // line counts to show. "+0 -0" here reads as "nothing changed", which is
+        // the opposite of the truth.
+        <span className="whitespace-nowrap text-2xs font-semibold text-removed">conflict</span>
+      ) : sub ? (
         // Line counts are meaningless for a submodule pointer; show what moved.
         <span className="whitespace-nowrap text-2xs text-sub">submodule · {submoduleNote(sub)}</span>
       ) : (
