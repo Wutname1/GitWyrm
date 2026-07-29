@@ -5,12 +5,14 @@ import {
   type EditorKind,
   type PullResult,
   type PushResult,
+  type RefMove,
   type Resolution,
   type ResetMode,
   type SelectedLine,
 } from '@/lib/bindings'
 import { keys, trimLogToFirstPage, unwrap } from '@/lib/queryKeys'
 import { useHostResolver } from '@/hooks/useGitQueries'
+import { noteManualFetch } from '@/hooks/useAutoFetch'
 import { classifyError } from '@/lib/errorClass'
 import { copyToClipboard } from '@/lib/clipboard'
 import { plural, shortSha } from '@/lib/gitDisplay'
@@ -548,6 +550,9 @@ export function useGitMutations(repoId: string | null) {
     mutationFn: async () => unwrap(await commands.gitFetch(id)),
     onSuccess: () => {
       invalidate(qc, id, ['log', 'branches', 'remotes'])
+      // Resets the auto-fetch clock: a background timer firing seconds after
+      // the user fetched by hand is pure duplicated network work.
+      noteManualFetch(id)
       toast('Fetched all remotes')
     },
     onError,
@@ -610,6 +615,8 @@ export function useGitMutations(repoId: string | null) {
   const pull = useMutation({
     mutationFn: async () => unwrap(await commands.gitPull(id)),
     onSuccess: (result) => {
+      // A pull just fetched, so the auto-fetch clock restarts here too.
+      noteManualFetch(id)
       toast(describePull(result, hostOf(result.upstream)))
     },
     onError,

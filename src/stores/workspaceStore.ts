@@ -492,6 +492,8 @@ interface WorkspaceState {
   enableWorktrees: boolean;
   /** Reopen the last session's tabs on launch. Off starts with no tabs (persisted). */
   restoreTabs: boolean;
+  /** Fetch open repositories in the background to keep remote state current (persisted). */
+  autoFetch: boolean;
   /**
    * Whether the welcome tour has run. App lifecycle state, not a preference:
    * deliberately absent from every reset group, since "reset my preferences"
@@ -600,6 +602,7 @@ interface WorkspaceState {
   resolveTagSettings: (path: string | null | undefined) => ResolvedTagSettings;
   setEnableWorktrees: (enabled: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
+  setAutoFetch: (enabled: boolean) => void;
   markOnboardingSeen: () => void;
   markSigningKeyPublished: (fingerprint: string) => void;
   setTabLayout: (layout: TabLayout) => void;
@@ -764,6 +767,7 @@ function toSettings(s: WorkspaceState): Settings {
     tag_overrides_by_repo: serializeTagOverrides(s.tagOverridesByRepo),
     enable_worktrees: s.enableWorktrees,
     restore_tabs: s.restoreTabs,
+    auto_fetch: s.autoFetch,
     onboarding_seen: s.onboardingSeen,
     signing_keys_published: s.signingKeysPublished,
     ui_scale: s.uiScale,
@@ -1014,6 +1018,7 @@ export const SETTINGS_DEFAULTS = {
   defaultEditor: DEFAULT_EDITOR,
   enableWorktrees: false,
   restoreTabs: true,
+  autoFetch: true,
   onboardingSeen: false,
   signingKeysPublished: [],
   tagPushDefault: "ask",
@@ -1051,7 +1056,7 @@ export const SETTINGS_GROUPS = {
     "defaultEditor",
     "enableWorktrees",
   ],
-  behavior: ["restoreTabs"],
+  behavior: ["restoreTabs", "autoFetch"],
   tags: ["tagPushDefault", "tagPushOnCreate", "tagDeleteOnRemote"],
   ai: ["aiInstruction"],
   appearance: [
@@ -1109,6 +1114,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   tagOverridesByRepo: {},
   enableWorktrees: false,
   restoreTabs: true,
+  autoFetch: true,
   onboardingSeen: false,
   signingKeysPublished: [],
   uiScale: DEFAULT_UI_SCALE,
@@ -1389,6 +1395,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setRestoreTabs: (enabled) => {
     set({ restoreTabs: enabled });
+    schedulePersist();
+  },
+  setAutoFetch: (enabled) => {
+    set({ autoFetch: enabled });
     schedulePersist();
   },
   markSigningKeyPublished: (fingerprint) => {
@@ -2118,6 +2128,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ),
         enableWorktrees: settings.enable_worktrees ?? false,
         restoreTabs: settings.restore_tabs ?? true,
+        autoFetch: settings.auto_fetch ?? true,
         onboardingSeen: settings.onboarding_seen ?? false,
         signingKeysPublished: settings.signing_keys_published ?? [],
         uiScale:

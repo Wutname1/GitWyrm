@@ -21,6 +21,7 @@ import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
 import { noteRepoAvailability } from '@/hooks/useRepoActions'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
+import { useAutoFetch } from '@/hooks/useAutoFetch'
 import { useTheme } from '@/hooks/useTheme'
 import { useFont } from '@/hooks/useFont'
 import { AUTO_CHECK_INTERVAL_MS, useUpdater } from '@/hooks/useUpdater'
@@ -68,6 +69,7 @@ async function shouldShowOnboarding(seen: boolean): Promise<boolean> {
 
 function AppInner() {
   useRepoWatcher()
+  useAutoFetch()
   useTheme()
   useFont()
   const openModal = useUiStore((s) => s.openModal)

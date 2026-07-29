@@ -190,6 +190,10 @@ pub struct Settings {
   /// the app starts with no repository open.
   #[serde(default = "default_restore_tabs")]
   pub restore_tabs: bool,
+  /// Fetch open repositories in the background so ahead/behind counts and
+  /// remote branches are current without the user asking. On by default.
+  #[serde(default = "default_auto_fetch")]
+  pub auto_fetch: bool,
   /// Whether the welcome tour has been shown. Without this the tour reopens on
   /// every launch that starts with no repository, which is the normal state for
   /// anyone who keeps "reopen my last tabs" off.
@@ -339,6 +343,10 @@ fn default_restore_tabs() -> bool {
   true
 }
 
+fn default_auto_fetch() -> bool {
+  true
+}
+
 fn default_vertical_tab_width() -> f64 {
   248.0
 }
@@ -392,6 +400,7 @@ impl Default for Settings {
       default_editor: None,
       enable_worktrees: false,
       restore_tabs: true,
+      auto_fetch: true,
       onboarding_seen: false,
       profiles: Vec::new(),
       active_profile_id: None,

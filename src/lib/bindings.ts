@@ -2453,6 +2453,11 @@ enable_worktrees?: boolean;
  */
 restore_tabs?: boolean; 
 /**
+ * Fetch open repositories in the background so ahead/behind counts and
+ * remote branches are current without the user asking. On by default.
+ */
+auto_fetch?: boolean; 
+/**
  * Whether the welcome tour has been shown. Without this the tour reopens on
  * every launch that starts with no repository, which is the normal state for
  * anyone who keeps "reopen my last tabs" off.
