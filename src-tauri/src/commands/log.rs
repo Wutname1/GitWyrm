@@ -101,6 +101,66 @@ fn collect_log_roots(repo: &git2::Repository) -> Vec<Oid> {
   roots
 }
 
+/// The commit lane zero is reserved for. Normally HEAD itself, but when another
+/// branch's tip sits directly above HEAD on the same first-parent line -- the
+/// remote branch after a rewind, or a local branch that moved ahead -- reserve
+/// that tip instead. The whole line then renders as one straight lane instead of
+/// forking sideways at HEAD even though the history never actually branched.
+fn primary_lane_oid(repo: &git2::Repository, head: Oid) -> Oid {
+  let mut best: Option<(i64, Oid)> = None;
+  let Ok(references) = repo.references() else {
+    return head;
+  };
+  for reference in references.flatten() {
+    let Some(name) = reference.name() else {
+      continue;
+    };
+    if !(name.starts_with("refs/heads/") || name.starts_with("refs/remotes/")) {
+      continue;
+    }
+    let Ok(tip) = reference.peel_to_commit() else {
+      continue;
+    };
+    if tip.id() == head {
+      continue;
+    }
+    // Cheap prefilter: the tip must be strictly ahead of HEAD with nothing
+    // missing, or HEAD cannot be on its line at all.
+    let Ok((ahead, behind)) = repo.graph_ahead_behind(tip.id(), head) else {
+      continue;
+    };
+    if behind != 0 || ahead == 0 {
+      continue;
+    }
+    // Confirm HEAD is on the tip's FIRST-parent chain. A branch that merely
+    // contains HEAD through a merge still deserves its own lane. Every commit
+    // on that chain down to HEAD is counted in `ahead`, so `ahead` steps is
+    // always enough to reach it.
+    let mut cursor = tip.clone();
+    let mut on_line = false;
+    for _ in 0..ahead {
+      match cursor.parent(0) {
+        Ok(parent) if parent.id() == head => {
+          on_line = true;
+          break;
+        }
+        Ok(parent) => cursor = parent,
+        Err(_) => break,
+      }
+    }
+    if !on_line {
+      continue;
+    }
+    // Several tips can share the line below their fork point; the newest one
+    // extends lane zero the furthest up before the others peel off.
+    let time = tip.time().seconds();
+    if best.map_or(true, |(t, _)| time > t) {
+      best = Some((time, tip.id()));
+    }
+  }
+  best.map_or(head, |(_, oid)| oid)
+}
+
 /// [`commit_change_stats`], memoized on the open repository.
 ///
 /// A log page needs stats for every commit on it, and each one is a tree-to-tree
@@ -173,7 +233,9 @@ pub async fn get_log(
     }
 
     let refs = collect_refs(&repo);
-    let mut lanes = head_oid.map(LaneState::with_primary).unwrap_or_default();
+    let mut lanes = head_oid
+      .map(|head| LaneState::with_primary(primary_lane_oid(&repo, head)))
+      .unwrap_or_default();
     let mut commits = Vec::with_capacity(limit as usize);
     let mut has_more = false;
     let end = skip as usize + limit as usize;
@@ -331,6 +393,52 @@ mod tests {
     assert!(
       commits.contains(&detached),
       "detached stash base must be walked"
+    );
+  }
+
+  #[test]
+  fn rewound_head_hands_lane_zero_to_the_tip_above_it() {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    let base = commit_file(&repo, "a.txt", "a", "base");
+    let newer = commit_file(&repo, "b.txt", "b", "newer");
+
+    // The remote stays at the newer tip while the local branch rewinds under it.
+    repo
+      .reference("refs/remotes/origin/master", newer, true, "test remote")
+      .expect("remote ref");
+    let base_commit = repo.find_commit(base).expect("base commit");
+    repo
+      .reset(base_commit.as_object(), git2::ResetType::Hard, None)
+      .expect("rewind");
+
+    assert_eq!(
+      primary_lane_oid(&repo, base),
+      newer,
+      "the straight line through HEAD must keep lane zero"
+    );
+  }
+
+  #[test]
+  fn diverged_tip_does_not_take_the_head_lane() {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    let base = commit_file(&repo, "a.txt", "a", "base");
+    let side = commit_file(&repo, "b.txt", "b", "side work");
+    repo
+      .reference("refs/heads/side", side, true, "test branch")
+      .expect("side ref");
+
+    let base_commit = repo.find_commit(base).expect("base commit");
+    repo
+      .reset(base_commit.as_object(), git2::ResetType::Hard, None)
+      .expect("rewind");
+    let head = commit_file(&repo, "c.txt", "c", "diverged");
+
+    assert_eq!(
+      primary_lane_oid(&repo, head),
+      head,
+      "a diverged branch must keep its own lane"
     );
   }
 }

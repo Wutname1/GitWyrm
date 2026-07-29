@@ -239,7 +239,7 @@ pub fn squash_commits(
   )?;
 
   repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
-  Ok(RefMove { branch, previous_sha })
+  Ok(RefMove { branch, previous_sha, stashed: false })
 }
 
 /// Drop several commits from the current branch in one rewrite: replay the
@@ -275,5 +275,5 @@ pub fn drop_commits(repo: &git2::Repository, shas: &[String]) -> Result<RefMove,
   )?;
 
   repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
-  Ok(RefMove { branch, previous_sha })
+  Ok(RefMove { branch, previous_sha, stashed: false })
 }
