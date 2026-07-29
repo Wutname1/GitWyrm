@@ -84,3 +84,38 @@ pub fn moved_submodules(repo: &git2::Repository) -> HashMap<String, SubmoduleMov
 pub fn is_submodule(repo: &git2::Repository, path: &str) -> bool {
   repo.find_submodule(path).is_ok()
 }
+
+/// Check out every initialized submodule at the commit the parent now records.
+///
+/// Operations that write a tree -- cherry-pick, revert, merge -- move the
+/// gitlink in the index but leave the nested checkout where it was. The commit
+/// then lands correctly while the working tree reports the submodule as
+/// modified, so the repo is dirty the instant the operation "succeeds" and the
+/// next operation refuses to start. Running this afterwards makes the checkout
+/// match what was just committed.
+///
+/// Uninitialized submodules are skipped: there is no checkout to move, and
+/// downloading one is a separate, explicit user action. Failures are ignored
+/// per-submodule -- a submodule whose commit is missing locally must not fail
+/// the operation that already committed successfully.
+pub fn sync_submodule_workdirs(repo: &git2::Repository) {
+  let Ok(subs) = repo.submodules() else {
+    return;
+  };
+
+  for mut sub in subs {
+    // No workdir id means it was never checked out; leave it alone.
+    if sub.workdir_id().is_none() {
+      continue;
+    }
+    // Re-read so index_id reflects the tree just written.
+    let _ = sub.reload(true);
+    let (Some(recorded), Some(checked_out)) = (sub.index_id(), sub.workdir_id()) else {
+      continue;
+    };
+    if recorded == checked_out {
+      continue;
+    }
+    let _ = sub.update(false, None);
+  }
+}

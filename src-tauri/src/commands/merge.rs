@@ -364,6 +364,11 @@ pub async fn commit_merge(
     };
 
     repo.cleanup_state()?;
+
+    // Same as the clean cherry-pick path: the tree just written may move
+    // submodule pointers that the nested checkouts have not followed.
+    crate::git::submodule::sync_submodule_workdirs(&repo);
+
     Ok(oid.to_string())
   })
   .await
@@ -418,6 +423,10 @@ pub async fn cherry_pick(
       &[&head_commit],
     )?;
     repo.cleanup_state()?;
+
+    // The commit moved any submodule pointers, but not the nested checkouts --
+    // without this the pick "succeeds" and leaves the repo dirty.
+    crate::git::submodule::sync_submodule_workdirs(&repo);
 
     Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts: Vec::new() })
   })

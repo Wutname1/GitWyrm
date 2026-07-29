@@ -148,3 +148,89 @@ fn safe_checkout_carries_a_moved_submodule() {
 
   assert_eq!(git_out(&parent, &["rev-parse", "--abbrev-ref", "HEAD"]), "feature");
 }
+
+
+/// Build a parent at c1 plus a `bump` branch whose tip moves the submodule to
+/// c2. Returns (parent, core_path, bump_sha, c1, c2) with master checked out
+/// clean at c1 -- the setup for picking a submodule bump onto master.
+fn bump_fixture(label: &str) -> Option<(PathBuf, PathBuf, String, String, String)> {
+  let (parent, c1, c2) = fixture(label)?;
+  let core = parent.join("packages/core");
+
+  git(&core, &["checkout", "-q", &c1]);
+  git(&parent, &["checkout", "-qb", "bump"]);
+  git(&core, &["checkout", "-q", &c2]);
+  git(&parent, &["add", "packages/core"]);
+  git(&parent, &["commit", "-qm", "bump core to c2"]);
+  let bump_sha = git_out(&parent, &["rev-parse", "HEAD"]);
+
+  git(&parent, &["checkout", "-q", "master"]);
+  git(&core, &["checkout", "-q", &c1]);
+  assert!(
+    git_out(&parent, &["status", "--short"]).is_empty(),
+    "fixture must start clean"
+  );
+
+  Some((parent, core, bump_sha, c1, c2))
+}
+
+/// Cherry-picking a commit that bumps a submodule pointer must leave the repo
+/// CLEAN. git2 writes the new gitlink into the index but never moves the nested
+/// checkout, so without an explicit sync the pick "succeeds" and immediately
+/// leaves `packages/core` modified -- which then blocks the next operation.
+#[test]
+fn cherry_picked_submodule_bump_leaves_repo_clean() {
+  let Some((parent, core, bump_sha, _c1, c2)) = bump_fixture("cpclean") else { return };
+  let repo = Repository::open(&parent).unwrap();
+
+  let commit = repo.find_commit(git2::Oid::from_str(&bump_sha).unwrap()).unwrap();
+  repo.cherrypick(&commit, None).unwrap();
+  assert!(!repo.index().unwrap().has_conflicts(), "bump onto an ancestor should apply cleanly");
+
+  let mut index = repo.index().unwrap();
+  let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+  let committer = repo.signature().unwrap();
+  let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+  repo
+    .commit(Some("HEAD"), &commit.author(), &committer, "pick", &tree, &[&head_commit])
+    .unwrap();
+  repo.cleanup_state().unwrap();
+
+  // The committed pointer is correct even before the fix; the bug is that the
+  // working tree disagrees with it.
+  assert_eq!(git_out(&parent, &["rev-parse", "HEAD:packages/core"]), c2);
+
+  gitwyrm_lib::git_submodule::sync_submodule_workdirs(&repo);
+
+  assert_eq!(
+    git_out(&core, &["rev-parse", "HEAD"]),
+    c2,
+    "the submodule checkout must follow the pointer the pick committed"
+  );
+  assert!(
+    git_out(&parent, &["status", "--short"]).is_empty(),
+    "a cherry-picked submodule bump must not leave the repo dirty, got: {:?}",
+    git_out(&parent, &["status", "--short"])
+  );
+  assert!(
+    gitwyrm_lib::git_submodule::moved_submodules(&repo).is_empty(),
+    "no submodule should report as moved after the sync"
+  );
+}
+
+/// The sync must not touch an uninitialized submodule: there is no checkout to
+/// move, and downloading one is a separate explicit action.
+#[test]
+fn sync_skips_uninitialized_submodules() {
+  let Some((parent, core, _sha, _c1, _c2)) = bump_fixture("cpuninit") else { return };
+
+  git(&parent, &["submodule", "deinit", "-f", "packages/core"]);
+  let repo = Repository::open(&parent).unwrap();
+
+  gitwyrm_lib::git_submodule::sync_submodule_workdirs(&repo);
+
+  assert!(
+    !core.join(".git").exists() && !core.join("f.txt").exists(),
+    "a deinitialized submodule must stay uninitialized"
+  );
+}
