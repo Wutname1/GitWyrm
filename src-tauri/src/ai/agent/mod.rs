@@ -6,6 +6,7 @@
 //! the single-shot path deliberately does not have.
 
 pub mod acp;
+pub mod cli_agent;
 pub mod copilot_cli;
 pub mod transport;
 

@@ -24,9 +24,12 @@
       the default provider supports - never by the engine having its own preference.
       Trait and shared types done in `ai/agent/transport.rs`; the three implementations
       are 2.2-2.4 below
-- [ ] 2.2 CLI subprocess transport: Copilot CLI first. Discovery by PATH then known
+- [x] 2.2 CLI subprocess transport: Copilot CLI first. Discovery by PATH then known
       locations, gated on a `--version` floor rather than a pinned path, since these tools
-      self-update. Auth state from the CLI's own answer, never its credential files
+      self-update. Auth state from the CLI's own answer, never its credential files.
+      Drives `copilot --acp --stdio` (Agent Client Protocol over NDJSON); `check()` opens a
+      real session, since that is the only thing that proves a sign-in has the scope it
+      needs. Version floor is a placeholder pending a real install to measure against
 - [ ] 2.3 API-key transport against a documented API (OpenAI, Anthropic)
 - [ ] 2.4 OpenAI-compatible endpoint transport, which also serves a local opencode server,
       Ollama, and LM Studio
