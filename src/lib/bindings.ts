@@ -194,6 +194,34 @@ async openspecCreateDraftedChange(repoId: string, id: string, artifacts: Drafted
 }
 },
 /**
+ * Draft one spec delta to fix a change that failed its spec check. **Writes
+ * nothing** -- the caller reviews it and then calls
+ * `openspec_add_drafted_delta`.
+ * 
+ * `change_id` is passed in rather than read from any current selection: the
+ * user may well select another change while this drafts, and the fix has to
+ * land on the change they actually checked.
+ */
+async openspecDraftFix(repoId: string, changeId: string, validatorOutput: string, provider: string, model: string) : Promise<Result<DraftedArtifact, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_draft_fix", { repoId, changeId, validatorOutput, provider, model }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Write one reviewed delta into an existing change.
+ */
+async openspecAddDraftedDelta(repoId: string, changeId: string, delta: DraftedArtifact) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_add_drafted_delta", { repoId, changeId, delta }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Open a single file in the given editor. Mirrors `external::open_in_editor`,
  * but targets one file inside the repo rather than the repo folder.
  */

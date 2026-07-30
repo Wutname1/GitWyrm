@@ -160,6 +160,31 @@ export function useOpenspecMutations(repoId: string | null) {
     onSettled: refresh,
   })
 
+  // Like drafting, this writes nothing; only addDraftedDelta does.
+  const draftFix = useMutation({
+    mutationFn: async (vars: {
+      changeId: string
+      validatorOutput: string
+      provider: string
+      model: string
+    }) =>
+      unwrap(
+        await commands.openspecDraftFix(
+          repoId!,
+          vars.changeId,
+          vars.validatorOutput,
+          vars.provider,
+          vars.model
+        )
+      ),
+  })
+
+  const addDraftedDelta = useMutation({
+    mutationFn: async (vars: { changeId: string; delta: DraftedArtifact }) =>
+      unwrap(await commands.openspecAddDraftedDelta(repoId!, vars.changeId, vars.delta)),
+    onSettled: refresh,
+  })
+
   const archiveChange = useMutation({
     mutationFn: async (changeId: string) =>
       unwrap(await commands.openspecArchiveChange(repoId!, changeId)),
@@ -173,5 +198,7 @@ export function useOpenspecMutations(repoId: string | null) {
     archiveChange,
     draftChange,
     createDraftedChange,
+    draftFix,
+    addDraftedDelta,
   }
 }

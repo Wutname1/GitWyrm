@@ -57,6 +57,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::openspec::openspec_recheck_cli,
     commands::openspec::openspec_draft_change,
     commands::openspec::openspec_create_drafted_change,
+    commands::openspec::openspec_draft_fix,
+    commands::openspec::openspec_add_drafted_delta,
     commands::file::open_file_in_editor,
     commands::file::reveal_file_in_file_manager,
     commands::file::open_folder_in_file_manager,

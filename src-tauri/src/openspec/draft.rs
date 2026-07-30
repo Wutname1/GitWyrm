@@ -118,6 +118,66 @@ no requirements -- do not invent one.
 Write for someone who does not know the codebase. Plain language, no jargon, no
 em dashes, and never mention other tools or products by name.";
 
+/// House style for drafting one requirement to fix a failed spec check.
+///
+/// Narrower than [`SYSTEM_PROMPT`] on purpose: the job is to satisfy the
+/// validator for a change that already exists, not to redesign it. A model that
+/// invented requirements here would silently expand scope the user never asked
+/// for.
+pub const FIX_SYSTEM_PROMPT: &str = "\
+You write a single OpenSpec spec delta for a change that already exists.
+
+Return JSON only, with this exact shape:
+{\"capability\":\"kebab-case-name\",\"content\":\"...\"}
+
+content must be exactly:
+# <capability> Spec Delta
+
+## ADDED Requirements
+
+### Requirement: <name>
+
+The system SHALL <behavior>.
+
+#### Scenario: <name>
+
+- WHEN <trigger>
+- THEN <observable outcome>
+
+Every requirement needs at least one scenario, or validation fails again. Derive
+the requirement from the change's own proposal -- do not invent scope it does not
+describe. Prefer one requirement with one or two scenarios over many.
+
+Plain language, no jargon, no em dashes.";
+
+/// Build the user half of the fix prompt from the change's own documents.
+pub fn fix_user_prompt(change_id: &str, proposal: &str, validator_output: &str) -> String {
+  format!(
+    "Change id: {}\n\nIts proposal:\n{}\n\nThe spec check said:\n{}",
+    change_id,
+    proposal.trim(),
+    validator_output.trim()
+  )
+}
+
+/// Parse a single drafted delta.
+pub fn parse_fix(response: &str) -> Result<DraftedArtifact, AppError> {
+  let json = extract_json(response)
+    .ok_or_else(|| AppError::Other("The AI did not return a delta. Try again.".into()))?;
+  let parsed: DraftResponseDelta = serde_json::from_str(json)
+    .map_err(|e| AppError::Other(format!("The AI's delta could not be read ({e}). Try again.")))?;
+  if parsed.content.trim().is_empty() {
+    return Err(AppError::Other("The AI returned an empty delta. Try again.".into()));
+  }
+  let capability = sanitize_capability(&parsed.capability).ok_or_else(|| {
+    AppError::Other("The AI did not say which capability this belongs to. Try again.".into())
+  })?;
+  Ok(DraftedArtifact {
+    path: format!("specs/{capability}/spec.md"),
+    content: ensure_trailing_newline(&parsed.content),
+  })
+}
+
 /// Build the user half of the drafting prompt.
 ///
 /// Everything the AI reads is assembled here so the UI can show the user the
@@ -370,6 +430,35 @@ mod tests {
     let (id, renamed) = unique_change_id("add-thing", &["ADD-THING".to_string()]);
     assert_eq!(id, "add-thing-2");
     assert!(renamed);
+  }
+
+  #[test]
+  fn parses_a_drafted_fix_delta() {
+    let reply = r##"{"capability":"spec-desk","content":"# spec-desk Spec Delta\n\n## ADDED Requirements"}"##;
+    let delta = parse_fix(reply).expect("parses");
+    assert_eq!(delta.path, "specs/spec-desk/spec.md");
+    assert!(delta.content.ends_with('\n'));
+  }
+
+  #[test]
+  fn a_fix_without_a_usable_capability_is_an_error() {
+    // Better to fail loudly than to write `specs//spec.md` next to the change.
+    let reply = r##"{"capability":"","content":"# x"}"##;
+    assert!(parse_fix(reply).is_err());
+  }
+
+  #[test]
+  fn an_empty_fix_is_an_error_not_an_empty_file() {
+    let reply = r##"{"capability":"core","content":"   "}"##;
+    assert!(parse_fix(reply).is_err());
+  }
+
+  #[test]
+  fn the_fix_prompt_carries_the_proposal_and_the_validator_output() {
+    let prompt = fix_user_prompt("add-thing", "## Why\n\nBecause.", "Missing requirement");
+    assert!(prompt.contains("add-thing"));
+    assert!(prompt.contains("Because."));
+    assert!(prompt.contains("Missing requirement"));
   }
 
   #[test]

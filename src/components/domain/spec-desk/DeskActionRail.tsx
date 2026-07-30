@@ -7,21 +7,29 @@ import {
   Code2,
   MessageCircleQuestion,
   Play,
+  Sparkles,
   SquareTerminal,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { DisabledHint } from '@/components/ui/tooltip'
-import type { CliOutcome, DemoScenario, SpecChange } from '@/lib/bindings'
+import type {
+  CliOutcome,
+  DemoScenario,
+  DraftedArtifact,
+  SpecChange,
+} from '@/lib/bindings'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { openAiSettings } from '@/lib/openAiSettings'
 import { composeTaskHandoff, copyTaskHandoff } from '@/lib/specHandoff'
 import { nextTask, useOpenspecMutations } from '@/hooks/useOpenspec'
 import { useSpecAi } from '@/hooks/useSpecAi'
+import { useAiSelection } from '@/hooks/useAiSelection'
 import { stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
 import { useBranches } from '@/hooks/useGitQueries'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { FormDialog } from '@/components/ui/form-dialog'
 import { describeError, log } from '@/lib/log'
 
 /**
@@ -85,7 +93,18 @@ function RailButton({
  * of a check is to sit there while the user fixes what it found. It stays until
  * the change is switched or the check is run again.
  */
-function CheckResult({ outcome, onRecheck }: { outcome: CliOutcome; onRecheck: () => void }) {
+function CheckResult({
+  outcome,
+  onRecheck,
+  onFix,
+  fixing,
+}: {
+  outcome: CliOutcome
+  onRecheck: () => void
+  /** Offered only with an AI configured; absent otherwise. */
+  onFix?: () => void
+  fixing?: boolean
+}) {
   if (outcome.kind === 'cliMissing') {
     return (
       <div className="mt-2 rounded-md border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8 px-3 py-2 text-2xs leading-relaxed text-[var(--gw-amber)]">
@@ -112,6 +131,17 @@ function CheckResult({ outcome, onRecheck }: { outcome: CliOutcome; onRecheck: (
           <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-2xs text-sub">
             {outcome.output.trim()}
           </pre>
+        )}
+        {onFix && (
+          <button
+            type="button"
+            onClick={onFix}
+            disabled={fixing}
+            className="mt-2 flex items-center gap-1.5 rounded border border-primary/45 px-2 py-1 text-2xs font-semibold text-accent-text hover:bg-primary/15 disabled:opacity-50"
+          >
+            <Sparkles size={11} strokeWidth={2.4} />
+            {fixing ? 'Drafting…' : 'Fix with AI'}
+          </button>
         )}
       </div>
     )
@@ -149,8 +179,14 @@ export function DeskActionRail({
   repoPath: string
 }) {
   const ai = useSpecAi()
-  const { validateChange, archiveChange } = useOpenspecMutations(repoId)
+  const { validateChange, archiveChange, draftFix, addDraftedDelta } =
+    useOpenspecMutations(repoId)
+  const selection = useAiSelection()
   const [result, setResult] = useState<CliOutcome | null>(null)
+  // Which change `result` describes. Not always the selected one: the user can
+  // switch changes while a fix drafts, and the fix belongs to what was checked.
+  const [checkedId, setCheckedId] = useState<string | null>(null)
+  const [fix, setFix] = useState<{ changeId: string; delta: DraftedArtifact } | null>(null)
   const [starting, setStarting] = useState(false)
   const branches = useBranches(repoId)
   const [confirmArchive, setConfirmArchive] = useState(false)
@@ -183,15 +219,68 @@ export function DeskActionRail({
 
   // A result belongs to the change it was run on. Switching changes has to clear
   // it, or the rail would show one change's problems beside another's name.
+  // The drafted fix is deliberately NOT cleared: it names the change it belongs
+  // to and writes there, so a user who switches while it drafts still gets to
+  // decide about it rather than losing it silently.
   useEffect(() => {
     setResult(null)
+    setCheckedId(null)
   }, [change.id])
 
   const runCheck = () => {
+    // Remember which change this result belongs to. "Fix with AI" must land on
+    // the change that was checked even if the user selects another one while
+    // the fix drafts, and the result panel outlives the selection.
+    const checked = change.id
     validateChange.mutate(change.id, {
-      onSuccess: setResult,
+      onSuccess: (outcome) => {
+        setResult(outcome)
+        setCheckedId(checked)
+      },
       onError: (e) => toast.error(describeError(e)),
     })
+  }
+
+  const startFix = () => {
+    const target = checkedId
+    if (!target || !result || result.kind !== 'failed') return
+    if (!selection.provider || !selection.model) return
+    draftFix.mutate(
+      {
+        changeId: target,
+        validatorOutput: result.output,
+        provider: selection.provider,
+        model: selection.model,
+      },
+      {
+        onSuccess: (delta) => setFix({ changeId: target, delta }),
+        onError: (e) =>
+          toast.error('Could not draft a fix.', { description: describeError(e) }),
+      }
+    )
+  }
+
+  const applyFix = () => {
+    if (!fix) return
+    addDraftedDelta.mutate(
+      { changeId: fix.changeId, delta: fix.delta },
+      {
+        onSuccess: (path) => {
+          toast.success('Added the requirement.', { description: `Wrote ${path}.` })
+          setFix(null)
+          // Re-run the check on the change the fix landed on, not on whatever is
+          // selected now, so the result the user sees is about their fix.
+          validateChange.mutate(fix.changeId, {
+            onSuccess: (outcome) => {
+              setResult(outcome)
+              setCheckedId(fix.changeId)
+            },
+          })
+        },
+        onError: (e) =>
+          toast.error('Could not add the requirement.', { description: describeError(e) }),
+      }
+    )
   }
 
   // Re-probe for the CLI, then immediately re-run the check if it turned up.
@@ -446,7 +535,14 @@ export function DeskActionRail({
               onClick={runCheck}
               pending={validateChange.isPending}
             />
-            {result && <CheckResult outcome={result} onRecheck={() => void recheckCli()} />}
+            {result && (
+              <CheckResult
+                outcome={result}
+                onRecheck={() => void recheckCli()}
+                onFix={ai.configured && checkedId ? startFix : undefined}
+                fixing={draftFix.isPending}
+              />
+            )}
             {/* Only shown after the check, so it reads as "what next" rather than
                 a warning about something the user has not done. */}
             <RailButton
@@ -529,6 +625,32 @@ export function DeskActionRail({
         pendingLabel="Archiving…"
         onConfirm={archive}
       />
+      {/* The drafted fix, for review. Nothing is on disk until Add. */}
+      <FormDialog
+        open={fix != null}
+        onOpenChange={(o) => !o && setFix(null)}
+        icon={<Sparkles size={15} strokeWidth={1.9} />}
+        widthClassName="sm:max-w-2xl"
+        title={fix ? `Add a requirement to ${fix.changeId}` : ''}
+        submitLabel="Add this delta"
+        pendingLabel="Adding…"
+        cancelLabel="Dismiss"
+        canSubmit={!addDraftedDelta.isPending}
+        pending={addDraftedDelta.isPending}
+        onSubmit={applyFix}
+      >
+        <p className="text-2xs leading-relaxed text-muted-foreground">
+          Drafted from this change's own proposal. Nothing is written until you add it.
+        </p>
+        {fix && (
+          <>
+            <p className="font-mono text-2xs text-sub">{fix.delta.path}</p>
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded border border-border bg-background px-2.5 py-2 font-mono text-2xs leading-relaxed text-sub">
+              {fix.delta.content}
+            </pre>
+          </>
+        )}
+      </FormDialog>
       <DemoRunLauncher change={change} repoId={repoId} />
     </div>
   )

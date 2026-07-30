@@ -25,16 +25,28 @@
       change. Covered by `creates_only_the_artifacts_it_is_given` and
       `nothing_is_left_behind_when_an_artifact_path_is_unusable`.
 - [ ] 2.4 Created change appears selected in both windows; History starts with
-      "Drafted with <provider> · reviewed by you"
+      "Drafted with <provider> · reviewed by you". **Selection is done**
+      (`selectChangeEverywhere` on create). The History line is blocked: History
+      is derived entirely from commits that touched the change folder
+      (`openspec/history.rs`), and a just-drafted change is not committed yet, so
+      it has no History at all until the user commits it. Recording provenance
+      needs either an `Assisted-by:` trailer written at commit time - which means
+      remembering that this change was drafted, across app restarts - or a stored
+      provenance file the History reader merges in. That is a design decision, not
+      an oversight; see the note in `openspec/history.rs` about attribution
+      belonging to `add-spec-commit-links`.
 
 ## 3. Validate-fix loop
 
-- [ ] 3.1 Failed spec check (with AI configured) offers "✦ Fix with AI" in the result
-- [ ] 3.2 Drafts a requirement from that change's proposal; review card with the delta
+- [x] 3.1 Failed spec check (with AI configured) offers "✦ Fix with AI" in the result
+- [x] 3.2 Drafts a requirement from that change's proposal; review card with the delta
       preview, Add this delta / Dismiss
-- [ ] 3.3 Adding writes the delta file, updates the deltas tab and History, and the
+- [x] 3.3 Adding writes the delta file, updates the deltas tab and History, and the
       re-run check passes; the fix attaches to the change that was checked even if the
-      selection moved meanwhile
+      selection moved meanwhile. The checked change id is captured when the check
+      runs and carried through drafting, adding, and the re-check, so none of them
+      follow the selection. Adding refuses to overwrite an existing delta
+      (`adding_a_delta_never_overwrites_one`).
 
 ## 4. Verify
 

@@ -243,6 +243,38 @@ fn safe_join(base: &Path, relative: &str) -> Option<std::path::PathBuf> {
   (depth > 0).then_some(out)
 }
 
+/// Add one delta file to an existing change, for the validate-fix loop.
+///
+/// Refuses to overwrite an existing delta: the user asked to *add* a missing
+/// requirement, and silently replacing a spec file they had already written
+/// would be the worst possible reading of that request.
+pub fn add_delta(
+  openspec_dir: &Path,
+  change_id: &str,
+  delta: &DraftedArtifact,
+) -> Result<String, AppError> {
+  let dir = openspec_dir.join("changes").join(change_id);
+  if !dir.exists() {
+    return Err(AppError::Other(format!("{change_id} is not a change here.")));
+  }
+  let target = safe_join(&dir, &delta.path)
+    .ok_or_else(|| AppError::Other(format!("{} is not a valid place for a file", delta.path)))?;
+  if target.exists() {
+    return Err(AppError::Other(format!(
+      "{} already exists. Edit it instead of adding another.",
+      delta.path
+    )));
+  }
+  if let Some(parent) = target.parent() {
+    std::fs::create_dir_all(parent)?;
+  }
+  std::fs::write(&target, &delta.content)?;
+  Ok(format!(
+    "openspec/changes/{change_id}/{}",
+    delta.path.replace('\\', "/")
+  ))
+}
+
 /// Creates `openspec/changes/<id>/` with template proposal.md and tasks.md.
 ///
 /// Refuses an existing folder rather than merging into it: the caller surfaces
@@ -483,6 +515,66 @@ mod tests {
       !dir.path().join("changes").join("add-thing").exists(),
       "a failed create must not leave a partial change behind"
     );
+    assert!(!dir.path().join("escape.md").exists());
+  }
+
+  #[test]
+  fn adds_a_delta_to_an_existing_change() {
+    let dir = tempfile::tempdir().unwrap();
+    create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# a\n")]).unwrap();
+
+    let written = add_delta(
+      dir.path(),
+      "add-thing",
+      &artifact("specs/core/spec.md", "# core Spec Delta\n"),
+    )
+    .unwrap();
+
+    assert_eq!(written, "openspec/changes/add-thing/specs/core/spec.md");
+    assert!(dir
+      .path()
+      .join("changes/add-thing/specs/core/spec.md")
+      .exists());
+  }
+
+  /// The fix loop adds a *missing* requirement. Replacing a spec the user
+  /// already wrote would destroy work they never offered up.
+  #[test]
+  fn adding_a_delta_never_overwrites_one() {
+    let dir = tempfile::tempdir().unwrap();
+    create_drafted_change(
+      dir.path(),
+      "add-thing",
+      &[
+        artifact("proposal.md", "# a\n"),
+        artifact("specs/core/spec.md", "# mine\n"),
+      ],
+    )
+    .unwrap();
+
+    assert!(add_delta(
+      dir.path(),
+      "add-thing",
+      &artifact("specs/core/spec.md", "# theirs\n")
+    )
+    .is_err());
+
+    let body =
+      std::fs::read_to_string(dir.path().join("changes/add-thing/specs/core/spec.md")).unwrap();
+    assert_eq!(body, "# mine\n", "the user's own delta must survive");
+  }
+
+  #[test]
+  fn adding_a_delta_to_a_missing_change_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(add_delta(dir.path(), "nope", &artifact("specs/core/spec.md", "# x\n")).is_err());
+  }
+
+  #[test]
+  fn a_delta_cannot_escape_its_change_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# a\n")]).unwrap();
+    assert!(add_delta(dir.path(), "add-thing", &artifact("../../escape.md", "x\n")).is_err());
     assert!(!dir.path().join("escape.md").exists());
   }
 

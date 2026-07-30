@@ -283,6 +283,62 @@ pub async fn openspec_create_drafted_change(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Draft one spec delta to fix a change that failed its spec check. **Writes
+/// nothing** -- the caller reviews it and then calls
+/// `openspec_add_drafted_delta`.
+///
+/// `change_id` is passed in rather than read from any current selection: the
+/// user may well select another change while this drafts, and the fix has to
+/// land on the change they actually checked.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_draft_fix(
+  app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  change_id: String,
+  validator_output: String,
+  provider: String,
+  model: String,
+) -> Result<draft::DraftedArtifact, AppError> {
+  let root = repo_root(&manager, &repo_id)?;
+  let change_for_read = change_id.clone();
+  let proposal = tauri::async_runtime::spawn_blocking(move || {
+    let dir = openspec::openspec_dir(&root)
+      .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
+    let path = dir.join("changes").join(&change_for_read).join("proposal.md");
+    std::fs::read_to_string(&path).map_err(|_| {
+      AppError::Other(format!("{change_for_read} has no proposal to work from."))
+    })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))??;
+
+  let user = draft::fix_user_prompt(&change_id, &proposal, &validator_output);
+  let response =
+    crate::ai::complete::complete(&app, &provider, &model, draft::FIX_SYSTEM_PROMPT, &user).await?;
+  draft::parse_fix(&response)
+}
+
+/// Write one reviewed delta into an existing change.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_add_drafted_delta(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  change_id: String,
+  delta: draft::DraftedArtifact,
+) -> Result<String, AppError> {
+  let root = repo_root(&manager, &repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let dir = openspec::openspec_dir(&root)
+      .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
+    write::add_delta(&dir, &change_id, &delta)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// Capability folder names under `openspec/specs/`, for the drafting prompt.
 fn capability_names(openspec_dir: &std::path::Path) -> Vec<String> {
   let Ok(entries) = std::fs::read_dir(openspec_dir.join("specs")) else {
