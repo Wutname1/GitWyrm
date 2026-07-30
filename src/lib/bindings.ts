@@ -844,9 +844,17 @@ async addToGitignore(repoId: string, pattern: string) : Promise<Result<IgnoreOut
     else return { status: "error", error: e  as any };
 }
 },
-async createCommit(repoId: string, summary: string, description: string, amend: boolean) : Promise<Result<string, string>> {
+/**
+ * Create a commit from the staged tree.
+ * 
+ * `spec_id` appends a `Spec:` trailer linking the commit to an OpenSpec
+ * change. The caller passes it rather than the link being read here, so the
+ * commit records exactly what the form showed -- including when the user
+ * removed the trailer for this one commit.
+ */
+async createCommit(repoId: string, summary: string, description: string, amend: boolean, specId: string | null) : Promise<Result<string, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_commit", { repoId, summary, description, amend }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_commit", { repoId, summary, description, amend, specId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1925,6 +1933,20 @@ async openspecArchivedIds(repoId: string) : Promise<Result<string[], string>> {
 }
 },
 /**
+ * Commits that touched a change's folder, newest first.
+ * 
+ * Empty (not an error) for a change that has never been committed -- a brand-new
+ * change has no history yet, which the UI states rather than treating as a fault.
+ */
+async openspecChangeHistory(repoId: string, changeId: string) : Promise<Result<SpecHistoryEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_change_history", { repoId, changeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Ticks or unticks one task, writing exactly that checkbox to tasks.md.
  * 
  * `line` comes from the parsed task the user clicked. If the file has moved on
@@ -1987,6 +2009,30 @@ async openSpecDesk(repoId: string) : Promise<Result<DeskOutcome, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async specLinkGet(repoId: string, branch: string) : Promise<Result<BranchSpecLink | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("spec_link_get", { repoId, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async specLinkSet(repoId: string, branch: string, changeId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("spec_link_set", { repoId, branch, changeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async specLinkClear(repoId: string, branch: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("spec_link_clear", { repoId, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -2025,6 +2071,18 @@ export type BranchList = { local: BranchInfo[]; remote: string[] }
  * (ahead) and commits `theirs` has that `ours` doesn't (behind).
  */
 export type BranchRelation = { ahead: number; behind: number }
+/**
+ * A branch's link to an OpenSpec change, as the UI sees it.
+ * 
+ * Fields stay snake_case, matching every other type crossing this boundary.
+ */
+export type BranchSpecLink = { change_id: string; 
+/**
+ * True when the user linked this branch, false when it was read from
+ * `Spec:` trailers. The UI words the two differently: an inferred link is
+ * a guess the user can make explicit.
+ */
+explicit: boolean }
 /**
  * What to do with uncommitted changes when switching branches.
  */
@@ -2181,7 +2239,15 @@ time: number; lane: number;
 /**
  * Lane of each parent edge, aligned with `parent_shas`.
  */
-parent_lanes: number[]; parent_shas: string[]; is_merge: boolean; refs: RefInfo[] }
+parent_lanes: number[]; parent_shas: string[]; is_merge: boolean; refs: RefInfo[]; 
+/**
+ * OpenSpec change id from this commit's `Spec:` trailer, if it has one.
+ */
+spec_id: string | null; 
+/**
+ * AI provider from this commit's `Assisted-by:` trailer, if a run wrote it.
+ */
+assisted_by: string | null }
 /**
  * The three sides of a conflicted file, as full text.
  */
@@ -3050,6 +3116,31 @@ capability: string;
  * Repo-relative path, shown in the UI so the user can find the file.
  */
 file: string; kind: DeltaKind; requirements: SpecRequirement[] }
+/**
+ * One thing that happened to a change.
+ */
+export type SpecHistoryEntry = { 
+/**
+ * Short sha, or empty for entries that are not commits.
+ */
+short_sha: string; 
+/**
+ * Commit subject, as written.
+ */
+summary: string; 
+/**
+ * Who made it.
+ */
+author: string; 
+/**
+ * Unix epoch seconds.
+ */
+time: number; 
+/**
+ * True when the commit message carries an `Assisted-by:` trailer, so the UI
+ * can mark AI-assisted work without guessing.
+ */
+ai_assisted: boolean }
 /**
  * Progress for one change, straight from its checkboxes.
  */

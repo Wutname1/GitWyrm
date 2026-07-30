@@ -6,6 +6,7 @@ use tauri::State;
 use crate::error::AppError;
 use crate::git::graph::{initials, LaneState};
 use crate::git::refs;
+use crate::git::trailers;
 use crate::git::types::{CommitEntry, LogPage, RefInfo, RefKind};
 use crate::state::{OpenRepo, RepoManager};
 
@@ -257,6 +258,9 @@ pub async fn get_log(
       let author = commit.author();
       let name = author.name().unwrap_or("unknown").to_string();
       let (files_changed, additions, deletions) = cached_change_stats(&open, &repo, &commit)?;
+      // The full message is already loaded here, so reading trailers costs
+      // nothing extra -- no second walk and no per-commit shell-out.
+      let message = commit.message().unwrap_or("");
       commits.push(CommitEntry {
         sha: oid.to_string(),
         short_sha: oid.to_string()[..7].to_string(),
@@ -273,6 +277,8 @@ pub async fn get_log(
         parent_shas: parents.iter().map(|p| p.to_string()).collect(),
         is_merge: parents.len() > 1,
         refs: refs.get(&oid).cloned().unwrap_or_default(),
+        spec_id: trailers::spec_id(message),
+        assisted_by: trailers::assisted_by(message),
       });
     }
 

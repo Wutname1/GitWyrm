@@ -47,6 +47,10 @@ pub struct CommitEntry {
   pub parent_shas: Vec<String>,
   pub is_merge: bool,
   pub refs: Vec<RefInfo>,
+  /// OpenSpec change id from this commit's `Spec:` trailer, if it has one.
+  pub spec_id: Option<String>,
+  /// AI provider from this commit's `Assisted-by:` trailer, if a run wrote it.
+  pub assisted_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]

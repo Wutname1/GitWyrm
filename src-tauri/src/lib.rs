@@ -210,11 +210,15 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::openspec::openspec_list_changes,
     commands::openspec::openspec_get_change,
     commands::openspec::openspec_archived_ids,
+    commands::openspec::openspec_change_history,
     commands::openspec::openspec_toggle_task,
     commands::openspec::openspec_scaffold_change,
     commands::openspec::openspec_validate_change,
     commands::openspec::openspec_archive_change,
     commands::spec_desk::open_spec_desk,
+    commands::spec_link::spec_link_get,
+    commands::spec_link::spec_link_set,
+    commands::spec_link::spec_link_clear,
   ])
   .typ::<watcher::RepoChangedPayload>()
   .typ::<commands::remote::GitProgressPayload>()

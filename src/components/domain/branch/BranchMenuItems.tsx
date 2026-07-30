@@ -31,6 +31,7 @@ import { useBranchHost, useRemotes } from '@/hooks/useGitQueries'
 import { branchActions } from '@/lib/branchActions'
 import { copyToClipboard } from '@/lib/clipboard'
 import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
+import { BranchSpecLinkItems } from './BranchSpecLinkItems'
 
 export interface BranchMenuHandlers {
   onMerge: (name: string) => void
@@ -238,6 +239,7 @@ export function BranchMenuItems({
         Start a pull request
         <ContextMenuShortcut className="text-2xs">soon</ContextMenuShortcut>
       </ContextMenuItem>
+      <BranchSpecLinkItems branch={branch.name} repoId={repoId} />
       <ContextMenuSeparator />
 
       <ContextMenuItem onSelect={() => handlers.onRename(branch.name)}>

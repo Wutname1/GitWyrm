@@ -1,8 +1,15 @@
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git::trailers;
 use crate::state::RepoManager;
 
+/// Create a commit from the staged tree.
+///
+/// `spec_id` appends a `Spec:` trailer linking the commit to an OpenSpec
+/// change. The caller passes it rather than the link being read here, so the
+/// commit records exactly what the form showed -- including when the user
+/// removed the trailer for this one commit.
 #[tauri::command]
 #[specta::specta]
 pub async fn create_commit(
@@ -11,6 +18,7 @@ pub async fn create_commit(
   summary: String,
   description: String,
   amend: bool,
+  spec_id: Option<String>,
 ) -> Result<String, AppError> {
   if summary.trim().is_empty() {
     return Err(AppError::Other("commit message is required".into()));
@@ -29,11 +37,17 @@ pub async fn create_commit(
     let tree_oid = index.write_tree()?;
     let tree = repo.find_tree(tree_oid)?;
 
-    let message = if description.trim().is_empty() {
+    let mut message = if description.trim().is_empty() {
       summary.trim().to_string()
     } else {
       format!("{}\n\n{}", summary.trim(), description.trim())
     };
+    // A description the user typed may already carry the trailer (they pasted
+    // it, or amended a commit that had one). upsert replaces instead of
+    // duplicating, so the message ends with exactly one `Spec:` line.
+    if let Some(spec_id) = spec_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+      message = trailers::upsert(&message, trailers::SPEC_KEY, spec_id);
+    }
 
     let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
 

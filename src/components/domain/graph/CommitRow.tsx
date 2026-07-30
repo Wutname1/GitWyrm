@@ -17,6 +17,9 @@ import { RefStack } from "./RefStack";
 import { CommitContextMenu } from "./CommitContextMenu";
 import { MultiCommitContextMenu } from "./MultiCommitContextMenu";
 import { ChangeSizeIndicator } from "./ChangeSizeIndicator";
+import { AiCommitMarker, SpecChip } from "./SpecChip";
+import { useOpenspecChanges } from "@/hooks/useOpenspec";
+import { useActiveRepo } from "@/stores/workspaceStore";
 
 /** Modifier keys held on a row click, for multi-select. */
 export interface SelectModifiers {
@@ -66,6 +69,18 @@ export const CommitRow = memo(function CommitRow({
   );
   const color = authorColor(commit.author_email || commit.author_name);
   const authorIconOnly = isAuthorIconOnly(widths);
+  const repo = useActiveRepo();
+  // Every row calls this, but react-query dedupes by key, so the whole
+  // virtualized list shares one cache entry and one fetch.
+  const changes = useOpenspecChanges(repo?.id ?? null);
+  // Progress belongs on the branch tip only: it describes the change's state
+  // now, which would be a lie on an older commit that merely mentions it.
+  const isBranchTip = commit.refs.some(
+    (r) => r.type === "branch" || r.type === "head",
+  );
+  const progress = isBranchTip
+    ? (changes.data?.find((c) => c.id === commit.spec_id)?.progress ?? null)
+    : null;
 
   const cell: Record<ColumnId, React.ReactNode> = {
     refs: (
@@ -90,8 +105,20 @@ export const CommitRow = memo(function CommitRow({
             "flex h-full flex-col justify-center",
         )}
       >
-        <div className="overflow-hidden text-ellipsis whitespace-nowrap">
-          {commit.summary}
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+            {commit.summary}
+          </span>
+          {commit.assisted_by && (
+            <AiCommitMarker provider={commit.assisted_by} />
+          )}
+          {commit.spec_id && repo && (
+            <SpecChip
+              repoId={repo.id}
+              changeId={commit.spec_id}
+              progress={progress}
+            />
+          )}
         </div>
         {showChangeIndicator && changeSizeDisplay === "row" && (
           <ChangeSizeIndicator

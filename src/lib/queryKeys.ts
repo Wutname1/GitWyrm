@@ -25,6 +25,9 @@ export const keys = {
     ['openspecHistory', repoId, changeId] as const,
   /** Prefix: every change's history for one repo. */
   openspecHistoryAll: (repoId: string) => ['openspecHistory', repoId] as const,
+  specLink: (repoId: string, branch: string) => ['specLink', repoId, branch] as const,
+  /** Prefix: every branch's spec link for one repo. */
+  specLinkAll: (repoId: string) => ['specLink', repoId] as const,
 
   /**
    * Prefixes for invalidating every entry of a kind for one repo, regardless of

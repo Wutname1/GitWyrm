@@ -382,8 +382,22 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const createCommit = useMutation({
-    mutationFn: async (args: { summary: string; description: string; amend?: boolean }) =>
-      unwrap(await commands.createCommit(id, args.summary, args.description, args.amend ?? false)),
+    mutationFn: async (args: {
+      summary: string
+      description: string
+      amend?: boolean
+      /** Change id for the `Spec:` trailer; omitted when unlinked or removed. */
+      specId?: string | null
+    }) =>
+      unwrap(
+        await commands.createCommit(
+          id,
+          args.summary,
+          args.description,
+          args.amend ?? false,
+          args.specId ?? null,
+        ),
+      ),
     onSuccess: (sha, args) => {
       // Tell the graph to keep its "Uncommitted changes" row up until this
       // commit is actually in the log. `status` comes back before `log` does,
