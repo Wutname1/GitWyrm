@@ -40,19 +40,19 @@ pub fn change_history(
 ) -> Result<Vec<SpecHistoryEntry>, crate::error::AppError> {
   let pathspec = format!("openspec/changes/{change_id}/");
   let max = format!("-n{limit}");
-  // Unit separator between fields, record separator between commits: commit
-  // subjects contain almost anything, so a printable delimiter is not safe.
+  // One field per line, with an explicit end-of-record marker.
   //
-  // Written as git's own `%x1f`/`%x1e` escapes rather than literal control bytes
-  // in the argument. Passing raw 0x1e through the Windows command line killed the
-  // backend process outright -- git printed the right thing when tested in a
-  // shell, but the same bytes in a spawned argument did not survive.
+  // A commit subject cannot contain a newline, so line-per-field is unambiguous
+  // without control-byte separators or `%(trailers:...)` -- both of which are
+  // portability risks across the git versions GitWyrm may resolve (system git,
+  // or the MinGit copy it bundles). The Assisted-by check reads the body, which
+  // needs no format extension at all.
   let out = crate::git::shell::run_git(
     Some(&repo_root.to_string_lossy()),
     &[
       "log",
       &max,
-      "--format=%h%x1f%s%x1f%an%x1f%at%x1f%(trailers:key=Assisted-by,valueonly)%x1e",
+      "--format=%h%n%s%n%an%n%at%n%b%n@@RECORD@@",
       "--",
       &pathspec,
     ],
@@ -63,19 +63,27 @@ pub fn change_history(
 
 /// Splits the `git log` output produced above into entries. Kept separate from
 /// the shell call so it can be tested without a repository.
+///
+/// Layout per record: sha, subject, author, unix time, then the body (any number
+/// of lines) up to the `@@RECORD@@` marker.
 fn parse_history(stdout: &str) -> Vec<SpecHistoryEntry> {
   stdout
-    .split('\x1e')
-    .map(str::trim)
-    .filter(|record| !record.is_empty())
+    .split("@@RECORD@@")
+    .filter(|record| !record.trim().is_empty())
     .filter_map(|record| {
-      let mut fields = record.split('\x1f');
-      let short_sha = fields.next()?.trim().to_string();
-      let summary = fields.next()?.trim().to_string();
-      let author = fields.next()?.trim().to_string();
-      let time: f64 = fields.next()?.trim().parse().ok()?;
-      // Absent trailer yields an empty field, which is the common case.
-      let ai_assisted = fields.next().map(|t| !t.trim().is_empty()).unwrap_or(false);
+      let mut lines = record.trim_start_matches(['\r', '\n']).lines();
+      let short_sha = lines.next()?.trim().to_string();
+      let summary = lines.next()?.trim().to_string();
+      let author = lines.next()?.trim().to_string();
+      let time: f64 = lines.next()?.trim().parse().ok()?;
+      // A commit is AI-assisted when its body carries the trailer. Read it here
+      // rather than asking git to extract it -- see the format note above.
+      let ai_assisted = lines.any(|line| {
+        line.trim_start().to_ascii_lowercase().starts_with("assisted-by:")
+      });
+      if short_sha.is_empty() {
+        return None;
+      }
       Some(SpecHistoryEntry { short_sha, summary, author, time, ai_assisted })
     })
     .collect()
@@ -87,8 +95,8 @@ mod tests {
 
   #[test]
   fn parses_log_records() {
-    let stdout = "a1b2c3\x1fnew: Add the thing\x1fJeremy\x1f1785000000\x1f\x1e\n\
-                  d4e5f6\x1fimproved: Tidy it up\x1fJeremy\x1f1784900000\x1fCopilot\x1e\n";
+    let stdout = "a1b2c3\nnew: Add the thing\nJeremy\n1785000000\n\n@@RECORD@@\n\
+                  d4e5f6\nimproved: Tidy it up\nJeremy\n1784900000\nBody line\nAssisted-by: Copilot\n\n@@RECORD@@\n";
     let entries = parse_history(stdout);
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].short_sha, "a1b2c3");
@@ -100,24 +108,36 @@ mod tests {
   }
 
   #[test]
-  fn tolerates_subjects_containing_delimiters_and_blank_output() {
-    // A subject with a colon, quotes, and unicode must survive intact.
-    let stdout = "aaa\x1ffixes: \"quoted\" - em dash test\x1fA B\x1f1\x1f\x1e";
+  fn tolerates_awkward_subjects_and_blank_output() {
+    // Colons, quotes, and a multi-line body must not confuse the fields.
+    let stdout = "aaa\nfixes: \"quoted\" - dash test\nA B\n1\nsome body\nmore body\n@@RECORD@@";
     let entries = parse_history(stdout);
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].summary, "fixes: \"quoted\" - em dash test");
+    assert_eq!(entries[0].summary, "fixes: \"quoted\" - dash test");
+    assert_eq!(entries[0].author, "A B");
 
     // A change never committed has no history, which is not an error.
     assert!(parse_history("").is_empty());
-    assert!(parse_history("\n\x1e\n").is_empty());
+    assert!(parse_history("\n@@RECORD@@\n").is_empty());
+    assert!(parse_history("   \n  \n").is_empty());
   }
 
   #[test]
   fn skips_malformed_records_without_dropping_good_ones() {
-    let stdout = "short-record-no-fields\x1e\
-                  bbb\x1fgood one\x1fAuthor\x1f1700000000\x1f\x1e";
+    let stdout = "only-one-line@@RECORD@@\
+                  bbb\ngood one\nAuthor\n1700000000\n\n@@RECORD@@";
     let entries = parse_history(stdout);
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].summary, "good one");
+  }
+
+  #[test]
+  fn ignores_a_trailer_like_line_in_the_subject() {
+    // The subject is field 2, never scanned for trailers, so a commit that
+    // merely mentions the trailer is not marked as AI-assisted.
+    let stdout = "ccc\nfixes: drop the Assisted-by: trailer\nA\n1\n\n@@RECORD@@";
+    let entries = parse_history(stdout);
+    assert_eq!(entries.len(), 1);
+    assert!(!entries[0].ai_assisted);
   }
 }
