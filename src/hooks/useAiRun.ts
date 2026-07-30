@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import { useAiRunStore, EMPTY_RUN } from '@/stores/aiRunStore'
 import {
   commands,
   type DemoScenario,
@@ -50,85 +51,80 @@ function findOpenGate(
   return last?.kind === 'gate' ? last : null
 }
 
-export function useAiRun(repoId: string | null): AiRun {
-  const [session, setSession] = useState<RunSession | null>(null)
-  const [steps, setSteps] = useState<RunStep[]>([])
-  const [state, setState] = useState<RunState | null>(null)
-  const [latest, setLatest] = useState('')
-
-  // Held in a ref as well as state so the event handler can compare without
-  // re-subscribing on every event.
-  const sessionIdRef = useRef<string | null>(null)
-
-  const load = useCallback(async () => {
-    if (!repoId) {
-      setSession(null)
-      setSteps([])
-      setState(null)
-      sessionIdRef.current = null
-      return
-    }
-    const res = await commands.aiRunCurrent(repoId)
-    if (res.status !== 'ok') return
-    const current = res.data
-    setSession(current)
-    sessionIdRef.current = current?.session_id ?? null
-    setSteps(current?.steps ?? [])
-    setState(current?.state ?? null)
-  }, [repoId])
-
+/**
+ * Subscribes to the app-wide run event once, for the whole window.
+ *
+ * Mounted from the root rather than per component: five surfaces render a run,
+ * and one listener per surface would apply every event five times.
+ */
+export function useAiRunListener() {
+  const applyEvent = useAiRunStore((s) => s.applyEvent)
   useEffect(() => {
-    void load()
-  }, [load])
-
-  useEffect(() => {
-    if (!repoId) return
     const unlisten = listen<RunEventKind>('ai-run-event', (event) => {
-      const e = event.payload
-      if (e.repo_id !== repoId) return
-      // A run that was replaced must not write into the newer one's console.
-      // The backend drops these too; this is the same rule on the near side,
-      // so a late event cannot slip in between a start and a reload.
-      if (sessionIdRef.current && e.session_id !== sessionIdRef.current) return
-      setState(e.state)
-      setLatest(e.summary)
-      setSteps((prev) => [...prev, e.step])
+      applyEvent(event.payload)
     })
     return () => {
       void unlisten.then((fn) => fn())
     }
-  }, [repoId])
+  }, [applyEvent])
+}
+
+export function useAiRun(repoId: string | null): AiRun {
+  // Read from the shared store, so every surface shows the same run. Component
+  // state here would give each caller its own copy and leave the mirrors blank.
+  const entry = useAiRunStore((s) => (repoId ? s.byRepo[repoId] : undefined)) ?? EMPTY_RUN
+  const setRun = useAiRunStore((s) => s.setRun)
+  const clearRun = useAiRunStore((s) => s.clearRun)
+  const { session, steps, state, latest } = entry
+
+  useEffect(() => {
+    if (!repoId) return
+    let cancelled = false
+    void (async () => {
+      const res = await commands.aiRunCurrent(repoId)
+      if (cancelled || res.status !== 'ok') return
+      const current = res.data
+      // Only seed from the backend when this window has nothing yet. Otherwise
+      // a late load would wipe steps that arrived while it was in flight.
+      if (useAiRunStore.getState().byRepo[repoId]) return
+      setRun(repoId, {
+        session: current,
+        steps: current?.steps ?? [],
+        state: current?.state ?? null,
+        latest: '',
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [repoId, setRun])
 
   const answerGate = useCallback(
     async (answer: GateAnswer) => {
-      if (!repoId || !sessionIdRef.current) return
-      await commands.aiRunAnswerGate(repoId, sessionIdRef.current, answer)
+      if (!repoId || !session) return
+      await commands.aiRunAnswerGate(repoId, session.session_id, answer)
     },
-    [repoId]
+    [repoId, session]
   )
 
   const note = useCallback(
     async (text: string) => {
-      if (!repoId || !sessionIdRef.current || !text.trim()) return
-      await commands.aiRunNote(repoId, sessionIdRef.current, text.trim())
+      if (!repoId || !session || !text.trim()) return
+      await commands.aiRunNote(repoId, session.session_id, text.trim())
     },
-    [repoId]
+    [repoId, session]
   )
 
   const stop = useCallback(async () => {
-    if (!repoId || !sessionIdRef.current) return
-    await commands.aiRunStop(repoId, sessionIdRef.current)
-  }, [repoId])
+    if (!repoId || !session) return
+    await commands.aiRunStop(repoId, session.session_id)
+  }, [repoId, session])
 
   const clear = useCallback(async () => {
     if (!repoId) return
     await commands.aiRunClear(repoId)
-    setSession(null)
-    setSteps([])
-    setState(null)
-    setLatest('')
-    sessionIdRef.current = null
-  }, [repoId])
+    clearRun(repoId)
+  }, [repoId, clearRun])
 
   const startDemo = useCallback(
     async (opts: DemoStart): Promise<string | null> => {
@@ -143,13 +139,15 @@ export function useAiRun(repoId: string | null): AiRun {
       )
       if (res.status !== 'ok') return 'That could not be started.'
       if (res.data.kind === 'alreadyRunning') return res.data.summary
-      setSession(res.data.session)
-      sessionIdRef.current = res.data.session.session_id
-      setSteps([])
-      setState(res.data.session.state)
+      setRun(repoId, {
+        session: res.data.session,
+        steps: [],
+        state: res.data.session.state,
+        latest: '',
+      })
       return null
     },
-    [repoId]
+    [repoId, setRun]
   )
 
   return {

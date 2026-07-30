@@ -26,6 +26,7 @@ import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
 import { noteRepoAvailability } from '@/hooks/useRepoActions'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
+import { useAiRunListener } from '@/hooks/useAiRun'
 import { useAutoFetch } from '@/hooks/useAutoFetch'
 import { useTheme } from '@/hooks/useTheme'
 import { useFont } from '@/hooks/useFont'
@@ -74,6 +75,9 @@ async function shouldShowOnboarding(seen: boolean): Promise<boolean> {
 
 function AppInner() {
   useRepoWatcher()
+  // One listener for the window. Each surface that shows a run reads the shared
+  // store rather than subscribing itself.
+  useAiRunListener()
   useAutoFetch()
   useTheme()
   useFont()
@@ -405,6 +409,7 @@ function SpecDeskRoot() {
   // same watcher-driven refresh -- but scoped to its own repository. Unscoped, an
   // edit in any of the other open tabs would refetch this window's queries too.
   useRepoWatcher(readWindowMode().repoId)
+  useAiRunListener()
 
   useEffect(() => {
     // Load settings into this window's store. Each webview has its own store, so

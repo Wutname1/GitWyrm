@@ -526,6 +526,34 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
               onRestart: () => {
                 toast.info('Restarting a task needs the engine wired up.')
               },
+              // These two can act for real: reconnecting is a settings trip,
+              // and the handoff is the escape hatch that exists precisely for
+              // when the AI cannot run.
+              // Settings live in the main window, so this brings that window
+              // forward and says where to go rather than pretending the Desk
+              // can open a panel it does not have.
+              onReconnect: () => {
+                void (async () => {
+                  try {
+                    const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+                    const main = await WebviewWindow.getByLabel('main')
+                    await main?.unminimize()
+                    await main?.show()
+                    await main?.setFocus()
+                  } catch {
+                    // Falling through to the toast is fine: the instruction is
+                    // the useful part, not the focus change.
+                  }
+                  toast.info('Open Settings > AI in the main window to sign in again.')
+                })()
+              },
+              onCopyHandoff: () => {
+                const task = nextTask(change)
+                if (task) void copyTaskHandoff(change, task)
+              },
+              onRetryWithNote: () => {
+                toast.info('Trying again with a note needs the engine wired up.')
+              },
             }}
           />
         )}

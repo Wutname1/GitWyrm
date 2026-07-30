@@ -42,12 +42,21 @@ export function RunEndingCard({
       }
     >
       <div className="text-xs font-semibold text-foreground">
-        {failed ? "This didn't finish" : 'Run stopped'}
+        {/* Three endings, three titles. Calling a finished run "stopped" reads
+            as though something went wrong when nothing did. */}
+        {state === 'failed'
+          ? "This didn't finish"
+          : state === 'stopped'
+            ? 'Run stopped'
+            : 'Task finished'}
       </div>
       <p className="mt-1 text-2xs leading-relaxed text-sub">{detail}</p>
+      {/* Said once, not twice: the first draft claimed the edits were
+          uncommitted and then that nothing was committed, which is the same
+          fact stated as though it were two. */}
       <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
-        The AI's edits are sitting in your changes, uncommitted. Nothing was committed and
-        your own work is untouched.
+        The AI's edits are waiting in your changes list, not committed. Your own work is
+        untouched.
       </p>
 
       <div className="mt-2.5 flex flex-wrap gap-1.5">
