@@ -5,6 +5,7 @@ import type { SpecChange } from '@/lib/bindings'
 import { formatRelativeTime } from '@/lib/gitDisplay'
 import { progressCount } from '@/lib/specDisplay'
 import { ProgressBar, StatusPill } from './SpecBits'
+import { ArchivedChangesDialog } from './ArchivedChangesDialog'
 import { SpecContextMenu } from './SpecContextMenu'
 import { selectChangeEverywhere } from '@/lib/specSync'
 import { useUiStore } from '@/stores/uiStore'
@@ -97,6 +98,7 @@ export function DeskChangesList({
   repoId: string
 }) {
   const [filter, setFilter] = useState<Filter>('active')
+  const [showArchive, setShowArchive] = useState(false)
   const openModal = useUiStore((s) => s.openModal)
   const rows = changes.filter((c) => matchesFilter(c, filter))
   const reviewCount = changes.filter((c) => c.status === 'needsReview').length
@@ -161,14 +163,18 @@ export function DeskChangesList({
 
       <button
         type="button"
-        onClick={() =>
-          toast.info('Browsing archived changes comes with the actions work.')
-        }
+        onClick={() => setShowArchive(true)}
         className="mx-4 mb-3.5 flex flex-none items-center gap-2 border-t border-border pt-2.5 text-left text-2xs text-muted-foreground hover:text-foreground"
       >
         <Archive size={11} strokeWidth={2} className="flex-none" />
         Archive · {archivedCount} completed {archivedCount === 1 ? 'change' : 'changes'}
       </button>
+
+      <ArchivedChangesDialog
+        repoId={repoId}
+        open={showArchive}
+        onOpenChange={setShowArchive}
+      />
     </div>
   )
 }

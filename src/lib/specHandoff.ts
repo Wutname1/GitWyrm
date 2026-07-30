@@ -56,11 +56,21 @@ export function composeTaskHandoff(change: SpecChange, task: SpecTask | undefine
 /**
  * Copies a task handoff and confirms it, because a clipboard write is invisible
  * otherwise. Says where to paste it rather than just "copied".
+ *
+ * `silent` suppresses only the success toast, for callers that copy as one step
+ * of a larger action and report that instead -- two toasts for one click reads
+ * as a stutter. A failure still speaks up: the caller is about to tell the user
+ * the handoff is on the clipboard, and it would not be.
  */
-export async function copyTaskHandoff(change: SpecChange, task: SpecTask | undefined) {
+export async function copyTaskHandoff(
+  change: SpecChange,
+  task: SpecTask | undefined,
+  options?: { silent?: boolean }
+) {
   const text = composeTaskHandoff(change, task)
   try {
     await navigator.clipboard.writeText(text)
+    if (options?.silent) return
     toast.success(
       task
         ? 'Handoff copied - paste it into opencode, VS Code, or any AI chat.'

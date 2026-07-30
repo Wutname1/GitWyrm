@@ -4,6 +4,8 @@ import { unwrap } from '@/lib/queryKeys'
 import { DeskTitleBar } from '@/components/domain/spec-desk/DeskTitleBar'
 import { DeskChangesList } from '@/components/domain/spec-desk/DeskChangesList'
 import { DeskDetail } from '@/components/domain/spec-desk/DeskDetail'
+import { DeskActionRail } from '@/components/domain/spec-desk/DeskActionRail'
+import { cn } from '@/lib/utils'
 import { useOpenspecChanges, useOpenspecStatus, useSelectedChange } from '@/hooks/useOpenspec'
 import { listenForSpecSelection } from '@/lib/specSync'
 import { readWindowMode } from '@/lib/windowMode'
@@ -95,7 +97,16 @@ export function SpecDeskView() {
           detail="Add an openspec/ folder to plan work here. Everything else in GitWyrm works as usual."
         />
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-[282px_minmax(0,1fr)]">
+        <div
+          className={cn(
+            'grid min-h-0 flex-1',
+            // The rail only exists when there is a change to act on, so the grid
+            // does not leave a third empty column.
+            change
+              ? 'grid-cols-[282px_minmax(0,1fr)_306px]'
+              : 'grid-cols-[282px_minmax(0,1fr)]'
+          )}
+        >
           <DeskChangesList
             changes={changes}
             archivedCount={status.data.archived_count}
@@ -104,7 +115,10 @@ export function SpecDeskView() {
           />
 
           {change ? (
-            <DeskDetail change={change} repoId={repo.id} />
+            <>
+              <DeskDetail change={change} repoId={repo.id} />
+              <DeskActionRail change={change} repoId={repo.id} repoPath={repo.path} />
+            </>
           ) : (
             <div className="p-6">
               <p className="text-xs text-muted-foreground">
