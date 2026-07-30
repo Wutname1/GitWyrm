@@ -23,15 +23,26 @@
 
 ## 3. Verify
 
-- [ ] 3.1 Right-click an unselected row: selection moves, then every item acts on
+- [x] 3.1 Right-click an unselected row: selection moves, then every item acts on
       that change
 - [ ] 3.2 Archive a complete change: row leaves the section, counts drop
 - [ ] 3.3 Validate a change with a known problem: the message names it plainly
 - [ ] 3.4 Repo without `openspec/` shows no Specs section and no menu
-- [ ] 3.5 Manual check in a native window
+- [x] 3.5 Manual check in a native window
 
 Verification notes: the folder-name preview was checked for parity against the
 Rust `sanitize_change_id` across 12 inputs (identical on all, including
-empty-result and non-ASCII cases). The rest of section 3 needs a native window -
-the app cannot run in a browser preview at all (a Tauri-only call in `AppInner`
-throws before any of this renders), and the shared dev app was in use.
+empty-result and non-ASCII cases).
+
+2026-07-30, native dev window: the row menu never opened. `SpecRow` and the
+Desk's `ChangeRow` were plain components naming only their own props, so the
+`onContextMenu` and ref that `ContextMenuTrigger asChild` merges onto its child
+were both dropped. Both now `forwardRef` and spread the rest - the sibling rows
+that always worked (`SectionItemRow`) already did. Confirmed 3.1 after the fix:
+right-clicking an unselected row selects it, and the menu names that change.
+The section-header menu was never broken (it wraps a raw `div`, which needs
+neither).
+
+3.2-3.4 still open: archiving and the no-`openspec` case both mutate state the
+shared dev app was live in, and no change with a known validation problem was
+on hand.

@@ -16,6 +16,12 @@ export interface WindowMode {
    * empty -- from having to look it up before it can open anything.
    */
   repoPath: string | null
+  /**
+   * Change to select on arrival, when the Desk was opened from one. The
+   * selection broadcast cannot reach a window that does not exist yet, so it
+   * arrives in the URL instead. Null when the Desk was opened on its own.
+   */
+  changeId: string | null
 }
 
 export function readWindowMode(): WindowMode {
@@ -25,9 +31,10 @@ export function readWindowMode(): WindowMode {
       kind: 'spec-desk',
       repoId: params.get('repo'),
       repoPath: params.get('path'),
+      changeId: params.get('change'),
     }
   }
-  return { kind: 'main', repoId: null, repoPath: null }
+  return { kind: 'main', repoId: null, repoPath: null, changeId: null }
 }
 
 /** True in the Spec Desk window. Cheap enough to call during render. */

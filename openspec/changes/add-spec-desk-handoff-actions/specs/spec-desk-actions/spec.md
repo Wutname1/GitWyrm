@@ -27,14 +27,25 @@ compose a review handoff instead. The exact text SHALL be previewable before cop
 
 ### Requirement: External tool launchers
 
-The rail SHALL offer Open in opencode (opens a terminal in the repository with the
-handoff supplied) and Open in VS Code (opens the repository with the handoff on the
-clipboard). These SHALL remain one click away regardless of AI configuration.
+The rail SHALL offer Open in opencode (starts opencode in the repository with the
+handoff as its opening message) and Open in VS Code (opens the repository with the
+handoff on the clipboard). These SHALL remain one click away regardless of AI
+configuration.
+
+Open in opencode SHALL be offered only when opencode can be launched, and SHALL say
+so when it cannot, rather than opening a terminal the user must finish by hand.
 
 #### Scenario: opencode
 
 - WHEN the user clicks Open in opencode
-- THEN a terminal opens in the repo with opencode running and the handoff provided
+- THEN opencode starts in a terminal at the repo with the handoff already in the
+  conversation, requiring no paste
+
+#### Scenario: opencode is not installed
+
+- WHEN opencode cannot be found on the machine
+- THEN the button is disabled and names the fix, and the other handoff actions
+  continue to work
 
 ### Requirement: Editable handoff templates
 

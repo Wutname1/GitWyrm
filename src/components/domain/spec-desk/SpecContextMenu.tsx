@@ -78,6 +78,18 @@ export function SpecContextMenu({ change, repoId, children }: SpecContextMenuPro
           </ContextMenuLabel>
           <ContextMenuSeparator />
 
+          {/* A change with every task done has one obvious next move, so it
+              leads rather than sitting last behind the everyday items. */}
+          {allDone && (
+            <>
+              <ContextMenuItem onSelect={() => setConfirmArchive(true)}>
+                <Archive />
+                Archive this change…
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
+
           <ContextMenuItem onSelect={() => void openSpecDesk(repoId, change.id)}>
             <ExternalLink />
             Open in Spec Desk
@@ -103,12 +115,6 @@ export function SpecContextMenu({ change, repoId, children }: SpecContextMenuPro
             pending={validateChange.isPending}
             onRun={validate}
           />
-          {allDone && (
-            <ContextMenuItem onSelect={() => setConfirmArchive(true)}>
-              <Archive />
-              Archive this change…
-            </ContextMenuItem>
-          )}
         </ContextMenuContent>
       </ContextMenu>
 

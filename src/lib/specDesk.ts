@@ -24,7 +24,10 @@ export async function openSpecDesk(repoId: string, changeId?: string) {
     return
   }
   try {
-    const outcome = unwrap(await commands.openSpecDesk(repoId))
+    // The id goes over the wire as well as over the event: a Desk that is not
+    // open yet has no listener, so the broadcast above only reaches an already
+    // open one. The URL covers the first open.
+    const outcome = unwrap(await commands.openSpecDesk(repoId, changeId ?? null))
     // Opening is self-evident -- a window appears. Focusing an already-open Desk
     // is not, especially when it is on another monitor, so say so.
     if (outcome === 'focused') {

@@ -2117,12 +2117,17 @@ async openspecDefaultArchiveCommitTemplate() : Promise<string> {
 /**
  * Opens the Spec Desk for a repository, or focuses the one already open.
  * 
+ * `change_id` is the change to select on arrival. The selection broadcast
+ * cannot reach a window that does not exist yet, so a Desk opened from a
+ * change carries it in the URL rather than opening empty and waiting for an
+ * event that already fired.
+ * 
  * Size and position are remembered by Tauri's own window-state handling per
  * label, so reopening lands where the user left it.
  */
-async openSpecDesk(repoId: string) : Promise<Result<DeskOutcome, string>> {
+async openSpecDesk(repoId: string, changeId: string | null) : Promise<Result<DeskOutcome, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("open_spec_desk", { repoId }) };
+    return { status: "ok", data: await TAURI_INVOKE("open_spec_desk", { repoId, changeId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

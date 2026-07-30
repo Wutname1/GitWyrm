@@ -33,7 +33,27 @@ fn desk_label(repo_id: &str) -> String {
   format!("spec-desk-{safe}")
 }
 
+/// Percent-encode a query-string value. Done by hand -- a Windows path is full
+/// of characters a query string cannot hold literally, and adding a URL crate
+/// for two calls is not worth it.
+fn percent_encode(value: &str) -> String {
+  value
+    .bytes()
+    .map(|b| match b {
+      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+        (b as char).to_string()
+      }
+      other => format!("%{other:02X}"),
+    })
+    .collect()
+}
+
 /// Opens the Spec Desk for a repository, or focuses the one already open.
+///
+/// `change_id` is the change to select on arrival. The selection broadcast
+/// cannot reach a window that does not exist yet, so a Desk opened from a
+/// change carries it in the URL rather than opening empty and waiting for an
+/// event that already fired.
 ///
 /// Size and position are remembered by Tauri's own window-state handling per
 /// label, so reopening lands where the user left it.
@@ -43,6 +63,7 @@ pub async fn open_spec_desk(
   app: AppHandle,
   manager: tauri::State<'_, RepoManager>,
   repo_id: String,
+  change_id: Option<String>,
 ) -> Result<DeskOutcome, AppError> {
   // Fail early with a clear message rather than opening a Desk onto a repo the
   // backend cannot resolve.
@@ -66,21 +87,14 @@ pub async fn open_spec_desk(
 
   // Carry the path, not just the id: the Desk's store starts empty, and the
   // backend already knows the path here, so the window can open its repository
-  // without a settings lookup that would have to re-derive it. Percent-encode
-  // by hand -- a Windows path is full of characters a query string cannot hold
-  // literally, and adding a URL crate for one call is not worth it.
-  let encoded_path: String = open
-    .path
-    .to_string_lossy()
-    .bytes()
-    .map(|b| match b {
-      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-        (b as char).to_string()
-      }
-      other => format!("%{other:02X}"),
-    })
-    .collect();
-  let url = format!("index.html?window=spec-desk&repo={repo_id}&path={encoded_path}");
+  // without a settings lookup that would have to re-derive it. The selected
+  // change rides along for the same reason -- a window that does not exist yet
+  // cannot hear the selection broadcast.
+  let encoded_path = percent_encode(&open.path.to_string_lossy());
+  let mut url = format!("index.html?window=spec-desk&repo={repo_id}&path={encoded_path}");
+  if let Some(change_id) = change_id.as_deref().filter(|c| !c.is_empty()) {
+    url.push_str(&format!("&change={}", percent_encode(change_id)));
+  }
   // `inner_size` here is the FIRST-OPEN default only. The window-state plugin
   // restores a saved size and position after the window is created, so a Desk
   // the user has already arranged reopens where they left it rather than

@@ -411,6 +411,15 @@ function SpecDeskRoot() {
   useRepoWatcher(readWindowMode().repoId)
   useAiRunListener()
 
+  // Opened from a change, so start on it. The selection broadcast that keeps the
+  // two windows in step cannot reach a window that did not exist when it fired,
+  // so the id arrives in the URL and seeds the store before the first paint --
+  // otherwise the Desk opens empty and the user has to find the change again.
+  useState(() => {
+    const { changeId } = readWindowMode()
+    if (changeId) useUiStore.getState().selectChange(changeId)
+  })
+
   useEffect(() => {
     // Load settings into this window's store. Each webview has its own store, so
     // without this the Desk runs on defaults: no theme, no font, and -- the one

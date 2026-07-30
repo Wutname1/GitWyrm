@@ -11,6 +11,7 @@ use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::editors::{self, EditorAvailability, EditorKind};
+use crate::commands::opencode;
 use crate::error::AppError;
 use crate::state::RepoManager;
 use tauri::State;
@@ -98,6 +99,28 @@ pub fn open_solution_in_visual_studio(
     )));
   }
   editors::open_solution(&solution_path)
+}
+
+/// Start opencode on one task, in the repo folder, with the handoff as its
+/// opening message.
+///
+/// The handoff arrives from the frontend rather than being rebuilt here so that
+/// what opencode receives is byte-for-byte what the Desk shows under "what gets
+/// copied" -- one composer, no chance of the two drifting apart.
+#[tauri::command]
+#[specta::specta]
+pub fn open_in_opencode(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  handoff: String,
+) -> Result<(), AppError> {
+  let path = repo_path(&manager, &repo_id)?;
+  let Some(found) = opencode::find_opencode() else {
+    return Err(AppError::Other(
+      "Could not find opencode. Install it from opencode.ai, then try again.".into(),
+    ));
+  };
+  opencode::launch(&found, &path, &handoff)
 }
 
 /// Open a terminal in the repo folder. Uses Windows Terminal if present,

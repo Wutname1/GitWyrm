@@ -6,7 +6,9 @@
       each delta), rules block (only this task, tick tasks.md, run validate, keep
       unrelated work intact); review-handoff variant when all tasks are done
 - [x] 1.2 Rail card: next task title, Copy task handoff, Open in opencode
-      (terminal in repo + handoff pasted), Open in VS Code (files + clipboard)
+      (starts opencode in repo with the handoff as its opening message; disabled
+      with a reason when opencode is not installed), Open in VS Code (files +
+      clipboard)
 - [x] 1.3 Handoff preview box showing exactly what gets copied
 - [x] 1.4 Per-task copy from task-row hover; spec-card copy in the main window uses
       the same composer

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { forwardRef, useState, type ComponentPropsWithoutRef } from 'react'
 import { Archive, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SpecChange } from '@/lib/bindings'
@@ -34,25 +34,31 @@ function matchesFilter(change: SpecChange, filter: Filter): boolean {
   }
 }
 
-function ChangeRow({
-  change,
-  isSelected,
-  onSelect,
-}: {
-  change: SpecChange
-  isSelected: boolean
-  onSelect: () => void
-}) {
+// forwardRef and the prop spread are load-bearing: `ContextMenuTrigger asChild`
+// merges its onContextMenu handler and a ref onto this child. A plain component
+// that only names its own props drops both, and the row silently stops answering
+// a right-click.
+const ChangeRow = forwardRef<
+  HTMLButtonElement,
+  {
+    change: SpecChange
+    isSelected: boolean
+    onSelect: () => void
+  } & ComponentPropsWithoutRef<'button'>
+>(function ChangeRow({ change, isSelected, onSelect, className, ...props }, ref) {
   return (
     <button
       type="button"
+      {...props}
+      ref={ref}
       onClick={onSelect}
       aria-current={isSelected || undefined}
       className={cn(
         'relative block w-full rounded-lg border px-3 py-2.5 text-left transition-colors',
         isSelected
           ? 'border-primary/25 bg-soft'
-          : 'border-transparent hover:bg-panel2'
+          : 'border-transparent hover:bg-panel2',
+        className
       )}
     >
       {isSelected && (
@@ -80,7 +86,7 @@ function ChangeRow({
       </span>
     </button>
   )
-}
+})
 
 /**
  * The Desk's left column: every active change, filterable, with the archive

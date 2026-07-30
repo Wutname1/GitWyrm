@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Archive,
   CheckCircle2,
@@ -10,6 +11,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { DisabledHint } from '@/components/ui/tooltip'
 import type { CliOutcome, DemoScenario, SpecChange } from '@/lib/bindings'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
@@ -20,6 +22,13 @@ import { stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
 import { useBranches } from '@/hooks/useGitQueries'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { describeError, log } from '@/lib/log'
+
+/**
+ * Why the opencode button is off. Names the fix rather than the failure: the
+ * button being grey is the symptom the user can already see.
+ */
+const OPENCODE_MISSING =
+  'opencode is not installed. Get it from opencode.ai, then reopen this window.'
 
 /** A button in the rail. Primary is the one action the state calls for. */
 function RailButton({
@@ -40,11 +49,10 @@ function RailButton({
   /** Shown on hover, so a disabled button can say why. */
   title?: string
 }) {
-  return (
+  const button = (
     <button
       type="button"
       onClick={onClick}
-      title={title}
       disabled={pending || disabled}
       className={cn(
         'flex min-h-8 w-full items-center justify-center gap-2 rounded-md px-3 text-2xs font-semibold transition-colors disabled:opacity-50',
@@ -56,6 +64,16 @@ function RailButton({
       {icon}
       {pending ? 'Working…' : label}
     </button>
+  )
+
+  // Deliberately not the `title` attribute: that draws the OS tooltip, which
+  // ignores the app's theme and takes a second to appear. DisabledHint puts the
+  // reason on a hoverable wrapper, since a disabled button gets no pointer
+  // events and could never show a tooltip of its own.
+  return (
+    <DisabledHint disabled={disabled} reason={title} className="w-full">
+      {button}
+    </DisabledHint>
   )
 }
 
@@ -136,6 +154,17 @@ export function DeskActionRail({
   const remaining = change.progress.total - change.progress.done
   const handoff = composeTaskHandoff(change, task)
 
+  // Whether opencode can actually be launched. A machine-level fact, so it is
+  // not keyed by repo; the long staleTime keeps the Desk from re-probing PATH
+  // on every task tick. Assumed available until the probe answers, so the
+  // button does not flicker disabled on open.
+  const opencodeReady = useQuery({
+    queryKey: ['opencodeAvailable'],
+    queryFn: () => commands.opencodeAvailable(),
+    staleTime: 5 * 60_000,
+  })
+  const opencodeMissing = opencodeReady.data === false
+
   // A result belongs to the change it was run on. Switching changes has to clear
   // it, or the rail would show one change's problems beside another's name.
   useEffect(() => {
@@ -169,17 +198,20 @@ export function DeskActionRail({
   }
 
   const openInOpencode = async () => {
-    // Clipboard first: the terminal opens whether or not opencode is installed,
-    // and the handoff is the part the user actually needs in hand.
+    // The handoff goes to opencode as its opening message, so there is nothing
+    // to paste. It is copied anyway: if the launch fails halfway, or the user
+    // wants it in a second window, it is already in hand.
     await copyTaskHandoff(change, task, { silent: true })
     try {
-      unwrap(await commands.openInTerminal(repoId))
-      toast.success('Terminal opened with the handoff copied.', {
-        description: 'Start opencode and paste it.',
+      unwrap(await commands.openInOpencode(repoId, handoff))
+      toast.success('opencode is starting on this task.', {
+        description: 'The handoff is already in the conversation.',
       })
     } catch (e) {
-      log.error(`spec desk: open in terminal failed: ${describeError(e)}`)
-      toast.error('Could not open a terminal here.', { description: describeError(e) })
+      log.error(`spec desk: open in opencode failed: ${describeError(e)}`)
+      toast.error('Could not start opencode.', {
+        description: `${describeError(e)} The handoff is on your clipboard.`,
+      })
     }
   }
 
@@ -291,6 +323,8 @@ export function DeskActionRail({
                 <RailButton
                   icon={<SquareTerminal size={12} strokeWidth={2.2} />}
                   label="Open in opencode"
+                  disabled={opencodeMissing}
+                  title={opencodeMissing ? OPENCODE_MISSING : undefined}
                   onClick={() => void openInOpencode()}
                 />
                 <RailButton
@@ -336,6 +370,8 @@ export function DeskActionRail({
               <RailButton
                 icon={<SquareTerminal size={12} strokeWidth={2.2} />}
                 label="Open in opencode"
+                disabled={opencodeMissing}
+                title={opencodeMissing ? OPENCODE_MISSING : undefined}
                 onClick={() => void openInOpencode()}
               />
               <RailButton

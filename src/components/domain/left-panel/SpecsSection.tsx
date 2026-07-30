@@ -1,3 +1,4 @@
+import { forwardRef, type ComponentPropsWithoutRef } from 'react'
 import { ChevronRight, ExternalLink, Plus, RefreshCw } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
@@ -33,24 +34,30 @@ function ProgressBar({ percent }: { percent: number }) {
   )
 }
 
-function SpecRow({
-  change,
-  isSelected,
-  onClick,
-}: {
-  change: SpecChange
-  isSelected: boolean
-  onClick: () => void
-}) {
+// forwardRef and the prop spread are load-bearing: `ContextMenuTrigger asChild`
+// merges its onContextMenu handler and a ref onto this child. A plain component
+// that only names its own props drops both, and the row silently stops answering
+// a right-click.
+const SpecRow = forwardRef<
+  HTMLButtonElement,
+  {
+    change: SpecChange
+    isSelected: boolean
+    onClick: () => void
+  } & ComponentPropsWithoutRef<'button'>
+>(function SpecRow({ change, isSelected, onClick, className, ...props }, ref) {
   const count = progressCount(change)
   return (
     <button
       type="button"
+      {...props}
+      ref={ref}
       onClick={onClick}
       aria-current={isSelected || undefined}
       className={cn(
         'block w-full border-l-2 py-1.5 pl-[22px] pr-3 text-left transition-colors hover:bg-panel2',
-        isSelected ? 'border-primary bg-soft' : 'border-transparent'
+        isSelected ? 'border-primary bg-soft' : 'border-transparent',
+        className
       )}
     >
       <span className="flex items-center gap-2">
@@ -75,7 +82,7 @@ function SpecRow({
       <ProgressBar percent={change.progress.percent} />
     </button>
   )
-}
+})
 
 /**
  * The Specs section of the left panel: one row per active OpenSpec change, with
