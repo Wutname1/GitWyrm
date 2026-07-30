@@ -36,6 +36,14 @@ behavior SHALL reach the console or any other UI.
 - THEN the run reports that plainly as something an administrator controls, rather than
   reading as a GitWyrm fault
 
+#### Scenario: A CLI's integration surface changes
+
+- WHEN a provider CLI's integration protocol changes or becomes unavailable, as a
+  preview-status protocol may
+- THEN the failure is contained to that one transport: the run reports that provider as
+  currently unusable and the copy-handoff path still works, rather than the engine failing
+  as a whole
+
 #### Scenario: API key present
 
 - WHEN the default provider is configured with an API key
@@ -151,14 +159,47 @@ a path outside it SHALL be refused.
 
 ### Requirement: A run cannot spin forever
 
-Every run SHALL end: when the task's done-means checks pass, when its turn budget is
+Every run SHALL end: when the targeted task's checkbox is ticked, when its turn budget is
 spent, or when the user stops it. A run that exhausts its budget SHALL report that as its
 cause rather than appearing to still be working.
 
+The budget SHALL be counted in turns - complete plan/act/observe cycles - rather than
+elapsed time, so a task behaves the same way regardless of how fast the chosen provider
+is. It SHALL default to 12 and SHALL be adjustable in settings.
+
 #### Scenario: Budget spent
 
-- WHEN the loop reaches its turn budget without the checks passing
+- WHEN the loop reaches its turn budget without the task's checkbox ticked
 - THEN the run ends as "didn't finish", naming the budget as the reason
+
+#### Scenario: Budget raised
+
+- WHEN the user raises the turn budget in settings
+- THEN later runs use the new value, and a run already under way keeps the budget it
+  started with
+
+### Requirement: Done means the task's checkbox is ticked
+
+A run targets one task, and SHALL treat that task's checkbox in `tasks.md` becoming ticked
+as the signal to stop. The engine SHALL NOT invent a separate notion of completion, so
+what ends the loop is the same thing the user sees in the Desk.
+
+A run ending SHALL NOT by itself apply the work. The console's keep-or-undo choice remains
+the gate, so a checkbox ticked without the work being done is caught by review rather than
+silently accepted.
+
+#### Scenario: Task completed
+
+- WHEN the targeted task's checkbox is ticked during a run
+- THEN the loop stops and the run reports as finished, with its changes still awaiting the
+  user's keep-or-undo choice
+
+#### Scenario: No check to run
+
+- WHEN the targeted task is documentation or spec text, with no project check that could
+  prove it
+- THEN the run can still complete, because the checkbox and not a passing check is what
+  defines done
 
 ### Requirement: Stop is prompt and leaves a clean tree
 

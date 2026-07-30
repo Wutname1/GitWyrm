@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod auth;
 pub mod catalog;
 pub mod client;

@@ -295,6 +295,81 @@ Two caveats to keep honest:
 - "Officially supported" describes today's documentation. It is a better position than the
   other two providers, not a permanent guarantee.
 
+### How the Copilot CLI is actually driven
+
+Verified against GitHub's own command reference and ACP server reference (fetched from
+`github/docs`, 2026-07-30), not from the summary above. Three things it settles:
+
+**Use ACP over stdio, not `-p`.** `copilot --acp --stdio` starts an Agent Client Protocol
+server speaking structured JSON-RPC over stdin/stdout. `-p/--prompt` prints prose meant
+for a human to read, and parsing it would put us at the mercy of every wording change. ACP
+is a published protocol with named methods, which is the difference between an interface
+and a screen-scrape. GitHub documents it for exactly this: "IDE integrations", "CI/CD
+pipelines", "custom frontends".
+
+The caveat to hold: ACP support is in **public preview and subject to change**. That is a
+reason to isolate it behind `ProviderAgent` -- which we are doing anyway -- not a reason to
+prefer the prose path.
+
+**Tool filtering is set when the server starts, not per session.** `--available-tools` and
+`--excluded-tools` are server-level options; a client cannot narrow them through
+`session/new`. So GitWyrm launches its own server process per run with the bounded tool set
+already applied, rather than connecting to a shared one and asking nicely. This suits us:
+the guardrails are ours to enforce, and a server we started is one we can kill.
+
+**Auth is checkable without touching credential files.** `copilot login` uses the OAuth
+device flow and stores its token in the system credential store; `COPILOT_GITHUB_TOKEN`,
+`GH_TOKEN`, and `GITHUB_TOKEN` are honoured in that order, which the docs call out as "most
+suitable for headless use such as automation". We read none of these. `copilot version`
+reports the installed version for the floor check, and the ACP handshake failing is the
+answer to "is this usable", from the tool itself.
+
+One correction to an earlier assumption: there is **no `--allow-all-tools` needed for our
+case**, because we are not approving a broad tool set and then hoping. We start the server
+with only the tools the bounded set names.
+
+## What bounds a run
+
+### Turn budget: 12, and the user can change it
+
+A run is bounded by **turns** - complete plan/act/observe cycles - not by wall-clock time.
+The default is **12**, exposed as a setting so a user who hits it often can raise it.
+
+Turns rather than minutes because the same task should behave the same way on every
+provider. A five-minute ceiling gives a fast provider fifteen real steps and a slow one
+four, so "didn't finish" would mean different things depending on who the user signed in
+with. A turn is a unit of work; a minute is not.
+
+Twelve because the spike measured 10-20 seconds per turn, putting a worst-case run at
+roughly three to four minutes. That is long enough to be worth starting and short enough
+that a run gone wrong is not left grinding. It is a starting value, not a finding - the
+setting exists because the right number is the kind of thing only real use reveals.
+
+A run that spends its budget ends as **didn't finish**, naming the budget as the cause. It
+never reports success it did not reach, and never sits there looking like it is still
+working.
+
+### Done means the task's checkbox is ticked
+
+A run targets one OpenSpec task. It is done when that task's checkbox is ticked in
+`tasks.md`.
+
+This reuses what already exists rather than inventing a completion concept: the checkbox
+is in the file, visible in the Desk, already parsed by `openspec/parse.rs`, and already
+writable one line at a time by `toggle_task_line`. The user can see the same thing the
+loop is checking.
+
+The alternative - requiring a project check to pass - was considered and rejected as the
+sole signal. Many spec tasks are documentation, UI copy, or spec text, where no check
+proves anything; gating those on a green build would mean they could never complete. A
+check remains available to the loop as a *tool* (`run a project check`), so a task whose
+own done-means calls for one can still use it. It is just not what defines done.
+
+The obvious risk is that ticking a checkbox is cheap and the model could tick it without
+doing the work. Two things sit against that, neither of them in this change: the run
+produces a diff the user reviews before keeping it, and the console's keep-or-undo choice
+is the actual gate. The checkbox ends the *loop*; the user ends the *run*.
+
 ### Still open
 
 Nothing blocking. The remaining terms question is whether to pursue written approval from
