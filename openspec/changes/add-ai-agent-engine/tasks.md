@@ -1,23 +1,28 @@
 # Tasks
 
-## 1. Design (do first)
+## 1. Design
 
-- [ ] 1.1 Fold the "Claude Code CLI Provider for GitWyrm" spike into design.md: how the
-      CLI is invoked, how its output is consumed turn by turn, how tool calls and results
-      are exchanged, and how a run is cancelled mid-turn
+- [x] 1.1 Fold the "Claude Code CLI Provider for GitWyrm" spike into design.md: measured
+      timings, the auth lesson, the numbers not to trust, and the version-gate finding
 - [ ] 1.2 Decide the Copilot CLI adapter shape against the same interface, and record
       what differs
 - [ ] 1.3 Decide the turn budget and what "the task is done" means for the loop, so a run
       cannot spin forever
+- [ ] 1.4 Answer the terms-of-service question per provider before shipping to users. A
+      working integration that breaks a provider's terms is worse than none
 
-## 2. Provider CLI adapters
+## 2. Provider transports
 
-- [ ] 2.1 Detect each provider CLI the way git and gpg already are: configured path,
-      PATH, then absent - with a plain-language message naming what to install
-- [ ] 2.2 Claude Code adapter behind a `ProviderAgent` interface
-- [ ] 2.3 Copilot CLI adapter behind the same interface
-- [ ] 2.4 Surface a missing or broken CLI as the provider surface's reconnect state
-      rather than a failed run
+- [ ] 2.1 `ProviderAgent` interface with two kinds of implementation behind it: a direct
+      provider API (preferred when the user has a key) and a CLI wrapper (so a
+      subscription-only user is not shut out)
+- [ ] 2.2 CLI discovery: PATH, then known install locations per platform, gated by a
+      `--version` floor rather than a pinned path - the CLI self-updates
+- [ ] 2.3 Claude Code adapter: prompt over stdin, structured result out, typed errors
+- [ ] 2.4 Copilot CLI adapter behind the same interface
+- [ ] 2.5 Auth status from the CLI's own answer, never from inspecting its credential
+      files. GitWyrm reads and writes no provider credentials
+- [ ] 2.6 Cancellation terminates the child process, leaving no orphan
 
 ## 3. The loop
 
@@ -27,8 +32,10 @@
       Every path resolved inside the repository and refused outside it
 - [ ] 3.3 Emit the console's typed events as the loop progresses, each with its
       one-sentence plain-language summary
+- [ ] 3.4 Stream a turn's output where the transport allows it, so the console has
+      something to show inside the first second or two of a 10-20 second turn
 
-## 4. Guardrails (enforced here, not by the CLI)
+## 4. Guardrails (enforced here, not by the provider)
 
 - [ ] 4.1 Refuse any push outright - never a gate, never an option
 - [ ] 4.2 Raise typed gates for side effects: add or remove a dependency, run an install,
@@ -44,8 +51,13 @@
 
 - [ ] 5.1 A real task run end to end against Claude Code on a scratch repository
 - [ ] 5.2 The same task against the Copilot CLI
-- [ ] 5.3 Guardrails hold under a hostile prompt: ask it to push, to install a package,
+- [ ] 5.3 The same task against a direct provider API with a key, proving the interface
+      is not CLI-shaped
+- [ ] 5.4 Guardrails hold under a hostile prompt: ask it to push, to install a package,
       and to edit a file outside the repo - push refused, the others gated
-- [ ] 5.4 Stop mid-turn leaves no half-written file and the user's own work intact
-- [ ] 5.5 With no provider CLI installed, the Desk shows the reconnect state and the
-      copy-handoff path still works
+- [ ] 5.5 Stop mid-turn leaves no half-written file, no orphaned process, and the user's
+      own work intact
+- [ ] 5.6 With no provider CLI installed and no key, the Desk shows the reconnect state
+      and the copy-handoff path still works
+- [ ] 5.7 An account with credentials but a bad scope reports needs-reconnect rather than
+      failing at generation time (the spike's own failure case)

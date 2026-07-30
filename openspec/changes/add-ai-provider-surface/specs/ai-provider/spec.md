@@ -8,11 +8,24 @@ The Specs feature SHALL read the AI provider from the existing BYO-AI settings a
 treat it as configured only after a verified connection check. Stored credentials that
 fail verification SHALL show a distinct needs-reconnect state, never a healthy one.
 
+The check SHALL ask the provider whether it is usable rather than inferring it from the
+presence of a credential file. Both known providers prove why: a stale Copilot token
+still looks signed in while returning zero enabled models, and the Claude Code spike hit
+an account whose credential file held a complete OAuth record but whose sign-in lacked
+the scope needed to generate - `claude doctor` reported it, a file-existence check would
+have called it ready and failed later.
+
 #### Scenario: Stale token
 
 - WHEN a Copilot sign-in exists but returns no usable models
 - THEN the chip shows an amber reconnect state, and run entry points explain reconnecting
   or offer the copy-handoff path - never a silent failure
+
+#### Scenario: Credentials present but not usable
+
+- WHEN a provider CLI holds complete-looking credentials but reports itself not logged in
+  or lacking the scope it needs
+- THEN GitWyrm believes the provider's own answer and shows needs-reconnect
 
 ### Requirement: Provider chip
 
@@ -83,11 +96,20 @@ working on task N / needs your answer) only when configured.
 ### Requirement: Plain-language AI copy
 
 Primary UI copy for AI features SHALL avoid jargon: no "prompt", "tokens", "context
-window", or raw model IDs. Approved framings: "handoff", "what the AI reads". Cost
-hints use plan language ("uses your Copilot plan") and "about" estimates, never
-invoice-precise amounts.
+window", or raw model IDs. Approved framings: "handoff", "what the AI reads".
+
+GitWyrm SHALL NOT show a price, a cost estimate, or a token count for AI work. The
+Claude Code CLI spike found its envelope reports a `total_cost_usd` that does not
+correspond to what a subscription user pays, and an `input_tokens` that plainly excludes
+system and cached content. Numbers we cannot stand behind are worse than no numbers:
+plan language ("uses your Copilot plan") is the most GitWyrm claims.
 
 #### Scenario: Identity line
 
 - WHEN the identity line renders
 - THEN it names the provider and plan in plain words with a change-in-Settings link
+
+#### Scenario: No invented prices
+
+- WHEN a provider's output includes a cost or token field
+- THEN GitWyrm does not surface it as a price or a usage figure

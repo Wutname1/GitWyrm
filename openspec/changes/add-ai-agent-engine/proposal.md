@@ -16,9 +16,19 @@ What we do reuse is the model access people already pay for, through the provide
 CLI: Claude Code for Anthropic, the GitHub Copilot CLI for Copilot. The user has already
 signed in to those; GitWyrm drives them rather than asking for another API key.
 
-A design spike ("Claude Code CLI Provider for GitWyrm") covers the Claude side and is
-the reference for the adapter shape here; its findings should land as this change's
-design.md before build tasks start.
+A design spike ("Claude Code CLI Provider for GitWyrm") has been run and **succeeded**:
+a proof of concept generated a properly-formatted commit message from a real staged diff
+through the local `claude` CLI. Its findings are folded into `design.md` here and shape
+several requirements below - the auth check, the absence of any cost UI, and the fact
+that a turn takes 10 to 20 seconds rather than the ~1.7s startup floor first assumed.
+
+The spike also stands as the pattern for **any CLI-authenticated tool**, not just Claude:
+discover it, ask it whether it is usable, drive it over stdin/stdout, and gate it behind
+a version check rather than a pinned path.
+
+Where a provider offers a documented API and the user has a key, GitWyrm should prefer it
+- mirroring how opencode talks to providers directly. The CLI path exists so a
+subscription-only user is not shut out, not because it is the better transport.
 
 ## What Changes
 

@@ -18,23 +18,70 @@ process rather than delegated to another tool.
 - WHEN the engine is asked to do something a guardrail forbids
 - THEN GitWyrm refuses or gates it, regardless of what the underlying provider would allow
 
-### Requirement: Model access through the provider's own CLI
+### Requirement: Two transports behind one interface
 
-The engine SHALL reach models through the provider's command-line tool - Claude Code for
-Anthropic, the GitHub Copilot CLI for Copilot - so the user's existing sign-in is reused
-rather than asking for another API key. A missing CLI SHALL be reported in plain language
-naming what to install.
+The engine SHALL reach models either through a provider's documented API (when the user
+has a key) or through the provider's command-line tool (Claude Code, the GitHub Copilot
+CLI), behind a single interface. Where both are available the API SHALL be preferred: a
+CLI is not a public interface and its output can change between releases. The CLI path
+exists so a subscription-only user is not shut out. No provider-specific behavior SHALL
+reach the console or any other UI.
 
 #### Scenario: Reusing an existing sign-in
 
-- WHEN the user is already signed in to their provider's CLI
-- THEN GitWyrm runs tasks with it without asking for a key
+- WHEN the user is signed in to their provider's CLI and has no API key
+- THEN GitWyrm runs tasks through the CLI without asking for a key
 
-#### Scenario: CLI absent
+#### Scenario: A key is available
 
-- WHEN the provider's CLI is not installed
-- THEN the Desk shows the reconnect state, says which tool to install, and the
+- WHEN the user has an API key for their provider
+- THEN the engine uses the documented API rather than the CLI
+
+#### Scenario: Neither available
+
+- WHEN no CLI is installed and no key is set
+- THEN the Desk shows the reconnect state, says what to install or add, and the
   copy-handoff path still works
+
+### Requirement: Provider credentials are never touched
+
+GitWyrm SHALL determine whether a provider is usable by asking the provider, and SHALL
+NOT read, write, or inspect a provider's credential files or configuration.
+
+#### Scenario: Complete credentials, unusable account
+
+- WHEN a provider CLI holds a complete credential record but reports itself not logged in,
+  or lacking a scope it needs
+- THEN GitWyrm reports needs-reconnect rather than starting a run that would fail
+
+### Requirement: Discovery survives provider updates
+
+A provider CLI SHALL be located by discovery - PATH, then known install locations - and
+accepted on a minimum version rather than a pinned path or exact build, because these
+tools update themselves.
+
+#### Scenario: The CLI updates itself
+
+- WHEN a provider CLI updates to a newer build between runs
+- THEN GitWyrm keeps working with no change on its side
+
+### Requirement: A turn is never a silent wait
+
+A generation turn takes seconds, not milliseconds - measured at 10 to 20 seconds for a
+realistic diff. The engine SHALL stream a turn's output where its transport allows, and
+SHALL remain cancellable throughout, so the console always has something to show and Stop
+always responds.
+
+#### Scenario: Streaming available
+
+- WHEN the transport can report output progressively
+- THEN the engine forwards it as it arrives rather than only at the end of the turn
+
+#### Scenario: Cancel mid-turn
+
+- WHEN the user stops during a turn
+- THEN the engine cancels promptly and terminates any child process it started, leaving no
+  orphan holding a subscription slot
 
 ### Requirement: A bounded tool set
 

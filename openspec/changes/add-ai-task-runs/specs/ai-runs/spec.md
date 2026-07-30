@@ -81,6 +81,26 @@ hijacking page or window scroll.
 - THEN a row shows the file, +/− counts, and View diff opens that edit in the diff view
   the user already knows
 
+### Requirement: Thinking time is visible, not silent
+
+A turn takes real time - the Claude Code spike measured 10 to 20 seconds for a realistic
+diff, with startup only about a tenth of it. The console SHALL therefore show that the
+run is working during a turn rather than sitting still, and Stop SHALL stay responsive
+throughout. A silent gap long enough to read as a hang is a defect, not a wait.
+
+Where the engine can stream partial output, the console SHALL show it as it arrives:
+time-to-first-token is what makes a fifteen-second turn tolerable.
+
+#### Scenario: Mid-turn
+
+- WHEN a turn has been running for several seconds with nothing to report yet
+- THEN the console shows the run is still working, and Stop still responds immediately
+
+#### Scenario: Streamed output
+
+- WHEN the engine can report a turn's output progressively
+- THEN the console appends it as it arrives rather than waiting for the turn to finish
+
 ### Requirement: Approval gates
 
 The run SHALL pause completely for side effects beyond plain in-repo edits and the
