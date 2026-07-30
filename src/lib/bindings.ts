@@ -1143,12 +1143,24 @@ async stashDrop(repoId: string, index: number) : Promise<Result<null, string>> {
 }
 },
 /**
- * Every submodule whose checked-out commit differs from the commit the parent
- * repo pins (plus uninitialized ones). Empty when all submodules are in sync.
+ * Every submodule in the repo, in sync or not. The list view's source.
  */
-async listSubmodules(repoId: string) : Promise<Result<SubmoduleMove[], string>> {
+async listSubmodules(repoId: string) : Promise<Result<SubmoduleStatus[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_submodules", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Only the submodules that are out of sync with what the parent records.
+ * Kept separate from [`list_submodules`] because the changed-files view asks a
+ * narrower question than the sidebar list does.
+ */
+async listMovedSubmodules(repoId: string) : Promise<Result<SubmoduleMove[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_moved_submodules", { repoId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1163,6 +1175,62 @@ async listSubmodules(repoId: string) : Promise<Result<SubmoduleMove[], string>> 
 async updateSubmodule(repoId: string, path: string, init: boolean) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_submodule", { repoId, path, init }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Move a submodule to the newest commit on the branch it follows, and stage
+ * the new pointer so the bump is ready to commit.
+ * 
+ * This is `git submodule update --remote`: it fetches the submodule's remote
+ * first, so it needs the network. Staging afterwards means the user sees a
+ * staged change they can commit, rather than a bare working-tree edit whose
+ * origin is unclear.
+ */
+async bumpSubmodule(repoId: string, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("bump_submodule", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Download and check out every submodule that is not initialized yet, the
+ * fresh-clone case where submodule folders exist but are empty.
+ */
+async initAllSubmodules(repoId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("init_all_submodules", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a new submodule at `path` pointing at `url`, optionally following a
+ * branch. Leaves the addition staged, which is how `git submodule add` works.
+ */
+async addSubmodule(repoId: string, url: string, path: string, branch: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_submodule", { repoId, url, path, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove a submodule: stop tracking it, drop it from .gitmodules and the
+ * index, and clear the cached git data so the same path can be re-added later.
+ * 
+ * `delete_files` also removes the checked-out folder from disk. The removal is
+ * left staged, matching `git rm`.
+ */
+async removeSubmodule(repoId: string, path: string, deleteFiles: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_submodule", { repoId, path, deleteFiles }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2835,6 +2903,63 @@ behind: number;
  * False when the submodule has not been checked out (needs init).
  */
 initialized: boolean }
+/**
+ * Where a submodule stands relative to the commit its parent pins.
+ */
+export type SubmoduleState = 
+/**
+ * Checked out at exactly the commit the parent records.
+ */
+"in_sync" | 
+/**
+ * Checked out, but at a different commit than the parent records.
+ */
+"moved" | 
+/**
+ * Recorded in .gitmodules but never checked out -- needs downloading.
+ */
+"uninitialized"
+/**
+ * A submodule and everything the UI needs to describe it: where it points,
+ * where it came from, and whether it matches what the parent records.
+ * 
+ * Unlike [`SubmoduleMove`], which only covers submodules that are out of sync,
+ * this describes every submodule in the repo including healthy ones.
+ */
+export type SubmoduleStatus = { 
+/**
+ * Path within the parent repo, e.g. "packages/core".
+ */
+path: string; 
+/**
+ * Name from .gitmodules, which can differ from the path.
+ */
+name: string; 
+/**
+ * Clone URL, when .gitmodules records one.
+ */
+url: string | null; 
+/**
+ * Branch this submodule follows, when configured. Bumping moves to this
+ * branch's tip; with none set, the remote's default branch is used.
+ */
+branch: string | null; 
+/**
+ * Commit the parent repo records for this submodule.
+ */
+recorded_sha: string; 
+/**
+ * Commit the submodule is actually checked out at, if initialized.
+ */
+workdir_sha: string | null; 
+/**
+ * Commits the workdir is ahead of the recorded commit.
+ */
+ahead: number; 
+/**
+ * Commits the workdir is behind the recorded commit.
+ */
+behind: number; state: SubmoduleState }
 /**
  * How a branch stands against the remote. Distinguishes the three cases the
  * old `(0, 0)` collapsed together: genuinely in sync, no upstream configured,

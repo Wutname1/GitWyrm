@@ -100,6 +100,45 @@ pub struct SubmoduleMove {
   pub initialized: bool,
 }
 
+/// Where a submodule stands relative to the commit its parent pins.
+#[derive(Debug, Clone, Copy, Serialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SubmoduleState {
+  /// Checked out at exactly the commit the parent records.
+  InSync,
+  /// Checked out, but at a different commit than the parent records.
+  Moved,
+  /// Recorded in .gitmodules but never checked out -- needs downloading.
+  Uninitialized,
+}
+
+/// A submodule and everything the UI needs to describe it: where it points,
+/// where it came from, and whether it matches what the parent records.
+///
+/// Unlike [`SubmoduleMove`], which only covers submodules that are out of sync,
+/// this describes every submodule in the repo including healthy ones.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct SubmoduleStatus {
+  /// Path within the parent repo, e.g. "packages/core".
+  pub path: String,
+  /// Name from .gitmodules, which can differ from the path.
+  pub name: String,
+  /// Clone URL, when .gitmodules records one.
+  pub url: Option<String>,
+  /// Branch this submodule follows, when configured. Bumping moves to this
+  /// branch's tip; with none set, the remote's default branch is used.
+  pub branch: Option<String>,
+  /// Commit the parent repo records for this submodule.
+  pub recorded_sha: String,
+  /// Commit the submodule is actually checked out at, if initialized.
+  pub workdir_sha: Option<String>,
+  /// Commits the workdir is ahead of the recorded commit.
+  pub ahead: u32,
+  /// Commits the workdir is behind the recorded commit.
+  pub behind: u32,
+  pub state: SubmoduleState,
+}
+
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct WorkingStatus {
   pub staged: Vec<FileChange>,

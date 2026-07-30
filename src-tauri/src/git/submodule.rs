@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use crate::git::types::SubmoduleMove;
+use crate::git::types::{SubmoduleMove, SubmoduleState, SubmoduleStatus};
 
 /// A path -> pointer-move map for every submodule whose workdir HEAD differs
 /// from the commit the parent repo records. Paths not present are in sync (or
@@ -78,6 +78,62 @@ pub fn moved_submodules(repo: &git2::Repository) -> HashMap<String, SubmoduleMov
   }
 
   moves
+}
+
+/// Every submodule in the repo, in sync or not, sorted by path.
+///
+/// This is the list view's source: unlike [`moved_submodules`], a healthy
+/// submodule still appears, because "all my submodules are fine" is something
+/// the user needs to be able to see rather than infer from an empty list.
+///
+/// ahead/behind are computed against the submodule's OWN repo -- the nested
+/// commits are not in the parent's object database, so asking the parent
+/// returns 0/0.
+pub fn all_submodules(repo: &git2::Repository) -> Vec<SubmoduleStatus> {
+  let Ok(subs) = repo.submodules() else {
+    return Vec::new();
+  };
+
+  let mut out = Vec::new();
+  for sub in subs {
+    let Some(path) = sub.path().to_str().map(str::to_string) else {
+      continue;
+    };
+    let Some(recorded) = sub.index_id().or_else(|| sub.head_id()) else {
+      continue;
+    };
+    let checked_out = sub.workdir_id();
+
+    let (state, ahead, behind) = match checked_out {
+      None => (SubmoduleState::Uninitialized, 0, 0),
+      Some(at) if at == recorded => (SubmoduleState::InSync, 0, 0),
+      Some(at) => {
+        let (a, b) = sub
+          .open()
+          .ok()
+          .and_then(|nested| {
+            nested.graph_ahead_behind(at, recorded).ok().map(|(a, b)| (a as u32, b as u32))
+          })
+          .unwrap_or((0, 0));
+        (SubmoduleState::Moved, a, b)
+      }
+    };
+
+    out.push(SubmoduleStatus {
+      name: sub.name().unwrap_or(&path).to_string(),
+      url: sub.url().map(str::to_string),
+      branch: sub.branch().map(str::to_string),
+      recorded_sha: recorded.to_string(),
+      workdir_sha: checked_out.map(|o| o.to_string()),
+      ahead,
+      behind,
+      state,
+      path,
+    });
+  }
+
+  out.sort_by(|a, b| a.path.cmp(&b.path));
+  out
 }
 
 /// True when `path` names a submodule in this repo (moved or not).
