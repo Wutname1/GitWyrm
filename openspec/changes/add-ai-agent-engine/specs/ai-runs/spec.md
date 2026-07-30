@@ -18,52 +18,50 @@ process rather than delegated to another tool.
 - WHEN the engine is asked to do something a guardrail forbids
 - THEN GitWyrm refuses or gates it, regardless of what the underlying provider would allow
 
-### Requirement: Two transports behind one interface
+### Requirement: Model access is by the user's own API key
 
-The engine SHALL reach models either through a provider's documented API (when the user
-has a key) or through the provider's command-line tool (Claude Code, the GitHub Copilot
-CLI), behind a single interface. Where both are available the API SHALL be preferred: a
-CLI is not a public interface and its output can change between releases. The CLI path
-exists so a subscription-only user is not shut out. No provider-specific behavior SHALL
-reach the console or any other UI.
+The engine SHALL reach models through each provider's documented API, authenticated with
+an API key the user supplies. It SHALL NOT route requests through a user's consumer
+subscription credentials, and SHALL NOT reuse credentials issued to another application.
 
-#### Scenario: Reusing an existing sign-in
+This is a terms constraint, not a technical preference. Anthropic prohibits third-party
+products routing requests through Free, Pro, or Max plan credentials on their users'
+behalf. OpenAI declined four direct requests to confirm that a third-party product may use
+ChatGPT sign-in, and its own documentation recommends API keys for programmatic use. The
+full sourcing is in this change's design.md.
 
-- WHEN the user is signed in to their provider's CLI and has no API key
-- THEN GitWyrm runs tasks through the CLI without asking for a key
+#### Scenario: A key is present
 
-#### Scenario: A key is available
+- WHEN the user has supplied an API key for their provider
+- THEN the engine runs tasks through that provider's documented API
 
-- WHEN the user has an API key for their provider
-- THEN the engine uses the documented API rather than the CLI
+#### Scenario: Subscription but no key
 
-#### Scenario: Neither available
+- WHEN the user has a consumer subscription to a provider but no API key
+- THEN GitWyrm does not attempt to use the subscription, says plainly that a key is needed
+  and where to get one, and leaves the copy-handoff path fully available
 
-- WHEN no CLI is installed and no key is set
-- THEN the Desk shows the reconnect state, says what to install or add, and the
-  copy-handoff path still works
+#### Scenario: No pretending it is broken
+
+- WHEN a provider is unavailable for want of a key
+- THEN the message names what is missing rather than reading as a fault or a failed run
 
 ### Requirement: Provider credentials are never touched
 
-GitWyrm SHALL determine whether a provider is usable by asking the provider, and SHALL
-NOT read, write, or inspect a provider's credential files or configuration.
+GitWyrm SHALL NOT read, write, or inspect credential files or configuration belonging to
+another application, and SHALL determine a provider's usability by asking that provider
+rather than by inferring it from stored files.
 
-#### Scenario: Complete credentials, unusable account
+#### Scenario: Another tool's credentials on disk
 
-- WHEN a provider CLI holds a complete credential record but reports itself not logged in,
-  or lacking a scope it needs
-- THEN GitWyrm reports needs-reconnect rather than starting a run that would fail
+- WHEN a provider's own CLI has credentials stored on the machine
+- THEN GitWyrm neither reads nor relies on them
 
-### Requirement: Discovery survives provider updates
+#### Scenario: Credentials present but unusable
 
-A provider CLI SHALL be located by discovery - PATH, then known install locations - and
-accepted on a minimum version rather than a pinned path or exact build, because these
-tools update themselves.
-
-#### Scenario: The CLI updates itself
-
-- WHEN a provider CLI updates to a newer build between runs
-- THEN GitWyrm keeps working with no change on its side
+- WHEN a provider reports itself not usable - not logged in, or lacking a needed scope -
+  despite credentials existing
+- THEN GitWyrm believes that answer rather than starting a run that would fail later
 
 ### Requirement: A turn is never a silent wait
 

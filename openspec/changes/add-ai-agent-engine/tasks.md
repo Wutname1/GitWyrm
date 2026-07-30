@@ -4,25 +4,24 @@
 
 - [x] 1.1 Fold the "Claude Code CLI Provider for GitWyrm" spike into design.md: measured
       timings, the auth lesson, the numbers not to trust, and the version-gate finding
-- [ ] 1.2 Decide the Copilot CLI adapter shape against the same interface, and record
-      what differs
+- [x] 1.4 Answer the terms-of-service question per provider. Done for Anthropic
+      (prohibited in writing) and OpenAI (four unanswered asks; API keys recommended).
+      Recorded in design.md, and the reason this change is API-key only
+- [ ] 1.2 Resolve the Copilot question: GitWyrm already routes through GitHub's bundled
+      Copilot CLI to obtain entitlements its own OAuth app is denied. Decide whether that
+      stays, changes, or goes - it ships today
 - [ ] 1.3 Decide the turn budget and what "the task is done" means for the loop, so a run
       cannot spin forever
-- [ ] 1.4 Answer the terms-of-service question per provider before shipping to users. A
-      working integration that breaks a provider's terms is worse than none
 
 ## 2. Provider transports
 
-- [ ] 2.1 `ProviderAgent` interface with two kinds of implementation behind it: a direct
-      provider API (preferred when the user has a key) and a CLI wrapper (so a
-      subscription-only user is not shut out)
-- [ ] 2.2 CLI discovery: PATH, then known install locations per platform, gated by a
-      `--version` floor rather than a pinned path - the CLI self-updates
-- [ ] 2.3 Claude Code adapter: prompt over stdin, structured result out, typed errors
-- [ ] 2.4 Copilot CLI adapter behind the same interface
-- [ ] 2.5 Auth status from the CLI's own answer, never from inspecting its credential
-      files. GitWyrm reads and writes no provider credentials
-- [ ] 2.6 Cancellation terminates the child process, leaving no orphan
+- [ ] 2.1 `ProviderAgent` interface over each provider's documented API, keyed by the
+      user's own API key. No subscription-credential path - see design.md
+- [ ] 2.2 Anthropic implementation (Messages API with tool use)
+- [ ] 2.3 OpenAI implementation behind the same interface
+- [ ] 2.4 A provider with no key reports as unavailable in plain language, naming where to
+      get one, without implying GitWyrm is broken
+- [ ] 2.5 Cancellation terminates any in-flight request promptly
 
 ## 3. The loop
 
