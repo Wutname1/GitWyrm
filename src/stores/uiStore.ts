@@ -22,6 +22,7 @@ export type ModalKind =
   | 'newTag'
   | 'remotes'
   | 'githubConnect'
+  | 'addSubmodule'
   | null
 
 export interface GithubItemRef {
@@ -260,6 +261,7 @@ export const useUiStore = create<UiState>((set) => ({
     prs: true,
     issues: false,
     tags: false,
+    submodules: true,
   },
   activeModal: null,
   mergeSource: null,

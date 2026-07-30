@@ -93,6 +93,19 @@ export function useRemoteTags(repoId: string | null, remote = '', enabled = true
   })
 }
 
+/**
+ * Every submodule in the repo with its status, in sync or not. Drives the
+ * sidebar list, so it includes healthy submodules -- "everything is fine" has
+ * to be visible rather than inferred from an empty list.
+ */
+export function useSubmodules(repoId: string | null) {
+  return useQuery({
+    queryKey: keys.submodules(repoId ?? 'none'),
+    enabled: repoId != null,
+    queryFn: async () => unwrap(await commands.listSubmodules(repoId!)),
+  })
+}
+
 export function useRemotes(repoId: string | null) {
   return useQuery({
     queryKey: keys.remotes(repoId ?? 'none'),

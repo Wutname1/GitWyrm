@@ -234,3 +234,68 @@ fn sync_skips_uninitialized_submodules() {
     "a deinitialized submodule must stay uninitialized"
   );
 }
+
+#[test]
+fn all_submodules_reports_in_sync_entries() {
+  let Some((parent, recorded, _w)) = fixture("allsync") else { return };
+  let core = parent.join("packages/core");
+  git(&core, &["checkout", "-q", &recorded]);
+
+  let repo = Repository::open(&parent).unwrap();
+  let all = gitwyrm_lib::git_submodule::all_submodules(&repo);
+
+  assert_eq!(all.len(), 1, "an in-sync submodule must still be listed");
+  let s = &all[0];
+  assert_eq!(s.path, "packages/core");
+  assert_eq!(s.state, gitwyrm_lib::git_types::SubmoduleState::InSync);
+  assert_eq!(s.recorded_sha, recorded);
+  assert_eq!(s.ahead, 0);
+  assert_eq!(s.behind, 0);
+  assert!(s.url.is_some(), "url comes from .gitmodules");
+}
+
+#[test]
+fn all_submodules_reports_moved_with_counts() {
+  let Some((parent, recorded, workdir)) = fixture("allmoved") else { return };
+  let repo = Repository::open(&parent).unwrap();
+
+  let all = gitwyrm_lib::git_submodule::all_submodules(&repo);
+  let s = all.iter().find(|s| s.path == "packages/core").unwrap();
+
+  assert_eq!(s.state, gitwyrm_lib::git_types::SubmoduleState::Moved);
+  assert_eq!(s.recorded_sha, recorded);
+  assert_eq!(s.workdir_sha.as_deref(), Some(workdir.as_str()));
+  assert_eq!(s.ahead, 1, "ahead must come from the submodule's own repo");
+  assert_eq!(s.behind, 0);
+}
+
+#[test]
+fn all_submodules_reports_uninitialized() {
+  let Some((parent, recorded, _w)) = fixture("alluninit") else { return };
+  git(&parent, &["submodule", "deinit", "-f", "packages/core"]);
+
+  let repo = Repository::open(&parent).unwrap();
+  let all = gitwyrm_lib::git_submodule::all_submodules(&repo);
+  let s = all.iter().find(|s| s.path == "packages/core").unwrap();
+
+  assert_eq!(s.state, gitwyrm_lib::git_types::SubmoduleState::Uninitialized);
+  assert_eq!(s.recorded_sha, recorded);
+  assert!(s.workdir_sha.is_none(), "an uninitialized submodule has no checkout");
+}
+
+/// A repo with no submodules must produce an empty list rather than erroring --
+/// the sidebar hides the section on this.
+#[test]
+fn all_submodules_is_empty_without_any() {
+  let Some((parent, _r, _w)) = fixture("allnone") else { return };
+  let plain = parent.parent().unwrap().join("plain");
+  fs::create_dir_all(&plain).unwrap();
+  git(&plain, &["init", "-q"]);
+  identity(&plain);
+  fs::write(plain.join("a.txt"), "hi").unwrap();
+  git(&plain, &["add", "."]);
+  git(&plain, &["commit", "-qm", "only commit"]);
+
+  let repo = Repository::open(&plain).unwrap();
+  assert!(gitwyrm_lib::git_submodule::all_submodules(&repo).is_empty());
+}

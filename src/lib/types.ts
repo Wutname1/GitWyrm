@@ -1,6 +1,14 @@
 // UI-only types. Backend-owned types live in the generated bindings.ts.
 
-export type SectionKey = 'local' | 'remote' | 'worktrees' | 'stashes' | 'prs' | 'issues' | 'tags'
+export type SectionKey =
+  | 'local'
+  | 'remote'
+  | 'worktrees'
+  | 'stashes'
+  | 'prs'
+  | 'issues'
+  | 'tags'
+  | 'submodules'
 
 export type SectionType = 'branch' | 'remote' | 'tree' | 'stash' | 'pr' | 'issue' | 'tag'
 

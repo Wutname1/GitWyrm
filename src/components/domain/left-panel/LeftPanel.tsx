@@ -27,6 +27,7 @@ import { StashContextMenu } from '@/components/domain/graph/StashRow'
 import { SidebarSection } from './SidebarSection'
 import { BranchSidebarItem } from './BranchSidebarItem'
 import { RemotesSection } from './RemotesSection'
+import { SubmodulesSection } from './SubmodulesSection'
 
 export function LeftPanel() {
   const repo = useActiveRepo()
@@ -428,6 +429,8 @@ export function LeftPanel() {
       />
 
       <RemotesSection remotes={remotes.data ?? []} onManage={() => openModal('remotes')} />
+
+      <SubmodulesSection />
 
       {otherSections.map((section) => (
         <SidebarSection

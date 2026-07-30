@@ -20,7 +20,15 @@ import { log } from '@/lib/log'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useUiStore } from '@/stores/uiStore'
 
-type QueryName = 'status' | 'log' | 'branches' | 'stashes' | 'tags' | 'remotes' | 'mergeState'
+type QueryName =
+  | 'status'
+  | 'log'
+  | 'branches'
+  | 'stashes'
+  | 'tags'
+  | 'remotes'
+  | 'mergeState'
+  | 'submodules'
 
 interface FolderFilesArgs {
   folder: string
@@ -314,9 +322,61 @@ export function useGitMutations(repoId: string | null) {
       return args
     },
     onSuccess: ({ path, init }) => {
-      invalidate(qc, id, ['status', 'log'])
+      invalidate(qc, id, ['status', 'log', 'submodules'])
       const name = path.split('/').pop() ?? path
       toast(init ? `Downloaded ${name}` : `Reset ${name} to the recorded commit`)
+    },
+    onError,
+  })
+
+  // Move a submodule to the newest commit on the branch it follows. Hits the
+  // network, and leaves the new pointer staged and ready to commit.
+  const bumpSubmodule = useMutation({
+    mutationFn: async (path: string) => {
+      await unwrap(await commands.bumpSubmodule(id, path))
+      return path
+    },
+    onSuccess: (path) => {
+      invalidate(qc, id, ['status', 'submodules'])
+      const name = path.split('/').pop() ?? path
+      toast(`Updated ${name} to the latest commit`, {
+        description: 'Commit the change to save it.',
+      })
+    },
+    onError,
+  })
+
+  // Download every submodule that has not been checked out yet -- the
+  // fresh-clone case where the folders exist but are empty.
+  const initAllSubmodules = useMutation({
+    mutationFn: async () => unwrap(await commands.initAllSubmodules(id)),
+    onSuccess: () => {
+      invalidate(qc, id, ['status', 'submodules'])
+      toast('Downloaded all submodules')
+    },
+    onError,
+  })
+
+  const addSubmodule = useMutation({
+    mutationFn: async (args: { url: string; path: string; branch: string | null }) => {
+      await unwrap(await commands.addSubmodule(id, args.url, args.path, args.branch))
+      return args
+    },
+    onSuccess: ({ path }) => {
+      invalidate(qc, id, ['status', 'submodules'])
+      toast(`Added ${path}`, { description: 'Commit the change to save it.' })
+    },
+    onError,
+  })
+
+  const removeSubmodule = useMutation({
+    mutationFn: async (args: { path: string; deleteFiles: boolean }) => {
+      await unwrap(await commands.removeSubmodule(id, args.path, args.deleteFiles))
+      return args
+    },
+    onSuccess: ({ path }) => {
+      invalidate(qc, id, ['status', 'submodules'])
+      toast(`Removed ${path}`, { description: 'Commit the change to save it.' })
     },
     onError,
   })
@@ -1134,6 +1194,10 @@ export function useGitMutations(repoId: string | null) {
     discardAll,
     addToGitignore,
     updateSubmodule,
+    bumpSubmodule,
+    initAllSubmodules,
+    addSubmodule,
+    removeSubmodule,
     createCommit,
     createBranch,
     deleteBranch,

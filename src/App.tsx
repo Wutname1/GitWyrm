@@ -16,6 +16,7 @@ import { DragScrim } from '@/components/domain/DragScrim'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
 import { NewTagModal } from '@/components/modals/NewTagModal'
+import { AddSubmoduleModal } from '@/components/modals/AddSubmoduleModal'
 import { PushTagsModal } from '@/components/modals/PushTagsModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
@@ -370,6 +371,7 @@ function AppInner() {
       <PushChoiceModal />
       <NewBranchModal />
       <NewTagModal />
+      <AddSubmoduleModal />
       <PushTagsModal />
       <RemotesModal />
       <GithubConnectModal />
