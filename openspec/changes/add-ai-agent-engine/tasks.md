@@ -50,8 +50,10 @@
 
 ## 3. The loop
 
-- [ ] 3.1 Plan / act / observe loop that ends when the task's done-means checks pass, the
-      turn budget is spent, or the user stops
+- [x] 3.1 Plan / act / observe loop that ends when the task's done-means checks pass, the
+      turn budget is spent, or the user stops. A fourth ending was added deliberately: a
+      turn with no tool calls and the task not ticked means the AI gave up, which is
+      reported rather than left to run the budget down quietly
 - [x] 3.2 Tools, and only these: read file, edit file, list directory, run a project check.
       Every path resolved inside the repository and refused outside it. Lexical check
       first (catches traversal on paths that do not exist yet), then a canonicalize
@@ -59,18 +61,25 @@
       pointing out of the repo. `.git` refused case-insensitively. NOTE: the symlink
       case cannot be exercised on an unelevated Windows machine and prints a notice
       instead of asserting - needs verifying where symlinks can be created
-- [ ] 3.3 Emit the console's typed events as the loop progresses, each with its
-      one-sentence plain-language summary
+- [x] 3.3 Emit the console's typed events as the loop progresses, each with its
+      one-sentence plain-language summary. `events.rs` carries the sentence on the event
+      so every surface reads identically; a test asserts no refusal or gate uses jargon
 - [ ] 3.4 Stream a turn's output where the transport allows it, so the console has
       something to show inside the first second or two of a 10-20 second turn
 
 ## 4. Guardrails (enforced here, not by the provider)
 
-- [ ] 4.1 Refuse any push outright - never a gate, never an option
-- [ ] 4.2 Raise typed gates for side effects: add or remove a dependency, run an install,
-      network access, delete files, anything outside the repository
-- [ ] 4.3 Work only on the linked branch (or a new work branch when none is linked);
-      refuse to run with a different branch checked out
+- [x] 4.1 Refuse any push outright - never a gate, never an option. Checked before any
+      other rule, on both the tool name and its arguments, so a push dressed as an
+      ordinary edit is still refused
+- [x] 4.2 Raise typed gates for side effects: add or remove a dependency, run an install,
+      network access, delete files, anything outside the repository. Gate variants defined
+      and wired; an unknown tool gates rather than executing. Detecting a dependency or
+      install specifically needs the CLI's own tool vocabulary, so those variants are not
+      yet raised from a real run
+- [x] 4.3 Work only on the linked branch (or a new work branch when none is linked);
+      refuse to run with a different branch checked out. `guardrails::branch_is_runnable`;
+      the preflight that calls it is part of the run console change
 - [ ] 4.4 Set the user's uncommitted work aside before the run and restore it after,
       reusing the stash plumbing
 - [ ] 4.5 Cancel promptly on stop, including mid-turn, leaving the tree in a state the
