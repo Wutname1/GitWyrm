@@ -19,6 +19,34 @@ fn clean_path(path: &str) -> Result<String, AppError> {
   Ok(cleaned)
 }
 
+/// The name `.gitmodules` records for a submodule at `path`, which can differ
+/// from the path itself. None when there is no matching entry.
+fn submodule_name_for_path(repo_path: &str, path: &str) -> Option<String> {
+  let out = run_git(
+    Some(repo_path),
+    &[
+      "config",
+      "--file",
+      ".gitmodules",
+      "--get-regexp",
+      r"^submodule\..*\.path$",
+    ],
+  )
+  .ok()?;
+
+  out.stdout.lines().find_map(|line| {
+    let (key, value) = line.split_once(' ')?;
+    if value.trim() != path {
+      return None;
+    }
+    // "submodule.<name>.path" -> "<name>", where the name may contain dots.
+    key
+      .strip_prefix("submodule.")
+      .and_then(|rest| rest.strip_suffix(".path"))
+      .map(str::to_string)
+  })
+}
+
 /// Every submodule in the repo, in sync or not. The list view's source.
 #[tauri::command]
 #[specta::specta]
@@ -195,12 +223,51 @@ pub async fn remove_submodule(
     // the goal is only that it is not initialized by the time git rm runs.
     let _ = run_git(Some(&repo_path), &["submodule", "deinit", "-f", "--", &path]);
 
-    // git rm drops it from .gitmodules and the index in one step.
+    // Drop the index entry (and the folder, when asked).
     if delete_files {
       run_git(Some(&repo_path), &["rm", "-f", "--", &path])?;
     } else {
       run_git(Some(&repo_path), &["rm", "--cached", "--", &path])?;
     }
+
+    // `git rm` strips the .gitmodules stanza itself, but the section can survive
+    // when the path and the submodule's name differ. Removing it by name is
+    // best-effort: "no such section" just means git already handled it.
+    let gitmodules = root.join(".gitmodules");
+    if gitmodules.exists() {
+      if let Some(name) = submodule_name_for_path(&repo_path, &path) {
+        let _ = run_git(
+          Some(&repo_path),
+          &[
+            "config",
+            "--file",
+            ".gitmodules",
+            "--remove-section",
+            &format!("submodule.{name}"),
+          ],
+        );
+      }
+
+      // git leaves a 0-byte .gitmodules behind once the last submodule is gone.
+      // Committing a blank file is noise, so drop it; otherwise stage the edit
+      // so the whole removal lands in one commit.
+      let empty = std::fs::read_to_string(&gitmodules)
+        .map(|c| c.trim().is_empty())
+        .unwrap_or(false);
+      if empty {
+        let _ = std::fs::remove_file(&gitmodules);
+        let _ = run_git(Some(&repo_path), &["rm", "--cached", "--", ".gitmodules"]);
+      } else {
+        let _ = run_git(Some(&repo_path), &["add", "--", ".gitmodules"]);
+      }
+    }
+
+    // The submodule's entry in .git/config outlives deinit in some states;
+    // clearing it stops git treating the path as a submodule.
+    let _ = run_git(
+      Some(&repo_path),
+      &["config", "--remove-section", &format!("submodule.{path}")],
+    );
 
     // Stale data under .git/modules would block re-adding the same path later.
     let cached = root.join(".git").join("modules").join(&path);

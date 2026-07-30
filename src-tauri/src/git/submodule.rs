@@ -94,13 +94,32 @@ pub fn all_submodules(repo: &git2::Repository) -> Vec<SubmoduleStatus> {
     return Vec::new();
   };
 
+  // The index is the source of truth for what the repo currently tracks. A
+  // staged-but-uncommitted removal is gone from the index while HEAD still has
+  // the gitlink, so falling back to head_id would keep listing a submodule the
+  // user just removed.
+  let index_has_entry = |path: &str| {
+    repo
+      .index()
+      .ok()
+      .map(|idx| idx.get_path(std::path::Path::new(path), 0).is_some())
+      .unwrap_or(false)
+  };
+
   let mut out = Vec::new();
   for sub in subs {
     let Some(path) = sub.path().to_str().map(str::to_string) else {
       continue;
     };
-    let Some(recorded) = sub.index_id().or_else(|| sub.head_id()) else {
-      continue;
+    let recorded = match sub.index_id() {
+      Some(oid) => oid,
+      // Not in the index: only real if HEAD still has it AND it was not just
+      // removed. `git rm` drops the index entry, which is what distinguishes
+      // "removal pending commit" from "index simply not loaded".
+      None => match sub.head_id() {
+        Some(oid) if index_has_entry(&path) => oid,
+        _ => continue,
+      },
     };
     let checked_out = sub.workdir_id();
 
