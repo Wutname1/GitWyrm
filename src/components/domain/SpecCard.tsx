@@ -14,7 +14,9 @@ import { openSpecDesk } from '@/lib/specDesk'
  *
  * The main window stays a git client: this card reports where a change stands
  * and hands work off, but reading proposals, editing tasks, and everything else
- * deep belongs in the Spec Desk. Absent entirely for repos without openspec/.
+ * deep belongs in the Spec Desk. Absent entirely for repos without openspec/,
+ * and whenever no change is selected -- deselecting is how you reclaim the room
+ * above the commit form.
  */
 export function SpecCard() {
   const repo = useActiveRepo()

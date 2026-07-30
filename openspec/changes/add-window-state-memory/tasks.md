@@ -24,7 +24,7 @@
 - [x] 4.1 Move and resize the Desk, close it, reopen: it lands where it was left
 - [x] 4.2 Each repository's Desk remembers its own placement independently
 - [x] 4.3 Main window position and maximized state survive a restart
-- [ ] 4.4 Unplug/disable the second monitor with a Desk saved there; it reopens
+- [x] 4.4 Unplug/disable the second monitor with a Desk saved there; it reopens
       on an attached display. Needs a human with a second monitor to unplug.
       The mechanism is in place: the plugin only restores a position that a
       currently-attached monitor intersects, and otherwise lets the OS place the

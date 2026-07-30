@@ -68,21 +68,19 @@ export function useOpenspecArchived(repoId: string | null, enabled = false) {
 /**
  * The change every Specs surface is currently pointed at.
  *
- * `null` means nothing is selected, and stays that way -- a surface that
- * resolved null to the first change would make the first row impossible to
- * click away from, since deselecting it would immediately reselect it.
+ * Nothing selected stays nothing selected: resolving null to the first change
+ * would make that row impossible to click away from, since deselecting it would
+ * immediately reselect it. Surfaces render their own empty state instead -- the
+ * spec card hides, the Desk prompts you to pick one.
  *
- * Pass `fallbackToFirst` for surfaces that must always show something (the spec
- * card). That also covers a selected change going away -- archived, renamed, or
- * deleted by another tool -- so the card does not blank out when the folder
- * changes underneath it.
+ * A change that goes away underneath us -- archived, renamed, or deleted by
+ * another tool -- reads as nothing selected for the same reason.
  */
-export function useSelectedChange(repoId: string | null, fallbackToFirst = false) {
+export function useSelectedChange(repoId: string | null) {
   const changes = useOpenspecChanges(repoId)
   const selectedId = useUiStore((s) => s.selectedChangeId)
   const list = changes.data ?? []
-  const match = list.find((c) => c.id === selectedId)
-  const selected = match ?? (fallbackToFirst ? list[0] : undefined)
+  const selected = list.find((c) => c.id === selectedId)
   return { change: selected, changes: list, query: changes }
 }
 

@@ -132,7 +132,7 @@ export function SshAccess() {
       {configuredKey && (
         <div className="px-1 text-2xs text-muted-foreground">
           Right now {host} uses{' '}
-          <span className="font-mono text-foreground">{configuredKey}</span>.
+          <span className="font-mono font-medium text-emerald-500">{configuredKey}</span>.
         </div>
       )}
 
@@ -286,12 +286,6 @@ function KeyRow({
             {keyInfo.algorithm && (
               <span className="flex-none text-2xs text-muted-foreground">{keyInfo.algorithm}</span>
             )}
-            {inUse && (
-              <span className="flex flex-none items-center gap-1 text-2xs text-emerald-500">
-                <Check size={11} />
-                used for {host}
-              </span>
-            )}
           </div>
           {keyInfo.comment && (
             <div className="truncate text-2xs text-muted-foreground">{keyInfo.comment}</div>
@@ -309,7 +303,17 @@ function KeyRow({
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {!inUse && (
+        {inUse ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-6 border-emerald-500/40 text-emerald-500 disabled:opacity-100"
+            disabled
+          >
+            <Check size={11} />
+            Used for {host}
+          </Button>
+        ) : (
           <Button size="sm" variant="secondary" className="h-6" onClick={onUse}>
             Use for {host}
           </Button>

@@ -101,10 +101,6 @@ export function SpecsSection({
   const selectedId = useUiStore((s) => s.selectedChangeId)
   const qc = useQueryClient()
 
-  // Mirrors useSelectedChange: with nothing clicked, the first change is the
-  // one the card is showing, so it is the one that looks selected here.
-  const effectiveId = changes.find((c) => c.id === selectedId)?.id ?? changes[0]?.id
-
   return (
     <div className="group/section">
       <ContextMenu>
@@ -150,11 +146,10 @@ export function SpecsSection({
               <SpecContextMenu key={change.id} change={change} repoId={repoId}>
                 <SpecRow
                   change={change}
-                  isSelected={change.id === effectiveId}
+                  isSelected={change.id === selectedId}
                   onClick={() =>
-                    // Clicking the row that's already selected clears the pick
-                    // instead of no-op'ing -- otherwise the auto-selected first
-                    // change can never be clicked away from.
+                    // Clicking the selected row clears the pick rather than
+                    // no-op'ing, so any row can be clicked away from.
                     selectChangeEverywhere(change.id === selectedId ? null : change.id)
                   }
                 />
