@@ -17,6 +17,7 @@ import { composeTaskHandoff, copyTaskHandoff } from '@/lib/specHandoff'
 import { nextTask, useOpenspecMutations } from '@/hooks/useOpenspec'
 import { useSpecAi } from '@/hooks/useSpecAi'
 import { stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
+import { useBranches } from '@/hooks/useGitQueries'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { describeError, log } from '@/lib/log'
 
@@ -28,6 +29,7 @@ function RailButton({
   primary,
   pending,
   disabled,
+  title,
 }: {
   icon?: React.ReactNode
   label: string
@@ -35,11 +37,14 @@ function RailButton({
   primary?: boolean
   pending?: boolean
   disabled?: boolean
+  /** Shown on hover, so a disabled button can say why. */
+  title?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       disabled={pending || disabled}
       className={cn(
         'flex min-h-8 w-full items-center justify-center gap-2 rounded-md px-3 text-2xs font-semibold transition-colors disabled:opacity-50',
@@ -117,6 +122,8 @@ export function DeskActionRail({
   const ai = useSpecAi()
   const { validateChange, archiveChange } = useOpenspecMutations(repoId)
   const [result, setResult] = useState<CliOutcome | null>(null)
+  const [starting, setStarting] = useState(false)
+  const branches = useBranches(repoId)
   const [confirmArchive, setConfirmArchive] = useState(false)
   // Held here, not inside the <details>: the rail re-renders on every task tick
   // and watcher refresh, and a details element rebuilt from JSX would snap shut
@@ -187,6 +194,37 @@ export function DeskActionRail({
     }
   }
 
+  const startRun = async () => {
+    if (!task || starting) return
+    setStarting(true)
+    try {
+      const res = await commands.aiRunStart(
+        repoId,
+        change.id,
+        task.index,
+        // The author's own numbering is what the header shows; the index is
+        // what identifies the checkbox. They disagree whenever a plan skips or
+        // repeats a number, so both are sent rather than one being derived.
+        change.progress.done + 1,
+        task.text,
+        // The checked-out branch: a run edits files in place, so it has to be
+        // pinned to where the work will actually land.
+        branches.data?.local.find((b) => b.is_head)?.name ?? 'main'
+      )
+      if (res.status !== 'ok') {
+        toast.error('That could not be started.', { description: res.error })
+        return
+      }
+      if (res.data.kind === 'alreadyRunning') {
+        toast.info(res.data.summary)
+        return
+      }
+      toast.success('Started. Watch it on the AI tab.')
+    } finally {
+      setStarting(false)
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-col border-l border-border bg-panel">
       <header className="flex-none border-b border-border px-4 py-3.5">
@@ -226,21 +264,20 @@ export function DeskActionRail({
                   <RailButton
                     primary
                     icon={<Play size={12} strokeWidth={2.6} />}
-                    label="Run this task with AI"
-                    onClick={() =>
-                      toast.info('Monitored AI runs arrive with the run-engine work.', {
-                        description:
-                          'Until then, copy the handoff below - it carries the same context.',
-                      })
-                    }
+                    label={starting ? 'Starting…' : 'Run this task with AI'}
+                    onClick={() => void startRun()}
                   />
                 )}
+                {/* Asking questions in-app is its own change (`add-ai-ask-mode`).
+                    Until it lands the button is disabled with a tooltip rather
+                    than clickable-then-apologetic: a control that does nothing
+                    but explain itself trains people to stop trusting buttons. */}
                 <RailButton
                   icon={<MessageCircleQuestion size={12} strokeWidth={2.2} />}
                   label="Ask about this change"
-                  onClick={() =>
-                    toast.info('Asking questions in-app arrives with the ask-mode work.')
-                  }
+                  disabled
+                  title="Not built yet - copy the handoff below and ask in your own tool."
+                  onClick={() => {}}
                 />
               </>
             ) : (

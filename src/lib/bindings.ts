@@ -127,6 +127,29 @@ async openInTerminal(repoId: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Start opencode on one task, in the repo folder, with the handoff as its
+ * opening message.
+ * 
+ * The handoff arrives from the frontend rather than being rebuilt here so that
+ * what opencode receives is byte-for-byte what the Desk shows under "what gets
+ * copied" -- one composer, no chance of the two drifting apart.
+ */
+async openInOpencode(repoId: string, handoff: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_in_opencode", { repoId, handoff }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Whether opencode can be launched. Drives the Desk button's enabled state, so
+ * the button is never offered when clicking it could only fail.
+ */
+async opencodeAvailable() : Promise<boolean> {
+    return await TAURI_INVOKE("opencode_available");
+},
+/**
  * Open a single file in the given editor. Mirrors `external::open_in_editor`,
  * but targets one file inside the repo rather than the repo folder.
  */
@@ -1885,6 +1908,21 @@ async githubMergePr(owner: string, repo: string, number: number, method: MergeMe
 async githubCloseIssue(owner: string, repo: string, number: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("github_close_issue", { owner, repo, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Starts a real run: the engine, against the user's default provider.
+ * 
+ * Separate command from `ai_run_start_demo` on purpose. The demo replays a
+ * script and must never be mistaken for this; this spends the user's AI
+ * credits and edits their files.
+ */
+async aiRunStart(repoId: string, changeId: string, taskIndex: number, taskNumber: number, taskText: string, branch: string) : Promise<Result<StartOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_run_start", { repoId, changeId, taskIndex, taskNumber, taskText, branch }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

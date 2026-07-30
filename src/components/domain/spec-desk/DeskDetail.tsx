@@ -3,6 +3,7 @@ import { Bot, Check, CircleDot, FileText, GitCommitHorizontal, ListChecks, Scale
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import type { SpecChange, SpecTask } from '@/lib/bindings'
+import { commands } from '@/lib/bindings'
 import { Markdown } from '@/components/ui/markdown'
 import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import { nextStepHint, progressSentence } from '@/lib/specDisplay'
@@ -523,8 +524,28 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
               onUndo: () => {
                 toast.info('Undo runs from the changes list for now.')
               },
+              // Restarts the run's own task, not whatever is selected now --
+              // the session carries its change and task for exactly this.
               onRestart: () => {
-                toast.info('Restarting a task needs the engine wired up.')
+                void (async () => {
+                  const session = run.session
+                  if (!session) return
+                  await run.clear()
+                  const res = await commands.aiRunStart(
+                    repoId,
+                    session.change_id,
+                    // The session does not carry the checkbox index, so the
+                    // next unticked task in this change is the target. That is
+                    // the same task unless it was ticked during the run.
+                    nextTask(change)?.index ?? 0,
+                    session.task_number,
+                    session.task_text,
+                    session.branch
+                  )
+                  if (res.status !== 'ok') {
+                    toast.error('That could not be restarted.', { description: res.error })
+                  }
+                })()
               },
               // These two can act for real: reconnecting is a settings trip,
               // and the handoff is the escape hatch that exists precisely for
@@ -551,9 +572,10 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
                 const task = nextTask(change)
                 if (task) void copyTaskHandoff(change, task)
               },
-              onRetryWithNote: () => {
-                toast.info('Trying again with a note needs the engine wired up.')
-              },
+              // Adding a note to a retry needs somewhere to type it, which is
+              // its own piece of UI. Restart plus the composer already covers
+              // the same ground, so this is left out rather than stubbed.
+              onRetryWithNote: undefined,
             }}
           />
         )}
