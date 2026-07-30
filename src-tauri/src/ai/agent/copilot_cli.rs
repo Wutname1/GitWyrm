@@ -28,7 +28,12 @@ use crate::git::shell::CREATE_NO_WINDOW;
 /// A floor rather than a pinned path because these tools self-update, often
 /// silently. Pinning would break the day the user's CLI updated itself; a floor
 /// only refuses versions that predate the interface we rely on.
-pub const MIN_VERSION: (u32, u32, u32) = (0, 0, 340);
+///
+/// 1.0.0 because the ACP handshake was verified working against 1.0.76 (the
+/// first real install available), and nothing older has been tested. Set no
+/// higher than the version actually confirmed: a floor above what we know
+/// would refuse installs that may well work.
+pub const MIN_VERSION: (u32, u32, u32) = (1, 0, 0);
 
 /// What discovery found.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -240,8 +245,20 @@ mod tests {
 
   #[test]
   fn floor_comparison_is_by_component_not_string() {
-    // "0.0.9" > "0.0.10" as strings; as tuples it is not.
-    assert!(parse_version("0.0.400").unwrap() >= MIN_VERSION);
-    assert!(parse_version("0.0.9").unwrap() < MIN_VERSION);
+    // "1.0.9" > "1.0.10" as strings; as tuples it is not.
+    assert!(parse_version("1.0.9").unwrap() >= MIN_VERSION);
+    assert!(parse_version("1.0.76").unwrap() >= MIN_VERSION);
+    assert!(parse_version("0.9.999").unwrap() < MIN_VERSION);
+  }
+
+  #[test]
+  fn the_installed_copilot_version_clears_the_floor() {
+    // Verbatim from `copilot version` on the real 1.0.76 install this floor
+    // was measured against. A regression here means either the parser or the
+    // floor moved somewhere that would refuse a working install.
+    let raw = "GitHub Copilot CLI 1.0.76\n\nYou are running the latest version.";
+    let parsed = parse_version(raw).expect("the real version string must parse");
+    assert_eq!(parsed, (1, 0, 76));
+    assert!(parsed >= MIN_VERSION);
   }
 }

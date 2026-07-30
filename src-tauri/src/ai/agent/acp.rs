@@ -107,6 +107,16 @@ impl StopReason {
 
 type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, AgentError>>>>>;
 
+/// What a client sends to prove it can be talked to.
+///
+/// Measured against Copilot CLI 1.0.76: `initialize` is answered even when
+/// nobody is signed in, but `session/new` produces *no reply at all* -- the
+/// process simply exits 0. So "the handshake worked" is not evidence of a
+/// usable agent, and the absence of a session response has to be read as a
+/// sign-in problem rather than a crash.
+const SIGN_IN_HINT: &str =
+  "Copilot needs you to sign in first. Run `copilot login` in a terminal, then try again.";
+
 /// A live ACP session over a spawned CLI.
 pub struct AcpConnection {
   child: Child,
@@ -121,18 +131,22 @@ pub struct AcpConnection {
 impl AcpConnection {
   /// Spawns the CLI in ACP stdio mode and starts reading its output.
   ///
-  /// `available_tools` is applied at start because ACP fixes tool filtering at
+  /// `denied_tools` is applied at start because ACP fixes tool filtering at
   /// server launch: a client cannot narrow it per session, so the bounded set
   /// has to be a launch argument.
+  ///
+  /// Denial rather than an allow-list because, per `copilot help permissions`,
+  /// "denial rules always take precedence over allow rules, even
+  /// --allow-all-tools" -- so this cannot be widened by anything later.
   pub async fn spawn(
     program: &std::path::Path,
     cwd: &std::path::Path,
-    available_tools: &[&str],
+    denied_tools: &[&str],
   ) -> Result<Self, AgentError> {
     let mut cmd = Command::new(program);
     cmd.arg("--acp").arg("--stdio");
-    if !available_tools.is_empty() {
-      cmd.arg(format!("--available-tools={}", available_tools.join(",")));
+    for tool in denied_tools {
+      cmd.arg(format!("--deny-tool={tool}"));
     }
     cmd.current_dir(cwd)
       .stdin(Stdio::piped())
@@ -204,17 +218,28 @@ impl AcpConnection {
       init.get("agentInfo").and_then(|v| v.get("name")).and_then(Value::as_str).unwrap_or("?")
     );
 
-    let session = self
+    // Measured against 1.0.76: a signed-out CLI answers `initialize` happily
+    // and then closes the pipe on `session/new` without a reply. Both the
+    // "stream ended" error and a reply with no sessionId therefore mean the
+    // same thing to a user -- sign in -- so neither is reported as a fault.
+    let session = match self
       .request(
         "session/new",
         json!({ "cwd": cwd.to_string_lossy(), "mcpServers": [] }),
       )
-      .await?;
+      .await
+    {
+      Ok(v) => v,
+      Err(AgentError::Failed { .. }) => {
+        return Err(AgentError::NeedsReconnect { detail: SIGN_IN_HINT.into() })
+      }
+      Err(other) => return Err(other),
+    };
 
     let id = session
       .get("sessionId")
       .and_then(Value::as_str)
-      .ok_or_else(|| AgentError::Failed { detail: "the CLI did not return a session".into() })?
+      .ok_or_else(|| AgentError::NeedsReconnect { detail: SIGN_IN_HINT.into() })?
       .to_string();
     self.session_id = Some(id.clone());
     Ok(id)
