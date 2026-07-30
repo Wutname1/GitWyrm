@@ -601,7 +601,22 @@ fn create_commit_chain(
     } else {
       format!("{summary}\n\n{description}")
     };
-    let oid = repo.commit(None, &signature, &signature, &message, &tree, &parents)?;
+    // Signs when the repository is configured to, same as a hand-made commit.
+    // No ref moves here: the chain is built detached and the branch is only
+    // advanced once every commit has been verified below.
+    let identity = crate::git::commit_write::CommitIdentity {
+      author: signature.clone(),
+      committer: signature.clone(),
+    };
+    let oid = crate::git::commit_write::create(
+      repo,
+      repo_path,
+      None,
+      &identity,
+      &message,
+      &tree,
+      &parents,
+    )?;
 
     created.push(AiCreatedCommit {
       sha: oid.to_string(),

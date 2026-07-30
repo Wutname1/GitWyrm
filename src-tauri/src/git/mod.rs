@@ -1,4 +1,5 @@
 pub mod bundled;
+pub mod commit_write;
 pub mod graph;
 pub mod identity;
 pub mod history;

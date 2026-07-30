@@ -1,10 +1,13 @@
 //! Merge and conflict resolution. Uses git2 for the local index work; a merge
-//! never touches the network, so no shell-out is required here.
+//! never touches the network, so nothing here shells out for its own sake --
+//! only the commits themselves go through `commit_write`, which shells out when
+//! the repository is configured to sign.
 
 use git2::{build::CheckoutBuilder, MergeOptions, Oid, ResetType};
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git::commit_write::{self, CommitIdentity};
 use crate::git::merge_ops::{self, Resolution};
 use crate::git::refs;
 use crate::git::types::{
@@ -324,6 +327,8 @@ pub async fn commit_merge(
     let committer = repo.signature()?;
     let head_commit = repo.head()?.peel_to_commit()?;
 
+    let repo_path = commit_write::workdir_of(&repo);
+
     // A cherry-pick produces a single-parent commit that keeps the picked
     // commit's original author; a revert is single-parent but authored by the
     // reverter; a merge produces a two-parent merge commit.
@@ -331,31 +336,47 @@ pub async fn commit_merge(
       git2::RepositoryState::CherryPick => {
         let picked_oid = read_state_head(&repo, "CHERRY_PICK_HEAD")?;
         let picked = repo.find_commit(picked_oid)?;
-        let author = picked.author();
-        repo.commit(
+        let identity = CommitIdentity {
+          author: picked.author().to_owned(),
+          committer: committer.clone(),
+        };
+        commit_write::create(
+          &repo,
+          &repo_path,
           Some("HEAD"),
-          &author,
-          &committer,
+          &identity,
           &message,
           &tree,
           &[&head_commit],
         )?
       }
-      git2::RepositoryState::Revert => repo.commit(
-        Some("HEAD"),
-        &committer,
-        &committer,
-        &message,
-        &tree,
-        &[&head_commit],
-      )?,
+      git2::RepositoryState::Revert => {
+        let identity = CommitIdentity {
+          author: committer.clone(),
+          committer: committer.clone(),
+        };
+        commit_write::create(
+          &repo,
+          &repo_path,
+          Some("HEAD"),
+          &identity,
+          &message,
+          &tree,
+          &[&head_commit],
+        )?
+      }
       _ => {
         let merge_head_oid = read_state_head(&repo, "MERGE_HEAD")?;
         let merge_commit = repo.find_commit(merge_head_oid)?;
-        repo.commit(
+        let identity = CommitIdentity {
+          author: committer.clone(),
+          committer: committer.clone(),
+        };
+        commit_write::create(
+          &repo,
+          &repo_path,
           Some("HEAD"),
-          &committer,
-          &committer,
+          &identity,
           &message,
           &tree,
           &[&head_commit, &merge_commit],
@@ -414,10 +435,15 @@ pub async fn cherry_pick(
     let committer = repo.signature()?;
     let head_commit = repo.head()?.peel_to_commit()?;
     let message = commit.message().unwrap_or("");
-    repo.commit(
+    let identity = CommitIdentity {
+      author: commit.author().to_owned(),
+      committer,
+    };
+    commit_write::create(
+      &repo,
+      &commit_write::workdir_of(&repo),
       Some("HEAD"),
-      &commit.author(),
-      &committer,
+      &identity,
       message,
       &tree,
       &[&head_commit],

@@ -8,6 +8,7 @@ use git2::{build::CheckoutBuilder, Oid, ResetType};
 use std::collections::HashSet;
 
 use crate::error::AppError;
+use crate::git::commit_write::{self, CommitIdentity};
 use crate::git::refs;
 use crate::git::types::RefMove;
 
@@ -144,7 +145,21 @@ fn replay_steps<'r>(
     let tree_oid = index.write_tree_to(repo)?;
     let tree = repo.find_tree(tree_oid)?;
     let message = commit.message().unwrap_or("");
-    let new_oid = repo.commit(None, &commit.author(), signature, message, &tree, &[&new_tip])?;
+    // A replayed commit keeps its original author and takes the rewriter as
+    // committer, so a signature here is the rewriter's, over the new commit.
+    let identity = CommitIdentity {
+      author: commit.author().to_owned(),
+      committer: signature.to_owned(),
+    };
+    let new_oid = commit_write::create(
+      repo,
+      &commit_write::workdir_of(repo),
+      None,
+      &identity,
+      message,
+      &tree,
+      &[&new_tip],
+    )?;
     new_tip = repo.find_commit(new_oid)?;
   }
   Ok(new_tip)
@@ -218,10 +233,15 @@ pub fn squash_commits(
     &previous_sha,
     "these commits can't be combined cleanly; nothing was changed",
   )?;
-  let squash_oid = repo.commit(
+  let identity = CommitIdentity {
+    author: author.to_owned(),
+    committer: signature.to_owned(),
+  };
+  let squash_oid = commit_write::create(
+    repo,
+    &commit_write::workdir_of(repo),
     None,
-    &author,
-    &signature,
+    &identity,
     message,
     &combined_tip.tree()?,
     &[&base],

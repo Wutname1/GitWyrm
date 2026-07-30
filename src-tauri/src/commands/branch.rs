@@ -2,6 +2,7 @@ use git2::{build::CheckoutBuilder, BranchType, Oid, ResetType};
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git::commit_write::{self, CommitIdentity};
 use crate::git::history;
 use crate::git::refs;
 use crate::git::remote_url;
@@ -793,8 +794,20 @@ pub async fn reword_commit(
 
     // Fast path: the tip commit amends in place, keeping tree and parent.
     if head.id() == target_oid {
-      let new_oid =
-        head.amend(Some("HEAD"), Some(&head.author()), None, None, Some(message), None)?;
+      // Reword keeps the original author. The committer is whoever is
+      // rewording now, which is also who any signature belongs to.
+      let identity = CommitIdentity {
+        author: head.author().to_owned(),
+        committer: repo.signature()?,
+      };
+      let new_oid = commit_write::amend_head(
+        &repo,
+        &commit_write::workdir_of(&repo),
+        &head,
+        &identity,
+        message,
+        &head.tree()?,
+      )?;
       return Ok(new_oid.to_string());
     }
 
@@ -824,10 +837,15 @@ pub async fn reword_commit(
 
     // Rebuild the target with the new message, same tree, parent, and author.
     let signature = repo.signature()?;
-    let new_target_oid = repo.commit(
+    let identity = CommitIdentity {
+      author: target.author().to_owned(),
+      committer: signature.clone(),
+    };
+    let new_target_oid = commit_write::create(
+      &repo,
+      &commit_write::workdir_of(&repo),
       None,
-      &target.author(),
-      &signature,
+      &identity,
       message,
       &target.tree()?,
       &[&parent],
@@ -897,7 +915,20 @@ pub async fn revert_commit(
     let head_commit = repo.head()?.peel_to_commit()?;
     let summary = commit.summary().unwrap_or("commit");
     let message = format!("Revert \"{summary}\"\n\nThis reverts commit {oid}.");
-    repo.commit(Some("HEAD"), &signature, &signature, &message, &tree, &[&head_commit])?;
+    // A revert is authored by whoever is reverting, not by the original author.
+    let identity = CommitIdentity {
+      author: signature.clone(),
+      committer: signature,
+    };
+    commit_write::create(
+      &repo,
+      &commit_write::workdir_of(&repo),
+      Some("HEAD"),
+      &identity,
+      &message,
+      &tree,
+      &[&head_commit],
+    )?;
     repo.cleanup_state()?;
 
     Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts: Vec::new() })

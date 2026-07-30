@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import { Archive, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FolderOpen, MinusCircle, PlusCircle, Trash2 } from 'lucide-react'
+import { Archive, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FolderOpen, MinusCircle, Pencil, Plus, PlusCircle, Trash2 } from 'lucide-react'
 import type { FileChange, StatusCode } from '@/lib/bindings'
 import { statusColor } from '@/lib/gitDisplay'
 import {
@@ -113,18 +113,18 @@ function rollup(files: FileChange[]): FolderRollup {
  * Per-folder tally on the folder row. Only non-zero buckets are drawn, so a
  * folder of plain edits shows one number rather than two zeroes. The counts are
  * files, not lines -- the +/- pair on a file row already means lines, so these
- * use letters to avoid reading as the same thing.
+ * use icons to avoid reading as the same thing.
  */
 function FolderCounts({ counts }: { counts: FolderRollup }) {
-  const parts: Array<{ code: StatusCode; n: number; word: string }> = [
-    { code: 'A', n: counts.added, word: 'added' },
-    { code: 'D', n: counts.removed, word: 'removed' },
-    { code: 'M', n: counts.modified, word: 'modified' },
+  const parts: Array<{ code: StatusCode; n: number; word: string; Icon: typeof Plus }> = [
+    { code: 'A', n: counts.added, word: 'added', Icon: Plus },
+    { code: 'D', n: counts.removed, word: 'removed', Icon: Trash2 },
+    { code: 'M', n: counts.modified, word: 'modified', Icon: Pencil },
   ]
   const shown = parts.filter((part) => part.n > 0)
   if (shown.length === 0) return null
-  // The letters are shorthand a screen reader would spell out mid-name, so the
-  // group carries the words and the glyphs themselves are hidden from it.
+  // The icons are shorthand a screen reader has no words for, so the group
+  // carries the words and the glyphs themselves are hidden from it.
   const spoken = shown.map((part) => `${part.n} ${part.word}`).join(', ')
   return (
     <span
@@ -133,8 +133,14 @@ function FolderCounts({ counts }: { counts: FolderRollup }) {
       title={spoken}
     >
       {shown.map((part) => (
-        <span key={part.code} aria-hidden style={{ color: statusColor(part.code) }}>
-          {part.n}{part.code}
+        <span
+          key={part.code}
+          aria-hidden
+          className="flex items-center gap-0.5"
+          style={{ color: statusColor(part.code) }}
+        >
+          {part.n}
+          <part.Icon className="size-3" />
         </span>
       ))}
     </span>

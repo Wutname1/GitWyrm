@@ -322,10 +322,18 @@ pub async fn git_init(
       index.write()?;
       let tree_oid = index.write_tree()?;
       let tree = repo.find_tree(tree_oid)?;
-      repo.commit(
+      // A brand-new repository has no local config yet, but a global
+      // `commit.gpgsign` still applies -- someone who signs everything expects
+      // their first commit signed too.
+      let identity = crate::git::commit_write::CommitIdentity {
+        author: signature.clone(),
+        committer: signature,
+      };
+      crate::git::commit_write::create(
+        &repo,
+        &dir.to_string_lossy(),
         Some("HEAD"),
-        &signature,
-        &signature,
+        &identity,
         "Start project",
         &tree,
         &[],

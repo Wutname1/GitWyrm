@@ -1,6 +1,7 @@
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git::commit_write::{self, CommitIdentity};
 use crate::git::trailers;
 use crate::state::RepoManager;
 
@@ -24,6 +25,7 @@ pub async fn create_commit(
     return Err(AppError::Other("commit message is required".into()));
   }
   let open = manager.get(&repo_id)?;
+  let repo_path = open.path.to_string_lossy().into_owned();
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
 
@@ -57,14 +59,12 @@ pub async fn create_commit(
       // Amend rolls the staged changes into the previous commit. Keep the
       // original author; use the current signature as committer. Passing the
       // freshly written tree folds any staged changes into the amended commit.
-      let new_oid = head_commit.amend(
-        Some("HEAD"),
-        Some(&head_commit.author()),
-        Some(&signature),
-        None,
-        Some(&message),
-        Some(&tree),
-      )?;
+      let identity = CommitIdentity {
+        author: head_commit.author().to_owned(),
+        committer: signature,
+      };
+      let new_oid =
+        commit_write::amend_head(&repo, &repo_path, &head_commit, &identity, &message, &tree)?;
       return Ok(new_oid.to_string());
     }
 
@@ -77,7 +77,19 @@ pub async fn create_commit(
       }
     }
 
-    let oid = repo.commit(Some("HEAD"), &signature, &signature, &message, &tree, &parents)?;
+    let identity = CommitIdentity {
+      author: signature.clone(),
+      committer: signature,
+    };
+    let oid = commit_write::create(
+      &repo,
+      &repo_path,
+      Some("HEAD"),
+      &identity,
+      &message,
+      &tree,
+      &parents,
+    )?;
     Ok(oid.to_string())
   })
   .await

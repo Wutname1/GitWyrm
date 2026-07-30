@@ -151,7 +151,12 @@ export function SpecsSection({
                 <SpecRow
                   change={change}
                   isSelected={change.id === effectiveId}
-                  onClick={() => selectChangeEverywhere(change.id)}
+                  onClick={() =>
+                    // Clicking the row that's already selected clears the pick
+                    // instead of no-op'ing -- otherwise the auto-selected first
+                    // change can never be clicked away from.
+                    selectChangeEverywhere(change.id === selectedId ? null : change.id)
+                  }
                 />
               </SpecContextMenu>
             ))

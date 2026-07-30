@@ -62,3 +62,4 @@ src/components/_ds_barrel.ts
 # something - it fails the build outright when it matches nothing.
 src-tauri/resources/*
 !src-tauri/resources/README.md
+/docs/

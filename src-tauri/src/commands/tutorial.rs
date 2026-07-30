@@ -128,6 +128,12 @@ fn tutorial_signature() -> Result<git2::Signature<'static>, AppError> {
 }
 
 /// Write a file, stage everything, and commit on the current HEAD.
+///
+/// Deliberately stays on libgit2 rather than routing through `commit_write`:
+/// these commits are scaffolding for a repo that gets deleted when the tutorial
+/// ends. Signing them would put a passphrase prompt -- or a hard failure from a
+/// misconfigured key -- in the middle of a beginner's first lesson, to sign
+/// something nobody will ever verify.
 fn commit_files(
   repo: &git2::Repository,
   signature: &git2::Signature,
