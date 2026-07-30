@@ -2,20 +2,28 @@
 
 ## 1. Draft flow
 
-- [ ] 1.1 New-change dialog gains "✦ Draft it for me" (primary when AI configured;
+- [x] 1.1 New-change dialog gains "✦ Draft it for me" (primary when AI configured;
       absent otherwise); "Start blank" always present
-- [ ] 1.2 Name field stays user-owned; collisions auto-unique with a visible suffix
-- [ ] 1.3 Staged drafting view: reads specs library → drafting proposal → breaking
-      into tasks → writing deltas, each stage visibly completing; Cancel discards
-- [ ] 1.4 Drafting reads the specs library, recent commits, and the description
+- [x] 1.2 Name field stays user-owned; collisions auto-unique with a visible suffix
+      (matched case-insensitively, so Windows folder rules cannot bite at write time)
+- [x] 1.3 Staged drafting view: reads specs library → drafting proposal → breaking
+      into tasks → writing deltas, each stage visibly completing; Cancel discards.
+      Cancel deliberately does not use FormDialog's `pending`, which blocks Escape;
+      an in-flight draft is matched on a run id and dropped if the user left.
+- [x] 1.4 Drafting reads the specs library, recent commits, and the description
       (shown to the user as what the AI reads)
 
 ## 2. Review before write
 
-- [ ] 2.1 Per-artifact cards (Proposal / Tasks / Spec deltas) with content previews
-      and Keep/Skip toggles that control creation
-- [ ] 2.2 Live "writes N files" count; Create blocked at zero kept with a hint
-- [ ] 2.3 Create writes exactly the kept artifacts; Discard leaves no trace
+- [x] 2.1 Per-artifact cards (Proposal / Tasks / Spec deltas) with content previews
+      and Keep/Skip toggles that control creation. The preview is the exact file
+      body, not a summary, or "review before write" would not be true.
+- [x] 2.2 Live "writes N files" count; Create blocked at zero kept with a hint
+- [x] 2.3 Create writes exactly the kept artifacts; Discard leaves no trace.
+      Enforced by the skipped artifact simply not being passed to the backend,
+      and by a failed create removing the folder rather than leaving a partial
+      change. Covered by `creates_only_the_artifacts_it_is_given` and
+      `nothing_is_left_behind_when_an_artifact_path_is_unusable`.
 - [ ] 2.4 Created change appears selected in both windows; History starts with
       "Drafted with <provider> · reviewed by you"
 

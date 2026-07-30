@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { commands, type SpecChange, type SpecTask } from '@/lib/bindings'
+import {
+  commands,
+  type DraftedArtifact,
+  type SpecChange,
+  type SpecTask,
+} from '@/lib/bindings'
 import { invalidateOpenspec, keys, unwrap } from '@/lib/queryKeys'
 import { useUiStore } from '@/stores/uiStore'
 
@@ -129,11 +134,44 @@ export function useOpenspecMutations(repoId: string | null) {
     // Validation reads; nothing to refresh.
   })
 
+  // Drafting writes nothing, so it deliberately does not refresh the spec
+  // queries -- there is no new change to show until the user presses Create.
+  const draftChange = useMutation({
+    mutationFn: async (vars: {
+      name: string
+      description: string
+      provider: string
+      model: string
+    }) =>
+      unwrap(
+        await commands.openspecDraftChange(
+          repoId!,
+          vars.name,
+          vars.description,
+          vars.provider,
+          vars.model
+        )
+      ),
+  })
+
+  const createDraftedChange = useMutation({
+    mutationFn: async (vars: { id: string; artifacts: DraftedArtifact[] }) =>
+      unwrap(await commands.openspecCreateDraftedChange(repoId!, vars.id, vars.artifacts)),
+    onSettled: refresh,
+  })
+
   const archiveChange = useMutation({
     mutationFn: async (changeId: string) =>
       unwrap(await commands.openspecArchiveChange(repoId!, changeId)),
     onSettled: refresh,
   })
 
-  return { toggleTask, scaffoldChange, validateChange, archiveChange }
+  return {
+    toggleTask,
+    scaffoldChange,
+    validateChange,
+    archiveChange,
+    draftChange,
+    createDraftedChange,
+  }
 }

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import {
@@ -26,6 +27,8 @@ interface FormDialogProps {
   canSubmit?: boolean
   pending?: boolean
   destructive?: boolean
+  /** Width class, for dialogs whose body is more than a couple of fields. */
+  widthClassName?: string
   onSubmit: () => void
 }
 
@@ -51,6 +54,7 @@ export function FormDialog({
   canSubmit = true,
   pending = false,
   destructive = false,
+  widthClassName = 'sm:max-w-md',
   onSubmit,
 }: FormDialogProps) {
   return (
@@ -61,7 +65,7 @@ export function FormDialog({
         onOpenChange(next)
       }}
     >
-      <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
+      <DialogContent className={cn('gap-0 p-0', widthClassName)} aria-describedby={undefined}>
         <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
           <DialogTitle className="flex items-center gap-2 text-sm">
             {icon}
