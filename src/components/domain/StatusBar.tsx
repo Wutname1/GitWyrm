@@ -1,6 +1,7 @@
 import { Download, Loader2, Minus, Plus, RotateCcw, Search } from 'lucide-react'
 import { useBranches, useStatus } from '@/hooks/useGitQueries'
 import { useOpenspecStatus } from '@/hooks/useOpenspec'
+import { isActive, stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
 import { useUpdater } from '@/hooks/useUpdater'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { branchSync } from '@/lib/branchActions'
@@ -115,6 +116,35 @@ function ZoomControl() {
  * spec check and archiving, so its absence is stated quietly rather than as a
  * problem -- reading and ticking work either way.
  */
+/**
+ * The run's state, wherever the user is in the app.
+ *
+ * Its own segment rather than a suffix on the openspec count: a gate is
+ * something to act on, and appending it to a tally is how it gets missed.
+ * Silent when nothing is running.
+ */
+function AiRunSegment() {
+  const repo = useActiveRepo()
+  const run = useAiRun(repo?.id ?? null)
+  if (!run.state || !run.session) return null
+
+  const needsYou = run.state === 'needsYou'
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={needsYou ? 'text-[var(--gw-amber)]' : 'text-muted-foreground'}>
+          {stateGlyph(run.state)} {stateLabel(run.state)}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        Task {run.session.task_number} · {run.session.task_text}
+        {run.latest ? ` — ${run.latest}` : ''}
+        {isActive(run.state) ? '' : ' (this run has ended)'}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 function OpenspecSegment() {
   const repo = useActiveRepo()
   const status = useOpenspecStatus(repo?.id ?? null)
@@ -192,6 +222,7 @@ export function StatusBar() {
     <div data-dim-on-drag className="relative flex h-6 flex-none items-center gap-4 border-t border-border bg-panel2 px-3 font-mono text-2xs text-sub">
       {sync?.text ? <span title={sync.title ?? undefined}>{sync.text}</span> : null}
       <span className="text-muted-foreground">{total} changes</span>
+      <AiRunSegment />
       <OpenspecSegment />
       <div className="flex-1" />
       <UpdateButton />

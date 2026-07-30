@@ -16,7 +16,7 @@ import { unwrap } from '@/lib/queryKeys'
 import { composeTaskHandoff, copyTaskHandoff } from '@/lib/specHandoff'
 import { nextTask, useOpenspecMutations } from '@/hooks/useOpenspec'
 import { useSpecAi } from '@/hooks/useSpecAi'
-import { useAiRun } from '@/hooks/useAiRun'
+import { stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { describeError, log } from '@/lib/log'
 
@@ -197,6 +197,7 @@ export function DeskActionRail({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
+        <RunBanner repoId={repoId} />
         <section className="rounded-lg border border-primary/25 bg-soft px-3.5 py-3">
           <p className="text-2xs font-bold tracking-[.09em] text-accent-text">
             {task
@@ -427,6 +428,43 @@ export function DeskActionRail({
         onConfirm={archive}
       />
       <DemoRunLauncher change={change} repoId={repoId} />
+    </div>
+  )
+}
+
+/**
+ * The current run, shown in the rail so a gate is visible while the Desk is on
+ * another tab. Silent when nothing is running.
+ */
+function RunBanner({ repoId }: { repoId: string }) {
+  const run = useAiRun(repoId)
+  if (!run.session || !run.state) return null
+  const needsYou = run.state === 'needsYou'
+  return (
+    <div
+      className={cn(
+        'mb-3 rounded-lg border px-3 py-2',
+        needsYou
+          ? 'border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8'
+          : 'border-border bg-panel2'
+      )}
+    >
+      <div className="flex items-center gap-1.5">
+        <span className={cn('flex-none text-2xs', needsYou && 'text-[var(--gw-amber)]')}>
+          {stateGlyph(run.state)}
+        </span>
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate text-2xs font-semibold',
+            needsYou ? 'text-[var(--gw-amber)]' : 'text-sub'
+          )}
+        >
+          {needsYou ? 'This run needs you' : stateLabel(run.state)}
+        </span>
+      </div>
+      <p className="mt-0.5 line-clamp-2 text-2xs text-muted-foreground">
+        Task {run.session.task_number} · {run.session.task_text}
+      </p>
     </div>
   )
 }

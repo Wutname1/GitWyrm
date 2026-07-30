@@ -37,10 +37,12 @@
       No - find another way / Stop the run; no don't-ask-again, no type-to-confirm
 - [x] 3.2 The run fully pauses at a gate - no further steps execute
 - [x] 3.3 Denial visibly adapts (the next step states the alternative taken)
-- [~] 3.4 Mirroring: tab badge, rail banner with a View link, status bar, main-window
-      spec card amber state. The ✦ AI tab badge is done and turns amber on a gate. The
-      rail banner, status bar, and main-window spec card still read from the same event
-      stream but are not wired yet
+- [x] 3.4 Mirroring: tab badge, rail banner with a View link, status bar, main-window
+      spec card amber state. All four wired to the same event stream: the AI tab badge,
+      a rail banner in the Desk, its own status-bar segment (its own, not appended to the
+      openspec count -- a gate is something to act on, and a tally is how it gets
+      missed), and the spec card, which turns amber and grows a View button that opens
+      the run's own change
 
 ## 4. Stop and failure
 

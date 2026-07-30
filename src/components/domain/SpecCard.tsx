@@ -1,5 +1,7 @@
 import { ExternalLink, Sparkles } from 'lucide-react'
 import { useSpecAi } from '@/hooks/useSpecAi'
+import { stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
+import { cn } from '@/lib/utils'
 import { nextStepHint, progressSentence } from '@/lib/specDisplay'
 import { ProgressRing, StatusPill } from '@/components/domain/spec-desk/SpecBits'
 import { nextTask, useOpenspecStatus, useSelectedChange } from '@/hooks/useOpenspec'
@@ -19,6 +21,7 @@ export function SpecCard() {
   const status = useOpenspecStatus(repo?.id ?? null)
   const { change } = useSelectedChange(repo?.id ?? null)
   const ai = useSpecAi()
+  const run = useAiRun(repo?.id ?? null)
 
   if (!repo || !status.data?.present || !change) return null
 
@@ -26,7 +29,34 @@ export function SpecCard() {
   const allDone = !task && !change.progress.is_draft
 
   return (
-    <div className="flex-none border-b border-border px-3 py-2.5">
+    <div
+      className={cn(
+        'flex-none border-b px-3 py-2.5',
+        // A gate is the one card state worth changing colour for: the run
+        // cannot continue until someone answers it.
+        run.state === 'needsYou'
+          ? 'border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8'
+          : 'border-border'
+      )}
+    >
+      {run.session && run.state && (
+        <button
+          type="button"
+          onClick={() => openSpecDesk(repo.id, run.session!.change_id)}
+          className={cn(
+            'mb-2 flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-2xs',
+            run.state === 'needsYou'
+              ? 'bg-[var(--gw-amber)]/15 text-[var(--gw-amber)] hover:bg-[var(--gw-amber)]/25'
+              : 'bg-panel2 text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <span className="flex-none">{stateGlyph(run.state)}</span>
+          <span className="min-w-0 flex-1 truncate">
+            {run.state === 'needsYou' ? 'This run needs you' : run.latest || stateLabel(run.state)}
+          </span>
+          <span className="flex-none font-semibold">View</span>
+        </button>
+      )}
       <div className="flex items-center gap-2">
         <span className="text-2xs font-bold tracking-[.09em] text-sub">SPEC</span>
         <StatusPill status={change.status} />
