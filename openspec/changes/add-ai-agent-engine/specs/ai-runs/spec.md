@@ -30,6 +30,12 @@ behavior SHALL reach the console or any other UI.
 - WHEN the default provider ships a CLI that GitWyrm can drive, and it reports itself usable
 - THEN the engine runs tasks through it, and never handles a credential itself
 
+#### Scenario: Copilot switched off by an administrator
+
+- WHEN a user's organization or enterprise has disabled Copilot CLI
+- THEN the run reports that plainly as something an administrator controls, rather than
+  reading as a GitWyrm fault
+
 #### Scenario: API key present
 
 - WHEN the default provider is configured with an API key

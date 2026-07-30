@@ -7,10 +7,10 @@
 - [x] 1.4 Answer the terms-of-service question per provider. Done for Anthropic
       (prohibited in writing) and OpenAI (four unanswered asks; API keys recommended).
       Recorded in design.md, and the reason this change is API-key only
-- [ ] 1.2 Confirm the Copilot position from GitHub's own terms. GitWyrm already routes
-      through GitHub's bundled Copilot CLI to obtain entitlements its own OAuth app is
-      denied; this transport is now load-bearing rather than incidental, so the answer
-      matters more than it did
+- [x] 1.2 Confirm the Copilot position from GitHub's own terms. Done: Section J of the ToS
+      is silent on clients and programmatic access, the AUP's scraping and resale clauses do
+      not reach this, and GitHub's own docs say the CLI may be used "as an agent in any
+      third-party tools, IDEs, or automation systems". Officially supported - see design.md
 - [ ] 1.3 Decide the turn budget and what "the task is done" means for the loop, so a run
       cannot spin forever
 

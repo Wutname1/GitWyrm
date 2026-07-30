@@ -236,11 +236,67 @@ not to assume.
 What we should not do is ship subscription reuse quietly and discover the answer when a
 user's account is suspended.
 
+### GitHub / Copilot: documented as intended usage
+
+Researched from GitHub's own primary sources. The answer is the opposite of Anthropic's,
+and it is the strongest position of the three providers - which is why the Copilot CLI is
+the transport that ships first.
+
+**The terms are silent, in the permissive direction.** Individual Copilot use is governed by
+Section J (AI Features) of the [GitHub Terms of
+Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)
+(eff. 2026-04-27), routed there by the [Additional Products
+terms](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features)
+(eff. 2026-04-27). Section J covers ownership of Input and Output, training use, and
+disclaimers. It says **nothing** about supported clients, editors, programmatic access, or
+third-party tools. There is no analogue of Anthropic's "does not permit third-party
+developers... to route requests through Free, Pro, or Max plan credentials".
+
+The [Acceptable Use
+Policies](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies)
+restrict scraping - "extracting information from our Service via an automated process, such
+as a bot or webcrawler", and explicitly "does not refer to the collection of information
+through our API" - and reselling: "You will not reproduce, duplicate, copy, sell, resell or
+exploit any portion of the Service... without our express written permission". Neither
+reaches a user running an agent on their own machine against their own subscription.
+
+**GitHub documents this exact use affirmatively.** From [About Copilot
+CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli):
+
+> To use the CLI programmatically, include the `-p` or `--prompt` command-line option
+
+> Alternatively, you can use a script to output command-line options and pipe this to
+> copilot
+
+> You can use Copilot CLI as an agent in **any third-party tools, IDEs, or automation
+> systems** that support this protocol
+
+That last sentence is the whole question, answered by GitHub in its own documentation.
+Approval options are documented as allowing "headless operation of the CLI", and the CLI
+exposes an Agent Client Protocol server as an integration surface. GitHub's own
+`github/copilot-cli` repository (11k stars, active) describes the tool as bringing "the
+power of Copilot coding agent directly to your terminal".
+
+**Classification: officially supported.** Not silence, not mere tolerance - documentation.
+
+**On the allowlist.** GitWyrm's own measurement stands: Copilot returns real model
+entitlements only to OAuth apps on an approved client list, and GitWyrm's app is not on it
+(29 models with 12 enabled from an approved client, versus ~8 with 0 from GitWyrm's own).
+Routing through GitHub's CLI to obtain those entitlements is not circumvention of a
+technical restriction in the AUP sense - it is using the client GitHub built and documented
+for third-party integration, authenticating as itself. The distinction that matters:
+GitWyrm does not impersonate an approved client and does not reuse another client's
+credentials. It invokes a first-party tool the way that tool's own docs describe.
+
+Two caveats to keep honest:
+
+- Copilot CLI requires an active Copilot subscription and can be disabled by an org or
+  enterprise admin. A run has to fail gracefully when it is switched off, not look broken.
+- "Officially supported" describes today's documentation. It is a better position than the
+  other two providers, not a permanent guarantee.
+
 ### Still open
 
-Copilot. The question is sharper than it first appeared: GitWyrm already moved off
-direct-token access because GitHub gates real model entitlements to an **approved client
-allowlist** that GitWyrm's OAuth app is not on, and now routes through GitHub's own
-bundled CLI to obtain those entitlements. Whether that is permitted, or is circumvention,
-needs the same primary-source treatment. Unlike the other two this already ships, so it
-is an existing exposure rather than a design decision.
+Nothing blocking. The remaining terms question is whether to pursue written approval from
+Anthropic (contact sales) or OpenAI (App Server known-clients channel) if a subprocess path
+for either becomes worth having. Neither is needed to ship.
