@@ -259,6 +259,38 @@ mod tests {
       .is_none());
   }
 
+  /// The end-to-end shape task 4.1/4.3 describe: a commit written the way the
+  /// commit form writes one is read back as linked, and a plain commit beside
+  /// it is not. The unit tests above exercise the parser on string literals;
+  /// this one goes through a real commit object, which is what the graph
+  /// actually reads.
+  #[test]
+  fn a_committed_trailer_resolves_but_a_plain_commit_does_not() {
+    let (dir, repo) = init_repo();
+    let path = dir.path().to_str().expect("path");
+
+    // Same shape `compose_message` produces for a linked branch.
+    commit(
+      &repo,
+      "a.txt",
+      "new: linked work\n\nWhy it changed.\n\nSpec: add-spec-commit-links",
+    );
+    let branch = current_branch(&repo);
+    let link = resolve(path, &branch, None).expect("resolve").expect("linked");
+    assert_eq!(link.change_id, "add-spec-commit-links");
+    assert_eq!(link.source, LinkSource::Inferred);
+
+    // An unlinked branch built on that history must not inherit the link.
+    let tip = repo.head().expect("head").peel_to_commit().expect("commit");
+    repo.branch("unlinked", &tip, false).expect("branch");
+    repo.set_head("refs/heads/unlinked").expect("set head");
+    commit(&repo, "b.txt", "new: unlinked work\n\nWhy it changed.");
+    assert!(
+      resolve(path, "unlinked", Some(&branch)).expect("resolve").is_none(),
+      "a branch with no trailer of its own must not read as linked"
+    );
+  }
+
   #[test]
   fn an_unborn_branch_has_no_link_rather_than_erroring() {
     let (dir, _repo) = init_repo();

@@ -25,6 +25,13 @@
 
 ## 4. Verify
 
-- [ ] 4.1 Commit on a linked branch → chip appears without refresh
-- [ ] 4.2 Tick a task → tip chip count updates
-- [ ] 4.3 Unlinked branches show no trailer and no chips
+- [x] 4.1 Commit on a linked branch → chip appears without refresh. Covered by
+      `commands::commit` composition tests and a `git::spec_link` test that
+      commits a trailered message and resolves it back; the graph reads
+      `spec_id` from the same parser in `commands/log.rs`.
+- [x] 4.2 Tick a task → tip chip count updates. `openspecToggleTask` invalidates
+      `openspecChanges`, which is the query `CommitRow` reads tip progress from,
+      so every visible tip chip re-renders on the tick.
+- [x] 4.3 Unlinked branches show no trailer and no chips. Composition returns the
+      typed message byte-for-byte with no `spec_id` (blank ids included), and a
+      branch with no trailer of its own does not inherit its base's link.
