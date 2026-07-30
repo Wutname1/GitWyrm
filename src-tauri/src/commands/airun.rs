@@ -260,3 +260,121 @@ fn emit(
   );
   let _ = app.emit(RUN_EVENT, event);
 }
+
+/// Starts a real run: the engine, against the user's default provider.
+///
+/// Separate command from `ai_run_start_demo` on purpose. The demo replays a
+/// script and must never be mistaken for this; this spends the user's AI
+/// credits and edits their files.
+#[tauri::command]
+#[specta::specta]
+pub async fn ai_run_start(
+  app: tauri::AppHandle,
+  manager: State<'_, crate::state::RepoManager>,
+  sessions: State<'_, SessionRegistry>,
+  repo_id: String,
+  change_id: String,
+  task_index: u32,
+  task_number: u32,
+  task_text: String,
+  branch: String,
+) -> Result<StartOutcome, AppError> {
+  let open = manager.get(&repo_id)?;
+  let root = open.path.clone();
+
+  let session =
+    match sessions.start(&repo_id, &change_id, task_number, &task_text, &branch) {
+      Ok(s) => s,
+      Err(StartRefusal::AlreadyRunning { session_id, summary }) => {
+        return Ok(StartOutcome::AlreadyRunning { session_id, summary })
+      }
+    };
+
+  let tasks_file = root
+    .join("openspec")
+    .join("changes")
+    .join(&change_id)
+    .join("tasks.md");
+
+  let (answer_tx, answer_rx) = std::sync::mpsc::channel::<GateAnswer>();
+  GATE_ANSWERS.lock().unwrap().insert(repo_id.clone(), answer_tx);
+
+  let session_id = session.session_id.clone();
+  let repo = repo_id.clone();
+  let app_for_sink = app.clone();
+  let sink_repo = repo_id.clone();
+  let sink_session = session_id.clone();
+  let sink: crate::airun::engine::Sink = std::sync::Arc::new(move |state, step| {
+    emit(&app_for_sink, &sink_repo, &sink_session, state, step);
+  });
+
+  // The engine's loop is blocking at the tool boundary (a gate waits on a
+  // channel), so it runs on a blocking thread rather than the async runtime.
+  tauri::async_runtime::spawn(async move {
+    let outcome = tokio::task::spawn_blocking(move || {
+      run_engine(root, tasks_file, task_index, task_text, sink, answer_rx)
+    })
+    .await;
+    if let Err(e) = outcome {
+      log::error!("run task panicked: {e}");
+      emit(
+        &app,
+        &repo,
+        &session_id,
+        RunState::Failed,
+        RunStep::Ended {
+          state: RunState::Failed,
+          detail: "This run stopped unexpectedly. Nothing was committed and your own \
+                   work is untouched."
+            .into(),
+        },
+      );
+    }
+    GATE_ANSWERS.lock().unwrap().remove(&repo);
+  });
+
+  Ok(StartOutcome::Started { session })
+}
+
+/// Gate answers, per repository, so `ai_run_answer_gate` can reach a live run.
+static GATE_ANSWERS: std::sync::LazyLock<
+  std::sync::Mutex<std::collections::HashMap<String, std::sync::mpsc::Sender<GateAnswer>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Builds the transport and drives the task.
+///
+/// The Copilot CLI runs its own agent loop, so this hands the whole task to it
+/// rather than feeding it single turns -- see `airun::cli_run`. Our loop in
+/// `ai::agent::run` is for transports that answer one turn at a time, which is
+/// the API path.
+fn run_engine(
+  root: std::path::PathBuf,
+  _tasks_file: std::path::PathBuf,
+  _task_index: u32,
+  task_text: String,
+  sink: crate::airun::engine::Sink,
+  answers: std::sync::mpsc::Receiver<GateAnswer>,
+) {
+  use crate::ai::agent::cli_agent::CliAgent;
+
+  let agent = match CliAgent::discover(root) {
+    Ok(a) => a,
+    Err(e) => {
+      let detail = crate::ai::agent::select::plain_explanation(&e);
+      sink(RunState::Failed, RunStep::Ended { state: RunState::Failed, detail });
+      return;
+    }
+  };
+
+  let prompt = format!(
+    "{}
+
+The task:
+{}",
+    crate::ai::agent::run::SYSTEM_PROMPT,
+    task_text
+  );
+
+  let rt = tokio::runtime::Handle::current();
+  rt.block_on(crate::airun::cli_run::run_task(&agent, &prompt, sink, answers));
+}

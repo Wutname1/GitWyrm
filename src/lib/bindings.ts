@@ -2461,7 +2461,16 @@ export type GateAnswer = "allowOnce" | "findAnotherWay" | "stopRun"
  * Only side effects beyond in-repo edits and the project's own checks appear
  * here. Editing source and running tests is the job, not a gate.
  */
-export type GateRequest = { kind: "addDependency"; name: string } | { kind: "runInstall"; command: string } | { kind: "networkAccess"; target: string } | { kind: "deleteFiles"; paths: string[] } | { kind: "outsideRepo"; path: string }
+export type GateRequest = { kind: "addDependency"; name: string } | { kind: "runInstall"; command: string } | { kind: "networkAccess"; target: string } | { kind: "deleteFiles"; paths: string[] } | { kind: "outsideRepo"; path: string } | 
+/**
+ * Something the agent asked for that GitWyrm cannot classify.
+ * 
+ * Exists so an unrecognised request is shown as what it is rather than
+ * squeezed into a variant that would mislabel the consequence -- an
+ * arbitrary ask rendered as "Install packages?" tells the user the wrong
+ * thing about what they are approving.
+ */
+{ kind: "unclassified"; summary: string }
 export type GeneratedCommitMessage = { summary: string; description: string }
 /**
  * Who git thinks the user is. Either field can be empty when git has never
@@ -2826,6 +2835,13 @@ export type Resolution =
  * Use the provided, hand-edited text.
  */
 { kind: "manual"; text: string }
+/**
+ * An event as it reaches the UI.
+ * 
+ * `summary` is the sentence every surface renders. `repo_id` and `session_id`
+ * are what keep an ended run from writing into a newer one's console.
+ */
+export type RunEventKind = { repo_id: string; session_id: string; state: RunState; summary: string; step: RunStep }
 /**
  * A run the console is showing.
  */

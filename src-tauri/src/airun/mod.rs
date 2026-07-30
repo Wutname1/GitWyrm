@@ -6,6 +6,7 @@
 //! back. The engine is one driver behind the seam; a scripted driver is
 //! another, so every console state can be verified before a provider is wired.
 
+pub mod cli_run;
 pub mod driver;
 pub mod engine;
 pub mod scripted;

@@ -81,6 +81,13 @@ pub enum GateRequest {
   NetworkAccess { target: String },
   DeleteFiles { paths: Vec<String> },
   OutsideRepo { path: String },
+  /// Something the agent asked for that GitWyrm cannot classify.
+  ///
+  /// Exists so an unrecognised request is shown as what it is rather than
+  /// squeezed into a variant that would mislabel the consequence -- an
+  /// arbitrary ask rendered as "Install packages?" tells the user the wrong
+  /// thing about what they are approving.
+  Unclassified { summary: String },
 }
 
 impl GateRequest {
@@ -98,6 +105,7 @@ impl GateRequest {
         }
       }
       GateRequest::OutsideRepo { path } => format!("Touch {path}, outside this folder?"),
+      GateRequest::Unclassified { summary } => format!("Allow this: {summary}?"),
     }
   }
 
@@ -121,6 +129,10 @@ impl GateRequest {
       GateRequest::OutsideRepo { path } => format!(
         "{path} is outside the folder you opened, so it isn't covered by undo. Changes \
          there stay even if you undo this run."
+      ),
+      GateRequest::Unclassified { summary } => format!(
+        "The AI asked to do something GitWyrm doesn't recognise: {summary}. Only allow \
+         it if you understand what it will do."
       ),
     }
   }

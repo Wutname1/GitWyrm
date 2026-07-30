@@ -15,6 +15,23 @@ use super::transport::{
   AgentError, AgentTurn, Message, ProviderAgent, ToolCall, ToolResult, TurnRequest,
 };
 
+/// What the model is told before it starts.
+///
+/// States the boundaries plainly rather than relying on the guardrails alone.
+/// The guardrails are what actually holds -- a prompt is a request, not a
+/// control -- but a model that knows the rules wastes fewer turns discovering
+/// them by being refused.
+pub const SYSTEM_PROMPT: &str = "You are working inside a single git repository, on one task from a spec.
+
+Rules that are enforced by the tool, not just asked of you:
+- You can only read and change files inside this repository. Paths outside it are refused, as is the .git folder.
+- You cannot run shell commands or reach the network.
+- You can never push. Your work stays local for the person to review.
+
+Work in small steps. Read before you change. When the task is done, tick its checkbox in the change's tasks.md -- that is the signal that ends the run.
+
+If something is refused, do not retry it unchanged: find another way, or say plainly that you cannot.";
+
 /// How the loop reaches the outside world.
 ///
 /// A trait so the loop can be tested without a provider, a repository, or a

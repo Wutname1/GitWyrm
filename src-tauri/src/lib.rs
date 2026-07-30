@@ -238,6 +238,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
   ])
   .typ::<watcher::RepoChangedPayload>()
   .typ::<commands::remote::GitProgressPayload>()
+  // Event payloads have to be named explicitly: specta only exports types a
+  // command mentions, and this one only ever travels as an emitted event. Left
+  // out, the frontend imports a type that is not there and the build fails.
+  .typ::<airun::RunEventKind>()
 }
 
 const SENTRY_DSN: &str = "https://5cb301777a6d45efd4ddba81136bc6c9@o4511760444686336.ingest.us.sentry.io/4511760446717952";

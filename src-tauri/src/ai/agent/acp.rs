@@ -107,8 +107,6 @@ impl StopReason {
 
 type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, AgentError>>>>>;
 
-/// What a client sends to prove it can be talked to.
-///
 /// Offered when the CLI reports an auth problem by name.
 ///
 /// Deliberately NOT used for a silent stream close. An earlier version of this
@@ -133,7 +131,12 @@ pub struct AcpConnection {
   next_id: AtomicI64,
   pending: Pending,
   /// Notifications and agent-to-client requests, in arrival order.
-  pub incoming: mpsc::UnboundedReceiver<Incoming>,
+  ///
+  /// Taken out with [`Self::take_incoming`] rather than borrowed, because a
+  /// caller has to read this *while* a prompt is in flight -- the prompt does
+  /// not return until any permission request it raises has been answered, so
+  /// borrowing both at once is both impossible and the wrong shape.
+  incoming: Option<mpsc::UnboundedReceiver<Incoming>>,
   session_id: Option<String>,
 }
 
@@ -205,7 +208,7 @@ impl AcpConnection {
       stdin,
       next_id: AtomicI64::new(1),
       pending,
-      incoming,
+      incoming: Some(incoming),
       session_id: None,
     })
   }
@@ -248,6 +251,14 @@ impl AcpConnection {
       .to_string();
     self.session_id = Some(id.clone());
     Ok(id)
+  }
+
+  /// Takes the incoming stream, once.
+  ///
+  /// Returns None on a second call: there is one stream, and two readers would
+  /// each see half the messages.
+  pub fn take_incoming(&mut self) -> Option<mpsc::UnboundedReceiver<Incoming>> {
+    self.incoming.take()
   }
 
   /// Sends one prompt and waits for the turn to end.
