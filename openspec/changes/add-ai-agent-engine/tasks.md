@@ -37,10 +37,14 @@
       Ollama, and LM Studio. Same code path as 2.3 with the base URL pointed elsewhere;
       the distinct transport value exists so failures can say "the endpoint you
       configured" rather than naming a provider the user never chose
-- [ ] 2.5 Anthropic is API-key only - no subprocess path, per design.md. If a user's default
-      is Anthropic with no key, say that plainly rather than reaching for the CLI
-- [ ] 2.6 A default provider that cannot run reports which transport is missing and what to
-      do, without implying GitWyrm is broken
+- [x] 2.5 Anthropic is API-key only - no subprocess path, per design.md. If a user's default
+      is Anthropic with no key, say that plainly rather than reaching for the CLI.
+      Enforced in `select::choose`, with a test that Anthropic stays on the API path even
+      when a CLI is installed
+- [x] 2.6 A default provider that cannot run reports which transport is missing and what to
+      do, without implying GitWyrm is broken. "Signed in to Copilot but no CLI" and "not
+      signed in" are separate sentences because the fix differs; a test asserts no
+      explanation reads as a GitWyrm fault
 - [ ] 2.7 Cancellation terminates any in-flight request or child process promptly, leaving
       no orphan
 
