@@ -24,4 +24,4 @@
 
 - [x] 3.1 Unit tests: parser fixtures (well-formed, missing sections, malformed markdown)
 - [x] 3.2 Unit test: write-back preserves file content byte-for-byte outside the toggled box
-- [ ] 3.3 Manual: edit tasks.md in VS Code while GitWyrm is open; state updates within 1s
+- [x] 3.3 Manual: edit tasks.md in VS Code while GitWyrm is open; state updates within 1s

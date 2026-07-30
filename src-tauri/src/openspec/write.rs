@@ -157,7 +157,6 @@ pub fn sanitize_change_id(raw: &str) -> Option<String> {
 
 /// What a scaffold call produced.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
 pub struct ScaffoldResult {
   /// The id actually used (sanitized).
   pub id: String,

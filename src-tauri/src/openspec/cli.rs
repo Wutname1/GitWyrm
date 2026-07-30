@@ -16,7 +16,6 @@ use crate::git::shell::CREATE_NO_WINDOW;
 
 /// Whether the CLI is usable, and which version answered.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
 pub struct CliInfo {
   pub available: bool,
   /// Version string as reported, when we could get one.

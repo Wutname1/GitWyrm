@@ -1,5 +1,6 @@
 import { Download, Loader2, Minus, Plus, RotateCcw, Search } from 'lucide-react'
 import { useBranches, useStatus } from '@/hooks/useGitQueries'
+import { useOpenspecStatus } from '@/hooks/useOpenspec'
 import { useUpdater } from '@/hooks/useUpdater'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { branchSync } from '@/lib/branchActions'
@@ -109,6 +110,39 @@ function ZoomControl() {
 }
 
 /**
+ * Spec counts for repos that use OpenSpec, and whether the OpenSpec tool is
+ * around. Absent entirely for every other repo. The tool only matters for the
+ * spec check and archiving, so its absence is stated quietly rather than as a
+ * problem -- reading and ticking work either way.
+ */
+function OpenspecSegment() {
+  const repo = useActiveRepo()
+  const status = useOpenspecStatus(repo?.id ?? null)
+  const data = status.data
+
+  if (!data?.present) return null
+
+  const cliLabel = data.cli.available
+    ? `tool ${data.cli.version ?? 'ready'}`
+    : 'tool not installed'
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="text-muted-foreground">
+          openspec · {data.active_count} active
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        {data.active_count} {data.active_count === 1 ? 'change' : 'changes'} in progress
+        {data.archived_count > 0 ? `, ${data.archived_count} archived` : ''} · {cliLabel}
+        {data.cli.available ? '' : ' (only the spec check and archiving need it)'}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/**
  * Centered "Update now" pill, shown only once a newer release is detected.
  * Downloads, installs, and relaunches when clicked.
  */
@@ -158,6 +192,7 @@ export function StatusBar() {
     <div data-dim-on-drag className="relative flex h-6 flex-none items-center gap-4 border-t border-border bg-panel2 px-3 font-mono text-2xs text-sub">
       {sync?.text ? <span title={sync.title ?? undefined}>{sync.text}</span> : null}
       <span className="text-muted-foreground">{total} changes</span>
+      <OpenspecSegment />
       <div className="flex-1" />
       <UpdateButton />
       {repo && <span className="text-muted-foreground">{repo.path}</span>}

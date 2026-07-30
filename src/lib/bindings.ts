@@ -2387,6 +2387,10 @@ export type ModelList = { models: CatalogModel[];
 live: boolean }
 /**
  * Whether this repository uses OpenSpec, and whether the CLI is around.
+ * 
+ * Fields stay snake_case, matching every other type that crosses this boundary
+ * (`has_more`, `target_sha`, ...). No `rename_all`: specta and serde then agree,
+ * which is what keeps the generated type honest about the wire format.
  */
 export type OpenspecStatus = { 
 /**
@@ -2397,11 +2401,11 @@ present: boolean;
 /**
  * Active (non-archived) change count, for the sidebar and status bar.
  */
-activeCount: number; 
+active_count: number; 
 /**
  * Archived change count, for the Desk's archive link.
  */
-archivedCount: number; cli: CliInfo }
+archived_count: number; cli: CliInfo }
 /**
  * A pending index-level operation that can leave conflicts to resolve.
  */

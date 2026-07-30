@@ -15,8 +15,11 @@ use crate::openspec::{self, cli, parse, write};
 use crate::state::RepoManager;
 
 /// Whether this repository uses OpenSpec, and whether the CLI is around.
+///
+/// Fields stay snake_case, matching every other type that crosses this boundary
+/// (`has_more`, `target_sha`, ...). No `rename_all`: specta and serde then agree,
+/// which is what keeps the generated type honest about the wire format.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
 pub struct OpenspecStatus {
   /// False for every repo without an `openspec/` folder -- the UI shows nothing
   /// at all in that case.

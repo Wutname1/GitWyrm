@@ -68,6 +68,14 @@ interface UiState {
   /** File shown by the history / blame views. */
   fileTarget: FileTarget | null
   sectionOpen: Record<SectionKey, boolean>
+  /**
+   * The OpenSpec change the Specs surfaces are pointed at, by folder id. Shared
+   * app-wide rather than held by the sidebar so the spec card follows the row
+   * the user clicked -- and, once the Spec Desk window exists, so both windows
+   * agree on what is selected. Null means "the first active change", which lets
+   * the card show something useful before anything is clicked.
+   */
+  selectedChangeId: string | null
   activeModal: ModalKind
   mergeSource: string | null
   syncSource: string | null
@@ -171,6 +179,8 @@ interface UiState {
   awaitingCommitSha: string | null
 
   selectCommit: (sha: string | null) => void
+  /** Point the Specs surfaces at a change (by folder id). */
+  selectChange: (changeId: string | null) => void
   /** Announce a fresh commit the graph should hold its WIP row for. */
   commitLanding: (sha: string | null) => void
   /**
@@ -258,11 +268,15 @@ export const useUiStore = create<UiState>((set) => ({
     remote: false,
     worktrees: true,
     stashes: true,
+    // Open by default: a repo that has openspec/ is one where the plan is the
+    // point, and the section is absent entirely for every other repo.
+    specs: true,
     prs: true,
     issues: false,
     tags: false,
     submodules: true,
   },
+  selectedChangeId: null,
   activeModal: null,
   mergeSource: null,
   syncSource: null,
@@ -293,6 +307,7 @@ export const useUiStore = create<UiState>((set) => ({
   awaitingCommitSha: null,
 
   selectCommit: (sha) => set({ selectedSha: sha, selectedShas: sha ? [sha] : [] }),
+  selectChange: (changeId) => set({ selectedChangeId: changeId }),
   commitLanding: (sha) => set({ awaitingCommitSha: sha }),
   setSelection: (shas, anchor) =>
     set({ selectedShas: shas, selectedSha: shas.length > 0 ? anchor : null }),

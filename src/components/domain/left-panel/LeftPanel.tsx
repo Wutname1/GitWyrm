@@ -27,6 +27,9 @@ import { StashContextMenu } from '@/components/domain/graph/StashRow'
 import { SidebarSection } from './SidebarSection'
 import { BranchSidebarItem } from './BranchSidebarItem'
 import { RemotesSection } from './RemotesSection'
+import { SpecsSection } from './SpecsSection'
+import { useOpenspecChanges, useOpenspecStatus } from '@/hooks/useOpenspec'
+import { openSpecDesk } from '@/lib/specDesk'
 import { SubmodulesSection } from './SubmodulesSection'
 
 export function LeftPanel() {
@@ -47,6 +50,8 @@ export function LeftPanel() {
   const tagSync = useTagSync(repo?.id ?? null, tagsOpen)
   const remotes = useRemotes(repo?.id ?? null)
   const stashes = useStashes(repo?.id ?? null)
+  const openspecStatus = useOpenspecStatus(repo?.id ?? null)
+  const openspecChanges = useOpenspecChanges(repo?.id ?? null)
 
   const githubSlug = useGithubSlug(repo?.id ?? null)
   const githubAuth = useGithubAuth()
@@ -431,6 +436,14 @@ export function LeftPanel() {
       <RemotesSection remotes={remotes.data ?? []} onManage={() => openModal('remotes')} />
 
       <SubmodulesSection />
+
+      {/* Only for repos that use OpenSpec; absent entirely otherwise. */}
+      {openspecStatus.data?.present && (
+        <SpecsSection
+          changes={openspecChanges.data ?? []}
+          onOpenDesk={() => openSpecDesk(repo.id)}
+        />
+      )}
 
       {otherSections.map((section) => (
         <SidebarSection

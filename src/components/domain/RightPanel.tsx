@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/uiStore";
 import { GithubContextPanel } from "./github/GithubContextPanel";
+import { SpecCard } from "./SpecCard";
 import { ChangesList } from "./commit-form/ChangesList";
 import { CommitMessageForm } from "./commit-form/CommitMessageForm";
 
@@ -32,6 +33,7 @@ export function RightPanel() {
       )}
     >
       <GithubContextPanel />
+      <SpecCard />
       <ChangesList />
       <CommitMessageForm />
     </div>

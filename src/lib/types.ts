@@ -5,6 +5,7 @@ export type SectionKey =
   | 'remote'
   | 'worktrees'
   | 'stashes'
+  | 'specs'
   | 'prs'
   | 'issues'
   | 'tags'

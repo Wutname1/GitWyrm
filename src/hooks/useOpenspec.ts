@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { commands, type SpecChange, type SpecTask } from '@/lib/bindings'
 import { invalidateOpenspec, keys, unwrap } from '@/lib/queryKeys'
+import { useUiStore } from '@/stores/uiStore'
 
 /**
  * Whether this repository uses OpenSpec, plus the change counts and CLI state.
@@ -35,6 +36,22 @@ export function useOpenspecArchived(repoId: string | null, enabled = false) {
     enabled: repoId != null && enabled,
     queryFn: async () => unwrap(await commands.openspecArchivedIds(repoId!)),
   })
+}
+
+/**
+ * The change every Specs surface is currently pointed at.
+ *
+ * Falls back to the first (most recently updated) change when nothing has been
+ * clicked, or when the selected change has gone away -- archived, renamed, or
+ * deleted by another tool. That keeps the spec card useful on first paint and
+ * stops it going blank when the folder changes underneath it.
+ */
+export function useSelectedChange(repoId: string | null) {
+  const changes = useOpenspecChanges(repoId)
+  const selectedId = useUiStore((s) => s.selectedChangeId)
+  const list = changes.data ?? []
+  const selected = list.find((c) => c.id === selectedId) ?? list[0]
+  return { change: selected, changes: list, query: changes }
 }
 
 /** Progress across every active change, for a header count. */
