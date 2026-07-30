@@ -12,6 +12,19 @@
 //! target links the rlib instead.
 
 fn main() {
-  gitwyrm_lib::export_bindings("../src/lib/bindings.ts").expect("failed to export bindings");
-  println!("wrote src/lib/bindings.ts");
+  // Resolve against the manifest directory, not the working directory. With
+  // `--manifest-path` from the repo root, cargo runs this with the cwd at the
+  // root, so a relative `../src/lib/bindings.ts` lands one level ABOVE the repo
+  // and the real file is never updated -- while the command still prints
+  // success. `tauri dev` happens to run with the cwd at src-tauri, which is why
+  // the bug only appears when regenerating by hand.
+  let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    .parent()
+    .expect("src-tauri has a parent")
+    .join("src")
+    .join("lib")
+    .join("bindings.ts");
+  let out = out.to_string_lossy().into_owned();
+  gitwyrm_lib::export_bindings(&out).expect("failed to export bindings");
+  println!("wrote {out}");
 }

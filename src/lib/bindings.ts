@@ -1973,6 +1973,20 @@ async openspecArchiveChange(repoId: string, changeId: string) : Promise<Result<C
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Opens the Spec Desk for a repository, or focuses the one already open.
+ * 
+ * Size and position are remembered by Tauri's own window-state handling per
+ * label, so reopening lands where the user left it.
+ */
+async openSpecDesk(repoId: string) : Promise<Result<DeskOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_spec_desk", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -2204,6 +2218,18 @@ theirs_deleted: boolean }
  * What kind of spec edit a delta describes.
  */
 export type DeltaKind = "ADDED" | "MODIFIED" | "REMOVED" | "RENAMED"
+/**
+ * Where the Desk ended up, so the UI can say something true either way.
+ */
+export type DeskOutcome = 
+/**
+ * A new window was created.
+ */
+"opened" | 
+/**
+ * One was already open for this repository; it was brought to the front.
+ */
+"focused"
 export type DeviceCodeInfo = { device_code: string; user_code: string; verification_uri: string; 
 /**
  * Minimum seconds between polls.

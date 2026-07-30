@@ -2,6 +2,7 @@ import { ChevronRight, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SpecChange } from '@/lib/bindings'
 import { progressCount } from '@/lib/specDisplay'
+import { selectChangeEverywhere } from '@/lib/specSync'
 import { useUiStore } from '@/stores/uiStore'
 
 /**
@@ -84,7 +85,6 @@ export function SpecsSection({
   const open = useUiStore((s) => s.sectionOpen.specs)
   const toggleSection = useUiStore((s) => s.toggleSection)
   const selectedId = useUiStore((s) => s.selectedChangeId)
-  const selectChange = useUiStore((s) => s.selectChange)
 
   // Mirrors useSelectedChange: with nothing clicked, the first change is the
   // one the card is showing, so it is the one that looks selected here.
@@ -119,7 +119,7 @@ export function SpecsSection({
                 key={change.id}
                 change={change}
                 isSelected={change.id === effectiveId}
-                onClick={() => selectChange(change.id)}
+                onClick={() => selectChangeEverywhere(change.id)}
               />
             ))
           )}

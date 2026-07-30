@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -6,6 +6,9 @@ import { toast } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { WorkspaceLayout } from '@/layouts/WorkspaceLayout'
+import { SpecDeskView } from '@/views/SpecDeskView'
+import { readWindowMode } from '@/lib/windowMode'
+import { listenForSpecSelection } from '@/lib/specSync'
 import { OnboardingModal } from '@/components/modals/OnboardingModal'
 import { TutorialHost } from '@/components/tutorial/TutorialHost'
 import { TutorialOutcomeDialog } from '@/components/tutorial/TutorialOutcomeDialog'
@@ -357,6 +360,10 @@ function AppInner() {
     return () => document.removeEventListener('contextmenu', onContextMenu)
   }, [])
 
+  // Selecting a change in the Spec Desk has to move this window's sidebar row
+  // and spec card too -- the two windows render the same state.
+  useEffect(() => listenForSpecSelection(), [])
+
   return (
     <>
       <WorkspaceLayout />
@@ -380,12 +387,46 @@ function AppInner() {
   )
 }
 
+/**
+ * The Spec Desk window's root.
+ *
+ * Deliberately does not render `AppInner`: that owns the main window's startup
+ * (launch restore, the splash, auto-fetch, the updater, the tutorial). Running a
+ * second copy of it in the Desk would reopen every tab, fight over the settings
+ * file, and check for updates twice. The Desk shares the query client, theme, and
+ * toasts -- nothing else.
+ */
+function SpecDeskRoot() {
+  useTheme()
+  useFont()
+  // The Desk renders openspec state that other tools also write, so it needs the
+  // same watcher-driven refresh -- but scoped to its own repository. Unscoped, an
+  // edit in any of the other open tabs would refetch this window's queries too.
+  useRepoWatcher(readWindowMode().repoId)
+
+  useEffect(() => {
+    // Startup holds the splash until the app is ready; the Desk has no restore to
+    // wait for, so lift it as soon as this window paints.
+    hideSplash()
+  }, [])
+
+  return (
+    <>
+      <SpecDeskView />
+      <Toaster position="bottom-center" />
+    </>
+  )
+}
+
 export default function App() {
+  // Read once: a webview never changes which window it is.
+  const [mode] = useState(readWindowMode)
+
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider delayDuration={300}>
-          <AppInner />
+          {mode.kind === 'spec-desk' ? <SpecDeskRoot /> : <AppInner />}
         </TooltipProvider>
       </QueryClientProvider>
     </ErrorBoundary>

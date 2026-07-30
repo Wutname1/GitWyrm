@@ -214,6 +214,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::openspec::openspec_scaffold_change,
     commands::openspec::openspec_validate_change,
     commands::openspec::openspec_archive_change,
+    commands::spec_desk::open_spec_desk,
   ])
   .typ::<watcher::RepoChangedPayload>()
   .typ::<commands::remote::GitProgressPayload>()

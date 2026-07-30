@@ -97,9 +97,23 @@ fn program_name(base: &str) -> String {
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-/// Probes for a usable CLI, preferring a direct install. Cheap enough to call
-/// per `openspec_status`, and the result is what the status bar displays.
+/// Cached CLI probe.
+///
+/// Probing is NOT cheap: with no global install it falls through to `npx`, which
+/// can take seconds and hits the network. `openspec_status` is called on every
+/// watcher event and once per window, so probing per call made a single file save
+/// fire a burst of `npx` runs and left both windows stuck on loading state.
+/// Whether the tool is installed does not change while the app runs, so probe
+/// once per process.
+static CLI_CACHE: std::sync::OnceLock<CliInfo> = std::sync::OnceLock::new();
+
+/// The cached answer, probing on first use.
 pub fn detect() -> CliInfo {
+  CLI_CACHE.get_or_init(probe).clone()
+}
+
+/// Probes for a usable CLI, preferring a direct install.
+fn probe() -> CliInfo {
   for invocation in [Invocation::Direct, Invocation::Npx] {
     // A bare `--version` needs no repo, so run it in the current directory.
     let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());

@@ -1,21 +1,38 @@
 import { toast } from 'sonner'
-import { useUiStore } from '@/stores/uiStore'
+import { commands } from '@/lib/bindings'
+import { unwrap } from '@/lib/queryKeys'
+import { describeError, log } from '@/lib/log'
+import { selectChangeEverywhere } from '@/lib/specSync'
+
+const inTauri = '__TAURI_INTERNALS__' in window
 
 /**
- * Opens (or focuses) the Spec Desk window for a repository.
+ * Opens the Spec Desk window for a repository, or focuses the one already open.
  *
- * The window itself ships with `add-spec-desk-window`. Until then this is the
- * one place every entry point funnels through, so wiring the real window later
- * is a single edit rather than a hunt through the sidebar, the spec card, and
- * the graph chips.
+ * Every entry point (sidebar footer, spec card, and later the graph chips) funnels
+ * through here, so there is one place that decides what "open the Desk" means.
  *
- * It still selects the change and says what will happen: a button that answers a
- * click with nothing reads as broken, and "coming soon" is more honest than a
- * dead control.
+ * Selecting the change first means the Desk paints on the right change instead of
+ * jumping a beat later, and the main window's card follows too.
  */
-export function openSpecDesk(_repoId: string, changeId?: string) {
+export async function openSpecDesk(repoId: string, changeId?: string) {
   if (changeId) {
-    useUiStore.getState().selectChange(changeId)
+    selectChangeEverywhere(changeId)
   }
-  toast.info('The Spec Desk window is coming next. For now, spec status lives here.')
+  if (!inTauri) {
+    toast.info('The Spec Desk opens as a separate window in the desktop app.')
+    return
+  }
+  try {
+    const outcome = unwrap(await commands.openSpecDesk(repoId))
+    // Opening is self-evident -- a window appears. Focusing an already-open Desk
+    // is not, especially when it is on another monitor, so say so.
+    if (outcome === 'focused') {
+      toast.info('The Spec Desk is already open - brought it to the front.')
+    }
+  } catch (e) {
+    const message = describeError(e)
+    log.error(`open spec desk failed: ${message}`)
+    toast.error(`Could not open the Spec Desk. ${message}`)
+  }
 }

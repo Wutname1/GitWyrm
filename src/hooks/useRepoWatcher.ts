@@ -7,13 +7,21 @@ interface RepoChangedPayload {
   repo_id: string
 }
 
-/** Invalidates git queries when the backend watcher reports external changes. */
-export function useRepoWatcher() {
+/**
+ * Invalidates git queries when the backend watcher reports external changes.
+ *
+ * `onlyRepoId` limits the refresh to one repository. The Spec Desk passes its
+ * own: it has a single repo on screen, and reacting to all fourteen open tabs
+ * would refetch state it never shows -- including the openspec queries, which is
+ * how a single file save turned into a burst of work.
+ */
+export function useRepoWatcher(onlyRepoId?: string | null) {
   const queryClient = useQueryClient()
 
   useEffect(() => {
     const unlisten = listen<RepoChangedPayload>('repo-changed', (event) => {
       const repoId = event.payload.repo_id
+      if (onlyRepoId != null && repoId !== onlyRepoId) return
       queryClient.invalidateQueries({ queryKey: keys.status(repoId) })
       // Cached diffs are keyed by path and staged/unstaged only, so a rewind or
       // branch switch made outside the app leaves them pointing at the wrong
@@ -35,5 +43,5 @@ export function useRepoWatcher() {
     return () => {
       unlisten.then((fn) => fn())
     }
-  }, [queryClient])
+  }, [queryClient, onlyRepoId])
 }
