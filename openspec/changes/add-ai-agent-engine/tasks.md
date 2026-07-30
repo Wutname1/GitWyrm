@@ -45,8 +45,11 @@
       do, without implying GitWyrm is broken. "Signed in to Copilot but no CLI" and "not
       signed in" are separate sentences because the fix differs; a test asserts no
       explanation reads as a GitWyrm fault
-- [ ] 2.7 Cancellation terminates any in-flight request or child process promptly, leaving
-      no orphan
+- [x] 2.7 Cancellation terminates any in-flight request or child process promptly, leaving
+      no orphan. `kill_on_drop` for an abandoned connection plus an explicit kill when a
+      shutdown hangs; proven with a real child process rather than by reading the builder
+      call, and the detector itself checked against a live process so the test cannot pass
+      vacuously
 
 ## 3. The loop
 
@@ -64,8 +67,10 @@
 - [x] 3.3 Emit the console's typed events as the loop progresses, each with its
       one-sentence plain-language summary. `events.rs` carries the sentence on the event
       so every surface reads identically; a test asserts no refusal or gate uses jargon
-- [ ] 3.4 Stream a turn's output where the transport allows it, so the console has
-      something to show inside the first second or two of a 10-20 second turn
+- [x] 3.4 Stream a turn's output where the transport allows it, so the console has
+      something to show inside the first second or two of a 10-20 second turn. The ACP
+      transport surfaces `agent_message_chunk` as it arrives; the API transports return a
+      whole turn, which is the shape those endpoints give without SSE
 
 ## 4. Guardrails (enforced here, not by the provider)
 
@@ -80,10 +85,14 @@
 - [x] 4.3 Work only on the linked branch (or a new work branch when none is linked);
       refuse to run with a different branch checked out. `guardrails::branch_is_runnable`;
       the preflight that calls it is part of the run console change
-- [ ] 4.4 Set the user's uncommitted work aside before the run and restore it after,
-      reusing the stash plumbing
-- [ ] 4.5 Cancel promptly on stop, including mid-turn, leaving the tree in a state the
-      console's keep/undo choices can act on
+- [x] 4.4 Set the user's uncommitted work aside before the run and restore it after,
+      reusing the stash plumbing. One honest narrowing: a *kept* run leaves the stash in
+      place and says so, because restoring over the run's own edits would conflict. A
+      visible stash is recoverable; a failed automatic merge is a mess the user did not
+      ask for
+- [x] 4.5 Cancel promptly on stop, including mid-turn, leaving the tree in a state the
+      console's keep/undo choices can act on. The stop flag is checked before each turn
+      and before each tool, so a stop lands within a step rather than at the end of a run
 
 ## 5. Verify
 

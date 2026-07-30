@@ -13,6 +13,7 @@ pub mod events;
 pub mod guardrails;
 pub mod run;
 pub mod select;
+pub mod session;
 pub mod tools;
 pub mod transport;
 

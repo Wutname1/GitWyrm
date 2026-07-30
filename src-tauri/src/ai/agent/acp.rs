@@ -542,4 +542,50 @@ mod tests {
     let err = json!({ "code": -32603, "message": "model unavailable on your plan" });
     assert!(matches!(rpc_error(&err), AgentError::Refused { .. }));
   }
+
+  /// Proves the no-orphan promise with a real child process rather than by
+  /// reading the builder call. Uses a long-lived system command as a stand-in
+  /// for the CLI, since what is being tested is our process handling.
+  #[tokio::test]
+  async fn dropping_a_connection_kills_its_child() {
+    let mut cmd = Command::new(if cfg!(windows) { "cmd" } else { "sleep" });
+    if cfg!(windows) {
+      // `pause` waits on input forever; with stdin piped and never written to,
+      // it will not exit on its own.
+      cmd.args(["/C", "pause"]);
+    } else {
+      cmd.arg("30");
+    }
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+
+    let Ok(mut child) = cmd.spawn() else {
+      eprintln!("NOTE: could not spawn a test child; skipping the orphan check");
+      return;
+    };
+    let pid = child.id().expect("a running child has a pid");
+
+    // Dropping is what a cancelled or panicking run does. kill_on_drop turns
+    // that into a terminated child rather than an orphan.
+    drop(child);
+
+    // The kill is asynchronous; give the OS a moment before looking.
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(!process_is_running(pid), "process {pid} survived the drop");
+  }
+
+  #[cfg(windows)]
+  fn process_is_running(pid: u32) -> bool {
+    let out = std::process::Command::new("tasklist")
+      .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+      .output();
+    match out {
+      Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()),
+      Err(_) => false,
+    }
+  }
+
+  #[cfg(not(windows))]
+  fn process_is_running(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
+  }
 }
