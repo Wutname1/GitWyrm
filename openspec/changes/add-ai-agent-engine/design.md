@@ -328,6 +328,41 @@ One correction to an earlier assumption: there is **no `--allow-all-tools` neede
 case**, because we are not approving a broad tool set and then hoping. We start the server
 with only the tools the bounded set names.
 
+### The ACP wire protocol, as verified
+
+Taken from `agentclientprotocol/agent-client-protocol` (the schema crate itself, not the
+docs site) and GitHub's ACP reference, 2026-07-30.
+
+**Framing.** Newline-delimited JSON over the child's stdin/stdout. In stdio mode stdout is
+reserved for the protocol stream, so the CLI's own logging goes to stderr -- which we
+capture separately for the log rather than trying to parse.
+
+**Handshake, then a session, then turns.** `initialize` (with `protocolVersion` and
+`clientCapabilities`) -> `session/new` (with `cwd` and `mcpServers`, returning a
+`sessionId`) -> `session/prompt` per turn. Streaming arrives as `session/update`
+notifications whose `update.sessionUpdate` discriminates `agent_message_chunk`,
+`tool_call`, and `tool_call_update`. `session/cancel` is a notification, and the spec
+requires the agent to still answer the in-flight prompt with `stopReason: "cancelled"` --
+so Stop has a defined completion rather than a dropped pipe.
+
+**`stopReason` is the loop's own answer.** The values are `end_turn`, `max_tokens`,
+`max_turn_requests`, `refusal`, and `cancelled`. Note the docs site currently lists
+`"completed"`, which does not exist in the schema; GitHub's own example checking
+`!== "end_turn"` is the correct one. Two of these map onto requirements we already have:
+`max_turn_requests` is the agent hitting its own ceiling, and `refusal` is a turn the model
+declined -- both are "didn't finish" with a nameable cause rather than a silent stall.
+
+**Permission is a request to us, and that is where the guardrails attach.**
+`session/request_permission` is sent *by the agent to the client*, carrying a `toolCall`
+and a list of `options`; we answer `{"outcome": {"outcome": "cancelled"}}` or
+`{"outcome": {"outcome": "selected", "optionId": ...}}`, where option kinds are
+`allow_once`, `allow_always`, `reject_once`, `reject_always`.
+
+This is the mechanism that makes "guardrails live in GitWyrm's process" true rather than
+aspirational: never-push is a rejection we return, not a setting we trust the CLI to
+honour. GitWyrm SHALL never answer with `allow_always` -- a remembered approval is a
+decision made once and applied to situations the user never saw.
+
 ## What bounds a run
 
 ### Turn budget: 12, and the user can change it

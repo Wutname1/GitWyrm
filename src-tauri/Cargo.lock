@@ -1651,6 +1651,7 @@ dependencies = [
  "tauri-specta",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "trash",
  "winreg 0.52.0",
 ]

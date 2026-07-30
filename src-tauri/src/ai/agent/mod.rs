@@ -5,6 +5,7 @@
 //! transport that can carry tool calls and results back and forth -- a shape
 //! the single-shot path deliberately does not have.
 
+pub mod acp;
 pub mod copilot_cli;
 pub mod transport;
 
