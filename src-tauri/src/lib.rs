@@ -1,4 +1,5 @@
 mod ai;
+mod airun;
 mod commands;
 mod error;
 mod git;
@@ -210,6 +211,12 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::github::github_approve_pr,
     commands::github::github_merge_pr,
     commands::github::github_close_issue,
+    commands::airun::ai_run_start_demo,
+    commands::airun::ai_run_answer_gate,
+    commands::airun::ai_run_note,
+    commands::airun::ai_run_stop,
+    commands::airun::ai_run_current,
+    commands::airun::ai_run_clear,
     commands::openspec::openspec_status,
     commands::openspec::openspec_list_changes,
     commands::openspec::openspec_get_change,
@@ -467,6 +474,8 @@ pub fn run() {
       ));
       Ok(())
     })
+    .manage(crate::airun::SessionRegistry::new())
+    .manage(commands::airun::DriverRegistry::default())
     .manage(RepoManager::default())
     .manage(WatcherRegistry::default())
     .invoke_handler(builder.invoke_handler())

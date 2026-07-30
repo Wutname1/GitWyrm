@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod ai_commits;
+pub mod airun;
 pub mod app;
 pub mod branch;
 pub mod commit;

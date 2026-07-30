@@ -2,16 +2,19 @@
 
 ## 1. Driver seam
 
-- [ ] 1.1 `RunDriver` trait: start / event stream / answer_gate / note / stop, with typed
+- [x] 1.1 `RunDriver` trait: start / event stream / answer_gate / note / stop, with typed
       events (preflight, plan, edit, check, gate, note, error, steps-done) and typed gate
       requests (AddDependency, RunInstall, NetworkAccess, DeleteFiles, OutsideRepo)
-- [ ] 1.2 Scripted driver behind the trait: replays a fixed event sequence with realistic
+- [x] 1.2 Scripted driver behind the trait: replays a fixed event sequence with realistic
       timing, pauses at a gate until answered, and can be told to fail. Exists so every
       console state is verifiable before the engine lands - it is never presented to the
       user as a real run
-- [ ] 1.3 Session model: one run per repository at a time; events reach the UI over a
-      Tauri channel; every event carries the one plain-language summary the stream, the
-      main-window card, and the status bar all render
+- [x] 1.3 Session model: one run per repository at a time; every event carries the one
+      plain-language summary the stream, the main-window card, and the status bar all
+      render. Uses a global Tauri event rather than a channel: a gate has to be visible
+      from wherever the user is, and a channel reaches only whoever opened it. Sessions
+      are identified, not just replaced, so a driver still finishing cannot write into a
+      newer run's console
 
 ## 2. Run tab UI
 

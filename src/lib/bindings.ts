@@ -1890,6 +1890,77 @@ async githubCloseIssue(owner: string, repo: string, number: number) : Promise<Re
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Starts a scripted run, for building and checking the console.
+ * 
+ * Deliberately named `demo` at every layer, and every session it produces
+ * carries a task text saying so. A scripted run that looked real would be a
+ * lie told by the product rather than a test fixture, so there is no way to
+ * start one that does not announce itself.
+ */
+async aiRunStartDemo(repoId: string, changeId: string, taskNumber: number, taskText: string, branch: string, scenario: DemoScenario) : Promise<Result<StartOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_run_start_demo", { repoId, changeId, taskNumber, taskText, branch, scenario }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Answers the open gate and resumes the run.
+ */
+async aiRunAnswerGate(repoId: string, sessionId: string, answer: GateAnswer) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_run_answer_gate", { repoId, sessionId, answer }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Queues a steering note.
+ */
+async aiRunNote(repoId: string, sessionId: string, text: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_run_note", { repoId, sessionId, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stops the run.
+ */
+async aiRunStop(repoId: string, sessionId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_run_stop", { repoId, sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The run the console should show for a repository, if any.
+ */
+async aiRunCurrent(repoId: string) : Promise<Result<RunSession | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_run_current", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Clears a finished run so the repository can start another.
+ */
+async aiRunClear(repoId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_run_clear", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async openspecStatus(repoId: string) : Promise<Result<OpenspecStatus, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("openspec_status", { repoId }) };
@@ -1986,7 +2057,9 @@ async openspecValidateChange(repoId: string, changeId: string) : Promise<Result<
 },
 /**
  * Runs `openspec archive` for one change: merges its deltas into the specs
- * library and moves the folder into `changes/archive/`.
+ * library and moves the folder into `changes/archive/`. On success, stages
+ * and commits the result immediately -- no AI, no separate commit step --
+ * so an archived change never sits as an uncommitted diff.
  */
 async openspecArchiveChange(repoId: string, changeId: string) : Promise<Result<CliOutcome, string>> {
     try {
@@ -2285,6 +2358,10 @@ theirs_deleted: boolean }
  */
 export type DeltaKind = "ADDED" | "MODIFIED" | "REMOVED" | "RENAMED"
 /**
+ * Which scripted scenario to replay.
+ */
+export type DemoScenario = "happy" | "gate" | "providerExpired" | "failure"
+/**
  * Where the Desk ended up, so the UI can say something true either way.
  */
 export type DeskOutcome = 
@@ -2363,6 +2440,21 @@ export type FileHistoryEntry = { sha: string; short_sha: string; summary: string
  * Path this file had in this commit, when the commit renamed it.
  */
 old_path: string | null }
+/**
+ * What the user chose at a gate.
+ * 
+ * Exactly three. There is no "don't ask again" and nothing to type: a
+ * remembered approval is a decision made once and applied to situations the
+ * user never saw.
+ */
+export type GateAnswer = "allowOnce" | "findAnotherWay" | "stopRun"
+/**
+ * Something the run wants to do that needs an answer first.
+ * 
+ * Only side effects beyond in-repo edits and the project's own checks appear
+ * here. Editing source and running tests is the job, not a gate.
+ */
+export type GateRequest = { kind: "addDependency"; name: string } | { kind: "runInstall"; command: string } | { kind: "networkAccess"; target: string } | { kind: "deleteFiles"; paths: string[] } | { kind: "outsideRepo"; path: string }
 export type GeneratedCommitMessage = { summary: string; description: string }
 /**
  * Who git thinks the user is. Either field can be empty when git has never
@@ -2513,6 +2605,15 @@ export type PollResult =
 { status: "pending"; interval: number }
 export type PrDetail = { number: number; title: string; body: string; author: string; author_is_bot: boolean; state: string; draft: boolean; merged: boolean; mergeable: boolean | null; head_ref: string; base_ref: string; additions: number; deletions: number; changed_files: number; comments: GithubComment[]; html_url: string; created_at: string; updated_at: string }
 export type PrSummary = { number: number; title: string; author: string; author_is_bot: boolean; draft: boolean; head_ref: string; base_ref: string; updated_at: string; html_url: string }
+/**
+ * One preflight check, shown before any work starts.
+ */
+export type PreflightItem = { label: string; 
+/**
+ * False when the step genuinely had nothing to do -- "no spec changes to
+ * read" is said out loud rather than shown as a tick that implies work.
+ */
+done: boolean; detail: string }
 /**
  * One identity you commit under.
  */
@@ -2718,6 +2819,93 @@ export type Resolution =
  * Use the provided, hand-edited text.
  */
 { kind: "manual"; text: string }
+/**
+ * A run the console is showing.
+ */
+export type RunSession = { session_id: string; repo_id: string; 
+/**
+ * The change this run belongs to, so the header always names its own.
+ */
+change_id: string; 
+/**
+ * Task number within that change, as the header shows it.
+ */
+task_number: number; task_text: string; 
+/**
+ * Branch the run is pinned to. A run must not continue on another.
+ */
+branch: string; state: RunState; steps: RunStep[] }
+/**
+ * Where a run is, as the state pill shows it.
+ * 
+ * The glyphs matter: "Needs you" sits next to a change-status "Needs review"
+ * in the same window, and colour alone does not separate them.
+ */
+export type RunState = 
+/**
+ * Getting ready: reading the plan, the deltas, the task.
+ */
+"preparing" | 
+/**
+ * Working. Glyph ●.
+ */
+"working" | 
+/**
+ * Paused at a gate, waiting for an answer. Glyph ⏸.
+ */
+"needsYou" | 
+/**
+ * Done, changes waiting to be kept or undone. Glyph ✓.
+ */
+"finished" | 
+/**
+ * The user stopped it. Glyph ■.
+ */
+"stopped" | 
+/**
+ * It could not continue. Glyph ✕.
+ */
+"failed"
+/**
+ * One row of the activity stream.
+ */
+export type RunStep = 
+/**
+ * The preflight checklist, emitted once before work starts.
+ */
+{ kind: "preflight"; items: PreflightItem[] } | 
+/**
+ * What it intends to do next.
+ */
+{ kind: "plan"; text: string } | 
+/**
+ * A file changed, with counts for the row and a path for View diff.
+ */
+{ kind: "edit"; path: string; added: number; removed: number } | 
+/**
+ * One of the project's checks ran.
+ */
+{ kind: "check"; name: string; passed: boolean; detail: string } | 
+/**
+ * A gate opened. The run is paused until it is answered.
+ */
+{ kind: "gate"; request: GateRequest } | 
+/**
+ * The user's steering note, echoed back so it is visibly received.
+ */
+{ kind: "youSaid"; text: string } | 
+/**
+ * Anything the run wants to say that is not one of the above.
+ */
+{ kind: "note"; text: string } | 
+/**
+ * It could not do something, and is adapting.
+ */
+{ kind: "adapted"; text: string } | 
+/**
+ * The run ended.
+ */
+{ kind: "ended"; state: RunState; detail: string }
 /**
  * What a scaffold call produced.
  */
@@ -3257,6 +3445,14 @@ identity: string | null;
  * that a different key on the same machine would have worked.
  */
 workingKey: string | null }
+/**
+ * Starting a run either gives you the session or says why not.
+ */
+export type StartOutcome = { kind: "started"; session: RunSession } | 
+/**
+ * One is already going. Carries the sentence and the session to route to.
+ */
+{ kind: "alreadyRunning"; session_id: string; summary: string }
 export type StashInfo = { index: number; 
 /**
  * Raw stash message as git stores it, e.g. "On develop: auto-stash before...".
