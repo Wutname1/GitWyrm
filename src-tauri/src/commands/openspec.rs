@@ -11,7 +11,7 @@ use specta::Type;
 use tauri::State;
 
 use crate::error::AppError;
-use crate::openspec::{self, cli, parse, write};
+use crate::openspec::{self, cli, history, parse, write};
 use crate::state::RepoManager;
 
 /// Whether this repository uses OpenSpec, and whether the CLI is around.
@@ -112,6 +112,27 @@ pub async fn openspec_archived_ids(
     openspec::openspec_dir(&root)
       .map(|dir| parse::archived_ids(&dir))
       .unwrap_or_default()
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Commits that touched a change's folder, newest first.
+///
+/// Empty (not an error) for a change that has never been committed -- a brand-new
+/// change has no history yet, which the UI states rather than treating as a fault.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_change_history(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  change_id: String,
+) -> Result<Vec<history::SpecHistoryEntry>, AppError> {
+  let root = repo_root(&manager, &repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    // 50 is far more than a change accumulates in practice, and it bounds the
+    // work for a repository with a long history.
+    history::change_history(&root, &change_id, 50).unwrap_or_default()
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))

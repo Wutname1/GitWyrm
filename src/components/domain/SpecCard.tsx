@@ -1,48 +1,10 @@
 import { ExternalLink } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import type { SpecChange } from '@/lib/bindings'
-import { nextStepHint, progressSentence, STATUS_LABEL, statusTone } from '@/lib/specDisplay'
+import { nextStepHint, progressSentence } from '@/lib/specDisplay'
+import { ProgressRing, StatusPill } from '@/components/domain/spec-desk/SpecBits'
 import { nextTask, useOpenspecStatus, useSelectedChange } from '@/hooks/useOpenspec'
 import { copyTaskHandoff } from '@/lib/specHandoff'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { openSpecDesk } from '@/lib/specDesk'
-
-/** A ring showing percent complete. Same shape the Spec Desk uses. */
-function ProgressRing({ percent }: { percent: number }) {
-  return (
-    <div
-      className="relative grid size-11 flex-none place-items-center rounded-full"
-      style={{
-        background: `conic-gradient(var(--gw-accent) ${percent}%, var(--gw-panel3) 0)`,
-      }}
-      role="img"
-      aria-label={`${percent} percent done`}
-    >
-      <span className="absolute inset-[4px] rounded-full bg-panel" />
-      <span className="relative font-mono text-2xs font-semibold text-foreground">{percent}%</span>
-    </div>
-  );
-}
-
-const TONE_CLASS = {
-  muted: 'border-muted-foreground/40 text-muted-foreground',
-  info: 'border-[var(--gw-blue)]/40 text-[var(--gw-blue)]',
-  warn: 'border-[var(--gw-amber)]/40 text-[var(--gw-amber)]',
-  good: 'border-primary/40 text-accent-text',
-} as const
-
-function StatusPill({ change }: { change: SpecChange }) {
-  return (
-    <span
-      className={cn(
-        'flex-none rounded-full border px-1.5 py-px text-2xs font-semibold',
-        TONE_CLASS[statusTone(change.status)]
-      )}
-    >
-      {STATUS_LABEL[change.status]}
-    </span>
-  )
-}
 
 /**
  * Spec status for the selected change, pinned above the commit form.
@@ -65,7 +27,7 @@ export function SpecCard() {
     <div className="flex-none border-b border-border px-3 py-2.5">
       <div className="flex items-center gap-2">
         <span className="text-2xs font-bold tracking-[.09em] text-sub">SPEC</span>
-        <StatusPill change={change} />
+        <StatusPill status={change.status} />
         <button
           type="button"
           onClick={() => openSpecDesk(repo.id, change.id)}

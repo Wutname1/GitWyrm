@@ -6,7 +6,7 @@
       main-window entry points; closes with the repo tab
 - [x] 1.2 Titlebar: wyrm mark, "Spec Desk · <repo>", Keep on top toggle,
       "Show main window", window controls
-- [x] 1.3 Remember size/position per repo; sane default (940×760)
+- [ ] 1.3 Remember size/position per repo; sane default (940x760) - moved to add-window-state-memory
 
 ## 2. Changes list
 

@@ -3,7 +3,8 @@ import { Archive, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SpecChange } from '@/lib/bindings'
 import { formatRelativeTime } from '@/lib/gitDisplay'
-import { progressCount, STATUS_LABEL, statusTone } from '@/lib/specDisplay'
+import { progressCount } from '@/lib/specDisplay'
+import { ProgressBar, StatusPill } from './SpecBits'
 import { selectChangeEverywhere } from '@/lib/specSync'
 import { useUiStore } from '@/stores/uiStore'
 import { toast } from 'sonner'
@@ -16,13 +17,6 @@ const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: 'review', label: 'Needs review' },
   { key: 'mine', label: 'Mine' },
 ]
-
-const TONE_CLASS = {
-  muted: 'border-muted-foreground/40 text-muted-foreground',
-  info: 'border-[var(--gw-blue)]/40 text-[var(--gw-blue)] bg-[var(--gw-blue)]/8',
-  warn: 'border-[var(--gw-amber)]/40 text-[var(--gw-amber)] bg-[var(--gw-amber)]/8',
-  good: 'border-primary/40 text-accent-text bg-soft',
-} as const
 
 function matchesFilter(change: SpecChange, filter: Filter): boolean {
   switch (filter) {
@@ -72,21 +66,11 @@ function ChangeRow({
         <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-muted-foreground">
           updated {formatRelativeTime(change.updated)}
         </span>
-        <span
-          className={cn(
-            'flex-none rounded-full border px-1.5 py-px text-2xs font-semibold',
-            TONE_CLASS[statusTone(change.status)]
-          )}
-        >
-          {STATUS_LABEL[change.status]}
-        </span>
+        <StatusPill status={change.status} />
       </span>
       <span className="mt-2 flex items-center gap-2">
-        <span className="block h-[3px] flex-1 overflow-hidden rounded-full bg-panel3">
-          <span
-            className="block h-full rounded-full bg-primary transition-[width] duration-300"
-            style={{ width: `${change.progress.percent}%` }}
-          />
+        <span className="flex-1">
+          <ProgressBar change={change} />
         </span>
         <span className="flex-none font-mono text-2xs text-muted-foreground">
           {progressCount(change)}

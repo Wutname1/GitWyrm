@@ -5,13 +5,13 @@
 ### Requirement: Popout window
 
 The Spec Desk SHALL be a separate OS window per repository. The main window SHALL stay
-fully usable while the Desk is open. The Desk SHALL remember its size and position, and
-opening it when already open SHALL focus it.
+fully usable while the Desk is open, and opening the Desk when one is already open SHALL
+focus it. Remembering size and position is specified separately in `app-windows`.
 
 #### Scenario: Second monitor
 
 - WHEN the user opens the Spec Desk and moves it to another monitor
-- THEN both windows work simultaneously, and the Desk reopens where it was left
+- THEN both windows work simultaneously and stay independently usable
 
 #### Scenario: Keep on top
 

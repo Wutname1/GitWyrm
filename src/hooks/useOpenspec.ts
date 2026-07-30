@@ -29,6 +29,24 @@ export function useOpenspecChanges(repoId: string | null) {
   })
 }
 
+/**
+ * Commits that touched a change's folder, newest first.
+ *
+ * Only fetched when something is actually showing history, since it shells out to
+ * git log per change.
+ */
+export function useOpenspecHistory(
+  repoId: string | null,
+  changeId: string | null,
+  enabled = true
+) {
+  return useQuery({
+    queryKey: keys.openspecHistory(repoId ?? 'none', changeId ?? 'none'),
+    enabled: repoId != null && changeId != null && enabled,
+    queryFn: async () => unwrap(await commands.openspecChangeHistory(repoId!, changeId!)),
+  })
+}
+
 /** Ids of archived changes, newest first. Only fetched when asked for. */
 export function useOpenspecArchived(repoId: string | null, enabled = false) {
   return useQuery({

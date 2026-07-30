@@ -21,6 +21,10 @@ export const keys = {
   openspecStatus: (repoId: string) => ['openspecStatus', repoId] as const,
   openspecChanges: (repoId: string) => ['openspecChanges', repoId] as const,
   openspecArchived: (repoId: string) => ['openspecArchived', repoId] as const,
+  openspecHistory: (repoId: string, changeId: string) =>
+    ['openspecHistory', repoId, changeId] as const,
+  /** Prefix: every change's history for one repo. */
+  openspecHistoryAll: (repoId: string) => ['openspecHistory', repoId] as const,
 
   /**
    * Prefixes for invalidating every entry of a kind for one repo, regardless of
@@ -43,6 +47,7 @@ export function invalidateOpenspec(qc: QueryClient, repoId: string) {
   qc.invalidateQueries({ queryKey: keys.openspecStatus(repoId) })
   qc.invalidateQueries({ queryKey: keys.openspecChanges(repoId) })
   qc.invalidateQueries({ queryKey: keys.openspecArchived(repoId) })
+  qc.invalidateQueries({ queryKey: keys.openspecHistoryAll(repoId) })
 }
 
 /**
