@@ -239,7 +239,7 @@ pub fn commit_archive(
     committer: signature,
   };
   let parents: Vec<&git2::Commit<'_>> = head_commit.iter().collect();
-  let message = format!("chore: Archive {change_id} spec");
+  let message = format!("Archive {change_id} spec");
 
   let oid = crate::git::commit_write::create(
     repo,
@@ -315,7 +315,7 @@ mod tests {
 
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.id(), oid.unwrap());
-    assert_eq!(head.message().unwrap(), "chore: Archive add-thing spec");
+    assert_eq!(head.message().unwrap(), "Archive add-thing spec");
     assert_eq!(repo.statuses(None).unwrap().len(), 0, "everything should be committed");
 
     let tree = head.tree().unwrap();
