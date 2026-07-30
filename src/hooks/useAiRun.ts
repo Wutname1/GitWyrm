@@ -77,27 +77,33 @@ export function useAiRun(repoId: string | null): AiRun {
   const clearRun = useAiRunStore((s) => s.clearRun)
   const { session, steps, state, latest } = entry
 
+  // Seed from the backend, and re-seed when events arrive for a run this
+  // window has never seen -- which is what happens when the other window starts
+  // one. Without the `state` dependency, the main window collected a Desk run's
+  // events but never learned its session, and every surface checks for a
+  // session before rendering, so a gate stayed invisible over there.
+  const needsSession = state != null && session == null
   useEffect(() => {
     if (!repoId) return
     let cancelled = false
     void (async () => {
       const res = await commands.aiRunCurrent(repoId)
-      if (cancelled || res.status !== 'ok') return
-      const current = res.data
-      // Only seed from the backend when this window has nothing yet. Otherwise
-      // a late load would wipe steps that arrived while it was in flight.
-      if (useAiRunStore.getState().byRepo[repoId]) return
+      if (cancelled || res.status !== 'ok' || !res.data) return
+      const entry = useAiRunStore.getState().byRepo[repoId]
+      if (entry?.session) return
       setRun(repoId, {
-        session: current,
-        steps: current?.steps ?? [],
-        state: current?.state ?? null,
-        latest: '',
+        session: res.data,
+        // Keep whatever arrived while this was in flight; fall back to the
+        // backend's own copy of the steps.
+        steps: entry?.steps?.length ? entry.steps : res.data.steps,
+        state: entry?.state ?? res.data.state,
+        latest: entry?.latest ?? '',
       })
     })()
     return () => {
       cancelled = true
     }
-  }, [repoId, setRun])
+  }, [repoId, setRun, needsSession])
 
   const answerGate = useCallback(
     async (answer: GateAnswer) => {

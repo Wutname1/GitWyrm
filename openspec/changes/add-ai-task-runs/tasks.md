@@ -64,14 +64,23 @@
 
 ## 6. Verify
 
-None of section 6 is done. All three need the app running in a native window, and the
-dev port was held by another session throughout this work. The console renders nothing
-useful in a plain browser, where the Tauri IPC is absent -- confirmed, not assumed.
+Driven on screen in a native window against the scripted driver.
 
-A dev-only demo launcher is in the Desk action rail (four scenarios plus Clear) so these
-are quick to walk through once a native window is free.
-
-- [ ] 6.1 Drive the scripted driver through every state on screen: working, gate open,
-      denial, stopped, failed, provider-expired
-- [ ] 6.2 Gate mirroring visible from the main window while the Desk is on another tab
-- [ ] 6.3 Stop mid-run: the console says nothing was committed, and the choices work
+- [x] 6.1 Drive the scripted driver through every state on screen: working, gate open,
+      denial, stopped, failed, provider-expired. All six seen. Found and fixed three
+      real bugs that typechecking could not: every surface held its own copy of the run
+      state so the AI tab never appeared, a finished run's card said "Run stopped", and
+      the failure card's Reconnect / Copy / Try-again buttons were never passed handlers
+- [~] 6.2 Gate mirroring visible from the main window while the Desk is on another tab.
+      **Half done.** Verified inside the Desk: with the Desk on its Overview tab, the AI
+      tab badge and the rail banner both show the amber paused state. NOT working in the
+      main window -- its spec card and status bar stay blank while the Desk shows a gate.
+      The event is broadcast to all windows and the listener is mounted in both roots, so
+      the cause is still open; an attempted fix (re-seeding the session when an event
+      arrives for an unknown run) broke both windows with a hook-order error and was
+      reverted. Needs a devtools session on the main window to see what it actually
+      receives
+- [x] 6.3 Stop mid-run: the console says nothing was committed, and the choices work.
+      Stopped from a paused gate: the gate collapsed to history, the stream said "You
+      stopped this run. Nothing was committed.", and the card offered Keep / Undo /
+      Restart
