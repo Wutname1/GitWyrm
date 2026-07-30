@@ -8,9 +8,11 @@ import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import { nextStepHint, progressSentence } from '@/lib/specDisplay'
 import { copyTaskHandoff } from '@/lib/specHandoff'
 import { nextTask, useOpenspecHistory, useOpenspecMutations } from '@/hooks/useOpenspec'
+import { stateGlyph, useAiRun } from '@/hooks/useAiRun'
+import { AiRunTab } from '@/components/domain/ai-run/AiRunTab'
 import { DeltaBadge, ProgressRing, StatusPill } from './SpecBits'
 
-type Tab = 'overview' | 'proposal' | 'deltas' | 'history'
+type Tab = 'overview' | 'proposal' | 'deltas' | 'history' | 'ai'
 
 /** A card with a small uppercase header, used across the overview. */
 function Card({
@@ -293,6 +295,11 @@ const TABS: Array<{ key: Tab; label: string }> = [
  */
 export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: string }) {
   const [tab, setTab] = useState<Tab>('overview')
+  const run = useAiRun(repoId)
+  // The AI tab only exists once there is a run to show. An empty tab that is
+  // always present invites clicking on nothing.
+  const hasRun = run.session != null
+  const tabs = hasRun ? [...TABS, { key: 'ai' as Tab, label: '✦ AI' }] : TABS
   const history = useOpenspecHistory(repoId, change.id, tab === 'overview' || tab === 'history')
   const recent = (history.data ?? []).slice(0, 3)
 
@@ -324,7 +331,7 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
         aria-label="Change details"
         className="mt-4 flex flex-none gap-5 border-b border-border px-6"
       >
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             role="tab"
@@ -341,6 +348,18 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
             {t.key === 'deltas' && (
               <span className="ml-1.5 rounded-full bg-panel3 px-1.5 font-mono text-2xs font-normal text-sub">
                 {change.deltas.length}
+              </span>
+            )}
+            {t.key === 'ai' && run.state && (
+              <span
+                className={cn(
+                  'ml-1.5 font-normal',
+                  run.state === 'needsYou' ? 'text-[var(--gw-amber)]' : 'text-sub'
+                )}
+                // The badge is how a gate reaches someone reading another tab.
+                aria-label={run.state === 'needsYou' ? 'This run needs you' : undefined}
+              >
+                {stateGlyph(run.state)}
               </span>
             )}
           </button>
@@ -491,6 +510,25 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
         )}
 
         {tab === 'history' && <HistoryTab change={change} repoId={repoId} />}
+        {tab === 'ai' && (
+          <AiRunTab
+            run={run}
+            endingActions={{
+              // Keeping is the default state already: the edits are sitting in
+              // the changes list, so this just closes the run out.
+              onKeep: () => {
+                void run.clear()
+                toast.success('Kept. The changes are in your changes list.')
+              },
+              onUndo: () => {
+                toast.info('Undo runs from the changes list for now.')
+              },
+              onRestart: () => {
+                toast.info('Restarting a task needs the engine wired up.')
+              },
+            }}
+          />
+        )}
       </div>
     </div>
   )

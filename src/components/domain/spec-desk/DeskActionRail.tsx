@@ -10,12 +10,13 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import type { CliOutcome, SpecChange } from '@/lib/bindings'
+import type { CliOutcome, DemoScenario, SpecChange } from '@/lib/bindings'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { composeTaskHandoff, copyTaskHandoff } from '@/lib/specHandoff'
 import { nextTask, useOpenspecMutations } from '@/hooks/useOpenspec'
 import { useSpecAi } from '@/hooks/useSpecAi'
+import { useAiRun } from '@/hooks/useAiRun'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { describeError, log } from '@/lib/log'
 
@@ -425,6 +426,67 @@ export function DeskActionRail({
         pendingLabel="Archiving…"
         onConfirm={archive}
       />
+      <DemoRunLauncher change={change} repoId={repoId} />
+    </div>
+  )
+}
+
+/**
+ * Starts a scripted run, for checking the console's states on screen.
+ *
+ * Development builds only, and labelled as a demo wherever it appears. A
+ * scripted run that looked like a real one would be the product lying, so
+ * there is deliberately no way to start one without seeing the word "demo".
+ */
+function DemoRunLauncher({ change, repoId }: { change: SpecChange; repoId: string }) {
+  const run = useAiRun(repoId)
+  if (import.meta.env.PROD) return null
+
+  const start = async (scenario: DemoScenario) => {
+    const task = change.tasks[0]
+    const refused = await run.startDemo({
+      changeId: change.id,
+      taskNumber: 1,
+      taskText: task?.text ?? 'Demo task',
+      branch: 'main',
+      scenario,
+    })
+    if (refused) toast.info(refused)
+  }
+
+  return (
+    <div className="mt-4 border-t border-dashed border-border pt-3">
+      <p className="mb-1.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Demo run (dev only)
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {(
+          [
+            ['happy', 'Happy'],
+            ['gate', 'Gate'],
+            ['failure', 'Failure'],
+            ['providerExpired', 'Sign-in expired'],
+          ] as Array<[DemoScenario, string]>
+        ).map(([scenario, label]) => (
+          <button
+            key={scenario}
+            type="button"
+            className="rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground hover:bg-panel2 hover:text-foreground"
+            onClick={() => void start(scenario)}
+          >
+            {label}
+          </button>
+        ))}
+        {run.session && (
+          <button
+            type="button"
+            className="rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground hover:bg-panel2 hover:text-foreground"
+            onClick={() => void run.clear()}
+          >
+            Clear
+          </button>
+        )}
+      </div>
     </div>
   )
 }
