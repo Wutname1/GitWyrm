@@ -231,6 +231,14 @@ mod tests {
   }
 
   #[test]
+  fn parses_a_real_cli_version_string() {
+    // Verbatim from an installed Claude Code CLI (`claude --version`), kept as
+    // a fixture because it is the shape these tools actually print: a version
+    // followed by a parenthesised product name.
+    assert_eq!(parse_version("2.1.220 (Claude Code)"), Some((2, 1, 220)));
+  }
+
+  #[test]
   fn floor_comparison_is_by_component_not_string() {
     // "0.0.9" > "0.0.10" as strings; as tuples it is not.
     assert!(parse_version("0.0.400").unwrap() >= MIN_VERSION);

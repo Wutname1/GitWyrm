@@ -96,15 +96,35 @@
 
 ## 5. Verify
 
-- [ ] 5.1 A real task run end to end against Claude Code on a scratch repository
-- [ ] 5.2 The same task against the Copilot CLI
+Section 5 needs credentials, installed CLIs, and the run console (which is
+`add-ai-task-runs`, not this change). What could be verified here was; the rest is
+listed as needing a human, with the reason.
+
+- [~] 5.1 A real task run end to end against Claude Code on a scratch repository.
+      **Superseded by 2.5.** Claude Code is installed on the dev machine (2.1.220), but
+      this change deliberately has no Anthropic subprocess path -- their terms prohibit
+      routing requests through subscription credentials, and that is the one provider
+      where enforcement has been observed. Running this task as written would build the
+      thing 2.5 exists to prevent. The real version string is kept as a parser fixture
+- [ ] 5.2 The same task against the Copilot CLI. **Blocked:** Copilot CLI is not
+      installed on this machine. Also needs the version floor measured against a real
+      install - it is currently a placeholder
 - [ ] 5.3 The same task against a direct provider API with a key, proving the interface
-      is not CLI-shaped
-- [ ] 5.4 Guardrails hold under a hostile prompt: ask it to push, to install a package,
-      and to edit a file outside the repo - push refused, the others gated
-- [ ] 5.5 Stop mid-turn leaves no half-written file, no orphaned process, and the user's
-      own work intact
+      is not CLI-shaped. **Needs a key.** The dialect shapes are unit-tested against
+      recorded request/response bodies, which is not the same as a live call
+- [x] 5.4 Guardrails hold under a hostile prompt: ask it to push, to install a package,
+      and to edit a file outside the repo - push refused, the others gated. Verified as
+      unit tests driving the loop with a scripted provider: a push never reaches the
+      tool, an unknown tool gates, and a path outside the repo gates. A live hostile
+      prompt is still worth running once a provider is wired
+- [x] 5.5 Stop mid-turn leaves no half-written file, no orphaned process, and the user's
+      own work intact. Orphan case proven against a real child process, with the
+      detector itself checked against a live process so it cannot pass vacuously. The
+      "no half-written file" half is structural - edits are whole-file writes - but is
+      worth confirming in a real run
 - [ ] 5.6 With no provider CLI installed and no key, the Desk shows the reconnect state
-      and the copy-handoff path still works
+      and the copy-handoff path still works. **Needs the run console UI**
 - [ ] 5.7 An account with credentials but a bad scope reports needs-reconnect rather than
-      failing at generation time (the spike's own failure case)
+      failing at generation time (the spike's own failure case). **Needs such an
+      account.** The code path exists: `check()` opens a real session rather than looking
+      for a credential file, and 401/403 maps to needs-reconnect
