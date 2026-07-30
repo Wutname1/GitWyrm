@@ -6,6 +6,7 @@ import { DeskChangesList } from '@/components/domain/spec-desk/DeskChangesList'
 import { DeskDetail } from '@/components/domain/spec-desk/DeskDetail'
 import { DeskActionRail } from '@/components/domain/spec-desk/DeskActionRail'
 import { cn } from '@/lib/utils'
+import { useSpecAi } from '@/hooks/useSpecAi'
 import { useOpenspecChanges, useOpenspecStatus, useSelectedChange } from '@/hooks/useOpenspec'
 import { listenForSpecSelection } from '@/lib/specSync'
 import { readWindowMode } from '@/lib/windowMode'
@@ -77,6 +78,7 @@ export function SpecDeskView() {
   const changesQuery = useOpenspecChanges(repoId)
   const { change } = useSelectedChange(repoId)
   const changes = changesQuery.data ?? []
+  const ai = useSpecAi()
 
   // Selections made in the main window have to move this window too.
   useEffect(() => listenForSpecSelection(), [])
@@ -133,6 +135,12 @@ export function SpecDeskView() {
         <span>Spec Desk</span>
         {change && <span>{change.id}</span>}
         <div className="flex-1" />
+        {/* Omitted entirely when no AI is set up: "AI: none" is noise about
+            something the user has not asked for. */}
+        {ai.state === 'ready' && <span>AI: {ai.providerShort} ready</span>}
+        {ai.state === 'reconnect' && (
+          <span className="text-[var(--gw-amber)]">AI: {ai.providerShort} needs reconnecting</span>
+        )}
         <span className="text-accent-text">tasks.md watched · saved instantly</span>
       </div>
     </div>

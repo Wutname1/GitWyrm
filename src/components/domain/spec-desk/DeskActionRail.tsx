@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Archive, CheckCircle2, ClipboardCopy, SquareTerminal, Code2 } from 'lucide-react'
+import {
+  Archive,
+  CheckCircle2,
+  ClipboardCopy,
+  Code2,
+  MessageCircleQuestion,
+  Play,
+  SquareTerminal,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import type { CliOutcome, SpecChange } from '@/lib/bindings'
@@ -7,6 +15,7 @@ import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { composeTaskHandoff, copyTaskHandoff } from '@/lib/specHandoff'
 import { nextTask, useOpenspecMutations } from '@/hooks/useOpenspec'
+import { useSpecAi } from '@/hooks/useSpecAi'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { describeError, log } from '@/lib/log'
 
@@ -104,9 +113,15 @@ export function DeskActionRail({
   repoId: string
   repoPath: string
 }) {
+  const ai = useSpecAi()
   const { validateChange, archiveChange } = useOpenspecMutations(repoId)
   const [result, setResult] = useState<CliOutcome | null>(null)
   const [confirmArchive, setConfirmArchive] = useState(false)
+  // Held here, not inside the <details>: the rail re-renders on every task tick
+  // and watcher refresh, and a details element rebuilt from JSX would snap shut
+  // under the user mid-read.
+  const [handoffOpen, setHandoffOpen] = useState(false)
+  const [inviteDismissed, setInviteDismissed] = useState(false)
 
   const task = nextTask(change)
   const allDone = !task && !change.progress.is_draft
@@ -197,41 +212,117 @@ export function DeskActionRail({
                 : 'Add tasks to tasks.md to get started'}
           </h3>
           <p className="mt-1.5 text-2xs leading-relaxed text-sub">
-            The handoff carries this change's proposal, its agreed behavior, and the one
-            task - so whatever you paste it into does not have to guess.
+            {ai.configured
+              ? `${ai.providerShort} reads this change's proposal and agreed behavior first, then does just this task. You watch every step and can stop anytime.`
+              : "The handoff carries this change's proposal, its agreed behavior, and the one task - so whatever you paste it into does not have to guess."}
           </p>
 
           <div className="mt-3 flex flex-col gap-2">
-            <RailButton
-              primary
-              icon={<ClipboardCopy size={12} strokeWidth={2.4} />}
-              label={allDone ? 'Copy review handoff' : 'Copy task handoff'}
-              onClick={() => void copyTaskHandoff(change, task)}
-            />
-            <RailButton
-              icon={<SquareTerminal size={12} strokeWidth={2.2} />}
-              label="Open in opencode"
-              onClick={() => void openInOpencode()}
-            />
-            <RailButton
-              icon={<Code2 size={12} strokeWidth={2.2} />}
-              label="Open in VS Code"
-              onClick={() => void openInVsCode()}
-            />
+            {ai.configured ? (
+              <>
+                {task && (
+                  <RailButton
+                    primary
+                    icon={<Play size={12} strokeWidth={2.6} />}
+                    label="Run this task with AI"
+                    onClick={() =>
+                      toast.info('Monitored AI runs arrive with the run-engine work.', {
+                        description:
+                          'Until then, copy the handoff below - it carries the same context.',
+                      })
+                    }
+                  />
+                )}
+                <RailButton
+                  icon={<MessageCircleQuestion size={12} strokeWidth={2.2} />}
+                  label="Ask about this change"
+                  onClick={() =>
+                    toast.info('Asking questions in-app arrives with the ask-mode work.')
+                  }
+                />
+              </>
+            ) : (
+              <>
+                <RailButton
+                  primary
+                  icon={<ClipboardCopy size={12} strokeWidth={2.4} />}
+                  label={allDone ? 'Copy review handoff' : 'Copy task handoff'}
+                  onClick={() => void copyTaskHandoff(change, task)}
+                />
+                <RailButton
+                  icon={<SquareTerminal size={12} strokeWidth={2.2} />}
+                  label="Open in opencode"
+                  onClick={() => void openInOpencode()}
+                />
+                <RailButton
+                  icon={<Code2 size={12} strokeWidth={2.2} />}
+                  label="Open in VS Code"
+                  onClick={() => void openInVsCode()}
+                />
+              </>
+            )}
           </div>
+
+          {ai.configured && (
+            <p className="mt-2.5 text-2xs leading-relaxed text-muted-foreground">
+              Runs with <span className="font-semibold text-sub">{ai.provider}</span>
+              {ai.model && <> · {ai.model}</>} · uses your {ai.providerShort} plan
+            </p>
+          )}
         </section>
 
-        <section className="mt-4">
-          <h3 className="mb-1.5 text-2xs font-bold tracking-[.1em] text-sub">
-            WHAT GETS COPIED
-          </h3>
-          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-background px-3 py-2.5 font-mono text-2xs leading-relaxed text-sub">
-            {handoff}
-          </pre>
-          <p className="mt-1.5 text-2xs text-muted-foreground">
-            {repoPath}
-          </p>
-        </section>
+        {/* With an AI configured this drops to a disclosure: still one click away
+            for anyone who lives in opencode, but no longer the first thing. With
+            no AI it is the whole workflow and stays open. */}
+        {ai.configured ? (
+          <details
+            className="group mt-4"
+            open={handoffOpen}
+            onToggle={(e) => setHandoffOpen((e.currentTarget as HTMLDetailsElement).open)}
+          >
+            <summary className="cursor-pointer list-none text-2xs font-bold tracking-[.1em] text-sub hover:text-foreground">
+              <span className="inline-block transition-transform group-open:rotate-90">▸</span>{' '}
+              PREFER YOUR OWN EDITOR?
+            </summary>
+            <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
+              Copy this task to opencode, VS Code, or any AI chat - the same handoff, your
+              tool.
+            </p>
+            <div className="mt-2 flex flex-col gap-2">
+              <RailButton
+                icon={<ClipboardCopy size={12} strokeWidth={2.4} />}
+                label={allDone ? 'Copy review handoff' : 'Copy task handoff'}
+                onClick={() => void copyTaskHandoff(change, task)}
+              />
+              <RailButton
+                icon={<SquareTerminal size={12} strokeWidth={2.2} />}
+                label="Open in opencode"
+                onClick={() => void openInOpencode()}
+              />
+              <RailButton
+                icon={<Code2 size={12} strokeWidth={2.2} />}
+                label="Open in VS Code"
+                onClick={() => void openInVsCode()}
+              />
+            </div>
+            <h3 className="mb-1.5 mt-3 text-2xs font-bold tracking-[.1em] text-sub">
+              WHAT THE AI READS
+            </h3>
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-background px-3 py-2.5 font-mono text-2xs leading-relaxed text-sub">
+              {handoff}
+            </pre>
+          </details>
+        ) : (
+          <section className="mt-4">
+            <h3 className="mb-1.5 text-2xs font-bold tracking-[.1em] text-sub">
+              WHAT GETS COPIED
+            </h3>
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-background px-3 py-2.5 font-mono text-2xs leading-relaxed text-sub">
+              {handoff}
+            </pre>
+            <p className="mt-1.5 text-2xs text-muted-foreground">{repoPath}</p>
+          </section>
+        )}
 
         <section className="mt-4">
           <h3 className="mb-1.5 text-2xs font-bold tracking-[.1em] text-sub">
@@ -245,6 +336,8 @@ export function DeskActionRail({
               pending={validateChange.isPending}
             />
             {result && <CheckResult outcome={result} />}
+            {/* Only shown after the check, so it reads as "what next" rather than
+                a warning about something the user has not done. */}
             <RailButton
               icon={<Archive size={12} strokeWidth={2.2} />}
               label="Archive this change…"
@@ -268,6 +361,51 @@ export function DeskActionRail({
             />
           </div>
         </section>
+
+        {/* One quiet invitation, at the bottom, dismissible. Never a modal, never
+            the rail's primary action: the copy workflow above is complete on its
+            own, and a nag would imply otherwise. */}
+        {ai.state === 'none' && !inviteDismissed && (
+          <section className="mt-4 rounded-lg border border-dashed border-border px-3.5 py-3">
+            <h3 className="text-2xs font-bold tracking-[.09em] text-sub">
+              RUN TASKS RIGHT HERE
+            </h3>
+            <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
+              Connect the AI you already use - Copilot, Anthropic, or a local model - and
+              GitWyrm can work on tasks in this window. You watch every step and can stop
+              it anytime.
+            </p>
+            <div className="mt-2.5 flex items-center gap-2">
+              <RailButton
+                label="Connect an AI"
+                onClick={() =>
+                  toast.info('Choose an AI in Settings → AI.', {
+                    description: 'It lives in the main GitWyrm window, under the gear icon.',
+                  })
+                }
+              />
+              <button
+                type="button"
+                onClick={() => setInviteDismissed(true)}
+                className="flex-none px-1 text-2xs text-muted-foreground hover:text-sub"
+              >
+                Not now
+              </button>
+            </div>
+          </section>
+        )}
+
+        {ai.state === 'reconnect' && (
+          <section className="mt-4 rounded-lg border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8 px-3.5 py-3">
+            <h3 className="text-2xs font-bold tracking-[.09em] text-[var(--gw-amber)]">
+              {ai.providerShort.toUpperCase()} NEEDS RECONNECTING
+            </h3>
+            <p className="mt-1.5 text-2xs leading-relaxed text-[var(--gw-amber)]/85">
+              It is signed in but has no models available, so a run could not start.
+              Reconnect it in Settings → AI. Copying handoffs works either way.
+            </p>
+          </section>
+        )}
       </div>
 
       <ConfirmDialog

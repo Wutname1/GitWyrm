@@ -1,4 +1,5 @@
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Sparkles } from 'lucide-react'
+import { useSpecAi } from '@/hooks/useSpecAi'
 import { nextStepHint, progressSentence } from '@/lib/specDisplay'
 import { ProgressRing, StatusPill } from '@/components/domain/spec-desk/SpecBits'
 import { nextTask, useOpenspecStatus, useSelectedChange } from '@/hooks/useOpenspec'
@@ -17,6 +18,7 @@ export function SpecCard() {
   const repo = useActiveRepo()
   const status = useOpenspecStatus(repo?.id ?? null)
   const { change } = useSelectedChange(repo?.id ?? null)
+  const ai = useSpecAi()
 
   if (!repo || !status.data?.present || !change) return null
 
@@ -54,13 +56,36 @@ export function SpecCard() {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => copyTaskHandoff(change, task)}
-        className="mt-2.5 h-7 w-full rounded-md bg-primary text-2xs font-semibold text-primary-foreground transition-[filter] hover:brightness-110"
-      >
-        {allDone ? 'Copy review handoff' : 'Copy next-task handoff'}
-      </button>
+      {/* With an AI configured, running is the primary move and copying drops to
+          secondary -- but never disappears. Opening the Desk is the one motion
+          that gets you to the run. */}
+      {ai.configured && task ? (
+        <>
+          <button
+            type="button"
+            onClick={() => void openSpecDesk(repo.id, change.id)}
+            className="mt-2.5 flex h-7 w-full items-center justify-center gap-1.5 rounded-md bg-primary text-2xs font-semibold text-primary-foreground transition-[filter] hover:brightness-110"
+          >
+            <Sparkles size={11} strokeWidth={2.4} />
+            Run next task with AI
+          </button>
+          <button
+            type="button"
+            onClick={() => copyTaskHandoff(change, task)}
+            className="mt-1.5 h-7 w-full rounded-md border border-border bg-panel2 text-2xs font-semibold text-foreground transition-colors hover:border-muted-foreground hover:bg-panel3"
+          >
+            Copy next-task handoff
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => copyTaskHandoff(change, task)}
+          className="mt-2.5 h-7 w-full rounded-md bg-primary text-2xs font-semibold text-primary-foreground transition-[filter] hover:brightness-110"
+        >
+          {allDone ? 'Copy review handoff' : 'Copy next-task handoff'}
+        </button>
+      )}
     </div>
   )
 }

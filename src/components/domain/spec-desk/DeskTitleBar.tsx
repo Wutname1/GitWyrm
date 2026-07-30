@@ -3,6 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ArrowLeftToLine, Pin } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { WindowControls } from '@/components/domain/WindowControls'
+import { AiProviderChip } from './AiProviderChip'
 import { TooltipButton } from '@/components/ui/tooltip'
 import { describeError, log } from '@/lib/log'
 
@@ -93,8 +94,11 @@ export function DeskTitleBar({ repoName }: { repoName: string }) {
         </TooltipButton>
       </div>
 
-      <div className="ml-auto flex h-full items-stretch">
-        <WindowControls />
+      <div className="ml-auto flex h-full items-center gap-2 pl-3">
+        <AiProviderChip />
+        <div className="flex h-full items-stretch">
+          <WindowControls />
+        </div>
       </div>
     </div>
   )

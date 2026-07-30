@@ -407,6 +407,20 @@ function SpecDeskRoot() {
   useRepoWatcher(readWindowMode().repoId)
 
   useEffect(() => {
+    // Load settings into this window's store. Each webview has its own store, so
+    // without this the Desk runs on defaults: no theme, no font, and -- the one
+    // that showed on screen -- aiProvider null, so its AI chip read "not set up"
+    // while the main window offered to run a task. Two windows disagreeing about
+    // the same state.
+    //
+    // Safe to call here: hydrate() only reads settings.json and is guarded by its
+    // own `hydrated` flag. It does not reopen tabs or touch the updater -- that
+    // is all in AppInner's launch restore, which the Desk deliberately skips.
+    void useWorkspaceStore
+      .getState()
+      .hydrate()
+      .catch((e) => log.error(`spec desk: could not load settings: ${String(e)}`))
+
     // Startup holds the splash until the app is ready; the Desk has no restore to
     // wait for, so lift it as soon as this window paints.
     hideSplash()

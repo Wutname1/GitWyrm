@@ -10,7 +10,7 @@
 - [x] 1.3 Handoff preview box showing exactly what gets copied
 - [x] 1.4 Per-task copy from task-row hover; spec-card copy in the main window uses
       the same composer
-- [ ] 1.5 Editable templates in Settings → Specs with {change} {task} {deltas} variables
+- [x] 1.5 Editable templates in Settings → Specs with {change} {task} {deltas} variables
 
 ## 2. Spec check
 
@@ -36,6 +36,6 @@
 
 ## 5. Verify
 
-- [ ] 5.1 Copied handoff pastes cleanly into opencode and produces a scoped task
-- [ ] 5.2 Archive a finished change; confirm merge into specs/ and archive count bump
+- [x] 5.1 Copied handoff pastes cleanly into opencode and produces a scoped task
+- [x] 5.2 Archive a finished change; confirm merge into specs/ and archive count bump
 - [ ] 5.3 All of the above with the OpenSpec CLI uninstalled (graceful outcomes)
