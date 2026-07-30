@@ -28,7 +28,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { useAiConfigured, useAiMutations } from "@/hooks/useAi";
+import { useAiMutations } from "@/hooks/useAi";
+import { useAiSelection } from "@/hooks/useAiSelection";
 import type { AiCreatedCommit } from "@/lib/bindings";
 import { copyToClipboard } from "@/lib/clipboard";
 import { describeError, log } from "@/lib/log";
@@ -121,14 +122,8 @@ export function GenerateCommitsDialog({
   canOffer,
 }: GenerateCommitsDialogProps) {
   const repo = useActiveRepo();
-  const configured = useAiConfigured();
   const ai = useAiMutations();
-  const aiProvider = useWorkspaceStore((state) => state.aiProvider);
-  const aiModel = useWorkspaceStore((state) => state.aiModel);
-  const aiReady =
-    aiProvider != null &&
-    aiModel != null &&
-    (configured.data ?? []).some((provider) => provider.id === aiProvider);
+  const { ready: aiReady, provider: aiProvider, model: aiModel } = useAiSelection();
 
   const [open, setOpen] = useState(false);
   // Snapshot on open: generation stages and commits the files, so the live

@@ -1,5 +1,5 @@
-import { useAiCatalog, useAiConfigured, useAiModels } from '@/hooks/useAi'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useAiCatalog, useAiModels } from '@/hooks/useAi'
+import { useAiSelection } from '@/hooks/useAiSelection'
 
 /**
  * Whether the Specs surfaces can run AI, and what to say about it.
@@ -33,14 +33,13 @@ function shorten(name: string): string {
 }
 
 export function useSpecAi(): SpecAi {
-  const providerId = useWorkspaceStore((s) => s.aiProvider)
-  const modelId = useWorkspaceStore((s) => s.aiModel)
+  // The provider/model/credentials rule is shared with commit generation via
+  // the resolver. Only the model-entitlement check below is specific to Specs,
+  // which offers to start a run and so must not offer one that cannot start.
+  const { provider: providerId, model: modelId, configured } = useAiSelection()
   const catalog = useAiCatalog()
-  const configuredList = useAiConfigured()
 
-  const hasCredentials =
-    providerId != null &&
-    (configuredList.data ?? []).some((c) => c.id === providerId && c.configured)
+  const hasCredentials = providerId != null && configured.includes(providerId)
 
   // Only ask for models once credentials exist -- the call is the verification
   // step, and there is nothing to verify without them.

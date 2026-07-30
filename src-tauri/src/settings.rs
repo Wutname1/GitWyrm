@@ -137,10 +137,25 @@ pub struct Settings {
   pub auto_update: bool,
   #[serde(default = "default_branch_switch_mode")]
   pub branch_switch_mode: BranchSwitchMode,
+  /// Provider every AI feature uses unless pointed elsewhere: commit messages,
+  /// commit generation, and Spec Desk runs.
+  ///
+  /// Kept as `ai_provider` rather than renamed to `ai_default_provider`: several
+  /// providers can be signed in at once (auth.json is keyed by provider id), and
+  /// this field has always meant "the one in use". Renaming would drop the
+  /// existing value on upgrade for no gain.
   #[serde(default)]
   pub ai_provider: Option<String>,
+  /// Model chosen for the default provider.
+  ///
+  /// Read on upgrade to seed `ai_models` for that provider, and still written so
+  /// a downgrade keeps working. `ai_models` is the source of truth.
   #[serde(default)]
   pub ai_model: Option<String>,
+  /// Model chosen per provider, keyed by provider id, so switching which
+  /// provider is default does not discard the other's model.
+  #[serde(default)]
+  pub ai_models: Option<std::collections::BTreeMap<String, String>>,
   /// Custom system instruction for commit-message generation. None uses the
   /// built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).
   #[serde(default)]
@@ -400,6 +415,7 @@ impl Default for Settings {
       branch_switch_mode: default_branch_switch_mode(),
       ai_provider: None,
       ai_model: None,
+      ai_models: None,
       ai_instruction: None,
       column_layout: None,
       left_panel_width: default_left_panel_width(),

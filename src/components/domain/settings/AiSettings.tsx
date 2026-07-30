@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
+import { AiDefaultProviders } from './AiDefaultProviders'
 import { ResetToDefaults } from './ResetToDefaults'
 import { settingRowClass, useRevealHighlight } from './SettingRow'
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,7 @@ import {
   useAiMutations,
   useCopilotSignIn,
 } from '@/hooks/useAi'
+import { nextDefaultProvider } from '@/hooks/useAiSelection'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 const selectClass =
@@ -38,6 +40,7 @@ export function AiSettings() {
   const aiProvider = useWorkspaceStore((s) => s.aiProvider)
   const aiModel = useWorkspaceStore((s) => s.aiModel)
   const setAiSelection = useWorkspaceStore((s) => s.setAiSelection)
+  const setDefaultAiProvider = useWorkspaceStore((s) => s.setDefaultAiProvider)
 
   const [keyDraft, setKeyDraft] = useState('')
   const copilot = useCopilotSignIn()
@@ -65,8 +68,13 @@ export function AiSettings() {
   const isConfigured = aiProvider != null && configuredIds.has(aiProvider)
 
   // Credentials without a selection reads as "not set up". When there's only
-  // one configured provider the intent is unambiguous, so adopt it. The model
-  // is left null for the repair effect below to fill from the live list.
+  // one configured provider the intent is unambiguous, so adopt it as the
+  // default. The model is left null for the repair effect below to fill from
+  // the live list.
+  //
+  // Deliberately does not fire for the second and later providers: once a
+  // default exists, setting up another must not silently move it out from
+  // under the user's commit messages.
   useEffect(() => {
     if (aiProvider != null || configured.data == null) return
     if (configured.data.length !== 1) return
@@ -135,6 +143,7 @@ export function AiSettings() {
 
   return (
     <div className="space-y-0">
+      <AiDefaultProviders providers={providers} configuredIds={configuredIds} />
       <div ref={providerReveal.ref} className={settingRowClass(providerReveal.flash)}>
         <div className="w-52 flex-none">
           <div className="text-xs font-semibold text-foreground">Provider</div>
@@ -217,6 +226,24 @@ export function AiSettings() {
                         aria-busy={m.removeProvider.isPending || undefined}
                         onClick={() =>
                           m.removeProvider.mutate(provider.id, {
+                            onSuccess: () => {
+                              // Removing the default would otherwise leave the app
+                              // pointed at a provider with no credentials, which
+                              // reads as "AI is broken" rather than "one went away".
+                              if (provider.id !== aiProvider) return
+                              const next = nextDefaultProvider(
+                                [...configuredIds],
+                                provider.id
+                              )
+                              if (next) {
+                                setDefaultAiProvider(next)
+                                const name =
+                                  providers.find((p) => p.id === next)?.name ?? next
+                                toast.success(`${name} is now the default`)
+                              } else {
+                                setAiSelection(null, null)
+                              }
+                            },
                             onError: (e) => toast.error(String(e)),
                           })
                         }

@@ -32,7 +32,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useAiConfigured, useAiMutations } from "@/hooks/useAi";
+import { useAiMutations } from "@/hooks/useAi";
+import { useAiSelection } from "@/hooks/useAiSelection";
 import { useSpecLink } from "@/hooks/useSpecLink";
 import {
   useBranches,
@@ -68,17 +69,13 @@ export function CommitMessageForm() {
   const headDetail = useCommitDetail(repo?.id ?? null, amend ? headSha : null);
 
   const ai = useAiMutations();
-  const configured = useAiConfigured();
-  const aiProvider = useWorkspaceStore((s) => s.aiProvider);
-  const aiModel = useWorkspaceStore((s) => s.aiModel);
   const showSettings = useUiStore((s) => s.showSettings);
   const openModal = useUiStore((s) => s.openModal);
   const commitButtonMode = useWorkspaceStore((s) => s.commitButtonMode);
   const setCommitButtonMode = useWorkspaceStore((s) => s.setCommitButtonMode);
-  const aiReady =
-    aiProvider != null &&
-    aiModel != null &&
-    (configured.data ?? []).some((c) => c.id === aiProvider);
+  // One resolver, shared with the commit-generation dialog and the Spec Desk, so
+  // they cannot disagree about which AI is in use.
+  const { ready: aiReady, provider: aiProvider, model: aiModel } = useAiSelection();
 
   const stagedCount = status.data?.staged.length ?? 0;
   const currentBranch =

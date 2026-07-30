@@ -2763,7 +2763,29 @@ gpg_executable?: string | null; update_channel?: UpdateChannel;
  * Install updates automatically on the launch splash instead of waiting for
  * the user to press the update button. On by default.
  */
-auto_update?: boolean; branch_switch_mode?: BranchSwitchMode; ai_provider?: string | null; ai_model?: string | null; 
+auto_update?: boolean; branch_switch_mode?: BranchSwitchMode; 
+/**
+ * Provider every AI feature uses unless pointed elsewhere: commit messages,
+ * commit generation, and Spec Desk runs.
+ * 
+ * Kept as `ai_provider` rather than renamed to `ai_default_provider`: several
+ * providers can be signed in at once (auth.json is keyed by provider id), and
+ * this field has always meant "the one in use". Renaming would drop the
+ * existing value on upgrade for no gain.
+ */
+ai_provider?: string | null; 
+/**
+ * Model chosen for the default provider.
+ * 
+ * Read on upgrade to seed `ai_models` for that provider, and still written so
+ * a downgrade keeps working. `ai_models` is the source of truth.
+ */
+ai_model?: string | null; 
+/**
+ * Model chosen per provider, keyed by provider id, so switching which
+ * provider is default does not discard the other's model.
+ */
+ai_models?: Partial<{ [key in string]: string }> | null; 
 /**
  * Custom system instruction for commit-message generation. None uses the
  * built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).

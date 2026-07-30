@@ -477,10 +477,26 @@ interface WorkspaceState {
   autoUpdate: boolean;
   /** What to do with uncommitted changes when switching branches (persisted). */
   branchSwitchMode: BranchSwitchMode;
-  /** AI provider id used for commit message generation (persisted). */
+  /**
+   * The default AI provider: what every AI feature uses -- commit messages,
+   * commit generation, and Spec Desk runs (persisted).
+   *
+   * Several providers can be configured at once (credentials are stored per
+   * provider), so this names which one is in use rather than which one exists.
+   * Read it through `resolveAiSelection` rather than directly, so no feature
+   * decides for itself what "configured" means.
+   */
   aiProvider: string | null;
-  /** Model id within the selected AI provider (persisted). */
+  /** Model for the default provider. Mirrors `aiModels[aiProvider]` (persisted). */
   aiModel: string | null;
+  /**
+   * Model chosen per provider, keyed by provider id (persisted).
+   *
+   * Kept per provider so switching the default and switching back does not lose
+   * the model each was set to -- with one global model, changing provider left a
+   * model id that belonged to a different provider's catalog.
+   */
+  aiModels: Record<string, string>;
   /** Custom commit-generation instruction; null uses the built-in default (persisted). */
   aiInstruction: string | null;
   /** Commit-graph column order (persisted). */
@@ -617,6 +633,10 @@ interface WorkspaceState {
   setAutoUpdate: (enabled: boolean) => void;
   setBranchSwitchMode: (mode: BranchSwitchMode) => void;
   setAiSelection: (provider: string | null, model: string | null) => void;
+  /** Make a provider the default, restoring the model it was last set to. */
+  setDefaultAiProvider: (provider: string | null) => void;
+  /** Set one provider's model without making it the default. */
+  setAiModelFor: (provider: string, model: string | null) => void;
   setAiInstruction: (instruction: string | null) => void;
   setCommitButtonMode: (mode: CommitButtonMode) => void;
   setDefaultEditor: (editor: EditorKind) => void;
@@ -786,7 +806,9 @@ function toSettings(s: WorkspaceState): Settings {
     auto_update: s.autoUpdate,
     branch_switch_mode: s.branchSwitchMode,
     ai_provider: s.aiProvider,
+    // Still written so a downgrade keeps working; ai_models is the source of truth.
     ai_model: s.aiModel,
+    ai_models: s.aiModels,
     ai_instruction: s.aiInstruction,
     column_layout: {
       order: s.columnOrder,
@@ -855,6 +877,32 @@ function toSettings(s: WorkspaceState): Settings {
 
 /** Column ids known to this build; anything else in persisted layout is dropped. */
 const KNOWN_COLUMNS = new Set<ColumnId>(DEFAULT_COLUMN_ORDER);
+
+/**
+ * Builds the per-provider model map from settings.
+ *
+ * Two jobs. It drops empty entries -- the persisted map's values are optional,
+ * and a provider mapped to nothing is worse than a provider mapped to nothing at
+ * all. And it seeds the map from the older single `ai_provider`/`ai_model` pair,
+ * so an install from before per-provider models keeps its choice without the user
+ * reconfiguring. A stored map entry wins over the seed where both exist.
+ */
+function normalizeAiModels(
+  stored: Partial<Record<string, string>> | null | undefined,
+  legacyProvider: string | null | undefined,
+  legacyModel: string | null | undefined,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (legacyProvider && legacyModel) {
+    result[legacyProvider] = legacyModel;
+  }
+  for (const [provider, model] of Object.entries(stored ?? {})) {
+    if (model) {
+      result[provider] = model;
+    }
+  }
+  return result;
+}
 
 /**
  * Sanitizes a persisted order: keeps only known ids, drops duplicates, and
@@ -1138,6 +1186,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   branchSwitchMode: "auto_stash",
   aiProvider: null,
   aiModel: null,
+  aiModels: {},
   aiInstruction: null,
   columnOrder: DEFAULT_COLUMN_ORDER,
   hiddenColumns: [],
@@ -1359,7 +1408,52 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     schedulePersist();
   },
   setAiSelection: (provider, model) => {
-    set({ aiProvider: provider, aiModel: model });
+    // Record the model against its provider as well as as the current one, so
+    // the choice survives a switch away and back.
+    set((s) => ({
+      aiProvider: provider,
+      aiModel: model,
+      aiModels:
+        provider != null && model != null
+          ? { ...s.aiModels, [provider]: model }
+          : s.aiModels,
+    }));
+    schedulePersist();
+  },
+  /**
+   * Make a provider the default, restoring whatever model it was last set to.
+   *
+   * Separate from `setAiSelection` because the caller here is choosing a
+   * provider, not a provider-and-model pair: the model comes from what that
+   * provider already had.
+   */
+  setDefaultAiProvider: (provider) => {
+    set((s) => ({
+      aiProvider: provider,
+      aiModel: provider != null ? (s.aiModels[provider] ?? null) : null,
+    }));
+    schedulePersist();
+  },
+  /**
+   * Change one provider's model, leaving which provider is default alone.
+   *
+   * Editing a non-default provider's model must not quietly promote it -- the
+   * user is preparing that provider, not switching to it. `aiModel` only moves
+   * when the row being edited is already the default.
+   */
+  setAiModelFor: (provider, model) => {
+    set((s) => {
+      const aiModels = { ...s.aiModels };
+      if (model != null) {
+        aiModels[provider] = model;
+      } else {
+        delete aiModels[provider];
+      }
+      return {
+        aiModels,
+        aiModel: s.aiProvider === provider ? model : s.aiModel,
+      };
+    });
     schedulePersist();
   },
   setAiInstruction: (instruction) => {
@@ -2142,6 +2236,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         branchSwitchMode: settings.branch_switch_mode ?? "auto_stash",
         aiProvider: settings.ai_provider ?? null,
         aiModel: settings.ai_model ?? null,
+        // Upgrade path: an install from before per-provider models has only the
+        // single ai_provider/ai_model pair. Seed the map from it so the user's
+        // existing choice survives and nobody reconfigures. Stored values win
+        // where both exist.
+        aiModels: normalizeAiModels(
+          settings.ai_models,
+          settings.ai_provider,
+          settings.ai_model,
+        ),
         aiInstruction: settings.ai_instruction ?? null,
         columnOrder: normalizeOrder(settings.column_layout?.order),
         hiddenColumns: normalizeHidden(settings.column_layout?.hidden),
