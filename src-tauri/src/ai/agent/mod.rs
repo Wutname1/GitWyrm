@@ -10,6 +10,7 @@ pub mod api_agent;
 pub mod cli_agent;
 pub mod copilot_cli;
 pub mod select;
+pub mod tools;
 pub mod transport;
 
 // Re-exported so callers outside this module use `ai::agent::X` rather than

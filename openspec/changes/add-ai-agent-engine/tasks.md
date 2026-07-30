@@ -52,8 +52,13 @@
 
 - [ ] 3.1 Plan / act / observe loop that ends when the task's done-means checks pass, the
       turn budget is spent, or the user stops
-- [ ] 3.2 Tools, and only these: read file, edit file, list directory, run a project check.
-      Every path resolved inside the repository and refused outside it
+- [x] 3.2 Tools, and only these: read file, edit file, list directory, run a project check.
+      Every path resolved inside the repository and refused outside it. Lexical check
+      first (catches traversal on paths that do not exist yet), then a canonicalize
+      re-check for existing targets, which is the only thing that catches a symlink
+      pointing out of the repo. `.git` refused case-insensitively. NOTE: the symlink
+      case cannot be exercised on an unelevated Windows machine and prints a notice
+      instead of asserting - needs verifying where symlinks can be created
 - [ ] 3.3 Emit the console's typed events as the loop progresses, each with its
       one-sentence plain-language summary
 - [ ] 3.4 Stream a turn's output where the transport allows it, so the console has
