@@ -81,6 +81,11 @@ pub async fn open_spec_desk(
     })
     .collect();
   let url = format!("index.html?window=spec-desk&repo={repo_id}&path={encoded_path}");
+  // `inner_size` here is the FIRST-OPEN default only. The window-state plugin
+  // restores a saved size and position after the window is created, so a Desk
+  // the user has already arranged reopens where they left it rather than
+  // snapping back to these numbers. Keeping the default is what makes the very
+  // first open sensible.
   WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
     .title(format!("Spec Desk - {repo_name}"))
     .inner_size(940.0, 760.0)

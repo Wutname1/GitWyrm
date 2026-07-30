@@ -392,6 +392,28 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_process::init())
     .plugin(tauri_plugin_updater::Builder::new().build())
+    // Remember where each window was, per label -- so the main window and every
+    // repository's Spec Desk keep their own placement.
+    //
+    // SIZE | POSITION | MAXIMIZED only, deliberately:
+    // - DECORATIONS would restore a saved value over `decorations(false)`, and
+    //   GitWyrm draws its own titlebars app-wide.
+    // - VISIBLE could reopen a window hidden, leaving the app running with
+    //   nothing on screen and no way back.
+    // - FULLSCREEN is not something GitWyrm puts a window into.
+    //
+    // The plugin only restores a position that a currently-attached monitor
+    // intersects, and otherwise lets the OS place the window, so a Desk saved on
+    // a since-unplugged screen still comes back visible.
+    .plugin(
+      tauri_plugin_window_state::Builder::default()
+        .with_state_flags(
+          tauri_plugin_window_state::StateFlags::SIZE
+            | tauri_plugin_window_state::StateFlags::POSITION
+            | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+        )
+        .build(),
+    )
     .setup(|app| {
       // `tauri_plugin_log` normally claims the global `log` logger for itself,
       // which left `log::error!` writing to gitwyrm.log and nothing else --
