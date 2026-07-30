@@ -109,11 +109,20 @@ type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, AgentError>>
 
 /// What a client sends to prove it can be talked to.
 ///
-/// Measured against Copilot CLI 1.0.76: `initialize` is answered even when
-/// nobody is signed in, but `session/new` produces *no reply at all* -- the
-/// process simply exits 0. So "the handshake worked" is not evidence of a
-/// usable agent, and the absence of a session response has to be read as a
-/// sign-in problem rather than a crash.
+/// Offered when the CLI reports an auth problem by name.
+///
+/// Deliberately NOT used for a silent stream close. An earlier version of this
+/// file claimed `session/new` goes unanswered when nobody is signed in, and
+/// mapped any failure there to "sign in". That was wrong, and the measurement
+/// behind it was a broken test rather than the CLI: the probe closed stdin
+/// straight after writing, and a stdio-mode ACP server shuts down when its
+/// input stream closes -- so the server was being killed mid-request. Holding
+/// the pipe open returns a real `sessionId` on the same signed-in account.
+///
+/// The lesson worth keeping: a closed stream means the child went away, which
+/// can happen for many reasons. Only the CLI saying so is evidence of an auth
+/// problem, and sending someone to re-run `copilot login` when their sign-in
+/// was fine wastes their time on the wrong fix.
 const SIGN_IN_HINT: &str =
   "Copilot needs you to sign in first. Run `copilot login` in a terminal, then try again.";
 
@@ -218,24 +227,20 @@ impl AcpConnection {
       init.get("agentInfo").and_then(|v| v.get("name")).and_then(Value::as_str).unwrap_or("?")
     );
 
-    // Measured against 1.0.76: a signed-out CLI answers `initialize` happily
-    // and then closes the pipe on `session/new` without a reply. Both the
-    // "stream ended" error and a reply with no sessionId therefore mean the
-    // same thing to a user -- sign in -- so neither is reported as a fault.
-    let session = match self
+    // Errors are passed through as they are. `rpc_error` already promotes the
+    // CLI's own auth messages to NeedsReconnect; anything else really is a
+    // failure, and calling it a sign-in problem would send the user to fix
+    // something that is not broken.
+    let session = self
       .request(
         "session/new",
         json!({ "cwd": cwd.to_string_lossy(), "mcpServers": [] }),
       )
-      .await
-    {
-      Ok(v) => v,
-      Err(AgentError::Failed { .. }) => {
-        return Err(AgentError::NeedsReconnect { detail: SIGN_IN_HINT.into() })
-      }
-      Err(other) => return Err(other),
-    };
+      .await?;
 
+    // A reply that arrived but carries no session is the one case where the
+    // CLI is up and talking yet cannot open a session -- the shape a
+    // credential problem takes once the transport itself is fine.
     let id = session
       .get("sessionId")
       .and_then(Value::as_str)

@@ -27,6 +27,10 @@ pub use git::ssh::rewrite_config as ssh_config_rewrite;
 /// Exposed for the openspec_real_tree integration test, which parses this
 /// repository's own plan folder -- the only fixture guaranteed to match how the
 /// OpenSpec CLI formats a change.
+/// Exposed for the copilot_acp integration test, which drives the real CLI
+/// through this client -- the only check that the transport works end to end.
+pub use ai::agent::acp as agent_acp;
+pub use ai::agent::copilot_cli as agent_copilot_cli;
 pub use openspec::openspec_dir;
 pub use openspec::parse as openspec_parse;
 pub use openspec::write as openspec_write;

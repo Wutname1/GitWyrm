@@ -106,12 +106,11 @@ listed as needing a human, with the reason.
       routing requests through subscription credentials, and that is the one provider
       where enforcement has been observed. Running this task as written would build the
       thing 2.5 exists to prevent. The real version string is kept as a parser fixture
-- [~] 5.2 The same task against the Copilot CLI. **Partly done.** Copilot CLI 1.0.76 is
-      now installed, and the transport was verified against it: the `initialize`
-      handshake succeeds (protocolVersion 1 matches, agentInfo.name is "Copilot"), and
-      the `--deny-tool=shell --deny-tool=url` flags are accepted. The version floor is
-      now measured (1.0.0, set no higher than what was confirmed working). A full task
-      run still needs a signed-in Copilot account - device-flow login is interactive
+- [x] 5.2 The same task against the Copilot CLI. Copilot CLI 1.0.76 installed and signed
+      in (free tier). `tests/copilot_acp.rs` drives GitWyrm's own ACP client against it
+      and opens a real session with shell and network access denied. The test skips
+      itself when the CLI is absent or signed out, so it is safe elsewhere. Version floor
+      measured at 1.0.0
 - [ ] 5.3 The same task against a direct provider API with a key, proving the interface
       is not CLI-shaped. **Needs a key.** The dialect shapes are unit-tested against
       recorded request/response bodies, which is not the same as a live call

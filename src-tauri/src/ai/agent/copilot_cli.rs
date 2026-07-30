@@ -103,23 +103,43 @@ fn probe() -> CopilotCli {
   CopilotCli { state }
 }
 
+/// Names the CLI can have, in the order worth trying.
+///
+/// `npm install -g @github/copilot` -- the install method GitHub documents
+/// first -- writes `copilot.cmd` and `copilot.ps1` on Windows and no `.exe` at
+/// all. Looking only for `copilot.exe` reported "not installed" on a machine
+/// where the CLI was on PATH and working, which would have been every Windows
+/// user who followed the npm instructions.
+///
+/// `.cmd` before the bare name because a bare `copilot` on Windows is the
+/// shell script for Git Bash, which `Command::new` cannot execute directly.
+fn candidate_names() -> &'static [&'static str] {
+  if cfg!(windows) {
+    &["copilot.exe", "copilot.cmd", "copilot.bat", "copilot"]
+  } else {
+    &["copilot"]
+  }
+}
+
 /// PATH first, then the places the installers put it.
 fn find_executable() -> Option<PathBuf> {
-  let exe = if cfg!(windows) { "copilot.exe" } else { "copilot" };
-
   if let Some(paths) = std::env::var_os("PATH") {
     for dir in std::env::split_paths(&paths) {
-      let candidate = dir.join(exe);
-      if candidate.is_file() {
-        return Some(candidate);
+      for name in candidate_names() {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+          return Some(candidate);
+        }
       }
     }
   }
 
   for dir in known_locations() {
-    let candidate = dir.join(exe);
-    if candidate.is_file() {
-      return Some(candidate);
+    for name in candidate_names() {
+      let candidate = dir.join(name);
+      if candidate.is_file() {
+        return Some(candidate);
+      }
     }
   }
 
@@ -233,6 +253,26 @@ mod tests {
   #[test]
   fn returns_none_when_there_is_no_version() {
     assert_eq!(parse_version("not installed"), None);
+  }
+
+  #[test]
+  fn windows_looks_for_the_npm_shim_not_just_an_exe() {
+    // `npm install -g @github/copilot` writes copilot.cmd and no .exe. Looking
+    // only for copilot.exe reported "not installed" on a machine where the CLI
+    // was on PATH and working -- which would have been every Windows user who
+    // followed GitHub's own first-listed install instructions.
+    let names = candidate_names();
+    if cfg!(windows) {
+      assert!(names.contains(&"copilot.cmd"), "the npm shim must be searched for");
+      assert!(names.contains(&"copilot.exe"));
+      assert!(
+        names.iter().position(|n| *n == "copilot.cmd")
+          < names.iter().position(|n| *n == "copilot"),
+        "the .cmd shim must be preferred over the bare shell script"
+      );
+    } else {
+      assert_eq!(names, &["copilot"]);
+    }
   }
 
   #[test]
