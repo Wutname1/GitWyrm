@@ -6,7 +6,14 @@ import { AiProviderChip } from "./AiProviderChip";
  * The Desk's own titlebar. Window decorations are off app-wide, so this draws
  * the drag region and the window buttons, matching the main window's chrome.
  */
-export function DeskTitleBar({ repoName }: { repoName: string }) {
+export function DeskTitleBar({
+  repoName,
+  repoId,
+}: {
+  repoName: string;
+  /** For the chip's run state: turning the AI off must not hide a live run. */
+  repoId: string | null;
+}) {
   useEffect(() => {
     // Nothing to set up; kept as the seam for future titlebar state.
   }, []);
@@ -23,7 +30,7 @@ export function DeskTitleBar({ repoName }: { repoName: string }) {
       </span>
 
       <div className="ml-auto flex h-full items-center gap-2 pl-3">
-        <AiProviderChip />
+        <AiProviderChip repoId={repoId} />
         <div className="flex h-full items-stretch">
           <WindowControls />
         </div>

@@ -8,6 +8,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { WorkspaceLayout } from '@/layouts/WorkspaceLayout'
 import { SpecDeskView } from '@/views/SpecDeskView'
 import { readWindowMode } from '@/lib/windowMode'
+import { listenForSettingsRequests } from '@/lib/openAiSettings'
 import { listenForSpecSelection } from '@/lib/specSync'
 import { OnboardingModal } from '@/components/modals/OnboardingModal'
 import { TutorialHost } from '@/components/tutorial/TutorialHost'
@@ -369,6 +370,10 @@ function AppInner() {
   // and spec card too -- the two windows render the same state.
   useEffect(() => listenForSpecSelection(), [])
 
+  // The Desk has no settings view, so its "AI settings" entries ask this window
+  // to open the panel while bringing itself forward.
+  useEffect(() => listenForSettingsRequests(), [])
+
   return (
     <>
       <WorkspaceLayout />
@@ -444,8 +449,11 @@ function SpecDeskRoot() {
     <>
       <SpecDeskView />
       {/* The Desk mounts no other modals, but "New change" is reachable from
-          its header, so this one has to exist in this window too. */}
-      <NewChangeModal />
+          its header, so this one has to exist in this window too. It needs the
+          repo id passed in: this window has no active repo in its store, so the
+          modal's usual lookup would come back empty. The id from the URL is the
+          one the backend already resolved before opening this window. */}
+      <NewChangeModal repoId={readWindowMode().repoId ?? undefined} />
       <Toaster position="bottom-center" />
     </>
   )

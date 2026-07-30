@@ -33,13 +33,21 @@ function previewId(raw: string): string {
   return out.join('').replace(/-+$/, '')
 }
 
-export function NewChangeModal() {
+/**
+ * @param repoId Repository to create the change in. Omitted in the main window,
+ * which reads the active repo from the store. The Spec Desk must pass its own:
+ * that window never runs launch restore, so its store has no open repos and no
+ * active one -- `useActiveRepo()` there is always null, and creating a change
+ * would reach the backend with no repository at all.
+ */
+export function NewChangeModal({ repoId }: { repoId?: string }) {
   const open = useUiStore((s) => s.activeModal === 'newChange')
   const closeModal = useUiStore((s) => s.closeModal)
 
-  const repo = useActiveRepo()
-  const changes = useOpenspecChanges(repo?.id ?? null)
-  const { scaffoldChange } = useOpenspecMutations(repo?.id ?? null)
+  const activeRepo = useActiveRepo()
+  const targetRepoId = repoId ?? activeRepo?.id ?? null
+  const changes = useOpenspecChanges(targetRepoId)
+  const { scaffoldChange } = useOpenspecMutations(targetRepoId)
 
   const [title, setTitle] = useState('')
   const [why, setWhy] = useState('')
@@ -66,7 +74,7 @@ export function NewChangeModal() {
           ? `There is already a change named ${id}.`
           : null
 
-  const canCreate = id !== '' && !error && !scaffoldChange.isPending
+  const canCreate = targetRepoId != null && id !== '' && !error && !scaffoldChange.isPending
 
   const create = () => {
     if (!canCreate) return

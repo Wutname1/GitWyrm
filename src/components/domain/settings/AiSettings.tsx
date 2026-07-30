@@ -143,6 +143,7 @@ export function AiSettings() {
 
   return (
     <div className="space-y-0">
+      <AiUseToggle anyConfigured={configuredIds.size > 0} />
       <AiDefaultProviders providers={providers} configuredIds={configuredIds} />
       <div ref={providerReveal.ref} className={settingRowClass(providerReveal.flash)}>
         <div className="w-52 flex-none">
@@ -442,6 +443,46 @@ function InstructionSetting() {
             </span>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The on/off switch for every AI feature.
+ *
+ * The same setting the Desk chip writes, so the two can never disagree. Only
+ * shown once something is configured: with no provider there is nothing to
+ * switch, and a toggle above an empty provider list would suggest otherwise.
+ *
+ * Off deliberately keeps every credential. Removing a provider is the row below;
+ * this is for "not right now".
+ */
+function AiUseToggle({ anyConfigured }: { anyConfigured: boolean }) {
+  const aiEnabled = useWorkspaceStore((s) => s.aiEnabled)
+  const setAiEnabled = useWorkspaceStore((s) => s.setAiEnabled)
+
+  if (!anyConfigured) return null
+
+  return (
+    <div className="flex items-start gap-4 border-b border-border px-1 py-3">
+      <div className="w-52 flex-none">
+        <div className="text-xs font-semibold text-foreground">Use AI</div>
+        <div className="mt-0.5 text-2xs text-muted-foreground">
+          Turn AI features off without signing out. Copying handoffs keeps working either
+          way.
+        </div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+          <input
+            type="checkbox"
+            checked={aiEnabled}
+            onChange={(e) => setAiEnabled(e.target.checked)}
+            className="size-3.5 accent-[var(--gw-accent)]"
+          />
+          Let GitWyrm use AI
+        </label>
       </div>
     </div>
   )

@@ -497,6 +497,15 @@ interface WorkspaceState {
    * model id that belonged to a different provider's catalog.
    */
   aiModels: Record<string, string>;
+  /**
+   * Whether AI features are switched on (persisted).
+   *
+   * Off is not the same as having no provider: it means "set up, but not right
+   * now". Nothing about credentials changes, so turning it back on restores the
+   * provider that was in use. Read it through `useAiSelection` rather than
+   * directly -- every feature must see one answer.
+   */
+  aiEnabled: boolean;
   /** Custom commit-generation instruction; null uses the built-in default (persisted). */
   aiInstruction: string | null;
   /**
@@ -642,6 +651,8 @@ interface WorkspaceState {
   setDefaultAiProvider: (provider: string | null) => void;
   /** Set one provider's model without making it the default. */
   setAiModelFor: (provider: string, model: string | null) => void;
+  /** Switch AI features on or off, leaving every credential alone. */
+  setAiEnabled: (enabled: boolean) => void;
   setAiInstruction: (instruction: string | null) => void;
   setOpenspecArchiveCommitTemplate: (template: string | null) => void;
   setCommitButtonMode: (mode: CommitButtonMode) => void;
@@ -815,6 +826,7 @@ function toSettings(s: WorkspaceState): Settings {
     // Still written so a downgrade keeps working; ai_models is the source of truth.
     ai_model: s.aiModel,
     ai_models: s.aiModels,
+    ai_enabled: s.aiEnabled,
     ai_instruction: s.aiInstruction,
     openspec_archive_commit_template: s.openspecArchiveCommitTemplate,
     column_layout: {
@@ -1196,6 +1208,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   aiProvider: null,
   aiModel: null,
   aiModels: {},
+  aiEnabled: true,
   aiInstruction: null,
   openspecArchiveCommitTemplate: null,
   columnOrder: DEFAULT_COLUMN_ORDER,
@@ -1464,6 +1477,17 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         aiModel: s.aiProvider === provider ? model : s.aiModel,
       };
     });
+    schedulePersist();
+  },
+  /**
+   * Switch AI features on or off.
+   *
+   * Deliberately touches nothing but this flag: the provider, its model, and
+   * every credential stay exactly as they were, so turning it back on lands on
+   * the same AI the user last used rather than an empty picker.
+   */
+  setAiEnabled: (enabled) => {
+    set({ aiEnabled: enabled });
     schedulePersist();
   },
   setAiInstruction: (instruction) => {
@@ -2259,6 +2283,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.ai_provider,
           settings.ai_model,
         ),
+        // Absent means on: a settings file written before this flag existed
+        // belongs to a user whose AI was working, and must keep working.
+        aiEnabled: settings.ai_enabled !== false,
         aiInstruction: settings.ai_instruction ?? null,
         openspecArchiveCommitTemplate: settings.openspec_archive_commit_template ?? null,
         columnOrder: normalizeOrder(settings.column_layout?.order),

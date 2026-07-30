@@ -156,6 +156,14 @@ pub struct Settings {
   /// provider is default does not discard the other's model.
   #[serde(default)]
   pub ai_models: Option<std::collections::BTreeMap<String, String>>,
+  /// Whether AI features are switched on.
+  ///
+  /// Distinct from having no provider: off means "configured, but not right
+  /// now", and never touches credentials, so turning it back on needs no
+  /// sign-in. Defaults to on so an existing install is unaffected by the
+  /// field appearing.
+  #[serde(default = "default_ai_enabled")]
+  pub ai_enabled: bool,
   /// Custom system instruction for commit-message generation. None uses the
   /// built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).
   #[serde(default)]
@@ -361,6 +369,10 @@ fn default_auto_update() -> bool {
   true
 }
 
+fn default_ai_enabled() -> bool {
+  true
+}
+
 fn default_show_repo_icons() -> bool {
   true
 }
@@ -421,6 +433,7 @@ impl Default for Settings {
       ai_provider: None,
       ai_model: None,
       ai_models: None,
+      ai_enabled: default_ai_enabled(),
       ai_instruction: None,
       openspec_archive_commit_template: None,
       column_layout: None,
@@ -749,6 +762,24 @@ mod tests {
     // Settings written before the editor picker existed fall back to VS Code
     // on the frontend.
     assert!(settings.default_editor.is_none());
+    // The AI switch defaults to on, so adding it does not silently turn AI off
+    // for someone who already had a provider set up.
+    assert!(settings.ai_enabled);
+  }
+
+  /// Turning the AI off has to survive a restart, and turning it back on has to
+  /// stick too -- a switch that forgets is worse than no switch.
+  #[test]
+  fn the_ai_switch_round_trips_through_settings_json() {
+    for enabled in [false, true] {
+      let settings = Settings {
+        ai_enabled: enabled,
+        ..Default::default()
+      };
+      let json = serde_json::to_string(&settings).expect("serialize");
+      let back: Settings = serde_json::from_str(&json).expect("deserialize");
+      assert_eq!(back.ai_enabled, enabled, "ai_enabled should survive a round trip");
+    }
   }
 
   #[test]

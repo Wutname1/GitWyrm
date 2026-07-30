@@ -87,7 +87,7 @@ export function SpecDeskView() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-foreground">
-      <DeskTitleBar repoName={repoName} />
+      <DeskTitleBar repoName={repoName} repoId={repoId} />
 
       {error ? (
         <DeskMessage title="This Spec Desk has nothing to show" detail={error} />

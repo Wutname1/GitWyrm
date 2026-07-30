@@ -22,21 +22,33 @@ export interface AiSelection {
   model: string | null
   /** Provider ids with credentials stored, in id order. */
   configured: string[]
+  /**
+   * Whether the user has AI switched on.
+   *
+   * Separate from `ready` so the chip and the settings view can say "off" while
+   * every feature gate sees the same not-ready as it would with no provider at
+   * all. Only surfaces that talk *about* the AI need this; anything deciding
+   * whether it can make a request wants `ready`.
+   */
+  enabled: boolean
 }
 
 export function useAiSelection(): AiSelection {
   const provider = useWorkspaceStore((s) => s.aiProvider)
   const model = useWorkspaceStore((s) => s.aiModel)
+  const enabled = useWorkspaceStore((s) => s.aiEnabled)
   const configuredQuery = useAiConfigured()
 
   const configured = (configuredQuery.data ?? [])
     .filter((c) => c.configured)
     .map((c) => c.id)
 
+  // Switched off is not-ready by exactly the same route as unconfigured, so no
+  // feature needs its own opinion about the difference.
   const ready =
-    provider != null && model != null && configured.includes(provider)
+    enabled && provider != null && model != null && configured.includes(provider)
 
-  return { ready, provider, model, configured }
+  return { ready, provider, model, configured, enabled }
 }
 
 /**
