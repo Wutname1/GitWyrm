@@ -24,4 +24,5 @@ makes an embedded agent acceptable in a git client.
 - Affected specs: `ai-runs`
 - Affected code: run driver completion path, Finished/committed cards, main-window
   spec card live states, History writer
-- Depends on: `add-ai-task-runs`, `add-spec-commit-links`
+- Depends on: `add-ai-task-runs` (the console), `add-ai-agent-engine` (the engine
+  whose steps this completes), `add-spec-commit-links`

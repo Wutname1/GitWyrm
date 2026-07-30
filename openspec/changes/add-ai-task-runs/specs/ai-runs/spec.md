@@ -36,17 +36,24 @@ run is never modal. The tab's header SHALL always show the run's own change and 
 - WHEN the user selected a different change and returns to the run tab
 - THEN the Desk header shows the run's change, matching the console beneath it
 
-### Requirement: Guardrails stated and enforced
+### Requirement: Guardrails are stated where the run happens
 
-Every run SHALL state and enforce: works only on the linked branch (or a new work
-branch when none is linked), one commit per task, never pushes, stoppable anytime. The
-stated guardrails SHALL match actual behavior exactly - a run must never do something
-its own header says it will not.
+Every run SHALL state its guardrails in the console: works only on the linked branch (or
+a new work branch when none is linked), one commit per task, never pushes, stoppable
+anytime. The stated guardrails SHALL match actual behavior exactly - a run must never do
+something its own header says it will not. Enforcement itself is specified by
+`add-ai-agent-engine`; this requirement is that the promise is visible and honest.
 
-#### Scenario: Push is impossible
+#### Scenario: The promise is on screen
 
-- WHEN a run's engine attempts any push
-- THEN the driver refuses it outright; no gate ever offers push as a choice
+- WHEN a run is active
+- THEN the console names the branch it is limited to and states that it never pushes
+
+#### Scenario: Push is never offered
+
+- WHEN any gate is presented
+- THEN pushing is not among the choices - it is refused by the engine, not permitted by a
+  click
 
 ### Requirement: Preflight is visible
 

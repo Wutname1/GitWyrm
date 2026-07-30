@@ -24,4 +24,5 @@ and so the single-run work in `add-ai-task-runs` keeps its constraints
 ## Impact
 
 - Affected specs: `ai-runs` (deltas to be written during the spec phase below)
-- Depends on: `add-ai-task-runs`, `add-ai-run-completion` proven in real use first
+- Depends on: `add-ai-task-runs`, `add-ai-agent-engine`, and `add-ai-run-completion`
+  proven in real use first
