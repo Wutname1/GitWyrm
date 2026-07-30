@@ -250,5 +250,13 @@ fn emit(
   if !app.state::<SessionRegistry>().record(&event) {
     return;
   }
+  // Logged because a run spans two windows, and "did the event go out at all"
+  // is the first question worth answering when one of them looks blank.
+  log::debug!(
+    "run event: repo={} session={} state={:?}",
+    event.repo_id,
+    event.session_id,
+    event.state
+  );
   let _ = app.emit(RUN_EVENT, event);
 }

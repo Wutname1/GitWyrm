@@ -71,15 +71,12 @@ Driven on screen in a native window against the scripted driver.
       real bugs that typechecking could not: every surface held its own copy of the run
       state so the AI tab never appeared, a finished run's card said "Run stopped", and
       the failure card's Reconnect / Copy / Try-again buttons were never passed handlers
-- [~] 6.2 Gate mirroring visible from the main window while the Desk is on another tab.
-      **Half done.** Verified inside the Desk: with the Desk on its Overview tab, the AI
-      tab badge and the rail banner both show the amber paused state. NOT working in the
-      main window -- its spec card and status bar stay blank while the Desk shows a gate.
-      The event is broadcast to all windows and the listener is mounted in both roots, so
-      the cause is still open; an attempted fix (re-seeding the session when an event
-      arrives for an unknown run) broke both windows with a hook-order error and was
-      reverted. Needs a devtools session on the main window to see what it actually
-      receives
+- [x] 6.2 Gate mirroring visible from the main window while the Desk is on another tab.
+      Verified after the fact: with a gate open in the Desk, the main window's spec card
+      shows an amber "This run needs you" banner with a View link, and the status bar
+      shows the paused state. The earlier failure was a stale window running pre-fix
+      code, not a defect -- the re-seed effect that makes a window pick up a run started
+      elsewhere was already correct.
 - [x] 6.3 Stop mid-run: the console says nothing was committed, and the choices work.
       Stopped from a paused gate: the gate collapsed to history, the stream said "You
       stopped this run. Nothing was committed.", and the card offered Keep / Undo /
