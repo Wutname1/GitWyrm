@@ -18,6 +18,9 @@ export const keys = {
     ['fileBlame', repoId, path, sha] as const,
   mergeState: (repoId: string) => ['mergeState', repoId] as const,
   conflict: (repoId: string, path: string) => ['conflict', repoId, path] as const,
+  openspecStatus: (repoId: string) => ['openspecStatus', repoId] as const,
+  openspecChanges: (repoId: string) => ['openspecChanges', repoId] as const,
+  openspecArchived: (repoId: string) => ['openspecArchived', repoId] as const,
 
   /**
    * Prefixes for invalidating every entry of a kind for one repo, regardless of
@@ -27,6 +30,19 @@ export const keys = {
    */
   remoteTagsAll: (repoId: string) => ['remoteTags', repoId] as const,
   fileDiffAll: (repoId: string) => ['diff', repoId] as const,
+}
+
+/**
+ * Refresh everything derived from a repo's `openspec/` folder.
+ *
+ * Called both after our own writes and when the watcher reports an external
+ * edit, because the files are the state: an agent or editor ticking a task has
+ * to move the same counts our own click does.
+ */
+export function invalidateOpenspec(qc: QueryClient, repoId: string) {
+  qc.invalidateQueries({ queryKey: keys.openspecStatus(repoId) })
+  qc.invalidateQueries({ queryKey: keys.openspecChanges(repoId) })
+  qc.invalidateQueries({ queryKey: keys.openspecArchived(repoId) })
 }
 
 /**

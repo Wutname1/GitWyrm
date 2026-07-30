@@ -3,6 +3,7 @@ mod commands;
 mod error;
 mod git;
 mod missing_repos;
+mod openspec;
 mod scrub;
 mod settings;
 mod state;
@@ -18,6 +19,12 @@ pub use git::submodule as git_submodule;
 /// Exposed for the ssh_config integration test: this rewrites a file the app
 /// does not own, so it is tested against real config shapes.
 pub use git::ssh::rewrite_config as ssh_config_rewrite;
+/// Exposed for the openspec_real_tree integration test, which parses this
+/// repository's own plan folder -- the only fixture guaranteed to match how the
+/// OpenSpec CLI formats a change.
+pub use openspec::openspec_dir;
+pub use openspec::parse as openspec_parse;
+pub use openspec::write as openspec_write;
 
 use state::RepoManager;
 use tauri::{Emitter, Manager};
@@ -199,6 +206,14 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::github::github_approve_pr,
     commands::github::github_merge_pr,
     commands::github::github_close_issue,
+    commands::openspec::openspec_status,
+    commands::openspec::openspec_list_changes,
+    commands::openspec::openspec_get_change,
+    commands::openspec::openspec_archived_ids,
+    commands::openspec::openspec_toggle_task,
+    commands::openspec::openspec_scaffold_change,
+    commands::openspec::openspec_validate_change,
+    commands::openspec::openspec_archive_change,
   ])
   .typ::<watcher::RepoChangedPayload>()
   .typ::<commands::remote::GitProgressPayload>()

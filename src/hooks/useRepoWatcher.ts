@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { listen } from '@tauri-apps/api/event'
-import { keys, trimLogToFirstPage } from '@/lib/queryKeys'
+import { invalidateOpenspec, keys, trimLogToFirstPage } from '@/lib/queryKeys'
 
 interface RepoChangedPayload {
   repo_id: string
@@ -27,6 +27,10 @@ export function useRepoWatcher() {
       queryClient.invalidateQueries({ queryKey: keys.mergeState(repoId) })
       // Prefix match: refreshes every open conflict file for this repo.
       queryClient.invalidateQueries({ queryKey: ['conflict', repoId] })
+      // The openspec folder lives in the working tree, so the same watcher
+      // covers it. An agent or editor ticking a task in tasks.md has to move
+      // our progress counts exactly like our own click does.
+      invalidateOpenspec(queryClient, repoId)
     })
     return () => {
       unlisten.then((fn) => fn())

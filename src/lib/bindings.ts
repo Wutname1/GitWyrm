@@ -1881,6 +1881,98 @@ async githubCloseIssue(owner: string, repo: string, number: number) : Promise<Re
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async openspecStatus(repoId: string) : Promise<Result<OpenspecStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_status", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Every active change, newest first. Empty for a repo without `openspec/`.
+ */
+async openspecListChanges(repoId: string) : Promise<Result<SpecChange[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_list_changes", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * One change by id, or None when it is not there (deleted or archived while
+ * the UI was looking at it).
+ */
+async openspecGetChange(repoId: string, changeId: string) : Promise<Result<SpecChange | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_get_change", { repoId, changeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Ids of archived changes, newest first.
+ */
+async openspecArchivedIds(repoId: string) : Promise<Result<string[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_archived_ids", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Ticks or unticks one task, writing exactly that checkbox to tasks.md.
+ * 
+ * `line` comes from the parsed task the user clicked. If the file has moved on
+ * since (an agent inserted tasks, someone reordered them), the write is skipped
+ * and `LineMoved` tells the UI to re-read rather than guess.
+ */
+async openspecToggleTask(repoId: string, changeId: string, line: number, done: boolean) : Promise<Result<ToggleOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_toggle_task", { repoId, changeId, line, done }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Creates a new change folder with template files.
+ */
+async openspecScaffoldChange(repoId: string, name: string, description: string) : Promise<Result<ScaffoldResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_scaffold_change", { repoId, name, description }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Runs `openspec validate` for one change. Never errors for a missing CLI --
+ * that comes back as a `cliMissing` outcome with a plain-language hint.
+ */
+async openspecValidateChange(repoId: string, changeId: string) : Promise<Result<CliOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_validate_change", { repoId, changeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Runs `openspec archive` for one change: merges its deltas into the specs
+ * library and moves the folder into `changes/archive/`.
+ */
+async openspecArchiveChange(repoId: string, changeId: string) : Promise<Result<CliOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_archive_change", { repoId, changeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -1964,6 +2056,27 @@ export type ChangeSizeDisplay =
  */
 "row"
 /**
+ * A change's lifecycle state, derived from its tasks and deltas rather than
+ * stored anywhere. One function owns the rules so both windows agree.
+ */
+export type ChangeStatus = 
+/**
+ * No tasks yet, or none done: still being written.
+ */
+"draft" | 
+/**
+ * Some tasks done, build work outstanding.
+ */
+"inBuild" | 
+/**
+ * Build groups are complete but a review/verify group is still open.
+ */
+"needsReview" | 
+/**
+ * Every task done and at least one delta: ready for `openspec archive`.
+ */
+"readyToArchive"
+/**
  * What happened to uncommitted changes during a branch switch.
  */
 export type CheckoutOutcome = 
@@ -1987,6 +2100,35 @@ export type CheckoutOutcome =
  * their work went.
  */
 "stash_not_reapplied"
+/**
+ * Whether the CLI is usable, and which version answered.
+ */
+export type CliInfo = { available: boolean; 
+/**
+ * Version string as reported, when we could get one.
+ */
+version: string | null; 
+/**
+ * How it is invoked, for the log and for Settings: "openspec" or "npx".
+ */
+invocation: string | null }
+/**
+ * The result of a validate or archive attempt.
+ */
+export type CliOutcome = 
+/**
+ * The command ran and reported success.
+ */
+{ kind: "ok"; output: string } | 
+/**
+ * The command ran and reported a problem. `output` is the CLI's own text,
+ * shown as-is; the UI adds the plain-language framing around it.
+ */
+{ kind: "failed"; output: string } | 
+/**
+ * No CLI available. `hint` explains what to install, in plain words.
+ */
+{ kind: "cliMissing"; hint: string }
 /**
  * Commit-graph column layout. Column ids are validated on the frontend, so
  * unknown values here are ignored rather than rejected.
@@ -2058,6 +2200,10 @@ ours_deleted: boolean;
  * Their side deleted the file; choosing theirs removes it.
  */
 theirs_deleted: boolean }
+/**
+ * What kind of spec edit a delta describes.
+ */
+export type DeltaKind = "ADDED" | "MODIFIED" | "REMOVED" | "RENAMED"
 export type DeviceCodeInfo = { device_code: string; user_code: string; verification_uri: string; 
 /**
  * Minimum seconds between polls.
@@ -2240,6 +2386,23 @@ export type ModelList = { models: CatalogModel[];
  */
 live: boolean }
 /**
+ * Whether this repository uses OpenSpec, and whether the CLI is around.
+ */
+export type OpenspecStatus = { 
+/**
+ * False for every repo without an `openspec/` folder -- the UI shows nothing
+ * at all in that case.
+ */
+present: boolean; 
+/**
+ * Active (non-archived) change count, for the sidebar and status bar.
+ */
+activeCount: number; 
+/**
+ * Archived change count, for the Desk's archive link.
+ */
+archivedCount: number; cli: CliInfo }
+/**
  * A pending index-level operation that can leave conflicts to resolve.
  */
 export type OperationKind = "Merge" | "CherryPick" | "Revert" | "Rebase"
@@ -2275,6 +2438,17 @@ signCommits?: boolean;
  * `includeIf` rules so the terminal and other git tools agree.
  */
 folders?: string[] }
+/**
+ * The three narrative sections of proposal.md. Each is raw markdown; when a
+ * heading is missing the field is empty and `raw` carries the whole file so the
+ * UI can still show something real.
+ */
+export type Proposal = { why: string; what_changes: string; impact: string; 
+/**
+ * The unparsed file, always populated. The UI falls back to this when the
+ * three sections came up empty.
+ */
+raw: string }
 /**
  * Outcome of a pull, measured the same way as `PushResult`.
  */
@@ -2448,6 +2622,18 @@ export type Resolution =
  * Use the provided, hand-edited text.
  */
 { kind: "manual"; text: string }
+/**
+ * What a scaffold call produced.
+ */
+export type ScaffoldResult = { 
+/**
+ * The id actually used (sanitized).
+ */
+id: string; 
+/**
+ * Repo-relative paths written, in creation order.
+ */
+files: string[] }
 export type ScannedRepo = { name: string; path: string; 
 /**
  * Current branch parsed from .git/HEAD as text (None when detached/unreadable).
@@ -2800,6 +2986,88 @@ relative_path: string;
  */
 absolute_path: string }
 /**
+ * One change folder, fully parsed.
+ */
+export type SpecChange = { 
+/**
+ * Folder name under `openspec/changes/`, e.g. `add-openspec-foundation`.
+ */
+id: string; 
+/**
+ * First `# ` heading of proposal.md with any `Change: ` prefix removed,
+ * falling back to the id.
+ */
+title: string; status: ChangeStatus; progress: SpecProgress; proposal: Proposal; has_design: boolean; tasks: SpecTask[]; deltas: SpecDelta[]; 
+/**
+ * Newest mtime across the change's files, as a unix timestamp in seconds.
+ * Drives "updated 4m ago" without a second stat pass in the UI.
+ */
+updated: number; 
+/**
+ * Plain-language notes about what could not be parsed. Surfaced quietly, not
+ * as an error dialog.
+ */
+notes: string[] }
+/**
+ * One spec-delta file: which capability it edits and what it changes.
+ */
+export type SpecDelta = { 
+/**
+ * Capability name from the path: `specs/<capability>/spec.md`.
+ */
+capability: string; 
+/**
+ * Repo-relative path, shown in the UI so the user can find the file.
+ */
+file: string; kind: DeltaKind; requirements: SpecRequirement[] }
+/**
+ * Progress for one change, straight from its checkboxes.
+ */
+export type SpecProgress = { done: number; total: number; 
+/**
+ * 0-100, rounded. Zero when there are no tasks.
+ */
+percent: number; 
+/**
+ * True when the change has no tasks at all -- report as a draft rather than
+ * "0% of nothing".
+ */
+is_draft: boolean }
+/**
+ * One requirement inside a delta, with its scenarios kept as text.
+ */
+export type SpecRequirement = { name: string; 
+/**
+ * Prose under the requirement heading, before the first scenario.
+ */
+text: string; 
+/**
+ * Scenario blocks as `(name, body)` -- rendered verbatim, never interpreted.
+ */
+scenarios: ([string, string])[] }
+/**
+ * One checkbox line from tasks.md.
+ */
+export type SpecTask = { 
+/**
+ * Zero-based index across the whole file, and the handle used to toggle it.
+ */
+index: number; 
+/**
+ * The `## 1. Backend` heading this task sits under, without the `##`.
+ * Empty when the file has no headings.
+ */
+group: string; 
+/**
+ * The task text with any leading `1.2` numbering left in place -- it is the
+ * author's own numbering and handoffs quote it.
+ */
+text: string; done: boolean; 
+/**
+ * 1-based line number in tasks.md, so the writer can target this exact line.
+ */
+line: number }
+/**
  * An SSH key that can sign commits.
  */
 export type SshKey = { 
@@ -3023,6 +3291,23 @@ push_on_create?: boolean | null;
  * None follows the app default.
  */
 delete_on_remote?: boolean | null }
+/**
+ * Result of asking to toggle a task.
+ */
+export type ToggleOutcome = 
+/**
+ * The checkbox was flipped and the file written.
+ */
+"toggled" | 
+/**
+ * The task was already in the requested state, so nothing was written.
+ */
+"alreadyThatWay" | 
+/**
+ * The line no longer holds a checkbox -- the file changed underneath us.
+ * The caller re-reads rather than guessing.
+ */
+"lineMoved"
 /**
  * Which git and gpg the app resolved, and where each came from. Drives the
  * "using the copy that came with GitWyrm" vs "using your own" line in Settings.
