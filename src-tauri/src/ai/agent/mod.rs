@@ -6,10 +6,15 @@
 //! the single-shot path deliberately does not have.
 
 pub mod acp;
+pub mod api_agent;
 pub mod cli_agent;
 pub mod copilot_cli;
 pub mod transport;
 
+// Re-exported so callers outside this module use `ai::agent::X` rather than
+// reaching through `transport`. Allowed to be unused while the engine has no
+// caller yet; the run console is what will consume these.
+#[allow(unused_imports)]
 pub use transport::{
   AgentError, AgentTurn, Message, ProviderAgent, ToolCall, ToolResult, ToolSchema, Transport,
   TurnRequest,

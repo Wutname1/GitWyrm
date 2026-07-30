@@ -30,9 +30,13 @@
       Drives `copilot --acp --stdio` (Agent Client Protocol over NDJSON); `check()` opens a
       real session, since that is the only thing that proves a sign-in has the scope it
       needs. Version floor is a placeholder pending a real install to measure against
-- [ ] 2.3 API-key transport against a documented API (OpenAI, Anthropic)
-- [ ] 2.4 OpenAI-compatible endpoint transport, which also serves a local opencode server,
-      Ollama, and LM Studio
+- [x] 2.3 API-key transport against a documented API (OpenAI, Anthropic). Multi-turn with
+      tool calls in both dialects, which the existing single-shot commit-message client
+      has no notion of
+- [x] 2.4 OpenAI-compatible endpoint transport, which also serves a local opencode server,
+      Ollama, and LM Studio. Same code path as 2.3 with the base URL pointed elsewhere;
+      the distinct transport value exists so failures can say "the endpoint you
+      configured" rather than naming a provider the user never chose
 - [ ] 2.5 Anthropic is API-key only - no subprocess path, per design.md. If a user's default
       is Anthropic with no key, say that plainly rather than reaching for the CLI
 - [ ] 2.6 A default provider that cannot run reports which transport is missing and what to
