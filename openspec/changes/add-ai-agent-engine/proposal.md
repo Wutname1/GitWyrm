@@ -12,16 +12,34 @@ The agent has to be **ours and self-contained**. Shelling out to another agent a
 software the user may not have installed, and would put the guardrails - never push,
 gate side effects, stop instantly - inside a process we do not control.
 
-**The subscription-reuse plan does not survive the terms research.** The original intent
-was to reuse the model access people already pay for by driving Claude Code and the Codex
-CLI against their existing sign-ins. Anthropic prohibits that in writing and enforces it;
-OpenAI has declined four times to say it is allowed. Both are documented in `design.md`.
+**The terms research reshapes which transports are allowed, not whether the engine ships.**
+Two patterns have to be kept apart, because they carry very different risk (sourced in
+`design.md`):
 
-So the engine is built on **BYO API key**, which is unambiguously permitted and is what
-both providers' own docs recommend for programmatic use. That is a smaller feature than
-planned, and worth being plain about: a user with only a Claude subscription and no API
-key cannot run tasks in GitWyrm. The honest response is to say so in the UI and keep the
-copy-handoff path first-class, not to route their subscription credentials anyway.
+- **Driving the user's own installed CLI as a subprocess** - the CLI authenticates itself,
+  GitWyrm never touches a token. No enforcement against this has been found anywhere; it is
+  what every healthy multi-agent tool does, and GitHub ships its own Copilot CLI for it.
+- **Reading another tool's stored credentials and calling the API directly** - this is what
+  drew Anthropic legal action against opencode. **GitWyrm will not do this, for any
+  provider.**
+
+So the engine supports several transports from the start, all behind one interface:
+
+1. **Provider CLI as a subprocess** - the Copilot CLI first, since GitWyrm already bundles
+   and drives it for commit messages and GitHub built it to be driven.
+2. **BYO API key** against a provider's documented API - unambiguously permitted, and the
+   fallback whenever a CLI is absent.
+3. **An OpenAI-compatible endpoint**, which also covers a local opencode server, Ollama,
+   LM Studio, and anything else speaking that shape.
+
+**Anthropic is the exception and is API-key only.** Its terms prohibit routing requests
+through subscription credentials on a user's behalf, and it is the one provider that has
+actually enforced. No Anthropic subprocess path until that is either clarified or
+approved in writing.
+
+Whichever transport is used, the engine uses **the provider the user set as default in AI
+settings** - the same one commit-message generation uses. It does not carry its own
+provider choice.
 
 A design spike ("Claude Code CLI Provider for GitWyrm") was run and succeeded technically:
 a proof of concept generated a properly-formatted commit message from a real staged diff
@@ -40,11 +58,16 @@ subscription path.
   agent loop: plan, act, observe, repeat until the task's done-means checks pass
 - A tool set the loop can call, and nothing beyond it: read a file, edit a file, list a
   directory, run one of the project's own checks. Every tool is repo-scoped
-- Provider access by **API key only**, through each provider's documented API - the path
-  both Anthropic and OpenAI affirmatively recommend for programmatic use
-- Honest handling of the subscription-only user: the Desk says a key is needed, links to
-  where to get one, and leaves the copy-handoff path as a full-strength alternative rather
-  than a consolation
+- Three transports behind one `ProviderAgent` interface: a provider CLI driven as a
+  subprocess (Copilot CLI first), a documented API with the user's own key, and any
+  OpenAI-compatible endpoint (which covers a local opencode server, Ollama, LM Studio)
+- The engine resolves its provider from the user's **default** in AI settings, never its
+  own separate choice - so the Desk and commit messages can never disagree about which AI
+  is in use
+- No credential-file reading, for any provider, and no Anthropic subprocess path
+- Honest handling when the default provider cannot run: say which transport is missing and
+  what to do, and leave the copy-handoff path as a full-strength alternative rather than a
+  consolation
 - Guardrail enforcement in our process: linked branch only, push refused outright, side
   effects raised as typed gates the console answers
 - The user's uncommitted work set aside before a run and restored after, so "your own

@@ -18,33 +18,79 @@ process rather than delegated to another tool.
 - WHEN the engine is asked to do something a guardrail forbids
 - THEN GitWyrm refuses or gates it, regardless of what the underlying provider would allow
 
-### Requirement: Model access is by the user's own API key
+### Requirement: Three transports, one interface
 
-The engine SHALL reach models through each provider's documented API, authenticated with
-an API key the user supplies. It SHALL NOT route requests through a user's consumer
-subscription credentials, and SHALL NOT reuse credentials issued to another application.
+The engine SHALL reach models by any of: driving a provider's own installed CLI as a
+subprocess, a provider's documented API with an API key the user supplies, or an
+OpenAI-compatible endpoint. All SHALL sit behind one interface, and no provider-specific
+behavior SHALL reach the console or any other UI.
 
-This is a terms constraint, not a technical preference. Anthropic prohibits third-party
-products routing requests through Free, Pro, or Max plan credentials on their users'
-behalf. OpenAI declined four direct requests to confirm that a third-party product may use
-ChatGPT sign-in, and its own documentation recommends API keys for programmatic use. The
-full sourcing is in this change's design.md.
+#### Scenario: Provider CLI present
 
-#### Scenario: A key is present
+- WHEN the default provider ships a CLI that GitWyrm can drive, and it reports itself usable
+- THEN the engine runs tasks through it, and never handles a credential itself
 
-- WHEN the user has supplied an API key for their provider
+#### Scenario: API key present
+
+- WHEN the default provider is configured with an API key
 - THEN the engine runs tasks through that provider's documented API
 
-#### Scenario: Subscription but no key
+#### Scenario: A local or self-hosted model
 
-- WHEN the user has a consumer subscription to a provider but no API key
-- THEN GitWyrm does not attempt to use the subscription, says plainly that a key is needed
-  and where to get one, and leaves the copy-handoff path fully available
+- WHEN the default provider is an OpenAI-compatible endpoint - a local opencode server,
+  Ollama, LM Studio, or similar
+- THEN the engine runs tasks through it with no special-casing
 
-#### Scenario: No pretending it is broken
+### Requirement: Never another application's credentials
 
-- WHEN a provider is unavailable for want of a key
-- THEN the message names what is missing rather than reading as a fault or a failed run
+GitWyrm SHALL NOT read, write, or inspect credential files or configuration belonging to
+another application, and SHALL NOT reuse a credential issued to another application. Where
+a CLI is driven, that CLI authenticates itself.
+
+This is not a preference. Reading a coding CLI's stored credentials and calling the API
+directly is the pattern that drew legal action against a comparable project; the sourcing
+is in this change's design.md.
+
+#### Scenario: Another tool's credentials on disk
+
+- WHEN a provider's own CLI has credentials stored on the machine
+- THEN GitWyrm neither reads them nor relies on them, whatever convenience that would offer
+
+#### Scenario: Credentials present but unusable
+
+- WHEN a provider reports itself not usable - not logged in, or lacking a needed scope -
+  despite credentials existing
+- THEN GitWyrm believes that answer rather than starting a run that would fail later
+
+### Requirement: Anthropic access is by API key only
+
+The engine SHALL NOT drive an Anthropic CLI as a subprocess. Anthropic prohibits
+third-party products routing requests through Free, Pro, or Max plan credentials on their
+users' behalf, and is the one provider known to have enforced it. Anthropic runs require an
+API key until that position changes or written approval is obtained.
+
+#### Scenario: Anthropic default without a key
+
+- WHEN the default provider is Anthropic and no API key is configured
+- THEN GitWyrm says plainly that a key is needed and where to get one, does not reach for a
+  locally-installed Anthropic CLI, and leaves the copy-handoff path fully available
+
+### Requirement: The engine uses the user's default provider
+
+The engine SHALL resolve which provider and model to use from the user's default in AI
+settings, through the same shared path every other AI feature uses. It SHALL NOT carry its
+own provider selection.
+
+#### Scenario: One answer everywhere
+
+- WHEN a run starts
+- THEN it uses the same provider and model that commit-message generation would use
+
+#### Scenario: Default cannot run
+
+- WHEN the default provider has no usable transport
+- THEN the message names what is missing and what to do, rather than reading as a fault or a
+  failed run
 
 ### Requirement: Provider credentials are never touched
 

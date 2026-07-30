@@ -7,21 +7,29 @@
 - [x] 1.4 Answer the terms-of-service question per provider. Done for Anthropic
       (prohibited in writing) and OpenAI (four unanswered asks; API keys recommended).
       Recorded in design.md, and the reason this change is API-key only
-- [ ] 1.2 Resolve the Copilot question: GitWyrm already routes through GitHub's bundled
-      Copilot CLI to obtain entitlements its own OAuth app is denied. Decide whether that
-      stays, changes, or goes - it ships today
+- [ ] 1.2 Confirm the Copilot position from GitHub's own terms. GitWyrm already routes
+      through GitHub's bundled Copilot CLI to obtain entitlements its own OAuth app is
+      denied; this transport is now load-bearing rather than incidental, so the answer
+      matters more than it did
 - [ ] 1.3 Decide the turn budget and what "the task is done" means for the loop, so a run
       cannot spin forever
 
 ## 2. Provider transports
 
-- [ ] 2.1 `ProviderAgent` interface over each provider's documented API, keyed by the
-      user's own API key. No subscription-credential path - see design.md
-- [ ] 2.2 Anthropic implementation (Messages API with tool use)
-- [ ] 2.3 OpenAI implementation behind the same interface
-- [ ] 2.4 A provider with no key reports as unavailable in plain language, naming where to
-      get one, without implying GitWyrm is broken
-- [ ] 2.5 Cancellation terminates any in-flight request promptly
+- [ ] 2.1 `ProviderAgent` interface with three implementations behind it, chosen by what
+      the default provider supports - never by the engine having its own preference
+- [ ] 2.2 CLI subprocess transport: Copilot CLI first. Discovery by PATH then known
+      locations, gated on a `--version` floor rather than a pinned path, since these tools
+      self-update. Auth state from the CLI's own answer, never its credential files
+- [ ] 2.3 API-key transport against a documented API (OpenAI, Anthropic)
+- [ ] 2.4 OpenAI-compatible endpoint transport, which also serves a local opencode server,
+      Ollama, and LM Studio
+- [ ] 2.5 Anthropic is API-key only - no subprocess path, per design.md. If a user's default
+      is Anthropic with no key, say that plainly rather than reaching for the CLI
+- [ ] 2.6 A default provider that cannot run reports which transport is missing and what to
+      do, without implying GitWyrm is broken
+- [ ] 2.7 Cancellation terminates any in-flight request or child process promptly, leaving
+      no orphan
 
 ## 3. The loop
 
