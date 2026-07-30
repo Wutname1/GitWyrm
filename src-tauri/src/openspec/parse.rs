@@ -225,6 +225,23 @@ fn parse_task_line(line: &str) -> Option<(bool, String)> {
 /// Parses tasks.md into a flat, indexed list. Continuation lines (an indented
 /// line after a task that is not itself a checkbox) are appended to that task's
 /// text, because authors wrap long tasks and the handoff needs the whole thing.
+/// Whether the task at `index` is ticked.
+///
+/// Takes the file's own text so a caller can re-read it cheaply between turns:
+/// an AI run watches for its target task being ticked, and re-parsing one file
+/// is far less work than reloading the whole change.
+///
+/// `index` is the zero-based position used by [`SpecTask::index`], not the
+/// author's `1.2` numbering -- those disagree whenever a file skips or repeats
+/// a number, which real plans do.
+pub fn task_is_ticked(md: &str, index: u32) -> bool {
+  parse_tasks(md)
+    .into_iter()
+    .find(|t| t.index == index)
+    .map(|t| t.done)
+    .unwrap_or(false)
+}
+
 pub fn parse_tasks(md: &str) -> Vec<SpecTask> {
   let mut tasks: Vec<SpecTask> = Vec::new();
   let mut group = String::new();

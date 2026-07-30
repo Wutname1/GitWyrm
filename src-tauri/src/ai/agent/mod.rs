@@ -10,6 +10,7 @@ pub mod api_agent;
 pub mod cli_agent;
 pub mod copilot_cli;
 pub mod events;
+pub mod exec;
 pub mod guardrails;
 pub mod run;
 pub mod select;

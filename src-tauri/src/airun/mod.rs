@@ -7,6 +7,7 @@
 //! another, so every console state can be verified before a provider is wired.
 
 pub mod driver;
+pub mod engine;
 pub mod scripted;
 pub mod session;
 
