@@ -103,7 +103,11 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
       </span>
       <span className="ml-auto flex flex-none items-center gap-1.5 pl-1.5 font-mono text-2xs">
         {label && <span className={label.tone}>{label.text}</span>}
-        <span className="text-muted-foreground">{sub.recorded_sha.slice(0, 7)}</span>
+        {/* Where it actually sits, which only differs from the recorded commit
+            when it has moved -- that is the case worth showing the sha for. */}
+        <span className="text-muted-foreground">
+          {(sub.workdir_sha ?? sub.recorded_sha).slice(0, 7)}
+        </span>
       </span>
     </div>
   )

@@ -5,6 +5,10 @@ version = "0.0.0"
 description = "GitWyrm - a targeted Git client for Windows"
 authors = ["Jeremy"]
 edition = "2021"
+# The app binary. Without this, the export_bindings bin makes a bare
+# `cargo run` (which is what `tauri dev` issues) ambiguous and it refuses
+# to start.
+default-run = "gitwyrm"
 # Raised from 1.77.2 for github-copilot-sdk, which requires 1.94.0. Cargo caps
 # dependency resolution at this value, and when it cannot satisfy a crate it
 # silently substitutes a stub 0.0.0 placeholder instead of failing, so this must
