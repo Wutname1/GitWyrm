@@ -15,7 +15,11 @@ pub use git::history as git_history;
 pub use git::merge_ops as git_merge_ops;
 pub use git::types as git_types;
 pub use git::refs as git_refs;
+/// Exposed for the spec_links integration test, which drives linking and
+/// committing against a real repository rather than parsed strings.
+pub use git::spec_link as git_spec_link;
 pub use git::submodule as git_submodule;
+pub use git::trailers as git_trailers;
 /// Exposed for the ssh_config integration test: this rewrites a file the app
 /// does not own, so it is tested against real config shapes.
 pub use git::ssh::rewrite_config as ssh_config_rewrite;
