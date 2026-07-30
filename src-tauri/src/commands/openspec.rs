@@ -31,6 +31,14 @@ pub struct OpenspecStatus {
   pub cli: cli::CliInfo,
 }
 
+/// The built-in archive-commit message template, exposed so the settings UI
+/// can show it as the placeholder and restore it with "Reset to default".
+#[tauri::command]
+#[specta::specta]
+pub fn openspec_default_archive_commit_template() -> String {
+  cli::DEFAULT_ARCHIVE_COMMIT_TEMPLATE.to_string()
+}
+
 /// Resolves a repo id to its working directory.
 fn repo_root(manager: &RepoManager, repo_id: &str) -> Result<PathBuf, AppError> {
   Ok(manager.get(repo_id)?.path.clone())
@@ -204,17 +212,19 @@ pub async fn openspec_validate_change(
 #[tauri::command]
 #[specta::specta]
 pub async fn openspec_archive_change(
+  app: tauri::AppHandle,
   manager: State<'_, RepoManager>,
   repo_id: String,
   change_id: String,
 ) -> Result<cli::CliOutcome, AppError> {
   let open = manager.get(&repo_id)?;
   let root = open.path.clone();
+  let template = crate::settings::get_settings(app)?.openspec_archive_commit_template;
   tauri::async_runtime::spawn_blocking(move || {
     let outcome = cli::archive_change(&root, &change_id);
     if matches!(outcome, cli::CliOutcome::Ok { .. }) {
       let repo = open.repo.lock().unwrap();
-      cli::commit_archive(&repo, &root, &change_id)?;
+      cli::commit_archive(&repo, &root, &change_id, template.as_deref())?;
     }
     Ok(outcome)
   })

@@ -13,6 +13,7 @@ const APP_ITEMS: NavItem[] = [
   { key: 'tags', label: 'Tags' },
   { key: 'profiles', label: 'Profiles' },
   { key: 'ai', label: 'AI' },
+  { key: 'openspec', label: 'OpenSpec' },
   { key: 'security', label: 'Security' },
   { key: 'appearance', label: 'Appearance' },
   { key: 'logs', label: 'Logs' },

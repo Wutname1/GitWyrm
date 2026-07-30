@@ -26,6 +26,7 @@ export const SECTION_LABELS: Record<SettingsSection, string> = {
   tags: 'Tags',
   profiles: 'Profiles',
   ai: 'AI',
+  openspec: 'OpenSpec',
   security: 'Security',
   appearance: 'Appearance',
   logs: 'Logs',
@@ -143,6 +144,15 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     label: 'Commit instructions',
     hint: 'What you want the generated commit messages to look like.',
     keywords: ['prompt', 'system prompt', 'style', 'commit message', 'format'],
+  },
+
+  // -------------------------------------------------------------- openspec
+  {
+    id: 'openspec-archive-commit-template',
+    section: 'openspec',
+    label: 'Archive commit message',
+    hint: 'The message used when archiving a spec commits automatically.',
+    keywords: ['archive', 'spec', 'commit message', 'template', 'chore', 'openspec'],
   },
 
   // -------------------------------------------------------------- profiles

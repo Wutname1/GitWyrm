@@ -47,6 +47,15 @@ export function useOpenspecHistory(
   })
 }
 
+/** The built-in archive-commit message template, for the settings placeholder and reset. */
+export function useOpenspecDefaultArchiveTemplate() {
+  return useQuery({
+    queryKey: ['openspec-default-archive-template'],
+    staleTime: Infinity,
+    queryFn: async () => await commands.openspecDefaultArchiveCommitTemplate(),
+  })
+}
+
 /** Ids of archived changes, newest first. Only fetched when asked for. */
 export function useOpenspecArchived(repoId: string | null, enabled = false) {
   return useQuery({
@@ -59,16 +68,21 @@ export function useOpenspecArchived(repoId: string | null, enabled = false) {
 /**
  * The change every Specs surface is currently pointed at.
  *
- * Falls back to the first (most recently updated) change when nothing has been
- * clicked, or when the selected change has gone away -- archived, renamed, or
- * deleted by another tool. That keeps the spec card useful on first paint and
- * stops it going blank when the folder changes underneath it.
+ * `null` means nothing is selected, and stays that way -- a surface that
+ * resolved null to the first change would make the first row impossible to
+ * click away from, since deselecting it would immediately reselect it.
+ *
+ * Pass `fallbackToFirst` for surfaces that must always show something (the spec
+ * card). That also covers a selected change going away -- archived, renamed, or
+ * deleted by another tool -- so the card does not blank out when the folder
+ * changes underneath it.
  */
-export function useSelectedChange(repoId: string | null) {
+export function useSelectedChange(repoId: string | null, fallbackToFirst = false) {
   const changes = useOpenspecChanges(repoId)
   const selectedId = useUiStore((s) => s.selectedChangeId)
   const list = changes.data ?? []
-  const selected = list.find((c) => c.id === selectedId) ?? list[0]
+  const match = list.find((c) => c.id === selectedId)
+  const selected = match ?? (fallbackToFirst ? list[0] : undefined)
   return { change: selected, changes: list, query: changes }
 }
 

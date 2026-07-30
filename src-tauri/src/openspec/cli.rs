@@ -198,17 +198,34 @@ pub fn archive_change(repo_root: &Path, change_id: &str) -> CliOutcome {
   run(repo_root, &["archive", change_id, "--yes"])
 }
 
+/// Default commit message template for an automatic archive commit. `{id}` is
+/// replaced with the change id. Editable in Settings > OpenSpec.
+pub const DEFAULT_ARCHIVE_COMMIT_TEMPLATE: &str = "Archive {id} spec";
+
+/// Fills in `{id}` in a commit message template. Falls back to the built-in
+/// default when `template` is empty, so clearing the setting field behaves
+/// the same as never having set it.
+fn render_archive_commit_message(template: Option<&str>, change_id: &str) -> String {
+  let template = template
+    .map(str::trim)
+    .filter(|t| !t.is_empty())
+    .unwrap_or(DEFAULT_ARCHIVE_COMMIT_TEMPLATE);
+  template.replace("{id}", change_id)
+}
+
 /// Stages everything the archive command touched and commits it, with no AI
 /// and no CLI involved in the message -- archiving is a mechanical operation,
 /// so the record of it should be too.
 ///
 /// Only called after `archive_change` reports `Ok`; a `Failed` or `CliMissing`
 /// outcome leaves the working tree for the user to inspect, so nothing here
-/// runs in that case.
+/// runs in that case. `message_template` is the user's Settings > OpenSpec
+/// override, if any; None uses `DEFAULT_ARCHIVE_COMMIT_TEMPLATE`.
 pub fn commit_archive(
   repo: &git2::Repository,
   repo_path: &Path,
   change_id: &str,
+  message_template: Option<&str>,
 ) -> Result<Option<git2::Oid>, crate::error::AppError> {
   let repo_path_str = repo_path.to_string_lossy();
 
@@ -239,7 +256,7 @@ pub fn commit_archive(
     committer: signature,
   };
   let parents: Vec<&git2::Commit<'_>> = head_commit.iter().collect();
-  let message = format!("Archive {change_id} spec");
+  let message = render_archive_commit_message(message_template, change_id);
 
   let oid = crate::git::commit_write::create(
     repo,
@@ -310,7 +327,7 @@ mod tests {
     std::fs::write(dir.path().join("base.txt"), "changed\n").unwrap();
     std::fs::write(dir.path().join("new-spec.md"), "spec\n").unwrap();
 
-    let oid = commit_archive(&repo, dir.path(), "add-thing").unwrap();
+    let oid = commit_archive(&repo, dir.path(), "add-thing", None).unwrap();
     assert!(oid.is_some());
 
     let head = repo.head().unwrap().peel_to_commit().unwrap();
@@ -328,9 +345,35 @@ mod tests {
     let repo = repo_with_base(dir.path());
     let before = repo.head().unwrap().peel_to_commit().unwrap().id();
 
-    let oid = commit_archive(&repo, dir.path(), "add-thing").unwrap();
+    let oid = commit_archive(&repo, dir.path(), "add-thing", None).unwrap();
 
     assert!(oid.is_none());
     assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id(), before);
+  }
+
+  #[test]
+  fn commit_archive_honours_a_custom_template() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_with_base(dir.path());
+    std::fs::write(dir.path().join("base.txt"), "changed\n").unwrap();
+
+    let oid = commit_archive(&repo, dir.path(), "add-thing", Some("Archived: {id} ({id})"))
+      .unwrap()
+      .unwrap();
+
+    let head = repo.find_commit(oid).unwrap();
+    assert_eq!(head.message().unwrap(), "Archived: add-thing (add-thing)");
+  }
+
+  #[test]
+  fn blank_template_falls_back_to_the_default() {
+    assert_eq!(
+      render_archive_commit_message(Some("   "), "add-thing"),
+      "Archive add-thing spec"
+    );
+    assert_eq!(
+      render_archive_commit_message(None, "add-thing"),
+      "Archive add-thing spec"
+    );
   }
 }

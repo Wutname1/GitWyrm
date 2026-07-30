@@ -2070,6 +2070,13 @@ async openspecArchiveChange(repoId: string, changeId: string) : Promise<Result<C
 }
 },
 /**
+ * The built-in archive-commit message template, exposed so the settings UI
+ * can show it as the placeholder and restore it with "Reset to default".
+ */
+async openspecDefaultArchiveCommitTemplate() : Promise<string> {
+    return await TAURI_INVOKE("openspec_default_archive_commit_template");
+},
+/**
  * Opens the Spec Desk for a repository, or focuses the one already open.
  * 
  * Size and position are remembered by Tauri's own window-state handling per
@@ -2979,6 +2986,12 @@ ai_models?: Partial<{ [key in string]: string }> | null;
  * built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).
  */
 ai_instruction?: string | null; 
+/**
+ * Commit message template used when a spec archive commits automatically.
+ * `{id}` is replaced with the change id. None uses the built-in default
+ * (see `crate::openspec::cli::DEFAULT_ARCHIVE_COMMIT_TEMPLATE`).
+ */
+openspec_archive_commit_template?: string | null; 
 /**
  * Commit-graph column order and visibility.
  */

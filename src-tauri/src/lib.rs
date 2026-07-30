@@ -226,6 +226,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::openspec::openspec_scaffold_change,
     commands::openspec::openspec_validate_change,
     commands::openspec::openspec_archive_change,
+    commands::openspec::openspec_default_archive_commit_template,
     commands::spec_desk::open_spec_desk,
     commands::spec_link::spec_link_get,
     commands::spec_link::spec_link_set,

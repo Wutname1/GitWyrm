@@ -499,6 +499,11 @@ interface WorkspaceState {
   aiModels: Record<string, string>;
   /** Custom commit-generation instruction; null uses the built-in default (persisted). */
   aiInstruction: string | null;
+  /**
+   * Commit message template for automatic spec-archive commits; null uses the
+   * built-in default. `{id}` is replaced with the change id (persisted).
+   */
+  openspecArchiveCommitTemplate: string | null;
   /** Commit-graph column order (persisted). */
   columnOrder: ColumnId[];
   /** Commit-graph columns the user has hidden (persisted). */
@@ -638,6 +643,7 @@ interface WorkspaceState {
   /** Set one provider's model without making it the default. */
   setAiModelFor: (provider: string, model: string | null) => void;
   setAiInstruction: (instruction: string | null) => void;
+  setOpenspecArchiveCommitTemplate: (template: string | null) => void;
   setCommitButtonMode: (mode: CommitButtonMode) => void;
   setDefaultEditor: (editor: EditorKind) => void;
   setTagPushDefault: (mode: TagPushDefault) => void;
@@ -810,6 +816,7 @@ function toSettings(s: WorkspaceState): Settings {
     ai_model: s.aiModel,
     ai_models: s.aiModels,
     ai_instruction: s.aiInstruction,
+    openspec_archive_commit_template: s.openspecArchiveCommitTemplate,
     column_layout: {
       order: s.columnOrder,
       hidden: s.hiddenColumns,
@@ -1117,6 +1124,7 @@ export const SETTINGS_DEFAULTS = {
   tagPushOnCreate: true,
   tagDeleteOnRemote: true,
   aiInstruction: null,
+  openspecArchiveCommitTemplate: null,
   changeSizeDisplay: "column",
   showChangeIndicator: false,
   showChangeLineCounts: false,
@@ -1151,6 +1159,7 @@ export const SETTINGS_GROUPS = {
   behavior: ["restoreTabs", "autoFetch"],
   tags: ["tagPushDefault", "tagPushOnCreate", "tagDeleteOnRemote"],
   ai: ["aiInstruction"],
+  openspec: ["openspecArchiveCommitTemplate"],
   appearance: [
     "changeSizeDisplay",
     "showChangeIndicator",
@@ -1188,6 +1197,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   aiModel: null,
   aiModels: {},
   aiInstruction: null,
+  openspecArchiveCommitTemplate: null,
   columnOrder: DEFAULT_COLUMN_ORDER,
   hiddenColumns: [],
   columnWidths: {},
@@ -1458,6 +1468,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setAiInstruction: (instruction) => {
     set({ aiInstruction: instruction });
+    schedulePersist();
+  },
+  setOpenspecArchiveCommitTemplate: (template) => {
+    set({ openspecArchiveCommitTemplate: template });
     schedulePersist();
   },
   setCommitButtonMode: (mode) => {
@@ -2246,6 +2260,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.ai_model,
         ),
         aiInstruction: settings.ai_instruction ?? null,
+        openspecArchiveCommitTemplate: settings.openspec_archive_commit_template ?? null,
         columnOrder: normalizeOrder(settings.column_layout?.order),
         hiddenColumns: normalizeHidden(settings.column_layout?.hidden),
         columnWidths: normalizeColumnWidths(settings.column_layout?.widths),

@@ -160,6 +160,11 @@ pub struct Settings {
   /// built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).
   #[serde(default)]
   pub ai_instruction: Option<String>,
+  /// Commit message template used when a spec archive commits automatically.
+  /// `{id}` is replaced with the change id. None uses the built-in default
+  /// (see `crate::openspec::cli::DEFAULT_ARCHIVE_COMMIT_TEMPLATE`).
+  #[serde(default)]
+  pub openspec_archive_commit_template: Option<String>,
   /// Commit-graph column order and visibility.
   #[serde(default)]
   pub column_layout: Option<ColumnLayout>,
@@ -417,6 +422,7 @@ impl Default for Settings {
       ai_model: None,
       ai_models: None,
       ai_instruction: None,
+      openspec_archive_commit_template: None,
       column_layout: None,
       left_panel_width: default_left_panel_width(),
       right_panel_width: default_right_panel_width(),

@@ -4,6 +4,7 @@ import { AppearanceSettings } from '@/components/domain/settings/AppearanceSetti
 import { BehaviorSettings } from '@/components/domain/settings/BehaviorSettings'
 import { GeneralSettings } from '@/components/domain/settings/GeneralSettings'
 import { LogsSettings } from '@/components/domain/settings/LogsSettings'
+import { OpenspecSettings } from '@/components/domain/settings/OpenspecSettings'
 import { ProfilesSettings } from '@/components/domain/settings/ProfilesSettings'
 import { RepositorySettings } from '@/components/domain/settings/RepositorySettings'
 import { RepositoryTagsSettings } from '@/components/domain/settings/RepositoryTagsSettings'
@@ -22,6 +23,7 @@ const TITLES: Record<SettingsSection, string> = {
   tags: 'Tags',
   profiles: 'Profiles',
   ai: 'AI',
+  openspec: 'OpenSpec',
   security: 'Security',
   appearance: 'Appearance',
   logs: 'Logs',
@@ -34,6 +36,7 @@ const SUBTITLES: Partial<Record<SettingsSection, string>> = {
   repositoryTags: 'Tag rules for the repository open in the active tab.',
   tags: 'The default tag rules for every repository.',
   profiles: 'Who you commit as, and the key you sign with.',
+  openspec: 'How GitWyrm works with your openspec/ folder.',
   security: 'Prove your commits came from you, and choose the programs GitWyrm uses.',
 }
 
@@ -45,6 +48,7 @@ const SECTION_BODIES: Record<SettingsSection, React.ComponentType> = {
   tags: TagsSettings,
   profiles: ProfilesSettings,
   ai: AiSettings,
+  openspec: OpenspecSettings,
   security: SecuritySettings,
   appearance: AppearanceSettings,
   logs: LogsSettings,
