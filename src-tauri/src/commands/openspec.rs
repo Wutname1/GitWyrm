@@ -11,7 +11,7 @@ use specta::Type;
 use tauri::State;
 
 use crate::error::AppError;
-use crate::openspec::{self, cli, history, parse, write};
+use crate::openspec::{self, cli, draft, history, parse, write};
 use crate::state::RepoManager;
 
 /// Whether this repository uses OpenSpec, and whether the CLI is around.
@@ -205,6 +205,97 @@ pub async fn openspec_scaffold_change(
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Draft a change with the AI. **Writes nothing.**
+///
+/// The returned draft lives in the frontend until the user reviews it and
+/// presses Create, which calls `openspec_create_drafted_change`. Cancelling,
+/// discarding, or closing the window in between therefore cannot leave anything
+/// on disk -- there is no cleanup path because there is nothing to clean up.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_draft_change(
+  app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  name: String,
+  description: String,
+  provider: String,
+  model: String,
+) -> Result<draft::DraftedChange, AppError> {
+  if description.trim().is_empty() {
+    return Err(AppError::Other("Describe the change first.".into()));
+  }
+  let root = repo_root(&manager, &repo_id)?;
+  let root_for_context = root.clone();
+
+  // Gather everything the AI reads before spending a token on it.
+  let (existing_ids, capabilities, recent_commits) =
+    tauri::async_runtime::spawn_blocking(move || {
+      let Some(dir) = openspec::openspec_dir(&root_for_context) else {
+        return (Vec::new(), Vec::new(), String::new());
+      };
+      let ids = parse::parse_changes_dir(&dir)
+        .into_iter()
+        .map(|c| c.id)
+        .collect::<Vec<_>>();
+      let capabilities = capability_names(&dir);
+      let commits = crate::git::shell::run_git(
+        Some(&root_for_context.to_string_lossy()),
+        &["log", "--oneline", "--no-decorate", "-10"],
+      )
+      .map(|out| out.stdout)
+      .unwrap_or_default();
+      (ids, capabilities, commits)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?;
+
+  let desired = write::sanitize_change_id(&name)
+    .ok_or_else(|| AppError::Other("that name has no letters or numbers in it".into()))?;
+  let (id, renamed) = draft::unique_change_id(&desired, &existing_ids);
+
+  let user = draft::draft_user_prompt(&description, &capabilities, &recent_commits);
+  let response =
+    crate::ai::complete::complete(&app, &provider, &model, draft::SYSTEM_PROMPT, &user).await?;
+  draft::parse_draft(&response, &id, renamed)
+}
+
+/// Write a reviewed draft. Only the artifacts passed in are created, so an
+/// artifact the user skipped is absent rather than suppressed.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_create_drafted_change(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  id: String,
+  artifacts: Vec<draft::DraftedArtifact>,
+) -> Result<write::ScaffoldResult, AppError> {
+  let root = repo_root(&manager, &repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let dir = openspec::openspec_dir(&root)
+      .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
+    let files = write::create_drafted_change(&dir, &id, &artifacts)?;
+    Ok(write::ScaffoldResult { id, files })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Capability folder names under `openspec/specs/`, for the drafting prompt.
+fn capability_names(openspec_dir: &std::path::Path) -> Vec<String> {
+  let Ok(entries) = std::fs::read_dir(openspec_dir.join("specs")) else {
+    return Vec::new();
+  };
+  let mut names: Vec<String> = entries
+    .flatten()
+    .filter(|e| e.path().is_dir())
+    .filter_map(|e| e.file_name().to_str().map(str::to_string))
+    .filter(|name| !name.starts_with('.'))
+    .collect();
+  names.sort();
+  names
 }
 
 /// Runs `openspec validate` for one change. Never errors for a missing CLI --

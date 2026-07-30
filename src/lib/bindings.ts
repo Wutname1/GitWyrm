@@ -166,6 +166,34 @@ async openspecRecheckCli() : Promise<Result<CliInfo, string>> {
 }
 },
 /**
+ * Draft a change with the AI. **Writes nothing.**
+ * 
+ * The returned draft lives in the frontend until the user reviews it and
+ * presses Create, which calls `openspec_create_drafted_change`. Cancelling,
+ * discarding, or closing the window in between therefore cannot leave anything
+ * on disk -- there is no cleanup path because there is nothing to clean up.
+ */
+async openspecDraftChange(repoId: string, name: string, description: string, provider: string, model: string) : Promise<Result<DraftedChange, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_draft_change", { repoId, name, description, provider, model }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Write a reviewed draft. Only the artifacts passed in are created, so an
+ * artifact the user skipped is absent rather than suppressed.
+ */
+async openspecCreateDraftedChange(repoId: string, id: string, artifacts: DraftedArtifact[]) : Promise<Result<ScaffoldResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_create_drafted_change", { repoId, id, artifacts }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Open a single file in the given editor. Mirrors `external::open_in_editor`,
  * but targets one file inside the repo rather than the repo folder.
  */
@@ -2456,6 +2484,42 @@ sign: string; old_no: number | null; new_no: number | null; text: string;
  */
 hunk_index: number }
 export type DiffSource = { kind: "staged" } | { kind: "unstaged" } | { kind: "commit"; sha: string }
+/**
+ * One artifact the AI drafted, as offered for review.
+ * 
+ * `content` is the exact file body that would be written, so the review card
+ * can preview precisely what Create produces -- a preview that paraphrased the
+ * content would make "review before write" a promise the UI could not keep.
+ */
+export type DraftedArtifact = { 
+/**
+ * Path relative to the change folder, e.g. `proposal.md` or
+ * `specs/openspec-core/spec.md`.
+ */
+path: string; 
+/**
+ * Full file body.
+ */
+content: string }
+/**
+ * A whole change, drafted and awaiting review. Nothing is on disk yet.
+ */
+export type DraftedChange = { 
+/**
+ * The folder name the change would get. Already uniqued against existing
+ * changes, so the UI can show the user what they will actually end up with.
+ */
+id: string; 
+/**
+ * True when `id` differs from what the user asked for because that name was
+ * taken. The UI says so rather than silently renaming.
+ */
+renamed: boolean; proposal: DraftedArtifact; tasks: DraftedArtifact; 
+/**
+ * Spec deltas. May be empty: a change that only refactors adds no
+ * requirements, and inventing one would be worse than none.
+ */
+deltas: DraftedArtifact[] }
 /**
  * What the toolbar's open button needs to draw itself: the editors that are
  * installed, whether Visual Studio is available, and any solutions to offer.

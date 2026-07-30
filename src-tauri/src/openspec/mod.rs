@@ -7,6 +7,7 @@
 //! the working tree) is what makes an edit from any editor or agent show up.
 
 pub mod cli;
+pub mod draft;
 pub mod history;
 pub mod parse;
 pub mod write;

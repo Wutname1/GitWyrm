@@ -13,6 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
+use crate::openspec::draft::DraftedArtifact;
 
 /// Result of asking to toggle a task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
@@ -162,6 +163,84 @@ pub struct ScaffoldResult {
   pub id: String,
   /// Repo-relative paths written, in creation order.
   pub files: Vec<String>,
+}
+
+/// Write a reviewed draft to disk, creating only the artifacts passed in.
+///
+/// This is the *only* place a drafted change becomes files. Everything the user
+/// skipped at review is simply absent from `artifacts`, so "Skip" is enforced by
+/// there being nothing to write rather than by a flag this function has to
+/// honour.
+///
+/// A failure part-way through removes the change folder entirely. A half-written
+/// change would show up in the sidebar as a real one, and the user would have no
+/// way to tell which files the AI actually produced.
+pub fn create_drafted_change(
+  openspec_dir: &Path,
+  id: &str,
+  artifacts: &[DraftedArtifact],
+) -> Result<Vec<String>, AppError> {
+  if artifacts.is_empty() {
+    return Err(AppError::Other(
+      "Nothing was kept, so there is nothing to create.".into(),
+    ));
+  }
+  let id = sanitize_change_id(id)
+    .ok_or_else(|| AppError::Other("that name has no letters or numbers in it".to_string()))?;
+  let dir = openspec_dir.join("changes").join(&id);
+  if dir.exists() {
+    return Err(AppError::Other(format!("a change named {id} already exists")));
+  }
+
+  let written = write_artifacts(&dir, &id, artifacts);
+  if written.is_err() {
+    // Best effort: the folder was ours to begin with, created moments ago.
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+  written
+}
+
+/// The write half of `create_drafted_change`, split out so the caller can clean
+/// up after any failure without repeating the error path at every `?`.
+fn write_artifacts(
+  dir: &Path,
+  id: &str,
+  artifacts: &[DraftedArtifact],
+) -> Result<Vec<String>, AppError> {
+  std::fs::create_dir_all(dir)?;
+  let mut files = Vec::with_capacity(artifacts.len());
+  for artifact in artifacts {
+    let target = safe_join(dir, &artifact.path).ok_or_else(|| {
+      AppError::Other(format!("{} is not a valid place for a file", artifact.path))
+    })?;
+    if let Some(parent) = target.parent() {
+      std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&target, &artifact.content)?;
+    files.push(format!("openspec/changes/{id}/{}", artifact.path.replace('\\', "/")));
+  }
+  Ok(files)
+}
+
+/// Resolve `relative` inside `base`, refusing anything that escapes it.
+///
+/// The paths come from a model's JSON, so `../` and absolute paths are a real
+/// possibility rather than a theoretical one. Checked component by component
+/// because the target does not exist yet, which rules out canonicalising it.
+fn safe_join(base: &Path, relative: &str) -> Option<std::path::PathBuf> {
+  let mut out = base.to_path_buf();
+  let mut depth = 0usize;
+  for component in Path::new(relative).components() {
+    match component {
+      std::path::Component::Normal(part) => {
+        out.push(part);
+        depth += 1;
+      }
+      // Anything else -- `..`, a root, a drive prefix -- could leave the folder.
+      _ => return None,
+    }
+  }
+  (depth > 0).then_some(out)
 }
 
 /// Creates `openspec/changes/<id>/` with template proposal.md and tasks.md.
@@ -342,5 +421,77 @@ mod tests {
     assert_eq!(parsed.status, super::super::parse::ChangeStatus::Draft);
 
     assert!(scaffold_change(dir.path(), "warn-before-delete", "").is_err());
+  }
+
+  fn artifact(path: &str, content: &str) -> DraftedArtifact {
+    DraftedArtifact { path: path.into(), content: content.into() }
+  }
+
+  #[test]
+  fn creates_only_the_artifacts_it_is_given() {
+    let dir = tempfile::tempdir().unwrap();
+    let change = dir.path().join("changes").join("add-thing");
+
+    // The user kept the proposal and the delta but skipped tasks.
+    let files = create_drafted_change(
+      dir.path(),
+      "add-thing",
+      &[
+        artifact("proposal.md", "# Change: Add a thing\n"),
+        artifact("specs/core/spec.md", "# core Spec Delta\n"),
+      ],
+    )
+    .unwrap();
+
+    assert_eq!(files.len(), 2);
+    assert!(change.join("proposal.md").exists());
+    assert!(change.join("specs").join("core").join("spec.md").exists());
+    assert!(
+      !change.join("tasks.md").exists(),
+      "a skipped artifact must not be written"
+    );
+  }
+
+  #[test]
+  fn refuses_to_overwrite_an_existing_change() {
+    let dir = tempfile::tempdir().unwrap();
+    create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# a\n")]).unwrap();
+    assert!(
+      create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# b\n")]).is_err()
+    );
+    // The original survived the refused second call.
+    let body =
+      std::fs::read_to_string(dir.path().join("changes").join("add-thing").join("proposal.md"))
+        .unwrap();
+    assert_eq!(body, "# a\n");
+  }
+
+  #[test]
+  fn nothing_is_left_behind_when_an_artifact_path_is_unusable() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = create_drafted_change(
+      dir.path(),
+      "add-thing",
+      &[
+        artifact("proposal.md", "# ok\n"),
+        // Escaping the change folder must fail the whole create.
+        artifact("../../escape.md", "nope\n"),
+      ],
+    );
+    assert!(result.is_err(), "a path outside the change folder must be refused");
+    assert!(
+      !dir.path().join("changes").join("add-thing").exists(),
+      "a failed create must not leave a partial change behind"
+    );
+    assert!(!dir.path().join("escape.md").exists());
+  }
+
+  #[test]
+  fn an_empty_artifact_list_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    // "Create" with everything skipped writes nothing at all, so it should not
+    // produce an empty folder either.
+    assert!(create_drafted_change(dir.path(), "add-thing", &[]).is_err());
+    assert!(!dir.path().join("changes").join("add-thing").exists());
   }
 }

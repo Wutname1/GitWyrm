@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{Emitter, State};
 
-use crate::ai::{auth, catalog, client, copilot_sdk, prompt};
+use crate::ai::{auth, prompt};
 use crate::commands::patch::{self, SelectedLine};
 use crate::error::AppError;
 use crate::settings;
@@ -675,13 +675,6 @@ fn file_count_label(count: usize) -> String {
   format!("{count} file{}", if count == 1 { "" } else { "s" })
 }
 
-fn bearer_for(info: &auth::AuthInfo) -> &str {
-  match info {
-    auth::AuthInfo::Api { key } => key,
-    auth::AuthInfo::Oauth { refresh, .. } => refresh,
-  }
-}
-
 #[tauri::command]
 #[specta::specta]
 pub async fn generate_commits(
@@ -747,9 +740,10 @@ pub async fn generate_commits(
     )));
   }
 
-  let info = auth::get(&app, &provider)?
+  // Fail before building a large prompt if the provider is not connected.
+  // ai::complete checks this too, but only once it is about to send.
+  auth::get(&app, &provider)?
     .ok_or_else(|| AppError::Other("Connect the selected AI provider first".into()))?;
-  let provider_config = catalog::find(&app, &provider).await?;
   let saved_instruction = settings::get_settings(app.clone())?
     .ai_instruction
     .unwrap_or_default();
@@ -789,22 +783,18 @@ Recent commit subjects:\n{}\n\nChange units:{}",
     format!("Planning {requested} commits"),
     "AI is deciding which changes belong together and writing clear messages.",
   );
-  // Copilot cannot use the HTTP chat dialects with our own OAuth app, so it
-  // goes through the bundled CLI instead. See ai/copilot_sdk.rs.
-  let response = if provider == copilot_sdk::PROVIDER_ID {
-    copilot_sdk::complete(bearer_for(&info), &model, &system, &user).await?
-  } else {
-    client::chat(client::ChatRequest {
-      provider: &provider_config,
-      bearer: bearer_for(&info),
-      model: &model,
-      system: &system,
-      user: &user,
-      max_tokens: PLAN_MAX_TOKENS,
-      timeout: PLAN_TIMEOUT,
-    })
-    .await?
-  };
+  // Provider routing (including Copilot's CLI detour) lives in ai::complete, so
+  // this and the spec drafter cannot drift apart.
+  let response = crate::ai::complete::complete_with(
+    &app,
+    &provider,
+    &model,
+    &system,
+    &user,
+    PLAN_MAX_TOKENS,
+    PLAN_TIMEOUT,
+  )
+  .await?;
   emit_progress(
     &app,
     &repo_id,
