@@ -100,6 +100,7 @@ export function SpecDeskView() {
             changes={changes}
             archivedCount={status.data.archived_count}
             selectedId={change?.id}
+            repoId={repo.id}
           />
 
           {change ? (

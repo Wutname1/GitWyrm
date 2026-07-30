@@ -23,6 +23,7 @@ export type ModalKind =
   | 'remotes'
   | 'githubConnect'
   | 'addSubmodule'
+  | 'newChange'
   | null
 
 export interface GithubItemRef {

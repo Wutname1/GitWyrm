@@ -5,6 +5,7 @@ import type { SpecChange } from '@/lib/bindings'
 import { formatRelativeTime } from '@/lib/gitDisplay'
 import { progressCount } from '@/lib/specDisplay'
 import { ProgressBar, StatusPill } from './SpecBits'
+import { SpecContextMenu } from './SpecContextMenu'
 import { selectChangeEverywhere } from '@/lib/specSync'
 import { useUiStore } from '@/stores/uiStore'
 import { toast } from 'sonner'
@@ -88,12 +89,15 @@ export function DeskChangesList({
   changes,
   archivedCount,
   selectedId,
+  repoId,
 }: {
   changes: SpecChange[]
   archivedCount: number
   selectedId: string | undefined
+  repoId: string
 }) {
   const [filter, setFilter] = useState<Filter>('active')
+  const openModal = useUiStore((s) => s.openModal)
   const rows = changes.filter((c) => matchesFilter(c, filter))
   const reviewCount = changes.filter((c) => c.status === 'needsReview').length
 
@@ -103,9 +107,7 @@ export function DeskChangesList({
         <h2 className="text-2xs font-bold tracking-[.1em] text-sub">CHANGES</h2>
         <button
           type="button"
-          onClick={() =>
-            toast.info('Creating changes from the Desk comes with the actions work.')
-          }
+          onClick={() => openModal('newChange')}
           className="flex items-center gap-1 rounded border border-primary/40 bg-soft px-2 py-0.5 text-2xs font-bold text-accent-text hover:bg-primary/20"
         >
           <Plus size={10} strokeWidth={3} />
@@ -145,12 +147,13 @@ export function DeskChangesList({
         ) : (
           <div className="flex flex-col gap-0.5">
             {rows.map((change) => (
-              <ChangeRow
-                key={change.id}
-                change={change}
-                isSelected={change.id === selectedId}
-                onSelect={() => selectChangeEverywhere(change.id)}
-              />
+              <SpecContextMenu key={change.id} change={change} repoId={repoId}>
+                <ChangeRow
+                  change={change}
+                  isSelected={change.id === selectedId}
+                  onSelect={() => selectChangeEverywhere(change.id)}
+                />
+              </SpecContextMenu>
             ))}
           </div>
         )}

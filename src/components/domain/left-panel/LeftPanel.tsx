@@ -441,7 +441,9 @@ export function LeftPanel() {
       {openspecStatus.data?.present && (
         <SpecsSection
           changes={openspecChanges.data ?? []}
+          repoId={repo.id}
           onOpenDesk={() => openSpecDesk(repo.id)}
+          onNewChange={() => openModal('newChange')}
         />
       )}
 

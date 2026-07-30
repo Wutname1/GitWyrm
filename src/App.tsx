@@ -20,6 +20,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
 import { NewTagModal } from '@/components/modals/NewTagModal'
 import { AddSubmoduleModal } from '@/components/modals/AddSubmoduleModal'
+import { NewChangeModal } from '@/components/modals/NewChangeModal'
 import { PushTagsModal } from '@/components/modals/PushTagsModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
@@ -379,6 +380,7 @@ function AppInner() {
       <NewBranchModal />
       <NewTagModal />
       <AddSubmoduleModal />
+      <NewChangeModal />
       <PushTagsModal />
       <RemotesModal />
       <GithubConnectModal />
@@ -413,6 +415,9 @@ function SpecDeskRoot() {
   return (
     <>
       <SpecDeskView />
+      {/* The Desk mounts no other modals, but "New change" is reachable from
+          its header, so this one has to exist in this window too. */}
+      <NewChangeModal />
       <Toaster position="bottom-center" />
     </>
   )

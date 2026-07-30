@@ -1,7 +1,17 @@
-import { ChevronRight, ExternalLink } from 'lucide-react'
+import { ChevronRight, ExternalLink, Plus, RefreshCw } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import type { SpecChange } from '@/lib/bindings'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import { SpecContextMenu } from '@/components/domain/spec-desk/SpecContextMenu'
 import { progressCount } from '@/lib/specDisplay'
+import { invalidateOpenspec } from '@/lib/queryKeys'
 import { selectChangeEverywhere } from '@/lib/specSync'
 import { useUiStore } from '@/stores/uiStore'
 
@@ -77,14 +87,19 @@ function SpecRow({
  */
 export function SpecsSection({
   changes,
+  repoId,
   onOpenDesk,
+  onNewChange,
 }: {
   changes: SpecChange[]
+  repoId: string
   onOpenDesk: () => void
+  onNewChange: () => void
 }) {
   const open = useUiStore((s) => s.sectionOpen.specs)
   const toggleSection = useUiStore((s) => s.toggleSection)
   const selectedId = useUiStore((s) => s.selectedChangeId)
+  const qc = useQueryClient()
 
   // Mirrors useSelectedChange: with nothing clicked, the first change is the
   // one the card is showing, so it is the one that looks selected here.
@@ -92,21 +107,38 @@ export function SpecsSection({
 
   return (
     <div className="group/section">
-      <div
-        onClick={() => toggleSection('specs')}
-        className="flex cursor-pointer select-none items-center gap-1.5 py-1.5 pl-2.5 pr-3 hover:bg-panel2"
-      >
-        <ChevronRight
-          size={12}
-          strokeWidth={2.4}
-          className={cn(
-            'flex-none text-muted-foreground transition-transform duration-100',
-            open && 'rotate-90'
-          )}
-        />
-        <span className="text-2xs font-bold tracking-[.09em] text-sub">SPECS</span>
-        <span className="ml-auto font-mono text-2xs text-muted-foreground">{changes.length}</span>
-      </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            onClick={() => toggleSection('specs')}
+            className="flex cursor-pointer select-none items-center gap-1.5 py-1.5 pl-2.5 pr-3 hover:bg-panel2"
+          >
+            <ChevronRight
+              size={12}
+              strokeWidth={2.4}
+              className={cn(
+                'flex-none text-muted-foreground transition-transform duration-100',
+                open && 'rotate-90'
+              )}
+            />
+            <span className="text-2xs font-bold tracking-[.09em] text-sub">SPECS</span>
+            <span className="ml-auto font-mono text-2xs text-muted-foreground">
+              {changes.length}
+            </span>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-56">
+          <ContextMenuItem onSelect={onNewChange}>
+            <Plus />
+            Start a new change…
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => invalidateOpenspec(qc, repoId)}>
+            <RefreshCw />
+            Re-read from disk
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {open && (
         <div className="pb-1">
           {changes.length === 0 ? (
@@ -115,12 +147,13 @@ export function SpecsSection({
             </p>
           ) : (
             changes.map((change) => (
-              <SpecRow
-                key={change.id}
-                change={change}
-                isSelected={change.id === effectiveId}
-                onClick={() => selectChangeEverywhere(change.id)}
-              />
+              <SpecContextMenu key={change.id} change={change} repoId={repoId}>
+                <SpecRow
+                  change={change}
+                  isSelected={change.id === effectiveId}
+                  onClick={() => selectChangeEverywhere(change.id)}
+                />
+              </SpecContextMenu>
             ))
           )}
           <button
