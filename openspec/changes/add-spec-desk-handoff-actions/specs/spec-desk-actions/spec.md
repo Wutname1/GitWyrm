@@ -47,6 +47,12 @@ so when it cannot, rather than opening a terminal the user must finish by hand.
 - THEN the button is disabled and names the fix, and the other handoff actions
   continue to work
 
+#### Scenario: installed while the Desk is open
+
+- WHEN the user installs opencode after seeing the button disabled, and returns
+  to the window
+- THEN the button becomes usable without restarting GitWyrm
+
 ### Requirement: Editable handoff templates
 
 Handoff templates SHALL be editable in Settings → Specs with `{change}`, `{task}`, and

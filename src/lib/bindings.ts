@@ -150,6 +150,22 @@ async opencodeAvailable() : Promise<boolean> {
     return await TAURI_INVOKE("opencode_available");
 },
 /**
+ * Re-probe for the OpenSpec CLI, ignoring the cached answer.
+ * 
+ * The probe is cached because it can shell out to `npx` and runs on every
+ * watcher event. But installing the tool after reading the "not installed"
+ * hint is the expected next step, so there has to be a way to notice without
+ * restarting GitWyrm.
+ */
+async openspecRecheckCli() : Promise<Result<CliInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_recheck_cli") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Open a single file in the given editor. Mirrors `external::open_in_editor`,
  * but targets one file inside the repo rather than the repo folder.
  */
@@ -3040,6 +3056,15 @@ ai_model?: string | null;
  * provider is default does not discard the other's model.
  */
 ai_models?: Partial<{ [key in string]: string }> | null; 
+/**
+ * Whether AI features are switched on.
+ * 
+ * Distinct from having no provider: off means "configured, but not right
+ * now", and never touches credentials, so turning it back on needs no
+ * sign-in. Defaults to on so an existing install is unaffected by the
+ * field appearing.
+ */
+ai_enabled?: boolean; 
 /**
  * Custom system instruction for commit-message generation. None uses the
  * built-in default (see `crate::ai::prompt::DEFAULT_INSTRUCTION`).

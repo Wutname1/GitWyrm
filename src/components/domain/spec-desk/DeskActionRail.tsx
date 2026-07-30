@@ -15,6 +15,7 @@ import { DisabledHint } from '@/components/ui/tooltip'
 import type { CliOutcome, DemoScenario, SpecChange } from '@/lib/bindings'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
+import { openAiSettings } from '@/lib/openAiSettings'
 import { composeTaskHandoff, copyTaskHandoff } from '@/lib/specHandoff'
 import { nextTask, useOpenspecMutations } from '@/hooks/useOpenspec'
 import { useSpecAi } from '@/hooks/useSpecAi'
@@ -28,7 +29,7 @@ import { describeError, log } from '@/lib/log'
  * button being grey is the symptom the user can already see.
  */
 const OPENCODE_MISSING =
-  'opencode is not installed. Get it from opencode.ai, then reopen this window.'
+  'opencode is not installed. Get it from opencode.ai - this button turns on once it is.'
 
 /** A button in the rail. Primary is the one action the state calls for. */
 function RailButton({
@@ -84,12 +85,22 @@ function RailButton({
  * of a check is to sit there while the user fixes what it found. It stays until
  * the change is switched or the check is run again.
  */
-function CheckResult({ outcome }: { outcome: CliOutcome }) {
+function CheckResult({ outcome, onRecheck }: { outcome: CliOutcome; onRecheck: () => void }) {
   if (outcome.kind === 'cliMissing') {
     return (
       <div className="mt-2 rounded-md border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8 px-3 py-2 text-2xs leading-relaxed text-[var(--gw-amber)]">
         <p className="font-semibold">The OpenSpec tool is not installed.</p>
         <p className="mt-1 text-[var(--gw-amber)]/85">{outcome.hint}</p>
+        {/* Installing it is the expected next step, and the probe is cached, so
+            without this the panel would keep saying "not installed" until the
+            app restarted. */}
+        <button
+          type="button"
+          onClick={onRecheck}
+          className="mt-2 rounded border border-[var(--gw-amber)]/50 px-2 py-1 text-2xs font-semibold text-[var(--gw-amber)] hover:bg-[var(--gw-amber)]/12"
+        >
+          I installed it - check again
+        </button>
       </div>
     )
   }
@@ -155,13 +166,18 @@ export function DeskActionRail({
   const handoff = composeTaskHandoff(change, task)
 
   // Whether opencode can actually be launched. A machine-level fact, so it is
-  // not keyed by repo; the long staleTime keeps the Desk from re-probing PATH
-  // on every task tick. Assumed available until the probe answers, so the
-  // button does not flicker disabled on open.
+  // not keyed by repo. Assumed available until the probe answers, so the button
+  // does not flicker disabled on open.
+  //
+  // Re-probed when the window regains focus rather than cached for minutes:
+  // installing opencode is exactly what someone does after seeing the button
+  // disabled, and they come back to a window that should have noticed. The
+  // probe is a `where`/`which` lookup, so this is cheap to repeat.
   const opencodeReady = useQuery({
     queryKey: ['opencodeAvailable'],
     queryFn: () => commands.opencodeAvailable(),
-    staleTime: 5 * 60_000,
+    staleTime: 10_000,
+    refetchOnWindowFocus: true,
   })
   const opencodeMissing = opencodeReady.data === false
 
@@ -176,6 +192,26 @@ export function DeskActionRail({
       onSuccess: setResult,
       onError: (e) => toast.error(describeError(e)),
     })
+  }
+
+  // Re-probe for the CLI, then immediately re-run the check if it turned up.
+  // Two clicks to get from "not installed" back to a result would be one too
+  // many when the user has already done the installing.
+  const recheckCli = async () => {
+    try {
+      const info = unwrap(await commands.openspecRecheckCli())
+      if (!info.available) {
+        toast.info('Still cannot find the OpenSpec tool.', {
+          description: 'If you just installed it, opening a new terminal may be needed first.',
+        })
+        return
+      }
+      toast.success(`Found the OpenSpec tool${info.version ? ` (${info.version})` : ''}.`)
+      runCheck()
+    } catch (e) {
+      log.error(`spec desk: opencode cli recheck failed: ${describeError(e)}`)
+      toast.error('Could not check for the OpenSpec tool.', { description: describeError(e) })
+    }
   }
 
   const archive = () => {
@@ -410,7 +446,7 @@ export function DeskActionRail({
               onClick={runCheck}
               pending={validateChange.isPending}
             />
-            {result && <CheckResult outcome={result} />}
+            {result && <CheckResult outcome={result} onRecheck={() => void recheckCli()} />}
             {/* Only shown after the check, so it reads as "what next" rather than
                 a warning about something the user has not done. */}
             <RailButton
@@ -451,14 +487,7 @@ export function DeskActionRail({
               it anytime.
             </p>
             <div className="mt-2.5 flex items-center gap-2">
-              <RailButton
-                label="Connect an AI"
-                onClick={() =>
-                  toast.info('Choose an AI in Settings → AI.', {
-                    description: 'It lives in the main GitWyrm window, under the gear icon.',
-                  })
-                }
-              />
+              <RailButton label="Connect an AI" onClick={() => void openAiSettings()} />
               <button
                 type="button"
                 onClick={() => setInviteDismissed(true)}

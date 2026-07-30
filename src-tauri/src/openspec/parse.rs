@@ -632,6 +632,45 @@ mod tests {
     assert_eq!((p.done, p.total, p.percent), (0, 0, 0));
   }
 
+  /// A change folder that cannot be parsed must not take its neighbours down
+  /// with it. The `openspec-core` spec requires that a malformed file still
+  /// lists, renders as raw markdown, and never blocks other changes from
+  /// loading -- so a garbage folder beside a good one must leave the good one
+  /// intact rather than emptying the whole list.
+  #[test]
+  fn a_broken_change_folder_does_not_hide_the_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let openspec = dir.path().join("openspec");
+    let changes = openspec.join("changes");
+
+    // A well-formed change.
+    let good = changes.join("add-good-thing");
+    std::fs::create_dir_all(&good).unwrap();
+    std::fs::write(good.join("proposal.md"), "## Why\n\nBecause.\n").unwrap();
+    std::fs::write(good.join("tasks.md"), "- [x] 1.1 Done\n- [ ] 1.2 Open\n").unwrap();
+
+    // A folder with nothing parseable in it at all.
+    let broken = changes.join("add-broken-thing");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(broken.join("proposal.md"), "\u{0}\u{0} not markdown \u{1}").unwrap();
+    std::fs::write(broken.join("tasks.md"), "]]] [x[ garbage\n").unwrap();
+
+    // An empty folder, the other way a change can be malformed.
+    std::fs::create_dir_all(changes.join("add-empty-thing")).unwrap();
+
+    let parsed = parse_changes_dir(&openspec);
+    let ids: Vec<&str> = parsed.iter().map(|c| c.id.as_str()).collect();
+
+    assert!(
+      ids.contains(&"add-good-thing"),
+      "the well-formed change must survive a broken neighbour, got {ids:?}"
+    );
+    // The good change's own content must be untouched by the bad neighbour.
+    let good_change = parsed.iter().find(|c| c.id == "add-good-thing").unwrap();
+    assert_eq!(good_change.progress.done, 1);
+    assert_eq!(good_change.progress.total, 2);
+  }
+
   #[test]
   fn status_rules() {
     // No tasks at all.

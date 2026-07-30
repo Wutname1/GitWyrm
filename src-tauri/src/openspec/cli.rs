@@ -103,13 +103,38 @@ use std::os::windows::process::CommandExt;
 /// can take seconds and hits the network. `openspec_status` is called on every
 /// watcher event and once per window, so probing per call made a single file save
 /// fire a burst of `npx` runs and left both windows stuck on loading state.
-/// Whether the tool is installed does not change while the app runs, so probe
-/// once per process.
-static CLI_CACHE: std::sync::OnceLock<CliInfo> = std::sync::OnceLock::new();
+///
+/// Cached rather than probed per call, but deliberately NOT a `OnceLock`:
+/// installing the tool while GitWyrm is open is exactly what a user does after
+/// reading the "not installed" hint, and a permanent cache would keep telling
+/// them it is missing until they restarted the app.
+static CLI_CACHE: std::sync::RwLock<Option<CliInfo>> = std::sync::RwLock::new(None);
 
 /// The cached answer, probing on first use.
 pub fn detect() -> CliInfo {
-  CLI_CACHE.get_or_init(probe).clone()
+  if let Ok(guard) = CLI_CACHE.read() {
+    if let Some(info) = guard.as_ref() {
+      return info.clone();
+    }
+  }
+  // Probe outside the write lock: it can shell out to npx for seconds, and
+  // holding the lock would stall every other caller behind it.
+  let info = probe();
+  if let Ok(mut guard) = CLI_CACHE.write() {
+    // Last writer wins. A concurrent probe would have produced the same answer,
+    // so a race here costs a duplicate probe, never a wrong result.
+    *guard = Some(info.clone());
+  }
+  info
+}
+
+/// Forget the cached probe so the next `detect()` looks again.
+///
+/// Called when the user asks for a re-check after installing the tool.
+pub fn forget_cached() {
+  if let Ok(mut guard) = CLI_CACHE.write() {
+    *guard = None;
+  }
 }
 
 /// Probes for a usable CLI, preferring a direct install.

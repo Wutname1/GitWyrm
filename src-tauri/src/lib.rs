@@ -54,6 +54,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::external::open_in_terminal,
     commands::external::open_in_opencode,
     commands::opencode::opencode_available,
+    commands::openspec::openspec_recheck_cli,
     commands::file::open_file_in_editor,
     commands::file::reveal_file_in_file_manager,
     commands::file::open_folder_in_file_manager,

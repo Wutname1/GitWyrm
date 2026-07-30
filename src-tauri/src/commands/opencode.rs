@@ -22,9 +22,14 @@ use crate::git::shell::CREATE_NO_WINDOW;
 /// `opencode.cmd` shim, which `where` finds under the same bare name.
 const COMMANDS: [&str; 1] = ["opencode"];
 
-/// Whether a command resolves on PATH, using the platform's own lookup so
-/// PATHEXT (and therefore the npm `.cmd` shim) is honoured on Windows.
-fn command_exists(program: &str) -> bool {
+/// Resolve `program` to a full path via the platform's own lookup, honouring
+/// PATHEXT (and therefore the npm `.cmd` shim) on Windows.
+///
+/// The resolved path matters, not just a yes/no: Windows Terminal launches its
+/// child without PATHEXT resolution, so handing it a bare "opencode" fails with
+/// ERROR_FILE_NOT_FOUND when the install is an `opencode.cmd` shim. Resolving
+/// here means every launch path gets something directly executable.
+fn resolve_on_path(program: &str) -> Option<String> {
   #[cfg(windows)]
   let mut probe = {
     use std::os::windows::process::CommandExt;
@@ -40,12 +45,34 @@ fn command_exists(program: &str) -> bool {
     c
   };
 
-  probe
-    .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::null())
-    .status()
-    .map(|s| s.success())
-    .unwrap_or(false)
+  let out = probe.output().ok()?;
+  if !out.status.success() {
+    return None;
+  }
+  // `where` prints every match, one per line. Prefer a directly executable one:
+  // it also lists the extensionless shell script, which Windows cannot run.
+  let matches: Vec<String> = String::from_utf8_lossy(&out.stdout)
+    .lines()
+    .map(str::trim)
+    .filter(|l| !l.is_empty())
+    .map(str::to_string)
+    .collect();
+
+  #[cfg(windows)]
+  {
+    matches
+      .iter()
+      .find(|m| {
+        let lower = m.to_ascii_lowercase();
+        lower.ends_with(".exe") || lower.ends_with(".cmd") || lower.ends_with(".bat")
+      })
+      .cloned()
+      .or_else(|| matches.first().cloned())
+  }
+  #[cfg(not(windows))]
+  {
+    matches.first().cloned()
+  }
 }
 
 /// The user's home directory, from the platform's own variable.
@@ -99,11 +126,11 @@ fn fallback_paths() -> Vec<PathBuf> {
   out
 }
 
-/// How to invoke opencode on this machine: either a bare name to resolve
-/// through PATH, or an absolute path found in a known install location.
+/// The absolute path to opencode on this machine, from PATH or from a known
+/// install location. Always a full path: see `resolve_on_path`.
 pub fn find_opencode() -> Option<String> {
-  if let Some(found) = COMMANDS.iter().copied().find(|c| command_exists(c)) {
-    return Some(found.to_string());
+  if let Some(found) = COMMANDS.iter().copied().find_map(resolve_on_path) {
+    return Some(found);
   }
   fallback_paths()
     .into_iter()
@@ -223,6 +250,7 @@ fn applescript_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::path::Path;
 
   /// Detection must never claim opencode is available without something to
   /// run. The inverse is not asserted: this machine may legitimately have no
@@ -232,6 +260,34 @@ mod tests {
     assert_eq!(opencode_available(), find_opencode().is_some());
     if let Some(found) = find_opencode() {
       assert!(!found.is_empty(), "a found launcher must be nameable");
+    }
+  }
+
+  /// Windows Terminal launches its child without PATHEXT resolution, so a bare
+  /// "opencode" fails with ERROR_FILE_NOT_FOUND against an npm `.cmd` shim --
+  /// the launch appeared to work while opencode never started. Detection must
+  /// therefore hand back something directly executable, never a bare name.
+  /// Skipped when opencode is not installed.
+  #[test]
+  fn detection_returns_a_directly_executable_path() {
+    let Some(found) = find_opencode() else {
+      return;
+    };
+    assert!(
+      Path::new(&found).is_absolute(),
+      "launcher must be a full path, got {found:?}"
+    );
+    assert!(
+      Path::new(&found).exists(),
+      "resolved launcher does not exist: {found:?}"
+    );
+    #[cfg(windows)]
+    {
+      let lower = found.to_ascii_lowercase();
+      assert!(
+        lower.ends_with(".exe") || lower.ends_with(".cmd") || lower.ends_with(".bat"),
+        "on Windows the launcher must carry a runnable extension, got {found:?}"
+      );
     }
   }
 

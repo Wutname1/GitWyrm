@@ -44,6 +44,23 @@ fn repo_root(manager: &RepoManager, repo_id: &str) -> Result<PathBuf, AppError> 
   Ok(manager.get(repo_id)?.path.clone())
 }
 
+/// Re-probe for the OpenSpec CLI, ignoring the cached answer.
+///
+/// The probe is cached because it can shell out to `npx` and runs on every
+/// watcher event. But installing the tool after reading the "not installed"
+/// hint is the expected next step, so there has to be a way to notice without
+/// restarting GitWyrm.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_recheck_cli() -> Result<cli::CliInfo, AppError> {
+  tauri::async_runtime::spawn_blocking(|| {
+    cli::forget_cached();
+    cli::detect()
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn openspec_status(

@@ -88,6 +88,12 @@ not. Read-only viewing SHALL never require the CLI.
 - THEN GitWyrm explains the check needs the OpenSpec tool and how to get it
 - AND all viewing, progress, and task ticking still work
 
+#### Scenario: CLI installed while GitWyrm is open
+
+- WHEN the user installs the CLI after reading that hint and asks to check again
+- THEN GitWyrm re-probes rather than repeating the cached answer, and runs the
+  check without needing a restart
+
 ### Requirement: Typed command surface
 
 All OpenSpec operations SHALL be exposed as typed commands through the project's

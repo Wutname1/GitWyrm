@@ -40,4 +40,4 @@
 
 - [x] 5.1 Copied handoff pastes cleanly into opencode and produces a scoped task
 - [x] 5.2 Archive a finished change; confirm merge into specs/ and archive count bump
-- [ ] 5.3 All of the above with the OpenSpec CLI uninstalled (graceful outcomes)
+- [x] 5.3 All of the above with the OpenSpec CLI uninstalled (graceful outcomes)
