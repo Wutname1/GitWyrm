@@ -198,7 +198,9 @@ pub async fn openspec_validate_change(
 }
 
 /// Runs `openspec archive` for one change: merges its deltas into the specs
-/// library and moves the folder into `changes/archive/`.
+/// library and moves the folder into `changes/archive/`. On success, stages
+/// and commits the result immediately -- no AI, no separate commit step --
+/// so an archived change never sits as an uncommitted diff.
 #[tauri::command]
 #[specta::specta]
 pub async fn openspec_archive_change(
@@ -206,8 +208,16 @@ pub async fn openspec_archive_change(
   repo_id: String,
   change_id: String,
 ) -> Result<cli::CliOutcome, AppError> {
-  let root = repo_root(&manager, &repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || cli::archive_change(&root, &change_id))
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))
+  let open = manager.get(&repo_id)?;
+  let root = open.path.clone();
+  tauri::async_runtime::spawn_blocking(move || {
+    let outcome = cli::archive_change(&root, &change_id);
+    if matches!(outcome, cli::CliOutcome::Ok { .. }) {
+      let repo = open.repo.lock().unwrap();
+      cli::commit_archive(&repo, &root, &change_id)?;
+    }
+    Ok(outcome)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }

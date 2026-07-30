@@ -198,6 +198,61 @@ pub fn archive_change(repo_root: &Path, change_id: &str) -> CliOutcome {
   run(repo_root, &["archive", change_id, "--yes"])
 }
 
+/// Stages everything the archive command touched and commits it, with no AI
+/// and no CLI involved in the message -- archiving is a mechanical operation,
+/// so the record of it should be too.
+///
+/// Only called after `archive_change` reports `Ok`; a `Failed` or `CliMissing`
+/// outcome leaves the working tree for the user to inspect, so nothing here
+/// runs in that case.
+pub fn commit_archive(
+  repo: &git2::Repository,
+  repo_path: &Path,
+  change_id: &str,
+) -> Result<Option<git2::Oid>, crate::error::AppError> {
+  let repo_path_str = repo_path.to_string_lossy();
+
+  let mut index = repo.index()?;
+  index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
+  index.write()?;
+  let tree_oid = index.write_tree()?;
+  let tree = repo.find_tree(tree_oid)?;
+
+  let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+  if let Some(parent) = &head_commit {
+    if parent.tree_id() == tree_oid {
+      // Nothing changed -- the archive command itself failed to touch the
+      // working tree, which `archive_change`'s Ok/Failed split does not
+      // otherwise catch. Leave HEAD alone rather than writing an empty commit.
+      return Ok(None);
+    }
+  }
+
+  let signature = repo.signature().map_err(|_| {
+    crate::error::AppError::Other(
+      "Git does not know your name and email yet. Add them in Settings > General, then archive again."
+        .into(),
+    )
+  })?;
+  let identity = crate::git::commit_write::CommitIdentity {
+    author: signature.clone(),
+    committer: signature,
+  };
+  let parents: Vec<&git2::Commit<'_>> = head_commit.iter().collect();
+  let message = format!("chore: Archive {change_id} spec");
+
+  let oid = crate::git::commit_write::create(
+    repo,
+    &repo_path_str,
+    Some("HEAD"),
+    &identity,
+    &message,
+    &tree,
+    &parents,
+  )?;
+  Ok(Some(oid))
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -226,5 +281,56 @@ mod tests {
     // `run` maps the detected label back to an Invocation; keep them in sync.
     assert_eq!(Invocation::Direct.label(), "openspec");
     assert_eq!(Invocation::Npx.label(), "npx");
+  }
+
+  fn repo_with_base(dir: &Path) -> git2::Repository {
+    let repo = git2::Repository::init(dir).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.name", "Test Wyrm").unwrap();
+    config.set_str("user.email", "test@gitwyrm.dev").unwrap();
+    std::fs::write(dir.join("base.txt"), "base\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("base.txt")).unwrap();
+    index.write().unwrap();
+    {
+      let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+      let sig = repo.signature().unwrap();
+      repo.commit(Some("HEAD"), &sig, &sig, "base", &tree, &[]).unwrap();
+    }
+    repo
+  }
+
+  #[test]
+  fn commit_archive_stages_and_commits_working_tree_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_with_base(dir.path());
+
+    // Simulate what `openspec archive` does to the working tree: move a
+    // change folder and touch a spec file, with no staging of our own.
+    std::fs::write(dir.path().join("base.txt"), "changed\n").unwrap();
+    std::fs::write(dir.path().join("new-spec.md"), "spec\n").unwrap();
+
+    let oid = commit_archive(&repo, dir.path(), "add-thing").unwrap();
+    assert!(oid.is_some());
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.id(), oid.unwrap());
+    assert_eq!(head.message().unwrap(), "chore: Archive add-thing spec");
+    assert_eq!(repo.statuses(None).unwrap().len(), 0, "everything should be committed");
+
+    let tree = head.tree().unwrap();
+    assert!(tree.get_path(Path::new("new-spec.md")).is_ok());
+  }
+
+  #[test]
+  fn commit_archive_is_a_noop_when_nothing_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_with_base(dir.path());
+    let before = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+    let oid = commit_archive(&repo, dir.path(), "add-thing").unwrap();
+
+    assert!(oid.is_none());
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id(), before);
   }
 }
