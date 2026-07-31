@@ -326,6 +326,85 @@ pub fn tasks_path(openspec_dir: &Path, change_id: &str) -> PathBuf {
   openspec_dir.join("changes").join(change_id).join("tasks.md")
 }
 
+/// Resolve a file inside a change package, for editing.
+///
+/// Two checks, because either alone leaks. `safe_join` rejects `..`, roots and
+/// drive prefixes before touching the disk, which catches the ordinary escape
+/// and gives a useful message for a path that does not exist yet. Then the
+/// parent directory is canonicalized and re-checked against the canonical change
+/// directory, which catches the escape `safe_join` cannot see: a symlink whose
+/// every component is `Normal` but which points somewhere else entirely.
+///
+/// The parent is canonicalized rather than the file because the file may not
+/// exist yet -- a first save of design.md is a legitimate write.
+fn editable_path(change_dir: &Path, file: &str) -> Result<PathBuf, AppError> {
+  let outside = || AppError::Other(format!("{file} is not a file in this change."));
+
+  let target = safe_join(change_dir, file).ok_or_else(outside)?;
+  let base = change_dir.canonicalize().map_err(|_| outside())?;
+  let parent = target.parent().ok_or_else(outside)?;
+  // A parent that does not exist cannot be a symlink out, and creating it is the
+  // caller's business. Only an existing parent needs resolving.
+  if parent.exists() {
+    let resolved = parent.canonicalize().map_err(|_| outside())?;
+    if !resolved.starts_with(&base) {
+      return Err(outside());
+    }
+  }
+  Ok(target)
+}
+
+/// Read one file of a change package for the editor.
+///
+/// A missing file reads as empty rather than erroring: a change with no design.md
+/// should open a blank editor to write one, not an error about a file the user is
+/// trying to create.
+pub fn read_change_file(
+  openspec_dir: &Path,
+  change_id: &str,
+  file: &str,
+) -> Result<String, AppError> {
+  let dir = openspec_dir.join("changes").join(change_id);
+  if !dir.exists() {
+    return Err(AppError::Other(format!("{change_id} is not a change here.")));
+  }
+  let path = editable_path(&dir, file)?;
+  match std::fs::read_to_string(&path) {
+    Ok(body) => Ok(body),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+    Err(e) => Err(AppError::Other(format!("{file} could not be read: {e}"))),
+  }
+}
+
+/// Write one file of a change package from the editor.
+///
+/// The body is written exactly as given. No trailing-newline fixups or
+/// reformatting: this file is under version control and shared with agents and
+/// outside editors, so an unasked-for byte here is a spurious diff in someone's
+/// commit.
+pub fn write_change_file(
+  openspec_dir: &Path,
+  change_id: &str,
+  file: &str,
+  body: &str,
+) -> Result<String, AppError> {
+  let dir = openspec_dir.join("changes").join(change_id);
+  if !dir.exists() {
+    return Err(AppError::Other(format!("{change_id} is not a change here.")));
+  }
+  let path = editable_path(&dir, file)?;
+  if let Some(parent) = path.parent() {
+    std::fs::create_dir_all(parent)
+      .map_err(|e| AppError::Other(format!("{file} could not be saved: {e}")))?;
+  }
+  std::fs::write(&path, body)
+    .map_err(|e| AppError::Other(format!("{file} could not be saved: {e}")))?;
+  Ok(format!(
+    "openspec/changes/{change_id}/{}",
+    file.replace('\\', "/")
+  ))
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -585,5 +664,99 @@ mod tests {
     // produce an empty folder either.
     assert!(create_drafted_change(dir.path(), "add-thing", &[]).is_err());
     assert!(!dir.path().join("changes").join("add-thing").exists());
+  }
+
+  /// An openspec dir holding one change with a proposal, for the editing tests.
+  fn change_fixture() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    create_drafted_change(
+      dir.path(),
+      "add-thing",
+      &[artifact("proposal.md", "# Change\n\n## Why\n\nBecause.\n")],
+    )
+    .unwrap();
+    dir
+  }
+
+  #[test]
+  fn a_file_round_trips_through_read_and_write() {
+    let dir = change_fixture();
+    let body = "# Change\n\n## Why\n\nA better reason.\n";
+    write_change_file(dir.path(), "add-thing", "proposal.md", body).unwrap();
+    let back = read_change_file(dir.path(), "add-thing", "proposal.md").unwrap();
+    assert_eq!(back, body);
+  }
+
+  #[test]
+  fn a_write_stores_the_body_byte_for_byte() {
+    let dir = change_fixture();
+    // No trailing newline, CRLF inside, trailing spaces: all of it must survive.
+    let body = "# Change\r\n\r\ntrailing spaces   \nno final newline";
+    write_change_file(dir.path(), "add-thing", "proposal.md", body).unwrap();
+    let back = read_change_file(dir.path(), "add-thing", "proposal.md").unwrap();
+    assert_eq!(back, body);
+  }
+
+  #[test]
+  fn a_missing_file_reads_as_empty() {
+    let dir = change_fixture();
+    // design.md is optional; opening the editor to write one must not error.
+    assert_eq!(read_change_file(dir.path(), "add-thing", "design.md").unwrap(), "");
+  }
+
+  #[test]
+  fn a_first_save_creates_nested_parents() {
+    let dir = change_fixture();
+    write_change_file(dir.path(), "add-thing", "specs/core/spec.md", "# d\n").unwrap();
+    assert_eq!(
+      read_change_file(dir.path(), "add-thing", "specs/core/spec.md").unwrap(),
+      "# d\n"
+    );
+  }
+
+  #[test]
+  fn a_relative_escape_is_refused() {
+    let dir = change_fixture();
+    assert!(write_change_file(dir.path(), "add-thing", "../../escape.md", "x").is_err());
+    assert!(read_change_file(dir.path(), "add-thing", "../../escape.md").is_err());
+    assert!(!dir.path().join("escape.md").exists());
+  }
+
+  #[test]
+  fn an_absolute_path_is_refused() {
+    let dir = change_fixture();
+    let outside = dir.path().join("outside.md");
+    let absolute = outside.to_string_lossy().to_string();
+    assert!(write_change_file(dir.path(), "add-thing", &absolute, "x").is_err());
+    assert!(!outside.exists());
+  }
+
+  #[test]
+  fn an_unknown_change_is_refused() {
+    let dir = change_fixture();
+    assert!(read_change_file(dir.path(), "not-a-change", "proposal.md").is_err());
+    assert!(write_change_file(dir.path(), "not-a-change", "proposal.md", "x").is_err());
+  }
+
+  /// The escape `safe_join` cannot see: every component is `Normal`, so the
+  /// lexical check passes, and only canonicalizing reveals it leaves the folder.
+  #[cfg(unix)]
+  #[test]
+  fn a_symlink_out_of_the_change_is_refused() {
+    let dir = change_fixture();
+    let secrets = dir.path().join("secrets");
+    std::fs::create_dir_all(&secrets).unwrap();
+    std::fs::write(secrets.join("keys.md"), "private\n").unwrap();
+
+    let change = dir.path().join("changes").join("add-thing");
+    std::os::unix::fs::symlink(&secrets, change.join("link")).unwrap();
+
+    assert!(read_change_file(dir.path(), "add-thing", "link/keys.md").is_err());
+    assert!(write_change_file(dir.path(), "add-thing", "link/keys.md", "owned").is_err());
+    // The file behind the symlink is untouched.
+    assert_eq!(
+      std::fs::read_to_string(secrets.join("keys.md")).unwrap(),
+      "private\n"
+    );
   }
 }

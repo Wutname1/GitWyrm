@@ -11,7 +11,7 @@ use specta::Type;
 use tauri::State;
 
 use crate::error::AppError;
-use crate::openspec::{self, archive_repair, ask, cli, draft, history, parse, write};
+use crate::openspec::{self, archive_repair, ask, cli, draft, edit_draft, history, parse, write};
 use crate::state::RepoManager;
 
 /// Whether this repository uses OpenSpec, and whether the CLI is around.
@@ -456,6 +456,109 @@ pub async fn openspec_ask(
   let reply =
     crate::ai::complete::complete(&app, &provider, &model, ask::SYSTEM_PROMPT, &prompt).await?;
   Ok(ask::parse_answer(&reply, &sources, asked_for_work))
+}
+
+/// Read one file of a change package, for the editor.
+///
+/// Returns the raw markdown, not the parsed view: the editor saves what it was
+/// given, so it has to be given what is actually on disk.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_read_file(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  change_id: String,
+  file: String,
+) -> Result<String, AppError> {
+  let root = repo_root(&manager, &repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let dir = openspec::openspec_dir(&root)
+      .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
+    write::read_change_file(&dir, &change_id, &file)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Write one file of a change package from the editor.
+///
+/// The single write path for spec files: a hand edit and an accepted AI draft
+/// both arrive here, so the path refusal is enforced once rather than in two
+/// places that could drift apart.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_write_file(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  change_id: String,
+  file: String,
+  body: String,
+) -> Result<String, AppError> {
+  let root = repo_root(&manager, &repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let dir = openspec::openspec_dir(&root)
+      .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
+    write::write_change_file(&dir, &change_id, &file, &body)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Draft an edit to one file of a change package. **Writes nothing.**
+///
+/// The counterpart to `openspec_ask`, kept separate for the same reason ask has
+/// no tools: the read-only path stays read-only, and the writing path is its own
+/// command with its own prompt. What comes back is a proposed file body. The UI
+/// diffs it, the user accepts it into the editor, and the user saves -- which is
+/// the same `openspec_write_file` a hand edit uses, so there is one write path
+/// and one path refusal rather than two that could drift.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_draft_edit(
+  app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  change_id: String,
+  file: String,
+  instruction: String,
+  provider: String,
+  model: String,
+) -> Result<edit_draft::DraftedEdit, AppError> {
+  edit_draft::check_instruction(&instruction)?;
+  if !edit_draft::is_editable(&file) {
+    return Err(AppError::Other(format!(
+      "{file} is not a file this can edit."
+    )));
+  }
+
+  let root = repo_root(&manager, &repo_id)?;
+  let change_for_read = change_id.clone();
+  let file_for_read = file.clone();
+
+  // Read the file and the proposal together, so the model sees what it is
+  // editing and why the change exists.
+  let (current, proposal) = tauri::async_runtime::spawn_blocking(move || {
+    let dir = openspec::openspec_dir(&root)
+      .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
+    let current = write::read_change_file(&dir, &change_for_read, &file_for_read)?;
+    // Context only: a change with no proposal still drafts fine.
+    let proposal = write::read_change_file(&dir, &change_for_read, "proposal.md")
+      .unwrap_or_default();
+    Ok::<_, AppError>((current, proposal))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))??;
+
+  let user = edit_draft::user_prompt(&file, &current, &instruction, &proposal);
+  let reply = crate::ai::complete::complete(
+    &app,
+    &provider,
+    &model,
+    edit_draft::SYSTEM_PROMPT,
+    &user,
+  )
+  .await?;
+  edit_draft::parse_draft(&reply, &file)
 }
 
 /// Capability folder names under `openspec/specs/`, for the drafting prompt.

@@ -10,6 +10,7 @@ pub mod archive_repair;
 pub mod ask;
 pub mod cli;
 pub mod draft;
+pub mod edit_draft;
 pub mod history;
 pub mod parse;
 pub mod write;

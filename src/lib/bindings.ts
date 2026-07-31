@@ -269,6 +269,53 @@ async openspecAddDraftedDelta(repoId: string, changeId: string, delta: DraftedAr
 }
 },
 /**
+ * Read one file of a change package, for the editor.
+ * 
+ * Returns the raw markdown, not the parsed view: the editor saves what it was
+ * given, so it has to be given what is actually on disk.
+ */
+async openspecReadFile(repoId: string, changeId: string, file: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_read_file", { repoId, changeId, file }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Write one file of a change package from the editor.
+ * 
+ * The single write path for spec files: a hand edit and an accepted AI draft
+ * both arrive here, so the path refusal is enforced once rather than in two
+ * places that could drift apart.
+ */
+async openspecWriteFile(repoId: string, changeId: string, file: string, body: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_write_file", { repoId, changeId, file, body }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Draft an edit to one file of a change package. **Writes nothing.**
+ * 
+ * The counterpart to `openspec_ask`, kept separate for the same reason ask has
+ * no tools: the read-only path stays read-only, and the writing path is its own
+ * command with its own prompt. What comes back is a proposed file body. The UI
+ * diffs it, the user accepts it into the editor, and the user saves -- which is
+ * the same `openspec_write_file` a hand edit uses, so there is one write path
+ * and one path refusal rather than two that could drift.
+ */
+async openspecDraftEdit(repoId: string, changeId: string, file: string, instruction: string, provider: string, model: string) : Promise<Result<DraftedEdit, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_draft_edit", { repoId, changeId, file, instruction, provider, model }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Open a single file in the given editor. Mirrors `external::open_in_editor`,
  * but targets one file inside the repo rather than the repo folder.
  */
@@ -2719,6 +2766,23 @@ renamed: boolean; proposal: DraftedArtifact; tasks: DraftedArtifact;
  * requirements, and inventing one would be worse than none.
  */
 deltas: DraftedArtifact[] }
+/**
+ * A proposed replacement for one file of a change package.
+ */
+export type DraftedEdit = { 
+/**
+ * Path relative to the change folder, echoed back so the UI cannot apply a
+ * draft to a different file than the one it asked about.
+ */
+file: string; 
+/**
+ * The complete proposed contents of the file, not a patch.
+ */
+body: string; 
+/**
+ * One plain-language line about what changed, for the review header.
+ */
+summary: string }
 /**
  * What the toolbar's open button needs to draw itself: the editors that are
  * installed, whether Visual Studio is available, and any solutions to offer.

@@ -20,6 +20,9 @@ import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { unwrap } from '@/lib/queryKeys'
 import { describeError } from '@/lib/log'
 import { DeltaBadge, ProgressRing, StatusPill } from './SpecBits'
+import { EditFileButton, SpecFileEditor } from './SpecFileEditor'
+import { DraftedEditReview } from './DraftedEditReview'
+import { useSpecDraftStore } from '@/stores/specDraftStore'
 
 type Tab = 'overview' | 'proposal' | 'deltas' | 'history' | 'ai'
 
@@ -309,6 +312,40 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
   const ai = useSpecAi()
   const [confirmUndo, setConfirmUndo] = useState(false)
   const [undoing, setUndoing] = useState(false)
+  /**
+   * The file currently open in the editor, relative to the change folder, or
+   * null when every tab is rendering read-only.
+   *
+   * One at a time: two editors on screen would make "Save" ambiguous, and the
+   * drafts of the others are held in the store regardless, so nothing is lost by
+   * closing one to open another.
+   */
+  const [editing, setEditing] = useState<string | null>(null)
+  /**
+   * An AI-drafted edit waiting to be looked at, with the file's contents as they
+   * were when it was drafted so the diff compares against what the user saw.
+   */
+  const [drafted, setDrafted] = useState<{
+    file: string
+    body: string
+    summary: string
+    current: string
+  } | null>(null)
+  const [drafting, setDrafting] = useState(false)
+  const replaceDraft = useSpecDraftStore((s) => s.replace)
+  const changeHasDirty = useSpecDraftStore((s) =>
+    Object.entries(s.drafts).some(
+      ([key, draft]) =>
+        key.startsWith(`${repoId} ${change.id} `) && draft != null && draft.text !== draft.original
+    )
+  )
+
+  // Selecting another change closes the editor. The draft stays in the store, so
+  // coming back reopens it with the unsaved text intact -- but leaving an editor
+  // open across changes would show one change's file under another's header.
+  useEffect(() => {
+    setEditing(null)
+  }, [change.id])
 
   /**
    * Throw away the AI's edits and put its task back to not-done.
@@ -336,6 +373,52 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
       setUndoing(false)
     }
   }
+  /**
+   * Ask the AI for a rewrite of one file. Writes nothing.
+   *
+   * The file is read first so the review can diff against what is actually on
+   * disk right now, rather than against whatever the AI was shown -- those can
+   * differ if the file changed while the question was being typed.
+   */
+  const draftEdit = async (file: string, instruction: string) => {
+    if (drafting || !ai.provider || !ai.model) return
+    setDrafting(true)
+    try {
+      const current = unwrap(await commands.openspecReadFile(repoId, change.id, file))
+      const draft = unwrap(
+        await commands.openspecDraftEdit(
+          repoId,
+          change.id,
+          file,
+          instruction,
+          ai.provider,
+          ai.model
+        )
+      )
+      setDrafted({ file: draft.file, body: draft.body, summary: draft.summary, current })
+    } catch (e) {
+      toast.error('That edit could not be drafted.', { description: describeError(e) })
+    } finally {
+      setDrafting(false)
+    }
+  }
+
+  /**
+   * Take a drafted edit into the editor as unsaved text.
+   *
+   * Deliberately not a write: the AI's wording lands where the user can change
+   * it, and reaches disk by the same Save they use for a hand edit. One write
+   * path, one path refusal.
+   */
+  const acceptDraft = () => {
+    if (!drafted) return
+    replaceDraft(repoId, change.id, drafted.file, drafted.body)
+    setEditing(drafted.file)
+    setTab(drafted.file === 'proposal.md' ? 'proposal' : drafted.file.startsWith('specs/') ? 'deltas' : 'overview')
+    setDrafted(null)
+    toast.success(`Opened in the editor. Nothing is saved until you press Save.`)
+  }
+
   // An ask session belongs to the change it was started on. Showing one change's
   // answers under another's header would make every citation a lie.
   const asking = askSession?.changeId === change.id
@@ -364,6 +447,11 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
       <div className="flex-none px-6 pt-5">
         <p className="font-mono text-2xs text-muted-foreground">
           openspec / changes / {change.id}
+          {/* Unsaved work is easy to forget once the editor is closed, so the
+              change itself carries the marker, not only the file. */}
+          {changeHasDirty && (
+            <span className="ml-2 text-[var(--gw-amber)]">. unsaved changes</span>
+          )}
         </p>
         <div className="mt-1.5 flex items-start justify-between gap-4">
           <h1 className="text-lg font-semibold leading-tight text-foreground">{change.title}</h1>
@@ -478,14 +566,65 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
             </div>
 
             <div>
-              <h2 className="mb-2 text-2xs font-bold tracking-[.1em] text-sub">TASKS</h2>
-              <TaskList change={change} repoId={repoId} />
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h2 className="text-2xs font-bold tracking-[.1em] text-sub">TASKS</h2>
+                {editing !== 'tasks.md' && (
+                  <EditFileButton onClick={() => setEditing('tasks.md')} label="Edit tasks.md" />
+                )}
+              </div>
+              {editing === 'tasks.md' ? (
+                <SpecFileEditor
+                  repoId={repoId}
+                  changeId={change.id}
+                  file="tasks.md"
+                  onClose={() => setEditing(null)}
+                />
+              ) : (
+                <TaskList change={change} repoId={repoId} />
+              )}
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h2 className="text-2xs font-bold tracking-[.1em] text-sub">DESIGN</h2>
+                {editing !== 'design.md' && (
+                  <EditFileButton onClick={() => setEditing('design.md')} label="Edit design.md" />
+                )}
+              </div>
+              {editing === 'design.md' ? (
+                <SpecFileEditor
+                  repoId={repoId}
+                  changeId={change.id}
+                  file="design.md"
+                  onClose={() => setEditing(null)}
+                />
+              ) : (
+                <p className="text-2xs text-muted-foreground">
+                  {change.has_design
+                    ? 'design.md holds the technical notes for this change.'
+                    : 'No design.md yet. Editing creates one.'}
+                </p>
+              )}
             </div>
           </div>
         )}
 
-        {tab === 'proposal' && (
+        {tab === 'proposal' && editing === 'proposal.md' && (
           <div className="max-w-2xl">
+            <SpecFileEditor
+              repoId={repoId}
+              changeId={change.id}
+              file="proposal.md"
+              onClose={() => setEditing(null)}
+            />
+          </div>
+        )}
+
+        {tab === 'proposal' && editing !== 'proposal.md' && (
+          <div className="max-w-2xl">
+            <div className="mb-3 flex justify-end">
+              <EditFileButton onClick={() => setEditing('proposal.md')} label="Edit proposal.md" />
+            </div>
             {/* Sections when the file has the expected headings; the raw file when
                 it does not, so a half-written proposal still shows its content. */}
             {change.proposal.why.trim() || change.proposal.what_changes.trim() ? (
@@ -522,7 +661,18 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
           </div>
         )}
 
-        {tab === 'deltas' && (
+        {tab === 'deltas' && editing?.startsWith('specs/') && (
+          <div className="max-w-2xl">
+            <SpecFileEditor
+              repoId={repoId}
+              changeId={change.id}
+              file={editing}
+              onClose={() => setEditing(null)}
+            />
+          </div>
+        )}
+
+        {tab === 'deltas' && !editing?.startsWith('specs/') && (
           <div className="max-w-2xl">
             {change.deltas.length === 0 ? (
               <p className="text-xs text-muted-foreground">
@@ -538,9 +688,10 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
                   >
                     <header className="flex items-center gap-2.5 bg-panel px-3.5 py-2">
                       <DeltaBadge kind={delta.kind} />
-                      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-sub">
+                      <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-sub">
                         {delta.file}
                       </span>
+                      <EditFileButton onClick={() => setEditing(delta.file)} />
                     </header>
                     <div className="flex flex-col gap-3 px-3.5 py-3">
                       {delta.requirements.map((req) => (
@@ -566,6 +717,23 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
         )}
 
         {tab === 'history' && <HistoryTab change={change} repoId={repoId} />}
+        {tab === 'ai' && drafting && (
+          <p className="mb-3 rounded border border-border px-2.5 py-1.5 text-2xs text-muted-foreground">
+            Drafting that edit. Nothing is being changed yet.
+          </p>
+        )}
+        {tab === 'ai' && drafted && (
+          <div className="mb-4">
+            <DraftedEditReview
+              file={drafted.file}
+              summary={drafted.summary}
+              current={drafted.current}
+              proposed={drafted.body}
+              onAccept={acceptDraft}
+              onReject={() => setDrafted(null)}
+            />
+          </div>
+        )}
         {tab === 'ai' && askMode && (
           <AskTab
             repoId={repoId}
@@ -591,6 +759,12 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
                   }
                 : undefined
             }
+            // Drafting an edit is offered only when a provider is resolved --
+            // otherwise the button would be there with nothing behind it.
+            onDraftEdit={
+              ai.provider && ai.model ? (file, instruction) => void draftEdit(file, instruction) : undefined
+            }
+            deltaFiles={change.deltas.map((d) => d.file)}
           />
         )}
         {tab === 'ai' && !askMode && (

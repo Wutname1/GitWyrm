@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BookOpen, Eye, Play, Send } from 'lucide-react'
+import { BookOpen, Eye, PencilLine, Play, Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -10,6 +10,7 @@ import { describeError } from '@/lib/log'
 import { useAskStore, type AskTurn } from '@/stores/askStore'
 import { useAiSelection } from '@/hooks/useAiSelection'
 import { useSpecAi } from '@/hooks/useSpecAi'
+import { detectEditRequest } from '@/lib/specEditRequest'
 
 /**
  * The ✦ tab in ask mode: a read-only conversation about one change.
@@ -25,6 +26,8 @@ export function AskTab({
   changeId,
   onOpenTab,
   onStartRun,
+  onDraftEdit,
+  deltaFiles,
 }: {
   repoId: string
   changeId: string
@@ -35,6 +38,13 @@ export function AskTab({
    * there is no task left to run, so the escalation is never a dead button.
    */
   onStartRun?: () => void
+  /**
+   * Offered when the user asks for a spec file to be reworded. Drafting writes
+   * nothing: it returns a proposed file the Desk shows as a diff.
+   */
+  onDraftEdit?: (file: string, instruction: string) => void
+  /** The change's delta paths, so a question naming one matches a real file. */
+  deltaFiles?: readonly string[]
 }) {
   const [draft, setDraft] = useState('')
   const ai = useSpecAi()
@@ -97,7 +107,17 @@ export function AskTab({
           </div>
         )}
         {turns.map((turn) => (
-          <Turn key={turn.id} turn={turn} onOpenTab={onOpenTab} onStartRun={onStartRun} />
+          <Turn
+            key={turn.id}
+            turn={turn}
+            onOpenTab={onOpenTab}
+            onStartRun={onStartRun}
+            // Worked out from the question the user typed, not from the answer:
+            // the model is told it cannot edit, so its reply will not volunteer
+            // an offer to. The intent is in the question either way.
+            editRequest={detectEditRequest(turn.question, deltaFiles)}
+            onDraftEdit={onDraftEdit}
+          />
         ))}
         {pending && (
           <p className="px-1 py-2 text-2xs text-muted-foreground">Reading this change…</p>
@@ -136,10 +156,14 @@ function Turn({
   turn,
   onOpenTab,
   onStartRun,
+  editRequest,
+  onDraftEdit,
 }: {
   turn: AskTurn
   onOpenTab: (tab: string) => void
   onStartRun?: () => void
+  editRequest: { file: string; instruction: string } | null
+  onDraftEdit?: (file: string, instruction: string) => void
 }) {
   return (
     <div className="mb-3 last:mb-0">
@@ -171,6 +195,22 @@ function Turn({
                 </button>
               ))}
             </div>
+          )}
+          {/* Asked for a file to be reworded: offer to draft it. Drafting still
+              writes nothing -- it produces a diff to look at -- so this stays
+              inside the read-only promise the banner makes. */}
+          {editRequest && onDraftEdit && (
+            <button
+              type="button"
+              onClick={() => onDraftEdit(editRequest.file, editRequest.instruction)}
+              className={cn(
+                'mt-2 flex items-center gap-1.5 rounded-md border border-primary/50 bg-soft px-2.5 py-1',
+                'text-2xs font-semibold text-accent-text transition-colors hover:bg-primary/15'
+              )}
+            >
+              <PencilLine size={11} strokeWidth={2.4} />
+              Draft this edit to {editRequest.file}
+            </button>
           )}
           {/* Promotion from read-only to write is always one visible click. The
               button is offered; it never fires on its own. */}
