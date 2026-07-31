@@ -5,8 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#121212" />
     <link rel="icon" href="/favicon.ico" />
-    <!-- Fetch the mark alongside the HTML so the splash paints whole, not in two steps. -->
-    <link rel="preload" as="image" href="/logo.png" />
+    <!--
+      Fetch the mark alongside the HTML so the splash paints whole, not in two
+      steps. Which mark depends on the window: the Spec Desk opens with
+      `?window=spec-desk` and wears its own logo, so preloading both would cost
+      every main-window launch a second image it will never draw. The script
+      below runs before the splash markup parses, so the preload it inserts
+      still lands ahead of the paint.
+    -->
+    <script>
+      (function () {
+        var deskWindow = location.search.indexOf('window=spec-desk') !== -1
+        var link = document.createElement('link')
+        link.rel = 'preload'
+        link.as = 'image'
+        link.href = deskWindow ? '/specdesk-logo.png' : '/logo.png'
+        document.head.appendChild(link)
+        // The splash markup reads this to pick its logo and drop the pulse.
+        document.documentElement.dataset.splashVariant = deskWindow ? 'desk' : 'main'
+      })()
+    </script>
     <title>GitWyrm — Interactive UI Study</title>
     <!--
       Inline, so it paints on the very first frame. A stylesheet or module would
@@ -93,6 +111,16 @@
         /* The mark carries its own color; the glow ties it to the accent. */
         filter: drop-shadow(0 0 calc(var(--splash-size) * 0.03) rgba(29, 181, 132, 0.5));
         animation: splash-breathe 2.6s ease-in-out infinite;
+      }
+
+      /*
+        The Desk's mark sits still. The breathing scale reads as a wiggle on
+        this logo's straight edges, where the wyrm's round silhouette hid it.
+        The halo, ring, and graph keep moving, so the screen still reads as
+        loading rather than frozen.
+      */
+      [data-splash-variant='desk'] .splash-logo {
+        animation: none;
       }
 
       /* The commit graph: a branch that forks and merges, nodes lighting along it. */
@@ -209,7 +237,17 @@
     <div id="splash" role="status" aria-label="Loading GitWyrm">
       <div class="splash-mark">
         <div class="splash-ring"></div>
-        <img src="/logo.png" alt="" class="splash-logo" />
+        <!--
+          The Desk wears its own mark. Swapped inline, immediately after the
+          element parses, so the first paint already has the right logo rather
+          than showing the wyrm for a frame and then switching.
+        -->
+        <img id="splash-logo" src="/logo.png" alt="" class="splash-logo" />
+        <script>
+          if (document.documentElement.dataset.splashVariant === 'desk') {
+            document.getElementById('splash-logo').src = '/specdesk-logo.png'
+          }
+        </script>
       </div>
       <svg class="splash-graph" viewBox="0 0 132 30" aria-hidden="true">
         <!-- Base branch, then a fork that rejoins: the shape of a merge. -->

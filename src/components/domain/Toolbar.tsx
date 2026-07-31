@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { branchSync } from "@/lib/branchActions";
 import { SyncBadge } from "@/components/domain/branch/SyncBadge";
 import { OpenInEditorButton } from "@/components/domain/OpenInEditorButton";
+import { OpenSpecDeskButton } from "@/components/domain/OpenSpecDeskButton";
 import { useBranches, useRemotes, useStashes } from "@/hooks/useGitQueries";
 import { useGitMutations } from "@/hooks/useGitMutations";
 import { useUiStore } from "@/stores/uiStore";
@@ -425,6 +426,7 @@ export function Toolbar() {
         reason={noRepoReason}
       />
       <OpenInEditorButton disabled={noRepo} disabledReason={noRepoReason} />
+      <OpenSpecDeskButton disabled={noRepo} disabledReason={noRepoReason} />
       <GhostButton
         icon={<SquareTerminal size={16} strokeWidth={1.9} />}
         tooltip="Open in terminal"
