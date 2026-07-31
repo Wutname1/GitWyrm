@@ -31,6 +31,10 @@ pub use git::ssh::rewrite_config as ssh_config_rewrite;
 /// through this client -- the only check that the transport works end to end.
 pub use ai::agent::acp as agent_acp;
 pub use ai::agent::copilot_cli as agent_copilot_cli;
+/// Exposed for the archive-repair integration test, which drives a real
+/// half-finished archive through diagnosis and repair -- the one path whose
+/// value is entirely in what the CLI actually does.
+pub use openspec::archive_repair;
 pub use openspec::openspec_dir;
 pub use openspec::parse as openspec_parse;
 pub use openspec::write as openspec_write;
@@ -58,6 +62,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::openspec::openspec_draft_change,
     commands::openspec::openspec_create_drafted_change,
     commands::openspec::openspec_ask,
+    commands::openspec::openspec_diagnose_archive,
+    commands::openspec::openspec_repair_archive,
     commands::openspec::openspec_draft_fix,
     commands::openspec::openspec_add_drafted_delta,
     commands::file::open_file_in_editor,

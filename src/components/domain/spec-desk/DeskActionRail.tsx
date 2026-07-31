@@ -32,7 +32,7 @@ import { useStartRun } from "@/hooks/useStartRun";
 import { ConfirmDialog } from "@/components/modals/ConfirmDialog";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { describeError, log } from "@/lib/log";
-import { cliReason } from "@/lib/specCliOutcome";
+import { ArchiveProblemCard } from "./ArchiveProblemCard";
 
 /**
  * Why the opencode button is off. Names the fix rather than the failure: the
@@ -199,6 +199,13 @@ export function DeskActionRail({
   } | null>(null);
   const { startRun, starting } = useStartRun(repoId, change);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  // A failed archive, with the change it belongs to. Carries its own id for the
+  // same reason the drafted fix does: the user can select elsewhere while
+  // reading it, and the repair must land on what they actually archived.
+  const [archiveProblem, setArchiveProblem] = useState<{
+    changeId: string;
+    outcome: CliOutcome & { kind: "failed" };
+  } | null>(null);
   // Held here, not inside the <details>: the rail re-renders on every task tick
   // and watcher refresh, and a details element rebuilt from JSX would snap shut
   // under the user mid-read.
@@ -234,6 +241,9 @@ export function DeskActionRail({
   useEffect(() => {
     setResult(null);
     setCheckedId(null);
+    // The archive problem goes too: it names its own change, and leaving it
+    // under another change's header would read as a problem with that one.
+    setArchiveProblem(null);
   }, [change.id]);
 
   const runCheck = () => {
@@ -351,13 +361,16 @@ export function DeskActionRail({
           setConfirmArchive(false);
           return;
         }
-        // Keep the dialog open on failure: the change did not move, and closing
-        // would imply it did. The toast carries the one-line reason; the full
-        // output goes to the inline panel, which is where it can be read.
+        // Close the dialog and put the problem in the rail. Archive failures get
+        // their own panel because most of them are fixable, and a toast cannot
+        // hold an explanation plus the button that acts on it.
+        setConfirmArchive(false);
+        if (outcome.kind === "failed") {
+          setArchiveProblem({ changeId: change.id, outcome });
+          return;
+        }
+        // cliMissing: nothing to diagnose, the tool was never there.
         setResult(outcome);
-        toast.error(`Could not archive ${change.id}.`, {
-          description: outcome.kind === "failed" ? cliReason(outcome.output) : undefined,
-        });
       },
       onError: (e) => toast.error(describeError(e)),
     });
@@ -589,6 +602,14 @@ export function DeskActionRail({
                 setConfirmArchive(true);
               }}
             />
+            {archiveProblem && (
+              <ArchiveProblemCard
+                repoId={repoId}
+                changeId={archiveProblem.changeId}
+                outcome={archiveProblem.outcome}
+                onArchived={() => setArchiveProblem(null)}
+              />
+            )}
           </div>
         </section>
 

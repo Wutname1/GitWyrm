@@ -209,6 +209,38 @@ async openspecAsk(repoId: string, changeId: string, question: string, provider: 
 }
 },
 /**
+ * Work out why an archive failed. **Reads only.**
+ * 
+ * The CLI's output is a transcript ending in one line that matters, and two of
+ * its failures are ordinary and recoverable. This turns the transcript into a
+ * named problem with an explanation, and says whether GitWyrm can fix it. It
+ * never fixes anything: that is `openspec_repair_archive`, which the user has
+ * to ask for.
+ */
+async openspecDiagnoseArchive(changeId: string, output: string) : Promise<Result<ArchiveDiagnosis, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_diagnose_archive", { changeId, output }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Carry out a repair the user accepted, then archive again.
+ * 
+ * Both halves in one command so the user's single click produces the whole
+ * outcome. Repairing and then leaving them to press Archive a second time
+ * would be the app doing the hard part and then stopping short of the point.
+ */
+async openspecRepairArchive(repoId: string, changeId: string, problem: ArchiveProblem) : Promise<Result<CliOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_repair_archive", { repoId, changeId, problem }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Draft one spec delta to fix a change that failed its spec check. **Writes
  * nothing** -- the caller reviews it and then calls
  * `openspec_add_drafted_delta`.
@@ -2273,6 +2305,46 @@ async specLinkClear(repoId: string, branch: string) : Promise<Result<null, strin
 
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
+/**
+ * What the app can tell the user, and what it offers to do about it.
+ */
+export type ArchiveDiagnosis = { problem: ArchiveProblem; 
+/**
+ * One sentence naming what went wrong, in the user's terms.
+ */
+summary: string; 
+/**
+ * What happened and why, still in plain language. Two or three sentences.
+ */
+detail: string; 
+/**
+ * Label for the button that fixes it, when a fix is possible.
+ */
+fix_label: string | null; 
+/**
+ * Exactly what the fix would do, so accepting it is informed.
+ */
+fix_detail: string | null }
+/**
+ * A recognised reason an archive did not go through.
+ */
+export type ArchiveProblem = 
+/**
+ * A previous archive merged the specs, created its folder, then stopped
+ * before moving anything into it. Every later attempt refuses because the
+ * destination exists.
+ */
+{ kind: "leftoverArchive"; path: string } | 
+/**
+ * A delta creates a capability but also carries MODIFIED or RENAMED
+ * requirements, which only make sense against a spec that already exists.
+ */
+{ kind: "modifiedInNewSpec"; capability: string } | 
+/**
+ * Recognised as a failure, but not as one of the above. The user gets the
+ * tool's own words and no false promise of a fix.
+ */
+{ kind: "unrecognised" }
 /**
  * One answer from an ask session.
  */

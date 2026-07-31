@@ -11,7 +11,7 @@ use specta::Type;
 use tauri::State;
 
 use crate::error::AppError;
-use crate::openspec::{self, ask, cli, draft, history, parse, write};
+use crate::openspec::{self, archive_repair, ask, cli, draft, history, parse, write};
 use crate::state::RepoManager;
 
 /// Whether this repository uses OpenSpec, and whether the CLI is around.
@@ -202,6 +202,44 @@ pub async fn openspec_scaffold_change(
     let dir = openspec::openspec_dir(&root)
       .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
     write::scaffold_change(&dir, &name, &description)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Work out why an archive failed. **Reads only.**
+///
+/// The CLI's output is a transcript ending in one line that matters, and two of
+/// its failures are ordinary and recoverable. This turns the transcript into a
+/// named problem with an explanation, and says whether GitWyrm can fix it. It
+/// never fixes anything: that is `openspec_repair_archive`, which the user has
+/// to ask for.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_diagnose_archive(
+  change_id: String,
+  output: String,
+) -> Result<archive_repair::ArchiveDiagnosis, AppError> {
+  Ok(archive_repair::diagnose(&change_id, &output))
+}
+
+/// Carry out a repair the user accepted, then archive again.
+///
+/// Both halves in one command so the user's single click produces the whole
+/// outcome. Repairing and then leaving them to press Archive a second time
+/// would be the app doing the hard part and then stopping short of the point.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_repair_archive(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  change_id: String,
+  problem: archive_repair::ArchiveProblem,
+) -> Result<cli::CliOutcome, AppError> {
+  let root = repo_root(&manager, &repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    archive_repair::repair(&root, &problem)?;
+    Ok::<_, AppError>(cli::archive_change(&root, &change_id))
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
