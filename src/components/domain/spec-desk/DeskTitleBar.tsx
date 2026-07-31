@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import specDeskLogo from "@/assets/icons/specdesk.png";
 import { WindowControls } from "@/components/domain/WindowControls";
 import { AiProviderChip } from "./AiProviderChip";
 
@@ -23,7 +24,18 @@ export function DeskTitleBar({
       data-tauri-drag-region
       className="flex h-10 flex-none select-none items-center gap-2.5 border-b border-border bg-panel pl-3 pr-0"
     >
-      <span className="size-3.5 flex-none rounded bg-primary" aria-hidden />
+      {/* The window icon. Decorations are off, so this titlebar is the only
+          place the Desk's mark appears on the window itself. The mark carries
+          its own color, so it is drawn as an image rather than tinted. */}
+      <img
+        src={specDeskLogo}
+        alt=""
+        aria-hidden
+        width={16}
+        height={16}
+        className="flex-none object-contain"
+        style={{ width: 16, height: 16 }}
+      />
       <span className="text-xs font-semibold text-foreground">Spec Desk</span>
       <span className="overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-muted-foreground">
         {repoName}
