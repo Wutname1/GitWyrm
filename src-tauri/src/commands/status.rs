@@ -51,7 +51,10 @@ pub async fn get_status(
     // Line counts: staged = HEAD tree -> index; unstaged = index -> workdir.
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let mut diff_opts = DiffOptions::new();
-    diff_opts.include_untracked(true).show_untracked_content(true);
+    diff_opts
+      .include_untracked(true)
+      .show_untracked_content(true)
+      .recurse_untracked_dirs(true);
     let staged_stats = repo
       .diff_tree_to_index(head_tree.as_ref(), None, None)
       .map(|d| line_stats(&d))
