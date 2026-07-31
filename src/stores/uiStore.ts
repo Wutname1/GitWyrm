@@ -24,6 +24,7 @@ export type ModalKind =
   | 'githubConnect'
   | 'addSubmodule'
   | 'newChange'
+  | 'aiSettings'
   | null
 
 export interface GithubItemRef {

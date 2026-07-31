@@ -8,7 +8,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { WorkspaceLayout } from '@/layouts/WorkspaceLayout'
 import { SpecDeskView } from '@/views/SpecDeskView'
 import { readWindowMode } from '@/lib/windowMode'
-import { listenForSettingsRequests } from '@/lib/openAiSettings'
+import { listenForSettingsChanges } from '@/lib/settingsSync'
 import { listenForSpecSelection } from '@/lib/specSync'
 import { OnboardingModal } from '@/components/modals/OnboardingModal'
 import { TutorialHost } from '@/components/tutorial/TutorialHost'
@@ -22,6 +22,7 @@ import { NewBranchModal } from '@/components/modals/NewBranchModal'
 import { NewTagModal } from '@/components/modals/NewTagModal'
 import { AddSubmoduleModal } from '@/components/modals/AddSubmoduleModal'
 import { NewChangeModal } from '@/components/modals/NewChangeModal'
+import { AiSettingsModal } from '@/components/modals/AiSettingsModal'
 import { PushTagsModal } from '@/components/modals/PushTagsModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
@@ -370,9 +371,19 @@ function AppInner() {
   // and spec card too -- the two windows render the same state.
   useEffect(() => listenForSpecSelection(), [])
 
-  // The Desk has no settings view, so its "AI settings" entries ask this window
-  // to open the panel while bringing itself forward.
-  useEffect(() => listenForSettingsRequests(), [])
+  // AI settings can now be changed from the Desk as well as here, and each
+  // window has its own store. Without this, connecting a provider over there
+  // would leave this window's commit form still offering to set one up.
+  useEffect(
+    () =>
+      listenForSettingsChanges(() => {
+        void useWorkspaceStore
+          .getState()
+          .reloadSettings()
+          .catch((e) => log.error(`could not reload settings: ${String(e)}`))
+      }),
+    []
+  )
 
   return (
     <>
@@ -393,6 +404,7 @@ function AppInner() {
       <PushTagsModal />
       <RemotesModal />
       <GithubConnectModal />
+      <AiSettingsModal />
       <Toaster position="bottom-center" />
     </>
   )
@@ -445,6 +457,20 @@ function SpecDeskRoot() {
     hideSplash()
   }, [])
 
+  // Hydration above is a one-shot. Settings the main window changes afterwards
+  // -- switching provider, turning AI off -- have to reach this window too, or
+  // the chip here keeps naming an AI the rest of the app has moved off.
+  useEffect(
+    () =>
+      listenForSettingsChanges(() => {
+        void useWorkspaceStore
+          .getState()
+          .reloadSettings()
+          .catch((e) => log.error(`spec desk: could not reload settings: ${String(e)}`))
+      }),
+    []
+  )
+
   return (
     <>
       <SpecDeskView />
@@ -454,6 +480,9 @@ function SpecDeskRoot() {
           modal's usual lookup would come back empty. The id from the URL is the
           one the backend already resolved before opening this window. */}
       <NewChangeModal repoId={readWindowMode().repoId ?? undefined} />
+      {/* AI settings open here rather than throwing the user at the main
+          window, which is what "AI settings…" used to do from this window. */}
+      <AiSettingsModal />
       <Toaster position="bottom-center" />
     </>
   )

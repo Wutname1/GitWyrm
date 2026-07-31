@@ -8,6 +8,7 @@ import {
 } from "@/lib/bindings";
 import { log } from "@/lib/log";
 import { normalizePath, pathKey, samePath } from "@/lib/paths";
+import { broadcastSettingsChanged } from "@/lib/settingsSync";
 import { isTutorialRepoPath } from "@/lib/tutorialLessons";
 import { unwrap } from "@/lib/queryKeys";
 import {
@@ -799,6 +800,11 @@ interface WorkspaceState {
   setShowChangeLineCounts: (enabled: boolean) => void;
   /** Reads settings.json once and hydrates the store; returns the raw settings for launch-time restore. */
   hydrate: () => Promise<Settings>;
+  /**
+   * Re-read the settings another window can change while this one is open.
+   * Narrower than `hydrate`, which also owns tab and layout state.
+   */
+  reloadSettings: () => Promise<void>;
 }
 
 /** Fields persisted to settings.json (excludes in-memory-only state like openRepos handles). */
@@ -1091,7 +1097,12 @@ function schedulePersist() {
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     persistTimer = null;
-    void commands.saveSettings(toSettings(useWorkspaceStore.getState()));
+    // Broadcast only after the write resolves: a window that re-reads before
+    // the file lands would pick up the previous values and overwrite its own
+    // correct state with them.
+    void commands
+      .saveSettings(toSettings(useWorkspaceStore.getState()))
+      .then(broadcastSettingsChanged);
   }, 300);
 }
 
@@ -1106,7 +1117,12 @@ export function flushPendingSettings(): Promise<unknown> {
     clearTimeout(persistTimer);
     persistTimer = null;
   }
-  return commands.saveSettings(toSettings(useWorkspaceStore.getState()));
+  return commands
+    .saveSettings(toSettings(useWorkspaceStore.getState()))
+    .then((r) => {
+      broadcastSettingsChanged();
+      return r;
+    });
 }
 
 /**
@@ -2385,6 +2401,25 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       });
     }
     return settings;
+  },
+
+  reloadSettings: async () => {
+    const settings = unwrap(await commands.getSettings());
+    // Deliberately narrow: only the settings another window can change while
+    // this one is open. A full re-read would also pull tab groups, order and
+    // panel sizes, clobbering live layout state in this window with whatever
+    // the last debounced write happened to contain.
+    set({
+      aiProvider: settings.ai_provider ?? null,
+      aiModel: settings.ai_model ?? null,
+      aiModels: normalizeAiModels(
+        settings.ai_models,
+        settings.ai_provider,
+        settings.ai_model,
+      ),
+      aiEnabled: settings.ai_enabled !== false,
+      aiInstruction: settings.ai_instruction ?? null,
+    });
   },
 }));
 
