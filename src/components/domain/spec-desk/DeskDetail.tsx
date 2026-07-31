@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Bot, Check, CircleDot, FileText, GitCommitHorizontal, ListChecks, Scale } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -12,6 +12,9 @@ import { copyTaskHandoff } from '@/lib/specHandoff'
 import { nextTask, useOpenspecHistory, useOpenspecMutations } from '@/hooks/useOpenspec'
 import { stateGlyph, useAiRun } from '@/hooks/useAiRun'
 import { AiRunTab } from '@/components/domain/ai-run/AiRunTab'
+import { AskTab } from '@/components/domain/ai-run/AskTab'
+import { useAskStore } from '@/stores/askStore'
+import { useStartRun } from '@/hooks/useStartRun'
 import { DeltaBadge, ProgressRing, StatusPill } from './SpecBits'
 
 type Tab = 'overview' | 'proposal' | 'deltas' | 'history' | 'ai'
@@ -297,10 +300,28 @@ const TABS: Array<{ key: Tab; label: string }> = [
 export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: string }) {
   const [tab, setTab] = useState<Tab>('overview')
   const run = useAiRun(repoId)
-  // The AI tab only exists once there is a run to show. An empty tab that is
+  const askSession = useAskStore((s) => s.byRepo[repoId])
+  const { startRun, canStart: canStartRun } = useStartRun(repoId, change)
+  // An ask session belongs to the change it was started on. Showing one change's
+  // answers under another's header would make every citation a lie.
+  const asking = askSession?.changeId === change.id
+  // The AI tab only exists once there is something to show. An empty tab that is
   // always present invites clicking on nothing.
+  //
+  // A run wins the tab when both exist: it is the mode with state to watch and
+  // possibly a gate waiting, and it is the one that can change files.
   const hasRun = run.session != null
-  const tabs = hasRun ? [...TABS, { key: 'ai' as Tab, label: '✦ AI' }] : TABS
+  const askMode = asking && !hasRun
+  const showAiTab = hasRun || asking
+  const tabs = showAiTab
+    ? [...TABS, { key: 'ai' as Tab, label: askMode ? '✦ Ask AI' : '✦ AI' }]
+    : TABS
+
+  // Leaving the change the ask belongs to sends the tab back somewhere real,
+  // rather than leaving an empty ✦ selected.
+  useEffect(() => {
+    if (tab === 'ai' && !showAiTab) setTab('overview')
+  }, [tab, showAiTab])
   const history = useOpenspecHistory(repoId, change.id, tab === 'overview' || tab === 'history')
   const recent = (history.data ?? []).slice(0, 3)
 
@@ -511,7 +532,34 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
         )}
 
         {tab === 'history' && <HistoryTab change={change} repoId={repoId} />}
-        {tab === 'ai' && (
+        {tab === 'ai' && askMode && (
+          <AskTab
+            repoId={repoId}
+            changeId={change.id}
+            // A citation chip opens the tab holding the document it names, which
+            // is what makes a cited answer checkable rather than just decorated.
+            onOpenTab={(next) => {
+              if (next === 'proposal' || next === 'deltas' || next === 'history') {
+                setTab(next as Tab)
+              } else {
+                // tasks and design live under Overview.
+                setTab('overview')
+              }
+            }}
+            // Promotion from read-only to write, as one explicit click. Absent
+            // when every task is done, so the button is never offered with
+            // nothing to run.
+            onStartRun={
+              canStartRun
+                ? () => {
+                    void startRun()
+                    setTab('ai')
+                  }
+                : undefined
+            }
+          />
+        )}
+        {tab === 'ai' && !askMode && (
           <AiRunTab
             run={run}
             endingActions={{

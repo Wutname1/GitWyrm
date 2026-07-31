@@ -11,7 +11,7 @@ use specta::Type;
 use tauri::State;
 
 use crate::error::AppError;
-use crate::openspec::{self, cli, draft, history, parse, write};
+use crate::openspec::{self, ask, cli, draft, history, parse, write};
 use crate::state::RepoManager;
 
 /// Whether this repository uses OpenSpec, and whether the CLI is around.
@@ -337,6 +337,87 @@ pub async fn openspec_add_drafted_delta(
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Answer a question about a change. **Reads only.**
+///
+/// This deliberately goes through the one-shot completion path rather than the
+/// agent: there is no tool loop, so there is no edit capability to refuse. The
+/// read-only promise is structural, not a matter of the model behaving.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_ask(
+  app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  change_id: String,
+  question: String,
+  provider: String,
+  model: String,
+) -> Result<ask::AskAnswer, AppError> {
+  ask::check_question(&question)?;
+  let root = repo_root(&manager, &repo_id)?;
+  let change_for_read = change_id.clone();
+  // Decided before the question moves into the gathering closure, and from the
+  // question alone: a proposal that says "make the change" must not turn every
+  // question about it into an escalation.
+  let asked_for_work = ask::wants_run(&question);
+  let question_for_prompt = question.clone();
+
+  // Gather the change package. Every document handed to the model is also
+  // returned as a citable source, so a chip can never name something the model
+  // was not actually given.
+  let (prompt, sources) = tauri::async_runtime::spawn_blocking(move || {
+    let dir = openspec::openspec_dir(&root)
+      .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
+    let change_dir = dir.join("changes").join(&change_for_read);
+    if !change_dir.exists() {
+      return Err(AppError::Other(format!("{change_for_read} is not a change here.")));
+    }
+
+    let read = |name: &str| std::fs::read_to_string(change_dir.join(name)).unwrap_or_default();
+    let proposal = read("proposal.md");
+    let tasks = read("tasks.md");
+    let design_body = read("design.md");
+    let design = (!design_body.trim().is_empty()).then_some(design_body);
+
+    let mut sources = vec![
+      ask::AskSource { label: "proposal.md".into(), tab: "proposal".into() },
+      ask::AskSource { label: "tasks.md".into(), tab: "tasks".into() },
+    ];
+    if design.is_some() {
+      sources.push(ask::AskSource { label: "design.md".into(), tab: "design".into() });
+    }
+
+    let mut deltas = Vec::new();
+    for delta in parse::parse_change_dir(&change_dir)
+      .map(|c| c.deltas)
+      .unwrap_or_default()
+    {
+      let body = std::fs::read_to_string(change_dir.join(&delta.file)).unwrap_or_default();
+      if body.trim().is_empty() {
+        continue;
+      }
+      sources.push(ask::AskSource { label: delta.file.clone(), tab: "deltas".into() });
+      deltas.push((delta.file, body));
+    }
+
+    let prompt = ask::user_prompt(
+      &change_for_read,
+      &proposal,
+      &tasks,
+      design.as_deref(),
+      &deltas,
+      &question_for_prompt,
+    );
+    Ok::<_, AppError>((prompt, sources))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))??;
+
+  let reply =
+    crate::ai::complete::complete(&app, &provider, &model, ask::SYSTEM_PROMPT, &prompt).await?;
+  Ok(ask::parse_answer(&reply, &sources, asked_for_work))
 }
 
 /// Capability folder names under `openspec/specs/`, for the drafting prompt.

@@ -6,6 +6,7 @@
 //! renders what these modules parse, and the repo watcher (which already covers
 //! the working tree) is what makes an edit from any editor or agent show up.
 
+pub mod ask;
 pub mod cli;
 pub mod draft;
 pub mod history;

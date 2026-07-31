@@ -26,8 +26,9 @@ import { composeTaskHandoff, copyTaskHandoff } from '@/lib/specHandoff'
 import { nextTask, useOpenspecMutations } from '@/hooks/useOpenspec'
 import { useSpecAi } from '@/hooks/useSpecAi'
 import { useAiSelection } from '@/hooks/useAiSelection'
-import { stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
-import { useBranches } from '@/hooks/useGitQueries'
+import { isActive, stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
+import { useAskStore } from '@/stores/askStore'
+import { useStartRun } from '@/hooks/useStartRun'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { FormDialog } from '@/components/ui/form-dialog'
 import { describeError, log } from '@/lib/log'
@@ -182,13 +183,14 @@ export function DeskActionRail({
   const { validateChange, archiveChange, draftFix, addDraftedDelta } =
     useOpenspecMutations(repoId)
   const selection = useAiSelection()
+  const run = useAiRun(repoId)
+  const startAskSession = useAskStore((s) => s.start)
   const [result, setResult] = useState<CliOutcome | null>(null)
   // Which change `result` describes. Not always the selected one: the user can
   // switch changes while a fix drafts, and the fix belongs to what was checked.
   const [checkedId, setCheckedId] = useState<string | null>(null)
   const [fix, setFix] = useState<{ changeId: string; delta: DraftedArtifact } | null>(null)
-  const [starting, setStarting] = useState(false)
-  const branches = useBranches(repoId)
+  const { startRun, starting } = useStartRun(repoId, change)
   const [confirmArchive, setConfirmArchive] = useState(false)
   // Held here, not inside the <details>: the rail re-renders on every task tick
   // and watcher refresh, and a details element rebuilt from JSX would snap shut
@@ -238,6 +240,24 @@ export function DeskActionRail({
         setCheckedId(checked)
       },
       onError: (e) => toast.error(describeError(e)),
+    })
+  }
+
+  // Ask and runs share the ✦ tab and the one-session-at-a-time rule, so a
+  // working run holds the tab. `isActive` covers the states where a run is
+  // mid-flight or waiting on the user, not one that has already ended.
+  const runIsActive = isActive(run.state)
+
+  const startAsk = () => {
+    if (runIsActive) {
+      toast.info('A run is working right now.', {
+        description: 'Open the ✦ tab to watch it, then ask once it finishes.',
+      })
+      return
+    }
+    startAskSession(repoId, change.id)
+    toast.success('Ask is open in the ✦ tab.', {
+      description: 'It reads this change and the code, and changes nothing.',
     })
   }
 
@@ -351,37 +371,6 @@ export function DeskActionRail({
     }
   }
 
-  const startRun = async () => {
-    if (!task || starting) return
-    setStarting(true)
-    try {
-      const res = await commands.aiRunStart(
-        repoId,
-        change.id,
-        task.index,
-        // The author's own numbering is what the header shows; the index is
-        // what identifies the checkbox. They disagree whenever a plan skips or
-        // repeats a number, so both are sent rather than one being derived.
-        change.progress.done + 1,
-        task.text,
-        // The checked-out branch: a run edits files in place, so it has to be
-        // pinned to where the work will actually land.
-        branches.data?.local.find((b) => b.is_head)?.name ?? 'main'
-      )
-      if (res.status !== 'ok') {
-        toast.error('That could not be started.', { description: res.error })
-        return
-      }
-      if (res.data.kind === 'alreadyRunning') {
-        toast.info(res.data.summary)
-        return
-      }
-      toast.success('Started. Watch it on the AI tab.')
-    } finally {
-      setStarting(false)
-    }
-  }
-
   return (
     <div className="flex min-h-0 flex-col border-l border-border bg-panel">
       <header className="flex-none border-b border-border px-4 py-3.5">
@@ -425,16 +414,19 @@ export function DeskActionRail({
                     onClick={() => void startRun()}
                   />
                 )}
-                {/* Asking questions in-app is its own change (`add-ai-ask-mode`).
-                    Until it lands the button is disabled with a tooltip rather
-                    than clickable-then-apologetic: a control that does nothing
-                    but explain itself trains people to stop trusting buttons. */}
+                {/* Ask shares the ✦ tab with runs, and only one session exists at
+                    a time, so this is off while a run is working rather than
+                    quietly replacing what the user is watching. */}
                 <RailButton
                   icon={<MessageCircleQuestion size={12} strokeWidth={2.2} />}
                   label="Ask about this change"
-                  disabled
-                  title="Not built yet - copy the handoff below and ask in your own tool."
-                  onClick={() => {}}
+                  disabled={runIsActive}
+                  title={
+                    runIsActive
+                      ? 'A run is working right now. Open the ✦ tab to watch it, then ask when it finishes.'
+                      : undefined
+                  }
+                  onClick={startAsk}
                 />
               </>
             ) : (

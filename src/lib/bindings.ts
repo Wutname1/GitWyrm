@@ -194,6 +194,21 @@ async openspecCreateDraftedChange(repoId: string, id: string, artifacts: Drafted
 }
 },
 /**
+ * Answer a question about a change. **Reads only.**
+ * 
+ * This deliberately goes through the one-shot completion path rather than the
+ * agent: there is no tool loop, so there is no edit capability to refuse. The
+ * read-only promise is structural, not a matter of the model behaving.
+ */
+async openspecAsk(repoId: string, changeId: string, question: string, provider: string, model: string) : Promise<Result<AskAnswer, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_ask", { repoId, changeId, question, provider, model }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Draft one spec delta to fix a change that failed its spec check. **Writes
  * nothing** -- the caller reviews it and then calls
  * `openspec_add_drafted_delta`.
@@ -2243,6 +2258,31 @@ async specLinkClear(repoId: string, branch: string) : Promise<Result<null, strin
 
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
+/**
+ * One answer from an ask session.
+ */
+export type AskAnswer = { text: string; sources: AskSource[]; 
+/**
+ * True when the user asked for work to be done rather than explained. The UI
+ * turns this into a "Start a run with AI" button; promotion from read-only to
+ * write is always one visible click.
+ */
+wants_run: boolean }
+/**
+ * A document the answer drew on, for the citation chips.
+ * 
+ * `tab` is the Desk tab a chip opens. Kept as a plain string matching the tab
+ * keys the frontend already uses, so a new tab does not need a change here.
+ */
+export type AskSource = { 
+/**
+ * What to show on the chip, e.g. "proposal.md" or "specs/ai-ask/spec.md".
+ */
+label: string; 
+/**
+ * Desk tab to open: "proposal", "tasks", "deltas", or "design".
+ */
+tab: string }
 /**
  * One line of a file, tagged with the commit that last changed it.
  */
