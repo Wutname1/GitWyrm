@@ -228,6 +228,14 @@ pub struct Settings {
   /// remote branches are current without the user asking. On by default.
   #[serde(default = "default_auto_fetch")]
   pub auto_fetch: bool,
+  /// Send anonymous crash reports and error diagnostics. On by default; turning
+  /// it off stops both the frontend and backend reporters at their next start.
+  ///
+  /// Read straight off disk during startup by `crash_reports_enabled`, before
+  /// the Tauri app handle exists, so the reporters can honour it from the very
+  /// first line rather than after settings finish loading.
+  #[serde(default = "default_crash_reports")]
+  pub crash_reports: bool,
   /// Whether the welcome tour has been shown. Without this the tour reopens on
   /// every launch that starts with no repository, which is the normal state for
   /// anyone who keeps "reopen my last tabs" off.
@@ -385,6 +393,10 @@ fn default_auto_fetch() -> bool {
   true
 }
 
+fn default_crash_reports() -> bool {
+  true
+}
+
 fn default_vertical_tab_width() -> f64 {
   248.0
 }
@@ -452,6 +464,7 @@ impl Default for Settings {
       enable_worktrees: false,
       restore_tabs: true,
       auto_fetch: true,
+      crash_reports: true,
       onboarding_seen: false,
       profiles: Vec::new(),
       active_profile_id: None,
@@ -568,6 +581,41 @@ pub fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
     .map_err(|e| AppError::Other(e.to_string()))?;
   fs::create_dir_all(&dir)?;
   Ok(dir)
+}
+
+/// Whether the user has left crash reporting on, read directly from disk.
+///
+/// Crash reporting has to start before anything else does, which is earlier
+/// than the Tauri app handle exists -- so this cannot go through
+/// `app_data_dir`. It resolves the same directory Tauri would (the identifier
+/// from tauri.conf.json under the platform's app-data root) and reads the file
+/// itself.
+///
+/// Defaults to `true` on any failure. A missing or unreadable settings file is
+/// a first launch or a corrupt file, not an opt-out, and the opt-out is only
+/// ever recorded by the user explicitly turning the setting off.
+pub fn crash_reports_enabled() -> bool {
+  let Some(dir) = app_data_dir_unmanaged() else {
+    return true;
+  };
+  read_settings_in(&dir).crash_reports
+}
+
+/// The app data directory, resolved without a Tauri handle. Mirrors what
+/// `AppHandle::path().app_data_dir()` returns for this app's identifier.
+fn app_data_dir_unmanaged() -> Option<PathBuf> {
+  // Same identifier as tauri.conf.json; Tauri appends it to the OS app-data root.
+  const IDENTIFIER: &str = "dev.gitwyrm.app";
+  let base = if cfg!(target_os = "windows") {
+    std::env::var_os("APPDATA").map(PathBuf::from)
+  } else if cfg!(target_os = "macos") {
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support"))
+  } else {
+    std::env::var_os("XDG_DATA_HOME")
+      .map(PathBuf::from)
+      .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+  };
+  Some(base?.join(IDENTIFIER))
 }
 
 /// Read settings from `dir`, falling back to defaults when the file is absent or
@@ -755,6 +803,10 @@ mod tests {
     assert!(settings.mint_accent);
     // Settings written before this key existed keep reopening their tabs.
     assert!(settings.restore_tabs);
+    // Crash reporting is opt-out, so a settings file written before the switch
+    // existed reads as on -- that user was reporting already and nothing
+    // changes for them. Only an explicit `false` turns it off.
+    assert!(settings.crash_reports);
     // An existing user's settings file has no onboarding flag, so it reads as
     // false. They see the tour once, which is the intended one-time cost of
     // adding the identity step to it.
@@ -779,6 +831,27 @@ mod tests {
       let json = serde_json::to_string(&settings).expect("serialize");
       let back: Settings = serde_json::from_str(&json).expect("deserialize");
       assert_eq!(back.ai_enabled, enabled, "ai_enabled should survive a round trip");
+    }
+  }
+
+  /// The crash-reporting opt-out is read back off disk at the very start of the
+  /// next launch, before any Tauri machinery exists, so it has to survive the
+  /// real write-then-read path -- not just a serde round trip. If this breaks,
+  /// a user who opted out silently starts reporting again on restart.
+  #[test]
+  fn the_crash_report_switch_round_trips_through_settings_file() {
+    for enabled in [false, true] {
+      let dir = tempfile::tempdir().expect("temp dir");
+      let settings = Settings {
+        crash_reports: enabled,
+        ..Default::default()
+      };
+      write_settings_in(dir.path(), &settings).expect("write");
+      let back = read_settings_in(dir.path());
+      assert_eq!(
+        back.crash_reports, enabled,
+        "crash_reports should survive a write and read"
+      );
     }
   }
 

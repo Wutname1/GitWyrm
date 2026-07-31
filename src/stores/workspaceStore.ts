@@ -566,6 +566,12 @@ interface WorkspaceState {
   /** Fetch open repositories in the background to keep remote state current (persisted). */
   autoFetch: boolean;
   /**
+   * Send anonymous crash reports and error diagnostics (persisted). Read at
+   * startup before the reporters initialize, so a change here takes effect on
+   * the next launch rather than immediately.
+   */
+  crashReports: boolean;
+  /**
    * Whether the welcome tour has run. App lifecycle state, not a preference:
    * deliberately absent from every reset group, since "reset my preferences"
    * should not replay onboarding (persisted).
@@ -681,6 +687,7 @@ interface WorkspaceState {
   setEnableWorktrees: (enabled: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
   setAutoFetch: (enabled: boolean) => void;
+  setCrashReports: (enabled: boolean) => void;
   markOnboardingSeen: () => void;
   markSigningKeyPublished: (fingerprint: string) => void;
   setTabLayout: (layout: TabLayout) => void;
@@ -859,6 +866,7 @@ function toSettings(s: WorkspaceState): Settings {
     enable_worktrees: s.enableWorktrees,
     restore_tabs: s.restoreTabs,
     auto_fetch: s.autoFetch,
+    crash_reports: s.crashReports,
     onboarding_seen: s.onboardingSeen,
     signing_keys_published: s.signingKeysPublished,
     ui_scale: s.uiScale,
@@ -1146,6 +1154,10 @@ export const SETTINGS_DEFAULTS = {
   enableWorktrees: false,
   restoreTabs: true,
   autoFetch: true,
+  // Deliberately outside the per-screen "behavior" group below: a privacy
+  // opt-out must not switch itself back on because the user reset an unrelated
+  // page of preferences. Only the global "Reset all" restores it.
+  crashReports: true,
   onboardingSeen: false,
   signingKeysPublished: [],
   tagPushDefault: "ask",
@@ -1249,6 +1261,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   enableWorktrees: false,
   restoreTabs: true,
   autoFetch: true,
+  crashReports: true,
   onboardingSeen: false,
   signingKeysPublished: [],
   uiScale: DEFAULT_UI_SCALE,
@@ -1589,6 +1602,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setRestoreTabs: (enabled) => {
     set({ restoreTabs: enabled });
+    schedulePersist();
+  },
+  setCrashReports: (enabled) => {
+    set({ crashReports: enabled });
     schedulePersist();
   },
   setAutoFetch: (enabled) => {
@@ -2350,6 +2367,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         enableWorktrees: settings.enable_worktrees ?? false,
         restoreTabs: settings.restore_tabs ?? true,
         autoFetch: settings.auto_fetch ?? true,
+        // Absent means on: a settings file written before this flag existed
+        // belongs to a user who was never asked, and the default is to report.
+        crashReports: settings.crash_reports !== false,
         onboardingSeen: settings.onboarding_seen ?? false,
         signingKeysPublished: settings.signing_keys_published ?? [],
         uiScale:

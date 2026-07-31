@@ -132,13 +132,17 @@ export async function submitFeedback(
   email: string,
   d: Diagnostics
 ): Promise<SubmitResult> {
-  // initSentry no-ops in dev, so there is no client to send through. Say so
-  // plainly instead of reporting a success that never left the machine.
+  // No client means nothing can be sent: either this is a dev build, or the
+  // user turned crash reports off. Say which, rather than reporting a success
+  // that never left the machine -- someone who opted out and later files a bug
+  // needs to know the switch is why, and where to undo it.
   if (!Sentry.getClient()) {
     return {
       ok: false,
       reason: 'disabled',
-      message: 'Reporting is turned off in development builds.',
+      message: import.meta.env.DEV
+        ? 'Reporting is turned off in development builds.'
+        : 'Crash reports are turned off, so this could not be sent. You can turn them back on in Settings > Behavior.',
     }
   }
 

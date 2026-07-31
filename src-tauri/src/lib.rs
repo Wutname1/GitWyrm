@@ -273,6 +273,12 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
   if cfg!(debug_assertions) {
     return None;
   }
+  // Opting out has to mean nothing is sent, so this is checked before the
+  // client is built rather than filtered in `before_send` -- an initialized
+  // client still opens a connection and buffers events.
+  if !settings::crash_reports_enabled() {
+    return None;
+  }
   Some(sentry::init((
     SENTRY_DSN,
     sentry::ClientOptions {

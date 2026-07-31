@@ -1,12 +1,28 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import { commands } from './lib/bindings'
 import { describeError, log } from './lib/log'
 import { hideSplash, killSplash } from './lib/splash'
 import { initSentry, Sentry } from './lib/sentry'
 import './index.css'
 
-initSentry()
+// Crash reporting is opt-out, and honouring that means asking before the
+// reporter starts. The settings read is a single quick command, so it runs
+// ahead of the first render rather than letting the app boot un-gated and
+// switching the reporter on late -- that window is exactly when startup
+// crashes happen, and reporting one from a user who opted out is the failure
+// this setting exists to prevent.
+//
+// Awaited rather than fire-and-forget so no event can be captured before the
+// answer arrives. If the read fails we report, matching the backend: a broken
+// settings file is not an opt-out.
+try {
+  const res = await commands.getSettings()
+  initSentry(res.status === 'ok' ? res.data.crash_reports !== false : true)
+} catch {
+  initSentry(true)
+}
 
 // Catch errors that escape React's boundary (event handlers, microtasks,
 // unhandled rejections) so a crash leaves a visible, durable trace instead of

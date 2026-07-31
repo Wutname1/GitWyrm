@@ -3425,6 +3425,15 @@ restore_tabs?: boolean;
  */
 auto_fetch?: boolean; 
 /**
+ * Send anonymous crash reports and error diagnostics. On by default; turning
+ * it off stops both the frontend and backend reporters at their next start.
+ * 
+ * Read straight off disk during startup by `crash_reports_enabled`, before
+ * the Tauri app handle exists, so the reporters can honour it from the very
+ * first line rather than after settings finish loading.
+ */
+crash_reports?: boolean; 
+/**
  * Whether the welcome tour has been shown. Without this the tour reopens on
  * every launch that starts with no repository, which is the normal state for
  * anyone who keeps "reopen my last tabs" off.
