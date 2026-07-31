@@ -971,3 +971,93 @@ body.wyrm-dragging .gw-refs-cell {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Toasts
+
+   Sonner ships a dark theme whose only signal for "this went wrong" is a small
+   monochrome icon. Errors and warnings are the toasts a user most needs to
+   notice, so the icon and left edge carry the severity color, and every toast
+   gets a copy/close rail on the right.
+   --------------------------------------------------------------------------- */
+
+[data-sonner-toast][data-styled='true'] {
+  padding-right: 8px;
+}
+
+/* Severity color. Only the icon and a left edge are tinted -- a fully colored
+   surface at this size fights the rest of the dark UI and hurts text contrast. */
+[data-sonner-toast][data-type='error'] [data-icon] {
+  color: var(--gw-red);
+}
+[data-sonner-toast][data-type='error'] {
+  border-left: 3px solid var(--gw-red);
+}
+[data-sonner-toast][data-type='warning'] [data-icon] {
+  color: var(--gw-amber);
+}
+[data-sonner-toast][data-type='warning'] {
+  border-left: 3px solid var(--gw-amber);
+}
+[data-sonner-toast][data-type='success'] [data-icon] {
+  color: var(--gw-green);
+}
+[data-sonner-toast][data-type='info'] [data-icon] {
+  color: var(--gw-blue);
+}
+
+/* Push the button rail to the right edge, past the message. */
+[data-sonner-toast][data-styled='true'] [data-content] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Copy button, and the close button restyled to match. Sonner's default close
+   is a floating circle clipped to the top-left corner; here it becomes the
+   second button in the rail. It renders first in the DOM, so `order` -- not
+   source position -- is what puts it last. */
+[data-sonner-toast][data-styled='true'] [data-close-button] {
+  order: 1;
+}
+
+/* The theme selector is repeated on the close rules below so they outrank
+   sonner's own `[data-sonner-theme=dark] [data-close-button]`, which otherwise
+   re-applies a solid background and its own border color. */
+[data-sonner-toast][data-styled='true'] .gw-toast-copy,
+[data-sonner-toaster][data-sonner-theme='dark']
+  [data-sonner-toast][data-styled='true']
+  [data-close-button] {
+  position: static;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  width: 24px;
+  padding: 0;
+  transform: none;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--gw-muted);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+[data-sonner-toast][data-styled='true'] .gw-toast-copy:hover,
+[data-sonner-toaster][data-sonner-theme='dark']
+  [data-sonner-toast][data-styled='true']
+  [data-close-button]:hover {
+  background: var(--gw-panel3);
+  border: none;
+  color: var(--gw-text);
+}
+
+[data-sonner-toast][data-styled='true'] .gw-toast-copy:focus-visible,
+[data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  box-shadow: none;
+}
