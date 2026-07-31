@@ -185,9 +185,13 @@ export function useOpenspecMutations(repoId: string | null) {
     onSettled: refresh,
   })
 
+  // `force` carries the user's explicit "yes, archive it anyway" past the
+  // readiness check. Defaulted off so a caller that forgets gets the guard.
   const archiveChange = useMutation({
-    mutationFn: async (changeId: string) =>
-      unwrap(await commands.openspecArchiveChange(repoId!, changeId)),
+    mutationFn: async (vars: { changeId: string; force?: boolean }) =>
+      unwrap(
+        await commands.openspecArchiveChange(repoId!, vars.changeId, vars.force ?? false)
+      ),
     onSettled: refresh,
   })
 

@@ -2232,10 +2232,17 @@ async openspecValidateChange(repoId: string, changeId: string) : Promise<Result<
  * library and moves the folder into `changes/archive/`. On success, stages
  * and commits the result immediately -- no AI, no separate commit step --
  * so an archived change never sits as an uncommitted diff.
+ * 
+ * Checks the change is finished first, and refuses if not unless `force` says
+ * the user was told and chose to continue. That check lives here rather than
+ * only in the UI because GitWyrm passes `--yes` to the CLI -- which is what
+ * keeps it from prompting in a GUI, and also overrides the CLI's own
+ * incomplete-task guard. Without this, a change with half its tasks open
+ * merges into the specs library and gets committed, reporting success.
  */
-async openspecArchiveChange(repoId: string, changeId: string) : Promise<Result<CliOutcome, string>> {
+async openspecArchiveChange(repoId: string, changeId: string, force: boolean) : Promise<Result<ArchiveAttempt, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("openspec_archive_change", { repoId, changeId }) };
+    return { status: "ok", data: await TAURI_INVOKE("openspec_archive_change", { repoId, changeId, force }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2305,6 +2312,43 @@ async specLinkClear(repoId: string, branch: string) : Promise<Result<null, strin
 
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
+/**
+ * The result of asking to archive: either the CLI ran, or GitWyrm stopped
+ * first because the change is not ready.
+ */
+export type ArchiveAttempt = 
+/**
+ * GitWyrm did not run anything. Nothing was merged, moved, or committed.
+ */
+{ kind: "blocked"; block: ArchiveBlock; summary: string; detail: string } | 
+/**
+ * The CLI ran; its outcome is inside.
+ */
+{ kind: "ran"; outcome: CliOutcome }
+/**
+ * A reason not to archive a change yet, found before running anything.
+ * 
+ * These exist because GitWyrm passes `--yes` to the CLI, which is what stops
+ * it prompting in a GUI -- and `--yes` also overrides the CLI's own
+ * incomplete-task check. Without a check here, a change with half its tasks
+ * open merges into the specs library and gets committed, with only a warning
+ * nobody sees. Archiving is the one spec action that rewrites the library and
+ * makes a commit, so it is the one that has to be sure.
+ */
+export type ArchiveBlock = 
+/**
+ * Tasks remain unticked.
+ */
+{ kind: "tasksOpen"; open: number; total: number } | 
+/**
+ * No tasks were ever written, so nothing says the work happened.
+ */
+{ kind: "noTasks" } | 
+/**
+ * Nothing to merge: archiving would file the change away and add no
+ * requirements to the library at all.
+ */
+{ kind: "noDeltas" }
 /**
  * What the app can tell the user, and what it offers to do about it.
  */

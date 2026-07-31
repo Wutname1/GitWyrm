@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Archive, CheckCircle2, ClipboardCopy, ExternalLink, Hash } from 'lucide-react'
+import { toast } from 'sonner'
 import type { SpecChange } from '@/lib/bindings'
 import {
   ContextMenu,
@@ -51,13 +52,26 @@ export function SpecContextMenu({ change, repoId, children }: SpecContextMenuPro
   }
 
   const archive = () => {
-    archiveChange.mutate(change.id, {
-      onSuccess: (outcome) =>
-        reportCliOutcome(outcome, {
-          ok: `Archived ${change.id}.`,
-          failed: `Could not archive ${change.id}.`,
-        }),
-    })
+    archiveChange.mutate(
+      { changeId: change.id },
+      {
+        onSuccess: (attempt) => {
+          // The menu has no room for an explanation and an override, so a
+          // blocked archive points at the Desk, where both live. It never
+          // forces past the check from here.
+          if (attempt.kind === 'blocked') {
+            toast.info(attempt.summary, {
+              description: 'Open the Spec Desk to see what happens if you archive anyway.',
+            })
+            return
+          }
+          reportCliOutcome(attempt.outcome, {
+            ok: `Archived ${change.id}.`,
+            failed: `Could not archive ${change.id}.`,
+          })
+        },
+      }
+    )
   }
 
   return (

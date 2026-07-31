@@ -17,6 +17,75 @@ use specta::Type;
 
 use crate::error::AppError;
 
+/// A reason not to archive a change yet, found before running anything.
+///
+/// These exist because GitWyrm passes `--yes` to the CLI, which is what stops
+/// it prompting in a GUI -- and `--yes` also overrides the CLI's own
+/// incomplete-task check. Without a check here, a change with half its tasks
+/// open merges into the specs library and gets committed, with only a warning
+/// nobody sees. Archiving is the one spec action that rewrites the library and
+/// makes a commit, so it is the one that has to be sure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ArchiveBlock {
+  /// Tasks remain unticked.
+  TasksOpen { open: u32, total: u32 },
+  /// No tasks were ever written, so nothing says the work happened.
+  NoTasks,
+  /// Nothing to merge: archiving would file the change away and add no
+  /// requirements to the library at all.
+  NoDeltas,
+}
+
+impl ArchiveBlock {
+  /// One sentence naming what is not ready.
+  pub fn summary(&self) -> String {
+    match self {
+      Self::TasksOpen { open, total } => format!(
+        "{open} of {total} {} still open.",
+        if *open == 1 { "task is" } else { "tasks are" }
+      ),
+      Self::NoTasks => "This change has no tasks.".into(),
+      Self::NoDeltas => "This change has no requirements to file.".into(),
+    }
+  }
+
+  /// What archiving anyway would actually do. The user is allowed to proceed --
+  /// they know things the app does not -- but not without being told.
+  pub fn detail(&self) -> String {
+    match self {
+      Self::TasksOpen { .. } => "Archiving files this change's requirements into your specs \
+         and moves it out of the active list. The open tasks stay unticked, so the record \
+         will say the work was finished when part of it was not."
+        .into(),
+      Self::NoTasks => "Nothing here records what was done or whether it is finished. \
+         Archiving still files its requirements into your specs."
+        .into(),
+      Self::NoDeltas => "Archiving would move it out of the active list and add nothing to \
+         your specs. That is right for a pure refactor or a docs change, and wrong if the \
+         requirements were simply never written."
+        .into(),
+    }
+  }
+}
+
+/// Check a change before archiving it.
+///
+/// `done`/`total` and `deltas` come from GitWyrm's own parse of the change, not
+/// from the CLI -- the point is to decide *before* anything is merged.
+pub fn check_ready(done: u32, total: u32, deltas: usize) -> Option<ArchiveBlock> {
+  if total == 0 {
+    return Some(ArchiveBlock::NoTasks);
+  }
+  if done < total {
+    return Some(ArchiveBlock::TasksOpen { open: total - done, total });
+  }
+  if deltas == 0 {
+    return Some(ArchiveBlock::NoDeltas);
+  }
+  None
+}
+
 /// A recognised reason an archive did not go through.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -196,6 +265,66 @@ Error: Archive '2026-07-30-add-ai-provider-surface' already exists.";
 app-windows: target spec does not exist; only ADDED requirements are allowed for new \
 specs. MODIFIED and RENAMED operations require an existing spec.\n\
 Aborted. No files were changed.";
+
+  /// The check that matters most. `--yes` silences the CLI's own guard, so a
+  /// half-finished change archives with exit 0 and a warning nobody reads --
+  /// verified against the real CLI. This is the only thing standing between
+  /// that and a merged, committed spec library.
+  #[test]
+  fn a_half_finished_change_is_blocked() {
+    assert_eq!(
+      check_ready(1, 2, 1),
+      Some(ArchiveBlock::TasksOpen { open: 1, total: 2 })
+    );
+    assert_eq!(
+      check_ready(9, 12, 3),
+      Some(ArchiveBlock::TasksOpen { open: 3, total: 12 })
+    );
+  }
+
+  #[test]
+  fn a_change_with_no_tasks_is_blocked() {
+    assert_eq!(check_ready(0, 0, 1), Some(ArchiveBlock::NoTasks));
+  }
+
+  /// Archiving with nothing to merge is legal but almost never intended, so it
+  /// asks rather than refusing outright.
+  #[test]
+  fn a_change_with_no_requirements_is_blocked() {
+    assert_eq!(check_ready(3, 3, 0), Some(ArchiveBlock::NoDeltas));
+  }
+
+  #[test]
+  fn a_finished_change_with_requirements_passes() {
+    assert_eq!(check_ready(3, 3, 1), None);
+    assert_eq!(check_ready(12, 12, 6), None);
+  }
+
+  #[test]
+  fn every_block_says_what_is_wrong_and_what_would_happen() {
+    for block in [
+      ArchiveBlock::TasksOpen { open: 3, total: 12 },
+      ArchiveBlock::NoTasks,
+      ArchiveBlock::NoDeltas,
+    ] {
+      let summary = block.summary();
+      let detail = block.detail();
+      assert!(!summary.is_empty() && !detail.is_empty());
+      // Plain language: no CLI flags or tool tokens leaking into the copy.
+      for text in [&summary, &detail] {
+        assert!(!text.contains("--yes"), "leaked a flag: {text}");
+        assert!(!text.contains("delta header"), "leaked a tool term: {text}");
+      }
+    }
+  }
+
+  #[test]
+  fn the_open_task_count_reads_naturally_for_one() {
+    let one = ArchiveBlock::TasksOpen { open: 1, total: 2 }.summary();
+    assert!(one.contains("1 of 2 task is still open"), "{one}");
+    let many = ArchiveBlock::TasksOpen { open: 3, total: 12 }.summary();
+    assert!(many.contains("3 of 12 tasks are still open"), "{many}");
+  }
 
   #[test]
   fn recognises_a_leftover_archive_folder_and_names_it() {

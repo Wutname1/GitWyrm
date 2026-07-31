@@ -488,10 +488,32 @@ pub async fn openspec_validate_change(
     .map_err(|e| AppError::Other(e.to_string()))
 }
 
+/// The result of asking to archive: either the CLI ran, or GitWyrm stopped
+/// first because the change is not ready.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ArchiveAttempt {
+  /// GitWyrm did not run anything. Nothing was merged, moved, or committed.
+  Blocked {
+    block: archive_repair::ArchiveBlock,
+    summary: String,
+    detail: String,
+  },
+  /// The CLI ran; its outcome is inside.
+  Ran { outcome: cli::CliOutcome },
+}
+
 /// Runs `openspec archive` for one change: merges its deltas into the specs
 /// library and moves the folder into `changes/archive/`. On success, stages
 /// and commits the result immediately -- no AI, no separate commit step --
 /// so an archived change never sits as an uncommitted diff.
+///
+/// Checks the change is finished first, and refuses if not unless `force` says
+/// the user was told and chose to continue. That check lives here rather than
+/// only in the UI because GitWyrm passes `--yes` to the CLI -- which is what
+/// keeps it from prompting in a GUI, and also overrides the CLI's own
+/// incomplete-task guard. Without this, a change with half its tasks open
+/// merges into the specs library and gets committed, reporting success.
 #[tauri::command]
 #[specta::specta]
 pub async fn openspec_archive_change(
@@ -499,17 +521,43 @@ pub async fn openspec_archive_change(
   manager: State<'_, RepoManager>,
   repo_id: String,
   change_id: String,
-) -> Result<cli::CliOutcome, AppError> {
+  force: bool,
+) -> Result<ArchiveAttempt, AppError> {
   let open = manager.get(&repo_id)?;
   let root = open.path.clone();
   let template = crate::settings::get_settings(app)?.openspec_archive_commit_template;
+
+  if !force {
+    let root_for_check = root.clone();
+    let id_for_check = change_id.clone();
+    let block = tauri::async_runtime::spawn_blocking(move || {
+      let dir = openspec::openspec_dir(&root_for_check)?;
+      let change = parse::parse_change_dir(&dir.join("changes").join(&id_for_check))?;
+      archive_repair::check_ready(
+        change.progress.done,
+        change.progress.total,
+        change.deltas.len(),
+      )
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?;
+
+    if let Some(block) = block {
+      return Ok(ArchiveAttempt::Blocked {
+        summary: block.summary(),
+        detail: block.detail(),
+        block,
+      });
+    }
+  }
+
   tauri::async_runtime::spawn_blocking(move || {
     let outcome = cli::archive_change(&root, &change_id);
     if matches!(outcome, cli::CliOutcome::Ok { .. }) {
       let repo = open.repo.lock().unwrap();
       cli::commit_archive(&repo, &root, &change_id, template.as_deref())?;
     }
-    Ok(outcome)
+    Ok(ArchiveAttempt::Ran { outcome })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { DisabledHint } from "@/components/ui/tooltip";
 import type {
+  ArchiveAttempt,
   CliOutcome,
   DemoScenario,
   DraftedArtifact,
@@ -206,6 +207,12 @@ export function DeskActionRail({
     changeId: string;
     outcome: CliOutcome & { kind: "failed" };
   } | null>(null);
+  // Set when GitWyrm stopped before archiving because the change is not
+  // finished. Nothing has run at this point, so this is a question, not a
+  // report.
+  const [archiveBlock, setArchiveBlock] = useState<
+    (ArchiveAttempt & { kind: "blocked" }) | null
+  >(null);
   // Held here, not inside the <details>: the rail re-renders on every task tick
   // and watcher refresh, and a details element rebuilt from JSX would snap shut
   // under the user mid-read.
@@ -244,6 +251,7 @@ export function DeskActionRail({
     // The archive problem goes too: it names its own change, and leaving it
     // under another change's header would read as a problem with that one.
     setArchiveProblem(null);
+    setArchiveBlock(null);
   }, [change.id]);
 
   const runCheck = () => {
@@ -351,29 +359,41 @@ export function DeskActionRail({
     }
   };
 
-  const archive = () => {
-    archiveChange.mutate(change.id, {
-      onSuccess: (outcome) => {
-        if (outcome.kind === "ok") {
-          toast.success(`Archived ${change.id}.`, {
-            description: "Its requirements are part of your specs now.",
-          });
+  const archive = (force = false) => {
+    archiveChange.mutate(
+      { changeId: change.id, force },
+      {
+        onSuccess: (attempt) => {
+          // GitWyrm stopped before running anything. Nothing merged, nothing
+          // moved, nothing committed -- the user gets to decide with the facts.
+          if (attempt.kind === "blocked") {
+            setConfirmArchive(false);
+            setArchiveBlock(attempt);
+            return;
+          }
+          const outcome = attempt.outcome;
+          if (outcome.kind === "ok") {
+            toast.success(`Archived ${change.id}.`, {
+              description: "Its requirements are part of your specs now.",
+            });
+            setConfirmArchive(false);
+            setArchiveBlock(null);
+            return;
+          }
+          // Close the dialog and put the problem in the rail. Archive failures
+          // get their own panel because most of them are fixable, and a toast
+          // cannot hold an explanation plus the button that acts on it.
           setConfirmArchive(false);
-          return;
-        }
-        // Close the dialog and put the problem in the rail. Archive failures get
-        // their own panel because most of them are fixable, and a toast cannot
-        // hold an explanation plus the button that acts on it.
-        setConfirmArchive(false);
-        if (outcome.kind === "failed") {
-          setArchiveProblem({ changeId: change.id, outcome });
-          return;
-        }
-        // cliMissing: nothing to diagnose, the tool was never there.
-        setResult(outcome);
-      },
-      onError: (e) => toast.error(describeError(e)),
-    });
+          if (outcome.kind === "failed") {
+            setArchiveProblem({ changeId: change.id, outcome });
+            return;
+          }
+          // cliMissing: nothing to diagnose, the tool was never there.
+          setResult(outcome);
+        },
+        onError: (e) => toast.error(describeError(e)),
+      }
+    );
   };
 
   const openInOpencode = async () => {
@@ -602,6 +622,36 @@ export function DeskActionRail({
                 setConfirmArchive(true);
               }}
             />
+            {archiveBlock && (
+              <div className="mt-2 rounded-md border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8 px-3 py-2.5 text-2xs leading-relaxed">
+                <p className="font-semibold text-[var(--gw-amber)]">
+                  {archiveBlock.summary}
+                </p>
+                <p className="mt-1.5 text-[var(--gw-amber)]/85">{archiveBlock.detail}</p>
+                <p className="mt-1.5 text-[var(--gw-amber)]/85">
+                  Nothing has been archived or committed.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {/* The override is allowed -- the user knows things the app
+                      does not -- but only after reading what it would do. */}
+                  <button
+                    type="button"
+                    onClick={() => archive(true)}
+                    disabled={archiveChange.isPending}
+                    className="rounded border border-[var(--gw-amber)]/50 px-2 py-1 font-semibold text-[var(--gw-amber)] hover:bg-[var(--gw-amber)]/12 disabled:opacity-50"
+                  >
+                    {archiveChange.isPending ? "Archiving…" : "Archive it anyway"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setArchiveBlock(null)}
+                    className="rounded border border-border px-2 py-1 font-semibold text-muted-foreground hover:text-foreground"
+                  >
+                    Not yet
+                  </button>
+                </div>
+              </div>
+            )}
             {archiveProblem && (
               <ArchiveProblemCard
                 repoId={repoId}
@@ -671,7 +721,7 @@ export function DeskActionRail({
         confirmLabel="Archive it"
         pending={archiveChange.isPending}
         pendingLabel="Archiving…"
-        onConfirm={archive}
+        onConfirm={() => archive()}
       />
       {/* The drafted fix, for review. Nothing is on disk until Add. */}
       <FormDialog
