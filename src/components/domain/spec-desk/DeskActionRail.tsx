@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
   CheckCircle2,
@@ -9,36 +9,36 @@ import {
   Play,
   Sparkles,
   SquareTerminal,
-} from 'lucide-react'
-import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
-import { DisabledHint } from '@/components/ui/tooltip'
+} from "lucide-react";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { DisabledHint } from "@/components/ui/tooltip";
 import type {
   CliOutcome,
   DemoScenario,
   DraftedArtifact,
   SpecChange,
-} from '@/lib/bindings'
-import { commands } from '@/lib/bindings'
-import { unwrap } from '@/lib/queryKeys'
-import { openAiSettings } from '@/lib/openAiSettings'
-import { composeTaskHandoff, copyTaskHandoff } from '@/lib/specHandoff'
-import { nextTask, useOpenspecMutations } from '@/hooks/useOpenspec'
-import { useSpecAi } from '@/hooks/useSpecAi'
-import { useAiSelection } from '@/hooks/useAiSelection'
-import { isActive, stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
-import { useAskStore } from '@/stores/askStore'
-import { useStartRun } from '@/hooks/useStartRun'
-import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
-import { FormDialog } from '@/components/ui/form-dialog'
-import { describeError, log } from '@/lib/log'
+} from "@/lib/bindings";
+import { commands } from "@/lib/bindings";
+import { unwrap } from "@/lib/queryKeys";
+import { openAiSettings } from "@/lib/openAiSettings";
+import { composeTaskHandoff, copyTaskHandoff } from "@/lib/specHandoff";
+import { nextTask, useOpenspecMutations } from "@/hooks/useOpenspec";
+import { useSpecAi } from "@/hooks/useSpecAi";
+import { useAiSelection } from "@/hooks/useAiSelection";
+import { isActive, stateGlyph, stateLabel, useAiRun } from "@/hooks/useAiRun";
+import { useAskStore } from "@/stores/askStore";
+import { useStartRun } from "@/hooks/useStartRun";
+import { ConfirmDialog } from "@/components/modals/ConfirmDialog";
+import { FormDialog } from "@/components/ui/form-dialog";
+import { describeError, log } from "@/lib/log";
 
 /**
  * Why the opencode button is off. Names the fix rather than the failure: the
  * button being grey is the symptom the user can already see.
  */
 const OPENCODE_MISSING =
-  'opencode is not installed. Get it from opencode.ai - this button turns on once it is.'
+  "opencode is not installed. Get it from opencode.ai - this button turns on once it is.";
 
 /** A button in the rail. Primary is the one action the state calls for. */
 function RailButton({
@@ -50,14 +50,14 @@ function RailButton({
   disabled,
   title,
 }: {
-  icon?: React.ReactNode
-  label: string
-  onClick: () => void
-  primary?: boolean
-  pending?: boolean
-  disabled?: boolean
+  icon?: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  primary?: boolean;
+  pending?: boolean;
+  disabled?: boolean;
   /** Shown on hover, so a disabled button can say why. */
-  title?: string
+  title?: string;
 }) {
   const button = (
     <button
@@ -65,16 +65,16 @@ function RailButton({
       onClick={onClick}
       disabled={pending || disabled}
       className={cn(
-        'flex min-h-8 w-full items-center justify-center gap-2 rounded-md px-3 text-2xs font-semibold transition-colors disabled:opacity-50',
+        "flex min-h-8 w-full items-center justify-center gap-2 rounded-md px-3 text-2xs font-semibold transition-colors disabled:opacity-50",
         primary
-          ? 'bg-primary text-primary-foreground hover:brightness-110'
-          : 'border border-border bg-panel2 text-foreground hover:border-muted-foreground hover:bg-panel3'
+          ? "bg-primary text-primary-foreground hover:brightness-110"
+          : "border border-border bg-panel2 text-foreground hover:border-muted-foreground hover:bg-panel3",
       )}
     >
       {icon}
-      {pending ? 'Working…' : label}
+      {pending ? "Working…" : label}
     </button>
-  )
+  );
 
   // Deliberately not the `title` attribute: that draws the OS tooltip, which
   // ignores the app's theme and takes a second to appear. DisabledHint puts the
@@ -84,7 +84,7 @@ function RailButton({
     <DisabledHint disabled={disabled} reason={title} className="w-full">
       {button}
     </DisabledHint>
-  )
+  );
 }
 
 /**
@@ -100,13 +100,13 @@ function CheckResult({
   onFix,
   fixing,
 }: {
-  outcome: CliOutcome
-  onRecheck: () => void
+  outcome: CliOutcome;
+  onRecheck: () => void;
   /** Offered only with an AI configured; absent otherwise. */
-  onFix?: () => void
-  fixing?: boolean
+  onFix?: () => void;
+  fixing?: boolean;
 }) {
-  if (outcome.kind === 'cliMissing') {
+  if (outcome.kind === "cliMissing") {
     return (
       <div className="mt-2 rounded-md border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8 px-3 py-2 text-2xs leading-relaxed text-[var(--gw-amber)]">
         <p className="font-semibold">The OpenSpec tool is not installed.</p>
@@ -122,12 +122,14 @@ function CheckResult({
           I installed it - check again
         </button>
       </div>
-    )
+    );
   }
-  if (outcome.kind === 'failed') {
+  if (outcome.kind === "failed") {
     return (
       <div className="mt-2 rounded-md border border-[var(--gw-red)]/40 bg-[var(--gw-red)]/8 px-3 py-2 text-2xs leading-relaxed">
-        <p className="font-semibold text-removed">This change has problems to fix.</p>
+        <p className="font-semibold text-removed">
+          This change has problems to fix.
+        </p>
         {outcome.output.trim() && (
           <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-2xs text-sub">
             {outcome.output.trim()}
@@ -141,17 +143,18 @@ function CheckResult({
             className="mt-2 flex items-center gap-1.5 rounded border border-primary/45 px-2 py-1 text-2xs font-semibold text-accent-text hover:bg-primary/15 disabled:opacity-50"
           >
             <Sparkles size={11} strokeWidth={2.4} />
-            {fixing ? 'Drafting…' : 'Fix with AI'}
+            {fixing ? "Drafting…" : "Fix with AI"}
           </button>
         )}
       </div>
-    )
+    );
   }
   return (
     <div className="mt-2 rounded-md border border-primary/40 bg-soft px-3 py-2 text-2xs leading-relaxed">
       <p className="font-semibold text-accent-text">The spec check passed.</p>
       <p className="mt-1 text-sub">
-        The proposal, tasks, and requirements are all shaped the way OpenSpec expects.
+        The proposal, tasks, and requirements are all shaped the way OpenSpec
+        expects.
       </p>
       {outcome.output.trim() && (
         <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-2xs text-muted-foreground">
@@ -159,7 +162,7 @@ function CheckResult({
         </pre>
       )}
     </div>
-  )
+  );
 }
 
 /**
@@ -175,33 +178,36 @@ export function DeskActionRail({
   repoId,
   repoPath,
 }: {
-  change: SpecChange
-  repoId: string
-  repoPath: string
+  change: SpecChange;
+  repoId: string;
+  repoPath: string;
 }) {
-  const ai = useSpecAi()
+  const ai = useSpecAi();
   const { validateChange, archiveChange, draftFix, addDraftedDelta } =
-    useOpenspecMutations(repoId)
-  const selection = useAiSelection()
-  const run = useAiRun(repoId)
-  const startAskSession = useAskStore((s) => s.start)
-  const [result, setResult] = useState<CliOutcome | null>(null)
+    useOpenspecMutations(repoId);
+  const selection = useAiSelection();
+  const run = useAiRun(repoId);
+  const startAskSession = useAskStore((s) => s.start);
+  const [result, setResult] = useState<CliOutcome | null>(null);
   // Which change `result` describes. Not always the selected one: the user can
   // switch changes while a fix drafts, and the fix belongs to what was checked.
-  const [checkedId, setCheckedId] = useState<string | null>(null)
-  const [fix, setFix] = useState<{ changeId: string; delta: DraftedArtifact } | null>(null)
-  const { startRun, starting } = useStartRun(repoId, change)
-  const [confirmArchive, setConfirmArchive] = useState(false)
+  const [checkedId, setCheckedId] = useState<string | null>(null);
+  const [fix, setFix] = useState<{
+    changeId: string;
+    delta: DraftedArtifact;
+  } | null>(null);
+  const { startRun, starting } = useStartRun(repoId, change);
+  const [confirmArchive, setConfirmArchive] = useState(false);
   // Held here, not inside the <details>: the rail re-renders on every task tick
   // and watcher refresh, and a details element rebuilt from JSX would snap shut
   // under the user mid-read.
-  const [handoffOpen, setHandoffOpen] = useState(false)
-  const [inviteDismissed, setInviteDismissed] = useState(false)
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [inviteDismissed, setInviteDismissed] = useState(false);
 
-  const task = nextTask(change)
-  const allDone = !task && !change.progress.is_draft
-  const remaining = change.progress.total - change.progress.done
-  const handoff = composeTaskHandoff(change, task)
+  const task = nextTask(change);
+  const allDone = !task && !change.progress.is_draft;
+  const remaining = change.progress.total - change.progress.done;
+  const handoff = composeTaskHandoff(change, task);
 
   // Whether opencode can actually be launched. A machine-level fact, so it is
   // not keyed by repo. Assumed available until the probe answers, so the button
@@ -212,12 +218,12 @@ export function DeskActionRail({
   // disabled, and they come back to a window that should have noticed. The
   // probe is a `where`/`which` lookup, so this is cheap to repeat.
   const opencodeReady = useQuery({
-    queryKey: ['opencodeAvailable'],
+    queryKey: ["opencodeAvailable"],
     queryFn: () => commands.opencodeAvailable(),
     staleTime: 10_000,
     refetchOnWindowFocus: true,
-  })
-  const opencodeMissing = opencodeReady.data === false
+  });
+  const opencodeMissing = opencodeReady.data === false;
 
   // A result belongs to the change it was run on. Switching changes has to clear
   // it, or the rail would show one change's problems beside another's name.
@@ -225,46 +231,46 @@ export function DeskActionRail({
   // to and writes there, so a user who switches while it drafts still gets to
   // decide about it rather than losing it silently.
   useEffect(() => {
-    setResult(null)
-    setCheckedId(null)
-  }, [change.id])
+    setResult(null);
+    setCheckedId(null);
+  }, [change.id]);
 
   const runCheck = () => {
     // Remember which change this result belongs to. "Fix with AI" must land on
     // the change that was checked even if the user selects another one while
     // the fix drafts, and the result panel outlives the selection.
-    const checked = change.id
+    const checked = change.id;
     validateChange.mutate(change.id, {
       onSuccess: (outcome) => {
-        setResult(outcome)
-        setCheckedId(checked)
+        setResult(outcome);
+        setCheckedId(checked);
       },
       onError: (e) => toast.error(describeError(e)),
-    })
-  }
+    });
+  };
 
   // Ask and runs share the ✦ tab and the one-session-at-a-time rule, so a
   // working run holds the tab. `isActive` covers the states where a run is
   // mid-flight or waiting on the user, not one that has already ended.
-  const runIsActive = isActive(run.state)
+  const runIsActive = isActive(run.state);
 
   const startAsk = () => {
     if (runIsActive) {
-      toast.info('A run is working right now.', {
-        description: 'Open the ✦ tab to watch it, then ask once it finishes.',
-      })
-      return
+      toast.info("A run is working right now.", {
+        description: "Open the ✦ tab to watch it, then ask once it finishes.",
+      });
+      return;
     }
-    startAskSession(repoId, change.id)
-    toast.success('Ask is open in the ✦ tab.', {
-      description: 'It reads this change and the code, and changes nothing.',
-    })
-  }
+    startAskSession(repoId, change.id);
+    toast.success("Ask is open in the ✦ tab.", {
+      description: "It reads this change and the code, and changes nothing.",
+    });
+  };
 
   const startFix = () => {
-    const target = checkedId
-    if (!target || !result || result.kind !== 'failed') return
-    if (!selection.provider || !selection.model) return
+    const target = checkedId;
+    if (!target || !result || result.kind !== "failed") return;
+    if (!selection.provider || !selection.model) return;
     draftFix.mutate(
       {
         changeId: target,
@@ -275,106 +281,119 @@ export function DeskActionRail({
       {
         onSuccess: (delta) => setFix({ changeId: target, delta }),
         onError: (e) =>
-          toast.error('Could not draft a fix.', { description: describeError(e) }),
-      }
-    )
-  }
+          toast.error("Could not draft a fix.", {
+            description: describeError(e),
+          }),
+      },
+    );
+  };
 
   const applyFix = () => {
-    if (!fix) return
+    if (!fix) return;
     addDraftedDelta.mutate(
       { changeId: fix.changeId, delta: fix.delta },
       {
         onSuccess: (path) => {
-          toast.success('Added the requirement.', { description: `Wrote ${path}.` })
-          setFix(null)
+          toast.success("Added the requirement.", {
+            description: `Wrote ${path}.`,
+          });
+          setFix(null);
           // Re-run the check on the change the fix landed on, not on whatever is
           // selected now, so the result the user sees is about their fix.
           validateChange.mutate(fix.changeId, {
             onSuccess: (outcome) => {
-              setResult(outcome)
-              setCheckedId(fix.changeId)
+              setResult(outcome);
+              setCheckedId(fix.changeId);
             },
-          })
+          });
         },
         onError: (e) =>
-          toast.error('Could not add the requirement.', { description: describeError(e) }),
-      }
-    )
-  }
+          toast.error("Could not add the requirement.", {
+            description: describeError(e),
+          }),
+      },
+    );
+  };
 
   // Re-probe for the CLI, then immediately re-run the check if it turned up.
   // Two clicks to get from "not installed" back to a result would be one too
   // many when the user has already done the installing.
   const recheckCli = async () => {
     try {
-      const info = unwrap(await commands.openspecRecheckCli())
+      const info = unwrap(await commands.openspecRecheckCli());
       if (!info.available) {
-        toast.info('Still cannot find the OpenSpec tool.', {
-          description: 'If you just installed it, opening a new terminal may be needed first.',
-        })
-        return
+        toast.info("Still cannot find the OpenSpec tool.", {
+          description:
+            "If you just installed it, opening a new terminal may be needed first.",
+        });
+        return;
       }
-      toast.success(`Found the OpenSpec tool${info.version ? ` (${info.version})` : ''}.`)
-      runCheck()
+      toast.success(
+        `Found the OpenSpec tool${info.version ? ` (${info.version})` : ""}.`,
+      );
+      runCheck();
     } catch (e) {
-      log.error(`spec desk: opencode cli recheck failed: ${describeError(e)}`)
-      toast.error('Could not check for the OpenSpec tool.', { description: describeError(e) })
+      log.error(`spec desk: opencode cli recheck failed: ${describeError(e)}`);
+      toast.error("Could not check for the OpenSpec tool.", {
+        description: describeError(e),
+      });
     }
-  }
+  };
 
   const archive = () => {
     archiveChange.mutate(change.id, {
       onSuccess: (outcome) => {
-        if (outcome.kind === 'ok') {
+        if (outcome.kind === "ok") {
           toast.success(`Archived ${change.id}.`, {
-            description: 'Its requirements are part of your specs now.',
-          })
-          setConfirmArchive(false)
-          return
+            description: "Its requirements are part of your specs now.",
+          });
+          setConfirmArchive(false);
+          return;
         }
         // Keep the dialog open on failure: the change did not move, and closing
         // would imply it did.
-        setResult(outcome)
-        toast.error(`Could not archive ${change.id}.`)
+        setResult(outcome);
+        toast.error(`Could not archive ${change.id}.`);
       },
       onError: (e) => toast.error(describeError(e)),
-    })
-  }
+    });
+  };
 
   const openInOpencode = async () => {
     // The handoff goes to opencode as its opening message, so there is nothing
     // to paste. It is copied anyway: if the launch fails halfway, or the user
     // wants it in a second window, it is already in hand.
-    await copyTaskHandoff(change, task, { silent: true })
+    await copyTaskHandoff(change, task, { silent: true });
     try {
-      unwrap(await commands.openInOpencode(repoId, handoff))
-      toast.success('opencode is starting on this task.', {
-        description: 'The handoff is already in the conversation.',
-      })
+      unwrap(await commands.openInOpencode(repoId, handoff));
+      toast.success("opencode is starting on this task.", {
+        description: "The handoff is already in the conversation.",
+      });
     } catch (e) {
-      log.error(`spec desk: open in opencode failed: ${describeError(e)}`)
-      toast.error('Could not start opencode.', {
+      log.error(`spec desk: open in opencode failed: ${describeError(e)}`);
+      toast.error("Could not start opencode.", {
         description: `${describeError(e)} The handoff is on your clipboard.`,
-      })
+      });
     }
-  }
+  };
 
   const openInVsCode = async () => {
-    await copyTaskHandoff(change, task, { silent: true })
+    await copyTaskHandoff(change, task, { silent: true });
     try {
-      unwrap(await commands.openInEditor(repoId, 'vs_code'))
-      toast.success('VS Code opened with the handoff copied.')
+      unwrap(await commands.openInEditor(repoId, "vs_code"));
+      toast.success("VS Code opened with the handoff copied.");
     } catch (e) {
-      log.error(`spec desk: open in editor failed: ${describeError(e)}`)
-      toast.error('Could not open VS Code.', { description: describeError(e) })
+      log.error(`spec desk: open in editor failed: ${describeError(e)}`);
+      toast.error("Could not open VS Code.", { description: describeError(e) });
     }
-  }
+  };
 
   return (
     <div className="flex min-h-0 flex-col border-l border-border bg-panel">
       <header className="flex-none border-b border-border px-4 py-3.5">
-        <h2 className="text-sm font-semibold text-foreground">Next best action</h2>
+        <h2 className="text-sm font-semibold text-foreground">
+          Next best action
+        </h2>
         <p className="mt-0.5 text-2xs text-muted-foreground">
           Work from the spec. Keep the tools you already use.
         </p>
@@ -387,15 +406,15 @@ export function DeskActionRail({
             {task
               ? `NEXT TASK · ${change.progress.done + 1} OF ${change.progress.total}`
               : allDone
-                ? 'EVERY TASK IS DONE'
-                : 'NO TASKS YET'}
+                ? "EVERY TASK IS DONE"
+                : "NO TASKS YET"}
           </p>
           <h3 className="mt-1.5 text-xs font-semibold leading-snug text-foreground">
             {task
               ? task.text
               : allDone
-                ? 'Check it, then archive it'
-                : 'Add tasks to tasks.md to get started'}
+                ? "Check it, then archive it"
+                : "Add tasks to tasks.md to get started"}
           </h3>
           <p className="mt-1.5 text-2xs leading-relaxed text-sub">
             {ai.configured
@@ -410,7 +429,7 @@ export function DeskActionRail({
                   <RailButton
                     primary
                     icon={<Play size={12} strokeWidth={2.6} />}
-                    label={starting ? 'Starting…' : 'Run this task with AI'}
+                    label={starting ? "Starting…" : "Run this task with AI"}
                     onClick={() => void startRun()}
                   />
                 )}
@@ -423,7 +442,7 @@ export function DeskActionRail({
                   disabled={runIsActive}
                   title={
                     runIsActive
-                      ? 'A run is working right now. Open the ✦ tab to watch it, then ask when it finishes.'
+                      ? "A run is working right now. Open the ✦ tab to watch it, then ask when it finishes."
                       : undefined
                   }
                   onClick={startAsk}
@@ -434,7 +453,7 @@ export function DeskActionRail({
                 <RailButton
                   primary
                   icon={<ClipboardCopy size={12} strokeWidth={2.4} />}
-                  label={allDone ? 'Copy review handoff' : 'Copy task handoff'}
+                  label={allDone ? "Copy review handoff" : "Copy task handoff"}
                   onClick={() => void copyTaskHandoff(change, task)}
                 />
                 <RailButton
@@ -455,8 +474,10 @@ export function DeskActionRail({
 
           {ai.configured && (
             <p className="mt-2.5 text-2xs leading-relaxed text-muted-foreground">
-              Runs with <span className="font-semibold text-sub">{ai.provider}</span>
-              {ai.model && <> · {ai.model}</>} · uses your {ai.providerShort} plan
+              Runs with{" "}
+              <span className="font-semibold text-sub">{ai.provider}</span>
+              {ai.model && <> · {ai.model}</>} · uses your {ai.providerShort}{" "}
+              plan
             </p>
           )}
         </section>
@@ -468,20 +489,24 @@ export function DeskActionRail({
           <details
             className="group mt-4"
             open={handoffOpen}
-            onToggle={(e) => setHandoffOpen((e.currentTarget as HTMLDetailsElement).open)}
+            onToggle={(e) =>
+              setHandoffOpen((e.currentTarget as HTMLDetailsElement).open)
+            }
           >
             <summary className="cursor-pointer list-none text-2xs font-bold tracking-[.1em] text-sub hover:text-foreground">
-              <span className="inline-block transition-transform group-open:rotate-90">▸</span>{' '}
+              <span className="inline-block transition-transform group-open:rotate-90">
+                ▸
+              </span>{" "}
               PREFER YOUR OWN EDITOR?
             </summary>
             <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
-              Copy this task to opencode, VS Code, or any AI chat - the same handoff, your
-              tool.
+              Copy this task to opencode, VS Code, or any AI chat - the same
+              handoff, your tool.
             </p>
             <div className="mt-2 flex flex-col gap-2">
               <RailButton
                 icon={<ClipboardCopy size={12} strokeWidth={2.4} />}
-                label={allDone ? 'Copy review handoff' : 'Copy task handoff'}
+                label={allDone ? "Copy review handoff" : "Copy task handoff"}
                 onClick={() => void copyTaskHandoff(change, task)}
               />
               <RailButton
@@ -546,16 +571,18 @@ export function DeskActionRail({
                 if (!allDone) {
                   toast.info(
                     change.progress.is_draft
-                      ? 'Add tasks and finish them before archiving this change.'
-                      : `${remaining} ${remaining === 1 ? 'task is' : 'tasks are'} still open.`
-                  )
-                  return
+                      ? "Add tasks and finish them before archiving this change."
+                      : `${remaining} ${remaining === 1 ? "task is" : "tasks are"} still open.`,
+                  );
+                  return;
                 }
                 if (change.deltas.length === 0) {
-                  toast.info('This change has no requirements yet, so there is nothing to archive into your specs.')
-                  return
+                  toast.info(
+                    "This change has no requirements yet, so there is nothing to archive into your specs.",
+                  );
+                  return;
                 }
-                setConfirmArchive(true)
+                setConfirmArchive(true);
               }}
             />
           </div>
@@ -564,18 +591,21 @@ export function DeskActionRail({
         {/* One quiet invitation, at the bottom, dismissible. Never a modal, never
             the rail's primary action: the copy workflow above is complete on its
             own, and a nag would imply otherwise. */}
-        {ai.state === 'none' && !inviteDismissed && (
+        {ai.state === "none" && !inviteDismissed && (
           <section className="mt-4 rounded-lg border border-dashed border-border px-3.5 py-3">
             <h3 className="text-2xs font-bold tracking-[.09em] text-sub">
               RUN TASKS RIGHT HERE
             </h3>
             <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
-              Connect the AI you already use - Copilot, Anthropic, or a local model - and
-              GitWyrm can work on tasks in this window. You watch every step and can stop
-              it anytime.
+              Connect the AI you already use - Copilot, Anthropic, or a local
+              model - and GitWyrm can work on tasks in this window. You watch
+              every step and can stop it anytime.
             </p>
             <div className="mt-2.5 flex items-center gap-2">
-              <RailButton label="Connect an AI" onClick={() => void openAiSettings()} />
+              <RailButton
+                label="Connect an AI"
+                onClick={() => void openAiSettings()}
+              />
               <button
                 type="button"
                 onClick={() => setInviteDismissed(true)}
@@ -587,14 +617,15 @@ export function DeskActionRail({
           </section>
         )}
 
-        {ai.state === 'reconnect' && (
+        {ai.state === "reconnect" && (
           <section className="mt-4 rounded-lg border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8 px-3.5 py-3">
             <h3 className="text-2xs font-bold tracking-[.09em] text-[var(--gw-amber)]">
               {ai.providerShort.toUpperCase()} NEEDS RECONNECTING
             </h3>
             <p className="mt-1.5 text-2xs leading-relaxed text-[var(--gw-amber)]/85">
-              It is signed in but has no models available, so a run could not start.
-              Reconnect it in Settings → AI. Copying handoffs works either way.
+              It is signed in but has no models available, so a run could not
+              start. Reconnect it in Settings → AI. Copying handoffs works
+              either way.
             </p>
           </section>
         )}
@@ -606,10 +637,10 @@ export function DeskActionRail({
         title={`Archive ${change.id}?`}
         description={
           <>
-            Every task is done. Archiving folds this change's{' '}
-            {change.deltas.length === 1 ? 'requirement' : 'requirements'} into your specs
-            and moves it out of the active list. It stays on disk, under{' '}
-            <span className="font-mono">openspec/changes/archive</span>.
+            Every task is done. Archiving folds this change's{" "}
+            {change.deltas.length === 1 ? "requirement" : "requirements"} into
+            your specs and moves it out of the active list. It stays on disk,
+            under <span className="font-mono">openspec/changes/archive</span>.
           </>
         }
         confirmLabel="Archive it"
@@ -623,7 +654,7 @@ export function DeskActionRail({
         onOpenChange={(o) => !o && setFix(null)}
         icon={<Sparkles size={15} strokeWidth={1.9} />}
         widthClassName="sm:max-w-2xl"
-        title={fix ? `Add a requirement to ${fix.changeId}` : ''}
+        title={fix ? `Add a requirement to ${fix.changeId}` : ""}
         submitLabel="Add this delta"
         pendingLabel="Adding…"
         cancelLabel="Dismiss"
@@ -632,7 +663,8 @@ export function DeskActionRail({
         onSubmit={applyFix}
       >
         <p className="text-2xs leading-relaxed text-muted-foreground">
-          Drafted from this change's own proposal. Nothing is written until you add it.
+          Drafted from this change's own proposal. Nothing is written until you
+          add it.
         </p>
         {fix && (
           <>
@@ -643,9 +675,8 @@ export function DeskActionRail({
           </>
         )}
       </FormDialog>
-      <DemoRunLauncher change={change} repoId={repoId} />
     </div>
-  )
+  );
 }
 
 /**
@@ -653,94 +684,39 @@ export function DeskActionRail({
  * another tab. Silent when nothing is running.
  */
 function RunBanner({ repoId }: { repoId: string }) {
-  const run = useAiRun(repoId)
-  if (!run.session || !run.state) return null
-  const needsYou = run.state === 'needsYou'
+  const run = useAiRun(repoId);
+  if (!run.session || !run.state) return null;
+  const needsYou = run.state === "needsYou";
   return (
     <div
       className={cn(
-        'mb-3 rounded-lg border px-3 py-2',
+        "mb-3 rounded-lg border px-3 py-2",
         needsYou
-          ? 'border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8'
-          : 'border-border bg-panel2'
+          ? "border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8"
+          : "border-border bg-panel2",
       )}
     >
       <div className="flex items-center gap-1.5">
-        <span className={cn('flex-none text-2xs', needsYou && 'text-[var(--gw-amber)]')}>
+        <span
+          className={cn(
+            "flex-none text-2xs",
+            needsYou && "text-[var(--gw-amber)]",
+          )}
+        >
           {stateGlyph(run.state)}
         </span>
         <span
           className={cn(
-            'min-w-0 flex-1 truncate text-2xs font-semibold',
-            needsYou ? 'text-[var(--gw-amber)]' : 'text-sub'
+            "min-w-0 flex-1 truncate text-2xs font-semibold",
+            needsYou ? "text-[var(--gw-amber)]" : "text-sub",
           )}
         >
-          {needsYou ? 'This run needs you' : stateLabel(run.state)}
+          {needsYou ? "This run needs you" : stateLabel(run.state)}
         </span>
       </div>
       <p className="mt-0.5 line-clamp-2 text-2xs text-muted-foreground">
         Task {run.session.task_number} · {run.session.task_text}
       </p>
     </div>
-  )
-}
-
-/**
- * Starts a scripted run, for checking the console's states on screen.
- *
- * Development builds only, and labelled as a demo wherever it appears. A
- * scripted run that looked like a real one would be the product lying, so
- * there is deliberately no way to start one without seeing the word "demo".
- */
-function DemoRunLauncher({ change, repoId }: { change: SpecChange; repoId: string }) {
-  const run = useAiRun(repoId)
-  if (import.meta.env.PROD) return null
-
-  const start = async (scenario: DemoScenario) => {
-    const task = change.tasks[0]
-    const refused = await run.startDemo({
-      changeId: change.id,
-      taskNumber: 1,
-      taskText: task?.text ?? 'Demo task',
-      branch: 'main',
-      scenario,
-    })
-    if (refused) toast.info(refused)
-  }
-
-  return (
-    <div className="mt-4 border-t border-dashed border-border pt-3">
-      <p className="mb-1.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Demo run (dev only)
-      </p>
-      <div className="flex flex-wrap gap-1">
-        {(
-          [
-            ['happy', 'Happy'],
-            ['gate', 'Gate'],
-            ['failure', 'Failure'],
-            ['providerExpired', 'Sign-in expired'],
-          ] as Array<[DemoScenario, string]>
-        ).map(([scenario, label]) => (
-          <button
-            key={scenario}
-            type="button"
-            className="rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground hover:bg-panel2 hover:text-foreground"
-            onClick={() => void start(scenario)}
-          >
-            {label}
-          </button>
-        ))}
-        {run.session && (
-          <button
-            type="button"
-            className="rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground hover:bg-panel2 hover:text-foreground"
-            onClick={() => void run.clear()}
-          >
-            Clear
-          </button>
-        )}
-      </div>
-    </div>
-  )
+  );
 }
