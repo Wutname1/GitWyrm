@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ArchiveRestore,
   Archive,
@@ -14,10 +14,14 @@ import {
   Search,
   SquareTerminal,
   X,
-} from 'lucide-react'
-import { Separator } from '@/components/ui/separator'
-import { PendingIndicator } from '@/components/ui/pending-indicator'
-import { DisabledHint, TooltipButton, TooltipHint } from '@/components/ui/tooltip'
+} from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { PendingIndicator } from "@/components/ui/pending-indicator";
+import {
+  DisabledHint,
+  TooltipButton,
+  TooltipHint,
+} from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,29 +29,37 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
-import { cn } from '@/lib/utils'
-import { branchSync } from '@/lib/branchActions'
-import { SyncBadge } from '@/components/domain/branch/SyncBadge'
-import { OpenInEditorButton } from '@/components/domain/OpenInEditorButton'
-import { useBranches, useRemotes, useStashes } from '@/hooks/useGitQueries'
-import { useGitMutations } from '@/hooks/useGitMutations'
-import { useUiStore } from '@/stores/uiStore'
-import { useActiveRepo } from '@/stores/workspaceStore'
+} from "@/components/ui/dropdown-menu";
+import { detectProvider, RemoteIcon } from "@/lib/remoteProvider";
+import { cn } from "@/lib/utils";
+import { branchSync } from "@/lib/branchActions";
+import { SyncBadge } from "@/components/domain/branch/SyncBadge";
+import { OpenInEditorButton } from "@/components/domain/OpenInEditorButton";
+import { useBranches, useRemotes, useStashes } from "@/hooks/useGitQueries";
+import { useGitMutations } from "@/hooks/useGitMutations";
+import { useUiStore } from "@/stores/uiStore";
+import { useActiveRepo } from "@/stores/workspaceStore";
 
 interface ToolbarButtonProps {
-  icon: ReactNode
-  label: string
-  badge?: string
-  onClick: () => void
-  disabled?: boolean
-  pending?: boolean
+  icon: ReactNode;
+  label: string;
+  badge?: string;
+  onClick: () => void;
+  disabled?: boolean;
+  pending?: boolean;
   /** Why the button is off, shown on hover in place of the usual tooltip. */
-  reason?: string
+  reason?: string;
 }
 
-function ToolbarButton({ icon, label, badge, onClick, disabled, pending, reason }: ToolbarButtonProps) {
+function ToolbarButton({
+  icon,
+  label,
+  badge,
+  onClick,
+  disabled,
+  pending,
+  reason,
+}: ToolbarButtonProps) {
   return (
     <DisabledHint disabled={disabled} reason={reason}>
       <TooltipButton
@@ -60,9 +72,10 @@ function ToolbarButton({ icon, label, badge, onClick, disabled, pending, reason 
         disabled={disabled}
         aria-busy={pending || undefined}
         className={cn(
-          'relative flex h-8 items-center gap-[7px] overflow-hidden rounded-md border border-transparent px-[11px] text-foreground transition-[border-color,background-color,color,opacity] hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none',
-          disabled && !pending && 'opacity-35',
-          pending && 'wyrm-operation-active border-primary/40 bg-soft text-accent-text'
+          "relative flex h-8 items-center gap-[7px] overflow-hidden rounded-md border border-transparent px-[11px] text-foreground transition-[border-color,background-color,color,opacity] hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none",
+          disabled && !pending && "opacity-35",
+          pending &&
+            "wyrm-operation-active border-primary/40 bg-soft text-accent-text",
         )}
       >
         <span className="relative flex flex-none">
@@ -76,7 +89,7 @@ function ToolbarButton({ icon, label, badge, onClick, disabled, pending, reason 
         <span className="text-xs font-medium">{label}</span>
       </TooltipButton>
     </DisabledHint>
-  )
+  );
 }
 
 /**
@@ -94,148 +107,15 @@ function SwitchRowButton({ onClick }: { onClick: () => void }) {
         role="button"
         tabIndex={-1}
         onClick={(e) => {
-          e.stopPropagation()
-          onClick()
+          e.stopPropagation();
+          onClick();
         }}
         className="flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
       >
         <GitBranch size={12} strokeWidth={2} />
       </span>
     </TooltipHint>
-  )
-}
-
-function BranchSwitcher() {
-  const repo = useActiveRepo()
-  const branches = useBranches(repo?.id ?? null)
-  const remotes = useRemotes(repo?.id ?? null)
-  const revealRefInGraph = useUiStore((s) => s.revealRefInGraph)
-  const m = useGitMutations(repo?.id ?? null)
-  const [open, setOpen] = useState(false)
-
-  const locals = branches.data?.local ?? []
-  const head = locals.find((b) => b.is_head)
-  const currentBranch = head?.name ?? ''
-  if (!currentBranch) return null
-
-  const remoteList = remotes.data ?? []
-
-  const switchTo = (name: string) => {
-    if (name === currentBranch || m.checkout.isPending) return
-    m.checkout.mutate(name)
-    setOpen(false)
-  }
-
-  const reveal = (name: string) => {
-    revealRefInGraph(name)
-    setOpen(false)
-  }
-
-  return (
-    <div className="mr-1.5">
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger asChild>
-          <button className="flex h-[30px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-[11px] hover:border-muted-foreground hover:bg-panel3">
-            <span className="size-2 rounded-[2px] bg-primary" />
-            <span className="text-xs font-medium text-foreground">{currentBranch}</span>
-            {head && <SyncBadge branch={head} />}
-            <ChevronDown size={13} strokeWidth={2} className="text-muted-foreground" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="max-h-[70vh] w-[240px]">
-          <DropdownMenuLabel className="px-2 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">
-            LOCAL
-          </DropdownMenuLabel>
-          {locals.map((b) => {
-            const isCurrent = b.name === currentBranch
-            return (
-              <DropdownMenuItem
-                key={b.name}
-                className="group gap-2 text-xs"
-                onClick={() => (isCurrent ? reveal(b.name) : switchTo(b.name))}
-              >
-                <span
-                  className={cn(
-                    'size-2 flex-none rounded-full',
-                    isCurrent ? 'bg-primary' : 'border border-muted-foreground'
-                  )}
-                />
-                <span
-                  className={cn(
-                    'flex-1 overflow-hidden text-ellipsis whitespace-nowrap',
-                    isCurrent ? 'font-semibold text-foreground' : 'text-sub'
-                  )}
-                >
-                  {b.name}
-                </span>
-                <SyncBadge branch={b} className="text-2xs" />
-                {!isCurrent && <SwitchRowButton onClick={() => switchTo(b.name)} />}
-              </DropdownMenuItem>
-            )
-          })}
-
-          {remoteList.map((r) => {
-            const provider = detectProvider(r.url)
-            return (
-              <div key={r.name}>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="flex items-center gap-1.5 px-2 py-1 text-2xs font-semibold tracking-[.09em] text-muted-foreground">
-                  <RemoteIcon provider={provider} width={10} height={10} className="flex-none" />
-                  {r.name.toUpperCase()}
-                </DropdownMenuLabel>
-                {r.branches.length === 0 ? (
-                  <div className="px-2 py-1 text-2xs text-muted-foreground">No branches</div>
-                ) : (
-                  r.branches.map((b) => {
-                    // Already checked out locally under the same short name, so
-                    // there is nothing to switch to.
-                    const isCurrent = b.name === currentBranch
-                    return (
-                      <DropdownMenuItem
-                        key={b.name}
-                        className="group gap-2 text-xs text-sub"
-                        onClick={() =>
-                          isCurrent ? reveal(b.name) : switchTo(`${r.name}/${b.name}`)
-                        }
-                      >
-                        <span
-                          className={cn(
-                            'size-2 flex-none rounded-full',
-                            isCurrent ? 'bg-primary' : 'border border-sub'
-                          )}
-                        />
-                        <span
-                          className={cn(
-                            'flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono',
-                            isCurrent && 'font-semibold text-foreground'
-                          )}
-                        >
-                          {b.name}
-                        </span>
-                        {b.ahead_of_local > 0 && (
-                          <span className="flex-none font-mono text-2xs text-[var(--gw-green)]">
-                            ↓{b.ahead_of_local}
-                          </span>
-                        )}
-                        {b.local_only_missing && (
-                          <span className="flex-none text-2xs uppercase tracking-wide text-muted-foreground">
-                            not here
-                          </span>
-                        )}
-                        {!isCurrent && (
-                          <SwitchRowButton onClick={() => switchTo(`${r.name}/${b.name}`)} />
-                        )}
-                      </DropdownMenuItem>
-                    )
-                  })
-                )}
-              </div>
-            )
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  )
+  );
 }
 
 function GhostButton({
@@ -245,11 +125,11 @@ function GhostButton({
   disabled,
   reason,
 }: {
-  icon: ReactNode
-  tooltip: string
-  onClick: () => void
-  disabled?: boolean
-  reason?: string
+  icon: ReactNode;
+  tooltip: string;
+  onClick: () => void;
+  disabled?: boolean;
+  reason?: string;
 }) {
   return (
     <DisabledHint disabled={disabled} reason={reason}>
@@ -259,14 +139,14 @@ function GhostButton({
         aria-label={tooltip}
         disabled={disabled}
         className={cn(
-          'group flex h-[30px] w-8 items-center justify-center rounded-md border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none',
-          disabled && 'opacity-35'
+          "group flex h-[30px] w-8 items-center justify-center rounded-md border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none",
+          disabled && "opacity-35",
         )}
       >
         {icon}
       </TooltipButton>
     </DisabledHint>
-  )
+  );
 }
 
 // A prev/next stepper button in the search box. Disabled when there's nothing
@@ -277,10 +157,10 @@ function StepButton({
   onClick,
   disabled,
 }: {
-  icon: ReactNode
-  title: string
-  onClick: () => void
-  disabled: boolean
+  icon: ReactNode;
+  title: string;
+  onClick: () => void;
+  disabled: boolean;
 }) {
   // DisabledHint rather than a plain tooltip: this button is disabled whenever
   // there is nothing to step to, and a disabled button gets no pointer events,
@@ -296,7 +176,7 @@ function StepButton({
         {icon}
       </TooltipButton>
     </DisabledHint>
-  )
+  );
 }
 
 /**
@@ -306,22 +186,22 @@ function StepButton({
  * a nonce the app root bumps).
  */
 function CommitSearchBox() {
-  const query = useUiStore((s) => s.commitSearch)
-  const setCommitSearch = useUiStore((s) => s.setCommitSearch)
-  const jumpMatch = useUiStore((s) => s.jumpMatch)
-  const focusNonce = useUiStore((s) => s.searchFocusNonce)
-  const matchCount = useUiStore((s) => s.searchMatchCount)
-  const matchIndex = useUiStore((s) => s.searchMatchIndex)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const query = useUiStore((s) => s.commitSearch);
+  const setCommitSearch = useUiStore((s) => s.setCommitSearch);
+  const jumpMatch = useUiStore((s) => s.jumpMatch);
+  const focusNonce = useUiStore((s) => s.searchFocusNonce);
+  const matchCount = useUiStore((s) => s.searchMatchCount);
+  const matchIndex = useUiStore((s) => s.searchMatchIndex);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (focusNonce === 0) return
-    inputRef.current?.focus()
-    inputRef.current?.select()
-  }, [focusNonce])
+    if (focusNonce === 0) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [focusNonce]);
 
-  const hasMatches = (matchCount ?? 0) > 0
-  const showStatus = query.trim() !== '' && matchCount !== null
+  const hasMatches = (matchCount ?? 0) > 0;
+  const showStatus = query.trim() !== "" && matchCount !== null;
 
   return (
     <div className="flex h-[30px] min-w-[210px] items-center gap-[7px] rounded-md border border-border bg-panel2 px-2.5 text-muted-foreground focus-within:border-muted-foreground">
@@ -331,12 +211,12 @@ function CommitSearchBox() {
         value={query}
         onChange={(e) => setCommitSearch(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            if (hasMatches) jumpMatch(e.shiftKey ? -1 : 1)
-          } else if (e.key === 'Escape') {
-            setCommitSearch('')
-            inputRef.current?.blur()
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (hasMatches) jumpMatch(e.shiftKey ? -1 : 1);
+          } else if (e.key === "Escape") {
+            setCommitSearch("");
+            inputRef.current?.blur();
           }
         }}
         placeholder="Search commits"
@@ -345,11 +225,11 @@ function CommitSearchBox() {
       {showStatus && (
         <span
           className={cn(
-            'flex-none whitespace-nowrap font-mono text-2xs tabular-nums',
-            hasMatches ? 'text-muted-foreground' : 'text-removed'
+            "flex-none whitespace-nowrap font-mono text-2xs tabular-nums",
+            hasMatches ? "text-muted-foreground" : "text-removed",
           )}
         >
-          {hasMatches ? `${matchIndex || 1}/${matchCount}` : 'no results'}
+          {hasMatches ? `${matchIndex || 1}/${matchCount}` : "no results"}
         </span>
       )}
       {showStatus && hasMatches && (
@@ -371,8 +251,8 @@ function CommitSearchBox() {
       {query && (
         <TooltipButton
           onClick={() => {
-            setCommitSearch('')
-            inputRef.current?.focus()
+            setCommitSearch("");
+            inputRef.current?.focus();
           }}
           tooltip="Clear search"
           className="flex-none rounded p-0.5 hover:bg-panel3 hover:text-foreground"
@@ -381,46 +261,57 @@ function CommitSearchBox() {
         </TooltipButton>
       )}
     </div>
-  )
+  );
 }
 
 export function Toolbar() {
-  const repo = useActiveRepo()
-  const branches = useBranches(repo?.id ?? null)
-  const stashes = useStashes(repo?.id ?? null)
-  const m = useGitMutations(repo?.id ?? null)
-  const openMerge = useUiStore((s) => s.openMerge)
-  const openModal = useUiStore((s) => s.openModal)
-  const head = branches.data?.local.find((b) => b.is_head)
+  const repo = useActiveRepo();
+  const branches = useBranches(repo?.id ?? null);
+  const stashes = useStashes(repo?.id ?? null);
+  const m = useGitMutations(repo?.id ?? null);
+  const openMerge = useUiStore((s) => s.openMerge);
+  const openModal = useUiStore((s) => s.openModal);
+  const head = branches.data?.local.find((b) => b.is_head);
   const syncAction = m.fetch.isPending
-    ? 'fetch'
+    ? "fetch"
     : m.pull.isPending
-      ? 'pull'
+      ? "pull"
       : m.push.isPending
-        ? 'push'
-        : null
-  const syncPending = syncAction !== null
+        ? "push"
+        : null;
+  const syncPending = syncAction !== null;
   // A branch that has never been sent has no count to show -- there is nothing
   // to be ahead of -- but it still has work to push, so mark the button rather
   // than leaving it looking as settled as a branch that matches its remote.
-  const headSync = head ? branchSync(head) : null
+  const headSync = head ? branchSync(head) : null;
   const pushBadge =
-    headSync?.marker === 'new' ? '•' : headSync?.ahead ? String(headSync.ahead) : undefined
-  const stashAction = m.stashSave.isPending ? 'stash' : m.stashPop.isPending ? 'pop' : null
-  const stashPending = stashAction !== null
+    headSync?.marker === "new"
+      ? "•"
+      : headSync?.ahead
+        ? String(headSync.ahead)
+        : undefined;
+  const stashAction = m.stashSave.isPending
+    ? "stash"
+    : m.stashPop.isPending
+      ? "pop"
+      : null;
+  const stashPending = stashAction !== null;
 
   // With no repository open there is nothing for any of these to act on, so
   // they are switched off outright and say why on hover, rather than looking
   // live and answering a click with a toast.
-  const noRepo = !repo
-  const noRepoReason = 'Open a repository first'
-  const noStashes = (stashes.data?.length ?? 0) === 0
+  const noRepo = !repo;
+  const noRepoReason = "Open a repository first";
+  const noStashes = (stashes.data?.length ?? 0) === 0;
 
   return (
-    <div data-dim-on-drag className="relative flex h-12 flex-none items-center gap-1 border-b border-border bg-panel px-2.5">
+    <div
+      data-dim-on-drag
+      className="relative flex h-12 flex-none items-center gap-1 border-b border-border bg-panel px-2.5"
+    >
       <ToolbarButton
         icon={<ArrowDownToLine size={16} strokeWidth={1.9} />}
-        label={m.fetch.isPending ? 'Fetching…' : 'Fetch'}
+        label={m.fetch.isPending ? "Fetching…" : "Fetch"}
         onClick={() => m.fetch.mutate()}
         disabled={noRepo || syncPending}
         reason={noRepoReason}
@@ -428,7 +319,7 @@ export function Toolbar() {
       />
       <ToolbarButton
         icon={<ArrowDown size={16} strokeWidth={1.9} />}
-        label={m.pull.isPending ? 'Pulling…' : 'Pull'}
+        label={m.pull.isPending ? "Pulling…" : "Pull"}
         badge={headSync?.behind ? String(headSync.behind) : undefined}
         onClick={() => m.pull.mutate()}
         disabled={noRepo || syncPending}
@@ -437,14 +328,16 @@ export function Toolbar() {
       />
       <ToolbarButton
         icon={<ArrowUp size={16} strokeWidth={1.9} />}
-        label={m.push.isPending ? 'Pushing…' : 'Push'}
+        label={m.push.isPending ? "Pushing…" : "Push"}
         badge={pushBadge}
         // A branch that is behind its upstream can't be sent with a plain push --
         // git refuses it as non-fast-forward. Catch that here and let the user
         // choose (get the cloud's changes first, or force past them) rather than
         // firing a push we know will be rejected.
         onClick={() =>
-          headSync && headSync.behind > 0 ? openModal('push-choice') : m.push.mutate()
+          headSync && headSync.behind > 0
+            ? openModal("push-choice")
+            : m.push.mutate()
         }
         disabled={noRepo || syncPending}
         reason={noRepoReason}
@@ -454,8 +347,10 @@ export function Toolbar() {
       {syncAction && (
         <div
           className={cn(
-            'wyrm-sync-track pointer-events-none absolute bottom-0 left-2.5 w-[224px]',
-            syncAction === 'push' ? 'wyrm-sync-track-out' : 'wyrm-sync-track-in'
+            "wyrm-sync-track pointer-events-none absolute bottom-0 left-2.5 w-[224px]",
+            syncAction === "push"
+              ? "wyrm-sync-track-out"
+              : "wyrm-sync-track-in",
           )}
           aria-hidden="true"
         >
@@ -463,13 +358,13 @@ export function Toolbar() {
         </div>
       )}
       <span className="sr-only" role="status" aria-live="polite">
-        {syncAction === 'fetch'
-          ? 'Fetching from the remote'
-          : syncAction === 'pull'
-            ? 'Pulling changes from the remote'
-            : syncAction === 'push'
-              ? 'Pushing changes to the remote'
-              : ''}
+        {syncAction === "fetch"
+          ? "Fetching from the remote"
+          : syncAction === "pull"
+            ? "Pulling changes from the remote"
+            : syncAction === "push"
+              ? "Pushing changes to the remote"
+              : ""}
       </span>
 
       <Separator orientation="vertical" className="mx-1.5 !h-[26px]" />
@@ -477,7 +372,7 @@ export function Toolbar() {
       <ToolbarButton
         icon={<GitBranch size={16} strokeWidth={1.9} />}
         label="Branch"
-        onClick={() => openModal('newBranch')}
+        onClick={() => openModal("newBranch")}
         disabled={noRepo}
         reason={noRepoReason}
       />
@@ -490,7 +385,7 @@ export function Toolbar() {
       />
       <ToolbarButton
         icon={<Archive size={16} strokeWidth={1.9} />}
-        label={m.stashSave.isPending ? 'Stashing…' : 'Stash'}
+        label={m.stashSave.isPending ? "Stashing…" : "Stash"}
         onClick={() => m.stashSave.mutate(undefined)}
         disabled={noRepo || stashPending}
         reason={noRepoReason}
@@ -498,24 +393,30 @@ export function Toolbar() {
       />
       <ToolbarButton
         icon={<ArchiveRestore size={16} strokeWidth={1.9} />}
-        label={m.stashPop.isPending ? 'Restoring…' : 'Pop'}
+        label={m.stashPop.isPending ? "Restoring…" : "Pop"}
         onClick={() => m.stashPop.mutate(0)}
         disabled={noRepo || noStashes || stashPending}
-        reason={noRepo ? noRepoReason : 'Nothing stashed to restore'}
+        reason={noRepo ? noRepoReason : "Nothing stashed to restore"}
         pending={m.stashPop.isPending}
       />
 
       <div className="flex-1" />
-
-      <BranchSwitcher />
 
       <CommitSearchBox />
 
       <GhostButton
         icon={
           <span className="relative flex size-4 text-orange-400">
-            <Folder size={16} strokeWidth={1.9} className="group-hover:hidden" />
-            <FolderOpen size={16} strokeWidth={1.9} className="hidden group-hover:block" />
+            <Folder
+              size={16}
+              strokeWidth={1.9}
+              className="group-hover:hidden"
+            />
+            <FolderOpen
+              size={16}
+              strokeWidth={1.9}
+              className="hidden group-hover:block"
+            />
           </span>
         }
         tooltip="Show in file explorer"
@@ -532,5 +433,5 @@ export function Toolbar() {
         reason={noRepoReason}
       />
     </div>
-  )
+  );
 }
