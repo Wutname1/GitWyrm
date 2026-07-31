@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import type { AiRun } from '@/hooks/useAiRun'
 import { isActive, stateGlyph, stateLabel } from '@/hooks/useAiRun'
 import { RunEndingCard, type EndingActions } from './RunEndingCard'
+import { RunFinishedCard } from './RunFinishedCard'
 import { RunStream } from './RunStream'
 
 /**
@@ -19,10 +20,17 @@ export function AiRunTab({
   run,
   onViewDiff,
   endingActions,
+  provider,
 }: {
   run: AiRun
   onViewDiff?: (path: string) => void
   endingActions: EndingActions
+  /**
+   * Display name of the AI that did the work, for the `Assisted-by` trailer.
+   * Absent when it cannot be determined, in which case the run falls back to the
+   * plain ending rather than drafting a commit that would misattribute itself.
+   */
+  provider?: string
 }) {
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -94,7 +102,23 @@ export function AiRunTab({
         gateBusy={busy}
       />
 
-      {ended?.kind === 'ended' && !active && (
+      {/* A run that finished its task gets the review-and-commit card; one that
+          stopped or failed gets the plain ending, because there is nothing to
+          approve. Both say the same thing first: nothing was committed. */}
+      {ended?.kind === 'ended' && !active && ended.state === 'finished' && provider && (
+        <div className="flex-none border-t border-border p-2">
+          <RunFinishedCard
+            repoId={session.repo_id}
+            changeId={session.change_id}
+            taskNumber={session.task_number}
+            provider={provider}
+            onCommitted={endingActions.onCommitted ?? (() => {})}
+            onUndo={endingActions.onUndo}
+          />
+        </div>
+      )}
+
+      {ended?.kind === 'ended' && !active && (ended.state !== 'finished' || !provider) && (
         <div className="flex-none border-t border-border p-2">
           <RunEndingCard
             state={ended.state}

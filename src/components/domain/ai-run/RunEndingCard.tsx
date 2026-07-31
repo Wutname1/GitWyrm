@@ -5,6 +5,8 @@ export interface EndingActions {
   onKeep: () => void
   onUndo: () => void
   onRestart: () => void
+  /** Called with the new sha once a finished run's commit is approved. */
+  onCommitted?: (sha: string) => void
   /** Only offered on failure: try the same task again with an added note. */
   onRetryWithNote?: () => void
   /** Only offered when the cause was a sign-in problem. */

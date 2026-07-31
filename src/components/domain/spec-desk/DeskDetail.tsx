@@ -15,6 +15,10 @@ import { AiRunTab } from '@/components/domain/ai-run/AiRunTab'
 import { AskTab } from '@/components/domain/ai-run/AskTab'
 import { useAskStore } from '@/stores/askStore'
 import { useStartRun } from '@/hooks/useStartRun'
+import { useSpecAi } from '@/hooks/useSpecAi'
+import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { unwrap } from '@/lib/queryKeys'
+import { describeError } from '@/lib/log'
 import { DeltaBadge, ProgressRing, StatusPill } from './SpecBits'
 
 type Tab = 'overview' | 'proposal' | 'deltas' | 'history' | 'ai'
@@ -302,6 +306,36 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
   const run = useAiRun(repoId)
   const askSession = useAskStore((s) => s.byRepo[repoId])
   const { startRun, canStart: canStartRun } = useStartRun(repoId, change)
+  const ai = useSpecAi()
+  const [confirmUndo, setConfirmUndo] = useState(false)
+  const [undoing, setUndoing] = useState(false)
+
+  /**
+   * Throw away the AI's edits and put its task back to not-done.
+   *
+   * Order matters: discard first, un-tick second. A tick left standing over
+   * discarded work would claim a task was done when its changes are gone, which
+   * is worse than the reverse.
+   */
+  const undoRun = async () => {
+    const session = run.session
+    if (!session || undoing) return
+    setUndoing(true)
+    try {
+      unwrap(await commands.discardAll(repoId))
+      const line = change.tasks.find((t) => t.text === session.task_text)?.line
+      if (line != null) {
+        await commands.openspecToggleTask(repoId, session.change_id, line, false)
+      }
+      await run.clear()
+      setConfirmUndo(false)
+      toast.success("Undone. The AI's edits are gone and the task is open again.")
+    } catch (e) {
+      toast.error('Could not undo that.', { description: describeError(e) })
+    } finally {
+      setUndoing(false)
+    }
+  }
   // An ask session belongs to the change it was started on. Showing one change's
   // answers under another's header would make every citation a lie.
   const asking = askSession?.changeId === change.id
@@ -562,6 +596,10 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
         {tab === 'ai' && !askMode && (
           <AiRunTab
             run={run}
+            // Names the AI on the commit's Assisted-by trailer. Absent when no
+            // provider is resolved, which makes the run fall back to the plain
+            // ending rather than drafting a commit that misattributes itself.
+            provider={ai.provider || undefined}
             endingActions={{
               // Keeping is the default state already: the edits are sitting in
               // the changes list, so this just closes the run out.
@@ -569,9 +607,19 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
                 void run.clear()
                 toast.success('Kept. The changes are in your changes list.')
               },
-              onUndo: () => {
-                toast.info('Undo runs from the changes list for now.')
+              // The run is done once its work is committed. Clearing frees the
+              // repository to start the next task, which is an explicit click --
+              // runs never chain themselves.
+              onCommitted: (sha) => {
+                void run.clear()
+                toast.success(`Committed ${sha.slice(0, 7)}.`, {
+                  description: 'The task is ticked and the commit is on your branch.',
+                })
               },
+              // Throws the AI's edits away and puts the task back to not-done.
+              // Confirmed first: this is the one ending action that destroys
+              // work, and a misclick here costs the whole run.
+              onUndo: () => setConfirmUndo(true),
               // Restarts the run's own task, not whatever is selected now --
               // the session carries its change and task for exactly this.
               onRestart: () => {
@@ -628,6 +676,24 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
           />
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmUndo}
+        onOpenChange={setConfirmUndo}
+        title="Undo the AI's edits?"
+        description={
+          <>
+            Every file the AI changed goes back to how it was, and its task is marked
+            not done again. Anything you changed yourself in those files goes too, so
+            this is worth a look at your changes list first.
+          </>
+        }
+        confirmLabel="Undo the edits"
+        destructive
+        pending={undoing}
+        pendingLabel="Undoing…"
+        onConfirm={() => void undoRun()}
+      />
     </div>
   )
 }

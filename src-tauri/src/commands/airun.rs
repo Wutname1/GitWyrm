@@ -195,6 +195,61 @@ pub async fn ai_run_current(
   Ok(sessions.get(&repo_id))
 }
 
+/// What a finished run offers for approval.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct RunCompletion {
+  /// The commit message the user is about to approve, trailers and all. Editable
+  /// before committing -- this is a draft, not a decision.
+  pub message: String,
+  /// Line in tasks.md the run's task sits on, so ticking and un-ticking both
+  /// target the same line rather than re-deriving it.
+  pub task_line: Option<u32>,
+}
+
+/// The message and task line a finished run should offer. **Commits nothing.**
+///
+/// Kept separate from the commit itself so the user always sees what they are
+/// approving first. An agent that could compose and commit in one step would be
+/// a different and much harder thing to trust inside a git client.
+#[tauri::command]
+#[specta::specta]
+pub async fn ai_run_completion(
+  manager: State<'_, crate::state::RepoManager>,
+  sessions: State<'_, SessionRegistry>,
+  repo_id: String,
+  provider: String,
+) -> Result<Option<RunCompletion>, AppError> {
+  let Some(session) = sessions.get(&repo_id) else {
+    return Ok(None);
+  };
+  let root = manager.get(&repo_id)?.path.clone();
+  let change_id = session.change_id.clone();
+  let task_text = session.task_text.clone();
+
+  let task_line = tauri::async_runtime::spawn_blocking(move || {
+    let dir = crate::openspec::openspec_dir(&root)?;
+    let change = crate::openspec::parse::parse_change_dir(&dir.join("changes").join(&change_id))?;
+    // Match on the text the session recorded: the run's own task, not whatever
+    // is currently next, which may have moved while the run worked.
+    change
+      .tasks
+      .iter()
+      .find(|t| t.text == task_text)
+      .map(|t| t.line)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?;
+
+  Ok(Some(RunCompletion {
+    message: crate::airun::complete::commit_message(
+      &session.task_text,
+      &session.change_id,
+      &provider,
+    ),
+    task_line,
+  }))
+}
+
 /// Clears a finished run so the repository can start another.
 #[tauri::command]
 #[specta::specta]

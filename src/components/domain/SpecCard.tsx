@@ -1,6 +1,6 @@
 import { ExternalLink, Sparkles } from 'lucide-react'
 import { useSpecAi } from '@/hooks/useSpecAi'
-import { stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
+import { stateGlyph, useAiRun } from '@/hooks/useAiRun'
 import { cn } from '@/lib/utils'
 import { nextStepHint, progressSentence } from '@/lib/specDisplay'
 import { ProgressRing, StatusPill } from '@/components/domain/spec-desk/SpecBits'
@@ -53,10 +53,21 @@ export function SpecCard() {
           )}
         >
           <span className="flex-none">{stateGlyph(run.state)}</span>
+          {/* Names the task, then what it is doing right now. The task number is
+              what makes this legible from another window -- "working" alone does
+              not say on what. */}
           <span className="min-w-0 flex-1 truncate">
-            {run.state === 'needsYou' ? 'This run needs you' : run.latest || stateLabel(run.state)}
+            {run.state === 'needsYou'
+              ? `Task ${run.session.task_number} needs your OK`
+              : `The AI is on task ${run.session.task_number}${
+                  run.latest ? ` — ${run.latest}` : ''
+                }`}
           </span>
-          <span className="flex-none font-semibold">View</span>
+          {/* A gate is answered, not watched. Saying "View" for something that is
+              blocking would undersell what the click is for. */}
+          <span className="flex-none font-semibold">
+            {run.state === 'needsYou' ? 'Answer' : 'Watch'}
+          </span>
         </button>
       )}
       <div className="flex items-center gap-2">

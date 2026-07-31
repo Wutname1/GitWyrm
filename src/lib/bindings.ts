@@ -2086,6 +2086,21 @@ async aiRunClear(repoId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * The message and task line a finished run should offer. **Commits nothing.**
+ * 
+ * Kept separate from the commit itself so the user always sees what they are
+ * approving first. An agent that could compose and commit in one step would be
+ * a different and much harder thing to trust inside a git client.
+ */
+async aiRunCompletion(repoId: string, provider: string) : Promise<Result<RunCompletion | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_run_completion", { repoId, provider }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async openspecStatus(repoId: string) : Promise<Result<OpenspecStatus, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("openspec_status", { repoId }) };
@@ -3026,6 +3041,20 @@ export type Resolution =
  * Use the provided, hand-edited text.
  */
 { kind: "manual"; text: string }
+/**
+ * What a finished run offers for approval.
+ */
+export type RunCompletion = { 
+/**
+ * The commit message the user is about to approve, trailers and all. Editable
+ * before committing -- this is a draft, not a decision.
+ */
+message: string; 
+/**
+ * Line in tasks.md the run's task sits on, so ticking and un-ticking both
+ * target the same line rather than re-deriving it.
+ */
+task_line: number | null }
 /**
  * An event as it reaches the UI.
  * 

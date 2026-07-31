@@ -230,6 +230,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::airun::ai_run_stop,
     commands::airun::ai_run_current,
     commands::airun::ai_run_clear,
+    commands::airun::ai_run_completion,
     commands::openspec::openspec_status,
     commands::openspec::openspec_list_changes,
     commands::openspec::openspec_get_change,
