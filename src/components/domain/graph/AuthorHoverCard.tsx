@@ -37,6 +37,8 @@ export function AuthorHoverCard({ name, email, initials, sha, children }: Author
           type="button"
           disabled={!sha}
           onClick={() => sha && selectCommit(sha)}
+          // Left as `title`: this button is already inside an open hover card,
+          // and a tooltip would stack a second floating layer on top of it.
           title={sha ? 'Show this commit in the details pane' : undefined}
           className="-m-1 flex w-[calc(100%+0.5rem)] items-center gap-2.5 rounded-[5px] p-1 text-left enabled:hover:bg-soft"
         >

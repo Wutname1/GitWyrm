@@ -84,6 +84,9 @@ export function BlameView() {
                   selectCommit(block.sha)
                   openDiff({ path: target.path, source: { kind: 'commit', sha: block.sha } })
                 }}
+                // No tooltip here on purpose: this block already contains an
+                // AuthorHoverCard, and a second hover surface wrapping it would
+                // have the two fighting over the same pointer.
                 title={first.summary}
                 style={{ borderLeftColor: color }}
                 className="flex w-56 flex-none cursor-pointer flex-col justify-start gap-px border-l-2 bg-panel px-2 py-0.5 hover:bg-panel2"

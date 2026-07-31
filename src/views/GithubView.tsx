@@ -10,7 +10,7 @@ import type { GithubComment, IssueDetail, PrDetail } from '@/lib/bindings'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { Textarea } from '@/components/ui/textarea'
-import { TooltipButton } from '@/components/ui/tooltip'
+import { TooltipButton, TooltipHint } from '@/components/ui/tooltip'
 import {
   githubKeys,
   useGithubIssueDetail,
@@ -28,15 +28,16 @@ function ago(iso: string): string {
 
 function Avatar({ name, bot }: { name: string; bot?: boolean }) {
   return (
-    <span
-      className={cn(
-        'flex size-6 flex-none items-center justify-center rounded-full text-2xs font-bold',
-        bot ? 'border border-border bg-panel3 text-sub' : 'bg-panel3 text-foreground'
-      )}
-      title={name}
-    >
-      {name.slice(0, 2).toUpperCase()}
-    </span>
+    <TooltipHint label={name}>
+      <span
+        className={cn(
+          'flex size-6 flex-none items-center justify-center rounded-full text-2xs font-bold',
+          bot ? 'border border-border bg-panel3 text-sub' : 'bg-panel3 text-foreground'
+        )}
+      >
+        {name.slice(0, 2).toUpperCase()}
+      </span>
+    </TooltipHint>
   )
 }
 

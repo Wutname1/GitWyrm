@@ -11,6 +11,7 @@ import {
 import { useProfiles } from '@/hooks/useProfiles'
 import { commands, type GitIdentitySnapshot } from '@/lib/bindings'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
@@ -68,37 +69,44 @@ export function ProfileSwitcher() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          className={cn(
-            'mb-[7px] flex w-full items-center gap-1.5 rounded-md border px-2 py-1 text-left transition-colors',
-            missing
-              ? 'border-amber-500/50 bg-amber-500/10 hover:border-amber-500'
-              : 'border-transparent bg-panel3/60 hover:border-border'
-          )}
-          title={
-            effective?.email
-              ? `Commits here are made as ${effective.name} <${effective.email}>`
-              : 'No name and email set yet'
-          }
-        >
-          <UserRound
-            size={11}
-            className={missing ? 'flex-none text-amber-500' : 'flex-none text-muted-foreground'}
-          />
-          <span
+      {/* The tooltip wraps the trigger, never the other way round: whatever sits
+          directly inside `DropdownMenuTrigger asChild` must be the button, or
+          the trigger's click handler lands on the wrapper and the menu stops
+          opening. */}
+      <TooltipHint
+        label={
+          effective?.email
+            ? `Commits here are made as ${effective.name} <${effective.email}>`
+            : 'No name and email set yet'
+        }
+      >
+        <DropdownMenuTrigger asChild>
+          <button
             className={cn(
-              'min-w-0 flex-1 truncate text-[10px]',
-              missing ? 'font-medium text-amber-500' : 'text-muted-foreground'
+              'mb-[7px] flex w-full items-center gap-1.5 rounded-md border px-2 py-1 text-left transition-colors',
+              missing
+                ? 'border-amber-500/50 bg-amber-500/10 hover:border-amber-500'
+                : 'border-transparent bg-panel3/60 hover:border-border'
             )}
           >
-            {missing ? label : <span className="text-foreground">{label}</span>}
-          </span>
-          {effective?.overridden && (
-            <Pin size={9} className="flex-none text-muted-foreground" aria-label="Pinned to this repository" />
-          )}
-        </button>
-      </DropdownMenuTrigger>
+            <UserRound
+              size={11}
+              className={missing ? 'flex-none text-amber-500' : 'flex-none text-muted-foreground'}
+            />
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate text-[10px]',
+                missing ? 'font-medium text-amber-500' : 'text-muted-foreground'
+              )}
+            >
+              {missing ? label : <span className="text-foreground">{label}</span>}
+            </span>
+            {effective?.overridden && (
+              <Pin size={9} className="flex-none text-muted-foreground" aria-label="Pinned to this repository" />
+            )}
+          </button>
+        </DropdownMenuTrigger>
+      </TooltipHint>
 
       <DropdownMenuContent align="start" className="w-64">
         {effective?.email && (

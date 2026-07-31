@@ -19,7 +19,7 @@ import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { BranchMenu } from '@/components/domain/branch/BranchMenu'
-import { TooltipButton } from '@/components/ui/tooltip'
+import { TooltipButton, TooltipHint } from '@/components/ui/tooltip'
 import { openWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
 import { RemoteBranchMenuItems } from '@/components/domain/branch/RemoteBranchMenuItems'
 
@@ -98,7 +98,6 @@ function BranchNode({
     <div
       style={{ paddingLeft: pad + 14 }}
       className="flex items-center gap-1.5 py-0.5 pr-3 hover:bg-panel2"
-      title={b ? branchTooltip(b) : undefined}
     >
       <GitBranch
         size={10}
@@ -140,7 +139,17 @@ function BranchNode({
   // may want either from the one right-click.
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+      {/* Outside the trigger: `asChild` merges onto its immediate child, so a
+          tooltip nested inside the row would swallow the context-menu
+          handlers. Only wrapped when there is something to say -- an empty
+          tooltip would open a blank bubble on every hover. */}
+      {b ? (
+        <TooltipHint label={branchTooltip(b)}>
+          <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+        </TooltipHint>
+      ) : (
+        <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+      )}
       <ContextMenuContent className="w-64">
         <ContextMenuLabel className="font-mono text-2xs text-sub">
           {remote.name}/{node.branch}
@@ -199,12 +208,13 @@ function RemoteNode({ remote }: { remote: RemoteInfo }) {
             <RemoteIcon provider={provider} width={12} height={12} className="flex-none text-sub" />
             <span className="truncate text-xs text-foreground">{remote.name}</span>
             {incoming > 0 && (
-              <span
-                title={`${incoming} branch${incoming === 1 ? '' : 'es'} here ${incoming === 1 ? 'has' : 'have'} work you don't have yet`}
-                className="ml-auto flex-none rounded-sm bg-[var(--gw-green)]/15 px-1 font-mono text-2xs text-[var(--gw-green)]"
+              <TooltipHint
+                label={`${incoming} branch${incoming === 1 ? '' : 'es'} here ${incoming === 1 ? 'has' : 'have'} work you don't have yet`}
               >
-                {incoming} new
-              </span>
+                <span className="ml-auto flex-none rounded-sm bg-[var(--gw-green)]/15 px-1 font-mono text-2xs text-[var(--gw-green)]">
+                  {incoming} new
+                </span>
+              </TooltipHint>
             )}
             <span
               className={cn('pl-1.5 font-mono text-2xs text-muted-foreground', incoming === 0 && 'ml-auto')}

@@ -7,7 +7,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { StashGlyph } from '@/components/domain/graph/StashGlyph'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
-import { TooltipButton } from '@/components/ui/tooltip'
+import { TooltipButton, TooltipHint } from '@/components/ui/tooltip'
 
 function markerStyle(section: SidebarSectionData, isCurrent: boolean): CSSProperties {
   switch (section.type) {
@@ -126,20 +126,14 @@ export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(fu
         {pending ? pendingLabel ?? 'Working…' : item.name}
       </span>
       {item.meta && (
-        <span
+        <MetaBadge
+          meta={item.meta}
           title={item.metaTitle}
-          className={cn(
-            'ml-auto whitespace-nowrap pl-1.5 font-mono text-2xs',
-            // Word markers ("new", "gone") are states, not counts -- give them
-            // their own weight so they don't read as an ahead/behind number.
-            // Sync counts and stash ages are quiet data, not calls to action.
-            /^[↑↓]/.test(item.meta) || section.type === 'stash'
-              ? 'text-muted-foreground'
-              : 'font-semibold uppercase tracking-wide text-accent-text/80'
-          )}
-        >
-          {item.meta}
-        </span>
+          // Word markers ("new", "gone") are states, not counts -- give them
+          // their own weight so they don't read as an ahead/behind number.
+          // Sync counts and stash ages are quiet data, not calls to action.
+          quiet={/^[↑↓]/.test(item.meta) || section.type === 'stash'}
+        />
       )}
       {hoverAction && !pending && (
         <TooltipButton
@@ -159,3 +153,33 @@ export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(fu
     </div>
   )
 })
+
+/**
+ * The trailing count or state marker on a row.
+ *
+ * Only wrapped in a tooltip when there is something to say -- an empty label
+ * would open a blank bubble on every hover.
+ */
+function MetaBadge({
+  meta,
+  title,
+  quiet,
+}: {
+  meta: string
+  title?: string | null
+  quiet: boolean
+}) {
+  const badge = (
+    <span
+      className={cn(
+        'ml-auto whitespace-nowrap pl-1.5 font-mono text-2xs',
+        quiet
+          ? 'text-muted-foreground'
+          : 'font-semibold uppercase tracking-wide text-accent-text/80'
+      )}
+    >
+      {meta}
+    </span>
+  )
+  return title ? <TooltipHint label={title}>{badge}</TooltipHint> : badge
+}

@@ -64,6 +64,7 @@ import {
   Tooltip,
   TooltipButton,
   TooltipContent,
+  TooltipHint,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { RepoIconDialog } from "@/components/domain/RepoIconDialog";
@@ -516,15 +517,16 @@ function StatusBadge({
   collapsed: boolean;
 }) {
   return (
-    <span
-      className="flex flex-none items-center gap-0.5 font-mono text-[10px] font-semibold leading-none tabular-nums"
-      style={{ color }}
-      aria-label={`${count} ${label}`}
-      title={`${count} ${label}`}
-    >
-      {icon}
-      {!collapsed && count}
-    </span>
+    <TooltipHint label={`${count} ${label}`}>
+      <span
+        className="flex flex-none items-center gap-0.5 font-mono text-[10px] font-semibold leading-none tabular-nums"
+        style={{ color }}
+        aria-label={`${count} ${label}`}
+      >
+        {icon}
+        {!collapsed && count}
+      </span>
+    </TooltipHint>
   );
 }
 

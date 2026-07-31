@@ -1,6 +1,7 @@
 import { type DragEvent } from 'react'
 import { Check, Laptop, Tag } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 import type { RefInfo, RefKind } from '@/lib/bindings'
 import { type DraggedRef } from '@/lib/refSync'
 import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
@@ -87,7 +88,6 @@ export function RefBadge({
       {...dnd.props}
       data-tutorial-id={tutorialRefPillId(refTag.name, refTag.type)}
       onDoubleClick={canSwitch ? handleDoubleClick : undefined}
-      title={canSwitch ? `Double-click to switch to ${refTag.name}` : undefined}
       className={cn(
         'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-2xs font-semibold leading-[1.4] transition-opacity',
         dnd.props.draggable ? 'wyrm-draggable cursor-grab active:cursor-grabbing' : 'cursor-default',
@@ -108,5 +108,17 @@ export function RefBadge({
     </span>
   )
 
-  return withContextMenu ? <RefContextMenu refTag={refTag}>{badge}</RefContextMenu> : badge
+  const withMenu = withContextMenu ? (
+    <RefContextMenu refTag={refTag}>{badge}</RefContextMenu>
+  ) : (
+    badge
+  )
+
+  // Outside the context menu, whose trigger is `asChild`: a tooltip nested
+  // inside would become that trigger's target and swallow the right-click menu.
+  return canSwitch ? (
+    <TooltipHint label={`Double-click to switch to ${refTag.name}`}>{withMenu}</TooltipHint>
+  ) : (
+    withMenu
+  )
 }

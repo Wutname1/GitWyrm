@@ -10,6 +10,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
@@ -127,23 +128,24 @@ function FolderCounts({ counts }: { counts: FolderRollup }) {
   // carries the words and the glyphs themselves are hidden from it.
   const spoken = shown.map((part) => `${part.n} ${part.word}`).join(', ')
   return (
-    <span
-      className="flex flex-none items-center gap-1.5 font-mono text-2xs tabular-nums"
-      aria-label={spoken}
-      title={spoken}
-    >
-      {shown.map((part) => (
-        <span
-          key={part.code}
-          aria-hidden
-          className="flex items-center gap-0.5"
-          style={{ color: statusColor(part.code) }}
-        >
-          {part.n}
-          <part.Icon className="size-3" />
-        </span>
-      ))}
-    </span>
+    <TooltipHint label={spoken}>
+      <span
+        className="flex flex-none items-center gap-1.5 font-mono text-2xs tabular-nums"
+        aria-label={spoken}
+      >
+        {shown.map((part) => (
+          <span
+            key={part.code}
+            aria-hidden
+            className="flex items-center gap-0.5"
+            style={{ color: statusColor(part.code) }}
+          >
+            {part.n}
+            <part.Icon className="size-3" />
+          </span>
+        ))}
+      </span>
+    </TooltipHint>
   )
 }
 

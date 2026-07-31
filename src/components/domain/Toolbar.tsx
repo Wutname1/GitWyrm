@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
-import { DisabledHint, TooltipButton } from '@/components/ui/tooltip'
+import { DisabledHint, TooltipButton, TooltipHint } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -89,18 +89,19 @@ function ToolbarButton({ icon, label, badge, onClick, disabled, pending, reason 
 // hidden until the row is hovered so rows stay clean.
 function SwitchRowButton({ onClick }: { onClick: () => void }) {
   return (
-    <span
-      role="button"
-      tabIndex={-1}
-      title="Switch to this branch"
-      onClick={(e) => {
-        e.stopPropagation()
-        onClick()
-      }}
-      className="flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
-    >
-      <GitBranch size={12} strokeWidth={2} />
-    </span>
+    <TooltipHint label="Switch to this branch">
+      <span
+        role="button"
+        tabIndex={-1}
+        onClick={(e) => {
+          e.stopPropagation()
+          onClick()
+        }}
+        className="flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+      >
+        <GitBranch size={12} strokeWidth={2} />
+      </span>
+    </TooltipHint>
   )
 }
 
@@ -281,15 +282,20 @@ function StepButton({
   onClick: () => void
   disabled: boolean
 }) {
+  // DisabledHint rather than a plain tooltip: this button is disabled whenever
+  // there is nothing to step to, and a disabled button gets no pointer events,
+  // so its own tooltip could never open.
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className="flex-none rounded p-0.5 hover:bg-panel3 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
-    >
-      {icon}
-    </button>
+    <DisabledHint disabled={disabled} reason={title}>
+      <TooltipButton
+        onClick={onClick}
+        disabled={disabled}
+        tooltip={title}
+        className="flex-none rounded p-0.5 hover:bg-panel3 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+      >
+        {icon}
+      </TooltipButton>
+    </DisabledHint>
   )
 }
 
@@ -363,16 +369,16 @@ function CommitSearchBox() {
         </>
       )}
       {query && (
-        <button
+        <TooltipButton
           onClick={() => {
             setCommitSearch('')
             inputRef.current?.focus()
           }}
-          title="Clear search"
+          tooltip="Clear search"
           className="flex-none rounded p-0.5 hover:bg-panel3 hover:text-foreground"
         >
           <X size={13} strokeWidth={2} />
-        </button>
+        </TooltipButton>
       )}
     </div>
   )

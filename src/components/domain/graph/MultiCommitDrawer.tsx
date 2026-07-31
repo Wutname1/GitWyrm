@@ -226,11 +226,11 @@ export function MultiCommitDrawer({ repoId, shas }: { repoId: string; shas: stri
         >
           <div className="min-h-0 flex-1 overflow-y-auto border-r border-border py-1">
           {details.map((d) => (
-            <button
+            <TooltipButton
               key={d.sha}
               type="button"
               onClick={() => selectCommit(d.sha)}
-              title="View just this commit"
+              tooltip="View just this commit"
               className="flex w-full items-center gap-2 px-3 py-[3px] text-left hover:bg-panel2"
             >
               <Avatar
@@ -249,7 +249,7 @@ export function MultiCommitDrawer({ repoId, shas }: { repoId: string; shas: stri
               <span className="flex-none font-mono text-2xs text-muted-foreground">
                 {shortSha(d.sha)}
               </span>
-            </button>
+            </TooltipButton>
           ))}
           </div>
           <ResizeHandle

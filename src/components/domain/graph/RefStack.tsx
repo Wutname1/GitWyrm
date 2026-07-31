@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactElement } from 'react'
 import { ChevronDown, GitBranch } from 'lucide-react'
 import type { RefInfo, RefKind, RemoteInfo } from '@/lib/bindings'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { detectProvider, providerLabel } from '@/lib/remoteProvider'
 import { resolveDropPair, type DraggedRef } from '@/lib/refSync'
 import { cn } from '@/lib/utils'
@@ -181,7 +182,18 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
             {ordered.map((refTag) => {
               const source = sourceDetails(refTag, remotes.data ?? [])
               const canSwitch = refTag.type === 'branch' || refTag.type === 'remote'
-              return (
+              // The hint sits outside RefContextMenu, whose trigger is `asChild`
+              // -- nested inside, the tooltip would become the trigger's target
+              // and swallow the right-click menu.
+              const withHint = (node: ReactElement) =>
+                canSwitch ? (
+                  <TooltipHint label={`Double-click to switch to ${refTag.name}`}>
+                    {node}
+                  </TooltipHint>
+                ) : (
+                  node
+                )
+              return withHint(
                 <RefContextMenu
                   key={`${refTag.type}:${refTag.name}`}
                   refTag={refTag}
@@ -189,7 +201,6 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
                 >
                   <div
                     onDoubleClick={canSwitch ? () => switchTo(refTag.name) : undefined}
-                    title={canSwitch ? `Double-click to switch to ${refTag.name}` : undefined}
                     className={cn(
                       'relative flex min-h-8 items-center gap-2.5 rounded-[5px] px-1.5 py-1 hover:bg-panel3',
                       canSwitch && 'cursor-pointer'

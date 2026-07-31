@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import type { SpecChange, SpecTask } from '@/lib/bindings'
 import { commands } from '@/lib/bindings'
 import { Markdown } from '@/components/ui/markdown'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import { nextStepHint, progressSentence } from '@/lib/specDisplay'
 import { copyTaskHandoff } from '@/lib/specHandoff'
@@ -269,12 +270,11 @@ function HistoryTab({ change, repoId }: { change: SpecChange; repoId: string }) 
               </span>
             )}
           </span>
-          <span
-            className="flex-none whitespace-nowrap pt-px font-mono text-2xs text-muted-foreground"
-            title={formatCommitTime(entry.time)}
-          >
-            {formatRelativeTime(entry.time)} · {entry.author}
-          </span>
+          <TooltipHint label={formatCommitTime(entry.time)}>
+            <span className="flex-none whitespace-nowrap pt-px font-mono text-2xs text-muted-foreground">
+              {formatRelativeTime(entry.time)} · {entry.author}
+            </span>
+          </TooltipHint>
         </div>
       ))}
     </div>

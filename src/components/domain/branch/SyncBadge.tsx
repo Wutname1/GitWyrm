@@ -1,4 +1,5 @@
 import type { BranchInfo } from '@/lib/bindings'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { branchSync } from '@/lib/branchActions'
 
@@ -19,9 +20,8 @@ export function SyncBadge({ branch, className }: SyncBadgeProps) {
   const sync = branchSync(branch)
   if (!sync.text) return null
 
-  return (
+  const badge = (
     <span
-      title={sync.title ?? undefined}
       className={cn(
         'whitespace-nowrap font-mono text-2xs',
         sync.marker
@@ -33,4 +33,8 @@ export function SyncBadge({ branch, className }: SyncBadgeProps) {
       {sync.text}
     </span>
   )
+
+  // Only wrapped when there is something to say: an empty tooltip would open a
+  // blank bubble on every hover.
+  return sync.title ? <TooltipHint label={sync.title}>{badge}</TooltipHint> : badge
 }

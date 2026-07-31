@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/context-menu'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
-import { TooltipButton } from '@/components/ui/tooltip'
+import { TooltipButton, TooltipHint } from '@/components/ui/tooltip'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useSubmodules } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
@@ -80,7 +80,6 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
     <div
       style={{ paddingLeft: 24 }}
       className="flex items-center gap-1.5 py-0.5 pr-3 hover:bg-panel2"
-      title={tooltip(sub)}
     >
       <Package
         size={11}
@@ -115,7 +114,12 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
   return (
     <>
       <ContextMenu>
-        <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+        {/* Outside the trigger, not inside the row: `asChild` merges onto its
+            immediate child, so a tooltip nested within would swallow the
+            context-menu handlers. */}
+        <TooltipHint label={tooltip(sub)}>
+          <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+        </TooltipHint>
         <ContextMenuContent className="w-60">
           <ContextMenuLabel className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-sub">
             {sub.path}

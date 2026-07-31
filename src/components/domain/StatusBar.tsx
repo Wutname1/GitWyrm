@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '@/components/ui/tooltip'
 
 function ZoomControl() {
   const uiScale = useWorkspaceStore((s) => s.uiScale)
@@ -220,7 +220,15 @@ export function StatusBar() {
 
   return (
     <div data-dim-on-drag className="relative flex h-6 flex-none items-center gap-4 border-t border-border bg-panel2 px-3 font-mono text-2xs text-sub">
-      {sync?.text ? <span title={sync.title ?? undefined}>{sync.text}</span> : null}
+      {sync?.text ? (
+        sync.title ? (
+          <TooltipHint label={sync.title}>
+            <span>{sync.text}</span>
+          </TooltipHint>
+        ) : (
+          <span>{sync.text}</span>
+        )
+      ) : null}
       <span className="text-muted-foreground">{total} changes</span>
       <AiRunSegment />
       <OpenspecSegment />
