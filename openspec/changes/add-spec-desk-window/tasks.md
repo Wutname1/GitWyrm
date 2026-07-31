@@ -6,7 +6,10 @@
       main-window entry points; closes with the repo tab
 - [x] 1.2 Titlebar: wyrm mark, "Spec Desk · <repo>", Keep on top toggle,
       "Show main window", window controls
-- [ ] 1.3 Remember size/position per repo; sane default (940x760) - moved to add-window-state-memory
+- [x] 1.3 Remember size/position per repo; sane default (940x760). Delivered by
+      `add-window-state-memory`: `open_spec_desk` keeps 940x760 as the first-open
+      default only, and the window-state plugin restores a saved size and position
+      after the window is created.
 
 ## 2. Changes list
 
@@ -15,7 +18,9 @@
 - [x] 2.2 Selection synced with the main window (both directions)
 - [x] 2.3 Filters: Active / Needs review / Mine, with counts and an empty-filter message
 - [x] 2.4 "＋ New" button (opens the new-change flow from later changes)
-- [ ] 2.5 Archive link with completed count; opens a searchable archived-changes list
+- [x] 2.5 Archive link with completed count; opens a searchable archived-changes list
+      (`ArchivedChangesDialog`, with loading, empty, and no-match states; the list is
+      fetched only while open since it walks `changes/archive` on disk)
 
 ## 3. Status bar
 
