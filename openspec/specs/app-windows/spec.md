@@ -1,7 +1,8 @@
-# app-windows Spec Delta
+# app-windows Specification
 
-## ADDED Requirements
-
+## Purpose
+TBD - created by archiving change add-window-state-memory. Update Purpose after archive.
+## Requirements
 ### Requirement: Windows remember their placement
 
 GitWyrm SHALL remember each window's size, position, and maximized state per
@@ -39,26 +40,3 @@ place the window on an attached display instead.
 - WHEN a window has no saved placement yet
 - THEN it opens at its default size, centered
 
-## MODIFIED Requirements
-
-### Requirement: Popout window
-
-The Spec Desk SHALL be a separate OS window per repository. The main window SHALL
-stay fully usable while the Desk is open. Opening the Desk when one is already
-open SHALL focus it. Size and position are remembered per repository by the
-window-state handling described in this capability.
-
-#### Scenario: Second monitor
-
-- WHEN the user opens the Spec Desk and moves it to another monitor
-- THEN both windows work simultaneously, and the Desk reopens where it was left
-
-#### Scenario: Keep on top
-
-- WHEN the user toggles Keep on top
-- THEN the Desk floats above other windows until toggled off, and the toggle state is visible
-
-#### Scenario: Show main window
-
-- WHEN the user clicks Show main window in the Desk titlebar
-- THEN the main window is focused and the Desk stays open

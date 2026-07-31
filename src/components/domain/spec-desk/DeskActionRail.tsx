@@ -32,6 +32,7 @@ import { useStartRun } from "@/hooks/useStartRun";
 import { ConfirmDialog } from "@/components/modals/ConfirmDialog";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { describeError, log } from "@/lib/log";
+import { cliReason } from "@/lib/specCliOutcome";
 
 /**
  * Why the opencode button is off. Names the fix rather than the failure: the
@@ -351,9 +352,12 @@ export function DeskActionRail({
           return;
         }
         // Keep the dialog open on failure: the change did not move, and closing
-        // would imply it did.
+        // would imply it did. The toast carries the one-line reason; the full
+        // output goes to the inline panel, which is where it can be read.
         setResult(outcome);
-        toast.error(`Could not archive ${change.id}.`);
+        toast.error(`Could not archive ${change.id}.`, {
+          description: outcome.kind === "failed" ? cliReason(outcome.output) : undefined,
+        });
       },
       onError: (e) => toast.error(describeError(e)),
     });

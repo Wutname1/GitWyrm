@@ -100,14 +100,15 @@ script inside file content may execute or alter the page structure.
 
 ### Requirement: Popout window
 
-The Spec Desk SHALL be a separate OS window per repository. The main window SHALL stay
-fully usable while the Desk is open, and opening the Desk when one is already open SHALL
-focus it. Remembering size and position is specified separately in `app-windows`.
+The Spec Desk SHALL be a separate OS window per repository. The main window SHALL
+stay fully usable while the Desk is open. Opening the Desk when one is already
+open SHALL focus it. Remembering size and position per repository is specified in
+`app-windows`.
 
 #### Scenario: Second monitor
 
 - WHEN the user opens the Spec Desk and moves it to another monitor
-- THEN both windows work simultaneously and stay independently usable
+- THEN both windows work simultaneously, and the Desk reopens where it was left
 
 #### Scenario: Keep on top
 
