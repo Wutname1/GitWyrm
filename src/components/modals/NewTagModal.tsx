@@ -13,6 +13,16 @@ import { bumpSemver, formatSemver, highestSemver } from '@/lib/semver'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 
+// Plain-language names for the quick-pick buttons. "prerelease"/"patch" are
+// release-manager words; what the user is choosing is how big the change is.
+const BUMP_LABELS = {
+  prerelease: 'Next test build',
+  release: 'Ready for everyone',
+  patch: 'Small fix',
+  minor: 'New features',
+  major: 'Big change',
+} as const
+
 export function NewTagModal() {
   const open = useUiStore((s) => s.activeModal === 'newTag')
   const closeModal = useUiStore((s) => s.closeModal)
@@ -91,15 +101,23 @@ export function NewTagModal() {
     [tags.data]
   )
 
-  // When the repo tags with semver, offer one-tap buttons for the next major,
-  // minor, and patch versions off the highest existing tag.
+  // When the repo tags with semver, offer one-tap buttons for the next versions
+  // off the highest existing tag. A repo mid-pre-release (highest tag is
+  // "0.1.3-beta.17") leads with continuing that line and shipping it, since
+  // those are the two things it is actually about to do; the core bumps follow.
+  // Bumps that don't apply to the current version come back null and drop out.
   const quickPicks = useMemo(() => {
     const latest = highestSemver([...existing])
     if (!latest) return []
-    return (['major', 'minor', 'patch'] as const).map((bump) => ({
-      bump,
-      value: formatSemver(bumpSemver(latest, bump)),
-    }))
+    const order =
+      latest.pre.length > 0
+        ? (['prerelease', 'release', 'minor', 'major'] as const)
+        : (['patch', 'minor', 'major'] as const)
+    return order.flatMap((bump) => {
+      const next = bumpSemver(latest, bump)
+      if (!next) return []
+      return [{ bump, value: formatSemver(next), label: BUMP_LABELS[bump] }]
+    })
   }, [existing])
 
   // The most recently created tag, by date rather than by name -- a repo can tag
@@ -207,7 +225,7 @@ export function NewTagModal() {
                     }
                   >
                     <span className="font-mono">{pick.value}</span>
-                    <span className="capitalize text-muted-foreground">{pick.bump}</span>
+                    <span className="text-muted-foreground">{pick.label}</span>
                   </button>
                 )
               })}
