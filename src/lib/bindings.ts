@@ -1433,6 +1433,24 @@ async removeSubmodule(repoId: string, path: string, deleteFiles: boolean) : Prom
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * The absolute working directory of a submodule, for opening it as its own
+ * repository tab.
+ * 
+ * Resolves through libgit2's submodule handle rather than joining the path
+ * onto the parent, because `Repository::discover` walks *upward*: an empty or
+ * half-checked-out submodule folder would otherwise resolve to the parent
+ * repository and open a confusing duplicate tab. Opening it here first turns
+ * that case into an error the caller can show.
+ */
+async submoduleWorkdir(repoId: string, path: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("submodule_workdir", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async gitFetch(repoId: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_fetch", { repoId }) };

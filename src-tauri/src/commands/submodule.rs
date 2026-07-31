@@ -63,6 +63,43 @@ pub async fn list_submodules(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// The absolute working directory of a submodule, for opening it as its own
+/// repository tab.
+///
+/// Resolves through libgit2's submodule handle rather than joining the path
+/// onto the parent, because `Repository::discover` walks *upward*: an empty or
+/// half-checked-out submodule folder would otherwise resolve to the parent
+/// repository and open a confusing duplicate tab. Opening it here first turns
+/// that case into an error the caller can show.
+#[tauri::command]
+#[specta::specta]
+pub async fn submodule_workdir(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  path: String,
+) -> Result<String, AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = clean_path(&path)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let sub = repo
+      .find_submodule(&path)
+      .map_err(|_| AppError::Other(format!("{path} is not a submodule of this project")))?;
+    let nested = sub.open().map_err(|_| {
+      AppError::Other(format!(
+        "{path} has not been downloaded yet, so there is nothing to open"
+      ))
+    })?;
+    let workdir = nested
+      .workdir()
+      .ok_or_else(|| AppError::Other(format!("{path} has no working folder to open")))?
+      .to_path_buf();
+    Ok(workdir.to_string_lossy().into_owned())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// Only the submodules that are out of sync with what the parent records.
 /// Kept separate from [`list_submodules`] because the changed-files view asks a
 /// narrower question than the sidebar list does.

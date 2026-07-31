@@ -4,13 +4,16 @@ import {
   ChevronRight,
   Download,
   ExternalLink,
+  FolderOpen,
   Package,
   Plus,
   RotateCcw,
   Trash2,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import type { SubmoduleStatus } from '@/lib/bindings'
+import { commands, type SubmoduleStatus } from '@/lib/bindings'
+import { unwrap } from '@/lib/queryKeys'
 import { plural } from '@/lib/gitDisplay'
 import {
   ContextMenu,
@@ -27,6 +30,7 @@ import { useGitMutations } from '@/hooks/useGitMutations'
 import { useSubmodules } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
+import { useOpenRepo } from '@/hooks/useRepoActions'
 import { openWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
 
 /** Short label for the row's right edge, and the colour that goes with it. */
@@ -45,27 +49,31 @@ function stateLabel(s: SubmoduleStatus): { text: string; tone: string } | null {
 /** Plain-language explanation of the row, shown on hover. */
 function tooltip(s: SubmoduleStatus): string {
   const follows = s.branch ? ` Follows ${s.branch}.` : ''
+  // Double-click is otherwise invisible, so every row advertises it.
+  const open = ' Double-click to open it as its own project.'
   if (s.state === 'uninitialized') {
-    return `Not downloaded yet, so this folder is empty. Download it to get the files.${follows}`
+    return `Not downloaded yet, so this folder is empty. Download it to get the files.${follows}${open}`
   }
   if (s.state === 'in_sync') {
-    return `Up to date with the version this project expects.${follows}`
+    return `Up to date with the version this project expects.${follows}${open}`
   }
   if (s.ahead > 0 && s.behind > 0) {
-    return `This is on a different version than the project expects.${follows}`
+    return `This is on a different version than the project expects.${follows}${open}`
   }
   if (s.ahead > 0) {
-    return `${plural(s.ahead, 'newer commit')} than the project expects. Commit to save this update.${follows}`
+    return `${plural(s.ahead, 'newer commit')} than the project expects. Commit to save this update.${follows}${open}`
   }
-  return `${plural(s.behind, 'commit')} older than the project expects.${follows}`
+  return `${plural(s.behind, 'commit')} older than the project expects.${follows}${open}`
 }
 
 function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
   const repo = useActiveRepo()
   const m = useGitMutations(repo?.id ?? null)
+  const openRepo = useOpenRepo()
   const [confirmReset, setConfirmReset] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [deleteFiles, setDeleteFiles] = useState(true)
+  const [opening, setOpening] = useState(false)
 
   const name = sub.path.split('/').pop() ?? sub.path
   const label = stateLabel(sub)
@@ -76,8 +84,41 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
   const busy =
     m.bumpSubmodule.isPending || m.updateSubmodule.isPending || m.removeSubmodule.isPending
 
+  /**
+   * Opens the submodule's own checkout as a tab, so it can be branched and
+   * committed like any other project. A submodule that was never downloaded has
+   * an empty folder and nothing to open, so fetch it first rather than making
+   * the user run two separate steps to get to the same place.
+   */
+  async function openAsRepo() {
+    if (!repo || opening) return
+    setOpening(true)
+    try {
+      if (uninitialized) {
+        await m.updateSubmodule.mutateAsync({ path: sub.path, init: true })
+      }
+      // Ask the backend where the submodule actually lives instead of joining
+      // the path ourselves: repository discovery searches upward, so a folder
+      // that failed to check out would quietly open the parent project again.
+      // This is the only step here without its own failure toast.
+      const workdir = await commands
+        .submoduleWorkdir(repo.id, sub.path)
+        .then(unwrap)
+        .catch((e: Error) => {
+          toast.error(e.message)
+          throw e
+        })
+      await openRepo.mutateAsync(workdir)
+    } catch {
+      // Every step above reports its own failure.
+    } finally {
+      setOpening(false)
+    }
+  }
+
   const row = (
     <div
+      onDoubleClick={() => void openAsRepo()}
       style={{ paddingLeft: 24 }}
       className="flex items-center gap-1.5 py-0.5 pr-3 hover:bg-panel2"
     >
@@ -124,6 +165,17 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
           <ContextMenuLabel className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-sub">
             {sub.path}
           </ContextMenuLabel>
+          <ContextMenuSeparator />
+
+          <PendingMenuItem
+            icon={<FolderOpen />}
+            label="Open as its own project"
+            pendingLabel={uninitialized ? 'Downloading…' : 'Opening…'}
+            pending={opening}
+            disabled={busy || opening}
+            onRun={() => void openAsRepo()}
+          />
+
           <ContextMenuSeparator />
 
           {uninitialized ? (

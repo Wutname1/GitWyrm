@@ -195,3 +195,53 @@ fn init_all_downloads_missing_submodules() {
   );
   assert_eq!(after[0].workdir_sha.as_deref(), Some(first.as_str()));
 }
+
+/// The resolution behind "open as its own project": a downloaded submodule must
+/// resolve to its OWN working folder, not the parent's.
+#[test]
+fn submodule_opens_to_its_own_workdir() {
+  let Some((parent, _up, _f, _t)) = fixture("workdir") else { return };
+
+  let repo = Repository::open(&parent).unwrap();
+  let sub = repo.find_submodule("vendor/lib").unwrap();
+  let nested = sub.open().expect("a checked-out submodule opens as a repository");
+  let workdir = nested.workdir().unwrap().canonicalize().unwrap();
+
+  assert_eq!(
+    workdir,
+    parent.join("vendor/lib").canonicalize().unwrap(),
+    "must resolve to the submodule's own folder"
+  );
+  assert_ne!(
+    workdir,
+    parent.canonicalize().unwrap(),
+    "must never resolve to the parent project"
+  );
+}
+
+/// Guards the reason `submodule_workdir` resolves through the submodule handle
+/// instead of joining paths: `Repository::discover` searches UPWARD, so an
+/// un-downloaded submodule folder resolves to the parent. Opening it that way
+/// would silently produce a duplicate tab of the project the user is already
+/// in, so the command must fail on this case rather than discover.
+#[test]
+fn uninitialized_submodule_refuses_rather_than_finding_the_parent() {
+  let Some((parent, _up, _f, _t)) = fixture("uninit") else { return };
+
+  git(&parent, &["submodule", "deinit", "-f", "--", "vendor/lib"]);
+
+  let repo = Repository::open(&parent).unwrap();
+  let sub = repo.find_submodule("vendor/lib").unwrap();
+  assert!(
+    sub.open().is_err(),
+    "an un-downloaded submodule must not open, so the command reports it"
+  );
+
+  // The trap this avoids: discovery from the same path climbs to the parent.
+  let discovered = Repository::discover(parent.join("vendor/lib")).unwrap();
+  assert_eq!(
+    discovered.workdir().unwrap().canonicalize().unwrap(),
+    parent.canonicalize().unwrap(),
+    "discovery walks up to the parent -- exactly what we must not open"
+  );
+}

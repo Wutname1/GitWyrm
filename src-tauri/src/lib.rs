@@ -169,6 +169,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::submodule::init_all_submodules,
     commands::submodule::add_submodule,
     commands::submodule::remove_submodule,
+    commands::submodule::submodule_workdir,
     commands::remote::git_fetch,
     commands::remote::git_pull,
     commands::remote::git_push,
