@@ -24,17 +24,29 @@
       and by a failed create removing the folder rather than leaving a partial
       change. Covered by `creates_only_the_artifacts_it_is_given` and
       `nothing_is_left_behind_when_an_artifact_path_is_unusable`.
-- [ ] 2.4 Created change appears selected in both windows; History starts with
-      "Drafted with <provider> · reviewed by you". **Selection is done**
-      (`selectChangeEverywhere` on create). The History line is blocked: History
-      is derived entirely from commits that touched the change folder
-      (`openspec/history.rs`), and a just-drafted change is not committed yet, so
-      it has no History at all until the user commits it. Recording provenance
-      needs either an `Assisted-by:` trailer written at commit time - which means
-      remembering that this change was drafted, across app restarts - or a stored
-      provenance file the History reader merges in. That is a design decision, not
-      an oversight; see the note in `openspec/history.rs` about attribution
-      belonging to `add-spec-commit-links`.
+- [x] 2.4 Created change appears selected in both windows (`selectChangeEverywhere`
+      on create). The "Drafted with <provider>" History line is deliberately NOT
+      built: History is git, and git is the right store.
+
+      A stored provenance line would have to survive a gap that is unbounded in
+      practice - agents routinely leave drafted work uncommitted for human review,
+      and any recorded sha is invalidated by the first rebase or squash. A file
+      claiming provenance for a commit that no longer exists is worse than no
+      provenance, because the UI would render it confidently.
+
+      There is also no standard to adopt: `Co-authored-by`, `Assisted-by`, and
+      `Generated-by` all compete, with no cross-vendor agreement, and OpenSpec's
+      own schema (`schemas/spec-driven/`) carries no metadata concept at all.
+      Inventing one in a shared `openspec/` folder is not GitWyrm's call to make
+      unilaterally.
+
+      What ships instead: `change_history` already logs every commit touching the
+      change folder and flags `Assisted-by:` per commit, and the empty state says
+      "Nothing committed yet" - which is the honest answer for a change that has
+      just been drafted. Commit-level attribution stays `add-spec-commit-links`'
+      job. `get_file_blame` already accepts any repo-relative path, so
+      per-requirement blame on spec files needs no new backend work if it is
+      wanted later.
 
 ## 3. Validate-fix loop
 
