@@ -504,6 +504,31 @@ pub async fn openspec_write_file(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Delete one change's folder from the working tree.
+///
+/// The blunt counterpart to archiving: archive merges the change into the specs
+/// library and keeps it, this throws it away. For a change that was started and
+/// abandoned, where merging it into the specs would be wrong.
+///
+/// Only the working-tree folder goes. A change that was ever committed is still
+/// in git history, which is what the confirmation tells the user.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_delete_change(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  change_id: String,
+) -> Result<String, AppError> {
+  let root = repo_root(&manager, &repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let dir = openspec::openspec_dir(&root)
+      .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
+    write::delete_change(&dir, &change_id)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// Draft an edit to one file of a change package. **Writes nothing.**
 ///
 /// The counterpart to `openspec_ask`, kept separate for the same reason ask has

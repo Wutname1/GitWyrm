@@ -52,6 +52,7 @@ export function LeftPanel() {
   const stashes = useStashes(repo?.id ?? null)
   const openspecStatus = useOpenspecStatus(repo?.id ?? null)
   const openspecChanges = useOpenspecChanges(repo?.id ?? null)
+  const specDeskEnabled = useWorkspaceStore((s) => s.enableSpecDesk)
 
   const githubSlug = useGithubSlug(repo?.id ?? null)
   const githubAuth = useGithubAuth()
@@ -437,10 +438,12 @@ export function LeftPanel() {
 
       <SubmodulesSection />
 
-      {/* Only for repos that use OpenSpec; absent entirely otherwise. */}
-      {openspecStatus.data?.present && (
+      {/* Shown whenever Spec Desk is switched on, including in a repo with no
+          openspec/ folder yet -- that repo is the one that needs the way in. */}
+      {specDeskEnabled && (
         <SpecsSection
           changes={openspecChanges.data ?? []}
+          hasOpenspec={openspecStatus.data?.present ?? false}
           repoId={repo.id}
           onOpenDesk={() => openSpecDesk(repo.id)}
           onNewChange={() => openModal('newChange')}

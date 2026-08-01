@@ -148,6 +148,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
 
   // -------------------------------------------------------------- openspec
   {
+    id: 'spec-desk',
+    section: 'openspec',
+    label: 'Spec Desk',
+    hint: 'Show the Spec Desk button and the Specs list in the sidebar.',
+    keywords: ['spec desk', 'specs', 'openspec', 'plan', 'hide', 'sidebar', 'toolbar'],
+  },
+  {
     id: 'openspec-archive-commit-template',
     section: 'openspec',
     label: 'Archive commit message',

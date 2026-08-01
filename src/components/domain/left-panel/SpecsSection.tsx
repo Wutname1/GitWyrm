@@ -94,11 +94,14 @@ const SpecRow = forwardRef<
  */
 export function SpecsSection({
   changes,
+  hasOpenspec,
   repoId,
   onOpenDesk,
   onNewChange,
 }: {
   changes: SpecChange[]
+  /** Whether the repository has an `openspec/` folder yet. */
+  hasOpenspec: boolean
   repoId: string
   onOpenDesk: () => void
   onNewChange: () => void
@@ -145,9 +148,21 @@ export function SpecsSection({
       {open && (
         <div className="pb-1">
           {changes.length === 0 ? (
-            <p className="px-6 py-1 text-2xs text-muted-foreground">
-              No active changes in openspec/changes.
-            </p>
+            <div className="px-6 py-1">
+              <p className="text-2xs text-muted-foreground">
+                {hasOpenspec
+                  ? 'Nothing being worked on right now.'
+                  : 'This repository has no specs yet. Specs let you write down a plan before the code.'}
+              </p>
+              <button
+                type="button"
+                onClick={onNewChange}
+                className="mt-1 flex items-center gap-1 text-2xs text-muted-foreground hover:text-accent-text"
+              >
+                <Plus size={11} strokeWidth={2} className="flex-none" />
+                {hasOpenspec ? 'Start a new change' : 'Write your first spec'}
+              </button>
+            </div>
           ) : (
             changes.map((change) => (
               <SpecContextMenu key={change.id} change={change} repoId={repoId}>

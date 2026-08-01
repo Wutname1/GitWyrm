@@ -220,6 +220,21 @@ pub struct Settings {
   /// the frontend auto-enables it when a repo already has extra worktrees.
   #[serde(default)]
   pub enable_worktrees: bool,
+  /// Show the Spec Desk button and the sidebar Specs section. On by default, and
+  /// on regardless of whether the repository has an `openspec/` folder yet, so a
+  /// repo can be onboarded to OpenSpec from inside the app.
+  #[serde(default = "default_enable_spec_desk")]
+  pub enable_spec_desk: bool,
+  /// Skip the confirmation when archiving a change from a row button. Set by the
+  /// "Don't ask again" checkbox in that confirmation. Off by default: the opt-out
+  /// is the user's to make, never a default we ship.
+  #[serde(default)]
+  pub openspec_archive_without_asking: bool,
+  /// Skip the confirmation when deleting a change from a row button. Same
+  /// origin, and off by default for the same reason -- more so, since deleting
+  /// throws the work away.
+  #[serde(default)]
+  pub openspec_delete_without_asking: bool,
   /// Reopen the tabs from the last session on launch. On by default; when off
   /// the app starts with no repository open.
   #[serde(default = "default_restore_tabs")]
@@ -385,6 +400,10 @@ fn default_show_repo_icons() -> bool {
   true
 }
 
+fn default_enable_spec_desk() -> bool {
+  true
+}
+
 fn default_restore_tabs() -> bool {
   true
 }
@@ -462,6 +481,9 @@ impl Default for Settings {
       commit_button_mode: None,
       default_editor: None,
       enable_worktrees: false,
+      enable_spec_desk: default_enable_spec_desk(),
+      openspec_archive_without_asking: false,
+      openspec_delete_without_asking: false,
       restore_tabs: true,
       auto_fetch: true,
       crash_reports: true,
@@ -853,6 +875,29 @@ mod tests {
         "crash_reports should survive a write and read"
       );
     }
+  }
+
+  /// These two flags are the only thing between a row click and a destructive
+  /// action, so a settings file that predates them -- or one where they were
+  /// never ticked -- must mean "ask", never "just do it".
+  #[test]
+  fn spec_confirmation_opt_outs_default_to_asking_and_round_trip() {
+    let older: Settings = serde_json::from_str("{}").expect("empty settings should load");
+    assert!(!older.openspec_archive_without_asking);
+    assert!(!older.openspec_delete_without_asking);
+    assert!(!Settings::default().openspec_archive_without_asking);
+    assert!(!Settings::default().openspec_delete_without_asking);
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let settings = Settings {
+      openspec_archive_without_asking: true,
+      openspec_delete_without_asking: true,
+      ..Default::default()
+    };
+    write_settings_in(dir.path(), &settings).expect("write");
+    let back = read_settings_in(dir.path());
+    assert!(back.openspec_archive_without_asking);
+    assert!(back.openspec_delete_without_asking);
   }
 
   #[test]

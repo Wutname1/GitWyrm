@@ -2,8 +2,7 @@ import specDeskIcon from '@/assets/icons/specdesk.png'
 import { cn } from '@/lib/utils'
 import { DisabledHint, TooltipButton } from '@/components/ui/tooltip'
 import { openSpecDesk } from '@/lib/specDesk'
-import { useOpenspecStatus } from '@/hooks/useOpenspec'
-import { useActiveRepo } from '@/stores/workspaceStore'
+import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 
 /**
  * Toolbar action for opening the Spec Desk window.
@@ -13,9 +12,10 @@ import { useActiveRepo } from '@/stores/workspaceStore'
  * that is always in the same spot, so the Desk is reachable even from a repo
  * whose specs are not on screen.
  *
- * A repo without an `openspec/` folder has no Desk to show. The button stays in
- * place and says so on hover rather than disappearing, so the toolbar does not
- * reshuffle as you move between repositories.
+ * Deliberately not gated on the repo already having an `openspec/` folder: a
+ * repo that has never used specs is the one that most needs the way in. Users
+ * who don't plan this way turn the whole feature off in Settings > OpenSpec,
+ * which takes the button away entirely.
  */
 export function OpenSpecDeskButton({
   disabled,
@@ -26,26 +26,20 @@ export function OpenSpecDeskButton({
   disabledReason?: string
 }) {
   const repo = useActiveRepo()
-  const status = useOpenspecStatus(repo?.id ?? null)
+  const specDeskEnabled = useWorkspaceStore((s) => s.enableSpecDesk)
 
-  // Until the check comes back, treat the repo as having specs. Guessing the
-  // other way would flash the button off and then on for every OpenSpec repo.
-  const hasSpecs = status.data?.present ?? true
-  const off = disabled || !hasSpecs
-  const reason = disabled
-    ? disabledReason
-    : "This repository doesn't use specs yet"
+  if (!specDeskEnabled) return null
 
   return (
-    <DisabledHint disabled={off} reason={reason}>
+    <DisabledHint disabled={!!disabled} reason={disabledReason}>
       <TooltipButton
         onClick={() => repo && void openSpecDesk(repo.id)}
-        tooltip={off && reason ? reason : 'Open Spec Desk'}
+        tooltip={disabled && disabledReason ? disabledReason : 'Open Spec Desk'}
         aria-label="Open Spec Desk"
-        disabled={off}
+        disabled={disabled}
         className={cn(
           'group flex h-[30px] w-8 items-center justify-center rounded-md border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none',
-          off && 'opacity-35'
+          disabled && 'opacity-35'
         )}
       >
         {/* The mark carries its own accent color, so it is rendered as an

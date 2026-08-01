@@ -316,6 +316,24 @@ async openspecDraftEdit(repoId: string, changeId: string, file: string, instruct
 }
 },
 /**
+ * Delete one change's folder from the working tree.
+ * 
+ * The blunt counterpart to archiving: archive merges the change into the specs
+ * library and keeps it, this throws it away. For a change that was started and
+ * abandoned, where merging it into the specs would be wrong.
+ * 
+ * Only the working-tree folder goes. A change that was ever committed is still
+ * in git history, which is what the confirmation tells the user.
+ */
+async openspecDeleteChange(repoId: string, changeId: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_delete_change", { repoId, changeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Open a single file in the given editor. Mirrors `external::open_in_editor`,
  * but targets one file inside the repo rather than the repo folder.
  */
@@ -3496,6 +3514,24 @@ default_editor?: string | null;
  * the frontend auto-enables it when a repo already has extra worktrees.
  */
 enable_worktrees?: boolean; 
+/**
+ * Show the Spec Desk button and the sidebar Specs section. On by default, and
+ * on regardless of whether the repository has an `openspec/` folder yet, so a
+ * repo can be onboarded to OpenSpec from inside the app.
+ */
+enable_spec_desk?: boolean; 
+/**
+ * Skip the confirmation when archiving a change from a row button. Set by the
+ * "Don't ask again" checkbox in that confirmation. Off by default: the opt-out
+ * is the user's to make, never a default we ship.
+ */
+openspec_archive_without_asking?: boolean; 
+/**
+ * Skip the confirmation when deleting a change from a row button. Same
+ * origin, and off by default for the same reason -- more so, since deleting
+ * throws the work away.
+ */
+openspec_delete_without_asking?: boolean; 
 /**
  * Reopen the tabs from the last session on launch. On by default; when off
  * the app starts with no repository open.

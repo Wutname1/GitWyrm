@@ -561,6 +561,23 @@ interface WorkspaceState {
   tagOverridesByRepo: Record<string, TagOverride>;
   /** Show worktree actions and the worktree sidebar section (persisted). */
   enableWorktrees: boolean;
+  /**
+   * Show the Spec Desk button and the sidebar Specs section (persisted).
+   *
+   * On by default, and deliberately not tied to whether the repository has an
+   * `openspec/` folder: a repo that has never used specs is exactly the one that
+   * needs the way in. Off hides every Specs surface.
+   */
+  enableSpecDesk: boolean;
+  /**
+   * Archive a change from its row button without confirming first (persisted).
+   *
+   * Set only by the "Don't ask again" checkbox in that confirmation, and
+   * resettable from the Spec Desk settings screen so the prompt can come back.
+   */
+  openspecArchiveWithoutAsking: boolean;
+  /** Delete a change from its row button without confirming first (persisted). */
+  openspecDeleteWithoutAsking: boolean;
   /** Reopen the last session's tabs on launch. Off starts with no tabs (persisted). */
   restoreTabs: boolean;
   /** Fetch open repositories in the background to keep remote state current (persisted). */
@@ -685,6 +702,9 @@ interface WorkspaceState {
   /** Resolve tag settings for a repo path: app-wide defaults with any override applied. */
   resolveTagSettings: (path: string | null | undefined) => ResolvedTagSettings;
   setEnableWorktrees: (enabled: boolean) => void;
+  setEnableSpecDesk: (enabled: boolean) => void;
+  setOpenspecArchiveWithoutAsking: (skip: boolean) => void;
+  setOpenspecDeleteWithoutAsking: (skip: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
   setAutoFetch: (enabled: boolean) => void;
   setCrashReports: (enabled: boolean) => void;
@@ -864,6 +884,9 @@ function toSettings(s: WorkspaceState): Settings {
     tag_delete_on_remote: s.tagDeleteOnRemote,
     tag_overrides_by_repo: serializeTagOverrides(s.tagOverridesByRepo),
     enable_worktrees: s.enableWorktrees,
+    enable_spec_desk: s.enableSpecDesk,
+    openspec_archive_without_asking: s.openspecArchiveWithoutAsking,
+    openspec_delete_without_asking: s.openspecDeleteWithoutAsking,
     restore_tabs: s.restoreTabs,
     auto_fetch: s.autoFetch,
     crash_reports: s.crashReports,
@@ -1152,6 +1175,9 @@ export const SETTINGS_DEFAULTS = {
   commitButtonMode: "commit",
   defaultEditor: DEFAULT_EDITOR,
   enableWorktrees: false,
+  enableSpecDesk: true,
+  openspecArchiveWithoutAsking: false,
+  openspecDeleteWithoutAsking: false,
   restoreTabs: true,
   autoFetch: true,
   // Deliberately outside the per-screen "behavior" group below: a privacy
@@ -1199,7 +1225,14 @@ export const SETTINGS_GROUPS = {
   behavior: ["restoreTabs", "autoFetch"],
   tags: ["tagPushDefault", "tagPushOnCreate", "tagDeleteOnRemote"],
   ai: ["aiInstruction"],
-  openspec: ["openspecArchiveCommitTemplate"],
+  openspec: [
+    "enableSpecDesk",
+    "openspecArchiveCommitTemplate",
+    // Resetting this screen puts both confirmations back, which is the only way
+    // to undo a "Don't ask again" the user later regrets.
+    "openspecArchiveWithoutAsking",
+    "openspecDeleteWithoutAsking",
+  ],
   appearance: [
     "changeSizeDisplay",
     "showChangeIndicator",
@@ -1259,6 +1292,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   tagDeleteOnRemote: true,
   tagOverridesByRepo: {},
   enableWorktrees: false,
+  enableSpecDesk: true,
+  openspecArchiveWithoutAsking: false,
+  openspecDeleteWithoutAsking: false,
   restoreTabs: true,
   autoFetch: true,
   crashReports: true,
@@ -1598,6 +1634,18 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setEnableWorktrees: (enabled) => {
     set({ enableWorktrees: enabled });
+    schedulePersist();
+  },
+  setEnableSpecDesk: (enabled) => {
+    set({ enableSpecDesk: enabled });
+    schedulePersist();
+  },
+  setOpenspecArchiveWithoutAsking: (skip) => {
+    set({ openspecArchiveWithoutAsking: skip });
+    schedulePersist();
+  },
+  setOpenspecDeleteWithoutAsking: (skip) => {
+    set({ openspecDeleteWithoutAsking: skip });
     schedulePersist();
   },
   setRestoreTabs: (enabled) => {
@@ -2365,6 +2413,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.tag_overrides_by_repo,
         ),
         enableWorktrees: settings.enable_worktrees ?? false,
+        // Absent means on: a settings file written before this flag existed
+        // belongs to a user who could already see the Specs surfaces.
+        enableSpecDesk: settings.enable_spec_desk !== false,
+        // Both default to asking: an absent flag in an older settings file must
+        // mean "confirm", never "delete silently".
+        openspecArchiveWithoutAsking:
+          settings.openspec_archive_without_asking === true,
+        openspecDeleteWithoutAsking:
+          settings.openspec_delete_without_asking === true,
         restoreTabs: settings.restore_tabs ?? true,
         autoFetch: settings.auto_fetch ?? true,
         // Absent means on: a settings file written before this flag existed

@@ -354,6 +354,51 @@ fn editable_path(change_dir: &Path, file: &str) -> Result<PathBuf, AppError> {
   Ok(target)
 }
 
+/// Resolve a change folder for deletion.
+///
+/// Stricter than the read/write paths, because the operation is a recursive
+/// delete: the id must be a single ordinary path component, so `..`, a nested
+/// path, or an absolute path never reaches `remove_dir_all`. The resolved folder
+/// is then canonicalized and re-checked against the canonical changes directory,
+/// which catches a symlinked change folder pointing somewhere else on disk.
+fn deletable_change_dir(openspec_dir: &Path, change_id: &str) -> Result<PathBuf, AppError> {
+  let not_a_change = || AppError::Other(format!("{change_id} is not a change here."));
+
+  let mut components = Path::new(change_id).components();
+  let Some(std::path::Component::Normal(name)) = components.next() else {
+    return Err(not_a_change());
+  };
+  if components.next().is_some() {
+    return Err(not_a_change());
+  }
+
+  let changes = openspec_dir.join("changes");
+  let dir = changes.join(name);
+  if !dir.is_dir() {
+    return Err(not_a_change());
+  }
+
+  // A symlinked change folder would put remove_dir_all outside openspec/.
+  let base = changes.canonicalize().map_err(|_| not_a_change())?;
+  let resolved = dir.canonicalize().map_err(|_| not_a_change())?;
+  if !resolved.starts_with(&base) || resolved == base {
+    return Err(not_a_change());
+  }
+  Ok(resolved)
+}
+
+/// Delete one change's folder and everything in it.
+///
+/// This is the only destructive filesystem operation in the OpenSpec code. It
+/// removes the working-tree folder only -- git history is untouched, so a change
+/// that was ever committed can still be recovered from it.
+pub fn delete_change(openspec_dir: &Path, change_id: &str) -> Result<String, AppError> {
+  let dir = deletable_change_dir(openspec_dir, change_id)?;
+  std::fs::remove_dir_all(&dir)
+    .map_err(|e| AppError::Other(format!("{change_id} could not be deleted: {e}")))?;
+  Ok(format!("openspec/changes/{change_id}"))
+}
+
 /// Read one file of a change package for the editor.
 ///
 /// A missing file reads as empty rather than erroring: a change with no design.md
@@ -758,5 +803,60 @@ mod tests {
       std::fs::read_to_string(secrets.join("keys.md")).unwrap(),
       "private\n"
     );
+  }
+
+  #[test]
+  fn deleting_removes_the_whole_change_folder() {
+    let dir = change_fixture();
+    write_change_file(dir.path(), "add-thing", "specs/core/spec.md", "# d\n").unwrap();
+
+    let path = delete_change(dir.path(), "add-thing").unwrap();
+    assert_eq!(path, "openspec/changes/add-thing");
+    assert!(!dir.path().join("changes").join("add-thing").exists());
+    // Its neighbours -- here, the changes folder itself -- survive.
+    assert!(dir.path().join("changes").is_dir());
+  }
+
+  #[test]
+  fn deleting_an_unknown_change_is_refused() {
+    let dir = change_fixture();
+    assert!(delete_change(dir.path(), "not-a-change").is_err());
+    // The real change is still there.
+    assert!(dir.path().join("changes").join("add-thing").is_dir());
+  }
+
+  #[test]
+  fn a_delete_cannot_escape_the_changes_folder() {
+    let dir = change_fixture();
+    let outside = dir.path().join("keep-me");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("file.md"), "keep\n").unwrap();
+
+    // A traversing id, a nested id, and the changes folder itself.
+    assert!(delete_change(dir.path(), "../keep-me").is_err());
+    assert!(delete_change(dir.path(), "add-thing/specs").is_err());
+    assert!(delete_change(dir.path(), ".").is_err());
+    assert!(delete_change(dir.path(), "").is_err());
+    let absolute = outside.to_string_lossy().to_string();
+    assert!(delete_change(dir.path(), &absolute).is_err());
+
+    assert!(outside.join("file.md").exists());
+    assert!(dir.path().join("changes").join("add-thing").is_dir());
+  }
+
+  /// A symlinked change folder: every component is `Normal`, so only
+  /// canonicalizing reveals that removing it would delete something else.
+  #[cfg(unix)]
+  #[test]
+  fn deleting_a_symlinked_change_is_refused() {
+    let dir = change_fixture();
+    let secrets = dir.path().join("secrets");
+    std::fs::create_dir_all(&secrets).unwrap();
+    std::fs::write(secrets.join("keys.md"), "private\n").unwrap();
+
+    std::os::unix::fs::symlink(&secrets, dir.path().join("changes").join("linked")).unwrap();
+
+    assert!(delete_change(dir.path(), "linked").is_err());
+    assert!(secrets.join("keys.md").exists());
   }
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, RotateCcw } from 'lucide-react'
 import { ResetToDefaults } from './ResetToDefaults'
-import { settingRowClass, useRevealHighlight } from './SettingRow'
+import { SettingRow, settingRowClass, useRevealHighlight } from './SettingRow'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useOpenspecDefaultArchiveTemplate } from '@/hooks/useOpenspec'
@@ -10,9 +10,34 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 export function OpenspecSettings() {
   return (
     <div className="mt-2">
+      <SpecDeskSetting />
       <ArchiveCommitTemplateSetting />
       <ResetToDefaults group="openspec" label="Reset OpenSpec settings to default" />
     </div>
+  )
+}
+
+/** Master switch for every Specs surface: the toolbar button and the sidebar section. */
+function SpecDeskSetting() {
+  const enabled = useWorkspaceStore((s) => s.enableSpecDesk)
+  const setEnabled = useWorkspaceStore((s) => s.setEnableSpecDesk)
+
+  return (
+    <SettingRow
+      label="Spec Desk"
+      searchId="spec-desk"
+      hint="Plan work as written specs alongside your code. Shows the Spec Desk button and the Specs list in the sidebar, even before a repository has an openspec/ folder, so you can start one."
+    >
+      <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+          className="size-3.5 accent-[var(--gw-accent)]"
+        />
+        Show Spec Desk
+      </label>
+    </SettingRow>
   )
 }
 

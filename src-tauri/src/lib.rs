@@ -69,6 +69,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::openspec::openspec_read_file,
     commands::openspec::openspec_write_file,
     commands::openspec::openspec_draft_edit,
+    commands::openspec::openspec_delete_change,
     commands::file::open_file_in_editor,
     commands::file::reveal_file_in_file_manager,
     commands::file::open_folder_in_file_manager,

@@ -7,19 +7,30 @@ import {
 } from '@/lib/bindings'
 import { invalidateOpenspec, keys, unwrap } from '@/lib/queryKeys'
 import { useUiStore } from '@/stores/uiStore'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 /**
  * Whether this repository uses OpenSpec, plus the change counts and CLI state.
  *
- * Every Specs surface gates on `present`: a repo without an `openspec/` folder
- * shows no sidebar section, no spec card, and no status-bar segment at all.
+ * Surfaces that report on existing changes -- the spec card, the status-bar
+ * segment, the branch link menu -- gate on `present`, so they stay away from a
+ * repo with no `openspec/` folder. Switching Spec Desk off in settings forces
+ * `present` false, which takes all of them away at once.
+ *
+ * The two ways *in* to the feature (the toolbar button and the sidebar section)
+ * deliberately do not use this: they read `enableSpecDesk` directly, so they are
+ * there to be clicked in a repo that has no specs yet.
  */
 export function useOpenspecStatus(repoId: string | null) {
-  return useQuery({
+  const enabled = useWorkspaceStore((s) => s.enableSpecDesk)
+  const query = useQuery({
     queryKey: keys.openspecStatus(repoId ?? 'none'),
-    enabled: repoId != null,
+    enabled: repoId != null && enabled,
     queryFn: async () => unwrap(await commands.openspecStatus(repoId!)),
   })
+
+  if (!enabled) return { ...query, data: undefined }
+  return query
 }
 
 /**
@@ -195,11 +206,21 @@ export function useOpenspecMutations(repoId: string | null) {
     onSettled: refresh,
   })
 
+  // Throws away the change folder. No `force` twin: unlike archiving there is
+  // no readiness question to answer -- an abandoned change is exactly the one
+  // you delete -- so the only guard is the confirmation the caller shows.
+  const deleteChange = useMutation({
+    mutationFn: async (vars: { changeId: string }) =>
+      unwrap(await commands.openspecDeleteChange(repoId!, vars.changeId)),
+    onSettled: refresh,
+  })
+
   return {
     toggleTask,
     scaffoldChange,
     validateChange,
     archiveChange,
+    deleteChange,
     draftChange,
     createDraftedChange,
     draftFix,

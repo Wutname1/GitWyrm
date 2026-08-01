@@ -93,11 +93,6 @@ export function SpecDeskView() {
         <DeskMessage title="This Spec Desk has nothing to show" detail={error} />
       ) : !repo ? (
         <DeskMessage title="Opening the repository…" detail="This takes a moment on first open." />
-      ) : !status.data?.present ? (
-        <DeskMessage
-          title="This repository does not use OpenSpec"
-          detail="Add an openspec/ folder to plan work here. Everything else in GitWyrm works as usual."
-        />
       ) : (
         <div
           className={cn(
@@ -111,7 +106,7 @@ export function SpecDeskView() {
         >
           <DeskChangesList
             changes={changes}
-            archivedCount={status.data.archived_count}
+            archivedCount={status.data?.archived_count ?? 0}
             selectedId={change?.id}
             repoId={repo.id}
           />

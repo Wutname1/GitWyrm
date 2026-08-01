@@ -7,9 +7,9 @@ import { progressCount } from '@/lib/specDisplay'
 import { ProgressBar, StatusPill } from './SpecBits'
 import { ArchivedChangesDialog } from './ArchivedChangesDialog'
 import { SpecContextMenu } from './SpecContextMenu'
+import { SpecRowActions } from './SpecRowActions'
 import { selectChangeEverywhere } from '@/lib/specSync'
 import { useUiStore } from '@/stores/uiStore'
-import { toast } from 'sonner'
 
 /** Which subset of changes the list is showing. */
 type Filter = 'active' | 'review' | 'mine'
@@ -44,8 +44,9 @@ const ChangeRow = forwardRef<
     change: SpecChange
     isSelected: boolean
     onSelect: () => void
+    repoId: string
   } & ComponentPropsWithoutRef<'button'>
->(function ChangeRow({ change, isSelected, onSelect, className, ...props }, ref) {
+>(function ChangeRow({ change, isSelected, onSelect, repoId, className, ...props }, ref) {
   return (
     <button
       type="button"
@@ -54,7 +55,7 @@ const ChangeRow = forwardRef<
       onClick={onSelect}
       aria-current={isSelected || undefined}
       className={cn(
-        'relative block w-full rounded-lg border px-3 py-2.5 text-left transition-colors',
+        'group relative block w-full rounded-lg border px-3 py-2.5 text-left transition-colors',
         isSelected
           ? 'border-primary/25 bg-soft'
           : 'border-transparent hover:bg-panel2',
@@ -67,8 +68,21 @@ const ChangeRow = forwardRef<
           className="absolute inset-y-2.5 left-0 w-0.5 rounded-full bg-primary"
         />
       )}
-      <span className="block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs font-semibold text-foreground">
-        {change.id}
+      <span className="flex items-center gap-2">
+        <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs font-semibold text-foreground">
+          {change.id}
+        </span>
+        {/* Hidden until the row is hovered, focused, or selected: two icons on
+            every row at rest is noise, and the right-click menu still offers
+            them. focus-within keeps them reachable by keyboard. */}
+        <SpecRowActions
+          change={change}
+          repoId={repoId}
+          className={cn(
+            '-my-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 group-focus-visible:opacity-100',
+            isSelected && 'opacity-100'
+          )}
+        />
       </span>
       <span className="mt-1.5 flex items-center gap-2">
         <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-muted-foreground">
@@ -158,6 +172,7 @@ export function DeskChangesList({
               <SpecContextMenu key={change.id} change={change} repoId={repoId}>
                 <ChangeRow
                   change={change}
+                  repoId={repoId}
                   isSelected={change.id === selectedId}
                   onSelect={() => selectChangeEverywhere(change.id)}
                 />
