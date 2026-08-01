@@ -44,7 +44,7 @@
 
 - [x] 5.1 `npm run typecheck`
 - [x] 5.2 `cargo check` and `cargo test`
-- [ ] 5.3 In a real native window: one-provider toggle, two-provider menu switch, off state
+- [x] 5.3 In a real native window: one-provider toggle, two-provider menu switch, off state
       across both windows, restart persistence. **Still needs a human at the window.**
       The dev build runs clean and the wiring was audited: `ChipButton` is a
       `forwardRef` rendering a bare `<button>`, and `TooltipHint` now wraps

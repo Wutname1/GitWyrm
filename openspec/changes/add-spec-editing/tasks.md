@@ -86,7 +86,7 @@
 
 ## 4. Verify
 
-- [ ] 4.1 Edit and save each file type (proposal, tasks, design, a delta); the
+- [x] 4.1 Edit and save each file type (proposal, tasks, design, a delta); the
       Desk shows the saved text and the change list updates
 - [ ] 4.2 Unsaved edits survive a tab switch and a change switch, and discarding
       asks first
