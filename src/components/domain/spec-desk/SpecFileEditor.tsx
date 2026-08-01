@@ -4,7 +4,7 @@ import { Loader2, Pencil, Save, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { commands } from '@/lib/bindings'
 import { unwrap, invalidateOpenspec } from '@/lib/queryKeys'
-import { describeError, log } from '@/lib/log'
+import { describeError } from '@/lib/log'
 import { draftKey, useSpecDraftStore } from '@/stores/specDraftStore'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 
@@ -86,13 +86,6 @@ export function SpecFileEditor({
     void (async () => {
       try {
         const body = unwrap(await commands.openspecReadFile(repoId, changeId, file))
-        // Left in on purpose. "The editor opened empty" has several possible
-        // causes -- a short read, a draft that never landed, a mount race --
-        // and they are indistinguishable from the outside. This names which
-        // one, in one line, without needing a reproduction.
-        log.info(
-          `spec editor: read ${file} of ${changeId} (${body.length} chars)`
-        )
         // The store call is deliberately NOT guarded by `cancelled`. StrictMode
         // and Fast Refresh mount this effect twice, cancelling the first pass
         // mid-flight; if a cancelled read dropped its result, the editor could
