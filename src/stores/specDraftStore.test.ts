@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useSpecDraftStore } from './specDraftStore'
+import { changeDraftPrefix, draftKey, useSpecDraftStore } from './specDraftStore'
 
 const REPO = 'repo-1'
 const CHANGE = 'add-thing'
@@ -9,6 +9,45 @@ beforeEach(() => {
 })
 
 describe('specDraftStore', () => {
+  /**
+   * The bug this guards against: the store wrote drafts under a key built one
+   * way while the component subscribed with a key built another, so every
+   * lookup missed and the editor opened empty with the text sitting in the
+   * store the whole time. Nothing threw, and the file read fine -- the only
+   * symptom was a blank editor.
+   *
+   * Any component subscribing to one draft must use `draftKey`. These assert
+   * the exported helpers really are what the store stores under.
+   */
+  it('stores drafts under the exported key', () => {
+    useSpecDraftStore.getState().open(REPO, CHANGE, 'proposal.md', '# Change\n')
+    const key = draftKey(REPO, CHANGE, 'proposal.md')
+    expect(useSpecDraftStore.getState().drafts[key]?.text).toBe('# Change\n')
+  })
+
+  it('keys every draft of a change under the exported prefix', () => {
+    const s = useSpecDraftStore.getState()
+    s.open(REPO, CHANGE, 'proposal.md', 'a')
+    s.open(REPO, CHANGE, 'specs/core/spec.md', 'b')
+    const prefix = changeDraftPrefix(REPO, CHANGE)
+    const keys = Object.keys(useSpecDraftStore.getState().drafts)
+    expect(keys).toHaveLength(2)
+    expect(keys.every((k) => k.startsWith(prefix))).toBe(true)
+  })
+
+  it('builds keys from printable characters only', () => {
+    // A control character here is invisible in an editor and in a diff, so a
+    // stray one could silently split the store's keys from its readers' again.
+    const key = draftKey(REPO, CHANGE, 'proposal.md')
+    const hasControlChar = [...key].some((ch) => {
+      const code = ch.charCodeAt(0)
+      return code < 0x20 || code === 0x7f
+    })
+    expect(hasControlChar).toBe(false)
+    expect(key).toBe(`${REPO} ${CHANGE} proposal.md`)
+    expect(changeDraftPrefix(REPO, CHANGE)).toBe(`${REPO} ${CHANGE} `)
+  })
+
   it('holds the file contents it was opened with', () => {
     const s = useSpecDraftStore.getState()
     s.open(REPO, CHANGE, 'proposal.md', '# Change\n')

@@ -58,12 +58,32 @@ const theme = EditorView.theme({
     border: 'none',
     paddingRight: '4px',
   },
-  '.cm-activeLine': { backgroundColor: 'var(--gw-accent-soft)' },
-  '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--gw-sub)' },
-  '.cm-cursor': { borderLeftColor: 'var(--gw-accent-text)' },
-  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': {
-    backgroundColor: 'var(--gw-accent-soft)',
+  // The active line is a neutral lift, not an accent tint: the accent is what
+  // marks a selection, and using it for both made the two indistinguishable.
+  '.cm-activeLine': { backgroundColor: 'var(--gw-panel2)' },
+  '.cm-activeLineGutter': {
+    backgroundColor: 'var(--gw-panel2)',
+    color: 'var(--gw-accent-text)',
+    fontWeight: '600',
   },
+  // A 1px caret in the accent colour disappears against syntax-highlighted
+  // text. Wider, brighter, and always drawn even when the view is unfocused.
+  '.cm-cursor, .cm-dropCursor': {
+    borderLeft: '2px solid var(--gw-text)',
+    marginLeft: '-1px',
+  },
+  '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--gw-accent-text)' },
+  // Selection needs to read as a block behind the text. CodeMirror draws its
+  // own layer, so the native ::selection has to be transparent or the two
+  // stack into a muddy double-tint.
+  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
+    backgroundColor: 'var(--gw-accent)',
+    opacity: '0.28',
+  },
+  '.cm-content ::selection': { backgroundColor: 'transparent' },
+  // Blink needs to be obvious to find the caret in a wall of text.
+  '.cm-cursorLayer': { animation: 'cm-blink 1.1s steps(1) infinite' },
+  '@keyframes cm-blink': { '0%, 49%': { opacity: '1' }, '50%, 100%': { opacity: '0.15' } },
 })
 
 export function SpecEditor({

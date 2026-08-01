@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { commands } from '@/lib/bindings'
 import { unwrap, invalidateOpenspec } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
-import { useSpecDraftStore } from '@/stores/specDraftStore'
+import { draftKey, useSpecDraftStore } from '@/stores/specDraftStore'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 
 /**
@@ -61,7 +61,7 @@ export function SpecFileEditor({
   onClose: () => void
 }) {
   const qc = useQueryClient()
-  const draft = useSpecDraftStore((s) => s.drafts[`${repoId} ${changeId} ${file}`])
+  const draft = useSpecDraftStore((s) => s.drafts[draftKey(repoId, changeId, file)])
   const { open, edit, discard } = useSpecDraftStore()
   const [loading, setLoading] = useState(!draft)
   const [saving, setSaving] = useState(false)
@@ -180,7 +180,9 @@ export function SpecFileEditor({
         ) : loadError ? (
           <p className="px-3 py-4 text-2xs text-[var(--gw-red)]">{loadError}</p>
         ) : (
-          <div className="h-[min(60vh,520px)]">
+          // Tall enough to be worth typing in: most of the window, rather than
+          // a small box with empty space below it.
+          <div className="h-[calc(100vh-320px)] min-h-[360px]">
             <Suspense
               fallback={
                 <p className="px-3 py-4 text-2xs text-muted-foreground">Opening the editor...</p>

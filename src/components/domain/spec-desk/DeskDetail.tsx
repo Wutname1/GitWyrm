@@ -22,11 +22,11 @@ import { describeError } from '@/lib/log'
 import { DeltaBadge, ProgressRing, StatusPill } from './SpecBits'
 import { EditFileButton, SpecFileEditor } from './SpecFileEditor'
 import { DraftedEditReview } from './DraftedEditReview'
-import { useSpecDraftStore } from '@/stores/specDraftStore'
+import { changeDraftPrefix, useSpecDraftStore } from '@/stores/specDraftStore'
 
-type Tab = 'overview' | 'proposal' | 'deltas' | 'design' | 'history' | 'ai'
+type Tab = 'tasks' | 'proposal' | 'deltas' | 'design' | 'history' | 'ai'
 
-/** A card with a small uppercase header, used across the overview. */
+/** A card with a small uppercase header, used across the tasks. */
 function Card({
   title,
   aside,
@@ -106,9 +106,9 @@ function ChangePackage({
         change.tasks.length > 0
           ? `${change.tasks.length} steps that make progress visible.`
           : 'Add checkboxes to tasks.md.',
-      // Tasks are listed on Overview, below these cards, so this scrolls rather
+      // Tasks are listed on tasks, below these cards, so this scrolls rather
       // than navigating away from the list it points at.
-      tab: 'overview' as Tab,
+      tab: 'tasks' as Tab,
       editFile: 'tasks.md',
     },
   ]
@@ -414,12 +414,12 @@ function tabForFile(file: string): Tab {
   if (file === 'proposal.md') return 'proposal'
   if (file === 'design.md') return 'design'
   if (file.startsWith('specs/')) return 'deltas'
-  // tasks.md, and anything unexpected, live under Overview.
-  return 'overview'
+  // tasks.md, and anything unexpected, live under tasks.
+  return 'tasks'
 }
 
 const TABS: Array<{ key: Tab; label: string }> = [
-  { key: 'overview', label: 'Overview' },
+  { key: 'tasks', label: 'Tasks' },
   { key: 'proposal', label: 'Proposal' },
   { key: 'deltas', label: 'Spec deltas' },
   // Design is a tab rather than a section under Tasks: a document buried below
@@ -437,7 +437,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
  * to describe one change while the content below shows another.
  */
 export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: string }) {
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTab] = useState<Tab>('tasks')
   const run = useAiRun(repoId)
   const askSession = useAskStore((s) => s.byRepo[repoId])
   const { startRun, canStart: canStartRun } = useStartRun(repoId, change)
@@ -465,12 +465,12 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
   } | null>(null)
   const [drafting, setDrafting] = useState(false)
   const replaceDraft = useSpecDraftStore((s) => s.replace)
-  const changeHasDirty = useSpecDraftStore((s) =>
-    Object.entries(s.drafts).some(
-      ([key, draft]) =>
-        key.startsWith(`${repoId} ${change.id} `) && draft != null && draft.text !== draft.original
+  const changeHasDirty = useSpecDraftStore((s) => {
+    const prefix = changeDraftPrefix(repoId, change.id)
+    return Object.entries(s.drafts).some(
+      ([key, draft]) => key.startsWith(prefix) && draft != null && draft.text !== draft.original
     )
-  )
+  })
 
   // Selecting another change closes the editor. The draft stays in the store, so
   // coming back reopens it with the unsaved text intact -- but leaving an editor
@@ -569,37 +569,44 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
   // Leaving the change the ask belongs to sends the tab back somewhere real,
   // rather than leaving an empty ✦ selected.
   useEffect(() => {
-    if (tab === 'ai' && !showAiTab) setTab('overview')
+    if (tab === 'ai' && !showAiTab) setTab('tasks')
   }, [tab, showAiTab])
-  const history = useOpenspecHistory(repoId, change.id, tab === 'overview' || tab === 'history')
+  const history = useOpenspecHistory(repoId, change.id, tab === 'tasks' || tab === 'history')
   const recent = (history.data ?? []).slice(0, 3)
 
   return (
     <div className="flex min-h-0 flex-col">
       <div className="flex-none px-6 pt-5">
-        <p className="font-mono text-2xs text-muted-foreground">
-          openspec / changes / {change.id}
-          {/* Unsaved work is easy to forget once the editor is closed, so the
-              change itself carries the marker, not only the file. */}
-          {changeHasDirty && (
-            <span className="ml-2 text-[var(--gw-amber)]">. unsaved changes</span>
-          )}
-        </p>
         <div className="mt-1.5 flex items-start justify-between gap-4">
-          <h1 className="text-lg font-semibold leading-tight text-foreground">{change.title}</h1>
+          <h1 className="text-lg font-semibold leading-tight text-foreground">
+            {change.title}
+          </h1>
           <StatusPill status={change.status} className="mt-1" />
         </div>
         {change.proposal.why.trim() && (
           <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-sub">
             {/* The first line of Why is the change's one-sentence goal. */}
-            {change.proposal.why.trim().split('\n')[0]}
+            {change.proposal.why.trim().split(".")[0]}.
           </p>
         )}
         {change.notes.length > 0 && (
           <p className="mt-2 rounded border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8 px-2.5 py-1.5 text-2xs text-[var(--gw-amber)]">
-            {change.notes.join(' · ')}
+            {change.notes.join(" · ")}
           </p>
         )}
+      </div>
+
+      <div className="px-6 py-1">
+        <ChangePackage
+          change={change}
+          onOpen={(next, editFile) => {
+            setTab(next);
+            // Only set the editor when the card asked for it; otherwise
+            // clear it, so clicking a card never lands on an editor left
+            // open for a different file.
+            setEditing(editFile ?? null);
+          }}
+        />
       </div>
 
       <div
@@ -614,26 +621,30 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
             aria-selected={tab === t.key}
             onClick={() => setTab(t.key)}
             className={cn(
-              '-mb-px border-b-2 pb-2 text-xs font-semibold transition-colors',
+              "-mb-px border-b-2 pb-2 text-xs font-semibold transition-colors",
               tab === t.key
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-sub hover:text-foreground'
+                ? "border-primary text-foreground"
+                : "border-transparent text-sub hover:text-foreground",
             )}
           >
             {t.label}
-            {t.key === 'deltas' && (
+            {t.key === "deltas" && (
               <span className="ml-1.5 rounded-full bg-panel3 px-1.5 font-mono text-2xs font-normal text-sub">
                 {change.deltas.length}
               </span>
             )}
-            {t.key === 'ai' && run.state && (
+            {t.key === "ai" && run.state && (
               <span
                 className={cn(
-                  'ml-1.5 font-normal',
-                  run.state === 'needsYou' ? 'text-[var(--gw-amber)]' : 'text-sub'
+                  "ml-1.5 font-normal",
+                  run.state === "needsYou"
+                    ? "text-[var(--gw-amber)]"
+                    : "text-sub",
                 )}
                 // The badge is how a gate reaches someone reading another tab.
-                aria-label={run.state === 'needsYou' ? 'This run needs you' : undefined}
+                aria-label={
+                  run.state === "needsYou" ? "This run needs you" : undefined
+                }
               >
                 {stateGlyph(run.state)}
               </span>
@@ -643,14 +654,17 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-        {tab === 'overview' && (
+        {tab === "tasks" && (
           <div className="flex flex-col gap-5">
             <div className="grid gap-3 lg:grid-cols-2">
-              <Card title="Progress · from tasks.md" aside={
-                <span className="font-mono text-2xs text-muted-foreground">
-                  {progressSentence(change)}
-                </span>
-              }>
+              <Card
+                title="Progress · from tasks.md"
+                aside={
+                  <span className="font-mono text-2xs text-muted-foreground">
+                    {progressSentence(change)}
+                  </span>
+                }
+              >
                 <div className="flex items-center gap-3.5">
                   <ProgressRing percent={change.progress.percent} size={50} />
                   <div className="min-w-0">
@@ -677,7 +691,11 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
                         className="grid grid-cols-[16px_1fr_auto] items-center gap-2 text-2xs"
                       >
                         <span className="grid size-4 place-items-center rounded-full bg-soft text-accent-text">
-                          {entry.ai_assisted ? <Bot size={9} /> : <Check size={9} strokeWidth={3} />}
+                          {entry.ai_assisted ? (
+                            <Bot size={9} />
+                          ) : (
+                            <Check size={9} strokeWidth={3} />
+                          )}
                         </span>
                         <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">
                           {entry.summary}
@@ -693,27 +711,18 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
             </div>
 
             <div>
-              <h2 className="mb-2 text-2xs font-bold tracking-[.1em] text-sub">CHANGE PACKAGE</h2>
-              <ChangePackage
-                change={change}
-                onOpen={(next, editFile) => {
-                  setTab(next)
-                  // Only set the editor when the card asked for it; otherwise
-                  // clear it, so clicking a card never lands on an editor left
-                  // open for a different file.
-                  setEditing(editFile ?? null)
-                }}
-              />
-            </div>
-
-            <div>
               <div className="mb-2 flex items-center justify-between gap-3">
-                <h2 className="text-2xs font-bold tracking-[.1em] text-sub">TASKS</h2>
-                {editing !== 'tasks.md' && (
-                  <EditFileButton onClick={() => setEditing('tasks.md')} label="Edit tasks.md" />
+                <h2 className="text-2xs font-bold tracking-[.1em] text-sub">
+                  TASKS
+                </h2>
+                {editing !== "tasks.md" && (
+                  <EditFileButton
+                    onClick={() => setEditing("tasks.md")}
+                    label="Edit tasks.md"
+                  />
                 )}
               </div>
-              {editing === 'tasks.md' ? (
+              {editing === "tasks.md" ? (
                 <SpecFileEditor
                   repoId={repoId}
                   changeId={change.id}
@@ -724,12 +733,11 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
                 <TaskList change={change} repoId={repoId} />
               )}
             </div>
-
           </div>
         )}
 
-        {tab === 'proposal' && editing === 'proposal.md' && (
-          <div className="max-w-2xl">
+        {tab === "proposal" && editing === "proposal.md" && (
+          <div className="min-h-0 w-full">
             <SpecFileEditor
               repoId={repoId}
               changeId={change.id}
@@ -739,37 +747,52 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
           </div>
         )}
 
-        {tab === 'proposal' && editing !== 'proposal.md' && (
-          <div className="max-w-2xl">
+        {tab === "proposal" && editing !== "proposal.md" && (
+          <div className="min-h-0 w-full">
             <div className="mb-3 flex justify-end">
-              <EditFileButton onClick={() => setEditing('proposal.md')} label="Edit proposal.md" />
+              <EditFileButton
+                onClick={() => setEditing("proposal.md")}
+                label="Edit proposal.md"
+              />
             </div>
             {/* Sections when the file has the expected headings; the raw file when
                 it does not, so a half-written proposal still shows its content. */}
-            {change.proposal.why.trim() || change.proposal.what_changes.trim() ? (
+            {change.proposal.why.trim() ||
+            change.proposal.what_changes.trim() ? (
               <div className="flex flex-col gap-4">
                 <section>
-                  <h2 className="mb-1.5 text-2xs font-bold tracking-[.1em] text-accent-text">WHY</h2>
-                  <Markdown text={change.proposal.why} empty="No reason written yet." />
+                  <h2 className="mb-1.5 text-2xs font-bold tracking-[.1em] text-accent-text">
+                    WHY
+                  </h2>
+                  <Markdown
+                    text={change.proposal.why}
+                    empty="No reason written yet."
+                  />
                 </section>
                 <section>
                   <h2 className="mb-1.5 text-2xs font-bold tracking-[.1em] text-accent-text">
                     WHAT CHANGES
                   </h2>
-                  <Markdown text={change.proposal.what_changes} empty="Not written yet." />
+                  <Markdown
+                    text={change.proposal.what_changes}
+                    empty="Not written yet."
+                  />
                 </section>
                 <section>
                   <h2 className="mb-1.5 text-2xs font-bold tracking-[.1em] text-accent-text">
                     IMPACT
                   </h2>
-                  <Markdown text={change.proposal.impact} empty="Not written yet." />
+                  <Markdown
+                    text={change.proposal.impact}
+                    empty="Not written yet."
+                  />
                 </section>
               </div>
             ) : (
               <>
                 <p className="mb-3 rounded border border-border px-2.5 py-1.5 text-2xs text-muted-foreground">
-                  This proposal does not use the usual Why / What Changes / Impact headings, so
-                  it is shown as written.
+                  This proposal does not use the usual Why / What Changes /
+                  Impact headings, so it is shown as written.
                 </p>
                 <Markdown
                   text={change.proposal.raw}
@@ -780,8 +803,8 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
           </div>
         )}
 
-        {tab === 'deltas' && editing?.startsWith('specs/') && (
-          <div className="max-w-2xl">
+        {tab === "deltas" && editing?.startsWith("specs/") && (
+          <div className="min-h-0 w-full">
             <SpecFileEditor
               repoId={repoId}
               changeId={change.id}
@@ -791,12 +814,12 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
           </div>
         )}
 
-        {tab === 'deltas' && !editing?.startsWith('specs/') && (
-          <div className="max-w-2xl">
+        {tab === "deltas" && !editing?.startsWith("specs/") && (
+          <div className="min-h-0 w-full">
             {change.deltas.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                No spec deltas yet. They are written during the proposal step, and a change needs
-                at least one before it can be archived.
+                No spec deltas yet. They are written during the proposal step,
+                and a change needs at least one before it can be archived.
               </p>
             ) : (
               <div className="flex flex-col gap-3">
@@ -815,14 +838,29 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
                     <div className="flex flex-col gap-3 px-3.5 py-3">
                       {delta.requirements.map((req) => (
                         <div key={req.name}>
-                          <p className="text-xs font-semibold text-foreground">{req.name}</p>
+                          <p className="text-xs font-semibold text-foreground">
+                            {req.name}
+                          </p>
                           {req.text && (
-                            <Markdown text={req.text} className="mt-1" empty="" />
+                            <Markdown
+                              text={req.text}
+                              className="mt-1"
+                              empty=""
+                            />
                           )}
                           {req.scenarios.map(([name, body]) => (
-                            <div key={name} className="mt-2 border-l-2 border-border pl-2.5">
-                              <p className="text-2xs font-semibold text-sub">{name}</p>
-                              <Markdown text={body} className="mt-0.5" empty="" />
+                            <div
+                              key={name}
+                              className="mt-2 border-l-2 border-border pl-2.5"
+                            >
+                              <p className="text-2xs font-semibold text-sub">
+                                {name}
+                              </p>
+                              <Markdown
+                                text={body}
+                                className="mt-0.5"
+                                empty=""
+                              />
                             </div>
                           ))}
                         </div>
@@ -835,9 +873,9 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
           </div>
         )}
 
-        {tab === 'design' && (
-          <div className="max-w-2xl">
-            {editing === 'design.md' ? (
+        {tab === "design" && (
+          <div className="min-h-0 w-full">
+            {editing === "design.md" ? (
               <SpecFileEditor
                 repoId={repoId}
                 changeId={change.id}
@@ -849,18 +887,18 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
                 repoId={repoId}
                 changeId={change.id}
                 hasDesign={change.has_design}
-                onEdit={() => setEditing('design.md')}
+                onEdit={() => setEditing("design.md")}
               />
             )}
           </div>
         )}
-        {tab === 'history' && <HistoryTab change={change} repoId={repoId} />}
-        {tab === 'ai' && drafting && (
+        {tab === "history" && <HistoryTab change={change} repoId={repoId} />}
+        {tab === "ai" && drafting && (
           <p className="mb-3 rounded border border-border px-2.5 py-1.5 text-2xs text-muted-foreground">
             Drafting that edit. Nothing is being changed yet.
           </p>
         )}
-        {tab === 'ai' && drafted && (
+        {tab === "ai" && drafted && (
           <div className="mb-4">
             <DraftedEditReview
               file={drafted.file}
@@ -872,7 +910,7 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
             />
           </div>
         )}
-        {tab === 'ai' && askMode && (
+        {tab === "ai" && askMode && (
           <AskTab
             repoId={repoId}
             changeId={change.id}
@@ -880,15 +918,15 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
             // is what makes a cited answer checkable rather than just decorated.
             onOpenTab={(next) => {
               if (
-                next === 'proposal' ||
-                next === 'deltas' ||
-                next === 'design' ||
-                next === 'history'
+                next === "proposal" ||
+                next === "deltas" ||
+                next === "design" ||
+                next === "history"
               ) {
-                setTab(next as Tab)
+                setTab(next as Tab);
               } else {
-                // tasks live under Overview.
-                setTab('overview')
+                // tasks live under tasks.
+                setTab("tasks");
               }
             }}
             // Promotion from read-only to write, as one explicit click. Absent
@@ -897,20 +935,22 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
             onStartRun={
               canStartRun
                 ? () => {
-                    void startRun()
-                    setTab('ai')
+                    void startRun();
+                    setTab("ai");
                   }
                 : undefined
             }
             // Drafting an edit is offered only when a provider is resolved --
             // otherwise the button would be there with nothing behind it.
             onDraftEdit={
-              ai.provider && ai.model ? (file, instruction) => void draftEdit(file, instruction) : undefined
+              ai.provider && ai.model
+                ? (file, instruction) => void draftEdit(file, instruction)
+                : undefined
             }
             deltaFiles={change.deltas.map((d) => d.file)}
           />
         )}
-        {tab === 'ai' && !askMode && (
+        {tab === "ai" && !askMode && (
           <AiRunTab
             run={run}
             // Names the AI on the commit's Assisted-by trailer. Absent when no
@@ -921,17 +961,18 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
               // Keeping is the default state already: the edits are sitting in
               // the changes list, so this just closes the run out.
               onKeep: () => {
-                void run.clear()
-                toast.success('Kept. The changes are in your changes list.')
+                void run.clear();
+                toast.success("Kept. The changes are in your changes list.");
               },
               // The run is done once its work is committed. Clearing frees the
               // repository to start the next task, which is an explicit click --
               // runs never chain themselves.
               onCommitted: (sha) => {
-                void run.clear()
+                void run.clear();
                 toast.success(`Committed ${sha.slice(0, 7)}.`, {
-                  description: 'The task is ticked and the commit is on your branch.',
-                })
+                  description:
+                    "The task is ticked and the commit is on your branch.",
+                });
               },
               // Throws the AI's edits away and puts the task back to not-done.
               // Confirmed first: this is the one ending action that destroys
@@ -941,9 +982,9 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
               // the session carries its change and task for exactly this.
               onRestart: () => {
                 void (async () => {
-                  const session = run.session
-                  if (!session) return
-                  await run.clear()
+                  const session = run.session;
+                  if (!session) return;
+                  await run.clear();
                   const res = await commands.aiRunStart(
                     repoId,
                     session.change_id,
@@ -953,12 +994,14 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
                     nextTask(change)?.index ?? 0,
                     session.task_number,
                     session.task_text,
-                    session.branch
-                  )
-                  if (res.status !== 'ok') {
-                    toast.error('That could not be restarted.', { description: res.error })
+                    session.branch,
+                  );
+                  if (res.status !== "ok") {
+                    toast.error("That could not be restarted.", {
+                      description: res.error,
+                    });
                   }
-                })()
+                })();
               },
               // These two can act for real: reconnecting is a settings trip,
               // and the handoff is the escape hatch that exists precisely for
@@ -969,21 +1012,24 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
               onReconnect: () => {
                 void (async () => {
                   try {
-                    const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
-                    const main = await WebviewWindow.getByLabel('main')
-                    await main?.unminimize()
-                    await main?.show()
-                    await main?.setFocus()
+                    const { WebviewWindow } =
+                      await import("@tauri-apps/api/webviewWindow");
+                    const main = await WebviewWindow.getByLabel("main");
+                    await main?.unminimize();
+                    await main?.show();
+                    await main?.setFocus();
                   } catch {
                     // Falling through to the toast is fine: the instruction is
                     // the useful part, not the focus change.
                   }
-                  toast.info('Open Settings > AI in the main window to sign in again.')
-                })()
+                  toast.info(
+                    "Open Settings > AI in the main window to sign in again.",
+                  );
+                })();
               },
               onCopyHandoff: () => {
-                const task = nextTask(change)
-                if (task) void copyTaskHandoff(change, task)
+                const task = nextTask(change);
+                if (task) void copyTaskHandoff(change, task);
               },
               // Adding a note to a retry needs somewhere to type it, which is
               // its own piece of UI. Restart plus the composer already covers
@@ -1000,9 +1046,9 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
         title="Undo the AI's edits?"
         description={
           <>
-            Every file the AI changed goes back to how it was, and its task is marked
-            not done again. Anything you changed yourself in those files goes too, so
-            this is worth a look at your changes list first.
+            Every file the AI changed goes back to how it was, and its task is
+            marked not done again. Anything you changed yourself in those files
+            goes too, so this is worth a look at your changes list first.
           </>
         }
         confirmLabel="Undo the edits"
@@ -1012,5 +1058,5 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
         onConfirm={() => void undoRun()}
       />
     </div>
-  )
+  );
 }
