@@ -84,12 +84,25 @@ export function SpecEditor({
   // to capture a fresh closure would drop the cursor and the undo history.
   const handlers = useRef({ onChange, onSave })
   handlers.current = { onChange, onSave }
+  /**
+   * The document to build with, kept current for the build effect below.
+   *
+   * The effect runs with `[]` deps, so its closure captures the `value` from the
+   * first render and never sees a later one. That is fine when the editor is
+   * built once -- but StrictMode mounts effects twice (run, clean up, run
+   * again), and React Fast Refresh does the same. The second build would then
+   * re-create the editor from the *first* render's value, which is the empty
+   * string when the file is still being read. Reading through a ref makes every
+   * build use the text that is current at the moment it runs.
+   */
+  const initialDoc = useRef(value)
+  initialDoc.current = value
 
   useEffect(() => {
     if (!host.current) return
 
     const state = EditorState.create({
-      doc: value,
+      doc: initialDoc.current,
       extensions: [
         lineNumbers(),
         history(),

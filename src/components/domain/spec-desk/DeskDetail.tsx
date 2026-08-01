@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot, Check, CircleDot, FileText, GitCommitHorizontal, ListChecks, Scale } from 'lucide-react'
+import { Bot, Check, CircleDot, FileText, GitCommitHorizontal, ListChecks, Pencil, Scale } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import type { SpecChange, SpecTask } from '@/lib/bindings'
@@ -24,7 +24,7 @@ import { EditFileButton, SpecFileEditor } from './SpecFileEditor'
 import { DraftedEditReview } from './DraftedEditReview'
 import { useSpecDraftStore } from '@/stores/specDraftStore'
 
-type Tab = 'overview' | 'proposal' | 'deltas' | 'history' | 'ai'
+type Tab = 'overview' | 'proposal' | 'deltas' | 'design' | 'history' | 'ai'
 
 /** A card with a small uppercase header, used across the overview. */
 function Card({
@@ -48,13 +48,32 @@ function Card({
 }
 
 /** The four artifacts a change is made of, and whether each exists. */
-function ChangePackage({ change }: { change: SpecChange }) {
+/**
+ * The four artifacts a change is made of, and whether each exists.
+ *
+ * Every card is a button. Naming a document and then not letting you reach it
+ * is the state this whole feature exists to remove -- and a card marked absent
+ * is the most useful one to click, because it is where you go to write the
+ * missing file.
+ */
+function ChangePackage({
+  change,
+  onOpen,
+}: {
+  change: SpecChange
+  /** Opens the tab holding this artifact, optionally straight into the editor. */
+  onOpen: (tab: Tab, editFile?: string) => void
+}) {
   const items = [
     {
       icon: FileText,
       label: 'Proposal',
       present: change.proposal.why.trim().length > 0 || change.proposal.raw.trim().length > 0,
       detail: 'Why this matters and what people will notice.',
+      tab: 'proposal' as Tab,
+      // An absent file opens the editor directly: there is nothing to read, and
+      // the only thing to do here is write it.
+      editFile: 'proposal.md',
     },
     {
       icon: Scale,
@@ -64,6 +83,10 @@ function ChangePackage({ change }: { change: SpecChange }) {
         change.deltas.length > 0
           ? `${change.deltas.length} ${change.deltas.length === 1 ? 'requirement set' : 'requirement sets'} this change edits.`
           : 'Written during the proposal step.',
+      tab: 'deltas' as Tab,
+      // Deltas live at paths named after their capability, so there is no one
+      // file to create. The tab explains how they are added.
+      editFile: undefined,
     },
     {
       icon: CircleDot,
@@ -72,6 +95,8 @@ function ChangePackage({ change }: { change: SpecChange }) {
       detail: change.has_design
         ? 'Decisions, edge cases, and paths not taken.'
         : 'Optional - add design.md for tricky choices.',
+      tab: 'design' as Tab,
+      editFile: 'design.md',
     },
     {
       icon: ListChecks,
@@ -81,16 +106,28 @@ function ChangePackage({ change }: { change: SpecChange }) {
         change.tasks.length > 0
           ? `${change.tasks.length} steps that make progress visible.`
           : 'Add checkboxes to tasks.md.',
+      // Tasks are listed on Overview, below these cards, so this scrolls rather
+      // than navigating away from the list it points at.
+      tab: 'overview' as Tab,
+      editFile: 'tasks.md',
     },
   ]
 
   return (
     <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
       {items.map((item) => (
-        <div
+        <button
           key={item.label}
+          type="button"
+          // A missing file goes straight to the editor; an existing one goes to
+          // the tab that shows it.
+          onClick={() => onOpen(item.tab, item.present ? undefined : item.editFile)}
+          aria-label={
+            item.present ? `Open ${item.label}` : `Add ${item.editFile ?? item.label}`
+          }
           className={cn(
-            'rounded-lg border px-3 py-2.5',
+            'rounded-lg border px-3 py-2.5 text-left transition-colors',
+            'hover:border-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary',
             item.present ? 'border-border bg-background/40' : 'border-dashed border-border'
           )}
         >
@@ -108,7 +145,12 @@ function ChangePackage({ change }: { change: SpecChange }) {
             )}
           </div>
           <p className="mt-1.5 text-2xs leading-snug text-muted-foreground">{item.detail}</p>
-        </div>
+          {/* Says what the click does, so an absent card is an invitation
+              rather than a dead end. */}
+          <p className="mt-1 text-2xs font-semibold text-accent-text">
+            {item.present ? 'Open' : item.editFile ? `Add ${item.editFile}` : 'How to add these'}
+          </p>
+        </button>
       ))}
     </div>
   )
@@ -244,6 +286,82 @@ function TaskList({ change, repoId }: { change: SpecChange; repoId: string }) {
 }
 
 /** Commits that touched this change's folder. */
+/**
+ * The Design tab: design.md rendered, or an invitation to write one.
+ *
+ * Reads the file itself rather than taking it from the parsed change, which
+ * only carries `has_design`. The read is cheap and only happens while this tab
+ * is open.
+ */
+function DesignTab({
+  repoId,
+  changeId,
+  hasDesign,
+  onEdit,
+}: {
+  repoId: string
+  changeId: string
+  hasDesign: boolean
+  onEdit: () => void
+}) {
+  const [body, setBody] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setBody(null)
+    setError(null)
+    void (async () => {
+      try {
+        const text = unwrap(await commands.openspecReadFile(repoId, changeId, 'design.md'))
+        if (!cancelled) setBody(text)
+      } catch (e) {
+        if (!cancelled) setError(describeError(e))
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [repoId, changeId])
+
+  if (error) {
+    return <p className="text-xs text-removed">{error}</p>
+  }
+  if (body == null) {
+    return <p className="text-xs text-muted-foreground">Reading design.md…</p>
+  }
+
+  // A missing file and an empty one are the same thing to the reader: there is
+  // no design yet, and writing one is the next step.
+  if (!hasDesign || !body.trim()) {
+    return (
+      <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center">
+        <p className="text-xs font-semibold text-foreground">No design notes yet</p>
+        <p className="mx-auto mt-1 max-w-sm text-2xs leading-relaxed text-muted-foreground">
+          A design holds the technical decisions behind this change: what was
+          considered, what was chosen, and why. It is optional.
+        </p>
+        <button
+          onClick={onEdit}
+          className="mt-3 inline-flex items-center gap-1.5 rounded bg-primary px-2.5 py-1 text-2xs font-semibold text-accent-fg transition-opacity hover:opacity-90"
+        >
+          <Pencil size={11} />
+          Write design.md
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="mb-3 flex justify-end">
+        <EditFileButton onClick={onEdit} label="Edit design.md" />
+      </div>
+      <Markdown text={body} empty="design.md is empty." />
+    </>
+  )
+}
+
 function HistoryTab({ change, repoId }: { change: SpecChange; repoId: string }) {
   const history = useOpenspecHistory(repoId, change.id)
   const entries = history.data ?? []
@@ -291,10 +409,24 @@ function HistoryTab({ change, repoId }: { change: SpecChange; repoId: string }) 
   )
 }
 
+/** The tab that shows a change-package file, for routing an editor to it. */
+function tabForFile(file: string): Tab {
+  if (file === 'proposal.md') return 'proposal'
+  if (file === 'design.md') return 'design'
+  if (file.startsWith('specs/')) return 'deltas'
+  // tasks.md, and anything unexpected, live under Overview.
+  return 'overview'
+}
+
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'overview', label: 'Overview' },
   { key: 'proposal', label: 'Proposal' },
   { key: 'deltas', label: 'Spec deltas' },
+  // Design is a tab rather than a section under Tasks: a document buried below
+  // a task list is a document nobody finds. It stays present when the file is
+  // absent, because "there is no design yet" is worth being able to see -- and
+  // is where you go to write one.
+  { key: 'design', label: 'Design' },
   { key: 'history', label: 'History' },
 ]
 
@@ -414,7 +546,7 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
     if (!drafted) return
     replaceDraft(repoId, change.id, drafted.file, drafted.body)
     setEditing(drafted.file)
-    setTab(drafted.file === 'proposal.md' ? 'proposal' : drafted.file.startsWith('specs/') ? 'deltas' : 'overview')
+    setTab(tabForFile(drafted.file))
     setDrafted(null)
     toast.success(`Opened in the editor. Nothing is saved until you press Save.`)
   }
@@ -562,7 +694,16 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
 
             <div>
               <h2 className="mb-2 text-2xs font-bold tracking-[.1em] text-sub">CHANGE PACKAGE</h2>
-              <ChangePackage change={change} />
+              <ChangePackage
+                change={change}
+                onOpen={(next, editFile) => {
+                  setTab(next)
+                  // Only set the editor when the card asked for it; otherwise
+                  // clear it, so clicking a card never lands on an editor left
+                  // open for a different file.
+                  setEditing(editFile ?? null)
+                }}
+              />
             </div>
 
             <div>
@@ -584,28 +725,6 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
               )}
             </div>
 
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <h2 className="text-2xs font-bold tracking-[.1em] text-sub">DESIGN</h2>
-                {editing !== 'design.md' && (
-                  <EditFileButton onClick={() => setEditing('design.md')} label="Edit design.md" />
-                )}
-              </div>
-              {editing === 'design.md' ? (
-                <SpecFileEditor
-                  repoId={repoId}
-                  changeId={change.id}
-                  file="design.md"
-                  onClose={() => setEditing(null)}
-                />
-              ) : (
-                <p className="text-2xs text-muted-foreground">
-                  {change.has_design
-                    ? 'design.md holds the technical notes for this change.'
-                    : 'No design.md yet. Editing creates one.'}
-                </p>
-              )}
-            </div>
           </div>
         )}
 
@@ -716,6 +835,25 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
           </div>
         )}
 
+        {tab === 'design' && (
+          <div className="max-w-2xl">
+            {editing === 'design.md' ? (
+              <SpecFileEditor
+                repoId={repoId}
+                changeId={change.id}
+                file="design.md"
+                onClose={() => setEditing(null)}
+              />
+            ) : (
+              <DesignTab
+                repoId={repoId}
+                changeId={change.id}
+                hasDesign={change.has_design}
+                onEdit={() => setEditing('design.md')}
+              />
+            )}
+          </div>
+        )}
         {tab === 'history' && <HistoryTab change={change} repoId={repoId} />}
         {tab === 'ai' && drafting && (
           <p className="mb-3 rounded border border-border px-2.5 py-1.5 text-2xs text-muted-foreground">
@@ -741,10 +879,15 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
             // A citation chip opens the tab holding the document it names, which
             // is what makes a cited answer checkable rather than just decorated.
             onOpenTab={(next) => {
-              if (next === 'proposal' || next === 'deltas' || next === 'history') {
+              if (
+                next === 'proposal' ||
+                next === 'deltas' ||
+                next === 'design' ||
+                next === 'history'
+              ) {
                 setTab(next as Tab)
               } else {
-                // tasks and design live under Overview.
+                // tasks live under Overview.
                 setTab('overview')
               }
             }}

@@ -4,7 +4,7 @@ import { Loader2, Pencil, Save, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { commands } from '@/lib/bindings'
 import { unwrap, invalidateOpenspec } from '@/lib/queryKeys'
-import { describeError } from '@/lib/log'
+import { describeError, log } from '@/lib/log'
 import { useSpecDraftStore } from '@/stores/specDraftStore'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 
@@ -73,7 +73,11 @@ export function SpecFileEditor({
   // Read the file once, unless a draft for it is already in hand -- in which
   // case the unsaved text is what the user expects to see, not what is on disk.
   useEffect(() => {
-    if (draft) {
+    // Read through the store rather than the subscribed `draft`: this effect
+    // does not depend on `draft` (it must not refetch on every keystroke), so
+    // that binding is from the first render and can be stale by the time a
+    // second mount runs.
+    if (useSpecDraftStore.getState().get(repoId, changeId, file)) {
       setLoading(false)
       return
     }
@@ -82,8 +86,21 @@ export function SpecFileEditor({
     void (async () => {
       try {
         const body = unwrap(await commands.openspecReadFile(repoId, changeId, file))
-        if (cancelled) return
+        // Left in on purpose. "The editor opened empty" has several possible
+        // causes -- a short read, a draft that never landed, a mount race --
+        // and they are indistinguishable from the outside. This names which
+        // one, in one line, without needing a reproduction.
+        log.info(
+          `spec editor: read ${file} of ${changeId} (${body.length} chars)`
+        )
+        // The store call is deliberately NOT guarded by `cancelled`. StrictMode
+        // and Fast Refresh mount this effect twice, cancelling the first pass
+        // mid-flight; if a cancelled read dropped its result, the editor could
+        // end up with no draft at all and render empty. Seeding the store is
+        // idempotent -- `open` keeps an existing draft -- so doing it from a
+        // superseded pass is harmless, while skipping it is not.
         open(repoId, changeId, file, body)
+        if (cancelled) return
         setLoadError(null)
       } catch (e) {
         if (!cancelled) setLoadError(describeError(e))
@@ -94,8 +111,8 @@ export function SpecFileEditor({
     return () => {
       cancelled = true
     }
-    // `draft` is read once to decide whether a fetch is needed; re-running on
-    // every keystroke would refetch the file out from under the editor.
+    // `draft` is deliberately absent: re-running on every keystroke would
+    // refetch the file out from under the editor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoId, changeId, file])
 
