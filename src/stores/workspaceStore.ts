@@ -2496,6 +2496,40 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       ),
       aiEnabled: settings.ai_enabled !== false,
       aiInstruction: settings.ai_instruction ?? null,
+      // Appearance is a global preference, not per-window layout, so copying it
+      // cannot clobber anything this window owns. Without it a window that was
+      // already open keeps the theme, font and zoom it started with while the
+      // rest of the app has moved on.
+      theme: normalizeTheme(settings.theme),
+      themeMode: normalizeThemeMode(settings.theme_mode),
+      mintAccent: settings.mint_accent ?? true,
+      fontFamily: settings.font_family ?? DEFAULT_FONT_ID,
+      fontSize:
+        settings.font_size != null
+          ? clampFontSize(settings.font_size)
+          : DEFAULT_FONT_SIZE,
+      fontWeight:
+        settings.font_weight != null
+          ? clampFontWeight(settings.font_weight)
+          : DEFAULT_FONT_WEIGHT,
+      uiScale:
+        settings.ui_scale != null
+          ? clampUiScale(settings.ui_scale)
+          : DEFAULT_UI_SCALE,
+      // The Desk opens files and runs openspec actions, so it has to honour the
+      // same editor choice and the same "don't ask me again" answers the user
+      // just gave in the main window -- otherwise it re-prompts for something
+      // they already dismissed, or opens the wrong editor.
+      defaultEditor: EDITOR_KINDS.has(settings.default_editor as EditorKind)
+        ? (settings.default_editor as EditorKind)
+        : DEFAULT_EDITOR,
+      enableSpecDesk: settings.enable_spec_desk !== false,
+      openspecArchiveWithoutAsking:
+        settings.openspec_archive_without_asking === true,
+      openspecDeleteWithoutAsking:
+        settings.openspec_delete_without_asking === true,
+      openspecArchiveCommitTemplate:
+        settings.openspec_archive_commit_template ?? null,
     });
   },
 }));
