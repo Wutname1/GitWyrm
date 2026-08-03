@@ -365,6 +365,22 @@ pub fn export_bindings(out_path: &str) -> Result<(), String> {
 pub fn run() {
   let _sentry = init_sentry();
 
+  // libgit2 refuses to open a repository whose directory belongs to another
+  // Windows account ("dubious ownership"), which is routine for repos on a
+  // second internal drive, an external drive, or a folder cloned under a
+  // different profile. Git CLI only relaxes this for paths listed in
+  // safe.directory, so those repos open in every other client the user has
+  // configured but not here.
+  //
+  // Must run before any Repository::open/discover: this flips a libgit2 global,
+  // and doing it while another thread is inside libgit2 would be a data race.
+  // `run()` is single-threaded at this point and no repo has been touched yet.
+  unsafe {
+    if let Err(e) = git2::opts::set_verify_owner_validation(false) {
+      log::warn!("could not disable repository owner validation: {e}");
+    }
+  }
+
   // Route panics through the logger so a backend crash lands in gitwyrm.log
   // (with location + payload) instead of only the detached dev terminal.
   let default_hook = std::panic::take_hook();
