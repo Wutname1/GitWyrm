@@ -38,6 +38,7 @@ pub async fn get_status(
 ) -> Result<WorkingStatus, AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
+    let _timing = crate::perf::CommandTiming::start("get_status", "git.status");
     let repo = open.repo.lock().unwrap();
 
     let mut opts = StatusOptions::new();

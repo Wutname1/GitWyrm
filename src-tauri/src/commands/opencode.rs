@@ -140,10 +140,17 @@ pub fn find_opencode() -> Option<String> {
 
 /// Whether opencode can be launched. Drives the Desk button's enabled state, so
 /// the button is never offered when clicking it could only fail.
+///
+/// Async because resolving costs a `where`/`which` process per candidate name,
+/// and a *miss* is the slow case -- the whole PATH gets scanned. On a machine
+/// without opencode installed, which is the common case, that ran on the IPC
+/// thread and stalled every other command queued behind it.
 #[tauri::command]
 #[specta::specta]
-pub fn opencode_available() -> bool {
-  find_opencode().is_some()
+pub async fn opencode_available() -> bool {
+  tauri::async_runtime::spawn_blocking(|| find_opencode().is_some())
+    .await
+    .unwrap_or(false)
 }
 
 /// Start opencode in `path` with `prompt` as the opening message.
@@ -255,9 +262,12 @@ mod tests {
   /// Detection must never claim opencode is available without something to
   /// run. The inverse is not asserted: this machine may legitimately have no
   /// opencode installed, which is exactly the case the Desk button guards.
+  ///
+  /// Asserts against `find_opencode` rather than the command, which is now only
+  /// a thread-pool wrapper around it -- awaiting that here would stand up a
+  /// runtime to test nothing this does not already cover.
   #[test]
   fn availability_agrees_with_what_was_found() {
-    assert_eq!(opencode_available(), find_opencode().is_some());
     if let Some(found) = find_opencode() {
       assert!(!found.is_empty(), "a found launcher must be nameable");
     }

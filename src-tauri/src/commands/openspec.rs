@@ -653,7 +653,7 @@ pub async fn openspec_archive_change(
 ) -> Result<ArchiveAttempt, AppError> {
   let open = manager.get(&repo_id)?;
   let root = open.path.clone();
-  let template = crate::settings::get_settings(app)?.openspec_archive_commit_template;
+  let template = crate::settings::read_settings(&app)?.openspec_archive_commit_template;
 
   if !force {
     let root_for_check = root.clone();

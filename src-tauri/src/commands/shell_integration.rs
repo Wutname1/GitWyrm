@@ -52,9 +52,16 @@ fn exe_path() -> Result<String, AppError> {
 /// Reports `true` only when every target is present, so a half-written state
 /// (an interrupted install, a hand-edited registry) shows as off and the
 /// toggle repairs it rather than reporting success it cannot back up.
+/// Async because reading the registry is I/O; it is queried when Settings opens.
 #[tauri::command]
 #[specta::specta]
-pub fn context_menu_registered() -> Result<bool, AppError> {
+pub async fn context_menu_registered() -> Result<bool, AppError> {
+  tauri::async_runtime::spawn_blocking(read_context_menu_registered)
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+fn read_context_menu_registered() -> Result<bool, AppError> {
   #[cfg(windows)]
   {
     use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
@@ -85,7 +92,13 @@ pub fn context_menu_registered() -> Result<bool, AppError> {
 /// versioned folder) repairs itself when the user toggles this off and on.
 #[tauri::command]
 #[specta::specta]
-pub fn set_context_menu_registered(enabled: bool) -> Result<(), AppError> {
+pub async fn set_context_menu_registered(enabled: bool) -> Result<(), AppError> {
+  tauri::async_runtime::spawn_blocking(move || write_context_menu_registered(enabled))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+fn write_context_menu_registered(enabled: bool) -> Result<(), AppError> {
   #[cfg(windows)]
   {
     use winreg::enums::HKEY_CURRENT_USER;

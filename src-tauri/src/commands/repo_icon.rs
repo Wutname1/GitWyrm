@@ -433,6 +433,7 @@ fn get_repo_icon_sync(
     app: &tauri::AppHandle,
     repo_path: String,
 ) -> Result<Option<RepoIcon>, AppError> {
+    let _timing = crate::perf::CommandTiming::start("get_repo_icon", "icon.load");
     if icon_is_hidden(app, &repo_path) {
         return Ok(None);
     }

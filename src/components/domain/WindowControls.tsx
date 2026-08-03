@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Copy, Minus, Square, X } from 'lucide-react'
 import { TooltipButton } from '@/components/ui/tooltip'
+import { useIsMaximized } from '@/hooks/useIsMaximized'
 import { describeError, log } from '@/lib/log'
 
 const inTauri = '__TAURI_INTERNALS__' in window
@@ -30,19 +30,7 @@ async function closeWindow() {
 }
 
 export function WindowControls() {
-  const [isMax, setIsMax] = useState(false)
-
-  useEffect(() => {
-    if (!inTauri) return
-    const win = getCurrentWindow()
-    win.isMaximized().then(setIsMax).catch(() => {})
-    const un = win.onResized(() => {
-      win.isMaximized().then(setIsMax).catch(() => {})
-    })
-    return () => {
-      un.then((u) => u()).catch(() => {})
-    }
-  }, [])
+  const isMax = useIsMaximized()
 
   if (!inTauri) return null
 

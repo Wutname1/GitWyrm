@@ -107,8 +107,10 @@ pub async fn github_device_poll(
 
 #[tauri::command]
 #[specta::specta]
-pub fn github_sign_out(app: tauri::AppHandle) -> Result<(), AppError> {
-  auth::remove(&app, PROVIDER_ID)
+pub async fn github_sign_out(app: tauri::AppHandle) -> Result<(), AppError> {
+  tauri::async_runtime::spawn_blocking(move || auth::remove(&app, PROVIDER_ID))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// The signed-in login, or None when no token is stored or the token no

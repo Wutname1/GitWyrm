@@ -93,6 +93,10 @@ async openInEditor(repoId: string, editor: EditorKind) : Promise<Result<null, st
  * Which editors are installed, whether Visual Studio is available, and the
  * solutions in this repo. Drives the toolbar's open button and the editor
  * picker in Settings.
+ * Detection spawns a process per candidate launcher and walks the repo for
+ * solutions, so it must not run on the IPC thread: everything else the
+ * frontend asks for queues behind whatever is running there. The repo path is
+ * resolved up front because `State` cannot cross into the blocking pool.
  */
 async getEditorAvailability(repoId: string | null) : Promise<Result<EditorAvailability, string>> {
     try {
@@ -117,6 +121,9 @@ async openSolutionInVisualStudio(repoId: string, solutionPath: string) : Promise
 /**
  * Open a terminal in the repo folder. Uses Windows Terminal if present,
  * falling back to the classic console; a native terminal elsewhere.
+ * 
+ * Spawning a terminal is a process launch (several, when the first candidate
+ * is absent), so it runs off the IPC thread.
  */
 async openInTerminal(repoId: string) : Promise<Result<null, string>> {
     try {
@@ -145,6 +152,11 @@ async openInOpencode(repoId: string, handoff: string) : Promise<Result<null, str
 /**
  * Whether opencode can be launched. Drives the Desk button's enabled state, so
  * the button is never offered when clicking it could only fail.
+ * 
+ * Async because resolving costs a `where`/`which` process per candidate name,
+ * and a *miss* is the slow case -- the whole PATH gets scanned. On a machine
+ * without opencode installed, which is the common case, that ran on the IPC
+ * thread and stalled every other command queued behind it.
  */
 async opencodeAvailable() : Promise<boolean> {
     return await TAURI_INVOKE("opencode_available");
@@ -419,6 +431,11 @@ async getFileBlame(repoId: string, path: string, sha: string | null) : Promise<R
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Settings are read during startup by nearly every screen, so this must not
+ * run on the IPC thread even though the file is small -- a disk read there
+ * stalls every other command waiting to be dispatched.
+ */
 async getSettings() : Promise<Result<Settings, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_settings") };
@@ -2021,6 +2038,7 @@ async readRepoReadme(path: string) : Promise<Result<string | null, string>> {
  * Reports `true` only when every target is present, so a half-written state
  * (an interrupted install, a hand-edited registry) shows as off and the
  * toggle repairs it rather than reporting success it cannot back up.
+ * Async because reading the registry is I/O; it is queried when Settings opens.
  */
 async contextMenuRegistered() : Promise<Result<boolean, string>> {
     try {
@@ -3942,7 +3960,7 @@ tab_icon_only?: boolean;
  */
 vertical_tab_width?: number; 
 /**
- * "horizontal" or "vertical". Unknown values fall back to horizontal on
+ * "horizontal" or "vertical". Unknown values fall back to vertical on
  * the frontend so older and hand-edited settings remain safe.
  */
 tab_layout?: string | null; 

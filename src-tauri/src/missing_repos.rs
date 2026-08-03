@@ -195,13 +195,19 @@ fn mark_repo_missing_in(
 
 #[tauri::command]
 #[specta::specta]
-pub fn mark_repo_missing(
+pub async fn mark_repo_missing(
   app: tauri::AppHandle,
   repo_path: String,
   missing: bool,
 ) -> Result<(), AppError> {
   let dir = settings::app_data_dir(&app)?;
-  mark_repo_missing_in(&dir, &repo_path, missing, now_secs())
+  // Reads and rewrites the tombstone file; launch restore calls this once per
+  // missing repo, so several land at the same moment.
+  tauri::async_runtime::spawn_blocking(move || {
+    mark_repo_missing_in(&dir, &repo_path, missing, now_secs())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 #[cfg(test)]

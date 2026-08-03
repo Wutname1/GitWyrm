@@ -28,29 +28,43 @@ pub async fn ai_get_catalog(app: tauri::AppHandle) -> Result<Vec<catalog::Catalo
 
 #[tauri::command]
 #[specta::specta]
-pub fn ai_list_configured(app: tauri::AppHandle) -> Result<Vec<AiProviderStatus>, AppError> {
-  Ok(
-    auth::load_all(&app)?
-      .into_keys()
-      .map(|id| AiProviderStatus { id, configured: true })
-      .collect(),
-  )
+pub async fn ai_list_configured(app: tauri::AppHandle) -> Result<Vec<AiProviderStatus>, AppError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    Ok(
+      auth::load_all(&app)?
+        .into_keys()
+        .map(|id| AiProviderStatus { id, configured: true })
+        .collect(),
+    )
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn ai_set_api_key(app: tauri::AppHandle, provider: String, key: String) -> Result<(), AppError> {
+pub async fn ai_set_api_key(
+  app: tauri::AppHandle,
+  provider: String,
+  key: String,
+) -> Result<(), AppError> {
   let key = key.trim().to_string();
   if key.is_empty() {
     return Err(AppError::Other("API key is empty".into()));
   }
-  auth::set(&app, &provider, auth::AuthInfo::Api { key })
+  tauri::async_runtime::spawn_blocking(move || {
+    auth::set(&app, &provider, auth::AuthInfo::Api { key })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn ai_remove_provider(app: tauri::AppHandle, provider: String) -> Result<(), AppError> {
-  auth::remove(&app, &provider)
+pub async fn ai_remove_provider(app: tauri::AppHandle, provider: String) -> Result<(), AppError> {
+  tauri::async_runtime::spawn_blocking(move || auth::remove(&app, &provider))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// The models the user can actually use for a provider. Asks the provider's
@@ -160,7 +174,7 @@ pub async fn generate_commit_message(
 
   // The user's editable guidance (empty falls back to the default), always
   // combined with the fixed format contract our parser depends on.
-  let user_instruction = settings::get_settings(app.clone())?
+  let user_instruction = settings::read_settings(&app)?
     .ai_instruction
     .unwrap_or_default();
   let system = prompt::build_system(&user_instruction);

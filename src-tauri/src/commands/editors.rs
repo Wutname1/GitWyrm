@@ -8,6 +8,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -148,9 +150,37 @@ fn find_launcher(kind: EditorKind) -> Option<&'static str> {
   kind.commands().iter().copied().find(|c| command_exists(c))
 }
 
+/// How long a detection result stays good for.
+///
+/// Detection is expensive: every candidate launcher costs a `where`/`which`
+/// process, and a *miss* is the slow case because the whole PATH gets scanned.
+/// With 12 candidates plus vswhere that is ~13 process spawns, which is far too
+/// much to repeat on each call -- the toolbar asks on every repo open.
+///
+/// Deliberately a TTL rather than a permanent cache. Someone who installs an
+/// editor while GitWyrm is running should see it appear without restarting, so
+/// the result has to expire on its own.
+const DETECT_TTL: Duration = Duration::from_secs(60);
+
+/// Memoized editor detection, cleared by its own age.
+static EDITOR_CACHE: Mutex<Option<(Instant, Vec<InstalledEditor>)>> = Mutex::new(None);
+
+/// Memoized Visual Studio detection. Separate from the editor cache so a
+/// machine with no Visual Studio does not re-run vswhere on every call.
+static VS_CACHE: Mutex<Option<(Instant, Option<String>)>> = Mutex::new(None);
+
 /// Every editor found on this machine, in `EditorKind::ALL` order.
+///
+/// Cached for `DETECT_TTL`; see the constant for why this is not computed on
+/// every call.
 pub fn detect_editors() -> Vec<InstalledEditor> {
-  EditorKind::ALL
+  if let Some((at, cached)) = EDITOR_CACHE.lock().unwrap().as_ref() {
+    if at.elapsed() < DETECT_TTL {
+      return cached.clone();
+    }
+  }
+
+  let found: Vec<InstalledEditor> = EditorKind::ALL
     .iter()
     .filter_map(|&kind| {
       find_launcher(kind).map(|command| InstalledEditor {
@@ -159,7 +189,10 @@ pub fn detect_editors() -> Vec<InstalledEditor> {
         command: command.to_string(),
       })
     })
-    .collect()
+    .collect();
+
+  *EDITOR_CACHE.lock().unwrap() = Some((Instant::now(), found.clone()));
+  found
 }
 
 /// Path to `vswhere.exe`, the tool Visual Studio's installer leaves behind for
@@ -201,8 +234,22 @@ const VSWHERE_SELECT: [&str; 6] = [
 
 /// Display name of the newest installed Visual Studio, e.g.
 /// "Visual Studio Community 2026". None when VS is not installed.
-#[cfg(windows)]
+///
+/// Cached for `DETECT_TTL`: the probe spawns vswhere, and the toolbar asks for
+/// this on every repo open.
 pub fn detect_visual_studio() -> Option<String> {
+  if let Some((at, cached)) = VS_CACHE.lock().unwrap().as_ref() {
+    if at.elapsed() < DETECT_TTL {
+      return cached.clone();
+    }
+  }
+  let found = detect_visual_studio_uncached();
+  *VS_CACHE.lock().unwrap() = Some((Instant::now(), found.clone()));
+  found
+}
+
+#[cfg(windows)]
+fn detect_visual_studio_uncached() -> Option<String> {
   let vswhere = vswhere_path()?;
 
   use std::os::windows::process::CommandExt;
@@ -223,8 +270,9 @@ pub fn detect_visual_studio() -> Option<String> {
     .map(|s| s.to_string())
 }
 
+/// Visual Studio is Windows-only, so there is nothing to look for elsewhere.
 #[cfg(not(windows))]
-pub fn detect_visual_studio() -> Option<String> {
+fn detect_visual_studio_uncached() -> Option<String> {
   None
 }
 
@@ -388,6 +436,37 @@ mod tests {
     assert_eq!(
       serde_json::from_str::<EditorKind>("\"jetbrains\"").unwrap(),
       EditorKind::Jetbrains
+    );
+  }
+
+  /// The second call must not re-probe. Detection costs a process per
+  /// candidate launcher, and a *miss* is the expensive case because the whole
+  /// PATH gets scanned -- so an uncached call on a machine with no editors
+  /// installed is the worst case, not the cheapest. This ran on every repo
+  /// open and was a large part of a multi-second startup stall.
+  #[test]
+  fn editor_detection_is_cached() {
+    let first = Instant::now();
+    let a = detect_editors();
+    let cold = first.elapsed();
+
+    let second = Instant::now();
+    let b = detect_editors();
+    let warm = second.elapsed();
+
+    // Same answer both times.
+    assert_eq!(a.len(), b.len());
+
+    // A cache hit clones a small Vec; the cold path spawns processes. Asserting
+    // against the cold time rather than a fixed number keeps this meaningful on
+    // a fast machine and honest on a slow one.
+    assert!(
+      warm <= cold,
+      "second detect_editors() should not re-probe: cold {cold:?}, warm {warm:?}"
+    );
+    assert!(
+      warm < Duration::from_millis(50),
+      "a cache hit should be effectively free, took {warm:?}"
     );
   }
 

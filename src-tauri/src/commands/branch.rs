@@ -54,6 +54,7 @@ pub async fn list_branches(
 ) -> Result<BranchList, AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
+    let _timing = crate::perf::CommandTiming::start("list_branches", "git.branches");
     let repo = open.repo.lock().unwrap();
     let records = refs::walk_branches(&repo)?;
     let tips = refs::remote_tips(&records);

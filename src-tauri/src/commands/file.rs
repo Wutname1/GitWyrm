@@ -90,30 +90,38 @@ fn workdir(manager: &RepoManager, repo_id: &str) -> Result<PathBuf, AppError> {
 /// but targets one file inside the repo rather than the repo folder.
 #[tauri::command]
 #[specta::specta]
-pub fn open_file_in_editor(
+pub async fn open_file_in_editor(
   manager: State<'_, RepoManager>,
   repo_id: String,
   path: String,
   editor: EditorKind,
 ) -> Result<(), AppError> {
   let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
-  crate::commands::editors::open_path_in(editor, &full.to_string_lossy())
+  tauri::async_runtime::spawn_blocking(move || {
+    crate::commands::editors::open_path_in(editor, &full.to_string_lossy())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Show a single file in the OS file manager, selected in its folder.
 #[tauri::command]
 #[specta::specta]
-pub fn reveal_file_in_file_manager(
+pub async fn reveal_file_in_file_manager(
   app: AppHandle,
   manager: State<'_, RepoManager>,
   repo_id: String,
   path: String,
 ) -> Result<(), AppError> {
   let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
-  app
-    .opener()
-    .reveal_item_in_dir(&full)
-    .map_err(|e| AppError::Other(e.to_string()))
+  tauri::async_runtime::spawn_blocking(move || {
+    app
+      .opener()
+      .reveal_item_in_dir(&full)
+      .map_err(|e| AppError::Other(e.to_string()))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Open a folder inside the repo in the OS file manager. Unlike
@@ -121,20 +129,24 @@ pub fn reveal_file_in_file_manager(
 /// opens the folder itself so its contents are on screen.
 #[tauri::command]
 #[specta::specta]
-pub fn open_folder_in_file_manager(
+pub async fn open_folder_in_file_manager(
   app: AppHandle,
   manager: State<'_, RepoManager>,
   repo_id: String,
   path: String,
 ) -> Result<(), AppError> {
   let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
-  if !full.is_dir() {
-    return Err(AppError::Other(format!("{path} is not a folder")));
-  }
-  app
-    .opener()
-    .open_path(full.to_string_lossy(), None::<&str>)
-    .map_err(|e| AppError::Other(e.to_string()))
+  tauri::async_runtime::spawn_blocking(move || {
+    if !full.is_dir() {
+      return Err(AppError::Other(format!("{path} is not a folder")));
+    }
+    app
+      .opener()
+      .open_path(full.to_string_lossy(), None::<&str>)
+      .map_err(|e| AppError::Other(e.to_string()))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Send a file to the OS Recycle Bin / Trash. Recoverable on purpose: the
@@ -142,16 +154,22 @@ pub fn open_folder_in_file_manager(
 /// click away from a routine action is too sharp an edge.
 #[tauri::command]
 #[specta::specta]
-pub fn delete_file(
+pub async fn delete_file(
   manager: State<'_, RepoManager>,
   repo_id: String,
   path: String,
 ) -> Result<(), AppError> {
   let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
-  if !full.exists() {
-    return Err(AppError::Other(format!("{path} is already gone")));
-  }
-  trash::delete(&full).map_err(|e| AppError::Other(e.to_string()))
+  tauri::async_runtime::spawn_blocking(move || {
+    if !full.exists() {
+      return Err(AppError::Other(format!("{path} is already gone")));
+    }
+    // Sending to the Recycle Bin goes through a shell API that can block on a
+    // slow or network volume.
+    trash::delete(&full).map_err(|e| AppError::Other(e.to_string()))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Put a file back to its committed contents, undoing edits and un-deleting it

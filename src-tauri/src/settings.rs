@@ -709,10 +709,21 @@ pub fn write_settings_in(dir: &Path, settings: &Settings) -> Result<(), AppError
   Ok(())
 }
 
+/// Read settings without going through the async command. For backend callers
+/// that are already off the IPC thread.
+pub fn read_settings(app: &tauri::AppHandle) -> Result<Settings, AppError> {
+  Ok(read_settings_in(&app_data_dir(app)?))
+}
+
+/// Settings are read during startup by nearly every screen, so this must not
+/// run on the IPC thread even though the file is small -- a disk read there
+/// stalls every other command waiting to be dispatched.
 #[tauri::command]
 #[specta::specta]
-pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, AppError> {
-  Ok(read_settings_in(&app_data_dir(&app)?))
+pub async fn get_settings(app: tauri::AppHandle) -> Result<Settings, AppError> {
+  tauri::async_runtime::spawn_blocking(move || read_settings(&app))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Write settings exactly as given.
@@ -722,21 +733,25 @@ pub fn write_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(),
 
 #[tauri::command]
 #[specta::specta]
-pub fn save_settings(app: tauri::AppHandle, mut settings: Settings) -> Result<(), AppError> {
+pub async fn save_settings(app: tauri::AppHandle, mut settings: Settings) -> Result<(), AppError> {
   // Apply the tool paths immediately so a change takes effect without a
   // restart. Every shell-out reads these globals.
   crate::git::shell::set_git_program(settings.git_executable.as_deref());
   crate::git::signing::set_gpg_program(settings.gpg_executable.as_deref());
 
-  let dir = app_data_dir(&app)?;
-  keep_backend_owned_fields(&mut settings, &read_settings_in(&dir));
-  write_settings_in(&dir, &settings)
+  tauri::async_runtime::spawn_blocking(move || {
+    let dir = app_data_dir(&app)?;
+    keep_backend_owned_fields(&mut settings, &read_settings_in(&dir));
+    write_settings_in(&dir, &settings)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Load the persisted git executable and apply it to the shell global. Called
 /// once at startup so saved settings take effect before the first git command.
 pub fn apply_startup_git_executable(app: &tauri::AppHandle) {
-  if let Ok(settings) = get_settings(app.clone()) {
+  if let Ok(settings) = read_settings(app) {
     crate::git::shell::set_git_program(settings.git_executable.as_deref());
     crate::git::signing::set_gpg_program(settings.gpg_executable.as_deref());
   }

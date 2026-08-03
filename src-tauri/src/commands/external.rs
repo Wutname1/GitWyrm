@@ -28,16 +28,20 @@ fn repo_path(manager: &RepoManager, repo_id: &str) -> Result<String, AppError> {
 /// Open the repo folder in the OS file manager (Explorer / Finder / xdg).
 #[tauri::command]
 #[specta::specta]
-pub fn reveal_in_file_manager(
+pub async fn reveal_in_file_manager(
   app: AppHandle,
   manager: State<'_, RepoManager>,
   repo_id: String,
 ) -> Result<(), AppError> {
   let path = repo_path(&manager, &repo_id)?;
-  app
-    .opener()
-    .open_path(path, None::<&str>)
-    .map_err(|e| AppError::Other(e.to_string()))
+  tauri::async_runtime::spawn_blocking(move || {
+    app
+      .opener()
+      .open_path(path, None::<&str>)
+      .map_err(|e| AppError::Other(e.to_string()))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Open the repo folder in the given editor. Each editor is launched through
@@ -45,60 +49,78 @@ pub fn reveal_in_file_manager(
 /// the "Shell Command: Install 'code' command in PATH" step.
 #[tauri::command]
 #[specta::specta]
-pub fn open_in_editor(
+pub async fn open_in_editor(
   manager: State<'_, RepoManager>,
   repo_id: String,
   editor: EditorKind,
 ) -> Result<(), AppError> {
   let path = repo_path(&manager, &repo_id)?;
-  editors::open_path_in(editor, &path)
+  tauri::async_runtime::spawn_blocking(move || editors::open_path_in(editor, &path))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Which editors are installed, whether Visual Studio is available, and the
 /// solutions in this repo. Drives the toolbar's open button and the editor
 /// picker in Settings.
+/// Detection spawns a process per candidate launcher and walks the repo for
+/// solutions, so it must not run on the IPC thread: everything else the
+/// frontend asks for queues behind whatever is running there. The repo path is
+/// resolved up front because `State` cannot cross into the blocking pool.
 #[tauri::command]
 #[specta::specta]
-pub fn get_editor_availability(
+pub async fn get_editor_availability(
   manager: State<'_, RepoManager>,
   repo_id: Option<String>,
 ) -> Result<EditorAvailability, AppError> {
-  let visual_studio = editors::detect_visual_studio();
-
-  // Scanning for solutions is only worth the disk walk when there is a Visual
-  // Studio to open them with, and when a repo is actually open.
-  let solutions = match (&visual_studio, &repo_id) {
-    (Some(_), Some(id)) => {
-      let open = manager.get(id)?;
-      editors::find_solutions(&open.path)
-    }
-    _ => Vec::new(),
+  let repo_path = match &repo_id {
+    Some(id) => Some(manager.get(id)?.path.clone()),
+    None => None,
   };
 
-  Ok(EditorAvailability {
-    editors: editors::detect_editors(),
-    visual_studio,
-    solutions,
+  tauri::async_runtime::spawn_blocking(move || {
+    let _timing = crate::perf::CommandTiming::start("get_editor_availability", "editors.detect");
+    let visual_studio = editors::detect_visual_studio();
+
+    // Scanning for solutions is only worth the disk walk when there is a Visual
+    // Studio to open them with, and when a repo is actually open.
+    let solutions = match (&visual_studio, &repo_path) {
+      (Some(_), Some(path)) => editors::find_solutions(path),
+      _ => Vec::new(),
+    };
+
+    Ok(EditorAvailability {
+      editors: editors::detect_editors(),
+      visual_studio,
+      solutions,
+    })
   })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Open one of the repo's `.sln` files in Visual Studio. The path is checked
 /// against the repo's own solutions so an arbitrary path cannot be launched.
 #[tauri::command]
 #[specta::specta]
-pub fn open_solution_in_visual_studio(
+pub async fn open_solution_in_visual_studio(
   manager: State<'_, RepoManager>,
   repo_id: String,
   solution_path: String,
 ) -> Result<(), AppError> {
-  let open = manager.get(&repo_id)?;
-  let known = editors::find_solutions(&open.path);
-  if !known.iter().any(|s| s.absolute_path == solution_path) {
-    return Err(AppError::Other(format!(
-      "No solution named {solution_path} in this repository."
-    )));
-  }
-  editors::open_solution(&solution_path)
+  let root = manager.get(&repo_id)?.path.clone();
+  tauri::async_runtime::spawn_blocking(move || {
+    // Re-walks the repo to validate the path, then launches devenv.
+    let known = editors::find_solutions(&root);
+    if !known.iter().any(|s| s.absolute_path == solution_path) {
+      return Err(AppError::Other(format!(
+        "No solution named {solution_path} in this repository."
+      )));
+    }
+    editors::open_solution(&solution_path)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Start opencode on one task, in the repo folder, with the handoff as its
@@ -109,30 +131,43 @@ pub fn open_solution_in_visual_studio(
 /// copied" -- one composer, no chance of the two drifting apart.
 #[tauri::command]
 #[specta::specta]
-pub fn open_in_opencode(
+pub async fn open_in_opencode(
   manager: State<'_, RepoManager>,
   repo_id: String,
   handoff: String,
 ) -> Result<(), AppError> {
   let path = repo_path(&manager, &repo_id)?;
-  let Some(found) = opencode::find_opencode() else {
-    return Err(AppError::Other(
-      "Could not find opencode. Install it from opencode.ai, then try again.".into(),
-    ));
-  };
-  opencode::launch(&found, &path, &handoff)
+  tauri::async_runtime::spawn_blocking(move || {
+    // find_opencode probes PATH with a `where`/`which` process before launching.
+    let Some(found) = opencode::find_opencode() else {
+      return Err(AppError::Other(
+        "Could not find opencode. Install it from opencode.ai, then try again.".into(),
+      ));
+    };
+    opencode::launch(&found, &path, &handoff)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Open a terminal in the repo folder. Uses Windows Terminal if present,
 /// falling back to the classic console; a native terminal elsewhere.
+///
+/// Spawning a terminal is a process launch (several, when the first candidate
+/// is absent), so it runs off the IPC thread.
 #[tauri::command]
 #[specta::specta]
-pub fn open_in_terminal(
+pub async fn open_in_terminal(
   manager: State<'_, RepoManager>,
   repo_id: String,
 ) -> Result<(), AppError> {
   let path = repo_path(&manager, &repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || spawn_terminal_in(path))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
 
+fn spawn_terminal_in(path: String) -> Result<(), AppError> {
   #[cfg(windows)]
   {
     use std::os::windows::process::CommandExt;

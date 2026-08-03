@@ -82,8 +82,16 @@ pub fn build_info() -> BuildInfo {
 /// Checks whether a file or folder already exists without changing it.
 #[tauri::command]
 #[specta::specta]
-pub fn path_exists(path: String) -> bool {
-  std::path::Path::new(&path).exists()
+pub async fn path_exists(path: String) -> bool {
+  tauri::async_runtime::spawn_blocking(move || exists_on_disk(&path))
+    .await
+    .unwrap_or(false)
+}
+
+/// The `path_exists` check itself. Split out so it stays directly testable
+/// without standing up an async runtime.
+fn exists_on_disk(path: &str) -> bool {
+  std::path::Path::new(path).exists()
 }
 
 fn log_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, AppError> {
@@ -97,9 +105,11 @@ fn log_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, AppError> {
 /// Returns the current log file contents ("" when it does not exist yet).
 #[tauri::command]
 #[specta::specta]
-pub fn read_log(app: tauri::AppHandle) -> Result<String, AppError> {
+pub async fn read_log(app: tauri::AppHandle) -> Result<String, AppError> {
   let path = log_path(&app)?;
-  Ok(fs::read_to_string(path).unwrap_or_default())
+  tauri::async_runtime::spawn_blocking(move || Ok(fs::read_to_string(path).unwrap_or_default()))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// How much of the log a bug report carries. Big enough to hold app startup
@@ -114,10 +124,14 @@ const REPORT_LOG_BYTES: usize = 200_000;
 /// leaves the machine.
 #[tauri::command]
 #[specta::specta]
-pub fn read_log_tail(app: tauri::AppHandle) -> Result<String, AppError> {
+pub async fn read_log_tail(app: tauri::AppHandle) -> Result<String, AppError> {
   let path = log_path(&app)?;
-  let text = fs::read_to_string(path).unwrap_or_default();
-  Ok(tail_from_line_boundary(&text, REPORT_LOG_BYTES))
+  tauri::async_runtime::spawn_blocking(move || {
+    let text = fs::read_to_string(path).unwrap_or_default();
+    Ok(tail_from_line_boundary(&text, REPORT_LOG_BYTES))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Keep the last `max_bytes` of `text`, starting at the next line boundary so
@@ -142,34 +156,42 @@ fn tail_from_line_boundary(text: &str, max_bytes: usize) -> String {
 /// Truncates the log file in place so the logger's open handle stays valid.
 #[tauri::command]
 #[specta::specta]
-pub fn clear_log(app: tauri::AppHandle) -> Result<(), AppError> {
+pub async fn clear_log(app: tauri::AppHandle) -> Result<(), AppError> {
   let path = log_path(&app)?;
-  if path.exists() {
-    fs::OpenOptions::new().write(true).truncate(true).open(path)?;
-  }
-  Ok(())
+  tauri::async_runtime::spawn_blocking(move || {
+    if path.exists() {
+      fs::OpenOptions::new().write(true).truncate(true).open(path)?;
+    }
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Opens the log directory in the OS file manager.
 #[tauri::command]
 #[specta::specta]
-pub fn open_logs_folder(app: tauri::AppHandle) -> Result<(), AppError> {
+pub async fn open_logs_folder(app: tauri::AppHandle) -> Result<(), AppError> {
   let dir = app
     .path()
     .app_log_dir()
     .map_err(|e| AppError::Other(e.to_string()))?;
-  if !dir.exists() {
-    fs::create_dir_all(&dir)?;
-  }
-  app
-    .opener()
-    .open_path(dir.to_string_lossy().to_string(), None::<&str>)
-    .map_err(|e| AppError::Other(e.to_string()))
+  tauri::async_runtime::spawn_blocking(move || {
+    if !dir.exists() {
+      fs::create_dir_all(&dir)?;
+    }
+    app
+      .opener()
+      .open_path(dir.to_string_lossy().to_string(), None::<&str>)
+      .map_err(|e| AppError::Other(e.to_string()))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 #[cfg(test)]
 mod tests {
-  use super::{path_exists, repo_path_from_args, tail_from_line_boundary};
+  use super::{exists_on_disk, repo_path_from_args, tail_from_line_boundary};
 
   #[test]
   fn short_logs_are_returned_whole() {
@@ -208,9 +230,9 @@ mod tests {
   #[test]
   fn path_exists_reports_existing_and_missing_paths() {
     let directory = tempfile::tempdir().expect("temporary directory");
-    assert!(path_exists(directory.path().to_string_lossy().to_string()));
-    assert!(!path_exists(
-      directory.path().join("not-created").to_string_lossy().to_string()
+    assert!(exists_on_disk(&directory.path().to_string_lossy()));
+    assert!(!exists_on_disk(
+      &directory.path().join("not-created").to_string_lossy()
     ));
   }
 

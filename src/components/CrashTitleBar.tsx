@@ -15,14 +15,34 @@ const inTauri = '__TAURI_INTERNALS__' in window
 export function CrashTitleBar() {
   const [isMax, setIsMax] = useState(false)
 
+  // Kept inline rather than using the shared hook, for the same reason the rest
+  // of this component is duplicated: it must not depend on anything that might
+  // be what crashed. The debounce matches the hook's -- onResized fires per
+  // frame during a drag, and each check is an IPC round-trip.
   useEffect(() => {
     if (!inTauri) return
     const win = getCurrentWindow()
-    win.isMaximized().then(setIsMax).catch(() => {})
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let cancelled = false
+
+    const check = () => {
+      win
+        .isMaximized()
+        .then((v) => {
+          if (!cancelled) setIsMax(v)
+        })
+        .catch(() => {})
+    }
+
+    check()
     const un = win.onResized(() => {
-      win.isMaximized().then(setIsMax).catch(() => {})
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(check, 150)
     })
+
     return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
       un.then((u) => u()).catch(() => {})
     }
   }, [])

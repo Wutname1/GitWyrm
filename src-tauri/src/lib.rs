@@ -5,6 +5,7 @@ mod error;
 mod git;
 mod missing_repos;
 mod openspec;
+mod perf;
 mod scrub;
 mod settings;
 mod state;

@@ -744,7 +744,7 @@ pub async fn generate_commits(
   // ai::complete checks this too, but only once it is about to send.
   auth::get(&app, &provider)?
     .ok_or_else(|| AppError::Other("Connect the selected AI provider first".into()))?;
-  let saved_instruction = settings::get_settings(app.clone())?
+  let saved_instruction = settings::read_settings(&app)?
     .ai_instruction
     .unwrap_or_default();
   let message_guidance = if saved_instruction.trim().is_empty() {
