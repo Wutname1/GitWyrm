@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
@@ -40,6 +40,11 @@ interface FormDialogProps {
  * half-done operation can't be hidden from the user. That guard was previously
  * written out in each dialog, which is exactly the kind of thing that gets
  * fixed in one place and missed in the others.
+ *
+ * Enter submits from anywhere in the dialog, so a confirmation like "Delete
+ * branch?" answers to the key people already have their hand on. Textareas keep
+ * Enter for newlines, and Enter on a focused button still presses that button --
+ * otherwise Cancel would silently become Confirm.
  */
 export function FormDialog({
   open,
@@ -57,6 +62,38 @@ export function FormDialog({
   widthClassName = 'sm:max-w-md',
   onSubmit,
 }: FormDialogProps) {
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const submitRef = useRef<HTMLButtonElement>(null)
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.isDefaultPrevented()) return
+
+    const target = e.target as HTMLElement | null
+    if (!target) return
+    // Textareas need Enter for newlines; buttons need it to press themselves.
+    if (target.closest('textarea, [contenteditable="true"], button, a[href]')) return
+
+    if (!canSubmit || pending) return
+    e.preventDefault()
+    onSubmit()
+  }
+
+  /**
+   * Confirmations have nothing else worth focusing, so point at the submit
+   * button: it shows a focus ring, which is the only cue that Enter is live.
+   * Dialogs with a field keep their own `autoFocus` -- typing comes first there.
+   */
+  const focusSubmitIfNoField = (e: Event) => {
+    const body = bodyRef.current
+    if (body?.querySelector('input:not([type="checkbox"]):not([type="radio"]), textarea, select')) return
+    const submit = submitRef.current
+    // A disabled submit can't hold focus; let Radix do its usual thing instead.
+    if (!submit || submit.disabled) return
+    // Radix would otherwise focus the first tabbable node -- the X close button.
+    e.preventDefault()
+    submit.focus()
+  }
+
   return (
     <Dialog
       open={open}
@@ -65,7 +102,12 @@ export function FormDialog({
         onOpenChange(next)
       }}
     >
-      <DialogContent className={cn('gap-0 p-0', widthClassName)} aria-describedby={undefined}>
+      <DialogContent
+        className={cn('gap-0 p-0', widthClassName)}
+        aria-describedby={undefined}
+        onKeyDown={handleKeyDown}
+        onOpenAutoFocus={focusSubmitIfNoField}
+      >
         <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
           <DialogTitle className="flex items-center gap-2 text-sm">
             {icon}
@@ -73,7 +115,9 @@ export function FormDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-3 px-4 py-4">{children}</div>
+        <div ref={bodyRef} className="grid gap-3 px-4 py-4">
+          {children}
+        </div>
 
         <DialogFooter className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
           {footerExtra}
@@ -86,6 +130,7 @@ export function FormDialog({
             {cancelLabel}
           </Button>
           <Button
+            ref={submitRef}
             size="sm"
             variant={destructive ? 'destructive' : 'default'}
             disabled={!canSubmit || pending}
