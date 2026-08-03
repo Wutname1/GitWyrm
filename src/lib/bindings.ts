@@ -2651,6 +2651,20 @@ export type CliOutcome =
  */
 { kind: "cliMissing"; hint: string }
 /**
+ * A folder scanned for repositories. Several can be watched at once, each
+ * scanned on its own so an unplugged drive never holds up the others.
+ */
+export type CodeFolderSetting = { path: string; 
+/**
+ * Short name shown beside the path ("Main work"). None shows the path alone.
+ */
+label?: string | null; 
+/**
+ * The default destination for clones and new repositories, and the folder
+ * sorted first. Exactly one folder carries this; enforced on the frontend.
+ */
+primary?: boolean }
+/**
  * Commit-graph column layout. Column ids are validated on the frontend, so
  * unknown values here are ignored rather than rejected.
  */
@@ -3395,7 +3409,18 @@ open_repos?: string[];
 /**
  * Id of the repo that was active when the app last closed.
  */
-active_repo_path?: string | null; recents?: RecentRepo[]; code_folder?: string | null; clone_directory?: string | null; 
+active_repo_path?: string | null; recents?: RecentRepo[]; 
+/**
+ * The single watched folder, superseded by `code_folders`. Still written as
+ * the primary folder's path so an older build keeps working after a
+ * downgrade, and read once on upgrade to seed `code_folders`.
+ */
+code_folder?: string | null; 
+/**
+ * Every folder scanned for repositories. The source of truth; `code_folder`
+ * mirrors whichever entry is primary.
+ */
+code_folders?: CodeFolderSetting[]; clone_directory?: string | null; 
 /**
  * Path to the git executable used for fetch, pull, push, and clone. None
  * (the default) resolves git from PATH, then the copy bundled with GitWyrm.

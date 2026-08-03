@@ -1,4 +1,5 @@
 import {
+  usePrimaryCodeFolder,
   useWorkspaceStore,
   type BranchSwitchMode,
   type CommitButtonMode,
@@ -10,6 +11,7 @@ import { unwrap } from '@/lib/queryKeys'
 import { useTutorialStore } from '@/stores/tutorialStore'
 import { TUTORIAL_ENABLED } from '@/lib/tutorialEnabled'
 import { FolderSetting, SettingRow } from './SettingRow'
+import { CodeFoldersSetting } from './CodeFoldersSetting'
 import { IdentitySetting } from './IdentitySetting'
 import { EditorSetting } from './EditorSetting'
 import { ResetToDefaults } from './ResetToDefaults'
@@ -29,8 +31,7 @@ const commitButtonHints: Record<CommitButtonMode, string> = {
 }
 
 export function GeneralSettings() {
-  const codeFolder = useWorkspaceStore((s) => s.codeFolder)
-  const setCodeFolder = useWorkspaceStore((s) => s.setCodeFolder)
+  const primaryCodeFolder = usePrimaryCodeFolder()
   const cloneDirectory = useWorkspaceStore((s) => s.cloneDirectory)
   const setCloneDirectory = useWorkspaceStore((s) => s.setCloneDirectory)
   const branchSwitchMode = useWorkspaceStore((s) => s.branchSwitchMode)
@@ -53,17 +54,21 @@ export function GeneralSettings() {
       >
         <IdentitySetting />
       </SettingRow>
-      <SettingRow label="Code folder" searchId="code-folder" hint="Scanned for repositories to quick-launch from the open dialog.">
-        <FolderSetting value={codeFolder} placeholder="e.g. C:\code" onCommit={setCodeFolder} />
+      <SettingRow
+        label="Code folders"
+        searchId="code-folder"
+        hint="Folders searched for projects to open. Add as many as you like. The starred one is your main folder: new projects and copies are saved there."
+      >
+        <CodeFoldersSetting />
       </SettingRow>
       <SettingRow
         label="Default clone directory"
         searchId="clone-directory"
-        hint="Where new clones go. Falls back to the code folder when empty."
+        hint="Where new copies go. Falls back to your main code folder when empty."
       >
         <FolderSetting
           value={cloneDirectory}
-          placeholder={codeFolder ?? 'Not set'}
+          placeholder={primaryCodeFolder ?? 'Not set'}
           onCommit={setCloneDirectory}
         />
       </SettingRow>

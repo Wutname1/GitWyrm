@@ -1,22 +1,84 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { toast } from 'sonner'
-import { commands, type RepoInfo } from '@/lib/bindings'
+import { commands, type RepoInfo, type ScannedRepo } from '@/lib/bindings'
 import { normalizePath, pathKey } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
 import { Sentry } from '@/lib/sentry'
 import { useUiStore } from '@/stores/uiStore'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { primaryFirst, useWorkspaceStore, type CodeFolder } from '@/stores/workspaceStore'
 
-/** Scanned repos in the configured code folder (no repo handles taken). */
-export function useCodeFolderRepos() {
-  const codeFolder = useWorkspaceStore((s) => s.codeFolder)
-  return useQuery({
-    queryKey: ['code-folder', codeFolder ?? 'none'],
-    enabled: codeFolder != null,
-    staleTime: 60_000,
-    queryFn: async () => unwrap(await commands.scanCodeFolder(codeFolder!)),
+/** One watched folder's scan result. */
+export interface CodeFolderScan extends CodeFolder {
+  repos: ScannedRepo[]
+  isLoading: boolean
+  /** True when the folder could not be read -- usually a drive that is not plugged in. */
+  isUnavailable: boolean
+}
+
+export interface CodeFolderRepos {
+  /** Per folder, primary first, so a failing drive is visible on its own row. */
+  folders: CodeFolderScan[]
+  /** Every repo across every folder, de-duplicated by path. */
+  repos: ScannedRepo[]
+  isLoading: boolean
+  isFetching: boolean
+  /** Rescan every watched folder. */
+  refetch: () => void
+}
+
+/**
+ * Scanned repos across every watched folder (no repo handles taken).
+ *
+ * Each folder is its own query so one slow or disconnected drive never blocks
+ * the others -- a folder that fails shows as unavailable while the rest list
+ * normally.
+ */
+export function useCodeFolderRepos(): CodeFolderRepos {
+  const codeFolders = useWorkspaceStore((s) => s.codeFolders)
+  const ordered = useMemo(() => primaryFirst(codeFolders), [codeFolders])
+
+  const results = useQueries({
+    queries: ordered.map((folder) => ({
+      queryKey: ['code-folder', pathKey(folder.path)],
+      staleTime: 60_000,
+      // A missing folder is an expected state (drive unplugged), not a fault to
+      // retry: fail it once and let the row say so.
+      retry: false,
+      queryFn: async () => unwrap(await commands.scanCodeFolder(folder.path)),
+    })),
   })
+
+  return useMemo(() => {
+    const folders = ordered.map((folder, index) => {
+      const result = results[index]
+      return {
+        ...folder,
+        repos: result?.data ?? [],
+        isLoading: result?.isLoading ?? false,
+        isUnavailable: result?.isError ?? false,
+      }
+    })
+
+    // The same repo can sit under two overlapping folders; show it once.
+    const byPath = new Map<string, ScannedRepo>()
+    for (const folder of folders) {
+      for (const repo of folder.repos) {
+        const key = pathKey(repo.path)
+        if (!byPath.has(key)) byPath.set(key, repo)
+      }
+    }
+
+    return {
+      folders,
+      repos: [...byPath.values()],
+      isLoading: results.some((result) => result.isLoading),
+      isFetching: results.some((result) => result.isFetching),
+      refetch: () => {
+        for (const result of results) void result.refetch()
+      },
+    }
+  }, [ordered, results])
 }
 
 /**

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   Check,
   ChevronRight,
@@ -55,11 +56,13 @@ import { unwrap } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/uiStore";
 import {
+  usePrimaryCodeFolder,
   useWorkspaceStore,
   type RecentRepo,
   type RepoPickerSection,
   type SavedTabGroup,
 } from "@/stores/workspaceStore";
+import { CodeFoldersSetting } from "@/components/domain/settings/CodeFoldersSetting";
 
 interface GitProgressPayload {
   operation: string;
@@ -886,7 +889,8 @@ function RepoPickerPanel({
 }) {
   const recents = useWorkspaceStore((state) => state.recents);
   const openRepos = useWorkspaceStore((state) => state.openRepos);
-  const codeFolder = useWorkspaceStore((state) => state.codeFolder);
+  const codeFolders = useWorkspaceStore((state) => state.codeFolders);
+  const primaryCodeFolder = usePrimaryCodeFolder();
   const cloneDirectory = useWorkspaceStore((state) => state.cloneDirectory);
   const savedTabGroups = useWorkspaceStore((state) => state.savedTabGroups);
   const pinnedRepoPaths = useWorkspaceStore((state) => state.pinnedRepoPaths);
@@ -896,7 +900,7 @@ function RepoPickerPanel({
   const repoPickerCollapsedSections = useWorkspaceStore(
     (state) => state.repoPickerCollapsedSections,
   );
-  const setCodeFolder = useWorkspaceStore((state) => state.setCodeFolder);
+  const addCodeFolder = useWorkspaceStore((state) => state.addCodeFolder);
   const setCloneDirectory = useWorkspaceStore(
     (state) => state.setCloneDirectory,
   );
@@ -937,12 +941,15 @@ function RepoPickerPanel({
   const [namingGroup, setNamingGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [groupLibraryOpen, setGroupLibraryOpen] = useState(false);
+  const [folderManagerOpen, setFolderManagerOpen] = useState(false);
+  /** Which watched folder the library is filtered to; null means all of them. */
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [openingGroupId, setOpeningGroupId] = useState<string | null>(null);
   const [dropHover, setDropHover] = useState(false);
   const [dropStatus, setDropStatus] = useState("");
   const [wiggling, setWiggling] = useState(false);
 
-  const defaultDestination = codeFolder ?? cloneDirectory ?? "";
+  const defaultDestination = primaryCodeFolder ?? cloneDirectory ?? "";
   const [url, setUrl] = useState("");
   const [cloneDestination, setCloneDestination] = useState(defaultDestination);
   const [cloneFolderName, setCloneFolderName] = useState("");
@@ -977,7 +984,7 @@ function RepoPickerPanel({
 
   const libraryRepos = useMemo(() => {
     const byPath = new Map<string, LibraryRepo>();
-    for (const repo of scanned.data ?? []) {
+    for (const repo of scanned.repos) {
       byPath.set(pathKey(repo.path), {
         name: repo.name,
         path: repo.path,
@@ -997,7 +1004,7 @@ function RepoPickerPanel({
       }
     }
     return [...byPath.values()];
-  }, [pinnedRepoPaths, recents, scanned.data]);
+  }, [pinnedRepoPaths, recents, scanned.repos]);
 
   const repoByPath = useMemo(
     () => new Map(libraryRepos.map((repo) => [pathKey(repo.path), repo])),
@@ -1040,12 +1047,34 @@ function RepoPickerPanel({
   const hiddenKeys = new Set(
     [...pinnedRepos, ...recentRepos].map((repo) => pathKey(repo.path)),
   );
-  const otherRepos = (scanned.data ?? [])
-    .flatMap((repo): LibraryRepo[] => {
-      const item = repoByPath.get(pathKey(repo.path));
-      return item ? [item] : [];
-    })
-    .filter((repo) => !hiddenKeys.has(pathKey(repo.path)) && matches(repo));
+  // Folders in scope: all of them, or just the one the user picked in the rail.
+  const scopedFolders = scanned.folders.filter(
+    (folder) => activeFolder == null || pathKey(folder.path) === pathKey(activeFolder),
+  );
+
+  /**
+   * The watched section, split per folder. Showing every folder keeps its band
+   * so a path is never ambiguous; filtering to one folder renders a flat list.
+   */
+  const folderSections = scopedFolders.map((folder) => ({
+    folder,
+    repos: folder.repos
+      .flatMap((repo): LibraryRepo[] => {
+        const item = repoByPath.get(pathKey(repo.path));
+        return item ? [item] : [];
+      })
+      .filter((repo) => !hiddenKeys.has(pathKey(repo.path)) && matches(repo)),
+  }));
+
+  // Flat view of the same rows, for counts and shift-click ranges. De-duplicated
+  // because overlapping folders can surface the same repository twice.
+  const otherRepos = [
+    ...new Map(
+      folderSections
+        .flatMap((section) => section.repos)
+        .map((repo) => [pathKey(repo.path), repo]),
+    ).values(),
+  ];
 
   // Row order on screen, used to resolve shift-click ranges. Collapsed
   // sections are left out so a range never reaches rows you cannot see.
@@ -1176,11 +1205,22 @@ function RepoPickerPanel({
     const { open } = await import("@tauri-apps/plugin-dialog");
     const directory = await open({
       directory: true,
-      title: "Choose your watched folder",
+      multiple: true,
+      title: "Choose a folder that holds your repositories",
     });
-    if (typeof directory !== "string") return;
-    setCodeFolder(directory);
-    toast.success("Watched folder changed");
+    const paths = Array.isArray(directory)
+      ? directory
+      : typeof directory === "string"
+        ? [directory]
+        : [];
+    if (paths.length === 0) return;
+
+    const before = useWorkspaceStore.getState().codeFolders.length;
+    for (const path of paths) addCodeFolder(path);
+    const added = useWorkspaceStore.getState().codeFolders.length - before;
+
+    if (added === 0) toast("Already watching that folder");
+    else toast.success(added === 1 ? "Folder added" : `${added} folders added`);
   };
 
   const browseForRepositories = async () => {
@@ -1728,37 +1768,55 @@ function RepoPickerPanel({
           >
             <SectionHeading
               count={otherRepos.length}
-              note={codeFolder ? `in ${codeFolder}` : undefined}
+              note={
+                activeFolder
+                  ? `in ${activeFolder}`
+                  : codeFolders.length > 1
+                    ? `across ${codeFolders.length} folders`
+                    : undefined
+              }
               collapsed={isSectionCollapsed("watched")}
               onToggle={() =>
                 toggleLibrarySection(
                   "watched",
-                  codeFolder ? "Watched folder" : "Repositories",
+                  codeFolders.length > 0 ? "Code folders" : "Repositories",
                 )
               }
               action={
-                codeFolder ? (
-                  <TooltipButton
-                    tooltip="Rescan watched folder"
-                    onClick={() => {
-                      scanned.refetch();
-                      toast("Rescanning watched folder…");
-                    }}
-                    className="grid size-7 place-items-center rounded-[5px] text-muted-foreground hover:bg-panel3 hover:text-foreground"
-                  >
-                    <RefreshCw
-                      size={12}
-                      className={cn(scanned.isFetching && "animate-spin")}
-                    />
-                  </TooltipButton>
+                codeFolders.length > 0 ? (
+                  <>
+                    {activeFolder && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-2xs"
+                        onClick={() => setActiveFolder(null)}
+                      >
+                        Show all folders
+                      </Button>
+                    )}
+                    <TooltipButton
+                      tooltip="Look for new repositories"
+                      onClick={() => {
+                        scanned.refetch();
+                        toast("Looking for repositories…");
+                      }}
+                      className="grid size-7 place-items-center rounded-[5px] text-muted-foreground hover:bg-panel3 hover:text-foreground"
+                    >
+                      <RefreshCw
+                        size={12}
+                        className={cn(scanned.isFetching && "animate-spin")}
+                      />
+                    </TooltipButton>
+                  </>
                 ) : undefined
               }
             >
-              {codeFolder ? "Watched folder" : "Repositories"}
+              {codeFolders.length > 0 ? "Code folders" : "Repositories"}
             </SectionHeading>
             {!isSectionCollapsed("watched") && (
               <>
-                {!codeFolder && (
+                {codeFolders.length === 0 && (
                   <button
                     type="button"
                     onClick={pickCodeFolder}
@@ -1773,20 +1831,70 @@ function RepoPickerPanel({
                     </span>
                   </button>
                 )}
-                {codeFolder && scanned.isLoading && (
-                  <div className="flex items-center gap-2 px-3 py-6 text-xs text-muted-foreground">
-                    <Loader2 size={14} className="animate-spin" />
-                    Finding repositories…
-                  </div>
-                )}
-                {codeFolder && scanned.isError && (
-                  <div className="rounded-md border border-removed/30 bg-removed/5 px-3 py-3 text-xs text-removed">
-                    {(scanned.error as Error).message}
-                  </div>
-                )}
-                <div className="grid gap-0.5">
-                  {otherRepos.map(renderRepoRow)}
-                </div>
+                {folderSections.map(({ folder, repos }) => {
+                  // One folder in scope reads as a plain list; the band only
+                  // earns its space when more than one folder is on screen.
+                  const banded = folderSections.length > 1;
+                  if (
+                    !folder.isUnavailable &&
+                    !folder.isLoading &&
+                    repos.length === 0 &&
+                    banded
+                  )
+                    return null;
+                  return (
+                    <div key={folder.path} className={cn(banded && "mb-4")}>
+                      {banded && (
+                        <div className="sticky top-0 z-[2] mb-1.5 flex items-center gap-2 border-b border-border bg-background/95 py-1.5 backdrop-blur">
+                          <span className="truncate font-mono text-2xs font-medium text-sub">
+                            {folder.path}
+                          </span>
+                          {folder.primary && (
+                            <Star
+                              size={10}
+                              className="flex-none text-accent-text"
+                              fill="currentColor"
+                            />
+                          )}
+                          <span className="rounded-full bg-panel3 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+                            {folder.isUnavailable ? "—" : repos.length}
+                          </span>
+                          {folder.label && (
+                            <span className="truncate text-2xs text-muted-foreground">
+                              {folder.label}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {folder.isUnavailable ? (
+                        <div className="flex items-center gap-2.5 rounded-md border border-border-bright border-l-2 border-l-amber-500 bg-amber-500/5 px-3 py-2.5">
+                          <AlertTriangle
+                            size={14}
+                            className="flex-none text-amber-500"
+                          />
+                          <span className="min-w-0">
+                            <strong className="block truncate text-xs text-foreground">
+                              {folder.path} is not connected
+                            </strong>
+                            <small className="text-2xs text-muted-foreground">
+                              Plug the drive back in, then look again. Your
+                              groups keep these repositories until then.
+                            </small>
+                          </span>
+                        </div>
+                      ) : folder.isLoading ? (
+                        <div className="flex items-center gap-2 px-3 py-4 text-xs text-muted-foreground">
+                          <Loader2 size={14} className="animate-spin" />
+                          Finding repositories…
+                        </div>
+                      ) : (
+                        <div className="grid gap-0.5">
+                          {repos.map(renderRepoRow)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </>
             )}
           </section>
@@ -2482,49 +2590,163 @@ function RepoPickerPanel({
           <span className="hidden flex-1 lg:block" />
           <section className="mt-5 hidden rounded-lg border border-border bg-background p-3.5 shadow-[0_8px_24px_rgba(0,0,0,.08)] lg:block">
             <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[.09em] text-muted-foreground">
-              <Eye size={11} />
-              Watched folder
+              <Folder size={11} />
+              Code folders
+              {codeFolders.length > 0 && (
+                <span className="rounded-full bg-panel3 px-1.5 py-0.5 font-mono text-[9px] normal-case tracking-normal text-sub">
+                  {codeFolders.length}
+                </span>
+              )}
             </div>
-            {codeFolder ? (
-              <>
-                <div className="mt-2 truncate font-mono text-xs font-semibold text-foreground">
-                  {codeFolder}
-                </div>
-                <p className="mt-1 text-2xs text-muted-foreground">
-                  {scanned.isLoading
-                    ? "Finding repositories…"
-                    : `${scanned.data?.length ?? 0} repositories found automatically`}
-                </p>
-              </>
-            ) : (
+
+            {codeFolders.length === 0 ? (
               <p className="mt-2 text-2xs leading-4 text-muted-foreground">
-                Choose a folder to find repositories automatically.
+                Add a folder to find repositories automatically.
               </p>
+            ) : (
+              <div className="mt-2 grid max-h-52 gap-px overflow-y-auto">
+                <button
+                  type="button"
+                  aria-pressed={activeFolder == null}
+                  onClick={() => setActiveFolder(null)}
+                  className={cn(
+                    "grid grid-cols-[13px_minmax(0,1fr)_auto] items-center gap-2 rounded-[5px] border px-1.5 py-1 text-left",
+                    activeFolder == null
+                      ? "border-accent/40 bg-soft text-foreground"
+                      : "border-transparent text-sub hover:bg-panel2",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "size-1.5 justify-self-center rounded-full",
+                      activeFolder == null
+                        ? "bg-accent"
+                        : "bg-muted-foreground",
+                    )}
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate text-2xs font-medium">
+                      All folders
+                    </span>
+                  </span>
+                  <span
+                    className={cn(
+                      "font-mono text-[9px]",
+                      activeFolder == null
+                        ? "text-accent-text"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {scanned.repos.length}
+                  </span>
+                </button>
+
+                {scanned.folders.map((folder) => {
+                  const selected =
+                    activeFolder != null &&
+                    pathKey(activeFolder) === pathKey(folder.path);
+                  return (
+                    <button
+                      key={folder.path}
+                      type="button"
+                      title={folder.path}
+                      aria-pressed={selected}
+                      onClick={() => {
+                        if (folder.isUnavailable) {
+                          toast("That folder is not connected", {
+                            description: `Reconnect ${folder.path} to see its repositories.`,
+                          });
+                          return;
+                        }
+                        setActiveFolder(folder.path);
+                      }}
+                      className={cn(
+                        "grid grid-cols-[13px_minmax(0,1fr)_auto] items-center gap-2 rounded-[5px] border px-1.5 py-1 text-left",
+                        selected
+                          ? "border-accent/40 bg-soft text-foreground"
+                          : "border-transparent text-sub hover:bg-panel2",
+                        folder.isUnavailable && "text-muted-foreground",
+                      )}
+                    >
+                      <span className="grid justify-self-center">
+                        {folder.isUnavailable ? (
+                          <AlertTriangle size={11} className="text-amber-500" />
+                        ) : folder.isLoading ? (
+                          <RefreshCw
+                            size={10}
+                            className="animate-spin text-muted-foreground"
+                          />
+                        ) : folder.primary ? (
+                          <Star
+                            size={10}
+                            className="text-accent-text"
+                            fill="currentColor"
+                          />
+                        ) : (
+                          <span className="size-1.5 rounded-full bg-muted-foreground" />
+                        )}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate font-mono text-[10px] font-medium">
+                          {folder.path}
+                        </span>
+                        <span className="block truncate text-[9px] text-muted-foreground">
+                          {folder.isUnavailable
+                            ? "Not connected"
+                            : folder.isLoading
+                              ? "Looking…"
+                              : (folder.label ??
+                                (folder.primary ? "Main folder" : " "))}
+                        </span>
+                      </span>
+                      <span
+                        className={cn(
+                          "font-mono text-[9px]",
+                          selected ? "text-accent-text" : "text-muted-foreground",
+                        )}
+                      >
+                        {folder.isUnavailable ? "—" : folder.repos.length}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
+
             <div className="mt-3 flex gap-1.5">
               <Button
                 variant="secondary"
                 size="sm"
                 className="h-7 px-2 text-2xs"
-                onClick={pickCodeFolder}
+                onClick={() => setFolderManagerOpen(true)}
               >
-                {codeFolder ? "Change" : "Choose"}
+                Manage
               </Button>
-              {codeFolder && (
+              {codeFolders.length === 0 ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-2xs"
+                  onClick={pickCodeFolder}
+                >
+                  <Plus size={11} />
+                  Add folder
+                </Button>
+              ) : (
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-7 gap-1 px-2 text-2xs"
                   onClick={() => {
                     scanned.refetch();
-                    toast("Rescanning watched folder…");
+                    toast("Looking for repositories…");
                   }}
                 >
                   <RefreshCw
                     size={11}
                     className={cn(scanned.isFetching && "animate-spin")}
                   />
-                  Rescan
+                  Look again
                 </Button>
               )}
             </div>
@@ -2624,6 +2846,19 @@ function RepoPickerPanel({
           if (group) toast.success(`${group.name} removed from saved groups`);
         }}
       />
+
+      <Dialog open={folderManagerOpen} onOpenChange={setFolderManagerOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="text-base">Code folders</DialogTitle>
+            <DialogDescription className="text-xs">
+              GitWyrm looks inside these folders for your projects. Star the one
+              you use most: new projects and copies are saved there.
+            </DialogDescription>
+          </DialogHeader>
+          <CodeFoldersSetting />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

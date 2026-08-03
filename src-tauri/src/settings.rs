@@ -89,6 +89,20 @@ pub struct TabGroupSetting {
   pub repo_paths: Vec<String>,
 }
 
+/// A folder scanned for repositories. Several can be watched at once, each
+/// scanned on its own so an unplugged drive never holds up the others.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct CodeFolderSetting {
+  pub path: String,
+  /// Short name shown beside the path ("Main work"). None shows the path alone.
+  #[serde(default)]
+  pub label: Option<String>,
+  /// The default destination for clones and new repositories, and the folder
+  /// sorted first. Exactly one folder carries this; enforced on the frontend.
+  #[serde(default)]
+  pub primary: bool,
+}
+
 /// One repository's tag-setting overrides, keyed by repo path in `Settings`.
 /// Each field is optional: `Some` overrides the app-wide default for that repo,
 /// `None` (the default) means the repo follows the app-wide setting. Validated
@@ -117,8 +131,15 @@ pub struct Settings {
   pub active_repo_path: Option<String>,
   #[serde(default)]
   pub recents: Vec<RecentRepo>,
+  /// The single watched folder, superseded by `code_folders`. Still written as
+  /// the primary folder's path so an older build keeps working after a
+  /// downgrade, and read once on upgrade to seed `code_folders`.
   #[serde(default)]
   pub code_folder: Option<String>,
+  /// Every folder scanned for repositories. The source of truth; `code_folder`
+  /// mirrors whichever entry is primary.
+  #[serde(default)]
+  pub code_folders: Vec<CodeFolderSetting>,
   #[serde(default)]
   pub clone_directory: Option<String>,
   /// Path to the git executable used for fetch, pull, push, and clone. None
@@ -455,6 +476,7 @@ impl Default for Settings {
       active_repo_path: None,
       recents: Vec::new(),
       code_folder: None,
+      code_folders: Vec::new(),
       clone_directory: None,
       git_executable: None,
       gpg_executable: None,
@@ -928,6 +950,61 @@ mod tests {
     assert_eq!(restored.theme.as_deref(), Some("midnight"));
     assert_eq!(restored.theme_mode.as_deref(), Some("dark"));
     assert!(!restored.mint_accent);
+  }
+
+  #[test]
+  fn settings_written_before_code_folders_existed_still_load() {
+    // read_settings_in falls back to Settings::default() for the WHOLE file on a
+    // parse error, so a missing #[serde(default)] here would wipe every setting
+    // the user had. This pins that down.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let legacy = r#"{"code_folder":"C:\\code","clone_directory":"D:\\clones"}"#;
+    fs::write(dir.path().join("settings.json"), legacy).expect("write legacy");
+
+    let loaded = read_settings_in(dir.path());
+
+    assert_eq!(loaded.code_folder.as_deref(), Some("C:\\code"));
+    assert_eq!(loaded.clone_directory.as_deref(), Some("D:\\clones"));
+    assert!(
+      loaded.code_folders.is_empty(),
+      "absent code_folders defaults to empty, leaving the frontend to migrate"
+    );
+  }
+
+  #[test]
+  fn code_folders_survive_a_frontend_save() {
+    // code_folders is frontend-owned: it must NOT be carried over by
+    // keep_backend_owned_fields, or the list could never be changed.
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_settings_in(dir.path(), &Settings::default()).expect("seed write");
+
+    let mut from_frontend = Settings {
+      code_folder: Some("C:\\code".into()),
+      code_folders: vec![
+        CodeFolderSetting {
+          path: "C:\\code".into(),
+          label: Some("Main work".into()),
+          primary: true,
+        },
+        CodeFolderSetting {
+          path: "D:\\code".into(),
+          label: None,
+          primary: false,
+        },
+      ],
+      ..Settings::default()
+    };
+    keep_backend_owned_fields(&mut from_frontend, &read_settings_in(dir.path()));
+    write_settings_in(dir.path(), &from_frontend).expect("frontend write");
+
+    let after = read_settings_in(dir.path());
+    assert_eq!(after.code_folders.len(), 2);
+    assert_eq!(after.code_folders[0].path, "C:\\code");
+    assert_eq!(after.code_folders[0].label.as_deref(), Some("Main work"));
+    assert!(after.code_folders[0].primary);
+    assert!(!after.code_folders[1].primary);
+    // Mirrored for a downgrade to a build that only knows the single folder.
+    assert_eq!(after.code_folder.as_deref(), Some("C:\\code"));
   }
 
   #[test]

@@ -30,9 +30,9 @@ const TOUR_SLIDES: Slide[] = [
     title: 'Open your repositories',
     body: (
       <>
-        Open a single repo, or point GitWyrm at your code folder (like{' '}
+        Open a single repo, or point GitWyrm at the folders your code lives in (like{' '}
         <span className="font-mono text-foreground">C:\code</span>) to quick-launch everything
-        inside it. Clone straight from a URL, too.
+        inside them. Clone straight from a URL, too.
       </>
     ),
   },

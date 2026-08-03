@@ -6,6 +6,15 @@ import {
   type RepoInfo,
   type Settings,
 } from "@/lib/bindings";
+import {
+  addFolder,
+  deserializeCodeFolders,
+  primaryPathOf,
+  removeFolder,
+  setFolderLabel,
+  setPrimaryFolder,
+  type CodeFolder,
+} from "@/lib/codeFolders";
 import { log } from "@/lib/log";
 import { normalizePath, pathKey, samePath } from "@/lib/paths";
 import { broadcastSettingsChanged } from "@/lib/settingsSync";
@@ -464,9 +473,15 @@ interface WorkspaceState {
   activeRepoId: string | null;
   /** Recently opened repo paths, most recent first (persisted). */
   recents: RecentRepo[];
-  /** User-selected code folder scanned for quick-launch repos (persisted). */
-  codeFolder: string | null;
-  /** Default directory new clones go into (persisted; falls back to codeFolder). */
+  /**
+   * Folders scanned for quick-launch repos (persisted). Each is scanned on its
+   * own, so an unplugged drive never holds up the others.
+   */
+  codeFolders: CodeFolder[];
+  /**
+   * Default directory new clones go into (persisted; falls back to the primary
+   * code folder).
+   */
   cloneDirectory: string | null;
   /** Path to the git executable for fetch/pull/push/clone. Empty lets GitWyrm pick: PATH, then its bundled copy (persisted). */
   gitExecutable: string;
@@ -662,7 +677,14 @@ interface WorkspaceState {
   addReposInBackground: (repos: RepoInfo[]) => void;
   removeRepo: (id: string) => void;
   setActiveRepo: (id: string) => void;
-  setCodeFolder: (path: string | null) => void;
+  /** Watch another folder. Ignored when already watched; the first becomes primary. */
+  addCodeFolder: (path: string) => void;
+  /** Stop watching a folder. Removing the primary promotes the next one. */
+  removeCodeFolder: (path: string) => void;
+  /** Make this the default clone destination and sort it first. */
+  setPrimaryCodeFolder: (path: string) => void;
+  /** Rename a folder for display. Blank clears back to showing the path. */
+  setCodeFolderLabel: (path: string, label: string) => void;
   setCloneDirectory: (path: string | null) => void;
   /** Set the git executable path. Empty/blank falls back to PATH's git. */
   setGitExecutable: (path: string) => void;
@@ -848,7 +870,14 @@ function toSettings(s: WorkspaceState): Settings {
       return active ? normalizePath(active.path) : null;
     })(),
     recents: s.recents.map((r) => ({ name: r.name, path: r.path })),
-    code_folder: s.codeFolder,
+    // Mirrored so a downgrade to a build that only knows one folder still finds
+    // the one the user cares about most. code_folders is the source of truth.
+    code_folder: primaryPathOf(s.codeFolders),
+    code_folders: s.codeFolders.map((folder) => ({
+      path: folder.path,
+      label: folder.label,
+      primary: folder.primary,
+    })),
     clone_directory: s.cloneDirectory,
     git_executable: s.gitExecutable.trim() ? s.gitExecutable.trim() : null,
     gpg_executable: s.gpgExecutable.trim() ? s.gpgExecutable.trim() : null,
@@ -1163,7 +1192,7 @@ export function flushPendingSettings(): Promise<unknown> {
  * excluded: resetting preferences must never close tabs or drop groups.
  */
 export const SETTINGS_DEFAULTS = {
-  codeFolder: null,
+  codeFolders: [],
   cloneDirectory: null,
   repoPickerCollapsedSections: [],
   gitExecutable: "",
@@ -1212,7 +1241,7 @@ export type SettingsKey = keyof typeof SETTINGS_DEFAULTS;
 /** Which preference keys each settings screen owns, for per-screen reset. */
 export const SETTINGS_GROUPS = {
   general: [
-    "codeFolder",
+    "codeFolders",
     "cloneDirectory",
     "repoPickerCollapsedSections",
     "gitExecutable",
@@ -1259,7 +1288,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   openRepos: [],
   activeRepoId: null,
   recents: [],
-  codeFolder: null,
+  codeFolders: [],
   cloneDirectory: null,
   gitExecutable: "",
   gpgExecutable: "",
@@ -1436,8 +1465,20 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     schedulePersist();
   },
-  setCodeFolder: (path) => {
-    set({ codeFolder: path ? normalizePath(path) : null });
+  addCodeFolder: (path) => {
+    set((s) => ({ codeFolders: addFolder(s.codeFolders, path) }));
+    schedulePersist();
+  },
+  removeCodeFolder: (path) => {
+    set((s) => ({ codeFolders: removeFolder(s.codeFolders, path) }));
+    schedulePersist();
+  },
+  setPrimaryCodeFolder: (path) => {
+    set((s) => ({ codeFolders: setPrimaryFolder(s.codeFolders, path) }));
+    schedulePersist();
+  },
+  setCodeFolderLabel: (path, label) => {
+    set((s) => ({ codeFolders: setFolderLabel(s.codeFolders, path, label) }));
     schedulePersist();
   },
   setCloneDirectory: (path) => {
@@ -2346,7 +2387,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       );
       set({
         recents: settings.recents ?? [],
-        codeFolder: settings.code_folder ?? null,
+        codeFolders: deserializeCodeFolders(
+          settings.code_folders,
+          settings.code_folder,
+        ),
         cloneDirectory: settings.clone_directory ?? null,
         gitExecutable: settings.git_executable ?? "",
         gpgExecutable: settings.gpg_executable ?? "",
@@ -2541,6 +2585,17 @@ useWorkspaceStore.subscribe((s, prev) => {
   if (s.activeRepoId !== prev.activeRepoId)
     useUiStore.getState().resetForRepoSwitch();
 });
+
+export { primaryFirst } from "@/lib/codeFolders";
+export type { CodeFolder } from "@/lib/codeFolders";
+
+/**
+ * The starred folder's path, or null when no folder is watched. This is the
+ * default destination for clones and new repositories.
+ */
+export function usePrimaryCodeFolder(): string | null {
+  return useWorkspaceStore((s) => primaryPathOf(s.codeFolders));
+}
 
 export function useActiveRepo(): RepoInfo | null {
   const openRepos = useWorkspaceStore((s) => s.openRepos);
