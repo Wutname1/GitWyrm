@@ -1360,7 +1360,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   tabIconOnly: false,
   verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
   repoIconRevisions: {},
-  tabLayout: "horizontal",
+  tabLayout: "vertical",
   horizontalTabRow: false,
   tabGroups: [],
   tabOrder: [],
@@ -2518,7 +2518,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.vertical_tab_width ?? DEFAULT_VERTICAL_TAB_WIDTH,
         ),
         tabLayout:
-          settings.tab_layout === "vertical" ? "vertical" : "horizontal",
+          settings.tab_layout === "horizontal" ? "horizontal" : "vertical",
         horizontalTabRow: settings.horizontal_tab_row ?? false,
         tabGroups,
         tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),

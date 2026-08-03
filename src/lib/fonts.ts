@@ -15,8 +15,8 @@ export interface FontOption {
   bundled: boolean
 }
 
-/** The default font id (IBM Plex Sans, the app's original UI font). */
-export const DEFAULT_FONT_ID = 'plex'
+/** The default font id (Inter, the app's UI font). */
+export const DEFAULT_FONT_ID = 'inter'
 
 /**
  * Fonts bundled with the app (imported in index.css). These always render

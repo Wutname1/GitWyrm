@@ -335,7 +335,7 @@ pub struct Settings {
   /// Saved width of the vertical repository rail in logical pixels.
   #[serde(default = "default_vertical_tab_width")]
   pub vertical_tab_width: f64,
-  /// "horizontal" or "vertical". Unknown values fall back to horizontal on
+  /// "horizontal" or "vertical". Unknown values fall back to vertical on
   /// the frontend so older and hand-edited settings remain safe.
   #[serde(default)]
   pub tab_layout: Option<String>,
