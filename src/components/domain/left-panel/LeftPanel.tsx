@@ -31,6 +31,7 @@ import { SpecsSection } from './SpecsSection'
 import { useOpenspecChanges, useOpenspecStatus } from '@/hooks/useOpenspec'
 import { openSpecDesk } from '@/lib/specDesk'
 import { SubmodulesSection } from './SubmodulesSection'
+import { WorktreesSection } from './WorktreesSection'
 
 export function LeftPanel() {
   const repo = useActiveRepo()
@@ -436,6 +437,7 @@ export function LeftPanel() {
 
       <RemotesSection remotes={remotes.data ?? []} onManage={() => openModal('remotes')} />
 
+      <WorktreesSection />
       <SubmodulesSection />
 
       {/* Shown whenever Spec Desk is switched on, including in a repo with no

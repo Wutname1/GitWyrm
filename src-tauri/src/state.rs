@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use git2::{Oid, Repository};
@@ -91,6 +91,14 @@ impl RepoManager {
   pub fn close(&self, id: &str) {
     self.repos.lock().unwrap().remove(id);
   }
+}
+
+/// The id a workdir would get if opened.
+///
+/// Public so worktree removal can find and release the handle for a folder it
+/// is about to delete, without needing that folder to be open as a tab first.
+pub fn repo_id_for(workdir: &Path) -> String {
+  repo_id(&workdir.to_path_buf())
 }
 
 fn repo_id(workdir: &PathBuf) -> String {

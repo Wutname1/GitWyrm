@@ -574,8 +574,23 @@ interface WorkspaceState {
    * app-wide default. A repo with no entry follows the defaults entirely (persisted).
    */
   tagOverridesByRepo: Record<string, TagOverride>;
-  /** Show worktree actions and the worktree sidebar section (persisted). */
+  /**
+   * Offer to *create* worktrees (persisted).
+   *
+   * Governs creation, not visibility: a worktree that already exists is always
+   * listed and manageable, because a checkout the user cannot see is one they
+   * cannot open, remove, or repair when it goes wrong.
+   */
   enableWorktrees: boolean;
+  /**
+   * True once the user has deliberately set the worktrees toggle either way
+   * (persisted).
+   *
+   * The auto-enable is a first-encounter courtesy. Without this, a deliberate
+   * "off" is indistinguishable from "never asked" and the setting would keep
+   * turning itself back on the next time a worktree appeared.
+   */
+  worktreesSettingTouched: boolean;
   /**
    * Show the Spec Desk button and the sidebar Specs section (persisted).
    *
@@ -913,6 +928,7 @@ function toSettings(s: WorkspaceState): Settings {
     tag_delete_on_remote: s.tagDeleteOnRemote,
     tag_overrides_by_repo: serializeTagOverrides(s.tagOverridesByRepo),
     enable_worktrees: s.enableWorktrees,
+    worktrees_setting_touched: s.worktreesSettingTouched,
     enable_spec_desk: s.enableSpecDesk,
     openspec_archive_without_asking: s.openspecArchiveWithoutAsking,
     openspec_delete_without_asking: s.openspecDeleteWithoutAsking,
@@ -1204,6 +1220,7 @@ export const SETTINGS_DEFAULTS = {
   commitButtonMode: "commit",
   defaultEditor: DEFAULT_EDITOR,
   enableWorktrees: false,
+  worktreesSettingTouched: false,
   enableSpecDesk: true,
   openspecArchiveWithoutAsking: false,
   openspecDeleteWithoutAsking: false,
@@ -1250,6 +1267,7 @@ export const SETTINGS_GROUPS = {
     "commitButtonMode",
     "defaultEditor",
     "enableWorktrees",
+    "worktreesSettingTouched",
   ],
   behavior: ["restoreTabs", "autoFetch"],
   tags: ["tagPushDefault", "tagPushOnCreate", "tagDeleteOnRemote"],
@@ -1321,6 +1339,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   tagDeleteOnRemote: true,
   tagOverridesByRepo: {},
   enableWorktrees: false,
+  worktreesSettingTouched: false,
   enableSpecDesk: true,
   openspecArchiveWithoutAsking: false,
   openspecDeleteWithoutAsking: false,
@@ -1674,7 +1693,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     };
   },
   setEnableWorktrees: (enabled) => {
-    set({ enableWorktrees: enabled });
+    // Record the deliberate choice so the first-encounter auto-enable can never
+    // override it later.
+    set({ enableWorktrees: enabled, worktreesSettingTouched: true });
     schedulePersist();
   },
   setEnableSpecDesk: (enabled) => {
@@ -2457,6 +2478,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.tag_overrides_by_repo,
         ),
         enableWorktrees: settings.enable_worktrees ?? false,
+        worktreesSettingTouched: settings.worktrees_setting_touched ?? false,
         // Absent means on: a settings file written before this flag existed
         // belongs to a user who could already see the Specs surfaces.
         enableSpecDesk: settings.enable_spec_desk !== false,

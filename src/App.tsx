@@ -21,6 +21,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { NewBranchModal } from '@/components/modals/NewBranchModal'
 import { NewTagModal } from '@/components/modals/NewTagModal'
 import { AddSubmoduleModal } from '@/components/modals/AddSubmoduleModal'
+import { AddWorktreeModal } from '@/components/modals/AddWorktreeModal'
 import { NewChangeModal } from '@/components/modals/NewChangeModal'
 import { AiSettingsModal } from '@/components/modals/AiSettingsModal'
 import { PushTagsModal } from '@/components/modals/PushTagsModal'
@@ -313,13 +314,19 @@ function AppInner() {
   // above covers app start; this covers the hours after.
   useEffect(() => useUpdater.getState().startAutoCheck(AUTO_CHECK_INTERVAL_MS), [])
 
-  // Auto-enable the worktree feature the first time we see a repo that already
-  // has linked worktrees, so existing worktree users get the UI without hunting
-  // for the setting. Never turns it back off; that's the user's choice.
+  // Turn the worktrees feature on the first time we meet a repository that
+  // already has one, so an existing worktree user never has to find the toggle.
+  //
+  // This is a first-encounter courtesy only: once the user has set the toggle
+  // themselves it never fires again, in either direction. It also no longer has
+  // to be what makes worktrees visible -- the section lists whatever exists
+  // regardless of the setting, so a deliberate "off" still shows and manages
+  // them, just without Add.
   useEffect(() => {
     if (!activeRepoId) return
-    const { enableWorktrees, setEnableWorktrees } = useWorkspaceStore.getState()
-    if (enableWorktrees) return
+    const { enableWorktrees, worktreesSettingTouched, setEnableWorktrees } =
+      useWorkspaceStore.getState()
+    if (enableWorktrees || worktreesSettingTouched) return
     void commands.hasWorktrees(activeRepoId).then((r) => {
       if (r.status === 'ok' && r.data) setEnableWorktrees(true)
     })
@@ -384,6 +391,7 @@ function AppInner() {
       <NewBranchModal />
       <NewTagModal />
       <AddSubmoduleModal />
+      <AddWorktreeModal />
       <NewChangeModal />
       <PushTagsModal />
       <RemotesModal />

@@ -21,6 +21,7 @@ pub use git::refs as git_refs;
 pub use git::spec_link as git_spec_link;
 pub use git::submodule as git_submodule;
 pub use git::trailers as git_trailers;
+pub use git::worktree as git_worktree;
 /// Exposed for the ssh_config integration test: this rewrites a file the app
 /// does not own, so it is tested against real config shapes.
 pub use git::ssh::rewrite_config as ssh_config_rewrite;
@@ -171,6 +172,16 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::submodule::add_submodule,
     commands::submodule::remove_submodule,
     commands::submodule::submodule_workdir,
+    commands::worktree::list_worktrees,
+    commands::worktree::worktree_dirty_count,
+    commands::worktree::suggest_worktree_path,
+    commands::worktree::check_worktree_path,
+    commands::worktree::branch_holder,
+    commands::worktree::worktree_copyable_files,
+    commands::worktree::add_worktree,
+    commands::worktree::remove_worktree,
+    commands::worktree::prune_worktrees,
+    commands::worktree::repair_worktree,
     commands::remote::git_fetch,
     commands::remote::git_pull,
     commands::remote::git_push,
@@ -242,6 +253,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::airun::ai_run_stop,
     commands::airun::ai_run_current,
     commands::airun::ai_run_clear,
+    commands::airun::ai_run_discard_plan,
     commands::airun::ai_run_completion,
     commands::openspec::openspec_status,
     commands::openspec::openspec_list_changes,

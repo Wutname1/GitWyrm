@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bot, Check, CircleDot, FileText, GitCommitHorizontal, ListChecks, Pencil, Scale } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import type { SpecChange, SpecTask } from '@/lib/bindings'
+import type { RunDiscardPlan, SpecChange, SpecTask } from '@/lib/bindings'
 import { commands } from '@/lib/bindings'
 import { Markdown } from '@/components/ui/markdown'
 import { TooltipHint } from '@/components/ui/tooltip'
@@ -443,6 +443,13 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
   const { startRun, canStart: canStartRun } = useStartRun(repoId, change)
   const ai = useSpecAi()
   const [confirmUndo, setConfirmUndo] = useState(false)
+  /**
+   * Set when a discard found hand edits in the run's own folder, so the user is
+   * asked before it goes. Carries the counts, because deciding needs them.
+   */
+  const [handEdited, setHandEdited] = useState<
+    Extract<RunDiscardPlan, { kind: 'handEdited' }> | null
+  >(null)
   const [undoing, setUndoing] = useState(false)
   /**
    * The file currently open in the editor, relative to the change folder, or
@@ -486,19 +493,40 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
    * discarded work would claim a task was done when its changes are gone, which
    * is worse than the reverse.
    */
-  const undoRun = async () => {
+  const undoRun = async (keepFolder = false) => {
     const session = run.session
     if (!session || undoing) return
     setUndoing(true)
     try {
-      unwrap(await commands.discardAll(repoId))
+      // A run that worked in its own folder is undone by removing that folder,
+      // not by discarding changes in the user's checkout -- there are none
+      // there to discard, and discarding would throw away the user's own work.
+      const plan = unwrap(await commands.aiRunDiscardPlan(repoId))
+
+      if (plan.kind === 'noFolder') {
+        unwrap(await commands.discardAll(repoId))
+      } else if (plan.kind === 'handEdited' && !keepFolder) {
+        // Ask before deleting a folder the user worked in. A discard is about
+        // throwing away the AI's result, not theirs.
+        setHandEdited(plan)
+        setUndoing(false)
+        return
+      } else if (!keepFolder) {
+        unwrap(await commands.removeWorktree(repoId, plan.path, 'discard'))
+      }
+
       const line = change.tasks.find((t) => t.text === session.task_text)?.line
       if (line != null) {
         await commands.openspecToggleTask(repoId, session.change_id, line, false)
       }
       await run.clear()
       setConfirmUndo(false)
-      toast.success("Undone. The AI's edits are gone and the task is open again.")
+      setHandEdited(null)
+      toast.success(
+        keepFolder
+          ? 'Undone. The task is open again, and the folder is kept in your Folders list.'
+          : "Undone. The AI's edits are gone and the task is open again."
+      )
     } catch (e) {
       toast.error('Could not undo that.', { description: describeError(e) })
     } finally {
@@ -995,6 +1023,10 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
                     session.task_number,
                     session.task_text,
                     session.branch,
+                    // Restart the way the run was started. A run the user set
+                    // up to stay out of their files must not quietly start
+                    // editing them on a retry.
+                    session.worktree_path != null,
                   );
                   if (res.status !== "ok") {
                     toast.error("That could not be restarted.", {
@@ -1056,6 +1088,31 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
         pending={undoing}
         pendingLabel="Undoing…"
         onConfirm={() => void undoRun()}
+      />
+
+      {/* A run's folder the user worked in is never silently deleted. Discard
+          throws away the AI's result, not theirs. */}
+      <ConfirmDialog
+        open={handEdited != null}
+        onOpenChange={(o) => !o && setHandEdited(null)}
+        title="You've made your own edits in that folder"
+        description={
+          handEdited && (
+            <>
+              The <span className="font-mono text-foreground">{handEdited.folder_name}</span> folder
+              has {handEdited.modified > 0 && `${handEdited.modified} file${handEdited.modified === 1 ? '' : 's'} you changed`}
+              {handEdited.modified > 0 && handEdited.untracked > 0 && ' and '}
+              {handEdited.untracked > 0 &&
+                `${handEdited.untracked} new file${handEdited.untracked === 1 ? '' : 's'} that ${handEdited.untracked === 1 ? 'has' : 'have'} never been saved anywhere`}
+              . Keeping it leaves an ordinary folder in your Folders list that you can open or
+              remove whenever you like.
+            </>
+          )
+        }
+        confirmLabel="Keep the folder"
+        pending={undoing}
+        pendingLabel="Undoing…"
+        onConfirm={() => void undoRun(true)}
       />
     </div>
   );

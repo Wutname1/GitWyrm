@@ -23,6 +23,7 @@ export type ModalKind =
   | 'remotes'
   | 'githubConnect'
   | 'addSubmodule'
+  | 'addWorktree'
   | 'newChange'
   | 'aiSettings'
   | null

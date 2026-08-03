@@ -85,8 +85,18 @@ export function AiRunTab({
         <div className="mt-1.5 flex items-start gap-1.5 text-2xs text-muted-foreground">
           <ShieldCheck size={11} className="mt-0.5 flex-none" />
           <span>
-            Working on <span className="text-sub">{session.branch}</span>. One commit per
-            task, never pushes, and you can undo everything it does.
+            Working on <span className="text-sub">{session.branch}</span>
+            {/* Name the folder whenever it is not the user's own. A run that
+                says "working on branch X" while editing files the user cannot
+                see would be claiming to touch the files in front of them. */}
+            {session.worktree_name && (
+              <>
+                {' '}
+                in its own <span className="text-sub">{session.worktree_name}</span> folder, so
+                your files stay untouched while it works
+              </>
+            )}
+            . One commit per task, never pushes, and you can undo everything it does.
           </span>
         </div>
       </div>

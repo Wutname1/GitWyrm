@@ -7,9 +7,11 @@ use crate::git::history;
 use crate::git::refs;
 use crate::git::remote_url;
 use crate::git::types::{
-  BranchInfo, BranchList, BranchRelation, CheckoutOutcome, RefMove, ResetMode, SyncState, TagInfo,
+  BranchDeleteOutcome, BranchInfo, BranchList, BranchRelation, CheckoutOutcome, RefMove, ResetMode,
+  SyncState, TagInfo,
 };
 use crate::git::version_sort::compare_tag_names;
+use crate::git::worktree;
 use crate::settings::BranchSwitchMode;
 use crate::state::RepoManager;
 
@@ -199,6 +201,16 @@ pub async fn checkout_branch(
 
     // Picking a remote branch lands on a local tracking branch, not detached HEAD.
     let name = resolve_switch_target(&repo, &name)?;
+
+    // A branch can only be checked out in one folder at a time. Git refuses
+    // this with text that names neither the folder nor a way forward, so catch
+    // it here and hand back the worktree that holds it -- the UI's offer to
+    // open that folder is the only useful thing to do about it.
+    if let Some(holder) = worktree::holder_of_branch(&repo, &name) {
+      if !holder.is_current {
+        return Ok(CheckoutOutcome::HeldByWorktree);
+      }
+    }
 
     if !refs::any_changes_present(&repo)? {
       switch_to(&repo, &name)?;
@@ -459,24 +471,42 @@ pub async fn delete_tag(
 }
 
 /// Delete a local branch. Refuses to delete the branch HEAD is on.
+///
+/// A branch a worktree holds comes back as a typed refusal naming that folder,
+/// not as an error. "The branch is in use" is the report that leaves people
+/// hunting for where -- and the way out (remove the worktree first) is
+/// something GitWyrm can just offer.
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_branch(
   manager: State<'_, RepoManager>,
   repo_id: String,
   name: String,
-) -> Result<(), AppError> {
+) -> Result<BranchDeleteOutcome, AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    let mut branch = repo.find_branch(name.trim(), BranchType::Local)?;
+    let name = name.trim();
+    let mut branch = repo.find_branch(name, BranchType::Local)?;
     if branch.is_head() {
       return Err(AppError::Other(
         "that is the branch you're on; switch to another branch first".into(),
       ));
     }
+
+    // Another checkout has it. Report which one so the caller can offer to
+    // remove that worktree and then finish the deletion the user asked for.
+    if let Some(holder) = worktree::holder_of_branch(&repo, name) {
+      if !holder.is_current {
+        return Ok(BranchDeleteOutcome::HeldByWorktree {
+          folder_name: holder.folder_name,
+          path: holder.path,
+        });
+      }
+    }
+
     branch.delete()?;
-    Ok(())
+    Ok(BranchDeleteOutcome::Deleted)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

@@ -199,6 +199,8 @@ export function DeskActionRail({
     delta: DraftedArtifact;
   } | null>(null);
   const { startRun, starting } = useStartRun(repoId, change);
+  /** Run the task in its own copy of the project. Off by default. */
+  const [ownFolder, setOwnFolder] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   // A failed archive, with the change it belongs to. Carries its own id for the
   // same reason the drafted fix does: the user can select elsewhere while
@@ -463,12 +465,33 @@ export function DeskActionRail({
             {ai.configured ? (
               <>
                 {task && (
-                  <RailButton
-                    primary
-                    icon={<Play size={12} strokeWidth={2.6} />}
-                    label={starting ? "Starting…" : "Run this task with AI"}
-                    onClick={() => void startRun()}
-                  />
+                  <>
+                    <RailButton
+                      primary
+                      icon={<Play size={12} strokeWidth={2.6} />}
+                      label={starting ? "Starting…" : "Run this task with AI"}
+                      onClick={() => void startRun(ownFolder)}
+                    />
+                    {/* Off by default. A run already leaves the user's work
+                        untouched by setting it aside; a folder is only worth
+                        its cleanup cost when they want to keep editing the
+                        same files while it works. */}
+                    <label className="flex cursor-pointer items-start gap-1.5 px-0.5 text-2xs leading-relaxed text-sub hover:text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={ownFolder}
+                        onChange={(e) => setOwnFolder(e.target.checked)}
+                        className="mt-0.5 size-3 flex-none accent-[var(--gw-accent)]"
+                      />
+                      <span>
+                        Work in its own folder so you can keep editing
+                        <span className="block text-muted-foreground">
+                          Makes a separate copy of your files for the task, then shows you what
+                          changed before anything reaches your branch.
+                        </span>
+                      </span>
+                    </label>
+                  </>
                 )}
                 {/* Ask shares the ✦ tab with runs, and only one session exists at
                     a time, so this is off while a run is working rather than

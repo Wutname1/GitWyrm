@@ -1,5 +1,5 @@
-import { Download, Loader2, Minus, Plus, RotateCcw, Search } from 'lucide-react'
-import { useBranches, useStatus } from '@/hooks/useGitQueries'
+import { Download, FolderGit2, Loader2, Minus, Plus, RotateCcw, Search } from 'lucide-react'
+import { useBranches, useStatus, useWorktrees } from '@/hooks/useGitQueries'
 import { useOpenspecStatus } from '@/hooks/useOpenspec'
 import { isActive, stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
 import { useUpdater } from '@/hooks/useUpdater'
@@ -213,6 +213,14 @@ export function StatusBar() {
   const repo = useActiveRepo()
   const status = useStatus(repo?.id ?? null)
   const branches = useBranches(repo?.id ?? null)
+  const { data: worktrees } = useWorktrees(repo?.id ?? null)
+
+  // Name the checkout whenever it is not the project's original folder. With
+  // sibling tabs of one project open, "which folder am I committing into" is
+  // the question the status bar exists to answer, and a path alone makes the
+  // reader work it out.
+  const current = worktrees?.find((w) => w.is_current)
+  const inWorktree = current != null && !current.is_main
 
   const head = branches.data?.local.find((b) => b.is_head)
   const sync = head ? branchSync(head) : null
@@ -234,6 +242,16 @@ export function StatusBar() {
       <OpenspecSegment />
       <div className="flex-1" />
       <UpdateButton />
+      {inWorktree && current && (
+        <TooltipHint
+          label={`You're working in the ${current.folder_name} folder, a separate copy of this project. Commits here don't touch the original folder.`}
+        >
+          <span className="flex items-center gap-1 text-[var(--gw-accent-text)]">
+            <FolderGit2 size={9} />
+            {current.folder_name}
+          </span>
+        </TooltipHint>
+      )}
       {repo && <span className="text-muted-foreground">{repo.path}</span>}
       <ZoomControl />
     </div>

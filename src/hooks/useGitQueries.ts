@@ -106,6 +106,22 @@ export function useSubmodules(repoId: string | null) {
   })
 }
 
+/**
+ * Every checkout of this project: the main folder first, then linked
+ * worktrees.
+ *
+ * The section's own presence is driven by this query, so a worktree created in
+ * a terminal makes the section appear without any other trigger -- the watcher
+ * covers `.git/worktrees`, which is where that lands.
+ */
+export function useWorktrees(repoId: string | null) {
+  return useQuery({
+    queryKey: keys.worktrees(repoId ?? 'none'),
+    enabled: repoId != null,
+    queryFn: async () => unwrap(await commands.listWorktrees(repoId!)),
+  })
+}
+
 export function useRemotes(repoId: string | null) {
   return useQuery({
     queryKey: keys.remotes(repoId ?? 'none'),

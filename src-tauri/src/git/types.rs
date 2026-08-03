@@ -255,6 +255,24 @@ pub enum CheckoutOutcome {
   /// working tree does NOT have the changes, so the user must be told where
   /// their work went.
   StashNotReapplied,
+  /// Nothing happened: another worktree already has that branch checked out, so
+  /// git would refuse. The details the UI needs -- which folder holds it, so it
+  /// can offer to open that one -- come back from `branch_holder`, keeping this
+  /// enum a flat string union the way every existing call site reads it.
+  HeldByWorktree,
+}
+
+/// What happened when a branch deletion was attempted.
+///
+/// Typed rather than an error string because the refusal carries an offer: the
+/// worktree holding the branch can be removed, and then the deletion the user
+/// originally asked for can go ahead. That chain is the thing that makes
+/// branches feel undeletable when git reports it as plain text.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum BranchDeleteOutcome {
+  Deleted,
+  HeldByWorktree { folder_name: String, path: String },
 }
 
 #[derive(Debug, Clone, Serialize, Type)]

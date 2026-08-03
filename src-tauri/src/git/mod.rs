@@ -15,3 +15,4 @@ pub mod submodule;
 pub mod trailers;
 pub mod types;
 pub mod version_sort;
+pub mod worktree;

@@ -33,6 +33,12 @@ export function useRepoWatcher(onlyRepoId?: string | null) {
       queryClient.invalidateQueries({ queryKey: keys.stashes(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.tags(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.mergeState(repoId) })
+      // A worktree added or removed in a terminal lands in `.git/worktrees`,
+      // which the backend watcher now reports. Invalidating here is what makes
+      // the section appear (or a row disappear) while the window is open and
+      // focused -- re-checking when a repository becomes active cannot see a
+      // terminal running beside it.
+      queryClient.invalidateQueries({ queryKey: keys.worktrees(repoId) })
       // Prefix match: refreshes every open conflict file for this repo.
       queryClient.invalidateQueries({ queryKey: ['conflict', repoId] })
       // The openspec folder lives in the working tree, so the same watcher

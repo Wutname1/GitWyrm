@@ -10,6 +10,7 @@ export const keys = {
   remotes: (repoId: string) => ['remotes', repoId] as const,
   stashes: (repoId: string) => ['stashes', repoId] as const,
   submodules: (repoId: string) => ['submodules', repoId] as const,
+  worktrees: (repoId: string) => ['worktrees', repoId] as const,
   commitDetail: (repoId: string, sha: string) => ['commit', repoId, sha] as const,
   fileDiff: (repoId: string, path: string, source: DiffSource) =>
     ['diff', repoId, path, source] as const,

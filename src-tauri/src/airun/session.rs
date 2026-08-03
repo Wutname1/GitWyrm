@@ -26,6 +26,17 @@ pub struct RunSession {
   pub task_text: String,
   /// Branch the run is pinned to. A run must not continue on another.
   pub branch: String,
+  /// The folder this run is actually working in, when that is not the user's
+  /// own checkout.
+  ///
+  /// The console's guardrail line has to name it: a run that says "working on
+  /// branch X" while editing files in a folder the user cannot see is exactly
+  /// the header dishonesty the run promise forbids. None means the run is
+  /// working in the user's checkout, as it always did.
+  pub worktree_path: Option<String>,
+  /// Folder name of `worktree_path`, for the guardrail line. Stored rather than
+  /// derived so the UI never has to parse a path.
+  pub worktree_name: Option<String>,
   pub state: RunState,
   pub steps: Vec<RunStep>,
 }
@@ -75,6 +86,7 @@ impl SessionRegistry {
     task_number: u32,
     task_text: &str,
     branch: &str,
+    worktree: Option<(String, String)>,
   ) -> Result<RunSession, StartRefusal> {
     let mut map = self.inner.lock().unwrap();
     if let Some(existing) = map.get(repo_id) {
@@ -95,6 +107,8 @@ impl SessionRegistry {
       task_number,
       task_text: task_text.to_string(),
       branch: branch.to_string(),
+      worktree_path: worktree.as_ref().map(|(p, _)| p.clone()),
+      worktree_name: worktree.as_ref().map(|(_, n)| n.clone()),
       state: RunState::Preparing,
       steps: Vec::new(),
     };
@@ -153,8 +167,8 @@ mod tests {
   #[test]
   fn a_second_run_is_refused_with_a_route_to_the_first() {
     let r = reg();
-    r.start("repo", "chg", 1, "do a thing", "main").unwrap();
-    let err = r.start("repo", "chg", 2, "another", "main").unwrap_err();
+    r.start("repo", "chg", 1, "do a thing", "main", None).unwrap();
+    let err = r.start("repo", "chg", 2, "another", "main", None).unwrap_err();
     let StartRefusal::AlreadyRunning { summary, .. } = err;
     assert!(summary.contains("already running"), "{summary}");
     assert!(summary.contains("AI tab"), "should say where to look: {summary}");
@@ -163,16 +177,16 @@ mod tests {
   #[test]
   fn a_finished_run_does_not_block_the_next() {
     let r = reg();
-    let s = r.start("repo", "chg", 1, "first", "main").unwrap();
+    let s = r.start("repo", "chg", 1, "first", "main", None).unwrap();
     r.record(&event("repo", &s.session_id, RunState::Finished));
-    assert!(r.start("repo", "chg", 2, "second", "main").is_ok());
+    assert!(r.start("repo", "chg", 2, "second", "main", None).is_ok());
   }
 
   #[test]
   fn two_repositories_run_independently() {
     let r = reg();
-    r.start("a", "chg", 1, "t", "main").unwrap();
-    assert!(r.start("b", "chg", 1, "t", "main").is_ok());
+    r.start("a", "chg", 1, "t", "main", None).unwrap();
+    assert!(r.start("b", "chg", 1, "t", "main", None).is_ok());
   }
 
   #[test]
@@ -180,9 +194,9 @@ mod tests {
     // The integrity rule: a driver still finishing when its session was
     // replaced must not appear in the new run's stream.
     let r = reg();
-    let first = r.start("repo", "chg", 1, "first", "main").unwrap();
+    let first = r.start("repo", "chg", 1, "first", "main", None).unwrap();
     r.record(&event("repo", &first.session_id, RunState::Finished));
-    let second = r.start("repo", "chg", 2, "second", "main").unwrap();
+    let second = r.start("repo", "chg", 2, "second", "main", None).unwrap();
 
     assert!(!r.record(&event("repo", &first.session_id, RunState::Working)));
     let now = r.get("repo").unwrap();
@@ -194,6 +208,34 @@ mod tests {
   }
 
   #[test]
+  fn a_run_without_its_own_folder_says_so() {
+    // None is what makes the guardrail line stay as it always was: the run is
+    // working in the user's own checkout.
+    let r = reg();
+    let s = r.start("repo", "chg", 1, "t", "main", None).unwrap();
+    assert!(s.worktree_path.is_none());
+    assert!(s.worktree_name.is_none());
+  }
+
+  #[test]
+  fn an_isolated_run_carries_the_folder_the_console_must_name() {
+    let r = reg();
+    let s = r
+      .start(
+        "repo",
+        "chg",
+        1,
+        "t",
+        "main",
+        Some(("C:/code/proj-task".into(), "proj-task".into())),
+      )
+      .unwrap();
+    assert_eq!(s.worktree_path.as_deref(), Some("C:/code/proj-task"));
+    // The name is stored, not derived, so the console never parses a path.
+    assert_eq!(s.worktree_name.as_deref(), Some("proj-task"));
+  }
+
+  #[test]
   fn an_event_for_an_unknown_repository_is_dropped() {
     let r = reg();
     assert!(!r.record(&event("nobody", "run-1", RunState::Working)));
@@ -202,7 +244,7 @@ mod tests {
   #[test]
   fn the_header_names_the_runs_own_task() {
     let r = reg();
-    let s = r.start("repo", "chg", 3, "Add a settings toggle", "main").unwrap();
+    let s = r.start("repo", "chg", 3, "Add a settings toggle", "main", None).unwrap();
     assert_eq!(s.header(), "Task 3 · Add a settings toggle");
     assert_eq!(s.change_id, "chg", "the header must show the run's own change");
   }
@@ -210,7 +252,7 @@ mod tests {
   #[test]
   fn recording_moves_the_session_state() {
     let r = reg();
-    let s = r.start("repo", "chg", 1, "t", "main").unwrap();
+    let s = r.start("repo", "chg", 1, "t", "main", None).unwrap();
     assert_eq!(s.state, RunState::Preparing);
     r.record(&event("repo", &s.session_id, RunState::NeedsYou));
     assert_eq!(r.get("repo").unwrap().state, RunState::NeedsYou);

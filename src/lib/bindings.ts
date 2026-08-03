@@ -1089,8 +1089,13 @@ async createBranch(repoId: string, name: string, sha: string, checkout: boolean)
 },
 /**
  * Delete a local branch. Refuses to delete the branch HEAD is on.
+ * 
+ * A branch a worktree holds comes back as a typed refusal naming that folder,
+ * not as an error. "The branch is in use" is the report that leaves people
+ * hunting for where -- and the way out (remove the worktree first) is
+ * something GitWyrm can just offer.
  */
-async deleteBranch(repoId: string, name: string) : Promise<Result<null, string>> {
+async deleteBranch(repoId: string, name: string) : Promise<Result<BranchDeleteOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_branch", { repoId, name }) };
 } catch (e) {
@@ -1464,6 +1469,143 @@ async removeSubmodule(repoId: string, path: string, deleteFiles: boolean) : Prom
 async submoduleWorkdir(repoId: string, path: string) : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("submodule_workdir", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Every checkout of this repository: the main one first, then linked
+ * worktrees.
+ */
+async listWorktrees(repoId: string) : Promise<Result<Worktree[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_worktrees", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Modified and untracked counts for a worktree that is not the open one.
+ * Powers the remove confirm and the run-discard hand-edit check.
+ */
+async worktreeDirtyCount(path: string) : Promise<Result<DirtyCount, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("worktree_dirty_count", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The suggested folder for a new worktree on `branch`: a sibling of the
+ * repository, de-duplicated if it already exists.
+ * 
+ * Computed in Rust so the modal and any future caller agree on it rather than
+ * each inventing their own idea of where worktrees go.
+ */
+async suggestWorktreePath(repoId: string, branch: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("suggest_worktree_path", { repoId, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Why the chosen folder will not work, in plain words. None when it is fine.
+ * Checked as the user types, so a bad choice is a sentence in the dialog
+ * rather than a half-created folder to clean up.
+ */
+async checkWorktreePath(repoId: string, path: string) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_worktree_path", { repoId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The worktree holding `branch`, if any.
+ * 
+ * Returned as the whole worktree so the caller can offer to open that folder,
+ * which is the only useful thing to do about it.
+ */
+async branchHolder(repoId: string, branch: string) : Promise<Result<Worktree | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("branch_holder", { repoId, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Ignored files the new worktree would not get, offered for copying.
+ * 
+ * A fresh worktree has only tracked files, so local env files and editor
+ * settings are simply absent and the checkout looks broken for a reason git
+ * never mentions. Dependency folders are excluded -- they are rebuilt.
+ */
+async worktreeCopyableFiles(repoId: string) : Promise<Result<IgnoredFile[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("worktree_copyable_files", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Create a worktree.
+ * 
+ * Validates the folder and the branch before shelling out, so a refusal
+ * happens before anything is written to disk. `copy_files` names ignored files
+ * to carry across from the source checkout.
+ */
+async addWorktree(repoId: string, path: string, branch: string, newBranch: boolean, startPoint: string | null, copyFiles: string[]) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_worktree", { repoId, path, branch, newBranch, startPoint, copyFiles }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove a worktree.
+ * 
+ * `choice` decides what happens to uncommitted work; the UI only sends
+ * anything but `refuse` after its own plain-language confirm. GitWyrm releases
+ * its own hold on the folder first, and retries once after releasing, so the
+ * app is never the reason a removal reports that the folder is in use.
+ */
+async removeWorktree(repoId: string, path: string, choice: DirtyChoice) : Promise<Result<RemoveOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_worktree", { repoId, path, choice }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Drop admin entries for worktrees whose folders are gone. Returns how many
+ * were tidied up.
+ */
+async pruneWorktrees(repoId: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("prune_worktrees", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Point git at a worktree that moved. `new_path` is where the folder went;
+ * omitting it repairs every worktree at once, which is the case where the main
+ * repository itself was moved.
+ */
+async repairWorktree(repoId: string, newPath: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("repair_worktree", { repoId, newPath }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2138,9 +2280,9 @@ async githubCloseIssue(owner: string, repo: string, number: number) : Promise<Re
  * script and must never be mistaken for this; this spends the user's AI
  * credits and edits their files.
  */
-async aiRunStart(repoId: string, changeId: string, taskIndex: number, taskNumber: number, taskText: string, branch: string) : Promise<Result<StartOutcome, string>> {
+async aiRunStart(repoId: string, changeId: string, taskIndex: number, taskNumber: number, taskText: string, branch: string, ownFolder: boolean) : Promise<Result<StartOutcome, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("ai_run_start", { repoId, changeId, taskIndex, taskNumber, taskText, branch }) };
+    return { status: "ok", data: await TAURI_INVOKE("ai_run_start", { repoId, changeId, taskIndex, taskNumber, taskText, branch, ownFolder }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2212,6 +2354,21 @@ async aiRunCurrent(repoId: string) : Promise<Result<RunSession | null, string>> 
 async aiRunClear(repoId: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("ai_run_clear", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * What discarding this run would do, asked before anything is deleted.
+ * 
+ * The hand-edit check is the whole point: the user may have opened the run's
+ * folder and worked in it, and a discard is about throwing away the AI's
+ * result, not theirs.
+ */
+async aiRunDiscardPlan(repoId: string) : Promise<Result<RunDiscardPlan, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_run_discard_plan", { repoId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2517,6 +2674,15 @@ tab: string }
  * One line of a file, tagged with the commit that last changed it.
  */
 export type BlameLine = { line_no: number; text: string; sha: string; short_sha: string; summary: string; author_name: string; author_email: string; time: number }
+/**
+ * What happened when a branch deletion was attempted.
+ * 
+ * Typed rather than an error string because the refusal carries an offer: the
+ * worktree holding the branch can be removed, and then the deletion the user
+ * originally asked for can go ahead. That chain is the thing that makes
+ * branches feel undeletable when git reports it as plain text.
+ */
+export type BranchDeleteOutcome = { kind: "deleted" } | { kind: "heldByWorktree"; folder_name: string; path: string }
 export type BranchInfo = { name: string; is_head: boolean; upstream: string | null; ahead: number; behind: number; 
 /**
  * Richer reading of the same relationship; prefer this over the raw counts.
@@ -2636,7 +2802,14 @@ export type CheckoutOutcome =
  * working tree does NOT have the changes, so the user must be told where
  * their work went.
  */
-"stash_not_reapplied"
+"stash_not_reapplied" | 
+/**
+ * Nothing happened: another worktree already has that branch checked out, so
+ * git would refuse. The details the UI needs -- which folder holds it, so it
+ * can offer to open that one -- come back from `branch_holder`, keeping this
+ * enum a flat string union the way every existing call site reads it.
+ */
+"held_by_worktree"
 /**
  * Whether the CLI is usable, and which version answered.
  */
@@ -2797,6 +2970,33 @@ sign: string; old_no: number | null; new_no: number | null; text: string;
 hunk_index: number }
 export type DiffSource = { kind: "staged" } | { kind: "unstaged" } | { kind: "commit"; sha: string }
 /**
+ * What to do with uncommitted work when removing a worktree.
+ */
+export type DirtyChoice = 
+/**
+ * Stop and report the counts. The default: never destroy on the first ask.
+ */
+"refuse" | 
+/**
+ * Set the changes aside recoverably, then remove.
+ */
+"keep" | 
+/**
+ * Throw the changes away and remove. This is what `--force` compiles to
+ * after a plain-language confirm -- the user never passes a flag.
+ */
+"discard"
+/**
+ * Modified and untracked counts for a worktree, kept apart all the way to the
+ * UI.
+ * 
+ * "3 changes" hides the only case with no way back: an untracked file has
+ * never been written to history, so discarding it is unrecoverable, while a
+ * modified tracked file can always be got back. One number would make those
+ * read the same.
+ */
+export type DirtyCount = { modified: number; untracked: number }
+/**
  * One artifact the AI drafted, as offered for review.
  * 
  * `content` is the exact file body that would be written, so the review card
@@ -2954,6 +3154,14 @@ header: string }
  * rather than always claiming a line was written.
  */
 export type IgnoreOutcome = "added" | "already_present"
+/**
+ * An ignored file a new worktree would not get, offered for copying.
+ */
+export type IgnoredFile = { 
+/**
+ * Path relative to the source checkout.
+ */
+path: string; size_bytes: number }
 /**
  * One installed editor, as offered to the frontend.
  */
@@ -3254,6 +3462,38 @@ export type RemoteTagInfo = { name: string;
  * tag object, not the commit, so it need not match `TagInfo::target_sha`.
  */
 sha: string }
+/**
+ * What happened when a removal was attempted.
+ * 
+ * Every non-success carries what its offer needs, because each one leads
+ * somewhere different: dirt leads to keep-or-discard, a lock leads to Try
+ * again, a partial removal leads to telling the user what state the folder was
+ * left in. A string would force the UI to parse its way back to these.
+ */
+export type RemoveOutcome = 
+/**
+ * The worktree is gone. `branch` is what it had checked out, so the caller
+ * can offer to delete it as a follow-on; `branch_merged` says whether that
+ * offer is safe to make.
+ */
+{ kind: "removed"; branch: string | null; branch_merged: boolean } | 
+/**
+ * Refused: there is uncommitted work in it. Ask, then call again with a
+ * decision.
+ */
+{ kind: "refusedDirty"; modified: number; untracked: number } | 
+/**
+ * Refused by the OS: something still has a file open in the folder. On
+ * Windows this is an editor, a terminal sitting in the folder, a dev server,
+ * or a scanner -- and it is the single most common removal failure.
+ */
+{ kind: "refusedLocked"; path: string } | 
+/**
+ * Some files were deleted and then it failed. Saying so is the honest
+ * report; "failed" would imply nothing happened, and "removed" would be a
+ * lie.
+ */
+{ kind: "partiallyRemoved"; path: string }
 export type RepoChangedPayload = { repo_id: string }
 export type RepoIcon = { source_path: string; label: string; data_url: string; custom: boolean }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
@@ -3302,6 +3542,23 @@ message: string;
  */
 task_line: number | null }
 /**
+ * What discarding an isolated run would do to its folder.
+ */
+export type RunDiscardPlan = 
+/**
+ * The run did not have its own folder; discard is the ordinary path.
+ */
+{ kind: "noFolder" } | 
+/**
+ * The folder holds only what the run wrote, so it can go.
+ */
+{ kind: "folderCanGo"; path: string; folder_name: string } | 
+/**
+ * The user edited files in there by hand. A discard throws away the AI's
+ * result, not theirs, so this is never deleted without asking.
+ */
+{ kind: "handEdited"; path: string; folder_name: string; modified: number; untracked: number }
+/**
  * An event as it reaches the UI.
  * 
  * `summary` is the sentence every surface renders. `repo_id` and `session_id`
@@ -3323,7 +3580,22 @@ task_number: number; task_text: string;
 /**
  * Branch the run is pinned to. A run must not continue on another.
  */
-branch: string; state: RunState; steps: RunStep[] }
+branch: string; 
+/**
+ * The folder this run is actually working in, when that is not the user's
+ * own checkout.
+ * 
+ * The console's guardrail line has to name it: a run that says "working on
+ * branch X" while editing files in a folder the user cannot see is exactly
+ * the header dishonesty the run promise forbids. None means the run is
+ * working in the user's checkout, as it always did.
+ */
+worktree_path: string | null; 
+/**
+ * Folder name of `worktree_path`, for the guardrail line. Stored rather than
+ * derived so the UI never has to parse a path.
+ */
+worktree_name: string | null; state: RunState; steps: RunStep[] }
 /**
  * Where a run is, as the state pill shows it.
  * 
@@ -3551,10 +3823,23 @@ commit_button_mode?: string | null;
  */
 default_editor?: string | null; 
 /**
- * Show worktree actions and the worktree sidebar section. Off by default;
- * the frontend auto-enables it when a repo already has extra worktrees.
+ * Offer to *create* worktrees. Off by default; the frontend turns it on the
+ * first time it meets a repository that already has one.
+ * 
+ * This governs creation, not visibility. A worktree that exists is part of
+ * the repository's real state and is listed regardless -- hiding it would
+ * mean the user cannot open, remove, or repair a checkout another tool put
+ * there.
  */
 enable_worktrees?: boolean; 
+/**
+ * True once the user has deliberately set the worktrees toggle either way.
+ * 
+ * The auto-enable is a first-encounter courtesy, so it must never fire again
+ * after a deliberate off. Without this flag, "off" and "never asked" look
+ * identical and the setting would keep turning itself back on.
+ */
+worktrees_setting_touched?: boolean; 
 /**
  * Show the Spec Desk button and the sidebar Specs section. On by default, and
  * on regardless of whether the repository has an `openspec/` folder yet, so a
@@ -4238,6 +4523,76 @@ export type UnpushedTag = { name: string; target_sha: string;
 commit_on_remote: boolean }
 export type UpdateChannel = "stable" | "beta"
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }
+/**
+ * One checkout of the repository: the main one, or a linked worktree.
+ * 
+ * The main checkout is included in listings so the section shows the whole
+ * picture rather than "the other ones", which reads as if the folder the user
+ * is looking at is not a worktree at all.
+ */
+export type Worktree = { 
+/**
+ * Git's name for the worktree (its folder under `.git/worktrees`). Empty for
+ * the main checkout, which git does not name.
+ */
+name: string; 
+/**
+ * The folder name shown in the list -- the last component of `path`.
+ */
+folder_name: string; 
+/**
+ * Absolute path of the working folder.
+ */
+path: string; 
+/**
+ * The branch checked out here, short form. None when HEAD is detached.
+ */
+branch: string | null; 
+/**
+ * Short sha of HEAD. Shown instead of a branch when detached.
+ */
+head_sha: string | null; 
+/**
+ * True for the repository's original checkout.
+ */
+is_main: boolean; 
+/**
+ * True when this is the checkout the caller is looking at.
+ */
+is_current: boolean; 
+/**
+ * True when git has this worktree locked (`git worktree lock`), which blocks
+ * pruning. Distinct from the OS holding a file handle.
+ */
+is_locked: boolean; state: WorktreeState; 
+/**
+ * True when this worktree was created to run a Spec Desk task in.
+ */
+is_run_worktree: boolean }
+/**
+ * What kind of shape a worktree's folder is in.
+ * 
+ * Kept as three cases rather than a boolean because each has a different way
+ * out: `Ok` needs nothing, `Missing` prunes, `Moved` repairs. Collapsing them
+ * into "broken" would force the UI to offer both actions and let the user
+ * pick, which is exactly the guess this type exists to remove.
+ */
+export type WorktreeState = 
+/**
+ * The folder is there and is a real checkout.
+ */
+"ok" | 
+/**
+ * The folder is gone. The files are not on disk; pruning tidies the leftover
+ * reference and loses nothing that still exists.
+ */
+"missing" | 
+/**
+ * The admin entry points at something that is no longer a checkout, but the
+ * folder was not simply deleted -- typically it was moved. Repair points git
+ * at wherever it went.
+ */
+"moved"
 
 /** tauri-specta globals **/
 

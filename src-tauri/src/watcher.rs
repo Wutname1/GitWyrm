@@ -112,6 +112,13 @@ fn path_is_relevant(path: &Path, workdir: &Path, matcher: &Gitignore) -> bool {
     if under_refs {
       return true;
     }
+    // `.git/worktrees/` is where git records linked worktrees. Watching it is
+    // what makes a `git worktree add` typed in a terminal show up on its own:
+    // re-checking when the repository becomes active cannot see a terminal
+    // running beside an already-focused window, which is the common case.
+    if rel.components().any(|c| c.as_os_str() == "worktrees") {
+      return true;
+    }
     let file = path.file_name().map(|n| n.to_string_lossy());
     return match file {
       Some(name) => GIT_INTERNAL_WATCH.iter().any(|f| *f == name),
@@ -255,6 +262,22 @@ mod tests {
     assert!(path_is_relevant(&root().join(".git/HEAD"), &root(), &empty()));
     assert!(path_is_relevant(&root().join(".git/index"), &root(), &empty()));
     assert!(path_is_relevant(&root().join(".git/refs/heads/main"), &root(), &empty()));
+  }
+
+  #[test]
+  fn worktree_admin_changes_are_relevant() {
+    // A worktree created or removed in a terminal lands here, and the section
+    // must appear without the user clicking anything.
+    assert!(path_is_relevant(
+      &root().join(".git/worktrees/GitWyrm-feature/HEAD"),
+      &root(),
+      &empty()
+    ));
+    assert!(path_is_relevant(
+      &root().join(".git/worktrees/GitWyrm-feature/gitdir"),
+      &root(),
+      &empty()
+    ));
   }
 
   #[test]

@@ -237,10 +237,22 @@ pub struct Settings {
   /// ignored rather than rejected.
   #[serde(default)]
   pub default_editor: Option<String>,
-  /// Show worktree actions and the worktree sidebar section. Off by default;
-  /// the frontend auto-enables it when a repo already has extra worktrees.
+  /// Offer to *create* worktrees. Off by default; the frontend turns it on the
+  /// first time it meets a repository that already has one.
+  ///
+  /// This governs creation, not visibility. A worktree that exists is part of
+  /// the repository's real state and is listed regardless -- hiding it would
+  /// mean the user cannot open, remove, or repair a checkout another tool put
+  /// there.
   #[serde(default)]
   pub enable_worktrees: bool,
+  /// True once the user has deliberately set the worktrees toggle either way.
+  ///
+  /// The auto-enable is a first-encounter courtesy, so it must never fire again
+  /// after a deliberate off. Without this flag, "off" and "never asked" look
+  /// identical and the setting would keep turning itself back on.
+  #[serde(default)]
+  pub worktrees_setting_touched: bool,
   /// Show the Spec Desk button and the sidebar Specs section. On by default, and
   /// on regardless of whether the repository has an `openspec/` folder yet, so a
   /// repo can be onboarded to OpenSpec from inside the app.
@@ -503,6 +515,7 @@ impl Default for Settings {
       commit_button_mode: None,
       default_editor: None,
       enable_worktrees: false,
+      worktrees_setting_touched: false,
       enable_spec_desk: default_enable_spec_desk(),
       openspec_archive_without_asking: false,
       openspec_delete_without_asking: false,

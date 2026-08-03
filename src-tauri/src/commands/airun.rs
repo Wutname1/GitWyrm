@@ -87,7 +87,9 @@ pub async fn ai_run_start_demo(
   branch: String,
   scenario: DemoScenario,
 ) -> Result<StartOutcome, AppError> {
-  let session = match sessions.start(&repo_id, &change_id, task_number, &task_text, &branch) {
+  // The demo never creates a folder: it edits nothing, so there is nothing to
+  // isolate it from.
+  let session = match sessions.start(&repo_id, &change_id, task_number, &task_text, &branch, None) {
     Ok(s) => s,
     Err(StartRefusal::AlreadyRunning { session_id, summary }) => {
       return Ok(StartOutcome::AlreadyRunning { session_id, summary })
@@ -250,6 +252,66 @@ pub async fn ai_run_completion(
   }))
 }
 
+/// What discarding an isolated run would do to its folder.
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RunDiscardPlan {
+  /// The run did not have its own folder; discard is the ordinary path.
+  NoFolder,
+  /// The folder holds only what the run wrote, so it can go.
+  FolderCanGo { path: String, folder_name: String },
+  /// The user edited files in there by hand. A discard throws away the AI's
+  /// result, not theirs, so this is never deleted without asking.
+  HandEdited {
+    path: String,
+    folder_name: String,
+    modified: u32,
+    untracked: u32,
+  },
+}
+
+/// What discarding this run would do, asked before anything is deleted.
+///
+/// The hand-edit check is the whole point: the user may have opened the run's
+/// folder and worked in it, and a discard is about throwing away the AI's
+/// result, not theirs.
+#[tauri::command]
+#[specta::specta]
+pub async fn ai_run_discard_plan(
+  sessions: State<'_, SessionRegistry>,
+  repo_id: String,
+) -> Result<RunDiscardPlan, AppError> {
+  let Some(session) = sessions.get(&repo_id) else {
+    return Ok(RunDiscardPlan::NoFolder);
+  };
+  let (Some(path), Some(folder_name)) = (session.worktree_path, session.worktree_name) else {
+    return Ok(RunDiscardPlan::NoFolder);
+  };
+
+  tauri::async_runtime::spawn_blocking(move || {
+    // An unreadable folder is treated as hand-edited: refusing to delete
+    // something we cannot inspect is the safe direction to be wrong in.
+    let dirt = crate::git::worktree::dirty_count(std::path::Path::new(&path)).unwrap_or(
+      crate::git::worktree::DirtyCount {
+        modified: 1,
+        untracked: 0,
+      },
+    );
+    if dirt.is_clean() {
+      Ok(RunDiscardPlan::FolderCanGo { path, folder_name })
+    } else {
+      Ok(RunDiscardPlan::HandEdited {
+        path,
+        folder_name,
+        modified: dirt.modified,
+        untracked: dirt.untracked,
+      })
+    }
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// Clears a finished run so the repository can start another.
 #[tauri::command]
 #[specta::specta]
@@ -316,6 +378,72 @@ fn emit(
   let _ = app.emit(RUN_EVENT, event);
 }
 
+/// Make a disposable folder for a run to work in, on its own branch.
+///
+/// Returns (absolute path, folder name).
+///
+/// A branch rather than a detached HEAD: if the app dies mid-run the work is
+/// still reachable by name, and "the task worked on this branch" is something
+/// that can be explained to someone who has never heard of a worktree. Detached
+/// would leave commits reachable only by sha, which is exactly the state people
+/// need help getting out of.
+///
+/// The new branch starts at the tip of the branch the run is pinned to, so the
+/// result is a diff against the work the user is actually doing.
+fn provision_run_worktree(
+  open: &std::sync::Arc<crate::state::OpenRepo>,
+  branch: &str,
+  task_text: &str,
+) -> Result<(String, String), AppError> {
+  use crate::git::worktree;
+
+  let (main_path, run_branch, path) = {
+    let repo = open.repo.lock().unwrap();
+    let main = worktree::main_workdir(&repo)
+      .ok_or_else(|| AppError::Other("this project has no working folder".into()))?;
+
+    // Name it after the task so a leftover folder says what it was for.
+    let slug = worktree::branch_slug(&task_text.chars().take(40).collect::<String>());
+    let mut candidate = format!("gitwyrm-task/{slug}");
+    let mut n = 2;
+    while repo.find_branch(&candidate, git2::BranchType::Local).is_ok() {
+      candidate = format!("gitwyrm-task/{slug}-{n}");
+      n += 1;
+      if n > 100 {
+        break;
+      }
+    }
+    let path = worktree::suggest_path(&main, &candidate);
+    (main.to_string_lossy().into_owned(), candidate, path)
+  };
+
+  worktree::add(&main_path, &path, &run_branch, true, Some(branch)).map_err(|e| {
+    AppError::Other(format!(
+      "The task could not be given its own folder to work in, so it was not started: {e}"
+    ))
+  })?;
+
+  // Mark it so the list can label it and discard can tell a run's folder from
+  // one the user made. The marker lives in the admin directory, never in the
+  // working folder, so it cannot be committed and does not read as a hand edit.
+  {
+    let repo = open.repo.lock().unwrap();
+    if let Some(name) = worktree::list(&repo, None)
+      .into_iter()
+      .find(|w| worktree::paths_equal(std::path::Path::new(&w.path), std::path::Path::new(&path)))
+      .map(|w| w.name)
+    {
+      let _ = worktree::mark_as_run_worktree(&repo, &name);
+    }
+  }
+
+  let folder_name = std::path::Path::new(&path)
+    .file_name()
+    .map(|n| n.to_string_lossy().into_owned())
+    .unwrap_or_else(|| run_branch.clone());
+  Ok((path, folder_name))
+}
+
 /// Starts a real run: the engine, against the user's default provider.
 ///
 /// Separate command from `ai_run_start_demo` on purpose. The demo replays a
@@ -333,18 +461,45 @@ pub async fn ai_run_start(
   task_number: u32,
   task_text: String,
   branch: String,
+  own_folder: bool,
 ) -> Result<StartOutcome, AppError> {
   let open = manager.get(&repo_id)?;
-  let root = open.path.clone();
+  let user_root = open.path.clone();
 
-  let session =
-    match sessions.start(&repo_id, &change_id, task_number, &task_text, &branch) {
-      Ok(s) => s,
-      Err(StartRefusal::AlreadyRunning { session_id, summary }) => {
-        return Ok(StartOutcome::AlreadyRunning { session_id, summary })
-      }
-    };
+  // Provision the run's own folder BEFORE the session exists, so a failure to
+  // create one fails the start outright. Quietly falling back to the user's
+  // checkout would be the worst outcome: they asked to keep working in their
+  // own files and would be told the run is elsewhere while it edits theirs.
+  let worktree = if own_folder {
+    Some(provision_run_worktree(&open, &branch, &task_text)?)
+  } else {
+    None
+  };
 
+  // Everything the run touches is rooted here. The guardrails' in-repo check
+  // roots on the same path, so the run's boundary moves with it.
+  let root = worktree
+    .as_ref()
+    .map(|(p, _)| std::path::PathBuf::from(p))
+    .unwrap_or_else(|| user_root.clone());
+
+  let session = match sessions.start(
+    &repo_id,
+    &change_id,
+    task_number,
+    &task_text,
+    &branch,
+    worktree.clone(),
+  ) {
+    Ok(s) => s,
+    Err(StartRefusal::AlreadyRunning { session_id, summary }) => {
+      return Ok(StartOutcome::AlreadyRunning { session_id, summary })
+    }
+  };
+
+  // tasks.md is read from the run's own folder too. Reading the user's copy
+  // while writing to the worktree would have the run tick a checkbox in a file
+  // it is not otherwise allowed to touch.
   let tasks_file = root
     .join("openspec")
     .join("changes")

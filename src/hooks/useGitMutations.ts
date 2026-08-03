@@ -2,6 +2,7 @@ import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-q
 import { toast } from 'sonner'
 import {
   commands,
+  type DirtyChoice,
   type EditorKind,
   type PullResult,
   type PushResult,
@@ -17,6 +18,7 @@ import { classifyError } from '@/lib/errorClass'
 import { copyToClipboard } from '@/lib/clipboard'
 import { plural, shortSha } from '@/lib/gitDisplay'
 import { log } from '@/lib/log'
+import { removeOutcomeMessage } from '@/lib/worktreeCopy'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useUiStore } from '@/stores/uiStore'
 
@@ -29,6 +31,7 @@ type QueryName =
   | 'remotes'
   | 'mergeState'
   | 'submodules'
+  | 'worktrees'
 
 interface FolderFilesArgs {
   folder: string
@@ -381,6 +384,96 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // ---------------------------------------------------------------------------
+  // Worktrees
+  //
+  // A worktree is a second folder of the same project on a different branch.
+  // Every mutation here refreshes `worktrees`, and the ones that can move a
+  // branch refresh `branches`/`log` too -- `git worktree add -b` creates a
+  // branch, and the graph draws its pills from the log query.
+  // ---------------------------------------------------------------------------
+
+  const addWorktree = useMutation({
+    mutationFn: async (args: {
+      path: string
+      branch: string
+      newBranch: boolean
+      startPoint?: string | null
+      copyFiles?: string[]
+    }) => {
+      const created = unwrap(
+        await commands.addWorktree(
+          id,
+          args.path,
+          args.branch,
+          args.newBranch,
+          args.startPoint ?? null,
+          args.copyFiles ?? []
+        )
+      )
+      return { ...args, created }
+    },
+    onSuccess: ({ branch, created, copyFiles }) => {
+      invalidate(qc, id, ['worktrees', ...REFS])
+      const folder = created.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? created
+      const copied = copyFiles?.length ?? 0
+      toast(`Made a ${folder} folder on ${branch}`, {
+        description: copied
+          ? `Copied ${plural(copied, 'setup file')} across. Open it to start working.`
+          : 'Open it to start working there.',
+      })
+    },
+    onError,
+  })
+
+  /**
+   * Remove a worktree.
+   *
+   * Returns the outcome rather than only toasting, because the refusals lead
+   * somewhere: dirt leads to a keep-or-discard confirm, a lock leads to Try
+   * again. The caller drives that; this reports what it could not resolve
+   * itself.
+   */
+  const removeWorktree = useMutation({
+    mutationFn: async (args: { path: string; folderName: string; choice: DirtyChoice }) => {
+      const outcome = unwrap(await commands.removeWorktree(id, args.path, args.choice))
+      return { ...args, outcome }
+    },
+    onSuccess: ({ outcome, folderName }) => {
+      invalidate(qc, id, ['worktrees', ...REFS, 'stashes'])
+      // A refusal is not a failure to report loudly -- the caller turns it into
+      // the next question. Only the resolved outcomes toast from here.
+      if (outcome.kind === 'removed') {
+        const msg = removeOutcomeMessage(outcome, folderName)
+        toast(msg.text, { description: msg.detail })
+      }
+    },
+    onError,
+  })
+
+  const pruneWorktrees = useMutation({
+    mutationFn: async () => unwrap(await commands.pruneWorktrees(id)),
+    onSuccess: (count) => {
+      invalidate(qc, id, ['worktrees'])
+      toast(
+        count > 0
+          ? `Tidied up ${plural(count, 'leftover folder reference')}`
+          : 'Nothing needed tidying up'
+      )
+    },
+    onError,
+  })
+
+  const repairWorktree = useMutation({
+    mutationFn: async (newPath: string | null) =>
+      unwrap(await commands.repairWorktree(id, newPath)),
+    onSuccess: () => {
+      invalidate(qc, id, ['worktrees'])
+      toast('Pointed the project back at that folder')
+    },
+    onError,
+  })
+
   const createCommit = useMutation({
     mutationFn: async (args: {
       summary: string
@@ -420,12 +513,27 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  /**
+   * Delete a local branch.
+   *
+   * A branch a worktree holds comes back as a refusal naming that folder rather
+   * than an error, so the caller can offer to remove the worktree and then
+   * finish the deletion. Callers that want to walk that chain read `outcome`;
+   * ones that do not still get a plain-language toast naming the folder, which
+   * beats git's "branch is in use" with no location.
+   */
   const deleteBranch = useMutation({
     mutationFn: async (name: string) => {
-      await unwrap(await commands.deleteBranch(id, name))
-      return name
+      const outcome = unwrap(await commands.deleteBranch(id, name))
+      return { name, outcome }
     },
-    onSuccess: (name) => {
+    onSuccess: ({ name, outcome }) => {
+      if (outcome.kind === 'heldByWorktree') {
+        toast.warning(`${name} is open in the ${outcome.folder_name} folder`, {
+          description: 'Remove that folder first, then the branch can go.',
+        })
+        return
+      }
       invalidate(qc, id, REFS)
       toast(`Deleted branch ${name}`)
     },
@@ -531,7 +639,10 @@ export function useGitMutations(repoId: string | null) {
       let localFailed = false
       if (args.alsoLocal) {
         try {
-          await unwrap(await commands.deleteBranch(id, args.name))
+          const outcome = unwrap(await commands.deleteBranch(id, args.name))
+          // A worktree holding the branch is a refusal, not an error: the local
+          // copy is still here, which is exactly what `localFailed` reports.
+          if (outcome.kind === 'heldByWorktree') localFailed = true
         } catch (e) {
           localFailed = true
           logQuietFailure(e as Error)
@@ -587,6 +698,16 @@ export function useGitMutations(repoId: string | null) {
       // Compared as a string: `stash_not_reapplied` is a new backend variant and
       // bindings.ts only picks it up on the next `tauri dev` regeneration.
       const kind: string = outcome
+      if (kind === 'held_by_worktree') {
+        // Nothing happened. Git would refuse this, and its message names
+        // neither the folder nor a way forward -- so say which folder has it.
+        // The section's row is where the user opens that folder.
+        toast.warning(`${name} is already open in another folder`, {
+          description:
+            'A branch can only be open in one folder at a time. Open that worktree from the Worktrees list to work on it.',
+        })
+        return
+      }
       if (kind === 'stash_pop_conflict') {
         toast.warning(
           `Switched to ${name}, but your changes conflict — resolve the markers. Your stash was kept as a backup.`
@@ -1212,6 +1333,10 @@ export function useGitMutations(repoId: string | null) {
     initAllSubmodules,
     addSubmodule,
     removeSubmodule,
+    addWorktree,
+    removeWorktree,
+    pruneWorktrees,
+    repairWorktree,
     createCommit,
     createBranch,
     deleteBranch,
