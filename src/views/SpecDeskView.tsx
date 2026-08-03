@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { commands, type RepoInfo } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { DeskTitleBar } from '@/components/domain/spec-desk/DeskTitleBar'
@@ -8,7 +9,7 @@ import { DeskActionRail } from '@/components/domain/spec-desk/DeskActionRail'
 import { cn } from '@/lib/utils'
 import { useSpecAi } from '@/hooks/useSpecAi'
 import { useOpenspecChanges, useOpenspecStatus, useSelectedChange } from '@/hooks/useOpenspec'
-import { listenForSpecSelection } from '@/lib/specSync'
+import { listenForSpecRefresh, listenForSpecSelection } from '@/lib/specSync'
 import { readWindowMode } from '@/lib/windowMode'
 import { describeError, log } from '@/lib/log'
 
@@ -82,6 +83,14 @@ export function SpecDeskView() {
 
   // Selections made in the main window have to move this window too.
   useEffect(() => listenForSpecSelection(), [])
+
+  // A refresh in the main window re-reads here as well. Read through a ref so
+  // the subscription survives the repo arriving: the id is null on first render
+  // and resubscribing on it would drop events fired in between.
+  const qc = useQueryClient()
+  const repoIdRef = useRef(repoId)
+  repoIdRef.current = repoId
+  useEffect(() => listenForSpecRefresh(qc, () => repoIdRef.current), [qc])
 
   const repoName = repo?.name ?? 'Loading…'
 

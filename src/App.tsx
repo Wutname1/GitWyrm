@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -9,7 +10,7 @@ import { WorkspaceLayout } from '@/layouts/WorkspaceLayout'
 import { SpecDeskView } from '@/views/SpecDeskView'
 import { readWindowMode } from '@/lib/windowMode'
 import { listenForSettingsChanges } from '@/lib/settingsSync'
-import { listenForSpecSelection } from '@/lib/specSync'
+import { listenForSpecRefresh, listenForSpecSelection } from '@/lib/specSync'
 import { OnboardingModal } from '@/components/modals/OnboardingModal'
 import { TutorialHost } from '@/components/tutorial/TutorialHost'
 import { TutorialOutcomeDialog } from '@/components/tutorial/TutorialOutcomeDialog'
@@ -361,6 +362,16 @@ function AppInner() {
   // Selecting a change in the Spec Desk has to move this window's sidebar row
   // and spec card too -- the two windows render the same state.
   useEffect(() => listenForSpecSelection(), [])
+
+  // Likewise for a refresh: re-reading the spec files in the Desk has to re-read
+  // them here. Through a ref so switching repos does not resubscribe.
+  const specQc = useQueryClient()
+  const activeRepoIdRef = useRef(activeRepoId)
+  activeRepoIdRef.current = activeRepoId
+  useEffect(
+    () => listenForSpecRefresh(specQc, () => activeRepoIdRef.current),
+    [specQc]
+  )
 
   // AI settings can now be changed from the Desk as well as here, and each
   // window has its own store. Without this, connecting a provider over there

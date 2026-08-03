@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import specDeskLogo from "@/assets/icons/specdesk.png";
 import { WindowControls } from "@/components/domain/WindowControls";
 import { AiProviderChip } from "./AiProviderChip";
+import { SpecRefreshButton } from "./SpecRefreshButton";
 
 /**
  * The Desk's own titlebar. Window decorations are off app-wide, so this draws
@@ -42,6 +43,9 @@ export function DeskTitleBar({
       </span>
 
       <div className="ml-auto flex h-full items-center gap-2 pl-3">
+        {/* Only once the repo is open -- a refresh with no repo has nothing to
+            re-read, and a dead button in the titlebar reads as broken. */}
+        {repoId && <SpecRefreshButton repoId={repoId} />}
         <AiProviderChip repoId={repoId} />
         <div className="flex h-full items-stretch">
           <WindowControls />

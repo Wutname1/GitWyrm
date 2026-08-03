@@ -7,6 +7,7 @@ import { progressCount } from '@/lib/specDisplay'
 import { ProgressBar, StatusPill } from './SpecBits'
 import { ArchivedChangesDialog } from './ArchivedChangesDialog'
 import { SpecContextMenu } from './SpecContextMenu'
+import { SpecRefreshButton } from './SpecRefreshButton'
 import { SpecRowActions } from './SpecRowActions'
 import { selectChangeEverywhere } from '@/lib/specSync'
 import { useUiStore } from '@/stores/uiStore'
@@ -127,14 +128,17 @@ export function DeskChangesList({
     <div className="flex min-h-0 flex-col border-r border-border bg-panel">
       <div className="flex flex-none items-center justify-between px-4 pb-2.5 pt-4">
         <h2 className="text-2xs font-bold tracking-[.1em] text-sub">CHANGES</h2>
-        <button
-          type="button"
-          onClick={() => openModal('newChange')}
-          className="flex items-center gap-1 rounded border border-primary/40 bg-soft px-2 py-0.5 text-2xs font-bold text-accent-text hover:bg-primary/20"
-        >
-          <Plus size={10} strokeWidth={3} />
-          New
-        </button>
+        <div className="flex items-center gap-1">
+          <SpecRefreshButton repoId={repoId} />
+          <button
+            type="button"
+            onClick={() => openModal('newChange')}
+            className="flex items-center gap-1 rounded border border-primary/40 bg-soft px-2 py-0.5 text-2xs font-bold text-accent-text hover:bg-primary/20"
+          >
+            <Plus size={10} strokeWidth={3} />
+            New
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-none gap-3.5 border-b border-border px-4 pb-2.5">

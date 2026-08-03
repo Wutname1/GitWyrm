@@ -11,9 +11,9 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { SpecContextMenu } from '@/components/domain/spec-desk/SpecContextMenu'
+import { SpecRefreshButton } from '@/components/domain/spec-desk/SpecRefreshButton'
 import { progressCount } from '@/lib/specDisplay'
-import { invalidateOpenspec } from '@/lib/queryKeys'
-import { selectChangeEverywhere } from '@/lib/specSync'
+import { refreshSpecsEverywhere, selectChangeEverywhere } from '@/lib/specSync'
 import { useUiStore } from '@/stores/uiStore'
 
 /**
@@ -128,8 +128,18 @@ export function SpecsSection({
               )}
             />
             <span className="text-2xs font-bold tracking-[.09em] text-sub">SPECS</span>
-            <span className="ml-auto font-mono text-2xs text-muted-foreground">
-              {changes.length}
+            {/* Its own click must not also collapse the section it sits in. */}
+            <span
+              className="ml-auto flex items-center gap-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <SpecRefreshButton
+                repoId={repoId}
+                className="-my-0.5 opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100"
+              />
+              <span className="font-mono text-2xs text-muted-foreground">
+                {changes.length}
+              </span>
             </span>
           </div>
         </ContextMenuTrigger>
@@ -139,7 +149,7 @@ export function SpecsSection({
             Start a new change…
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => invalidateOpenspec(qc, repoId)}>
+          <ContextMenuItem onSelect={() => refreshSpecsEverywhere(qc, repoId)}>
             <RefreshCw />
             Re-read from disk
           </ContextMenuItem>
