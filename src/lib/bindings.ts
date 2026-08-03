@@ -1858,6 +1858,22 @@ async scanCodeFolder(folder: string) : Promise<Result<ScannedRepo[], string>> {
 }
 },
 /**
+ * Reads a repository's readme as text, or None when it has none.
+ * 
+ * Matching is case-insensitive because Windows and Linux checkouts disagree on
+ * `README.md` vs `readme.md`. Only files directly in the repository root are
+ * considered, and nothing here opens a git handle, so this is safe to call for
+ * repositories the user has not opened.
+ */
+async readRepoReadme(path: string) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_repo_readme", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether the right-click entry is currently registered.
  * 
  * Reports `true` only when every target is present, so a half-written state

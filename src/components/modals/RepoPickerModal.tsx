@@ -44,7 +44,9 @@ import {
   useCodeFolderRepos,
   useOpenRepo,
   useOpenRepos,
+  useRepoReadme,
 } from "@/hooks/useRepoActions";
+import { Markdown } from "@/components/ui/markdown";
 import {
   commands,
   type GithubRepository,
@@ -699,6 +701,37 @@ function OnlineRepositoryCard({
   );
 }
 
+/**
+ * The selected repository's readme, rendered under its details.
+ *
+ * Deliberately quiet about absence: plenty of repositories have no readme, and
+ * a loud "no readme found" panel would be noise on every one of them. A missing
+ * or unreadable file simply renders nothing.
+ */
+function RepoReadme({ path }: { path: string }) {
+  const readme = useRepoReadme(path);
+
+  if (readme.isLoading) {
+    return (
+      <div className="mt-5 flex items-center gap-2 border-t border-border pt-4 text-2xs text-muted-foreground">
+        <Loader2 size={12} className="animate-spin" />
+        Loading readme…
+      </div>
+    );
+  }
+  const text = readme.data;
+  if (!text || !text.trim()) return null;
+
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <p className="mb-2 text-2xs font-bold uppercase tracking-[.09em] text-muted-foreground">
+        Readme
+      </p>
+      <Markdown text={text} />
+    </div>
+  );
+}
+
 function RepoDetails({
   selected,
   repositories,
@@ -860,21 +893,26 @@ function RepoDetails({
             {pinned ? "Remove from pinned repositories" : "Pin this repository"}
           </button>
         </div>
+        <RepoReadme path={repo.path} />
         <span className="flex-1" />
-        <Button
-          className="mt-5 gap-2"
-          onClick={() =>
-            openRepo ? onJumpToRepo(openRepo.id) : onOpenRepo(repo.path)
-          }
-          disabled={busy}
-        >
-          {busy ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <FolderGit2 size={14} />
-          )}
-          {openRepo ? `Open ${repo.name} tab` : `Open ${repo.name}`}
-        </Button>
+        {/* Stuck to the bottom of the panel: a long readme must never scroll
+            the way to open the repository off the screen. */}
+        <div className="sticky bottom-0 -mx-5 -mb-5 mt-5 grid bg-panel px-5 pb-5 pt-3">
+          <Button
+            className="gap-2"
+            onClick={() =>
+              openRepo ? onJumpToRepo(openRepo.id) : onOpenRepo(repo.path)
+            }
+            disabled={busy}
+          >
+            {busy ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <FolderGit2 size={14} />
+            )}
+            {openRepo ? `Open ${repo.name} tab` : `Open ${repo.name}`}
+          </Button>
+        </div>
       </div>
     </>
   );

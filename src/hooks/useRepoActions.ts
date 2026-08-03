@@ -82,6 +82,22 @@ export function useCodeFolderRepos(): CodeFolderRepos {
 }
 
 /**
+ * A repository's readme text, or null when it has none.
+ *
+ * Reads the file straight off disk without opening the repository, so this is
+ * safe for any row in the library list, including ones never opened.
+ */
+export function useRepoReadme(path: string | null) {
+  return useQuery({
+    queryKey: ['repo-readme', path ? pathKey(path) : ''],
+    enabled: path != null,
+    staleTime: 60_000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.readRepoReadme(path as string)),
+  })
+}
+
+/**
  * Icons for repositories GitWyrm has opened before, keyed by normalized path.
  *
  * Reads only what discovery already recorded, so listing a large library costs
