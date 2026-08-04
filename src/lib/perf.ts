@@ -32,6 +32,34 @@ export function measureToPaint(name: string, op = 'ui.interaction'): void {
 }
 
 /**
+ * What the graph-load measurement should do for one (repoId, isLoading) tick.
+ *
+ * Split out from the hook so the state machine is testable without a DOM: the
+ * bug this guards against is a *sequence* bug, and sequences are exactly what a
+ * unit test can pin down.
+ */
+export type GraphLoadAction = 'none' | 'start' | 'finish' | 'abandon'
+
+export function nextGraphLoadAction(
+  repoId: string | null,
+  isLoading: boolean,
+  openSpanId: string | null
+): GraphLoadAction {
+  if (repoId == null) return openSpanId == null ? 'none' : 'abandon'
+
+  // Switching repos while the previous one was still loading strands that
+  // span: its finish condition is keyed to an id that is no longer active, so
+  // it can never fire. Left alone it stayed open until unmount -- hours, for a
+  // desktop app -- and reported graph.load durations in the tens of millions
+  // of ms, burying every real number in the aggregate.
+  if (openSpanId != null && openSpanId !== repoId) return 'abandon'
+
+  if (isLoading && openSpanId == null) return 'start'
+  if (!isLoading && openSpanId === repoId) return 'finish'
+  return 'none'
+}
+
+/**
  * Records a Sentry span for the "repo became active -> graph painted" gap: the
  * commit-log load plus first paint that happens *after* open_repo returns. This
  * is the invisible tail of repo-open latency -- open_repo's own span stops at
@@ -41,16 +69,30 @@ export function measureToPaint(name: string, op = 'ui.interaction'): void {
  * paint that follows the load finishing. Switching repos (new id) starts a
  * fresh measurement; an already-cached repo that never enters the loading state
  * is not measured, which is correct -- there was no felt gap to time.
+ *
+ * See `nextGraphLoadAction` for the state machine, including why a mid-load
+ * repo switch has to abandon the span it stranded.
  */
 export function useGraphLoadSpan(repoId: string | null, isLoading: boolean): void {
   const spanRef = useRef<Span | null>(null)
   const measuredId = useRef<string | null>(null)
 
   useEffect(() => {
+    const openSpanId = spanRef.current != null ? measuredId.current : null
+    const action = nextGraphLoadAction(repoId, isLoading, openSpanId)
+
+    // The user switched away mid-load. End the stranded span rather than leave
+    // it open; there is no honest "graph painted" moment left to measure to.
+    if (action === 'abandon') {
+      spanRef.current?.end()
+      spanRef.current = null
+      measuredId.current = null
+    }
+
     if (repoId == null) return
 
     // A new repo that is loading: open a span once for this id.
-    if (isLoading && measuredId.current !== repoId && spanRef.current == null) {
+    if (action === 'start' || (action === 'abandon' && isLoading)) {
       measuredId.current = repoId
       Sentry.startSpanManual({ name: 'graph.load', op: 'ui.load' }, (span) => {
         span.setAttribute('repo_id', repoId)
@@ -61,7 +103,7 @@ export function useGraphLoadSpan(repoId: string | null, isLoading: boolean): voi
     }
 
     // The load for the span we opened just finished: stop after the next paint.
-    if (!isLoading && spanRef.current != null && measuredId.current === repoId) {
+    if (action === 'finish' && spanRef.current != null) {
       const span = spanRef.current
       spanRef.current = null
       const stop = () => span.end()
