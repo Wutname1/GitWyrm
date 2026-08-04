@@ -89,7 +89,7 @@ export const CommitRow = memo(function CommitRow({
           <RefStack refs={commit.refs} />
         ) : (
           commit.refs.map((r) => (
-            <RefBadge key={`${r.type}:${r.name}`} refTag={r} />
+            <RefBadge key={`${r.type}:${r.name}`} refTag={r} expandOnHover />
           ))
         )}
       </div>

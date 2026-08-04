@@ -33,6 +33,25 @@ function groupKey(refTag: RefInfo): string {
   return refTag.type === 'tag' ? `tag:${refTag.name}` : `branch:${shortName(refTag)}`
 }
 
+/**
+ * The common "everything is in sync" case: one local branch (checked out or
+ * not) plus its remote-tracking ref, both on this commit, and nothing else.
+ * There is no choice to make here, so a `+1` stack that opens a 288px popover
+ * to list two rows with the same name is more UI than the fact deserves -- it
+ * collapses to a single chip with a small remote glyph instead.
+ *
+ * Returns the local ref to show and the remote it is synced with, or null when
+ * the refs are anything more interesting (extra branches, tags, two remotes).
+ */
+function syncedPair(refs: RefInfo[]): { local: RefInfo; remote: RefInfo } | null {
+  if (refs.length !== 2) return null
+  const local = refs.find((r) => r.type === 'head' || r.type === 'branch')
+  const remote = refs.find((r) => r.type === 'remote')
+  if (!local || !remote) return null
+  // Same branch name on both sides, or they merely happen to share a commit.
+  return shortName(remote) === local.name ? { local, remote } : null
+}
+
 function sortedRefs(refs: RefInfo[], primary: RefInfo): RefInfo[] {
   const primaryGroup = groupKey(primary)
   return [...refs].sort((a, b) => {
@@ -91,6 +110,13 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
     if (m.checkout.isPending) return
     m.checkout.mutate(name)
     setOpen(false)
+  }
+
+  // A local branch and its remote sitting together needs no stack or popover.
+  // Checked after the hooks above so hook order stays stable across renders.
+  const synced = syncedPair(refs)
+  if (synced) {
+    return <RefBadge refTag={synced.local} syncedWith={synced.remote} expandOnHover />
   }
 
   const primary = refs.find((ref) => ref.type === 'head') ?? refs.find((ref) => ref.type === 'branch') ?? refs[0]
