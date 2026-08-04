@@ -47,12 +47,9 @@ function CenterView() {
  * The selected commit's files, pinned under the center view. It lives here
  * rather than inside GraphView so that opening one of its files -- which swaps
  * the view above to the diff -- leaves the file list in place to click through.
- * Settings is the one view it does not belong under: it is app-level, not
- * about any commit.
  */
 function CommitDrawerSlot() {
   const repo = useActiveRepo()
-  const view = useUiStore((s) => s.centerView)
   const selectedSha = useUiStore((s) => s.selectedSha)
   const selectedShas = useUiStore((s) => s.selectedShas)
   const drawerHeight = useWorkspaceStore((s) => s.drawerHeight)
@@ -70,7 +67,7 @@ function CommitDrawerSlot() {
     return () => window.clearTimeout(timer)
   }, [multiCount])
 
-  if (!repo || view === 'settings') return null
+  if (!repo) return null
   if (selectedSha == null || selectedSha === WIP_SHA) return null
   return (
     <div
@@ -109,7 +106,6 @@ export function WorkspaceLayout() {
   const setLeftPanelWidth = useWorkspaceStore((state) => state.setLeftPanelWidth)
   const setRightPanelWidth = useWorkspaceStore((state) => state.setRightPanelWidth)
   const centerView = useUiStore((s) => s.centerView)
-  const inSettings = centerView === 'settings'
   const inRepoPicker = centerView === 'repoPicker'
 
   const panelRow = (
@@ -146,13 +142,8 @@ export function WorkspaceLayout() {
     </div>
   )
 
-  const centerBody = inRepoPicker ? (
-    <RepoPickerView />
-  ) : inSettings ? (
-    <SettingsView />
-  ) : (
-    panelRow
-  )
+  // Settings is not in this list: it opens as a modal over whatever is here.
+  const centerBody = inRepoPicker ? <RepoPickerView /> : panelRow
 
   const workspaceBody = (
     <div
@@ -169,6 +160,7 @@ export function WorkspaceLayout() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
       <RepositoryPreviewCapture />
+      <SettingsView />
       <TabBar />
       {tabLayout === 'vertical' ? (
         <div className="flex min-h-0 flex-1">
