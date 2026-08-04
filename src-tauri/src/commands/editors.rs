@@ -169,30 +169,73 @@ static EDITOR_CACHE: Mutex<Option<(Instant, Vec<InstalledEditor>)>> = Mutex::new
 /// machine with no Visual Studio does not re-run vswhere on every call.
 static VS_CACHE: Mutex<Option<(Instant, Option<String>)>> = Mutex::new(None);
 
+/// Held for the duration of a probe so concurrent callers run one, not several.
+///
+/// Separate from the cache mutexes on purpose. The cache lock is only ever
+/// taken to read or write the stored value and is never held across the probe:
+/// holding it there would make every other caller -- including ones that would
+/// have hit a warm cache -- block on process spawns.
+static EDITOR_FLIGHT: Mutex<()> = Mutex::new(());
+static VS_FLIGHT: Mutex<()> = Mutex::new(());
+
+/// Read the cache if the stored value is still young enough.
+///
+/// Takes the lock, copies, releases. Never call the probe while holding it.
+fn cached<T: Clone>(cache: &Mutex<Option<(Instant, T)>>) -> Option<T> {
+  cache
+    .lock()
+    .unwrap()
+    .as_ref()
+    .filter(|(at, _)| at.elapsed() < DETECT_TTL)
+    .map(|(_, value)| value.clone())
+}
+
+/// Run `probe` once even when several callers arrive together.
+///
+/// The first caller through takes the flight lock and probes. The others block
+/// on that lock rather than starting their own probe, then re-check the cache
+/// the winner just filled and return it without probing at all. Startup opens
+/// several repos at once and every one asks for this, so without the gate the
+/// cache only started paying off from the *fourth* caller onward -- the first
+/// three each ran a full ~13-process detection concurrently.
+fn detect_once<T: Clone>(
+  cache: &Mutex<Option<(Instant, T)>>,
+  flight: &Mutex<()>,
+  probe: impl FnOnce() -> T,
+) -> T {
+  if let Some(hit) = cached(cache) {
+    return hit;
+  }
+
+  let _flight = flight.lock().unwrap_or_else(|e| e.into_inner());
+
+  // The winner of the race filled the cache while this caller waited.
+  if let Some(hit) = cached(cache) {
+    return hit;
+  }
+
+  let found = probe();
+  *cache.lock().unwrap() = Some((Instant::now(), found.clone()));
+  found
+}
+
 /// Every editor found on this machine, in `EditorKind::ALL` order.
 ///
 /// Cached for `DETECT_TTL`; see the constant for why this is not computed on
 /// every call.
 pub fn detect_editors() -> Vec<InstalledEditor> {
-  if let Some((at, cached)) = EDITOR_CACHE.lock().unwrap().as_ref() {
-    if at.elapsed() < DETECT_TTL {
-      return cached.clone();
-    }
-  }
-
-  let found: Vec<InstalledEditor> = EditorKind::ALL
-    .iter()
-    .filter_map(|&kind| {
-      find_launcher(kind).map(|command| InstalledEditor {
-        kind,
-        label: kind.label().to_string(),
-        command: command.to_string(),
+  detect_once(&EDITOR_CACHE, &EDITOR_FLIGHT, || {
+    EditorKind::ALL
+      .iter()
+      .filter_map(|&kind| {
+        find_launcher(kind).map(|command| InstalledEditor {
+          kind,
+          label: kind.label().to_string(),
+          command: command.to_string(),
+        })
       })
-    })
-    .collect();
-
-  *EDITOR_CACHE.lock().unwrap() = Some((Instant::now(), found.clone()));
-  found
+      .collect()
+  })
 }
 
 /// Path to `vswhere.exe`, the tool Visual Studio's installer leaves behind for
@@ -238,14 +281,7 @@ const VSWHERE_SELECT: [&str; 6] = [
 /// Cached for `DETECT_TTL`: the probe spawns vswhere, and the toolbar asks for
 /// this on every repo open.
 pub fn detect_visual_studio() -> Option<String> {
-  if let Some((at, cached)) = VS_CACHE.lock().unwrap().as_ref() {
-    if at.elapsed() < DETECT_TTL {
-      return cached.clone();
-    }
-  }
-  let found = detect_visual_studio_uncached();
-  *VS_CACHE.lock().unwrap() = Some((Instant::now(), found.clone()));
-  found
+  detect_once(&VS_CACHE, &VS_FLIGHT, detect_visual_studio_uncached)
 }
 
 #[cfg(windows)]
@@ -436,6 +472,76 @@ mod tests {
     assert_eq!(
       serde_json::from_str::<EditorKind>("\"jetbrains\"").unwrap(),
       EditorKind::Jetbrains
+    );
+  }
+
+  /// Callers arriving together must produce exactly one probe.
+  ///
+  /// Startup opens several repos at once and each asks for editor availability,
+  /// so before the flight gate the first few callers each ran a full detection
+  /// concurrently and only later ones hit the cache. Uses its own cache/flight
+  /// pair and a counting probe so the assertion is about the gate itself, not
+  /// about whatever is installed on the machine running the test.
+  #[test]
+  fn concurrent_callers_probe_once() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    static CACHE: Mutex<Option<(Instant, usize)>> = Mutex::new(None);
+    static FLIGHT: Mutex<()> = Mutex::new(());
+    let probes = Arc::new(AtomicUsize::new(0));
+
+    let threads: Vec<_> = (0..8)
+      .map(|_| {
+        let probes = Arc::clone(&probes);
+        std::thread::spawn(move || {
+          detect_once(&CACHE, &FLIGHT, || {
+            probes.fetch_add(1, Ordering::SeqCst);
+            // Long enough that the other threads are certainly waiting, so a
+            // missing gate would show up as extra probes rather than by luck.
+            std::thread::sleep(Duration::from_millis(50));
+            42
+          })
+        })
+      })
+      .collect();
+
+    let results: Vec<usize> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+
+    assert_eq!(probes.load(Ordering::SeqCst), 1, "8 concurrent callers must probe once");
+    assert!(results.iter().all(|&v| v == 42), "every caller gets the value");
+  }
+
+  /// The cache lock must never be held across a probe, or a caller that would
+  /// have hit a warm cache ends up blocked behind process spawns -- which is
+  /// the UI hang the cache exists to prevent.
+  #[test]
+  fn a_warm_cache_hit_does_not_wait_on_an_in_flight_probe() {
+    static CACHE: Mutex<Option<(Instant, usize)>> = Mutex::new(None);
+    static FLIGHT: Mutex<()> = Mutex::new(());
+
+    // Prime it, so later callers should be served from the stored value.
+    detect_once(&CACHE, &FLIGHT, || 7);
+
+    // Start a slow probe against a *different* pair to hold a flight lock, then
+    // confirm the primed cache still answers immediately.
+    static OTHER_CACHE: Mutex<Option<(Instant, usize)>> = Mutex::new(None);
+    static OTHER_FLIGHT: Mutex<()> = Mutex::new(());
+    let slow = std::thread::spawn(|| {
+      detect_once(&OTHER_CACHE, &OTHER_FLIGHT, || {
+        std::thread::sleep(Duration::from_millis(200));
+        1
+      })
+    });
+
+    let started = Instant::now();
+    assert_eq!(detect_once(&CACHE, &FLIGHT, || panic!("must not re-probe")), 7);
+    let waited = started.elapsed();
+
+    slow.join().unwrap();
+    assert!(
+      waited < Duration::from_millis(50),
+      "a warm hit must not block on unrelated detection, waited {waited:?}"
     );
   }
 
