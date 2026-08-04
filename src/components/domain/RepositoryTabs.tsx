@@ -45,8 +45,11 @@ import {
 import { arrangeTabs } from "@/lib/tabSorting";
 import { useTabStatusStore } from "@/stores/tabStatusStore";
 import { useUiStore } from "@/stores/uiStore";
-import { useRepoTabStatus } from "@/hooks/useGitQueries";
+import { useBranches, useRepoTabStatus } from "@/hooks/useGitQueries";
+import { useGitMutations } from "@/hooks/useGitMutations";
+import { branchSync } from "@/lib/branchActions";
 import { Button } from "@/components/ui/button";
+import { PendingMenuItem } from "@/components/ui/pending-menu-item";
 import { Input } from "@/components/ui/input";
 import { FormDialog } from "@/components/ui/form-dialog";
 import {
@@ -673,6 +676,70 @@ function TabStatusIcons({
   );
 }
 
+/**
+ * Get-changes for one tab's repository, without switching to it first. Lives in
+ * its own component because the mutation hook is per repository and the tab
+ * menu is rendered inside a loop.
+ *
+ * Always enabled: the behind count only reflects the last fetch, so a repo that
+ * looks up to date may still have waiting changes. Pulling is how you find out.
+ */
+function TabPullItem({ repo, name }: { repo: RepoInfo; name: string }) {
+  const m = useGitMutations(repo.id);
+  const { behind } = useRepoTabStatus(repo.id);
+
+  return (
+    <PendingMenuItem
+      icon={<ArrowDown size={13} strokeWidth={2} />}
+      label={behind > 0 ? `Pull ${behind} into ${name}` : `Pull into ${name}`}
+      pendingLabel="Pulling…"
+      pending={m.pull.isPending}
+      onRun={() => m.pull.mutate()}
+    />
+  );
+}
+
+/**
+ * Send this tab's work, shown only when there is work to send. Unlike Pull,
+ * which is always offered because the behind count can be stale, the ahead
+ * count is local knowledge and trustworthy, so nothing-to-push means no item.
+ *
+ * `never_pushed` counts as something to push: a branch that has never reached
+ * the remote has no upstream to be ahead of, so its count is zero while all of
+ * its commits are still waiting.
+ */
+function TabPushItem({ repo, name }: { repo: RepoInfo; name: string }) {
+  const m = useGitMutations(repo.id);
+  const branches = useBranches(repo.id);
+  const head = branches.data?.local.find((b) => b.is_head);
+  const sync = head ? branchSync(head) : null;
+
+  if (!sync) return null;
+  const isNew = sync.marker === "new";
+  if (sync.ahead === 0 && !isNew) return null;
+
+  return (
+    <PendingMenuItem
+      icon={<ArrowUp size={13} strokeWidth={2} />}
+      label={isNew ? `Publish ${name}` : `Push ${sync.ahead} from ${name}`}
+      pendingLabel="Pushing…"
+      pending={m.push.isPending}
+      onRun={() => {
+        // Behind as well as ahead: a plain push is refused as non-fast-forward,
+        // so hand it to the same choice modal the toolbar uses. That modal reads
+        // the active repository, so this tab has to become active first or it
+        // would offer to force-push the wrong one.
+        if (sync.behind > 0) {
+          useWorkspaceStore.getState().setActiveRepo(repo.id);
+          useUiStore.getState().openModal("push-choice");
+          return;
+        }
+        m.push.mutate();
+      }}
+    />
+  );
+}
+
 export function RepositoryTabs({
   orientation,
 }: {
@@ -1240,6 +1307,9 @@ export function RepositoryTabs({
               </TooltipTrigger>
             </ContextMenuTrigger>
             <ContextMenuContent className="w-52">
+            <TabPullItem repo={repo} name={repoName(repo)} />
+            <TabPushItem repo={repo} name={repoName(repo)} />
+            <ContextMenuSeparator />
             <ContextMenuItem
               onSelect={() => {
                 useWorkspaceStore.getState().setActiveRepo(repo.id);

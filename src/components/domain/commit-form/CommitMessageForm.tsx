@@ -55,9 +55,24 @@ export function CommitMessageForm() {
   const branches = useBranches(repo?.id ?? null);
   const log = useCommitLog(repo?.id ?? null);
   const m = useGitMutations(repo?.id ?? null);
-  const [msg, setMsg] = useState("");
-  const [desc, setDesc] = useState("");
-  const [amend, setAmend] = useState(false);
+  // The draft lives in the store, keyed by repo, so switching tabs and coming
+  // back returns to what was typed. The form is keyed by repo id, so this
+  // instance only ever reads and writes its own repo's draft.
+  const repoId = repo?.id ?? null;
+  const draft = useWorkspaceStore((s) =>
+    repoId ? s.commitDrafts[repoId] : undefined,
+  );
+  const setCommitDraft = useWorkspaceStore((s) => s.setCommitDraft);
+  const clearCommitDraft = useWorkspaceStore((s) => s.clearCommitDraft);
+  const msg = draft?.summary ?? "";
+  const desc = draft?.description ?? "";
+  const amend = draft?.amend ?? false;
+  const setMsg = (summary: string) => {
+    if (repoId) setCommitDraft(repoId, { summary });
+  };
+  const setDesc = (description: string) => {
+    if (repoId) setCommitDraft(repoId, { description });
+  };
   const [justGenerated, setJustGenerated] = useState(false);
   const generatedTimer = useRef<number | null>(null);
   // Dropping the spec label for one commit only. Reset after every commit so
@@ -107,31 +122,33 @@ export function CommitMessageForm() {
   // shows the previous message (replacing anything typed), turning it off
   // clears back to an empty new commit.
   const toggleAmend = (next: boolean) => {
-    setAmend(next);
+    if (!repoId) return;
     if (!next) {
-      setMsg("");
-      setDesc("");
+      setCommitDraft(repoId, { amend: false, summary: "", description: "" });
       return;
     }
     // The previous commit may not be loaded yet on the first tick; the effect
     // below fills it in as soon as it arrives.
-    if (headDetail.data) {
-      setMsg(headDetail.data.summary);
-      setDesc(headDetail.data.body);
-    } else {
-      setMsg("");
-      setDesc("");
-    }
+    setCommitDraft(repoId, {
+      amend: true,
+      summary: headDetail.data?.summary ?? "",
+      description: headDetail.data?.body ?? "",
+    });
   };
 
   // Covers the case above: amend was switched on before the previous commit
   // had loaded. Only fills empty fields, so it never clobbers an edit the user
   // started while the fetch was in flight.
   useEffect(() => {
-    if (!amend || !headDetail.data) return;
-    setMsg((m) => (m.trim().length > 0 ? m : headDetail.data.summary));
-    setDesc((d) => (d.trim().length > 0 ? d : headDetail.data.body));
-  }, [amend, headDetail.data]);
+    if (!amend || !headDetail.data || !repoId) return;
+    const current = useWorkspaceStore.getState().commitDrafts[repoId];
+    setCommitDraft(repoId, {
+      summary: current?.summary.trim() ? current.summary : headDetail.data.summary,
+      description: current?.description.trim()
+        ? current.description
+        : headDetail.data.body,
+    });
+  }, [amend, headDetail.data, repoId, setCommitDraft]);
 
   // Why the commit button is off, shown on hover. The button is disabled in
   // exactly these cases, so this is the only way the user learns what to fix.
@@ -155,9 +172,7 @@ export function CommitMessageForm() {
       { summary: msg, description: desc, amend, specId: specIdForCommit },
       {
         onSuccess: async () => {
-          setMsg("");
-          setDesc("");
-          setAmend(false);
+          if (repoId) clearCommitDraft(repoId);
           setSpecDropped(false);
           if (mode !== "commit_push") return;
           // Amending a commit the remote already has leaves the branch
@@ -180,13 +195,20 @@ export function CommitMessageForm() {
       return;
     }
     if (ai.generate.isPending || !repo || stagedCount === 0) return;
+    const forRepo = repo.id;
     setJustGenerated(false);
     ai.generate.mutate(
-      { repoId: repo.id, provider: aiProvider!, model: aiModel! },
+      { repoId: forRepo, provider: aiProvider!, model: aiModel! },
       {
         onSuccess: (r) => {
-          setMsg(r.summary);
-          setDesc(r.description);
+          // The user can switch tabs while this is in flight. The draft is
+          // keyed by repo, so the message always lands on the repo it was
+          // generated from -- waiting there if they have moved on.
+          setCommitDraft(forRepo, {
+            summary: r.summary,
+            description: r.description,
+          });
+          if (useWorkspaceStore.getState().activeRepoId !== forRepo) return;
           setJustGenerated(true);
           if (generatedTimer.current != null)
             window.clearTimeout(generatedTimer.current);
@@ -195,7 +217,10 @@ export function CommitMessageForm() {
             1400,
           );
         },
-        onError: (e) => toast.error(String(e)),
+        onError: (e) => {
+          if (useWorkspaceStore.getState().activeRepoId !== forRepo) return;
+          toast.error(String(e));
+        },
       },
     );
   };
