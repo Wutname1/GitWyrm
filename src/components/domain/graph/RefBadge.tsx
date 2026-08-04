@@ -24,9 +24,19 @@ const styles: Record<RefKind, string> = {
 export function RefBadge({
   refTag,
   withContextMenu = true,
+  syncedWith,
+  expandOnHover = false,
 }: {
   refTag: RefInfo
   withContextMenu?: boolean
+  /**
+   * The remote-tracking ref sitting on this exact commit under the same name.
+   * Collapses "main + origin/main, both here" into one chip with a provider
+   * glyph instead of a `+1` stack that opens a popover to say the same thing.
+   */
+  syncedWith?: RefInfo | null
+  /** Let the chip grow past its column on hover to reveal a truncated name. */
+  expandOnHover?: boolean
 }) {
   const repo = useActiveRepo()
   const remotes = useRemotes(repo?.id ?? null)
@@ -74,6 +84,12 @@ export function RefBadge({
   const provider = detectProvider(remoteInfo?.url)
   const hasProviderIcon = refTag.type === 'remote' && provider !== 'unknown'
 
+  // The synced remote's own provider, for the trailing glyph on a merged chip.
+  const syncedRemote = syncedWith ? syncedWith.name.split('/')[0] : null
+  const syncedProvider = detectProvider(
+    remoteList.find((r) => r.name === syncedRemote)?.url
+  )
+
   // Label: for a remote pill, drop the `origin/` prefix when the provider logo
   // already signals which remote it is, or when there's only a single remote so
   // the prefix carries no information. With multiple remotes and no logo to tell
@@ -92,6 +108,9 @@ export function RefBadge({
         'inline-flex max-w-[110px] flex-none items-center gap-1 overflow-hidden rounded-[5px] px-1.5 py-px font-mono text-2xs font-semibold leading-[1.4] transition-opacity',
         dnd.props.draggable ? 'wyrm-draggable cursor-grab active:cursor-grabbing' : 'cursor-default',
         styles[refTag.type],
+        // Hovering lifts the chip out of its column so a long name can be read
+        // in full over the graph, instead of forcing a widen-the-column detour.
+        expandOnHover && 'wyrm-ref-expand',
         // The whole border pulses on a valid target while everything else
         // dims (body.wyrm-dragging), so the landing spots stand out.
         isValidTarget && 'wyrm-drop-target',
@@ -105,6 +124,11 @@ export function RefBadge({
       )}
       {refTag.type === 'tag' && <Tag aria-hidden className="size-2.5 flex-none" />}
       <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
+      {syncedWith && (
+        <span className="flex flex-none items-center gap-0.5 border-l border-primary-foreground/25 pl-1">
+          <RemoteIcon aria-hidden provider={syncedProvider} width={10} height={10} />
+        </span>
+      )}
     </span>
   )
 
@@ -116,9 +140,8 @@ export function RefBadge({
 
   // Outside the context menu, whose trigger is `asChild`: a tooltip nested
   // inside would become that trigger's target and swallow the right-click menu.
-  return canSwitch ? (
-    <TooltipHint label={`Double-click to switch to ${refTag.name}`}>{withMenu}</TooltipHint>
-  ) : (
-    withMenu
-  )
+  const hint = syncedWith
+    ? `${refTag.name} and ${syncedWith.name} are both here - nothing to push or pull. Double-click to switch to it.`
+    : `Double-click to switch to ${refTag.name}`
+  return canSwitch ? <TooltipHint label={hint}>{withMenu}</TooltipHint> : withMenu
 }

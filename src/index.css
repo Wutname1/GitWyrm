@@ -822,6 +822,42 @@ body.wyrm-dragging .gw-refs-cell {
   overflow: visible;
 }
 
+/* Hovering a branch chip reveals its full name by letting it grow past the
+   refs column and sit over the graph, rather than making the user widen the
+   column to read a name that only truncated by a few characters.
+
+   The cell clips its children, so it has to stop clipping for the hovered row
+   only; :has() scopes that to the row actually under the cursor. The chip
+   itself is raised so it paints above the graph SVG and the message text. */
+.gw-refs-cell:has(.wyrm-ref-expand:hover) {
+  overflow: visible;
+}
+
+.wyrm-ref-expand:hover {
+  position: relative;
+  z-index: 30;
+  max-width: none;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.45);
+}
+
+/* Truncation lives on the label span, so it has to be lifted there too. */
+.wyrm-ref-expand:hover > span {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* Expanding mid-drag would fight the drop-target highlight and shift the
+   landing spot out from under the cursor. */
+body.wyrm-dragging .wyrm-ref-expand:hover {
+  max-width: 110px;
+  box-shadow: none;
+}
+
+body.wyrm-dragging .wyrm-ref-expand:hover > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wyrm-ai-stage,
   .wyrm-ai-logo,
