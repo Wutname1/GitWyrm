@@ -190,8 +190,15 @@ pub async fn get_commit_detail(
     diff.foreach(
       &mut |delta, _| {
         if let Some(p) = delta.new_file().path().or_else(|| delta.old_file().path()) {
+          let path = p.to_string_lossy().into_owned();
+          let old_path = delta
+            .old_file()
+            .path()
+            .map(|o| o.to_string_lossy().into_owned())
+            .filter(|old| *old != path);
           files.borrow_mut().push(FileChange {
-            path: p.to_string_lossy().into_owned(),
+            path,
+            old_path,
             status: delta_code(delta.status()),
             additions: 0,
             deletions: 0,

@@ -3092,7 +3092,13 @@ export type FileBlame = { path: string; lines: BlameLine[];
  * Set instead of `lines` when the file can't be blamed line-by-line.
  */
 binary: boolean }
-export type FileChange = { path: string; status: StatusCode; additions: number; deletions: number; conflicted: boolean; 
+export type FileChange = { path: string; 
+/**
+ * Where the file came from, when this change is a rename. `path` is always
+ * the name the file has now, so the UI can show "old -> new" and every file
+ * action (stage, diff, open) targets the name that currently exists.
+ */
+old_path: string | null; status: StatusCode; additions: number; deletions: number; conflicted: boolean; 
 /**
  * Set when this path is a submodule whose pinned commit moved. Ordinary file
  * actions (stash, discard-by-checkout) can't touch it; the UI must offer

@@ -19,6 +19,16 @@ function submoduleNote(sub: NonNullable<FileChange['submodule']>): string {
   return 'points to a different commit'
 }
 
+/**
+ * Short label for where a renamed file came from. A move within the same folder
+ * only needs the old file name; a move across folders needs the full old path
+ * to be meaningful.
+ */
+function renamedFrom(oldPath: string, newPath: string): string {
+  const dir = (p: string) => p.slice(0, p.lastIndexOf('/') + 1)
+  return dir(oldPath) === dir(newPath) ? oldPath.slice(dir(oldPath).length) : oldPath
+}
+
 interface FileChangeRowProps {
   file: FileChange
   /** Alternate visible label; actions and menus still use the full file path. */
@@ -84,6 +94,16 @@ export function FileChangeRow({
       >
         {sub && <Package className="size-3 flex-none text-sub" aria-label="Submodule" />}
         <span className="overflow-hidden text-ellipsis">{displayPath ?? file.path}</span>
+        {file.old_path && (
+          // A rename lists the file under its new name; note where it came from
+          // so the old name is still findable.
+          <span
+            title={`Renamed from ${file.old_path}`}
+            className="flex-none overflow-hidden text-ellipsis text-2xs text-sub"
+          >
+            was {renamedFrom(file.old_path, file.path)}
+          </span>
+        )}
       </span>
       {file.conflicted ? (
         // An unmerged path has three index stages, not one diff, so there are no

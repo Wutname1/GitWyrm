@@ -30,6 +30,21 @@ fn line_stats(diff: &git2::Diff) -> HashMap<String, (u32, u32)> {
   stats
 }
 
+/// Current and previous path for a status entry's delta.
+///
+/// `StatusEntry::path()` returns the delta's *old* path, which for a rename is
+/// a name that no longer exists on disk. Prefer the delta's new path, and
+/// report the old one only when the two actually differ.
+fn delta_paths(delta: Option<git2::DiffDelta>, fallback: &str) -> (String, Option<String>) {
+  let Some(delta) = delta else {
+    return (fallback.to_string(), None);
+  };
+  let as_str = |f: git2::DiffFile| f.path().map(|p| p.to_string_lossy().into_owned());
+  let new_path = as_str(delta.new_file()).unwrap_or_else(|| fallback.to_string());
+  let old_path = as_str(delta.old_file()).filter(|old| *old != new_path);
+  (new_path, old_path)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn get_status(
@@ -46,6 +61,10 @@ pub async fn get_status(
       .include_untracked(true)
       .recurse_untracked_dirs(true)
       .renames_head_to_index(true)
+      // Without this, a rename that is not yet staged is reported as a delete
+      // plus an add, so the same change looks different before and after
+      // staging. Detect it on both sides so the two agree.
+      .renames_index_to_workdir(true)
       .update_index(true);
     let statuses = repo.statuses(Some(&mut opts))?;
 
@@ -80,6 +99,7 @@ pub async fn get_status(
       if st.is_conflicted() {
         unstaged.push(FileChange {
           path: path.clone(),
+          old_path: None,
           status: StatusCode::Conflicted,
           additions: 0,
           deletions: 0,
@@ -101,31 +121,40 @@ pub async fn get_status(
         } else {
           StatusCode::Modified
         };
-        let (a, d) = staged_stats.get(&path).copied().unwrap_or((0, 0));
+        // `entry.path()` reports the *old* name for a rename, so a staged
+        // rename would be listed under a file that no longer exists. Take the
+        // current name from the delta and keep the old one alongside it.
+        let (new_path, old_path) = delta_paths(entry.head_to_index(), &path);
+        let (a, d) = staged_stats.get(&new_path).copied().unwrap_or((0, 0));
         staged.push(FileChange {
-          path: path.clone(),
+          old_path,
           status: code,
           additions: a,
           deletions: d,
           conflicted: false,
-          submodule: submodules.get(&path).cloned(),
+          submodule: submodules.get(&new_path).cloned(),
+          path: new_path,
         });
       }
 
       if st.intersects(
         Status::WT_NEW | Status::WT_MODIFIED | Status::WT_DELETED | Status::WT_RENAMED | Status::WT_TYPECHANGE,
       ) {
-        let code = if st.contains(Status::WT_NEW) {
+        let code = if st.contains(Status::WT_RENAMED) {
+          StatusCode::Renamed
+        } else if st.contains(Status::WT_NEW) {
           StatusCode::Added
         } else if st.contains(Status::WT_DELETED) {
           StatusCode::Deleted
         } else {
           StatusCode::Modified
         };
-        let (a, d) = unstaged_stats.get(&path).copied().unwrap_or((0, 0));
-        let submodule = submodules.get(&path).cloned();
+        let (new_path, old_path) = delta_paths(entry.index_to_workdir(), &path);
+        let (a, d) = unstaged_stats.get(&new_path).copied().unwrap_or((0, 0));
+        let submodule = submodules.get(&new_path).cloned();
         unstaged.push(FileChange {
-          path,
+          path: new_path,
+          old_path,
           status: code,
           additions: a,
           deletions: d,

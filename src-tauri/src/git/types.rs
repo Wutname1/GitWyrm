@@ -76,6 +76,10 @@ pub enum StatusCode {
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct FileChange {
   pub path: String,
+  /// Where the file came from, when this change is a rename. `path` is always
+  /// the name the file has now, so the UI can show "old -> new" and every file
+  /// action (stage, diff, open) targets the name that currently exists.
+  pub old_path: Option<String>,
   pub status: StatusCode,
   pub additions: u32,
   pub deletions: u32,
