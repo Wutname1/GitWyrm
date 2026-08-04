@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { commands, type GithubRepoRef } from '@/lib/bindings'
+import { commands, type GithubRepoRef, type PrSummary } from '@/lib/bindings'
 import { isTauri } from '@/lib/env'
 import { unwrap } from '@/lib/queryKeys'
 import { classifyError } from '@/lib/errorClass'
@@ -50,13 +50,42 @@ export function useGithubSlug(repoId: string | null) {
   })
 }
 
+/**
+ * Open pull requests for a repo.
+ *
+ * Deliberately not gated on being signed in: the backend reads public repos
+ * anonymously, so PR links work before anyone connects GitHub. A private repo
+ * comes back empty in that case, which is the honest answer -- we cannot see it.
+ * The `connected` argument is kept so callers re-fetch on sign-in, when the same
+ * repo may start returning results.
+ */
 export function useGithubPrs(slug: GithubRepoRef | null | undefined, connected: boolean) {
   return useQuery({
-    queryKey: githubKeys.prs(slug?.owner ?? '', slug?.repo ?? ''),
-    enabled: isTauri && slug != null && connected,
+    queryKey: [...githubKeys.prs(slug?.owner ?? '', slug?.repo ?? ''), connected],
+    enabled: isTauri && slug != null,
     staleTime: 60 * 1000,
     queryFn: async () => unwrap(await commands.githubListPrs(slug!.owner, slug!.repo)),
   })
+}
+
+/**
+ * The open pull request whose source branch is `branch`, or null.
+ *
+ * Reuses the same PR list the GitHub panel already loads, so right-clicking a
+ * branch costs no extra request. Branch names are compared as GitHub reports
+ * them on `head_ref` -- no remote prefix -- so pass a plain local branch name.
+ *
+ * Works signed out on public repos; see [`useGithubPrs`].
+ */
+export function useGithubPrForBranch(
+  repoId: string | null,
+  branch: string | null | undefined
+): PrSummary | null {
+  const auth = useGithubAuth()
+  const slug = useGithubSlug(repoId)
+  const prs = useGithubPrs(slug.data, auth.data != null)
+  if (!branch) return null
+  return prs.data?.find((pr) => pr.head_ref === branch) ?? null
 }
 
 export function useGithubIssues(slug: GithubRepoRef | null | undefined, connected: boolean) {

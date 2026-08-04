@@ -28,6 +28,7 @@ import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useBranchHost, useRemotes } from '@/hooks/useGitQueries'
+import { useGithubPrForBranch } from '@/hooks/useGithub'
 import { branchActions } from '@/lib/branchActions'
 import { copyToClipboard } from '@/lib/clipboard'
 import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
@@ -73,6 +74,7 @@ export function BranchMenuItems({
   const host = useBranchHost(repoId, branch.upstream)
   const remotes = useRemotes(repoId)
   const actions = branchActions(branch, host)
+  const pr = useGithubPrForBranch(repoId, branch.name)
   const isCurrent = branch.is_head
 
   // How this branch relates to the checked-out one: ahead = commits only this
@@ -231,14 +233,21 @@ export function BranchMenuItems({
           View on {webTarget.label}
         </ContextMenuItem>
       )}
-      {/* TODO(github): needs the GitHub integration before it can run. The
-          "soon" badge already says why, so the item is simply inert rather than
-          answering a click with a toast. */}
-      <ContextMenuItem disabled>
-        <GitPullRequestArrow />
-        Start a pull request
-        <ContextMenuShortcut className="text-2xs">soon</ContextMenuShortcut>
-      </ContextMenuItem>
+      {pr ? (
+        <ContextMenuItem onSelect={() => openWebUrl(pr.html_url, 'GitHub')}>
+          <GitPullRequestArrow />
+          View pull request on GitHub
+          <ContextMenuShortcut className="text-2xs">#{pr.number}</ContextMenuShortcut>
+        </ContextMenuItem>
+      ) : (
+        /* TODO(github): opening a new PR needs more than a link -- base branch,
+           title, body -- so the item stays inert and says why. */
+        <ContextMenuItem disabled>
+          <GitPullRequestArrow />
+          Start a pull request
+          <ContextMenuShortcut className="text-2xs">soon</ContextMenuShortcut>
+        </ContextMenuItem>
+      )}
       <BranchSpecLinkItems branch={branch.name} repoId={repoId} />
       <ContextMenuSeparator />
 

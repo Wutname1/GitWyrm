@@ -32,15 +32,30 @@ fn token(app: &tauri::AppHandle) -> Result<String, AppError> {
 
 fn api(app: &tauri::AppHandle, method: reqwest::Method, path: &str) -> Result<reqwest::RequestBuilder, AppError> {
   let token = token(app)?;
-  Ok(
-    reqwest::Client::new()
-      .request(method, format!("{API_BASE}{path}"))
-      .bearer_auth(token)
-      .header("Accept", "application/vnd.github+json")
-      .header("X-GitHub-Api-Version", "2022-11-28")
-      .header("User-Agent", "GitWyrm")
-      .timeout(TIMEOUT),
-  )
+  Ok(request(method, path).bearer_auth(token))
+}
+
+fn request(method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+  reqwest::Client::new()
+    .request(method, format!("{API_BASE}{path}"))
+    .header("Accept", "application/vnd.github+json")
+    .header("X-GitHub-Api-Version", "2022-11-28")
+    .header("User-Agent", "GitWyrm")
+    .timeout(TIMEOUT)
+}
+
+/// Signed-in request when a token is stored, anonymous otherwise.
+///
+/// GitHub serves public repositories anonymously, so read-only lookups still
+/// work with nobody connected. The anonymous rate limit is much lower (60/hour
+/// per IP rather than 5000) and private repos return 404, which is why only
+/// small, cached reads use this -- anything that writes goes through [`api`]
+/// and keeps failing with "connect GitHub first".
+fn api_or_public(app: &tauri::AppHandle, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+  match token(app) {
+    Ok(token) => request(method, path).bearer_auth(token),
+    Err(_) => request(method, path),
+  }
 }
 
 /// Turns a non-2xx response into a readable error, preferring GitHub's own
@@ -439,7 +454,18 @@ pub async fn github_list_prs(
   repo: String,
 ) -> Result<Vec<PrSummary>, AppError> {
   let path = format!("/repos/{owner}/{repo}/pulls?state=open&per_page=50&sort=updated&direction=desc");
-  let prs: Vec<ApiPr> = send(api(&app, reqwest::Method::GET, &path)?)
+  // Falls back to an anonymous read so PR links work in public repos without
+  // connecting GitHub. A private repo is invisible that way and answers 404, so
+  // treat that as "no open pull requests": the branch menu omits the item
+  // instead of the UI raising an error for a repo the user never connected.
+  let res = api_or_public(&app, reqwest::Method::GET, &path)
+    .send()
+    .await
+    .map_err(|e| AppError::Other(format!("could not reach GitHub: {e}")))?;
+  if res.status().as_u16() == 404 {
+    return Ok(Vec::new());
+  }
+  let prs: Vec<ApiPr> = check(res)
     .await?
     .json()
     .await

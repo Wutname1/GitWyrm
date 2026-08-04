@@ -4,6 +4,7 @@ import {
   ExternalLink,
   GitBranch,
   GitMerge,
+  GitPullRequestArrow,
   RefreshCw,
   RotateCcw,
   Trash2,
@@ -20,6 +21,7 @@ import {
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useBranches } from '@/hooks/useGitQueries'
+import { useGithubPrForBranch } from '@/hooks/useGithub'
 import { useUiStore } from '@/stores/uiStore'
 import { copyToClipboard } from '@/lib/clipboard'
 import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
@@ -71,6 +73,7 @@ export function RemoteBranchMenuItems({
   // a no-op, and it cannot be merged or reset into itself.
   const isCheckedOut = !!localCounterpart && localCounterpart === currentBranch
 
+  const pr = useGithubPrForBranch(repoId, branch)
   const webTarget = remoteWebTarget(remote)
   const webUrl = webTarget ? remoteBranchWebUrl(webTarget, branch) : null
 
@@ -136,6 +139,13 @@ export function RemoteBranchMenuItems({
       )}
       <ContextMenuSeparator />
 
+      {pr && (
+        <ContextMenuItem onSelect={() => openWebUrl(pr.html_url, 'GitHub')}>
+          <GitPullRequestArrow />
+          View pull request on GitHub
+          <ContextMenuShortcut className="text-2xs">#{pr.number}</ContextMenuShortcut>
+        </ContextMenuItem>
+      )}
       {webTarget && webUrl && (
         <ContextMenuItem onSelect={() => openWebUrl(webUrl, webTarget.label)}>
           <ExternalLink />
