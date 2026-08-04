@@ -15,6 +15,12 @@ import {
   setPrimaryFolder,
   type CodeFolder,
 } from "@/lib/codeFolders";
+import {
+  applyDraft,
+  clearDraft,
+  type CommitDraft,
+  type CommitDraftMap,
+} from "@/lib/commitDrafts";
 import { log } from "@/lib/log";
 import { normalizePath, pathKey, samePath } from "@/lib/paths";
 import { broadcastSettingsChanged } from "@/lib/settingsSync";
@@ -471,6 +477,16 @@ interface WorkspaceState {
   openRepos: RepoInfo[];
   /** Active repo id (tab). */
   activeRepoId: string | null;
+  /**
+   * Unfinished commit message per repo, keyed by repo id. Lets a draft survive
+   * switching tabs and coming back.
+   *
+   * Deliberately in-memory only: this is working text, not a setting. A
+   * half-written message that reappeared days after the app restarted would be
+   * stale at best and misleading at worst. Cleared when the commit lands and
+   * when the tab closes.
+   */
+  commitDrafts: CommitDraftMap;
   /** Recently opened repo paths, most recent first (persisted). */
   recents: RecentRepo[];
   /**
@@ -692,6 +708,10 @@ interface WorkspaceState {
   addReposInBackground: (repos: RepoInfo[]) => void;
   removeRepo: (id: string) => void;
   setActiveRepo: (id: string) => void;
+  /** Save the in-progress commit message for a repo. */
+  setCommitDraft: (repoId: string, draft: Partial<CommitDraft>) => void;
+  /** Forget a repo's draft, e.g. once the commit is written. */
+  clearCommitDraft: (repoId: string) => void;
   /** Watch another folder. Ignored when already watched; the first becomes primary. */
   addCodeFolder: (path: string) => void;
   /** Stop watching a folder. Removing the primary promotes the next one. */
@@ -1305,6 +1325,7 @@ export type SettingsSnapshot = Partial<Pick<WorkspaceState, SettingsKey>>;
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   openRepos: [],
   activeRepoId: null,
+  commitDrafts: {},
   recents: [],
   codeFolders: [],
   cloneDirectory: null,
@@ -1464,6 +1485,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       return {
         openRepos,
         activeRepoId,
+        // Closing a tab discards its unfinished message along with it.
+        commitDrafts: clearDraft(s.commitDrafts, id),
         tabGroups: workspace.groups,
         tabOrder: workspace.order,
         // A closed tab keeps no pin; reopening it starts unpinned.
@@ -1473,6 +1496,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       };
     });
     schedulePersist();
+  },
+  setCommitDraft: (repoId, draft) => {
+    set((s) => ({ commitDrafts: applyDraft(s.commitDrafts, repoId, draft) }));
+  },
+  clearCommitDraft: (repoId) => {
+    set((s) => ({ commitDrafts: clearDraft(s.commitDrafts, repoId) }));
   },
   setActiveRepo: (id) => {
     set({ activeRepoId: id });
