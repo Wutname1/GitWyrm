@@ -8,8 +8,8 @@ use crate::state::RepoManager;
 
 fn stage_paths(repo: &git2::Repository, root: &Path, paths: &[String]) -> Result<(), git2::Error> {
   let mut index = repo.index()?;
-  for path in paths {
-    let rel = Path::new(path);
+  for path in rename_counterparts(repo, paths) {
+    let rel = Path::new(&path);
     if root.join(rel).exists() {
       index.add_path(rel)?;
     } else {
@@ -20,13 +20,51 @@ fn stage_paths(repo: &git2::Repository, root: &Path, paths: &[String]) -> Result
   Ok(())
 }
 
+/// The given paths, plus the other half of any rename they take part in.
+///
+/// A rename is one change to the user but two index entries: the new file added
+/// and the old one deleted. Staging a renamed file by its new name alone would
+/// leave the old name behind as a stray "deleted" row, so pull in its partner.
+fn rename_counterparts(repo: &git2::Repository, paths: &[String]) -> Vec<String> {
+  let mut out = paths.to_vec();
+  let mut opts = git2::StatusOptions::new();
+  opts
+    .include_untracked(true)
+    .recurse_untracked_dirs(true)
+    .renames_head_to_index(true)
+    .renames_index_to_workdir(true);
+  let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
+    return out;
+  };
+  for entry in statuses.iter() {
+    for delta in [entry.index_to_workdir(), entry.head_to_index()].into_iter().flatten() {
+      let as_str = |f: git2::DiffFile| f.path().map(|p| p.to_string_lossy().into_owned());
+      let (Some(old), Some(new)) = (as_str(delta.old_file()), as_str(delta.new_file())) else {
+        continue;
+      };
+      if old == new {
+        continue;
+      }
+      // Requesting either side of the rename should stage both sides.
+      if paths.contains(&old) && !out.contains(&new) {
+        out.push(new);
+      } else if paths.contains(&new) && !out.contains(&old) {
+        out.push(old);
+      }
+    }
+  }
+  out
+}
+
 fn unstage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::Error> {
+  // Unstaging half a rename would strand the other half in the index.
+  let paths = rename_counterparts(repo, paths);
   let head = repo.head().ok().and_then(|h| h.peel(git2::ObjectType::Commit).ok());
   match head {
     Some(head) => repo.reset_default(Some(&head), paths.iter().map(String::as_str))?,
     None => {
       let mut index = repo.index()?;
-      for path in paths {
+      for path in &paths {
         index.remove_path(Path::new(path))?;
       }
       index.write()?;
@@ -36,6 +74,9 @@ fn unstage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::
 }
 
 fn discard_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::Error> {
+  // Discarding a rename has to restore the old name as well as remove the new
+  // one, or the file appears to vanish.
+  let paths = rename_counterparts(repo, paths);
   let head = repo.head()?.peel(git2::ObjectType::Commit)?;
 
   // Reset the selected index entries too, so "all changes in this folder"
@@ -45,7 +86,7 @@ fn discard_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::
   let mut builder = git2::build::CheckoutBuilder::new();
   builder.force().remove_untracked(true);
   let mut has_regular_file = false;
-  for path in paths {
+  for path in &paths {
     if is_submodule(repo, path) {
       let mut sub = repo.find_submodule(path)?;
       sub.update(false, None)?;
@@ -254,6 +295,52 @@ mod tests {
         .expect("initial commit");
     }
     (dir, repo)
+  }
+
+  /// Staging a rename by its new name must stage the removal of the old name
+  /// too, otherwise the old path lingers as a stray deleted entry.
+  #[test]
+  fn staging_a_rename_by_new_name_also_stages_the_old_name() {
+    let (dir, repo) = committed_repo();
+    let old = "target/nested/tracked.txt";
+    let new = "target/nested/renamed.txt";
+    fs::rename(dir.path().join(old), dir.path().join(new)).expect("rename file");
+
+    stage_paths(&repo, dir.path(), &[new.to_string()]).expect("stage renamed file");
+
+    let old_status = repo.status_file(Path::new(old)).expect("old status");
+    assert!(
+      old_status.contains(git2::Status::INDEX_DELETED),
+      "old path should be staged as deleted, got {old_status:?}"
+    );
+    assert!(
+      !old_status.contains(git2::Status::WT_DELETED),
+      "old path should not still be an unstaged deletion, got {old_status:?}"
+    );
+
+    // And unstaging from the new name puts both halves back.
+    unstage_paths(&repo, &[new.to_string()]).expect("unstage renamed file");
+    let old_status = repo.status_file(Path::new(old)).expect("old status after unstage");
+    assert!(
+      !old_status.intersects(git2::Status::INDEX_DELETED),
+      "old path should be fully unstaged, got {old_status:?}"
+    );
+  }
+
+  /// Discarding a rename restores the original file rather than leaving the
+  /// content gone under both names.
+  #[test]
+  fn discarding_a_rename_restores_the_original_file() {
+    let (dir, repo) = committed_repo();
+    let old = "target/nested/tracked.txt";
+    let new = "target/nested/renamed.txt";
+    fs::rename(dir.path().join(old), dir.path().join(new)).expect("rename file");
+    stage_paths(&repo, dir.path(), &[new.to_string()]).expect("stage renamed file");
+
+    discard_paths(&repo, &[new.to_string()]).expect("discard rename");
+
+    assert!(dir.path().join(old).exists(), "original file should be back");
+    assert!(!dir.path().join(new).exists(), "renamed file should be gone");
   }
 
   #[test]

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
-  ChevronDown,
   GitCommitHorizontal,
   Pencil,
   Sparkles,
@@ -23,15 +22,6 @@ import {
 } from "@/components/ui/tooltip";
 import { plural } from "@/lib/gitDisplay";
 import { branchSync } from "@/lib/branchActions";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useAiMutations } from "@/hooks/useAi";
 import { useAiSelection } from "@/hooks/useAiSelection";
 import { useSpecLink } from "@/hooks/useSpecLink";
@@ -429,45 +419,39 @@ export function CommitMessageForm() {
           </button>
         </DisabledHint>
         <Tooltip>
-          <DropdownMenu>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <button
-                  aria-label="Change default commit action"
-                  className={cn(
-                    "flex w-[30px] items-center justify-center border-l transition-colors",
-                    canCommit
-                      ? "cursor-pointer border-primary/40 hover:bg-primary hover:text-primary-foreground"
-                      : "cursor-pointer border-border/60 text-sub hover:bg-panel2 hover:text-foreground",
-                  )}
-                >
-                  <ChevronDown size={14} strokeWidth={2.2} />
-                </button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>Change default commit action</TooltipContent>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel className="text-xs text-sub">
-                Default commit button action
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuRadioGroup
-                value={commitButtonMode}
-                onValueChange={(v) =>
-                  setCommitButtonMode(v as CommitButtonMode)
-                }
-              >
-                <DropdownMenuRadioItem value="commit" className="text-xs">
-                  <GitCommitHorizontal size={13} className="text-current" />
-                  Commit only
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="commit_push" className="text-xs">
-                  <Upload size={13} className="text-current" />
-                  Commit & push
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <TooltipTrigger asChild>
+            <button
+              role="switch"
+              aria-checked={commitButtonMode === "commit_push"}
+              aria-label={
+                commitButtonMode === "commit_push"
+                  ? "Switch to commit only"
+                  : "Switch to commit and push"
+              }
+              onClick={() =>
+                setCommitButtonMode(
+                  commitButtonMode === "commit_push" ? "commit" : "commit_push",
+                )
+              }
+              className={cn(
+                "flex w-[30px] items-center justify-center border-l transition-colors",
+                canCommit
+                  ? "cursor-pointer border-primary/40 hover:bg-primary hover:text-primary-foreground"
+                  : "cursor-pointer border-border/60 text-sub hover:bg-panel2 hover:text-foreground",
+              )}
+            >
+              {commitButtonMode === "commit_push" ? (
+                <GitCommitHorizontal size={15} strokeWidth={2} />
+              ) : (
+                <Upload size={14} strokeWidth={2} />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {commitButtonMode === "commit_push"
+              ? "Switch to commit only (do not push)"
+              : "Switch to commit and push"}
+          </TooltipContent>
         </Tooltip>
       </div>
     </div>
