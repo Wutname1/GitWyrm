@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useFileDiff } from '@/hooks/useGitQueries'
+import { useFileDiff, useStatus } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { useUiStore } from '@/stores/uiStore'
@@ -28,7 +28,9 @@ function toSelected(l: DiffLineEntry): SelectedLine {
 export function DiffView() {
   const repo = useActiveRepo()
   const request = useUiStore((s) => s.diffRequest)
+  const closeDiff = useUiStore((s) => s.closeDiff)
   const diff = useFileDiff(repo?.id ?? null, request?.path ?? null, request?.source ?? null)
+  const status = useStatus(repo?.id ?? null)
   const m = useGitMutations(repo?.id ?? null)
 
   // Selected changed-line keys, local to this file view.
@@ -49,6 +51,20 @@ export function DiffView() {
     setAnchor(null)
     setContextLine(null)
   }, [sourceKey])
+
+  // A working-tree diff outlives its file once that file is committed or
+  // discarded: the request still points at a path with nothing left to show, so
+  // the view sits there empty. Drop back to the graph as soon as the path stops
+  // being a pending change. Commit diffs are historical and always have content.
+  const isWorkingTree = kind === 'staged' || kind === 'unstaged'
+  const stillPending =
+    !isWorkingTree ||
+    !status.data ||
+    status.data.staged.some((f) => f.path === request?.path) ||
+    status.data.unstaged.some((f) => f.path === request?.path)
+  useEffect(() => {
+    if (!stillPending) closeDiff()
+  }, [stillPending, closeDiff])
 
   // Only working-tree diffs are partially stageable; commit diffs are read-only.
   const canPatch = kind === 'staged' || kind === 'unstaged'
