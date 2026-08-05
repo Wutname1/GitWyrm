@@ -12,6 +12,7 @@ import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import { useOpenRepo } from '@/hooks/useRepoActions'
+import { SidebarTip } from '@/components/domain/SidebarTip'
 
 /** A readable size for the copy list -- "2 KB" beats "2048". */
 function readableSize(bytes: number): string {
@@ -179,19 +180,22 @@ export function AddWorktreeModal() {
       open={open}
       onOpenChange={(o) => !o && closeModal()}
       icon={<FolderGit2 size={15} strokeWidth={1.9} />}
-      title="Work on another branch in its own folder"
-      submitLabel="Make the folder"
-      pendingLabel="Making…"
+      title="Add a worktree"
+      submitLabel="Add worktree"
+      pendingLabel="Adding…"
       canSubmit={canSubmit}
       pending={m.addWorktree.isPending}
       widthClassName="sm:max-w-lg"
       onSubmit={submit}
     >
-      <p className="text-2xs leading-relaxed text-muted-foreground">
-        This makes a second copy of your project's files on your computer, on a different branch.
-        Both stay in sync with the same history, so you can work in one while the other sits
-        untouched.
-      </p>
+      {/* Names the term, then explains it. Someone who arrived here from an AI
+          tool's docs recognises the word; someone who has never seen it learns
+          what it means without having to look it up. Hidden once tips are off:
+          the fields below are labelled and stand on their own. */}
+      <SidebarTip indent={false} className="pr-0 pt-0">
+        A worktree checks out another branch into its own folder on your computer. Both share the
+        same history and the same project, so you can work in one while the other sits untouched.
+      </SidebarTip>
 
       <div className="grid gap-1.5">
         <label className="text-2xs font-semibold text-sub">Branch</label>

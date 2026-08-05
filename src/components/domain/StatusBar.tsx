@@ -244,7 +244,7 @@ export function StatusBar() {
       <UpdateButton />
       {inWorktree && current && (
         <TooltipHint
-          label={`You're working in the ${current.folder_name} folder, a separate copy of this project. Commits here don't touch the original folder.`}
+          label={`You're working in the ${current.folder_name} worktree — this project checked out in its own folder. Commits here don't touch the main checkout.`}
         >
           <span className="flex items-center gap-1 text-[var(--gw-accent-text)]">
             <FolderGit2 size={9} />

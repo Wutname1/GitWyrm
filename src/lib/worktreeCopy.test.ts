@@ -212,21 +212,30 @@ describe('plain language', () => {
     .filter(Boolean)
     .join(' ')
 
-  it('never uses git jargon the user has not asked to learn', () => {
-    // These are the words that make git's own messages unreadable to someone
-    // who has not read git's documentation.
-    for (const jargon of [
+  it('never leaks raw git plumbing at the user', () => {
+    // The line this draws is deliberate. "Worktree" is NOT on this list: it is
+    // the name of the thing, the word git prints, and the word every AI tool's
+    // docs use -- so we teach it rather than inventing a friendlier synonym the
+    // user could never search for. What stays out is git's internal plumbing
+    // and the flags it expects you to already know.
+    for (const plumbing of [
       'HEAD',
       'refspec',
       'reflog',
       'detached',
       '--force',
-      'prune',
       'index',
       'fatal',
+      'gitdir',
     ]) {
-      expect(allCopy).not.toContain(jargon)
+      expect(allCopy).not.toContain(plumbing)
     }
+  })
+
+  it('teaches the real word instead of renaming the concept', () => {
+    // A user who read about worktrees in an AI tool's docs must recognise this
+    // screen, and a user who hits a raw git message must find the same word.
+    expect(allCopy).toContain('worktree')
   })
 
   it('never tells the user to pass a flag', () => {
@@ -238,7 +247,9 @@ describe('branch held elsewhere', () => {
   it('names the folder rather than reporting that the branch is in use', () => {
     const msg = branchHeldMessage('feature', 'project-feature')
     expect(msg).toContain('project-feature')
-    expect(msg).toContain('one folder at a time')
+    expect(msg).toContain('one place at a time')
+    // Names it as a worktree, so the user can find it in the section.
+    expect(msg).toContain('worktree')
   })
 })
 

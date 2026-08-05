@@ -9,6 +9,17 @@
  * output. That is the whole reason worktrees are hard: git reports symptoms
  * ("is already used by worktree", "not a working tree", "permission denied")
  * and never the cause or the way out.
+ *
+ * Plain language means explaining clearly, NOT renaming the concept. "Worktree"
+ * is the word git prints, the word every AI tool's documentation uses, and the
+ * word the user will type when they search for help -- so it is the word we
+ * use, and we teach it. Calling it something friendlier would leave them unable
+ * to connect this screen to anything else they read, and would break down the
+ * moment a raw git message reached them. What we do simplify is everything
+ * around it: "2 files you haven't saved yet", not "unstaged changes".
+ *
+ * The one place "folder" is still correct is the thing on disk -- a worktree
+ * *has* a folder, and that is the concrete noun for where its files live.
  */
 
 import type { DirtyCount, RemoveOutcome, Worktree, WorktreeState } from '@/lib/bindings'
@@ -27,10 +38,10 @@ function count(n: number, noun: string): string {
  */
 export function brokenExplanation(state: WorktreeState): string | null {
   if (state === 'missing') {
-    return 'This folder is no longer on your computer. Nothing is at risk — tidying up just removes the leftover reference.'
+    return "This worktree's folder is no longer on your computer. Nothing is at risk — tidying up just removes the leftover reference."
   }
   if (state === 'moved') {
-    return 'This folder moved, so the link to it broke. Your files are still there; repairing points the project back at them.'
+    return "This worktree's folder moved, so the link to it broke. Your files are still there; repairing points the project back at them."
   }
   return null
 }
@@ -53,15 +64,15 @@ export function brokenAction(state: WorktreeState): 'prune' | 'repair' | null {
 export function dirtySummary(dirt: DirtyCount): string {
   const { modified, untracked } = dirt
   if (modified === 0 && untracked === 0) {
-    return 'There is nothing unsaved in this folder.'
+    return 'There is nothing unsaved in it.'
   }
   if (modified > 0 && untracked > 0) {
-    return `This folder has ${count(modified, 'changed file')} and ${count(untracked, 'new file')} that have never been saved anywhere.`
+    return `It has ${count(modified, 'changed file')} and ${count(untracked, 'new file')} that have never been saved anywhere.`
   }
   if (untracked > 0) {
-    return `This folder has ${count(untracked, 'new file')} that ${untracked === 1 ? 'has' : 'have'} never been saved anywhere. If you throw ${untracked === 1 ? 'it' : 'them'} away, ${untracked === 1 ? 'it is' : 'they are'} gone for good.`
+    return `It has ${count(untracked, 'new file')} that ${untracked === 1 ? 'has' : 'have'} never been saved anywhere. If you throw ${untracked === 1 ? 'it' : 'them'} away, ${untracked === 1 ? 'it is' : 'they are'} gone for good.`
   }
-  return `This folder has ${count(modified, 'changed file')} you haven't saved yet.`
+  return `It has ${count(modified, 'changed file')} you haven't saved yet.`
 }
 
 /**
@@ -82,7 +93,7 @@ export function removeOutcomeMessage(
     case 'removed':
       return {
         tone: 'success',
-        text: `Removed the ${folderName} folder`,
+        text: `Removed the ${folderName} worktree`,
         detail: outcome.branch
           ? `The ${outcome.branch} branch is still here.`
           : undefined,
@@ -90,7 +101,7 @@ export function removeOutcomeMessage(
     case 'refusedDirty':
       return {
         tone: 'warning',
-        text: `${folderName} has work in it that isn't saved`,
+        text: `The ${folderName} worktree has work in it that isn't saved`,
         detail: dirtySummary({ modified: outcome.modified, untracked: outcome.untracked }),
       }
     case 'refusedLocked':
@@ -122,11 +133,11 @@ export function removeConfirmCopy(
   dirt: DirtyCount
 ): { title: string; body: string; branchNote: string } {
   return {
-    title: `Remove the ${worktree.folder_name} folder?`,
+    title: `Remove the ${worktree.folder_name} worktree?`,
     body: dirtySummary(dirt),
     branchNote: worktree.branch
-      ? `The ${worktree.branch} branch stays exactly as it is — only this copy of the files goes away.`
-      : 'Only this copy of the files goes away.',
+      ? `The ${worktree.branch} branch stays exactly as it is — only this checkout of the files goes away.`
+      : 'Only this checkout of the files goes away.',
   }
 }
 
@@ -137,7 +148,7 @@ export function removeConfirmCopy(
  * report that sends people hunting through a filesystem.
  */
 export function branchHeldMessage(branch: string, folderName: string): string {
-  return `${branch} is already open in the ${folderName} folder. A branch can only be open in one folder at a time.`
+  return `${branch} is already checked out in the ${folderName} worktree. A branch can only be checked out in one place at a time.`
 }
 
 /** The follow-on offer after a removal, when deleting the branch is safe. */

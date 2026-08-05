@@ -138,7 +138,7 @@ export function GeneralSettings() {
       <SettingRow
         label="Worktrees"
         searchId="worktrees"
-        hint="Worktrees let you check out more than one branch at once, each in its own folder. An advanced feature, off by default. Turns on by itself if this repo already uses them."
+        hint="Worktrees let you check out more than one branch at once, each in its own folder. An advanced feature, off by default. Turns on by itself if this repo already uses them. Turning it off stops GitWyrm offering to add new ones — worktrees you already have stay listed and manageable."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
           <input

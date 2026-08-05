@@ -92,8 +92,8 @@ export function AiRunTab({
             {session.worktree_name && (
               <>
                 {' '}
-                in its own <span className="text-sub">{session.worktree_name}</span> folder, so
-                your files stay untouched while it works
+                in the <span className="text-sub">{session.worktree_name}</span> worktree, so your
+                own files stay untouched while it works
               </>
             )}
             . One commit per task, never pushes, and you can undo everything it does.

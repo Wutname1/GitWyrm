@@ -524,7 +524,7 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
       setHandEdited(null)
       toast.success(
         keepFolder
-          ? 'Undone. The task is open again, and the folder is kept in your Folders list.'
+          ? 'Undone. The task is open again, and the worktree is kept in your Worktrees list.'
           : "Undone. The AI's edits are gone and the task is open again."
       )
     } catch (e) {
@@ -1095,21 +1095,22 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
       <ConfirmDialog
         open={handEdited != null}
         onOpenChange={(o) => !o && setHandEdited(null)}
-        title="You've made your own edits in that folder"
+        title="You've made your own edits in that worktree"
         description={
           handEdited && (
             <>
-              The <span className="font-mono text-foreground">{handEdited.folder_name}</span> folder
-              has {handEdited.modified > 0 && `${handEdited.modified} file${handEdited.modified === 1 ? '' : 's'} you changed`}
+              The <span className="font-mono text-foreground">{handEdited.folder_name}</span>{' '}
+              worktree has{' '}
+              {handEdited.modified > 0 && `${handEdited.modified} file${handEdited.modified === 1 ? '' : 's'} you changed`}
               {handEdited.modified > 0 && handEdited.untracked > 0 && ' and '}
               {handEdited.untracked > 0 &&
                 `${handEdited.untracked} new file${handEdited.untracked === 1 ? '' : 's'} that ${handEdited.untracked === 1 ? 'has' : 'have'} never been saved anywhere`}
-              . Keeping it leaves an ordinary folder in your Folders list that you can open or
+              . Keeping it leaves an ordinary worktree in your Worktrees list that you can open or
               remove whenever you like.
             </>
           )
         }
-        confirmLabel="Keep the folder"
+        confirmLabel="Keep the worktree"
         pending={undoing}
         pendingLabel="Undoing…"
         onConfirm={() => void undoRun(true)}

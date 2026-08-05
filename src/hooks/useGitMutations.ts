@@ -417,7 +417,7 @@ export function useGitMutations(repoId: string | null) {
       invalidate(qc, id, ['worktrees', ...REFS])
       const folder = created.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? created
       const copied = copyFiles?.length ?? 0
-      toast(`Made a ${folder} folder on ${branch}`, {
+      toast(`Added the ${folder} worktree on ${branch}`, {
         description: copied
           ? `Copied ${plural(copied, 'setup file')} across. Open it to start working.`
           : 'Open it to start working there.',
@@ -457,7 +457,7 @@ export function useGitMutations(repoId: string | null) {
       invalidate(qc, id, ['worktrees'])
       toast(
         count > 0
-          ? `Tidied up ${plural(count, 'leftover folder reference')}`
+          ? `Tidied up ${plural(count, 'leftover worktree')}`
           : 'Nothing needed tidying up'
       )
     },
@@ -469,7 +469,7 @@ export function useGitMutations(repoId: string | null) {
       unwrap(await commands.repairWorktree(id, newPath)),
     onSuccess: () => {
       invalidate(qc, id, ['worktrees'])
-      toast('Pointed the project back at that folder')
+      toast('Pointed the project back at that worktree')
     },
     onError,
   })
@@ -529,8 +529,8 @@ export function useGitMutations(repoId: string | null) {
     },
     onSuccess: ({ name, outcome }) => {
       if (outcome.kind === 'heldByWorktree') {
-        toast.warning(`${name} is open in the ${outcome.folder_name} folder`, {
-          description: 'Remove that folder first, then the branch can go.',
+        toast.warning(`${name} is checked out in the ${outcome.folder_name} worktree`, {
+          description: 'Remove that worktree first, then the branch can go.',
         })
         return
       }
@@ -702,9 +702,9 @@ export function useGitMutations(repoId: string | null) {
         // Nothing happened. Git would refuse this, and its message names
         // neither the folder nor a way forward -- so say which folder has it.
         // The section's row is where the user opens that folder.
-        toast.warning(`${name} is already open in another folder`, {
+        toast.warning(`${name} is already checked out in another worktree`, {
           description:
-            'A branch can only be open in one folder at a time. Open that worktree from the Worktrees list to work on it.',
+            'A branch can only be checked out in one place at a time. Open that worktree from the Worktrees list to work on it.',
         })
         return
       }

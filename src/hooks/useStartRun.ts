@@ -66,7 +66,7 @@ export function useStartRun(repoId: string, change: SpecChange) {
       }
       toast.success('Started. Watch it on the AI tab.', {
         description: ownFolder
-          ? 'It has its own copy of your files, so you can keep working in yours.'
+          ? 'It has its own worktree, so you can keep working in yours.'
           : undefined,
       })
     } finally {

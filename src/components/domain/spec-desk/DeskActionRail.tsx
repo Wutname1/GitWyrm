@@ -484,10 +484,10 @@ export function DeskActionRail({
                         className="mt-0.5 size-3 flex-none accent-[var(--gw-accent)]"
                       />
                       <span>
-                        Work in its own folder so you can keep editing
+                        Run it in its own worktree so you can keep editing
                         <span className="block text-muted-foreground">
-                          Makes a separate copy of your files for the task, then shows you what
-                          changed before anything reaches your branch.
+                          Checks this project out into a separate folder for the task, then shows
+                          you what changed before anything reaches your branch.
                         </span>
                       </span>
                     </label>
