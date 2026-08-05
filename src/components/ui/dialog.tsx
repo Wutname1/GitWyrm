@@ -37,7 +37,13 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/70 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+        // `duration-200` matches DialogContent. Without it the overlay used
+        // tw-animate's 150ms default while the panel ran 200ms, so the backdrop
+        // finished 50ms early and the two visibly came apart mid-fade.
+        // `will-change: opacity` gets the backdrop its own compositor layer, so
+        // the fade keeps advancing while the main thread is busy mounting the
+        // dialog's contents instead of stepping in time with it.
+        "fixed inset-0 z-50 bg-black/70 duration-200 will-change-[opacity] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
         className
       )}
       {...props}
@@ -59,7 +65,10 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-modal text-modal-foreground p-6 shadow-lg shadow-black/60 duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          // `will-change: transform, opacity` promotes the panel for the zoom +
+          // fade. Both are compositor properties, but the large drop shadow on
+          // a scaling box otherwise repaints every frame.
+          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-modal text-modal-foreground p-6 shadow-lg shadow-black/60 duration-200 will-change-[transform,opacity] outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
         {...props}
