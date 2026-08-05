@@ -1,16 +1,5 @@
-import { AboutSettings } from '@/components/domain/settings/AboutSettings'
-import { AiSettings } from '@/components/domain/settings/AiSettings'
-import { AppearanceSettings } from '@/components/domain/settings/AppearanceSettings'
-import { BehaviorSettings } from '@/components/domain/settings/BehaviorSettings'
-import { GeneralSettings } from '@/components/domain/settings/GeneralSettings'
-import { LogsSettings } from '@/components/domain/settings/LogsSettings'
-import { OpenspecSettings } from '@/components/domain/settings/OpenspecSettings'
-import { ProfilesSettings } from '@/components/domain/settings/ProfilesSettings'
-import { RepositorySettings } from '@/components/domain/settings/RepositorySettings'
-import { RepositoryTagsSettings } from '@/components/domain/settings/RepositoryTagsSettings'
-import { SecuritySettings } from '@/components/domain/settings/SecuritySettings'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { SettingsNav } from '@/components/domain/settings/SettingsNav'
-import { TagsSettings } from '@/components/domain/settings/TagsSettings'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { X } from 'lucide-react'
@@ -42,19 +31,83 @@ const SUBTITLES: Partial<Record<SettingsSection, string>> = {
   security: 'Prove your commits came from you, and choose the programs GitWyrm uses.',
 }
 
+/**
+ * Section bodies are split out and loaded on demand.
+ *
+ * Statically importing all twelve put every one of them in the main bundle and
+ * evaluated them at startup, to show the single section the user asked for.
+ * Several are large -- Security is ~670 lines and fires `getEffectiveIdentity`
+ * on mount, Profiles ~550, AI ~490 -- and the whole cost landed in the frame
+ * the dialog's open animation starts in, which is what made the fade stutter.
+ */
 const SECTION_BODIES: Record<SettingsSection, React.ComponentType> = {
-  general: GeneralSettings,
-  behavior: BehaviorSettings,
-  repository: RepositorySettings,
-  repositoryTags: RepositoryTagsSettings,
-  tags: TagsSettings,
-  profiles: ProfilesSettings,
-  ai: AiSettings,
-  openspec: OpenspecSettings,
-  security: SecuritySettings,
-  appearance: AppearanceSettings,
-  logs: LogsSettings,
-  about: AboutSettings,
+  general: lazy(async () => ({
+    default: (await import('@/components/domain/settings/GeneralSettings')).GeneralSettings,
+  })),
+  behavior: lazy(async () => ({
+    default: (await import('@/components/domain/settings/BehaviorSettings')).BehaviorSettings,
+  })),
+  repository: lazy(async () => ({
+    default: (await import('@/components/domain/settings/RepositorySettings')).RepositorySettings,
+  })),
+  repositoryTags: lazy(async () => ({
+    default: (await import('@/components/domain/settings/RepositoryTagsSettings'))
+      .RepositoryTagsSettings,
+  })),
+  tags: lazy(async () => ({
+    default: (await import('@/components/domain/settings/TagsSettings')).TagsSettings,
+  })),
+  profiles: lazy(async () => ({
+    default: (await import('@/components/domain/settings/ProfilesSettings')).ProfilesSettings,
+  })),
+  ai: lazy(async () => ({
+    default: (await import('@/components/domain/settings/AiSettings')).AiSettings,
+  })),
+  openspec: lazy(async () => ({
+    default: (await import('@/components/domain/settings/OpenspecSettings')).OpenspecSettings,
+  })),
+  security: lazy(async () => ({
+    default: (await import('@/components/domain/settings/SecuritySettings')).SecuritySettings,
+  })),
+  appearance: lazy(async () => ({
+    default: (await import('@/components/domain/settings/AppearanceSettings')).AppearanceSettings,
+  })),
+  logs: lazy(async () => ({
+    default: (await import('@/components/domain/settings/LogsSettings')).LogsSettings,
+  })),
+  about: lazy(async () => ({
+    default: (await import('@/components/domain/settings/AboutSettings')).AboutSettings,
+  })),
+}
+
+/** How long the dialog's open animation runs; see `DialogContent`'s duration-200. */
+const OPEN_ANIMATION_MS = 200
+
+/**
+ * Whether the dialog has finished animating open.
+ *
+ * Mounting the body during the fade is what the user sees as a stutter: React
+ * commits a page's worth of settings on the same thread that has to paint the
+ * next animation frame. Waiting until the animation is done trades a moment of
+ * empty panel for a fade that actually runs, and the panel is not blank -- the
+ * chrome, nav rail and heading are all up immediately.
+ *
+ * Resets on close so the next open animates from a clean state rather than
+ * snapping straight to full content.
+ */
+function useSettledOpen(open: boolean): boolean {
+  const [settled, setSettled] = useState(false)
+
+  useEffect(() => {
+    if (!open) {
+      setSettled(false)
+      return
+    }
+    const timer = setTimeout(() => setSettled(true), OPEN_ANIMATION_MS)
+    return () => clearTimeout(timer)
+  }, [open])
+
+  return settled
 }
 
 /**
@@ -72,6 +125,7 @@ export function SettingsView() {
   const setSettingsSection = useUiStore((s) => s.setSettingsSection)
   const showGraph = useUiStore((s) => s.showGraph)
 
+  const settled = useSettledOpen(open)
   const SectionBody = SECTION_BODIES[settingsSection]
   const subtitle = SUBTITLES[settingsSection]
 
@@ -105,7 +159,11 @@ export function SettingsView() {
                 <h2 className="text-base font-bold text-foreground">{TITLES[settingsSection]}</h2>
                 {subtitle && <p className="mt-0.5 text-2xs text-muted-foreground">{subtitle}</p>}
                 <Separator className="mt-3" />
-                <SectionBody />
+                {settled && (
+                  <Suspense fallback={null}>
+                    <SectionBody />
+                  </Suspense>
+                )}
               </div>
             </div>
           </div>
