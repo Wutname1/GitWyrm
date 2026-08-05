@@ -276,6 +276,11 @@ pub struct Settings {
   /// remote branches are current without the user asking. On by default.
   #[serde(default = "default_auto_fetch")]
   pub auto_fetch: bool,
+  /// Show the short explanations that teach a feature in the sidebar and
+  /// panels. On by default so the features get found; off leaves the controls
+  /// and the plain empty-state labels, which is what a returning user wants.
+  #[serde(default = "default_show_tips")]
+  pub show_tips: bool,
   /// Send anonymous crash reports and error diagnostics. On by default; turning
   /// it off stops both the frontend and backend reporters at their next start.
   ///
@@ -284,6 +289,18 @@ pub struct Settings {
   /// first line rather than after settings finish loading.
   #[serde(default = "default_crash_reports")]
   pub crash_reports: bool,
+  /// Send anonymous usage telemetry: performance traces, profiling, and
+  /// forwarded logs. Separate from `crash_reports` so someone can report the
+  /// crashes that would otherwise go unfixed without also being measured.
+  ///
+  /// `None` means the user has never chosen, so the default applies -- and that
+  /// default is not fixed, it depends on the build (see
+  /// `usage_telemetry_default`). Storing the un-chosen state rather than a
+  /// resolved bool is what lets a pre-1.0 install become opt-in at 1.0 without a
+  /// migration: nobody's explicit choice is ever overwritten, and everyone who
+  /// never expressed one follows the new default.
+  #[serde(default)]
+  pub usage_telemetry: Option<bool>,
   /// Whether the welcome tour has been shown. Without this the tour reopens on
   /// every launch that starts with no repository, which is the normal state for
   /// anyone who keeps "reopen my last tabs" off.
@@ -445,8 +462,58 @@ fn default_auto_fetch() -> bool {
   true
 }
 
+fn default_show_tips() -> bool {
+  true
+}
+
 fn default_crash_reports() -> bool {
   true
+}
+
+/// Whether usage telemetry is on for someone who has never chosen, for the
+/// build identified by `version` on `channel`.
+///
+/// Three cases, in order:
+/// - Before 1.0.0 every build is a pre-release, so this is on. Tuning the app
+///   during alpha is the whole reason the traces exist.
+/// - From 1.0.0, a stable release is opt-in: shipped software should not
+///   measure people who did not ask to be measured.
+/// - Beta builds stay opt-out at any version. Running a beta is itself a
+///   choice to help test, and the perf data is the point of the channel.
+///
+/// Crash reporting is deliberately not part of this and stays on by default at
+/// every version -- an unreported crash is a crash nobody fixes.
+fn usage_telemetry_default(version: &str, channel: &UpdateChannel) -> bool {
+  if matches!(channel, UpdateChannel::Beta) {
+    return true;
+  }
+  is_pre_1_0(version)
+}
+
+/// Whether a semver-ish version string is below 1.0.0. Only the major component
+/// is read, so build metadata and pre-release suffixes (`1.0.0-rc1`) do not
+/// matter. An unparseable version is treated as pre-1.0: that is the state of
+/// the in-repo `0.0.0` placeholder, and erring toward the development default
+/// is better than silently opting a dev build into release behaviour.
+fn is_pre_1_0(version: &str) -> bool {
+  let major = version
+    .trim_start_matches('v')
+    .split(['.', '-', '+'])
+    .next()
+    .and_then(|part| part.parse::<u64>().ok());
+  match major {
+    Some(major) => major < 1,
+    None => true,
+  }
+}
+
+/// Whether usage telemetry should run, resolving the un-chosen state against
+/// this build. Used by both the startup gate and the settings command so the
+/// UI and the reporters never disagree about what "default" means.
+pub fn usage_telemetry_enabled_for(settings: &Settings, version: &str) -> bool {
+  settings
+    .usage_telemetry
+    .unwrap_or_else(|| usage_telemetry_default(version, &settings.update_channel))
 }
 
 fn default_vertical_tab_width() -> f64 {
@@ -521,7 +588,10 @@ impl Default for Settings {
       openspec_delete_without_asking: false,
       restore_tabs: true,
       auto_fetch: true,
+      show_tips: true,
       crash_reports: true,
+      // No stored choice; resolved per build by `usage_telemetry_enabled_for`.
+      usage_telemetry: None,
       onboarding_seen: false,
       profiles: Vec::new(),
       active_profile_id: None,
@@ -658,6 +728,20 @@ pub fn crash_reports_enabled() -> bool {
   read_settings_in(&dir).crash_reports
 }
 
+/// Whether the user has usage telemetry on, read directly from disk during
+/// startup. Same early-startup constraint as `crash_reports_enabled`.
+///
+/// On a failure to locate the settings directory this falls back to the
+/// build's default rather than to `true`: a first launch should follow the
+/// release/beta rule, not opt everyone in.
+pub fn usage_telemetry_enabled() -> bool {
+  let version = env!("CARGO_PKG_VERSION");
+  let Some(dir) = app_data_dir_unmanaged() else {
+    return usage_telemetry_default(version, &UpdateChannel::Stable);
+  };
+  usage_telemetry_enabled_for(&read_settings_in(&dir), version)
+}
+
 /// The app data directory, resolved without a Tauri handle. Mirrors what
 /// `AppHandle::path().app_data_dir()` returns for this app's identifier.
 fn app_data_dir_unmanaged() -> Option<PathBuf> {
@@ -724,6 +808,24 @@ pub async fn get_settings(app: tauri::AppHandle) -> Result<Settings, AppError> {
   tauri::async_runtime::spawn_blocking(move || read_settings(&app))
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Whether usage telemetry is on for this build, with the un-chosen state
+/// already resolved against the version and update channel.
+///
+/// The frontend needs the effective answer both to configure its reporter and
+/// to render the toggle, and the rule that resolves it is deliberately not
+/// duplicated there -- one copy means the checkbox and the reporters can never
+/// disagree about what the default is.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_usage_telemetry_enabled(app: tauri::AppHandle) -> Result<bool, AppError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let settings = read_settings(&app)?;
+    Ok(usage_telemetry_enabled_for(&settings, env!("CARGO_PKG_VERSION")))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Write settings exactly as given.
@@ -875,6 +977,9 @@ mod tests {
     assert!(settings.mint_accent);
     // Settings written before this key existed keep reopening their tabs.
     assert!(settings.restore_tabs);
+    // Tips read as on for a settings file written before the switch existed --
+    // that is what those users were already seeing, so nothing moves for them.
+    assert!(settings.show_tips);
     // Crash reporting is opt-out, so a settings file written before the switch
     // existed reads as on -- that user was reporting already and nothing
     // changes for them. Only an explicit `false` turns it off.
@@ -1227,5 +1332,82 @@ mod tests {
     assert_eq!(restored.right_panel_width, 388.0);
     assert_eq!(restored.changes_split, 64.0);
     assert_eq!(restored.column_layout.unwrap().widths.get("graph"), Some(&184.0));
+  }
+
+  #[test]
+  fn usage_telemetry_defaults_on_before_1_0() {
+    assert!(usage_telemetry_default("0.0.0", &UpdateChannel::Stable));
+    assert!(usage_telemetry_default("0.9.12", &UpdateChannel::Stable));
+  }
+
+  #[test]
+  fn usage_telemetry_defaults_off_for_stable_releases() {
+    assert!(!usage_telemetry_default("1.0.0", &UpdateChannel::Stable));
+    assert!(!usage_telemetry_default("2.4.1", &UpdateChannel::Stable));
+  }
+
+  #[test]
+  fn usage_telemetry_defaults_on_for_beta_at_any_version() {
+    assert!(usage_telemetry_default("0.4.0", &UpdateChannel::Beta));
+    assert!(usage_telemetry_default("1.0.0", &UpdateChannel::Beta));
+    assert!(usage_telemetry_default("3.2.0", &UpdateChannel::Beta));
+  }
+
+  #[test]
+  fn usage_telemetry_reads_major_past_suffixes() {
+    assert!(is_pre_1_0("0.1.0-rc1"));
+    assert!(!is_pre_1_0("1.0.0-rc1"));
+    assert!(!is_pre_1_0("v1.2.3"));
+    assert!(!is_pre_1_0("1.0.0+build.7"));
+    // Unparseable falls back to the pre-1.0 development default.
+    assert!(is_pre_1_0("nightly"));
+  }
+
+  #[test]
+  fn stored_usage_telemetry_choice_beats_the_default() {
+    // A 1.0 stable release defaults off, but an explicit yes is honoured...
+    let mut settings = Settings {
+      usage_telemetry: Some(true),
+      update_channel: UpdateChannel::Stable,
+      ..Settings::default()
+    };
+    assert!(usage_telemetry_enabled_for(&settings, "1.0.0"));
+
+    // ...and an explicit no survives a beta build, which would default on.
+    settings.usage_telemetry = Some(false);
+    settings.update_channel = UpdateChannel::Beta;
+    assert!(!usage_telemetry_enabled_for(&settings, "0.4.0"));
+  }
+
+  #[test]
+  fn unset_usage_telemetry_follows_the_build() {
+    let settings = Settings {
+      usage_telemetry: None,
+      update_channel: UpdateChannel::Stable,
+      ..Settings::default()
+    };
+    assert!(usage_telemetry_enabled_for(&settings, "0.4.0"));
+    // The same install, unchanged, flips to opt-in once it reaches 1.0.
+    assert!(!usage_telemetry_enabled_for(&settings, "1.0.0"));
+  }
+
+  #[test]
+  fn usage_telemetry_survives_a_settings_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    let settings = Settings {
+      usage_telemetry: Some(false),
+      ..Settings::default()
+    };
+    write_settings_in(dir.path(), &settings).unwrap();
+    assert_eq!(read_settings_in(dir.path()).usage_telemetry, Some(false));
+  }
+
+  #[test]
+  fn missing_usage_telemetry_key_reads_as_unchosen() {
+    // Settings written by a build that predates the field must not read as an
+    // opt-out; they have to stay un-chosen so the default still applies.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("settings.json"), "{}").unwrap();
+    assert_eq!(read_settings_in(dir.path()).usage_telemetry, None);
   }
 }

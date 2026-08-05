@@ -444,6 +444,23 @@ async getSettings() : Promise<Result<Settings, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Whether usage telemetry is on for this build, with the un-chosen state
+ * already resolved against the version and update channel.
+ * 
+ * The frontend needs the effective answer both to configure its reporter and
+ * to render the toggle, and the rule that resolves it is deliberately not
+ * duplicated there -- one copy means the checkbox and the reporters can never
+ * disagree about what the default is.
+ */
+async getUsageTelemetryEnabled() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_usage_telemetry_enabled") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async saveSettings(settings: Settings) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("save_settings", { settings }) };
@@ -3893,6 +3910,11 @@ restore_tabs?: boolean;
  */
 auto_fetch?: boolean; 
 /**
+ * Show the short explanations that teach a feature in the sidebar and
+ * panels. On by default so the features get found; off leaves the controls
+ * and the plain empty-state labels, which is what a returning user wants.
+ */
+/**
  * Send anonymous crash reports and error diagnostics. On by default; turning
  * it off stops both the frontend and backend reporters at their next start.
  * 
@@ -3901,6 +3923,19 @@ auto_fetch?: boolean;
  * first line rather than after settings finish loading.
  */
 crash_reports?: boolean; 
+/**
+ * Send anonymous usage telemetry: performance traces, profiling, and
+ * forwarded logs. Separate from `crash_reports` so someone can report the
+ * crashes that would otherwise go unfixed without also being measured.
+ * 
+ * `None` means the user has never chosen, so the default applies -- and that
+ * default is not fixed, it depends on the build (see
+ * `usage_telemetry_default`). Storing the un-chosen state rather than a
+ * resolved bool is what lets a pre-1.0 install become opt-in at 1.0 without a
+ * migration: nobody's explicit choice is ever overwritten, and everyone who
+ * never expressed one follows the new default.
+ */
+usage_telemetry?: boolean | null; 
 /**
  * Whether the welcome tour has been shown. Without this the tour reopens on
  * every launch that starts with no repository, which is the normal state for

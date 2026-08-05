@@ -8,10 +8,19 @@ import { scrubDeep, scrubText } from '@/lib/scrub'
  * backend's, and keeps PII off because repo paths and branch names travel
  * through error messages.
  *
- * During the alpha we turn on the rest of what the Sentry SDK offers --
- * performance tracing and profiling -- even the features that would cost money
- * on a paid plan. The free plan's quota is small, so once we outgrow it (or
- * move to the self-hosted server) the sample rates below are the dials to turn
+ * Two independent opt-outs feed this, and they gate different things:
+ * - `crashReports` covers errors and unhandled rejections. Off means no client
+ *   is created at all, so nothing is sent.
+ * - `usageTelemetry` covers performance tracing, profiling, and forwarded
+ *   logs. Off drops those integrations and zeroes the sample rates, leaving
+ *   crash reporting working on its own.
+ *
+ * The split exists so reporting the crash that would otherwise go unfixed does
+ * not also mean being measured. The Rust `init_sentry` makes the same split.
+ *
+ * During the alpha, telemetry -- when on -- runs at full sampling, including
+ * the features that would cost money on a paid plan. The free plan's quota is
+ * small, so once we outgrow it the sample rates below are the dials to turn
  * down. See the `ALPHA:` comments.
  *
  * Session replay is deliberately absent. It recorded the DOM of a session that
@@ -26,7 +35,7 @@ import { scrubDeep, scrubText } from '@/lib/scrub'
  *
  * Call once, before the app renders. Safe to call in dev -- it no-ops there.
  */
-export function initSentry(enabled: boolean) {
+export function initSentry(enabled: boolean, usageTelemetry: boolean) {
   if (import.meta.env.DEV) return
   if (!enabled) return
 
@@ -37,20 +46,28 @@ export function initSentry(enabled: boolean) {
     sendDefaultPii: false,
 
     // ALPHA: forward console logs and `log.*` calls to Sentry's Logs product.
-    enableLogs: true,
+    // Usage telemetry, not crash reporting: these are the running commentary of
+    // a working session, not a failure, so they follow the telemetry opt-out.
+    enableLogs: usageTelemetry,
 
-    integrations: [
-      // Performance tracing across fetch/navigation, plus browser vitals.
-      Sentry.browserTracingIntegration(),
-      // CPU profiling attached to sampled transactions.
-      Sentry.browserProfilingIntegration(),
-    ],
+    integrations: usageTelemetry
+      ? [
+          // Performance tracing across fetch/navigation, plus browser vitals.
+          Sentry.browserTracingIntegration(),
+          // CPU profiling attached to sampled transactions.
+          Sentry.browserProfilingIntegration(),
+        ]
+      : // Dropped rather than left at a 0.0 sample rate: browserTracing also
+        // instruments fetch and history to build spans, so removing it stops
+        // that work from happening at all.
+        [],
 
-    // ALPHA: trace 100% of transactions. Drop toward 0.1-0.2 before any real
-    // launch, or the free-plan performance quota burns out fast.
-    tracesSampleRate: 1.0,
+    // ALPHA: trace 100% of transactions when telemetry is on. Drop toward
+    // 0.1-0.2 before any real launch, or the free-plan performance quota burns
+    // out fast. 0.0 leaves every transaction unsampled, so none is sent.
+    tracesSampleRate: usageTelemetry ? 1.0 : 0.0,
     // ALPHA: profile 100% of the traces we sample (multiplies tracesSampleRate).
-    profilesSampleRate: 1.0,
+    profilesSampleRate: usageTelemetry ? 1.0 : 0.0,
 
     // Keep a rolling window of the user's recent actions on every event.
     maxBreadcrumbs: 100,

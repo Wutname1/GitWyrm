@@ -20,8 +20,13 @@ use std::time::Instant;
 /// returns -- including the `?` early returns most commands are built from,
 /// which a closure would have to thread a return type through.
 ///
-/// The Sentry transaction is a no-op when Sentry is disabled (dev builds), so
-/// this is safe to construct unconditionally.
+/// The Sentry transaction is a no-op when Sentry is disabled (dev builds) and
+/// is left unsampled when the user has usage telemetry off -- `init_sentry`
+/// sets `traces_sample_rate` to 0.0, and an unsampled transaction is never
+/// sent. So this is safe to construct unconditionally.
+///
+/// The slow-command warning below is separate: it goes to the local log, which
+/// is on the user's disk and is only ever uploaded if they file a report.
 pub struct CommandTiming {
   name: &'static str,
   started: Instant,

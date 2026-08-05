@@ -80,6 +80,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::file::get_file_history,
     commands::file::get_file_blame,
     settings::get_settings,
+    settings::get_usage_telemetry_enabled,
     settings::save_settings,
     missing_repos::mark_repo_missing,
     commands::repo::open_repo,
@@ -285,9 +286,14 @@ const SENTRY_DSN: &str = "https://5cb301777a6d45efd4ddba81136bc6c9@o451176044468
 /// events on drop, so it has to stay alive for the whole process. Debug builds
 /// are skipped so local crashes stay local.
 ///
-/// During the alpha this mirrors the frontend `initSentry`: everything on, full
-/// sampling, even the paid-tier features. `traces_sample_rate` is the dial to
-/// turn down once the free-plan quota gets tight. See the `ALPHA:` comments.
+/// Two independent opt-outs feed this, and they gate different things:
+/// - Crash reports (errors and panics) are what `crash_reports` controls. Off
+///   means no client at all, so nothing is sent.
+/// - Usage telemetry (performance traces) is what `usage_telemetry` controls.
+///   Off zeroes the sample rate, which keeps crash reporting working while no
+///   transaction is ever recorded or sent.
+///
+/// Mirrors the frontend `initSentry`, which makes the same split.
 fn init_sentry() -> Option<sentry::ClientInitGuard> {
   if cfg!(debug_assertions) {
     return None;
@@ -298,6 +304,8 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
   if !settings::crash_reports_enabled() {
     return None;
   }
+  // Read once: this touches the disk, and the value decides two options below.
+  let usage_telemetry = settings::usage_telemetry_enabled();
   Some(sentry::init((
     SENTRY_DSN,
     sentry::ClientOptions {
@@ -308,9 +316,13 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
       send_default_pii: false,
       // Report every panic as a Sentry event, not just the process-fatal ones.
       attach_stacktrace: true,
-      // ALPHA: trace 100% of transactions. Drop toward 0.1-0.2 before launch,
-      // or the free-plan performance quota burns out fast.
-      traces_sample_rate: 1.0,
+      // Performance tracing is usage telemetry, not crash reporting: 0.0 means
+      // no transaction is recorded or sent, while panics and errors still go
+      // out under `crash_reports`.
+      //
+      // ALPHA: when on, trace 100% of transactions. Drop toward 0.1-0.2 before
+      // launch, or the free-plan performance quota burns out fast.
+      traces_sample_rate: if usage_telemetry { 1.0 } else { 0.0 },
       max_breadcrumbs: 100,
       // `send_default_pii: false` does not touch payloads: a panic message or a
       // logged error still carries whatever text built it. Every log::error!

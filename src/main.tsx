@@ -7,21 +7,33 @@ import { hideSplash, killSplash } from './lib/splash'
 import { initSentry, Sentry } from './lib/sentry'
 import './index.css'
 
-// Crash reporting is opt-out, and honouring that means asking before the
-// reporter starts. The settings read is a single quick command, so it runs
-// ahead of the first render rather than letting the app boot un-gated and
-// switching the reporter on late -- that window is exactly when startup
-// crashes happen, and reporting one from a user who opted out is the failure
-// this setting exists to prevent.
+// Crash reporting and usage telemetry are both opt-out, and honouring that
+// means asking before the reporter starts. These reads are two quick commands,
+// so they run ahead of the first render rather than letting the app boot
+// un-gated and switching the reporter on late -- that window is exactly when
+// startup crashes happen, and reporting one from a user who opted out is the
+// failure this setting exists to prevent.
 //
 // Awaited rather than fire-and-forget so no event can be captured before the
-// answer arrives. If the read fails we report, matching the backend: a broken
-// settings file is not an opt-out.
+// answer arrives. If the read fails we report crashes, matching the backend: a
+// broken settings file is a first launch or corruption, not an opt-out.
+//
+// Usage telemetry is resolved by the backend rather than read off the settings
+// field, because "unset" is not "off" -- the default depends on the version and
+// update channel, and that rule lives in Rust so there is only one copy of it.
 try {
-  const res = await commands.getSettings()
-  initSentry(res.status === 'ok' ? res.data.crash_reports !== false : true)
+  const [settings, telemetry] = await Promise.all([
+    commands.getSettings(),
+    commands.getUsageTelemetryEnabled(),
+  ])
+  initSentry(
+    settings.status === 'ok' ? settings.data.crash_reports !== false : true,
+    telemetry.status === 'ok' ? telemetry.data : false,
+  )
 } catch {
-  initSentry(true)
+  // Crashes still report; telemetry does not, since an unknown answer should
+  // not be read as consent to be measured.
+  initSentry(true, false)
 }
 
 // Catch errors that escape React's boundary (event handlers, microtasks,
