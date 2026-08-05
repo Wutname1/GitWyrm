@@ -111,10 +111,18 @@ export function DiffView() {
   const selectionFor = (predicate: (l: DiffLineEntry) => boolean): SelectedLine[] =>
     lines.filter((l) => isChanged(l) && predicate(l)).map(toSelected)
 
-  // A run of consecutive changed lines with no context line between them (e.g.
-  // `-a -b +A +B`) can only be staged as a unit: git apply would misplace an
-  // added line if only part of such a block is selected. So expand any
-  // partially-selected contiguous change run to cover the whole run.
+  // Within a run of consecutive changed lines (no context between them), a
+  // selected addition is anchored by whatever precedes it once the patch is
+  // rebuilt. Unselected deletions ahead of it get demoted to context, which
+  // pushes the addition past the lines it was meant to replace -- the patch
+  // applies but stages the wrong thing. So a selection is only widened as far
+  // as that hazard requires:
+  //   - picking a deletion alone is always fine (context holds its position);
+  //   - picking an addition pulls in any earlier deletions in the same run, so
+  //     nothing is left to displace it.
+  // "Removed a line, added lines right after it" therefore stays splittable:
+  // the deletion stages on its own, and taking the additions only pulls in that
+  // one deletion rather than the whole block.
   const expandedSelection = (keys: Set<string>): SelectedLine[] => {
     const out: SelectedLine[] = []
     let i = 0
@@ -125,13 +133,19 @@ export function DiffView() {
       }
       // [i, j) is a maximal contiguous run of changed lines.
       let j = i
-      let anySelected = false
-      while (j < lines.length && isChanged(lines[j])) {
-        if (keys.has(lineKey(lines[j]))) anySelected = true
-        j++
+      while (j < lines.length && isChanged(lines[j])) j++
+
+      // The last selected addition in the run, if any: every deletion before it
+      // must come along so it cannot be displaced.
+      let lastSelectedAdd = -1
+      for (let k = i; k < j; k++) {
+        if (lines[k].sign === '+' && keys.has(lineKey(lines[k]))) lastSelectedAdd = k
       }
-      if (anySelected) {
-        for (let k = i; k < j; k++) out.push(toSelected(lines[k]))
+
+      for (let k = i; k < j; k++) {
+        const picked =
+          keys.has(lineKey(lines[k])) || (lines[k].sign === '-' && k < lastSelectedAdd)
+        if (picked) out.push(toSelected(lines[k]))
       }
       i = j
     }

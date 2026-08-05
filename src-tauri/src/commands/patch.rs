@@ -179,12 +179,20 @@ pub(crate) fn logical_patch_units(raw: &str) -> Result<Vec<LogicalPatchUnit>, Ap
   Ok(units)
 }
 
-/// Validate that within each contiguous run of changed lines (a maximal block
-/// of consecutive +/- lines with no context between them), the selection is
-/// all-or-nothing. A partially-selected contiguous replace block cannot be
-/// represented as a patch that git applies to the intended position — the
-/// added lines would land after the unselected deletions. The frontend expands
-/// such selections to whole blocks; this is the backend backstop.
+/// Reject selections that `git apply` would place at the wrong position.
+///
+/// Within a contiguous run of changed lines (consecutive +/- with no context
+/// between), a selected addition is anchored by whatever precedes it in the
+/// rebuilt patch. Unselected deletions ahead of it are demoted to context, which
+/// pushes the addition *past* lines it was meant to replace. The patch still
+/// applies cleanly -- it just stages the wrong content -- so this has to be
+/// caught up front rather than left to `git apply` to reject.
+///
+/// Only that ordering is unsafe. These stay allowed:
+///   - deletions selected alone (their position is held by surrounding context);
+///   - additions whose run has no unselected deletion before them, which covers
+///     "removed a line, added some right after it" -- the additions still land
+///     where the demoted deletion sits.
 fn validate_contiguous_blocks(
   hunk: &RawHunk,
   hunk_index: u32,
@@ -192,50 +200,39 @@ fn validate_contiguous_blocks(
 ) -> Result<(), AppError> {
   let mut old_no = hunk.old_start;
   let mut new_no = hunk.new_start;
-  // Track selection state within the current contiguous change run.
-  let mut run_len = 0u32;
-  let mut run_selected = 0u32;
-
-  let flush = |len: u32, sel: u32| -> Result<(), AppError> {
-    if len > 1 && sel > 0 && sel < len {
-      return Err(AppError::Other(
-        "cannot stage part of a contiguous change block; select the whole block".into(),
-      ));
-    }
-    Ok(())
-  };
+  // Set when an unselected deletion is seen in the current run; any selected
+  // addition after it would be displaced by that deletion becoming context.
+  let mut dropped_deletion_in_run = false;
 
   for raw in &hunk.lines {
     let sign = raw.as_bytes().first().copied().unwrap_or(b' ');
     match sign {
       b'+' => {
         let sel = selection.iter().any(|s| s.matches(hunk_index, b'+', None, Some(new_no)));
-        run_len += 1;
-        if sel {
-          run_selected += 1;
+        if sel && dropped_deletion_in_run {
+          return Err(AppError::Other(
+            "cannot stage part of a replaced block; select the whole block".into(),
+          ));
         }
         new_no += 1;
       }
       b'-' => {
         let sel = selection.iter().any(|s| s.matches(hunk_index, b'-', Some(old_no), None));
-        run_len += 1;
-        if sel {
-          run_selected += 1;
+        if !sel {
+          dropped_deletion_in_run = true;
         }
         old_no += 1;
       }
       b'\\' => {}
       _ => {
-        // Context line ends the run.
-        flush(run_len, run_selected)?;
-        run_len = 0;
-        run_selected = 0;
+        // Context line ends the run and re-anchors everything after it.
+        dropped_deletion_in_run = false;
         old_no += 1;
         new_no += 1;
       }
     }
   }
-  flush(run_len, run_selected)
+  Ok(())
 }
 
 /// Rebuild a hunk keeping only selected changes; unselected changes are demoted
@@ -742,12 +739,13 @@ mod tests {
 
   #[test]
   fn partial_contiguous_block_rejected() {
-    // -two -three +TWO +THREE is one contiguous run; selecting only two->TWO
-    // (part of it) must be rejected by the backstop.
+    // -two -three +TWO +THREE is one contiguous run. Selecting +TWO while -two
+    // stays unselected would demote -two to context and push +TWO past it, so
+    // this must be rejected.
     let d = parse_diff(SAMPLE).unwrap();
-    let selection = vec![sel(0, Some(2), None), sel(0, None, Some(2))];
+    let selection = vec![sel(0, None, Some(2))];
     let err = validate_contiguous_blocks(&d.hunks[0], 0, &selection);
-    assert!(err.is_err(), "partial contiguous selection should be rejected");
+    assert!(err.is_err(), "addition behind an unselected deletion should be rejected");
 
     // Selecting the WHOLE block is allowed.
     let whole = vec![
@@ -757,6 +755,76 @@ mod tests {
       sel(0, None, Some(3)),
     ];
     assert!(validate_contiguous_blocks(&d.hunks[0], 0, &whole).is_ok());
+  }
+
+  /// The reported case: one line removed, comment lines added right after it,
+  /// with no context between. Each side must be stageable on its own.
+  const REMOVE_THEN_ADD: &str = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,5 +1,8 @@\n one\n two\n-REMOVEME\n+// c1\n+// c2\n+// c3\n+// c4\n three\n four\n";
+
+  #[test]
+  fn deletion_alone_allowed_next_to_additions() {
+    let d = parse_diff(REMOVE_THEN_ADD).unwrap();
+    // Just the deletion (old line 3). Nothing displaces it.
+    let selection = vec![sel(0, Some(3), None)];
+    assert!(
+      validate_contiguous_blocks(&d.hunks[0], 0, &selection).is_ok(),
+      "staging only the removed line must be allowed"
+    );
+    let out = rebuild_hunk(&d.hunks[0], 0, &selection, false).unwrap();
+    assert!(out.contains("-REMOVEME"), "out: {out}");
+    // The additions are dropped, not demoted, on the forward side.
+    assert!(!out.contains("+// c1"), "out: {out}");
+    // old: one,two,REMOVEME,three,four = 5 ; new: one,two,three,four = 4
+    assert!(out.starts_with("@@ -1,5 +1,4 @@\n"), "header: {out}");
+  }
+
+  #[test]
+  fn additions_alone_allowed_when_deletion_comes_with_them() {
+    let d = parse_diff(REMOVE_THEN_ADD).unwrap();
+    // Additions plus the deletion ahead of them: the shape the UI now sends.
+    let selection = vec![
+      sel(0, Some(3), None),
+      sel(0, None, Some(3)),
+      sel(0, None, Some(4)),
+      sel(0, None, Some(5)),
+      sel(0, None, Some(6)),
+    ];
+    assert!(validate_contiguous_blocks(&d.hunks[0], 0, &selection).is_ok());
+  }
+
+  #[test]
+  fn additions_behind_unselected_deletion_rejected() {
+    let d = parse_diff(REMOVE_THEN_ADD).unwrap();
+    // Additions without the preceding deletion: it would become context and
+    // push the comments below REMOVEME.
+    let selection = vec![sel(0, None, Some(3))];
+    assert!(
+      validate_contiguous_blocks(&d.hunks[0], 0, &selection).is_err(),
+      "addition behind an unselected deletion must be rejected"
+    );
+  }
+
+  /// End-to-end proof against real `git apply`: the reported case stages the
+  /// removed line only, leaving the added comments unstaged.
+  #[test]
+  fn roundtrip_stage_deletion_adjacent_to_additions() {
+    let Some(dir) = scratch_repo("del_adj_add", "one\ntwo\nREMOVEME\nthree\nfour\n") else {
+      return;
+    };
+    let dpath = dir.to_string_lossy().into_owned();
+    std::fs::write(dir.join("f.txt"), "one\ntwo\n// c1\n// c2\n// c3\n// c4\nthree\nfour\n")
+      .unwrap();
+
+    let dargs = diff_args_for(PatchTarget::Unstaged, "f.txt");
+    let dargs_ref: Vec<&str> = dargs.iter().map(String::as_str).collect();
+    // Only the removed line.
+    let selection = vec![sel(0, Some(3), None)];
+    let patch = build_patch(&dpath, "f.txt", &dargs_ref, &selection, false).unwrap();
+    super::run_git_stdin(Some(&dpath), &["apply", "--cached", "-"], patch.as_bytes()).unwrap();
+
+    // Index dropped REMOVEME and did NOT gain the comments.
+    assert_eq!(staged_content(&dir), "one\ntwo\nthree\nfour\n");
+    let _ = std::fs::remove_dir_all(&dir);
   }
 
   #[test]
