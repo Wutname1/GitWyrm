@@ -15,6 +15,7 @@ import { SpecRefreshButton } from '@/components/domain/spec-desk/SpecRefreshButt
 import { progressCount } from '@/lib/specDisplay'
 import { refreshSpecsEverywhere, selectChangeEverywhere } from '@/lib/specSync'
 import { useUiStore } from '@/stores/uiStore'
+import { SidebarTip } from '@/components/domain/SidebarTip'
 
 /**
  * A change's progress as a thin bar. Its own component because the generic
@@ -159,11 +160,18 @@ export function SpecsSection({
         <div className="pb-1">
           {changes.length === 0 ? (
             <div className="px-6 py-1">
+              {/* The state line always shows -- without it an empty section
+                  reads as failed to load. Only what it teaches is a tip. */}
               <p className="text-2xs text-muted-foreground">
                 {hasOpenspec
                   ? 'Nothing being worked on right now.'
-                  : 'This repository has no specs yet. Specs let you write down a plan before the code.'}
+                  : 'This repository has no specs yet.'}
               </p>
+              {!hasOpenspec && (
+                <SidebarTip indent={false} className="pr-0 pt-0.5">
+                  Specs let you write down a plan before the code.
+                </SidebarTip>
+              )}
               <button
                 type="button"
                 onClick={onNewChange}

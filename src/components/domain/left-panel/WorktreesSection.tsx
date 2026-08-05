@@ -36,6 +36,7 @@ import {
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { TooltipButton, TooltipHint } from '@/components/ui/tooltip'
+import { SidebarTip } from '@/components/domain/SidebarTip'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useWorktrees } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
@@ -199,8 +200,8 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
   const tooltip = broken
     ? (brokenExplanation(worktree.state) ?? '')
     : worktree.is_main
-      ? `The project's original folder${worktree.branch ? `, on ${worktree.branch}` : ''}. Double-click to open it.`
-      : `A separate folder of this project${worktree.branch ? ` on ${worktree.branch}` : ''}. Double-click to open it in its own tab.`
+      ? `The project's main checkout${worktree.branch ? `, on ${worktree.branch}` : ''}. Double-click to open it.`
+      : `A worktree${worktree.branch ? ` on ${worktree.branch}` : ''} — this project checked out in its own folder. Double-click to open it in its own tab.`
 
   return (
     <>
@@ -260,7 +261,9 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
                 onSelect={() => void startRemove()}
               >
                 <Trash2 />
-                {worktree.is_current ? 'Open in this tab — switch away first' : 'Remove this folder'}
+                {worktree.is_current
+                  ? 'Open in this tab — switch away first'
+                  : 'Remove this worktree'}
               </ContextMenuItem>
             </>
           )}
@@ -295,7 +298,9 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
             </label>
           )
         }
-        confirmLabel={clean ? 'Remove folder' : discard ? 'Throw away and remove' : 'Keep my work and remove'}
+        confirmLabel={
+          clean ? 'Remove worktree' : discard ? 'Throw away and remove' : 'Keep my work and remove'
+        }
         pending={m.removeWorktree.isPending}
         pendingLabel="Removing…"
         onConfirm={runRemove}
@@ -360,7 +365,7 @@ export function WorktreesSection() {
             open && 'rotate-90'
           )}
         />
-        <span className="text-2xs font-bold tracking-[.09em] text-sub">FOLDERS</span>
+        <span className="text-2xs font-bold tracking-[.09em] text-sub">WORKTREES</span>
 
         {canAdd && (
           <TooltipButton
@@ -368,7 +373,7 @@ export function WorktreesSection() {
               e.stopPropagation()
               openModal('addWorktree')
             }}
-            tooltip="Work on another branch in a separate folder"
+            tooltip="Add a worktree — another branch checked out in its own folder"
             className="ml-auto flex size-4 flex-none items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover/section:opacity-100"
           >
             <Plus size={12} strokeWidth={2.4} />
@@ -390,8 +395,8 @@ export function WorktreesSection() {
               <div className="flex items-start gap-1.5">
                 <AlertTriangle size={11} className="mt-px flex-none text-[var(--gw-amber)]" />
                 <div className="text-2xs leading-relaxed text-sub">
-                  Moving this project broke the link to every one of its other folders. Your files
-                  are all still there.
+                  Moving this project broke the link to every one of its worktrees. Your files are
+                  all still there.
                   <button
                     onClick={() => m.repairWorktree.mutate(null)}
                     disabled={m.repairWorktree.isPending}
@@ -408,18 +413,22 @@ export function WorktreesSection() {
             <WorktreeRow key={w.path} worktree={w} canAdd={canAdd} />
           ))}
 
-          {/* Present before it is needed -- that is how the feature gets found
-              by someone who has never heard of a worktree. */}
+          {/* Where the term gets taught. Someone who has never heard "worktree"
+              meets it here, so the line names it and then says what it is --
+              rather than renaming the concept to something friendlier, which
+              would leave them unable to search for help or follow along with
+              anything else that uses the real word. Once that has done its job,
+              the tips switch turns it off. */}
           {canAdd && linked.length === 0 && (
-            <div style={{ paddingLeft: 24 }} className="pr-3 pt-1 text-2xs leading-relaxed text-muted-foreground">
-              Need to work on two branches at once? Add a second folder for this project and switch
-              between them without putting anything aside.
-            </div>
+            <SidebarTip>
+              A worktree is another branch of this project checked out in its own folder, so you can
+              work on two at once without putting anything aside.
+            </SidebarTip>
           )}
 
           {explainNoAdd && (
             <div style={{ paddingLeft: 24 }} className="pr-3 pt-1 text-2xs leading-relaxed text-muted-foreground">
-              Making new folders is turned off in Settings. The ones here still work.
+              Adding worktrees is turned off in Settings. The ones here still work.
             </div>
           )}
         </div>

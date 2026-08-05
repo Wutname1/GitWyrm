@@ -126,6 +126,31 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['restore', 'reopen', 'session', 'launch', 'start'],
   },
   {
+    id: 'show-tips',
+    section: 'behavior',
+    label: 'Tips',
+    hint: 'The short explanations in the sidebar and panels that describe what a feature is for.',
+    // The words someone types when the text itself is the complaint, not the
+    // feature it describes.
+    keywords: ['tips', 'hints', 'help text', 'explanations', 'hide', 'dismiss', 'text', 'wordy', 'verbose'],
+  },
+  {
+    id: 'crash-reports',
+    section: 'behavior',
+    label: 'Crash reports',
+    hint: 'Send a report when GitWyrm hits an error, so the problem can be fixed.',
+    // "privacy", "telemetry" and "opt out" are what someone types when they
+    // want this off but do not know what we called it.
+    keywords: ['crash', 'error', 'report', 'sentry', 'privacy', 'telemetry', 'opt out', 'tracking'],
+  },
+  {
+    id: 'usage-telemetry',
+    section: 'behavior',
+    label: 'Usage data',
+    hint: 'Send timings so slow parts of GitWyrm can be found and fixed.',
+    keywords: ['usage', 'telemetry', 'analytics', 'performance', 'timing', 'privacy', 'opt out', 'tracking', 'data'],
+  },
+  {
     id: 'context-menu',
     section: 'behavior',
     label: 'Right-click menu',

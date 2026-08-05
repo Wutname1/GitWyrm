@@ -629,11 +629,36 @@ interface WorkspaceState {
   /** Fetch open repositories in the background to keep remote state current (persisted). */
   autoFetch: boolean;
   /**
+   * Show the short explanations that teach a feature in the sidebar and panels
+   * (persisted). Off hides the prose only: controls, counts, and the plain
+   * empty-state labels stay, so no section can read as broken.
+   */
+  showTips: boolean;
+  /**
    * Send anonymous crash reports and error diagnostics (persisted). Read at
    * startup before the reporters initialize, so a change here takes effect on
    * the next launch rather than immediately.
    */
   crashReports: boolean;
+  /**
+   * Send anonymous usage telemetry: performance traces, profiling, and
+   * forwarded logs (persisted). Separate from `crashReports` so reporting a
+   * crash does not also mean being measured.
+   *
+   * `null` means the user has never chosen, and the effective answer then
+   * depends on the build -- on before 1.0 and on beta channels, off for stable
+   * releases. That rule lives in Rust; `usageTelemetryEffective` below holds
+   * the answer it gave. Kept as a tri-state rather than collapsed to a boolean
+   * so a pre-1.0 install that never touched the toggle still flips to opt-in at
+   * 1.0 instead of having today's default frozen into its settings file.
+   */
+  usageTelemetry: boolean | null;
+  /**
+   * What usage telemetry actually resolved to for this build, answered by the
+   * backend at startup. This is what the checkbox shows, so an un-chosen
+   * install displays the state it is really in rather than an empty box.
+   */
+  usageTelemetryEffective: boolean;
   /**
    * Whether the welcome tour has run. App lifecycle state, not a preference:
    * deliberately absent from every reset group, since "reset my preferences"
@@ -764,7 +789,9 @@ interface WorkspaceState {
   setOpenspecDeleteWithoutAsking: (skip: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
   setAutoFetch: (enabled: boolean) => void;
+  setShowTips: (enabled: boolean) => void;
   setCrashReports: (enabled: boolean) => void;
+  setUsageTelemetry: (enabled: boolean) => void;
   markOnboardingSeen: () => void;
   markSigningKeyPublished: (fingerprint: string) => void;
   setTabLayout: (layout: TabLayout) => void;
@@ -953,8 +980,10 @@ function toSettings(s: WorkspaceState): Settings {
     openspec_archive_without_asking: s.openspecArchiveWithoutAsking,
     openspec_delete_without_asking: s.openspecDeleteWithoutAsking,
     restore_tabs: s.restoreTabs,
+    show_tips: s.showTips,
     auto_fetch: s.autoFetch,
     crash_reports: s.crashReports,
+    usage_telemetry: s.usageTelemetry,
     onboarding_seen: s.onboardingSeen,
     signing_keys_published: s.signingKeysPublished,
     ui_scale: s.uiScale,
@@ -1246,10 +1275,15 @@ export const SETTINGS_DEFAULTS = {
   openspecDeleteWithoutAsking: false,
   restoreTabs: true,
   autoFetch: true,
+  showTips: true,
   // Deliberately outside the per-screen "behavior" group below: a privacy
   // opt-out must not switch itself back on because the user reset an unrelated
   // page of preferences. Only the global "Reset all" restores it.
   crashReports: true,
+  // null is the real default: no choice recorded, so the build decides. A
+  // "Reset all" puts it back to un-chosen rather than to on.
+  usageTelemetry: null,
+  usageTelemetryEffective: true,
   onboardingSeen: false,
   signingKeysPublished: [],
   tagPushDefault: "ask",
@@ -1289,7 +1323,7 @@ export const SETTINGS_GROUPS = {
     "enableWorktrees",
     "worktreesSettingTouched",
   ],
-  behavior: ["restoreTabs", "autoFetch"],
+  behavior: ["restoreTabs", "autoFetch", "showTips"],
   tags: ["tagPushDefault", "tagPushOnCreate", "tagDeleteOnRemote"],
   ai: ["aiInstruction"],
   openspec: [
@@ -1366,7 +1400,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   openspecDeleteWithoutAsking: false,
   restoreTabs: true,
   autoFetch: true,
+  showTips: true,
   crashReports: true,
+  usageTelemetry: null,
+  // Optimistic until the backend answers at startup; corrected by hydration
+  // before the settings screen can be opened.
+  usageTelemetryEffective: true,
   onboardingSeen: false,
   signingKeysPublished: [],
   uiScale: DEFAULT_UI_SCALE,
@@ -1747,8 +1786,20 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ crashReports: enabled });
     schedulePersist();
   },
+  setUsageTelemetry: (enabled) => {
+    // Records an explicit choice, which from here on outranks the build's
+    // default. `usageTelemetryEffective` is updated alongside so the checkbox
+    // reflects the choice immediately, even though the reporters only pick it
+    // up at the next start.
+    set({ usageTelemetry: enabled, usageTelemetryEffective: enabled });
+    schedulePersist();
+  },
   setAutoFetch: (enabled) => {
     set({ autoFetch: enabled });
+    schedulePersist();
+  },
+  setShowTips: (enabled) => {
+    set({ showTips: enabled });
     schedulePersist();
   },
   markSigningKeyPublished: (fingerprint) => {
@@ -2430,6 +2481,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
   hydrate: async () => {
     const settings = unwrap(await commands.getSettings());
+    // Resolved by the backend rather than derived here, because "unset" only
+    // becomes on or off once the version and update channel are known. Failing
+    // this read must not read as consent, so it falls back to off.
+    const usageTelemetryEffective = await commands
+      .getUsageTelemetryEnabled()
+      .then((r) => (r.status === "ok" ? r.data : false))
+      .catch(() => false);
     if (!get().hydrated) {
       const tabGroups = deserializeTabGroups(settings.tab_groups);
       const savedTabGroups = deserializeSavedTabGroups(
@@ -2520,8 +2578,18 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         restoreTabs: settings.restore_tabs ?? true,
         autoFetch: settings.auto_fetch ?? true,
         // Absent means on: a settings file written before this flag existed
+        // belongs to someone who has been seeing the tips all along, so hiding
+        // them on upgrade would look like the sidebar lost content.
+        showTips: settings.show_tips ?? true,
+        // Absent means on: a settings file written before this flag existed
         // belongs to a user who was never asked, and the default is to report.
         crashReports: settings.crash_reports !== false,
+        // Absent stays absent: `null` is a meaningful state here ("never
+        // chosen"), so it must not be coerced to a boolean. Doing so would
+        // freeze today's default into the settings file on the next save and
+        // break the flip to opt-in at 1.0.
+        usageTelemetry: settings.usage_telemetry ?? null,
+        usageTelemetryEffective,
         onboardingSeen: settings.onboarding_seen ?? false,
         signingKeysPublished: settings.signing_keys_published ?? [],
         uiScale:

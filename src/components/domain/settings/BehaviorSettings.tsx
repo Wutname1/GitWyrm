@@ -9,8 +9,14 @@ export function BehaviorSettings() {
   const setRestoreTabs = useWorkspaceStore((s) => s.setRestoreTabs)
   const autoFetch = useWorkspaceStore((s) => s.autoFetch)
   const setAutoFetch = useWorkspaceStore((s) => s.setAutoFetch)
+  const showTips = useWorkspaceStore((s) => s.showTips)
+  const setShowTips = useWorkspaceStore((s) => s.setShowTips)
   const crashReports = useWorkspaceStore((s) => s.crashReports)
   const setCrashReports = useWorkspaceStore((s) => s.setCrashReports)
+  // The effective value, not the stored one: an install that has never chosen
+  // stores null, and the box must show the state it is actually in.
+  const usageTelemetry = useWorkspaceStore((s) => s.usageTelemetryEffective)
+  const setUsageTelemetry = useWorkspaceStore((s) => s.setUsageTelemetry)
 
   return (
     <div>
@@ -44,6 +50,21 @@ export function BehaviorSettings() {
           Check automatically
         </label>
       </SettingRow>
+      <SettingRow
+        label="Tips"
+        searchId="show-tips"
+        hint="The short explanations in the sidebar and panels that describe what a feature is for. Turning them off leaves every button, count, and list exactly where it is -- only the explaining goes away."
+      >
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+          <input
+            type="checkbox"
+            checked={showTips}
+            onChange={(e) => setShowTips(e.target.checked)}
+            className="size-3.5 accent-[var(--gw-accent)]"
+          />
+          Explain features to me
+        </label>
+      </SettingRow>
       {/* Deliberately outside the "behavior" reset group (see
           SETTINGS_DEFAULTS): resetting this page must not turn reporting back
           on for someone who switched it off. */}
@@ -71,6 +92,33 @@ export function BehaviorSettings() {
             className="size-3.5 accent-[var(--gw-accent)]"
           />
           Send anonymous crash reports
+        </label>
+      </SettingRow>
+      {/* Also outside the "behavior" reset group, for the same reason as crash
+          reports above. */}
+      <SettingRow
+        label="Usage data"
+        searchId="usage-telemetry"
+        hint="Sends timings for things like how long a repository takes to open, so slow parts of GitWyrm can be found and fixed. This is separate from crash reports -- you can turn this off and still report crashes. It never includes your files, your code, or your commit history. Takes effect next time you start GitWyrm."
+      >
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+          <input
+            type="checkbox"
+            checked={usageTelemetry}
+            onChange={(e) => {
+              setUsageTelemetry(e.target.checked)
+              // Same reasoning as crash reports: the reporters start once at
+              // launch, so without this the checkbox is the only feedback
+              // (Rule #1).
+              toast.success(
+                e.target.checked
+                  ? 'Usage data will be sent from your next start.'
+                  : 'Usage data is off from your next start.',
+              )
+            }}
+            className="size-3.5 accent-[var(--gw-accent)]"
+          />
+          Send anonymous usage data
         </label>
       </SettingRow>
       {/* Registry-backed, so it is deliberately outside the "behavior" reset

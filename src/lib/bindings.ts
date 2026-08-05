@@ -3914,6 +3914,7 @@ auto_fetch?: boolean;
  * panels. On by default so the features get found; off leaves the controls
  * and the plain empty-state labels, which is what a returning user wants.
  */
+show_tips?: boolean; 
 /**
  * Send anonymous crash reports and error diagnostics. On by default; turning
  * it off stops both the frontend and backend reporters at their next start.
