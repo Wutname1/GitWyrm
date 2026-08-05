@@ -764,20 +764,21 @@
 }
 
 /* A ref pill that will accept the current drag: its whole border pulses so the
-   landing spot is unmistakable. No scale, so surrounding layout stays put. */
+   landing spot is unmistakable. No scale, so surrounding layout stays put.
+
+   Only `opacity` is animated, on a pseudo-element that owns the glow. Animating
+   the `box-shadow` directly repaints the element every frame, and every valid
+   target pulses at once -- the branch sidebar is not virtualised, so a repo
+   with a few hundred branches was repainting all of them, continuously, during
+   the drag. Opacity composites, so the cost no longer scales with how many
+   targets are lit. */
 @keyframes wyrm-drop-target {
   0%,
   100% {
-    box-shadow:
-      0 0 0 2px var(--gw-accent),
-      0 0 0 4px color-mix(in srgb, var(--gw-accent) 45%, transparent),
-      0 0 12px 2px color-mix(in srgb, var(--gw-accent) 55%, transparent);
+    opacity: 1;
   }
   50% {
-    box-shadow:
-      0 0 0 2px var(--gw-accent),
-      0 0 0 7px color-mix(in srgb, var(--gw-accent) 0%, transparent),
-      0 0 4px 0 color-mix(in srgb, var(--gw-accent) 20%, transparent);
+    opacity: 0.25;
   }
 }
 
@@ -785,6 +786,20 @@
   position: relative;
   z-index: 60;
   border-radius: 5px;
+  /* Painted once, not animated: the solid ring that marks the target. */
+  box-shadow: 0 0 0 2px var(--gw-accent);
+}
+
+.wyrm-drop-target::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--gw-accent) 45%, transparent),
+    0 0 12px 2px color-mix(in srgb, var(--gw-accent) 55%, transparent);
+  will-change: opacity;
   animation: wyrm-drop-target 1.1s ease-in-out infinite;
 }
 
@@ -870,6 +885,9 @@ body.wyrm-dragging .wyrm-ref-expand:hover > span {
   .wyrm-ai-spark,
   .wyrm-sync-pulse,
   .wyrm-drop-target,
+  /* The drop-target glow lives on the pseudo-element, so it has to be named
+     here too -- stopping the parent alone would leave it pulsing. */
+  .wyrm-drop-target::after,
   .wyrm-tab-status-pulse,
   .wyrm-operation-active::after,
   .wyrm-sync-track span {
@@ -884,6 +902,11 @@ body.wyrm-dragging .wyrm-ref-expand:hover > span {
     box-shadow:
       0 0 0 2px var(--gw-accent),
       0 0 10px 2px color-mix(in srgb, var(--gw-accent) 45%, transparent);
+  }
+  /* The parent's static ring above is the whole indicator now; a pseudo-element
+     frozen mid-pulse on top of it would just double the glow. */
+  .wyrm-drop-target::after {
+    display: none;
   }
 }
 
