@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::Duration;
 
 use std::path::PathBuf;
@@ -139,6 +139,76 @@ fn path_is_relevant(path: &Path, workdir: &Path, matcher: &Gitignore) -> bool {
 
 type RepoDebouncer = Debouncer<RecommendedWatcher, RecommendedCache>;
 
+/// How many repositories may arm their watch at the same time.
+///
+/// Arming walks the whole working tree, and every repo does it on the same
+/// `spawn_blocking` pool that serves git commands. Restoring a session lets N
+/// tabs start at once, so the pool fills with tree walks and ordinary commands
+/// queue behind them -- a `repo.head()` (a single ref read) was measured taking
+/// 8.7 seconds during a 15-tab restore, which is queueing, not work.
+///
+/// Two keeps the disk busy without letting arming take over the pool. Arming is
+/// background work: finishing all of it a little later costs nothing, while
+/// starving the foreground is immediately visible.
+const ARM_CONCURRENCY: usize = 2;
+
+/// Gate limiting concurrent watch arming to [`ARM_CONCURRENCY`].
+///
+/// A plain counting semaphore over std primitives rather than tokio's: the
+/// waiter is inside `spawn_blocking`, where blocking the thread is expected and
+/// an async permit would need a runtime handle to await on.
+struct ArmGate {
+  available: Mutex<usize>,
+  released: Condvar,
+}
+
+impl ArmGate {
+  const fn new(permits: usize) -> Self {
+    Self {
+      available: Mutex::new(permits),
+      released: Condvar::new(),
+    }
+  }
+
+  /// Blocks until a permit is free, then holds it until the guard is dropped.
+  ///
+  /// Poisoning is recovered from rather than propagated: the guarded value is a
+  /// plain counter that a panicking holder cannot leave torn, and treating a
+  /// panic in one repo's arming as fatal to the gate would stop every later
+  /// repo from ever being watched.
+  fn acquire(&self) -> ArmPermit<'_> {
+    let mut available = self.available.lock().unwrap_or_else(|e| e.into_inner());
+    while *available == 0 {
+      available = self
+        .released
+        .wait(available)
+        .unwrap_or_else(|e| e.into_inner());
+    }
+    *available -= 1;
+    ArmPermit { gate: self }
+  }
+}
+
+struct ArmPermit<'a> {
+  gate: &'a ArmGate,
+}
+
+impl Drop for ArmPermit<'_> {
+  fn drop(&mut self) {
+    // Released even if arming panicked, so one bad repo cannot wedge the gate.
+    // Unwinding through here means the mutex is poisoned, so recover rather
+    // than panic again -- a double panic would abort the process.
+    *self
+      .gate
+      .available
+      .lock()
+      .unwrap_or_else(|e| e.into_inner()) += 1;
+    self.gate.released.notify_one();
+  }
+}
+
+static ARM_GATE: ArmGate = ArmGate::new(ARM_CONCURRENCY);
+
 #[derive(Default)]
 pub struct WatcherRegistry {
   watchers: Mutex<HashMap<String, RepoDebouncer>>,
@@ -151,13 +221,21 @@ impl WatcherRegistry {
   /// live before they get their `RepoInfo` back -- external-change events just
   /// start flowing a moment later. `app` owns the managed `WatcherRegistry`, so
   /// the spawned task reaches back into it through state rather than borrowing.
+  ///
+  /// Only [`ARM_CONCURRENCY`] repos arm at once; the rest wait their turn so a
+  /// session restore cannot fill the blocking pool with tree walks.
   pub fn watch_deferred(app: AppHandle, repo_id: String, workdir: PathBuf) {
     tauri::async_runtime::spawn_blocking(move || {
+      let queued = std::time::Instant::now();
+      let _permit = ARM_GATE.acquire();
+      let waited = queued.elapsed().as_millis();
       let start = std::time::Instant::now();
       let registry = app.state::<WatcherRegistry>();
       match registry.watch(app.clone(), repo_id.clone(), &workdir) {
+        // Wait and work are reported separately: a long total is only a problem
+        // when the *work* is long, and the old single number could not say which.
         Ok(()) => log::info!(
-          "watch: armed in {}ms for {}",
+          "watch: armed in {}ms (waited {waited}ms) for {}",
           start.elapsed().as_millis(),
           workdir.display()
         ),
@@ -302,6 +380,60 @@ mod tests {
     // Editing .gitignore changes what git reports, so it must emit.
     let m = matcher_with(&["*.log"]);
     assert!(path_is_relevant(&root().join(".gitignore"), &root(), &m));
+  }
+
+  /// The gate has to be a real ceiling, not a hint: exceeding it is what let
+  /// arming fill the blocking pool and starve foreground git commands.
+  #[test]
+  fn arm_gate_never_exceeds_its_permit_count() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static GATE: ArmGate = ArmGate::new(2);
+    let live = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+
+    std::thread::scope(|scope| {
+      for _ in 0..8 {
+        let live = live.clone();
+        let peak = peak.clone();
+        scope.spawn(move || {
+          let _permit = GATE.acquire();
+          let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+          peak.fetch_max(now, Ordering::SeqCst);
+          // Hold long enough that unbounded threads would overlap here.
+          std::thread::sleep(Duration::from_millis(20));
+          live.fetch_sub(1, Ordering::SeqCst);
+        });
+      }
+    });
+
+    assert_eq!(live.load(Ordering::SeqCst), 0, "every permit must be returned");
+    assert!(
+      peak.load(Ordering::SeqCst) <= 2,
+      "at most 2 may arm at once, saw {}",
+      peak.load(Ordering::SeqCst)
+    );
+  }
+
+  /// A panic while arming must not consume a permit forever, or one unreadable
+  /// repo would shrink the gate and eventually stop watching entirely.
+  #[test]
+  fn arm_gate_permit_survives_a_panic() {
+    static GATE: ArmGate = ArmGate::new(1);
+
+    let panicked = std::thread::spawn(|| {
+      let _permit = GATE.acquire();
+      panic!("arming blew up");
+    })
+    .join();
+    assert!(panicked.is_err(), "the test thread should have panicked");
+
+    // The permit is back, so this returns instead of deadlocking.
+    let recovered = std::thread::spawn(|| {
+      let _permit = GATE.acquire();
+    })
+    .join();
+    assert!(recovered.is_ok(), "a panic must release its permit");
   }
 
   #[test]
