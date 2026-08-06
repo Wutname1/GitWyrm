@@ -54,8 +54,22 @@ pub async fn get_status(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let _timing = crate::perf::CommandTiming::start("get_status", "git.status");
-    let repo = open.repo.lock().unwrap();
+    // Coalesced: one external change invalidates the status of every open tab
+    // at once, and scanning the same working tree N times only makes the last
+    // tab wait for the others to repeat its work.
+    let slot = &open.status_read;
+    open
+      .coalesced_read(slot, |repo| working_status(repo).map_err(|e: AppError| e.to_string()))
+      .map_err(AppError::Other)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
 
+/// Reads the working tree: staged and unstaged changes with per-file line
+/// counts. Split out from the command so it can run under a coalesced read.
+fn working_status(repo: &git2::Repository) -> Result<WorkingStatus, AppError> {
+  {
     let mut opts = StatusOptions::new();
     opts
       .include_untracked(true)
@@ -165,7 +179,5 @@ pub async fn get_status(
     }
 
     Ok(WorkingStatus { staged, unstaged })
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+  }
 }
