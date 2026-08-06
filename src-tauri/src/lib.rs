@@ -125,6 +125,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::repo_icon::clear_repo_icon,
     commands::repo_icon::hide_repo_icon,
     commands::log::get_log,
+    commands::log::get_commit_stats,
     commands::status::get_status,
     commands::branch::list_branches,
     commands::branch::branch_relation,

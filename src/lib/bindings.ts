@@ -927,6 +927,25 @@ async getLog(repoId: string, skip: number, limit: number) : Promise<Result<LogPa
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Diff stats for a set of commits, computed on demand.
+ * 
+ * The log page leaves stats out for any commit it has not already computed, so
+ * the frontend asks for just the rows the user can actually see. Results are
+ * memoized on the open repo, so scrolling back over the same commits is free
+ * and a later `get_log` refresh returns them inline.
+ * 
+ * Unknown or unreadable shas are skipped rather than failing the batch: a row
+ * that cannot be summarized should stay blank, not break the ones around it.
+ */
+async getCommitStats(repoId: string, shas: string[]) : Promise<Result<Partial<{ [key in string]: CommitStats }>, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_commit_stats", { repoId, shas }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getStatus(repoId: string) : Promise<Result<WorkingStatus, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_status", { repoId }) };
@@ -2922,16 +2941,20 @@ export type CommitDetail = { sha: string; summary: string; body: string; author_
 export type CommitEntry = { sha: string; short_sha: string; summary: string; 
 /**
  * Number of files changed compared with the first parent.
+ * 
+ * `None` until the stats have been computed. A log page only fills these in
+ * for commits whose stats are already cached; the rest are fetched by the
+ * frontend as rows scroll into view. See [`crate::commands::log::get_log`].
  */
-files_changed: number; 
+files_changed: number | null; 
 /**
- * Lines added compared with the first parent.
+ * Lines added compared with the first parent. `None` until computed.
  */
-additions: number; 
+additions: number | null; 
 /**
- * Lines removed compared with the first parent.
+ * Lines removed compared with the first parent. `None` until computed.
  */
-deletions: number; author_name: string; author_email: string; author_initials: string; 
+deletions: number | null; author_name: string; author_email: string; author_initials: string; 
 /**
  * Unix epoch seconds.
  */
@@ -2948,6 +2971,10 @@ spec_id: string | null;
  * AI provider from this commit's `Assisted-by:` trailer, if a run wrote it.
  */
 assisted_by: string | null }
+/**
+ * Diff stats for one commit, fetched on demand for rows in view.
+ */
+export type CommitStats = { files_changed: number; additions: number; deletions: number }
 /**
  * The three sides of a conflicted file, as full text.
  */

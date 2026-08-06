@@ -1,9 +1,10 @@
 import { cn } from '@/lib/utils'
 
 interface ChangeSizeIndicatorProps {
-  filesChanged: number
-  additions: number
-  deletions: number
+  /** `null` while the stats for this commit are still being computed. */
+  filesChanged: number | null
+  additions: number | null
+  deletions: number | null
   showLineCounts: boolean
   mode: 'row' | 'column'
   className?: string
@@ -18,6 +19,31 @@ export function ChangeSizeIndicator({
   mode,
   className,
 }: ChangeSizeIndicatorProps) {
+  // Stats are fetched for rows in view, so a commit can render before its
+  // numbers exist. Hold the row's exact shape with a muted placeholder rather
+  // than showing a misleading "0 files" or letting the layout jump when the
+  // real numbers land a beat later.
+  if (filesChanged == null || additions == null || deletions == null) {
+    return (
+      <div
+        aria-label="Loading change size"
+        className={cn(
+          'flex min-w-0 animate-pulse items-center gap-1.5 font-mono text-2xs text-muted-foreground/40',
+          className,
+        )}
+      >
+        <span aria-hidden className="flex-none">
+          &middot;&middot;&middot;
+        </span>
+        <span
+          aria-hidden
+          className="flex h-1.5 flex-none overflow-hidden rounded-sm bg-panel3"
+          style={{ width: 28 }}
+        />
+      </div>
+    )
+  }
+
   const totalLines = additions + deletions
   const magnitude = totalLines > 0 ? totalLines : filesChanged
   const barWidth = magnitude > 0 ? Math.min(74, Math.max(10, 8 + Math.log2(magnitude + 1) * 8)) : 0

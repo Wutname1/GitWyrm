@@ -241,9 +241,7 @@ pub async fn get_file_history(
       let mut opts = DiffOptions::new();
       opts.pathspec(&tracked);
       let mut diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
-      let mut find = git2::DiffFindOptions::new();
-      find.renames(true);
-      diff.find_similar(Some(&mut find))?;
+      crate::git::rename_detect::find_renames(&mut diff)?;
 
       if diff.deltas().len() == 0 {
         continue;

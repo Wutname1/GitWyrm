@@ -153,9 +153,7 @@ pub async fn get_file_diff(
     };
 
     // Detect renames so `old_path` can be populated for renamed files.
-    let mut find = git2::DiffFindOptions::new();
-    find.renames(true);
-    diff.find_similar(Some(&mut find))?;
+    crate::git::rename_detect::find_renames(&mut diff)?;
 
     build_file_diff(&diff, &path)
   })
@@ -181,9 +179,7 @@ pub async fn get_commit_detail(
     let mut opts = DiffOptions::new();
     let mut diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
 
-    let mut find = git2::DiffFindOptions::new();
-    find.renames(true);
-    diff.find_similar(Some(&mut find))?;
+    crate::git::rename_detect::find_renames(&mut diff)?;
 
     // Per-file stats.
     let files: std::cell::RefCell<Vec<FileChange>> = std::cell::RefCell::new(Vec::new());

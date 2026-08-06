@@ -7,6 +7,7 @@ pub mod merge_ops;
 pub mod profiles;
 pub mod refs;
 pub mod remote_url;
+pub mod rename_detect;
 pub mod shell;
 pub mod signing;
 pub mod spec_link;

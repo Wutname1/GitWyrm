@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { cn } from "@/lib/utils";
-import type { CommitEntry } from "@/lib/bindings";
+import type { CommitEntry, CommitStats } from "@/lib/bindings";
 import { authorColor, formatCommitTime } from "@/lib/gitDisplay";
 import {
   effectiveHiddenColumns,
@@ -30,6 +30,12 @@ export interface SelectModifiers {
 
 interface CommitRowProps {
   commit: CommitEntry;
+  /**
+   * Diff stats fetched for this row after it scrolled into view, when the log
+   * page did not already carry them. Falls back to whatever the commit itself
+   * has, which is set once the backend has the numbers cached.
+   */
+  stats?: CommitStats | null;
   selected: boolean;
   onSelect: (mods: SelectModifiers) => void;
   /**
@@ -48,6 +54,7 @@ interface CommitRowProps {
 
 export const CommitRow = memo(function CommitRow({
   commit,
+  stats,
   selected,
   onSelect,
   multiSelection,
@@ -68,6 +75,11 @@ export const CommitRow = memo(function CommitRow({
     changeSizeDisplay,
   );
   const color = authorColor(commit.author_email || commit.author_name);
+  // The commit's own numbers win when the page already had them; otherwise use
+  // whatever the on-demand fetch returned. Null in both means still loading.
+  const filesChanged = commit.files_changed ?? stats?.files_changed ?? null;
+  const additions = commit.additions ?? stats?.additions ?? null;
+  const deletions = commit.deletions ?? stats?.deletions ?? null;
   const authorIconOnly = isAuthorIconOnly(widths);
   const repo = useActiveRepo();
   // Every row calls this, but react-query dedupes by key, so the whole
@@ -122,9 +134,9 @@ export const CommitRow = memo(function CommitRow({
         </div>
         {showChangeIndicator && changeSizeDisplay === "row" && (
           <ChangeSizeIndicator
-            filesChanged={commit.files_changed}
-            additions={commit.additions}
-            deletions={commit.deletions}
+            filesChanged={filesChanged}
+            additions={additions}
+            deletions={deletions}
             showLineCounts={showLineCounts}
             mode="row"
           />
@@ -157,9 +169,9 @@ export const CommitRow = memo(function CommitRow({
     ),
     changes: (
       <ChangeSizeIndicator
-        filesChanged={commit.files_changed}
-        additions={commit.additions}
-        deletions={commit.deletions}
+        filesChanged={filesChanged}
+        additions={additions}
+        deletions={deletions}
         showLineCounts={showLineCounts}
         mode="column"
       />

@@ -4,6 +4,7 @@ import type { CommitEntry, StashInfo } from '@/lib/bindings'
 import { GRAPH_ROW_HEIGHT, GRAPH_ROW_WITH_CHANGES_HEIGHT } from '@/lib/gitDisplay'
 import { useCommitLog, useStashes, useStatus } from '@/hooks/useGitQueries'
 import { usePendingRowHold } from '@/hooks/usePendingRowHold'
+import { useVisibleCommitStats } from '@/hooks/useVisibleCommitStats'
 import { useGraphLoadSpan } from '@/lib/perf'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
@@ -236,6 +237,19 @@ export function GraphView() {
   const startIndex = items.length ? items[0].index : 0
   const endIndex = items.length ? items[items.length - 1].index : 0
 
+  // Commits on screen whose diff stats the log page did not include. Fetching
+  // only these keeps a cold open fast on repos where summarizing every commit
+  // in a page would take seconds. `key` in the hook compares by value, so
+  // rebuilding this array each render is fine.
+  const visibleStatShas: string[] = []
+  for (const vi of items) {
+    const row = rows[vi.index]
+    if (row?.kind === 'commit' && row.commit.files_changed == null) {
+      visibleStatShas.push(row.commit.sha)
+    }
+  }
+  const lazyStats = useVisibleCommitStats(repo?.id ?? null, visibleStatShas)
+
   // Fetch the next page when scrolling nears the end. Depend only on stable
   // primitives: `items` and `log` get fresh identities every render, so
   // including them would re-run this effect on every render and could spin
@@ -467,6 +481,7 @@ export function GraphView() {
               <CommitRow
                 key={commit.sha}
                 commit={commit}
+                stats={lazyStats.get(commit.sha) ?? null}
                 selected={selected}
                 onSelect={(mods) => handleCommitClick(commit.sha, mods)}
                 multiSelection={selected ? multiSelection : null}

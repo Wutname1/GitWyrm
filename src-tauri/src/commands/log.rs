@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use git2::{Commit, DiffFindOptions, Oid, Sort};
+use git2::{Commit, Oid, Sort};
 use tauri::State;
 
 use crate::error::AppError;
 use crate::git::graph::{initials, LaneState};
 use crate::git::refs;
+use crate::git::rename_detect;
 use crate::git::trailers;
-use crate::git::types::{CommitEntry, LogPage, RefInfo, RefKind};
+use crate::git::types::{CommitEntry, CommitStats, LogPage, RefInfo, RefKind};
 use crate::state::{OpenRepo, RepoManager};
 
 fn collect_refs(repo: &git2::Repository) -> HashMap<Oid, Vec<RefInfo>> {
@@ -197,9 +198,7 @@ pub(crate) fn commit_change_stats(
   let mut diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
 
   // Treat a rename as one changed file instead of a delete plus an add.
-  let mut find = DiffFindOptions::new();
-  find.renames(true);
-  diff.find_similar(Some(&mut find))?;
+  rename_detect::find_renames(&mut diff)?;
 
   let stats = diff.stats()?;
   Ok((
@@ -257,7 +256,11 @@ pub async fn get_log(
 
       let author = commit.author();
       let name = author.name().unwrap_or("unknown").to_string();
-      let (files_changed, additions, deletions) = cached_change_stats(&open, &repo, &commit)?;
+      // Deliberately cache-only: computing stats here would make the page cost
+      // one rename-detected tree diff per commit, which on a repo with huge
+      // commits takes seconds before anything renders. Rows that miss come back
+      // as `None` and the frontend fills them in for the visible range only.
+      let stats = open.cached_stats(oid);
       // The full message is already loaded here, so reading trailers costs
       // nothing extra -- no second walk and no per-commit shell-out.
       let message = commit.message().unwrap_or("");
@@ -265,9 +268,9 @@ pub async fn get_log(
         sha: oid.to_string(),
         short_sha: oid.to_string()[..7].to_string(),
         summary: commit.summary().unwrap_or("").to_string(),
-        files_changed,
-        additions,
-        deletions,
+        files_changed: stats.map(|s| s.0),
+        additions: stats.map(|s| s.1),
+        deletions: stats.map(|s| s.2),
         author_initials: initials(&name),
         author_email: author.email().unwrap_or("").to_string(),
         author_name: name,
@@ -283,6 +286,48 @@ pub async fn get_log(
     }
 
     Ok(LogPage { commits, has_more })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Diff stats for a set of commits, computed on demand.
+///
+/// The log page leaves stats out for any commit it has not already computed, so
+/// the frontend asks for just the rows the user can actually see. Results are
+/// memoized on the open repo, so scrolling back over the same commits is free
+/// and a later `get_log` refresh returns them inline.
+///
+/// Unknown or unreadable shas are skipped rather than failing the batch: a row
+/// that cannot be summarized should stay blank, not break the ones around it.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_commit_stats(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  shas: Vec<String>,
+) -> Result<HashMap<String, CommitStats>, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let mut out = HashMap::with_capacity(shas.len());
+    for sha in shas {
+      let Ok(oid) = Oid::from_str(&sha) else { continue };
+      let Ok(commit) = repo.find_commit(oid) else {
+        continue;
+      };
+      if let Ok((files_changed, additions, deletions)) = cached_change_stats(&open, &repo, &commit) {
+        out.insert(
+          sha,
+          CommitStats {
+            files_changed,
+            additions,
+            deletions,
+          },
+        );
+      }
+    }
+    Ok(out)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

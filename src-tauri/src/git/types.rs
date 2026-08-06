@@ -31,11 +31,15 @@ pub struct CommitEntry {
   pub short_sha: String,
   pub summary: String,
   /// Number of files changed compared with the first parent.
-  pub files_changed: u32,
-  /// Lines added compared with the first parent.
-  pub additions: u32,
-  /// Lines removed compared with the first parent.
-  pub deletions: u32,
+  ///
+  /// `None` until the stats have been computed. A log page only fills these in
+  /// for commits whose stats are already cached; the rest are fetched by the
+  /// frontend as rows scroll into view. See [`crate::commands::log::get_log`].
+  pub files_changed: Option<u32>,
+  /// Lines added compared with the first parent. `None` until computed.
+  pub additions: Option<u32>,
+  /// Lines removed compared with the first parent. `None` until computed.
+  pub deletions: Option<u32>,
   pub author_name: String,
   pub author_email: String,
   pub author_initials: String,
@@ -57,6 +61,14 @@ pub struct CommitEntry {
 pub struct LogPage {
   pub commits: Vec<CommitEntry>,
   pub has_more: bool,
+}
+
+/// Diff stats for one commit, fetched on demand for rows in view.
+#[derive(Debug, Clone, Copy, Serialize, Type)]
+pub struct CommitStats {
+  pub files_changed: u32,
+  pub additions: u32,
+  pub deletions: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
