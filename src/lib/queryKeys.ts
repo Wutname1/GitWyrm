@@ -4,6 +4,8 @@ import type { DiffSource } from './bindings'
 export const keys = {
   log: (repoId: string) => ['log', repoId] as const,
   status: (repoId: string) => ['status', repoId] as const,
+  /** Tab badge totals. Cheap counterpart to `status`; see `useRepoTabStatus`. */
+  repoCounts: (repoId: string) => ['repoCounts', repoId] as const,
   branches: (repoId: string) => ['branches', repoId] as const,
   tags: (repoId: string) => ['tags', repoId] as const,
   remoteTags: (repoId: string, remote: string) => ['remoteTags', repoId, remote] as const,

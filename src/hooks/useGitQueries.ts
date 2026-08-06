@@ -3,7 +3,6 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { commands, type DiffSource } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { detectProvider, providerLabel } from '@/lib/remoteProvider'
-import { branchSync } from '@/lib/branchActions'
 
 const LOG_PAGE_SIZE = 200
 
@@ -48,20 +47,30 @@ export interface RepoTabStatus {
 }
 
 /**
- * The push/pull/uncommitted counts a repository tab shows at a glance. Reuses
- * the cached status and branch queries so every open tab reflects live data
- * without an extra backend call, and the repo watcher keeps them current.
+ * The push/pull/uncommitted counts a repository tab shows at a glance.
+ *
+ * Asks the backend for exactly these three numbers rather than deriving them
+ * from the full status and branch queries. Those carry per-file lists, changed
+ * line counts and every branch's upstream, none of which a badge shows -- and
+ * this runs for every open tab, on every external change, not just the one on
+ * screen.
+ *
+ * It is invalidated by the same watcher event as the queries it replaced, so
+ * the numbers are exactly as live as before; only the cost of producing them
+ * changed.
  */
 export function useRepoTabStatus(repoId: string | null): RepoTabStatus {
-  const status = useStatus(repoId)
-  const branches = useBranches(repoId)
+  const counts = useQuery({
+    queryKey: keys.repoCounts(repoId ?? 'none'),
+    enabled: repoId != null,
+    queryFn: async () => unwrap(await commands.getRepoCounts(repoId!)),
+  })
 
-  const head = branches.data?.local.find((b) => b.is_head)
-  const sync = head ? branchSync(head) : null
-  const uncommitted =
-    (status.data?.staged.length ?? 0) + (status.data?.unstaged.length ?? 0)
-
-  return { ahead: sync?.ahead ?? 0, behind: sync?.behind ?? 0, uncommitted }
+  return {
+    ahead: counts.data?.ahead ?? 0,
+    behind: counts.data?.behind ?? 0,
+    uncommitted: counts.data?.uncommitted ?? 0,
+  }
 }
 
 export function useTags(repoId: string | null) {

@@ -5,7 +5,7 @@ use tauri::State;
 
 use crate::error::AppError;
 use crate::git::submodule::moved_submodules;
-use crate::git::types::{FileChange, StatusCode, WorkingStatus};
+use crate::git::types::{FileChange, RepoCounts, StatusCode, WorkingStatus};
 use crate::state::RepoManager;
 
 /// Per-file +/- line counts for a diff.
@@ -64,6 +64,109 @@ pub async fn get_status(
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// The push / pull / uncommitted numbers for a repository tab's badge.
+///
+/// A tab shows three numbers, but the only way to get them used to be
+/// [`get_status`] plus `list_branches` -- between them a full status walk, two
+/// content diffs to count changed lines, a submodule scan, and an ahead/behind
+/// pass over every branch in the repo. Every open tab ran all of that, on every
+/// external change, to render three integers it then threw the rest away from.
+///
+/// This asks for exactly the three. The savings are in what it leaves out:
+///
+/// - no per-file diffs, so file *contents* are never read;
+/// - no rename detection, which cannot change a total (a rename is one file
+///   either way, and pairing it with its old name only matters for display);
+/// - only the checked-out branch's upstream, not every branch's.
+///
+/// It stays on the same refresh path as everything else, so the numbers are
+/// exactly as fresh as before -- this is the same answer computed cheaply, not
+/// a cached or delayed one.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_repo_counts(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+) -> Result<RepoCounts, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let _timing = crate::perf::CommandTiming::start("get_repo_counts", "git.counts");
+    let slot = &open.counts_read;
+    open
+      .coalesced_read(slot, |repo| {
+        repo_counts(repo).map_err(|e: AppError| e.to_string())
+      })
+      .map_err(AppError::Other)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+fn repo_counts(repo: &git2::Repository) -> Result<RepoCounts, AppError> {
+  let mut opts = StatusOptions::new();
+  opts
+    .include_untracked(true)
+    // A new folder still counts as work waiting to be committed, so its files
+    // have to be reached -- but git can stop at the folder rather than listing
+    // everything inside it, which is the expensive part in a fresh build tree.
+    .recurse_untracked_dirs(false)
+    // Deliberately no rename detection: it pairs a delete with an add for
+    // display, and pairing cannot change how many files are involved.
+    .include_ignored(false)
+    // Read-only. `get_status` refreshes the index; doing it here too would mean
+    // every background tab writing to `.git` on every change.
+    .update_index(false);
+  let statuses = repo.statuses(Some(&mut opts))?;
+
+  let mut uncommitted = 0u32;
+  for entry in statuses.iter() {
+    let st = entry.status();
+    // Counted once per file, even when it is changed both in the index and in
+    // the working tree -- it is one piece of uncommitted work either way. This
+    // matches what the badge means, though it can differ from `get_status`,
+    // whose two lists show such a file in both.
+    if st.intersects(
+      Status::INDEX_NEW
+        | Status::INDEX_MODIFIED
+        | Status::INDEX_DELETED
+        | Status::INDEX_RENAMED
+        | Status::INDEX_TYPECHANGE
+        | Status::WT_NEW
+        | Status::WT_MODIFIED
+        | Status::WT_DELETED
+        | Status::WT_RENAMED
+        | Status::WT_TYPECHANGE
+        | Status::CONFLICTED,
+    ) {
+      uncommitted += 1;
+    }
+  }
+
+  // Only the checked-out branch has an upstream worth reporting on a tab.
+  // A detached HEAD or a branch that was never pushed has nothing to sync,
+  // which reads as zero rather than as an error.
+  let (ahead, behind) = head_sync(repo).unwrap_or((0, 0));
+
+  Ok(RepoCounts {
+    ahead,
+    behind,
+    uncommitted,
+  })
+}
+
+/// Ahead/behind for the checked-out branch against its upstream.
+fn head_sync(repo: &git2::Repository) -> Option<(u32, u32)> {
+  let head = repo.head().ok()?;
+  if !head.is_branch() {
+    return None;
+  }
+  let local = head.peel_to_commit().ok()?.id();
+  let branch = git2::Branch::wrap(head);
+  let upstream = branch.upstream().ok()?.get().peel_to_commit().ok()?.id();
+  let (ahead, behind) = repo.graph_ahead_behind(local, upstream).ok()?;
+  Some((ahead as u32, behind as u32))
 }
 
 /// Reads the working tree: staged and unstaged changes with per-file line
@@ -179,5 +282,156 @@ fn working_status(repo: &git2::Repository) -> Result<WorkingStatus, AppError> {
     }
 
     Ok(WorkingStatus { staged, unstaged })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::fs;
+
+  use git2::{Repository, Signature};
+
+  use super::*;
+
+  fn commit_all(repo: &Repository, message: &str) {
+    let mut index = repo.index().expect("index");
+    index
+      .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+      .expect("add");
+    index.write().expect("write index");
+    let tree = repo.find_tree(index.write_tree().expect("tree id")).expect("tree");
+    let sig = Signature::now("Counts Test", "counts@example.com").expect("signature");
+    let parents = repo
+      .head()
+      .ok()
+      .and_then(|h| h.peel_to_commit().ok())
+      .into_iter()
+      .collect::<Vec<_>>();
+    let parent_refs = parents.iter().collect::<Vec<_>>();
+    repo
+      .commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)
+      .expect("commit");
+  }
+
+  fn repo_with_commit() -> (tempfile::TempDir, Repository) {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    fs::write(dir.path().join("base.txt"), "base\n").expect("write");
+    commit_all(&repo, "base");
+    (dir, repo)
+  }
+
+  /// A clean tree is zero, and nothing about a repo with no upstream reads as
+  /// pending sync work.
+  #[test]
+  fn a_clean_repo_counts_zero() {
+    let (_dir, repo) = repo_with_commit();
+    let counts = repo_counts(&repo).expect("counts");
+    assert_eq!(
+      counts,
+      RepoCounts {
+        ahead: 0,
+        behind: 0,
+        uncommitted: 0
+      }
+    );
+  }
+
+  /// The number has to match what the user can see in the changes list, so it
+  /// counts staged work, unstaged work, and brand-new files alike.
+  #[test]
+  fn counts_staged_unstaged_and_untracked_work() {
+    let (dir, repo) = repo_with_commit();
+
+    // Staged: a new file added to the index.
+    fs::write(dir.path().join("staged.txt"), "staged\n").expect("write");
+    let mut index = repo.index().expect("index");
+    index
+      .add_path(std::path::Path::new("staged.txt"))
+      .expect("stage");
+    index.write().expect("write index");
+
+    // Unstaged: an edit to a committed file.
+    fs::write(dir.path().join("base.txt"), "changed\n").expect("write");
+    // Untracked: never seen by git.
+    fs::write(dir.path().join("new.txt"), "new\n").expect("write");
+
+    let counts = repo_counts(&repo).expect("counts");
+    assert_eq!(counts.uncommitted, 3, "three files are waiting to be committed");
+  }
+
+  /// A file both staged and edited again is one piece of work on the badge,
+  /// even though `get_status` lists it under staged and unstaged both.
+  #[test]
+  fn a_file_changed_twice_counts_once() {
+    let (dir, repo) = repo_with_commit();
+    fs::write(dir.path().join("base.txt"), "staged\n").expect("write");
+    let mut index = repo.index().expect("index");
+    index
+      .add_path(std::path::Path::new("base.txt"))
+      .expect("stage");
+    index.write().expect("write index");
+    // Edit again after staging, so it is dirty in the index and the worktree.
+    fs::write(dir.path().join("base.txt"), "and again\n").expect("write");
+
+    let counts = repo_counts(&repo).expect("counts");
+    assert_eq!(counts.uncommitted, 1, "one file, not two");
+  }
+
+  /// Untracked folders count without being walked: the files inside a new
+  /// directory must still register as work waiting.
+  #[test]
+  fn an_untracked_folder_registers_as_work() {
+    let (dir, repo) = repo_with_commit();
+    fs::create_dir(dir.path().join("fresh")).expect("mkdir");
+    fs::write(dir.path().join("fresh/a.txt"), "a\n").expect("write");
+    fs::write(dir.path().join("fresh/b.txt"), "b\n").expect("write");
+
+    let counts = repo_counts(&repo).expect("counts");
+    assert!(
+      counts.uncommitted >= 1,
+      "a new folder must show as pending work, got {}",
+      counts.uncommitted
+    );
+  }
+
+  /// Ahead/behind comes from the checked-out branch's upstream.
+  #[test]
+  fn ahead_counts_commits_waiting_to_push() {
+    let (dir, repo) = repo_with_commit();
+    let head = repo.head().expect("head").peel_to_commit().expect("commit");
+    // `set_upstream` resolves the remote behind the ref, so it has to exist.
+    repo
+      .remote("origin", "https://example.invalid/repo.git")
+      .expect("remote");
+    // Pretend the remote is at our first commit, then move ahead of it.
+    repo
+      .reference("refs/remotes/origin/master", head.id(), true, "test remote")
+      .expect("remote ref");
+    let mut branch = repo
+      .find_branch("master", git2::BranchType::Local)
+      .expect("branch");
+    branch.set_upstream(Some("origin/master")).expect("upstream");
+
+    fs::write(dir.path().join("next.txt"), "next\n").expect("write");
+    commit_all(&repo, "next");
+
+    let counts = repo_counts(&repo).expect("counts");
+    assert_eq!(counts.ahead, 1, "one commit is waiting to push");
+    assert_eq!(counts.behind, 0, "nothing is waiting to pull");
+  }
+
+  /// A detached HEAD has no upstream to compare against; that is zero, not an
+  /// error, and it must not stop the file count from being reported.
+  #[test]
+  fn a_detached_head_reports_zero_sync() {
+    let (dir, repo) = repo_with_commit();
+    let head = repo.head().expect("head").peel_to_commit().expect("commit");
+    repo.set_head_detached(head.id()).expect("detach");
+    fs::write(dir.path().join("loose.txt"), "loose\n").expect("write");
+
+    let counts = repo_counts(&repo).expect("counts");
+    assert_eq!((counts.ahead, counts.behind), (0, 0), "no upstream to compare");
+    assert_eq!(counts.uncommitted, 1, "file counting still works detached");
   }
 }

@@ -954,6 +954,34 @@ async getStatus(repoId: string) : Promise<Result<WorkingStatus, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * The push / pull / uncommitted numbers for a repository tab's badge.
+ * 
+ * A tab shows three numbers, but the only way to get them used to be
+ * [`get_status`] plus `list_branches` -- between them a full status walk, two
+ * content diffs to count changed lines, a submodule scan, and an ahead/behind
+ * pass over every branch in the repo. Every open tab ran all of that, on every
+ * external change, to render three integers it then threw the rest away from.
+ * 
+ * This asks for exactly the three. The savings are in what it leaves out:
+ * 
+ * - no per-file diffs, so file *contents* are never read;
+ * - no rename detection, which cannot change a total (a rename is one file
+ * either way, and pairing it with its old name only matters for display);
+ * - only the checked-out branch's upstream, not every branch's.
+ * 
+ * It stays on the same refresh path as everything else, so the numbers are
+ * exactly as fresh as before -- this is the same answer computed cheaply, not
+ * a cached or delayed one.
+ */
+async getRepoCounts(repoId: string) : Promise<Result<RepoCounts, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_repo_counts", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listBranches(repoId: string) : Promise<Result<BranchList, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_branches", { repoId }) };
@@ -3576,6 +3604,26 @@ export type RemoveOutcome =
  */
 { kind: "partiallyRemoved"; path: string }
 export type RepoChangedPayload = { repo_id: string }
+/**
+ * The three numbers a repository tab badge shows.
+ * 
+ * Everything a tab displays, and nothing it does not: no per-file list and no
+ * line counts, so this can be answered without diffing file contents. See
+ * [`crate::commands::status::get_repo_counts`].
+ */
+export type RepoCounts = { 
+/**
+ * Commits waiting to push.
+ */
+ahead: number; 
+/**
+ * Commits waiting to pull.
+ */
+behind: number; 
+/**
+ * Staged plus unstaged files: the uncommitted-work count.
+ */
+uncommitted: number }
 export type RepoIcon = { source_path: string; label: string; data_url: string; custom: boolean }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
 export type RepositoryStarter = "blank" | "node" | "rust" | "csharp" | "all_in_one"

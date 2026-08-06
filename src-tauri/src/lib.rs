@@ -17,6 +17,9 @@ pub use git::history as git_history;
 pub use git::merge_ops as git_merge_ops;
 pub use git::types as git_types;
 pub use git::refs as git_refs;
+/// Exposed so the verify_lazy example can time the real detection gate against
+/// a large repository rather than a reimplementation of it.
+pub use git::rename_detect as git_rename_detect;
 /// Exposed for the spec_links integration test, which drives linking and
 /// committing against a real repository rather than parsed strings.
 pub use git::spec_link as git_spec_link;
@@ -127,6 +130,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::log::get_log,
     commands::log::get_commit_stats,
     commands::status::get_status,
+    commands::status::get_repo_counts,
     commands::branch::list_branches,
     commands::branch::branch_relation,
     commands::branch::list_tags,

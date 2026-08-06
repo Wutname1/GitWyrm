@@ -23,6 +23,10 @@ export function useRepoWatcher(onlyRepoId?: string | null) {
       const repoId = event.payload.repo_id
       if (onlyRepoId != null && repoId !== onlyRepoId) return
       queryClient.invalidateQueries({ queryKey: keys.status(repoId) })
+      // The tab badge has its own cheap query, so it refreshes here too -- an
+      // edit made outside the app has to move the tab's numbers exactly like
+      // one made inside it.
+      queryClient.invalidateQueries({ queryKey: keys.repoCounts(repoId) })
       // Cached diffs are keyed by path and staged/unstaged only, so a rewind or
       // branch switch made outside the app leaves them pointing at the wrong
       // content under an unchanged key. Drop them alongside status.

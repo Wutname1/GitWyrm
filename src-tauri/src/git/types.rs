@@ -165,6 +165,21 @@ pub struct WorkingStatus {
   pub unstaged: Vec<FileChange>,
 }
 
+/// The three numbers a repository tab badge shows.
+///
+/// Everything a tab displays, and nothing it does not: no per-file list and no
+/// line counts, so this can be answered without diffing file contents. See
+/// [`crate::commands::status::get_repo_counts`].
+#[derive(Debug, Clone, Copy, Serialize, Type, PartialEq, Eq)]
+pub struct RepoCounts {
+  /// Commits waiting to push.
+  pub ahead: u32,
+  /// Commits waiting to pull.
+  pub behind: u32,
+  /// Staged plus unstaged files: the uncommitted-work count.
+  pub uncommitted: u32,
+}
+
 /// How a branch stands against the remote. Distinguishes the three cases the
 /// old `(0, 0)` collapsed together: genuinely in sync, no upstream configured,
 /// and an upstream whose ref could not be resolved.

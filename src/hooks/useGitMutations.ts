@@ -78,6 +78,13 @@ function invalidate(qc: QueryClient, repoId: string, which: QueryName[]) {
   if (which.includes('status')) {
     qc.invalidateQueries({ queryKey: keys.fileDiffAll(repoId) })
   }
+  // Tab badges read their own cheap query, so they have to be refreshed
+  // alongside whatever moved their numbers. Tied to `status` and the ref
+  // queries here rather than left to each call site, so a mutation cannot
+  // update the screen while the tab keeps showing the old count.
+  if (which.includes('status') || which.includes('branches') || which.includes('log')) {
+    qc.invalidateQueries({ queryKey: keys.repoCounts(repoId) })
+  }
 }
 
 /**

@@ -30,6 +30,9 @@ pub struct OpenRepo {
   /// tab's status at once, and they would otherwise queue up repeating an
   /// identical scan of the same tree.
   pub status_read: Mutex<Option<Arc<SharedRead<crate::git::types::WorkingStatus, String>>>>,
+  /// The in-flight tab-badge count read. Separate slot from `status_read` so a
+  /// cheap count never waits on a full status scan that is already running.
+  pub counts_read: Mutex<Option<Arc<SharedRead<crate::git::types::RepoCounts, String>>>>,
 }
 
 impl OpenRepo {
@@ -40,6 +43,7 @@ impl OpenRepo {
       repo: Mutex::new(repo),
       commit_stats: Mutex::new(HashMap::new()),
       status_read: Mutex::new(None),
+      counts_read: Mutex::new(None),
     }
   }
 
@@ -211,6 +215,7 @@ impl RepoManager {
       repo: Mutex::new(repo),
       commit_stats: Mutex::new(HashMap::new()),
       status_read: Mutex::new(None),
+      counts_read: Mutex::new(None),
     });
     repos.insert(id.clone(), open.clone());
     Ok((id, open))
