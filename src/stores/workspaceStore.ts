@@ -123,6 +123,14 @@ export interface TabGroup {
   color: string;
   collapsed: boolean;
   repoPaths: string[];
+  /**
+   * Set only on a submodule group: the path of the project whose submodules
+   * these are. The group is created for you when a submodule is opened, sits
+   * directly under its parent tab, and its members cannot be dragged away --
+   * a submodule belongs to its project, so letting one be filed somewhere else
+   * would be a lie about where the folder lives.
+   */
+  parentPath?: string;
 }
 
 export interface SavedTabGroup {
@@ -361,6 +369,7 @@ interface StoredTabGroup {
   color: string;
   collapsed?: boolean;
   repo_paths?: string[];
+  parent_path?: string | null;
 }
 
 function deserializeTabGroups(
@@ -386,6 +395,9 @@ function deserializeTabGroups(
       color: group.color || TAB_GROUP_COLORS[0],
       collapsed: group.collapsed ?? false,
       repoPaths,
+      ...(group.parent_path
+        ? { parentPath: normalizePath(group.parent_path) }
+        : {}),
     });
   }
   return result;
@@ -470,6 +482,50 @@ function workspaceIndexForPath(
 
 function newGroupId(): string {
   return `group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+/**
+ * True for the auto-built group that holds a project's opened submodules. These
+ * behave differently from groups the user made: they are named and placed for
+ * the user, they cannot be dragged apart, and they disappear with their parent.
+ */
+export function isSubmoduleGroup(group: TabGroup): boolean {
+  return group.parentPath != null;
+}
+
+/** The submodule group belonging to `parentPath`, if that project has one. */
+function submoduleGroupFor(
+  groups: TabGroup[],
+  parentPath: string,
+): TabGroup | undefined {
+  return groups.find(
+    (group) => group.parentPath != null && samePath(group.parentPath, parentPath),
+  );
+}
+
+/**
+ * Put `groupId` immediately after its parent tab, so a project's submodules
+ * always read as belonging to the tab above them. The parent may itself be
+ * inside a group the user built, in which case the submodule group follows that
+ * whole group rather than splitting it open.
+ */
+function placeAfterParent(
+  groups: TabGroup[],
+  order: TabOrderItem[],
+  groupId: string,
+  parentPath: string,
+): TabOrderItem[] {
+  const without = order.filter(
+    (item) => !(item.type === "group" && item.id === groupId),
+  );
+  const parentIndex = workspaceIndexForPath(groups, without, parentPath);
+  const next = [...without];
+  next.splice(
+    parentIndex >= 0 ? parentIndex + 1 : next.length,
+    0,
+    { type: "group", id: groupId },
+  );
+  return next;
 }
 
 interface WorkspaceState {
@@ -729,6 +785,11 @@ interface WorkspaceState {
   hydrated: boolean;
 
   addRepo: (repo: RepoInfo) => void;
+  /**
+   * Opens a submodule as a tab attached to the project it came from. Builds the
+   * parent's submodule group on first use and nests the tab inside it.
+   */
+  addSubmoduleRepo: (repo: RepoInfo, parentPath: string) => void;
   /** Opens several repos as tabs at once without changing which tab is active. */
   addReposInBackground: (repos: RepoInfo[]) => void;
   removeRepo: (id: string) => void;
@@ -1005,6 +1066,7 @@ function toSettings(s: WorkspaceState): Settings {
       color: group.color,
       collapsed: group.collapsed,
       repo_paths: group.repoPaths,
+      parent_path: group.parentPath ?? null,
     })),
     tab_order: serializeTabOrder(s.tabOrder),
     tab_sort: s.tabSort,
@@ -1461,6 +1523,70 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     });
     schedulePersist();
   },
+  addSubmoduleRepo: (repo, parentPath) => {
+    set((s) => {
+      const parent = s.openRepos.find((candidate) =>
+        samePath(candidate.path, parentPath),
+      );
+      // The parent tab is what a submodule group hangs from. With it gone there
+      // is nothing to attach to, so the submodule opens as an ordinary tab.
+      if (!parent) return s;
+
+      const path = normalizePath(repo.path);
+      const openRepos = s.openRepos.some(
+        (r) => r.id === repo.id || samePath(r.path, repo.path),
+      )
+        ? s.openRepos
+        : [...s.openRepos, repo];
+
+      // Wherever this path sat before -- loose, or in some other group -- it now
+      // belongs to its parent, so clear it out before filing it.
+      const cleared = removePathFromWorkspace(s.tabGroups, s.tabOrder, path);
+      let groups = cleared.groups;
+      let order = cleared.order;
+
+      const existing = submoduleGroupFor(groups, parent.path);
+      const groupId = existing?.id ?? newGroupId();
+      if (existing) {
+        groups = groups.map((group) =>
+          group.id === groupId
+            ? { ...group, collapsed: false, repoPaths: [...group.repoPaths, path] }
+            : group,
+        );
+      } else {
+        groups = [
+          ...groups,
+          {
+            id: groupId,
+            name: parent.name,
+            // The parent's own accent, so the nested block reads as part of it
+            // rather than as another colour-coded group the user picked.
+            color: TAB_GROUP_COLORS[groups.length % TAB_GROUP_COLORS.length]!,
+            collapsed: false,
+            repoPaths: [path],
+            parentPath: normalizePath(parent.path),
+          },
+        ];
+      }
+      order = placeAfterParent(groups, order, groupId, parent.path);
+
+      const recents = isTutorialRepoPath(repo.path)
+        ? s.recents
+        : [
+            { name: repo.name, path: repo.path },
+            ...s.recents.filter((r) => !samePath(r.path, repo.path)),
+          ].slice(0, 10);
+      return {
+        openRepos,
+        activeRepoId: repo.id,
+        recents,
+        tabGroups: groups,
+        tabOrder: order,
+      };
+    });
+    log.info("workspace: opened a submodule attached to its project");
+    schedulePersist();
+  },
   addReposInBackground: (repos) => {
     if (repos.length === 0) return;
     set((s) => {
@@ -1499,10 +1625,25 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   removeRepo: (id) => {
     set((s) => {
       const removed = s.openRepos.find((repo) => repo.id === id);
-      const openRepos = s.openRepos.filter((r) => r.id !== id);
-      const workspace = removed
+      // A submodule tab only exists as part of its project. Closing the project
+      // closes them with it, rather than leaving orphans nested under nothing.
+      const attached = removed
+        ? (submoduleGroupFor(s.tabGroups, removed.path)?.repoPaths ?? [])
+        : [];
+      const closedKeys = new Set(attached.map(pathKey));
+      const openRepos = s.openRepos.filter(
+        (r) => r.id !== id && !closedKeys.has(pathKey(r.path)),
+      );
+      let workspace = removed
         ? removePathFromWorkspace(s.tabGroups, s.tabOrder, removed.path)
         : { groups: s.tabGroups, order: s.tabOrder };
+      for (const path of attached) {
+        workspace = removePathFromWorkspace(
+          workspace.groups,
+          workspace.order,
+          path,
+        );
+      }
       const orderedRemaining = workspace.order.flatMap((item) => {
         if (item.type === "repo") return [item.path];
         return (
@@ -1513,19 +1654,28 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       const nextActivePath = orderedRemaining.find((path) =>
         openRepos.some((repo) => samePath(repo.path, path)),
       );
-      const activeRepoId =
-        s.activeRepoId === id
-          ? (openRepos.find(
-              (repo) => nextActivePath && samePath(repo.path, nextActivePath),
-            )?.id ??
-            openRepos[0]?.id ??
-            null)
-          : s.activeRepoId;
+      // Closing a project also closes its submodules, so the active tab can be
+      // one of those rather than the one that was clicked.
+      const activeClosed = !openRepos.some(
+        (repo) => repo.id === s.activeRepoId,
+      );
+      const activeRepoId = activeClosed
+        ? (openRepos.find(
+            (repo) => nextActivePath && samePath(repo.path, nextActivePath),
+          )?.id ??
+          openRepos[0]?.id ??
+          null)
+        : s.activeRepoId;
+      // Closing a tab discards its unfinished message along with it.
+      let commitDrafts = clearDraft(s.commitDrafts, id);
+      for (const repo of s.openRepos) {
+        if (closedKeys.has(pathKey(repo.path)))
+          commitDrafts = clearDraft(commitDrafts, repo.id);
+      }
       return {
         openRepos,
         activeRepoId,
-        // Closing a tab discards its unfinished message along with it.
-        commitDrafts: clearDraft(s.commitDrafts, id),
+        commitDrafts,
         tabGroups: workspace.groups,
         tabOrder: workspace.order,
         // A closed tab keeps no pin; reopening it starts unpinned.
@@ -1892,9 +2042,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       const paths = [
         ...new Map(
           repoPaths
-            .filter((path) =>
-              s.openRepos.some((repo) => samePath(repo.path, path)),
-            )
+            .filter((path) => {
+              if (!s.openRepos.some((repo) => samePath(repo.path, path)))
+                return false;
+              // Submodules stay with their project rather than joining a group
+              // the user built.
+              const group = groupForPath(s.tabGroups, path);
+              return !group || !isSubmoduleGroup(group);
+            })
             .map((path) => [pathKey(path), normalizePath(path)]),
         ).values(),
       ];
@@ -1938,6 +2093,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set((s) => {
       const currentGroup = groupForPath(s.tabGroups, repoPath);
       if (currentGroup?.id === groupId) return s;
+      // A submodule stays with its project, and a submodule group only ever
+      // holds submodules, so neither end of this move is allowed.
+      if (currentGroup && isSubmoduleGroup(currentGroup)) return s;
+      const requested = s.tabGroups.find((group) => group.id === groupId);
+      if (requested && isSubmoduleGroup(requested)) return s;
       const workspace = removePathFromWorkspace(
         s.tabGroups,
         s.tabOrder,
@@ -1965,6 +2125,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set((s) => {
       const group = groupForPath(s.tabGroups, repoPath);
       if (!group) return s;
+      // Detaching a submodule from its project would leave a tab claiming to be
+      // a standalone project when it is a folder inside another one.
+      if (isSubmoduleGroup(group)) return s;
       const groupIndex = s.tabOrder.findIndex(
         (item) => item.type === "group" && item.id === group.id,
       );
@@ -2026,6 +2189,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         (item) => item.type === "group" && item.id === groupId,
       );
       if (!group || groupIndex < 0) return s;
+      // A submodule group is a fact about the folders, not an arrangement the
+      // user chose, so there is nothing here to take apart.
+      if (isSubmoduleGroup(group)) return s;
       const order = [...s.tabOrder];
       order.splice(
         groupIndex,
@@ -2068,6 +2234,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set((s) => {
       const group = s.tabGroups.find((candidate) => candidate.id === groupId);
       if (!group) return s;
+      // Reopening a saved submodule group would open the submodules without the
+      // project they belong to, so these are not saveable.
+      if (isSubmoduleGroup(group)) return s;
       const saved: SavedTabGroup = {
         id: group.id,
         name: group.name,
@@ -2221,6 +2390,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       const pinned = s.pinnedTabPaths.some((candidate) =>
         samePath(candidate, path),
       );
+      // Pinning pulls a tab to the front of the strip, away from its project.
+      const group = groupForPath(s.tabGroups, path);
+      if (!pinned && group && isSubmoduleGroup(group)) return s;
       if (pinned) {
         return {
           pinnedTabPaths: s.pinnedTabPaths.filter(
@@ -2246,7 +2418,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   moveRepoBeside: (sourcePath, targetPath, placement) => {
     if (samePath(sourcePath, targetPath)) return;
     set((s) => {
-      const targetGroupId = groupForPath(s.tabGroups, targetPath)?.id ?? null;
+      const sourceGroup = groupForPath(s.tabGroups, sourcePath);
+      const targetGroup = groupForPath(s.tabGroups, targetPath);
+      // Submodule tabs are fixed to their project: they cannot be dragged out,
+      // and nothing can be dropped in beside them.
+      if (sourceGroup && isSubmoduleGroup(sourceGroup)) return s;
+      if (targetGroup && isSubmoduleGroup(targetGroup)) return s;
+      const targetGroupId = targetGroup?.id ?? null;
       const workspace = removePathFromWorkspace(
         s.tabGroups,
         s.tabOrder,
@@ -2299,6 +2477,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   moveRepoToOrder: (repoPath, requestedIndex) => {
     set((s) => {
       const sourceGroup = groupForPath(s.tabGroups, repoPath);
+      // A submodule tab is fixed to its project and has no place of its own in
+      // the order to move to.
+      if (sourceGroup && isSubmoduleGroup(sourceGroup)) return s;
       const sourceIndex = workspaceIndexForPath(
         s.tabGroups,
         s.tabOrder,
@@ -2368,7 +2549,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
             openKeys.has(pathKey(path)),
           ),
         }))
-        .filter((group) => group.repoPaths.length > 0);
+        .filter((group) => group.repoPaths.length > 0)
+        // A submodule group nests under its project. If that project did not
+        // reopen there is nothing to nest under, so the group is dropped and its
+        // submodules fall back to ordinary tabs below.
+        .filter(
+          (group) =>
+            group.parentPath == null || openKeys.has(pathKey(group.parentPath)),
+        );
       const groupIds = new Set(tabGroups.map((group) => group.id));
       const represented = new Set(
         tabGroups.flatMap((group) => group.repoPaths.map(pathKey)),

@@ -4494,7 +4494,12 @@ export type SyncState =
  * A named set of repository tabs. Repository paths are stable across app
  * restarts, unlike the in-memory repo ids assigned when a repository opens.
  */
-export type TabGroupSetting = { id: string; name: string; color: string; collapsed?: boolean; repo_paths?: string[] }
+export type TabGroupSetting = { id: string; name: string; color: string; collapsed?: boolean; repo_paths?: string[]; 
+/**
+ * Set only on the auto-built group holding a project's opened submodules:
+ * the path of that project. Absent on groups the user made themselves.
+ */
+parent_path?: string | null }
 export type TagInfo = { name: string; 
 /**
  * Commit the tag points at, after peeling an annotated tag's wrapper object.

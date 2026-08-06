@@ -87,6 +87,10 @@ pub struct TabGroupSetting {
   pub collapsed: bool,
   #[serde(default)]
   pub repo_paths: Vec<String>,
+  /// Set only on the auto-built group holding a project's opened submodules:
+  /// the path of that project. Absent on groups the user made themselves.
+  #[serde(default)]
+  pub parent_path: Option<String>,
 }
 
 /// A folder scanned for repositories. Several can be watched at once, each
@@ -671,6 +675,21 @@ impl Settings {
     {
       group.repo_paths.retain(|path| !gone(path));
     }
+    // A submodule group exists only to hang under its project. Once that
+    // project is forgotten the group has nothing to attach to, so it goes too
+    // rather than leaving submodule tabs nested under nothing. Its marker goes
+    // with it; groups the user built keep theirs even when emptied, since the
+    // frontend restores them as repositories come back.
+    let dropped: Vec<String> = self
+      .tab_groups
+      .iter()
+      .filter(|group| group.parent_path.as_deref().is_some_and(&gone))
+      .map(|group| format!("group:{}", group.id))
+      .collect();
+    self
+      .tab_groups
+      .retain(|group| !group.parent_path.as_deref().is_some_and(&gone));
+    self.tab_order.retain(|entry| !dropped.contains(entry));
     if self
       .active_repo_path
       .as_deref()
@@ -870,6 +889,15 @@ mod tests {
       color: "#000".into(),
       collapsed: false,
       repo_paths: repo_paths.iter().map(|p| (*p).to_string()).collect(),
+      parent_path: None,
+    }
+  }
+
+  /// A submodule group: the auto-built one that hangs under `parent_path`.
+  fn submodule_group(id: &str, parent_path: &str, repo_paths: &[&str]) -> TabGroupSetting {
+    TabGroupSetting {
+      parent_path: Some(parent_path.to_string()),
+      ..group(id, repo_paths)
     }
   }
 
@@ -928,6 +956,59 @@ mod tests {
     assert!(settings.tag_overrides_by_repo.is_empty());
     assert_eq!(settings.expanded_change_folders.len(), 1);
     assert!(settings.active_repo_path.is_none());
+  }
+
+  #[test]
+  fn forgetting_a_project_drops_its_submodule_group() {
+    let parent = "C:\\code\\parent";
+    let sub = "C:\\code\\parent\\vendor\\lib";
+    let other = "C:\\code\\other";
+    let mut settings = Settings {
+      open_repos: vec![parent.into(), sub.into(), other.into()],
+      tab_groups: vec![
+        submodule_group("subs", parent, &[sub]),
+        group("mine", &[other]),
+      ],
+      tab_order: vec![
+        parent.to_string(),
+        "group:subs".to_string(),
+        "group:mine".to_string(),
+      ],
+      ..Settings::default()
+    };
+
+    settings.forget_repos(&[parent.to_string()]);
+
+    // The submodule group went with its project, marker and all. The group the
+    // user built is untouched.
+    assert_eq!(settings.tab_groups.len(), 1);
+    assert_eq!(settings.tab_groups[0].id, "mine");
+    assert_eq!(settings.tab_order, vec!["group:mine".to_string()]);
+  }
+
+  #[test]
+  fn forgetting_a_submodule_leaves_its_project_alone() {
+    let parent = "C:\\code\\parent";
+    let sub = "C:\\code\\parent\\vendor\\lib";
+    let mut settings = Settings {
+      open_repos: vec![parent.into(), sub.into()],
+      tab_groups: vec![submodule_group("subs", parent, &[sub])],
+      tab_order: vec![parent.to_string(), "group:subs".to_string()],
+      ..Settings::default()
+    };
+
+    // Case and separators differ from what was stored, as in the sweep.
+    settings.forget_repos(&["c:/code/parent/vendor/lib".to_string()]);
+
+    // Only the submodule went. The group survives (emptied) because its project
+    // is still here, matching how user-built groups are treated.
+    assert_eq!(settings.open_repos, vec![parent.to_string()]);
+    assert_eq!(settings.tab_groups.len(), 1);
+    assert!(settings.tab_groups[0].repo_paths.is_empty());
+    assert_eq!(
+      settings.tab_order,
+      vec![parent.to_string(), "group:subs".to_string()]
+    );
   }
 
 
@@ -1227,6 +1308,7 @@ mod tests {
       color: "#2dd4bf".to_string(),
       collapsed: true,
       repo_paths: vec!["C:\\code\\GitWyrm".to_string()],
+      parent_path: None,
     });
     settings.saved_tab_groups = settings.tab_groups.clone();
     settings.pinned_repo_paths = vec!["C:\\code\\GitWyrm".to_string()];
