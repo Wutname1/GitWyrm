@@ -97,6 +97,21 @@ export function useAiMutations() {
   }
 }
 
+/**
+ * The GitHub login behind the stored Copilot token. Undefined while loading,
+ * null when the token is missing or no longer accepted. `configured` is part
+ * of the key so signing in or disconnecting refetches instead of showing the
+ * previous account.
+ */
+export function useCopilotAccount(configured: boolean) {
+  return useQuery({
+    queryKey: ['copilot-account', configured],
+    enabled: isTauri && configured,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => unwrap(await commands.aiCopilotAccount()),
+  })
+}
+
 export type CopilotSignIn =
   | { state: 'idle' }
   | { state: 'starting' }

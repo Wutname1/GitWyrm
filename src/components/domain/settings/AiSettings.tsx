@@ -15,6 +15,7 @@ import {
   useAiDefaultInstruction,
   useAiModels,
   useAiMutations,
+  useCopilotAccount,
   useCopilotSignIn,
 } from '@/hooks/useAi'
 import { nextDefaultProvider } from '@/hooks/useAiSelection'
@@ -66,6 +67,7 @@ export function AiSettings() {
     [configured.data]
   )
   const isConfigured = aiProvider != null && configuredIds.has(aiProvider)
+  const copilotAccount = useCopilotAccount(configuredIds.has('github-copilot'))
 
   // Credentials without a selection reads as "not set up". When there's only
   // one configured provider the intent is unambiguous, so adopt it as the
@@ -197,7 +199,20 @@ export function AiSettings() {
                     <div className="flex items-center gap-2">
                       <span className="flex items-center gap-1.5 text-xs text-sub">
                         <Check size={13} className="text-green-500" />
-                        {provider.id === 'github-copilot' ? 'Connected' : 'API key configured'}
+                        {provider.id === 'github-copilot' ? (
+                          copilotAccount.data ? (
+                            <>
+                              Connected as{' '}
+                              <span className="font-medium text-foreground">
+                                {copilotAccount.data}
+                              </span>
+                            </>
+                          ) : (
+                            'Connected'
+                          )
+                        ) : (
+                          'API key configured'
+                        )}
                       </span>
                       {provider.id === 'github-copilot' && (
                         <Button
@@ -260,6 +275,17 @@ export function AiSettings() {
                     {provider.id === 'github-copilot' && copilot.status.state === 'error' && (
                       <div className="text-2xs text-destructive">{copilot.status.message}</div>
                     )}
+                    {/* A saved sign-in GitHub no longer accepts. Nothing here
+                        will work until it is renewed, so say so plainly. */}
+                    {provider.id === 'github-copilot' &&
+                      copilot.status.state === 'idle' &&
+                      copilotAccount.isFetched &&
+                      copilotAccount.data == null && (
+                        <div className="text-2xs text-muted-foreground">
+                          GitHub no longer accepts this sign-in. Choose Reconnect to sign in
+                          again.
+                        </div>
+                      )}
                   </div>
                 )
               ) : provider.id === 'github-copilot' ? (
