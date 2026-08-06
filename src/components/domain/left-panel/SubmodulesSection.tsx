@@ -30,7 +30,7 @@ import { useGitMutations } from '@/hooks/useGitMutations'
 import { useSubmodules } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
-import { useOpenRepo } from '@/hooks/useRepoActions'
+import { useOpenSubmoduleRepo } from '@/hooks/useRepoActions'
 import { openWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
 
 /** Short label for the row's right edge, and the colour that goes with it. */
@@ -50,7 +50,7 @@ function stateLabel(s: SubmoduleStatus): { text: string; tone: string } | null {
 function tooltip(s: SubmoduleStatus): string {
   const follows = s.branch ? ` Follows ${s.branch}.` : ''
   // Double-click is otherwise invisible, so every row advertises it.
-  const open = ' Double-click to open it as its own project.'
+  const open = ' Double-click to open it in a tab under this project.'
   if (s.state === 'uninitialized') {
     return `Not downloaded yet, so this folder is empty. Download it to get the files.${follows}${open}`
   }
@@ -69,7 +69,7 @@ function tooltip(s: SubmoduleStatus): string {
 function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
   const repo = useActiveRepo()
   const m = useGitMutations(repo?.id ?? null)
-  const openRepo = useOpenRepo()
+  const openRepo = useOpenSubmoduleRepo()
   const [confirmReset, setConfirmReset] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [deleteFiles, setDeleteFiles] = useState(true)
@@ -85,10 +85,11 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
     m.bumpSubmodule.isPending || m.updateSubmodule.isPending || m.removeSubmodule.isPending
 
   /**
-   * Opens the submodule's own checkout as a tab, so it can be branched and
-   * committed like any other project. A submodule that was never downloaded has
-   * an empty folder and nothing to open, so fetch it first rather than making
-   * the user run two separate steps to get to the same place.
+   * Opens the submodule's own checkout as a tab nested under this project, so it
+   * can be branched and committed while still reading as part of what it belongs
+   * to. A submodule that was never downloaded has an empty folder and nothing to
+   * open, so fetch it first rather than making the user run two separate steps to
+   * get to the same place.
    */
   async function openAsRepo() {
     if (!repo || opening) return
@@ -108,7 +109,7 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
           toast.error(e.message)
           throw e
         })
-      await openRepo.mutateAsync(workdir)
+      await openRepo.mutateAsync({ path: workdir, parentPath: repo.path })
     } catch {
       // Every step above reports its own failure.
     } finally {
@@ -169,7 +170,7 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
 
           <PendingMenuItem
             icon={<FolderOpen />}
-            label="Open as its own project"
+            label="Open in its own tab"
             pendingLabel={uninitialized ? 'Downloading…' : 'Opening…'}
             pending={opening}
             disabled={busy || opening}

@@ -183,6 +183,43 @@ export function useOpenRepo() {
 }
 
 /**
+ * Opens a submodule as a tab attached to the project it belongs to, rather than
+ * as a project of its own. The tab nests under its parent and travels with it,
+ * because that is what the folder actually is: a part of the project above it.
+ */
+export function useOpenSubmoduleRepo() {
+  const addSubmoduleRepo = useWorkspaceStore((s) => s.addSubmoduleRepo)
+  const closeModal = useUiStore((s) => s.closeModal)
+  const closeRepoPicker = useUiStore((s) => s.closeRepoPicker)
+
+  return useMutation({
+    mutationFn: async ({ path: rawPath }: { path: string; parentPath: string }) => {
+      const path = normalizePath(rawPath)
+      const name = path.split('\\').pop() ?? path
+      const toastId = toast.loading(`Opening ${name}…`)
+      try {
+        return await Sentry.startSpan({ name: 'openRepo', op: 'git.open' }, () =>
+          commands.openRepo(path).then(unwrap)
+        )
+      } finally {
+        toast.dismiss(toastId)
+      }
+    },
+    onSuccess: (repo, { parentPath }) => {
+      closeRepoPicker()
+      addSubmoduleRepo(repo, parentPath)
+      closeModal()
+      void noteRepoAvailability(repo.path, true)
+      toast.success(`Opened ${repo.name}`)
+    },
+    onError: (e: Error, { path }) => {
+      void noteRepoAvailability(normalizePath(path), false)
+      toast.error(e.message)
+    },
+  })
+}
+
+/**
  * Opens several repos as tabs in one go. Failures are collected rather than
  * aborting the batch, so one unreadable folder cannot block the rest.
  */

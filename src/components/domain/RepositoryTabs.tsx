@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { normalizePath } from "@/lib/paths";
 import { useRepositoryPreview } from "@/lib/repositoryPreviews";
 import {
+  isSubmoduleGroup,
   TAB_GROUP_COLORS,
   useWorkspaceStore,
   type TabDropPlacement,
@@ -467,7 +468,12 @@ function AddRepoTab({
               : "mx-1.5 my-1 h-[31px] flex-none rounded-[5px] border border-dashed px-2",
             iconOnly && orientation === "horizontal" && !hovered && "justify-center px-1",
             active
-              ? "bg-panel font-semibold text-accent-text"
+              ? cn(
+                  "gw-tab-active bg-[color:color-mix(in_srgb,var(--gw-accent)_12%,var(--gw-panel2))] font-semibold text-accent-text",
+                  orientation === "horizontal"
+                    ? "gw-tab-active-top"
+                    : "gw-tab-active-side",
+                )
               : "text-sub hover:bg-panel2 hover:text-foreground",
           )}
           style={
@@ -861,9 +867,24 @@ export function RepositoryTabs({
   };
 
   const closeRepo = (repo: RepoInfo) => {
+    // Submodule tabs go with their project, so the backend has to release them
+    // too -- the store drops them from the workspace on its own.
+    const attachedPaths =
+      tabGroups.find(
+        (group) =>
+          group.parentPath != null && samePath(group.parentPath, repo.path),
+      )?.repoPaths ?? [];
     void commands.closeRepo(repo.id);
+    for (const path of attachedPaths) {
+      const attachedRepo = findRepo(openRepos, path);
+      if (attachedRepo) void commands.closeRepo(attachedRepo.id);
+    }
     useWorkspaceStore.getState().removeRepo(repo.id);
-    toast.success(`Closed ${repoName(repo)}`);
+    toast.success(
+      attachedPaths.length > 0
+        ? `Closed ${repoName(repo)} and its ${attachedPaths.length === 1 ? "part" : `${attachedPaths.length} parts`}`
+        : `Closed ${repoName(repo)}`,
+    );
   };
 
   const closeGroup = (group: TabGroup) => {
@@ -891,6 +912,35 @@ export function RepositoryTabs({
   const finishDrag = () => {
     setDragItem(null);
     setTarget(null);
+  };
+
+  /**
+   * Under Name or Has-changes the strip is a computed view: a move written to
+   * the manual order is real, but the sort rebuilds the arrangement on every
+   * render and the tab lands back where it started. Saying "moved" there would
+   * be a lie, so reordering explains why it did not stick and offers the switch
+   * that makes it stick -- the same one dragging a group performs outright.
+   *
+   * Returns true when the caller should stop; the drag is already finished.
+   */
+  const blockedBySort = (): boolean => {
+    if (tabSort === "manual") return false;
+    const sortName = tabSort === "name" ? "Name" : "Has changes";
+    toast.info(`Tabs are sorted by ${sortName}, so they cannot be dragged.`, {
+      description:
+        "Switching to Manual keeps the order you see now and lets you rearrange it.",
+      action: {
+        label: "Switch to Manual",
+        onClick: () => {
+          useWorkspaceStore.getState().adoptDisplayedTabOrder(displayOrder);
+          toast.success(
+            "Tab order switched to Manual. Drag your tabs to rearrange them.",
+          );
+        },
+      },
+    });
+    finishDrag();
+    return true;
   };
 
   const startRepoDrag = (event: DragEvent<HTMLElement>, repo: RepoInfo) => {
@@ -923,6 +973,7 @@ export function RepositoryTabs({
       const group = tabGroups.find((candidate) => candidate.id === dragItem.id);
       toast.success(`${group?.name ?? "Group"} moved`);
     } else {
+      if (blockedBySort()) return;
       useWorkspaceStore.getState().moveRepoToOrder(dragItem.path, index);
       const repo = findRepo(openRepos, dragItem.path);
       toast.success(
@@ -1011,6 +1062,9 @@ export function RepositoryTabs({
     );
 
     if (placement !== "group") {
+      // Grouping still works under any sort -- membership is not positional --
+      // so only the before/after moves have to answer to the sort rule.
+      if (blockedBySort()) return;
       store.moveRepoBeside(dragItem.path, targetPath, placement);
       toast.success(
         `${sourceRepo ? repoName(sourceRepo) : "Repository"} moved ${placement} ${targetRepo ? repoName(targetRepo) : "the tab"}`,
@@ -1088,6 +1142,9 @@ export function RepositoryTabs({
         ? dropTarget.placement
         : null;
     const inGroup = group != null;
+    // A submodule tab is part of the project above it, not a tab of its own, so
+    // it neither travels nor accepts anything dropped onto it.
+    const attached = group != null && isSubmoduleGroup(group);
     const active = repo.id === activeRepoId;
     const groupsForMenu = tabGroups.filter(
       (candidate) => candidate.id !== group?.id,
@@ -1145,6 +1202,9 @@ export function RepositoryTabs({
           )
         }
         onDragOver={(event) => {
+          // Nothing lands on a submodule tab: it has no place of its own in the
+          // order, and it cannot take on members.
+          if (attached) return;
           // A group dragged over a loose tab lands on the near side of it. Over
           // a grouped tab it is the parent group's section that decides, so let
           // the event bubble there instead.
@@ -1192,6 +1252,7 @@ export function RepositoryTabs({
             setTarget(null);
         }}
         onDrop={(event) => {
+          if (attached) return;
           if (dragItem?.type === "group") {
             if (inGroup) return;
             event.preventDefault();
@@ -1219,9 +1280,11 @@ export function RepositoryTabs({
               <TooltipTrigger asChild>
                 <div
               data-repo-tab
-              draggable
-              onDragStart={(event) => startRepoDrag(event, repo)}
-              onDragEnd={finishDrag}
+              draggable={!attached}
+              onDragStart={
+                attached ? undefined : (event) => startRepoDrag(event, repo)
+              }
+              onDragEnd={attached ? undefined : finishDrag}
               onClick={() =>
                 useWorkspaceStore.getState().setActiveRepo(repo.id)
               }
@@ -1240,18 +1303,30 @@ export function RepositoryTabs({
                   ? "h-full w-full flex-none border-l px-2.5"
                   : effectiveIconOnly
                     ? "h-[31px] w-full flex-none justify-center rounded-[5px] border px-1"
-                    : inGroup
-                      ? "h-[31px] w-full flex-none rounded-[5px] border px-2 pl-7"
-                      : "h-[31px] w-full flex-none rounded-[5px] border px-2 pl-2",
+                    : attached
+                      ? // Indented past a normal group member: this tab sits
+                        // one level inside the project it belongs to.
+                        "h-[31px] w-full flex-none cursor-pointer rounded-[5px] border px-2 pl-9"
+                      : inGroup
+                        ? "h-[31px] w-full flex-none rounded-[5px] border px-2 pl-7"
+                        : "h-[31px] w-full flex-none rounded-[5px] border px-2 pl-2",
                 effectiveIconOnly && orientation === "horizontal" && !hovered &&
                   "justify-center px-1",
                 inGroup && orientation === "horizontal"
                   ? "border-[color:color-mix(in_srgb,var(--tab-group-color)_20%,var(--gw-border))]"
                   : "border-border",
+                // The selected tab gets a tinted fill plus an accent edge, so
+                // which repository you are looking at is obvious at a glance.
                 active
-                  ? inGroup
-                    ? "bg-[color:color-mix(in_srgb,var(--tab-group-color)_10%,var(--gw-panel))] font-semibold text-foreground"
-                    : "bg-panel font-semibold text-foreground"
+                  ? cn(
+                      "gw-tab-active font-semibold text-foreground",
+                      inGroup
+                        ? "bg-[color:color-mix(in_srgb,var(--tab-group-color)_14%,var(--gw-panel2))]"
+                        : "bg-[color:color-mix(in_srgb,var(--gw-accent)_12%,var(--gw-panel2))]",
+                      orientation === "horizontal"
+                        ? "gw-tab-active-top"
+                        : "gw-tab-active-side",
+                    )
                   : "text-sub hover:bg-panel2 hover:text-foreground",
                 target === "group" &&
                   "z-10 border-primary! bg-soft! shadow-[0_0_0_2px_var(--gw-accent-soft)]",
@@ -1337,6 +1412,10 @@ export function RepositoryTabs({
               <ImageIcon size={13} strokeWidth={2} />
               Set icon
             </ContextMenuItem>
+            {/* A submodule tab is fixed to its project, so the moves that would
+                pull it out are left off its menu entirely. */}
+            {!attached && (
+              <>
             <ContextMenuItem
               onSelect={() => {
                 const wasPinned = isPinned(repo.path);
@@ -1401,6 +1480,8 @@ export function RepositoryTabs({
                 Remove from group
               </ContextMenuItem>
             )}
+              </>
+            )}
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => closeRepo(repo)}>
               <X size={13} strokeWidth={2} />
@@ -1444,6 +1525,13 @@ export function RepositoryTabs({
         ? dropTarget.placement
         : null;
     const saved = isSaved(group.id);
+    // A submodule group is built for the user and belongs to the tab above it.
+    // It cannot be dragged, renamed, saved or taken apart -- only folded shut.
+    const attached = isSubmoduleGroup(group);
+    const parentRepo = group.parentPath
+      ? findRepo(openRepos, group.parentPath)
+      : null;
+    const parentLabel = parentRepo ? repoName(parentRepo) : group.name;
     const groupRepos = group.repoPaths.map((path) => ({
       path,
       repo: findRepo(openRepos, path),
@@ -1475,6 +1563,9 @@ export function RepositoryTabs({
               )}
               style={groupStyle(group.color)}
               onDragOver={(event) => {
+                // A submodule group sits where its project is, so nothing lands
+                // beside it.
+                if (attached) return;
                 // Only whole-group drags land here; a repo drag belongs to the
                 // header button or a member tab underneath.
                 if (dragItem?.type !== "group" || dragItem.id === group.id)
@@ -1502,6 +1593,7 @@ export function RepositoryTabs({
                   setTarget(null);
               }}
               onDrop={(event) => {
+                if (attached) return;
                 if (dragItem?.type !== "group" || dragItem.id === group.id)
                   return;
                 event.preventDefault();
@@ -1512,18 +1604,26 @@ export function RepositoryTabs({
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  draggable
-                  onDragStart={(event) => startGroupDrag(event, group)}
-                  onDragEnd={() => {
-                    draggedGroupRef.current = group.id;
-                    window.setTimeout(() => {
-                      if (draggedGroupRef.current === group.id)
-                        draggedGroupRef.current = null;
-                    }, 200);
-                    finishDrag();
-                  }}
+                  draggable={!attached}
+                  onDragStart={
+                    attached
+                      ? undefined
+                      : (event) => startGroupDrag(event, group)
+                  }
+                  onDragEnd={
+                    attached
+                      ? undefined
+                      : () => {
+                          draggedGroupRef.current = group.id;
+                          window.setTimeout(() => {
+                            if (draggedGroupRef.current === group.id)
+                              draggedGroupRef.current = null;
+                          }, 200);
+                          finishDrag();
+                        }
+                  }
                   onDragOver={(event) => {
-                    if (dragItem?.type !== "repo") return;
+                    if (attached || dragItem?.type !== "repo") return;
                     event.preventDefault();
                     event.stopPropagation();
                     setTarget({ type: "group", id: group.id });
@@ -1538,6 +1638,7 @@ export function RepositoryTabs({
                       setTarget(null);
                   }}
                   onDrop={(event) => {
+                    if (attached) return;
                     event.preventDefault();
                     event.stopPropagation();
                     dropOnGroup(group);
@@ -1550,17 +1651,27 @@ export function RepositoryTabs({
                     useWorkspaceStore.getState().toggleTabGroup(group.id);
                   }}
                   className={cn(
-                    "gw-tab-group-handle flex flex-none cursor-grab items-center gap-1.5 text-left font-semibold outline-none active:cursor-grabbing",
+                    "gw-tab-group-handle flex flex-none items-center gap-1.5 text-left font-semibold outline-none",
+                    attached
+                      ? "cursor-pointer"
+                      : "cursor-grab active:cursor-grabbing",
                     orientation === "horizontal"
                       ? "h-full min-w-8 px-2 text-2xs"
                       : effectiveIconOnly
                         ? "h-[29px] w-full justify-center rounded-[5px] px-0 text-2xs hover:bg-panel2"
-                        : "h-[29px] w-full rounded-[5px] px-1.5 text-2xs hover:bg-panel2",
+                        : attached
+                          ? // Sits one level in from its project's tab.
+                            "h-[29px] w-full rounded-[5px] px-1.5 pl-5 text-2xs hover:bg-panel2"
+                          : "h-[29px] w-full rounded-[5px] px-1.5 text-2xs hover:bg-panel2",
                     groupTarget &&
                       "bg-soft shadow-[inset_0_0_0_1px_var(--gw-accent)]",
                   )}
                   style={{ color: group.color }}
-                  aria-label={`${group.name}. ${group.collapsed ? "Expand" : "Collapse"} group`}
+                  aria-label={
+                    attached
+                      ? `Parts of ${parentLabel}. ${group.collapsed ? "Expand" : "Collapse"}`
+                      : `${group.name}. ${group.collapsed ? "Expand" : "Collapse"} group`
+                  }
                 >
                   <ChevronRight
                     size={11}
@@ -1573,9 +1684,9 @@ export function RepositoryTabs({
                   {!(effectiveIconOnly && orientation === "vertical") && (
                     <>
                       <span className="max-w-28 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">
-                        {group.name}
+                        {attached ? `Parts of ${parentLabel}` : group.name}
                       </span>
-                      {saved && (
+                      {saved && !attached && (
                         <Save size={10} strokeWidth={2} aria-label="Saved group" />
                       )}
                       <span className="font-mono text-2xs opacity-65">
@@ -1610,7 +1721,9 @@ export function RepositoryTabs({
           </ContextMenuTrigger>
           <ContextMenuContent className="w-52">
             <ContextMenuLabel className="text-2xs tracking-wide text-muted-foreground">
-              {group.name.toUpperCase()} · {group.repoPaths.length} REPOS
+              {attached
+                ? `PARTS OF ${parentLabel.toUpperCase()}`
+                : `${group.name.toUpperCase()} · ${group.repoPaths.length} REPOS`}
             </ContextMenuLabel>
             <ContextMenuItem
               onSelect={() => {
@@ -1621,8 +1734,26 @@ export function RepositoryTabs({
                 size={13}
                 className={cn(!group.collapsed && "rotate-90")}
               />
-              {group.collapsed ? "Expand group" : "Collapse group"}
+              {group.collapsed ? "Expand" : "Collapse"}
             </ContextMenuItem>
+            {/* Renaming, recolouring, saving and ungrouping all describe a
+                group the user assembled. This one describes the folders. */}
+            {attached ? (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onSelect={() => {
+                    if (parentRepo)
+                      useWorkspaceStore.getState().setActiveRepo(parentRepo.id);
+                  }}
+                  disabled={!parentRepo}
+                >
+                  <Layers3 size={13} strokeWidth={2} />
+                  Go to {parentLabel}
+                </ContextMenuItem>
+              </>
+            ) : (
+              <>
             <ContextMenuItem
               onSelect={() =>
                 setRenaming({ type: "group", id: group.id, value: group.name })
@@ -1688,6 +1819,8 @@ export function RepositoryTabs({
               <Trash2 size={13} strokeWidth={2} />
               Close group
             </ContextMenuItem>
+              </>
+            )}
           </ContextMenuContent>
         </ContextMenu>
         <TooltipContent
@@ -1700,11 +1833,17 @@ export function RepositoryTabs({
           >
             <div className="flex items-center justify-between gap-3">
               <span className="truncate text-xs font-semibold text-foreground">
-                {group.name}
+                {attached ? `Parts of ${parentLabel}` : group.name}
               </span>
               <span className="flex-none font-mono text-[10px] text-muted-foreground">
                 {group.repoPaths.length}{" "}
-                {group.repoPaths.length === 1 ? "repository" : "repositories"}
+                {attached
+                  ? group.repoPaths.length === 1
+                    ? "part"
+                    : "parts"
+                  : group.repoPaths.length === 1
+                    ? "repository"
+                    : "repositories"}
               </span>
             </div>
           </div>

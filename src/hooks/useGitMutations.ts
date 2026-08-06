@@ -1,4 +1,10 @@
-import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import {
+  useIsMutating,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+  type UseMutationResult,
+} from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   commands,
@@ -143,6 +149,34 @@ function describePull(r: PullResult, host: string | null): string {
   return r.ahead_after > 0
     ? `${base}. You still have ${commitCount(r.ahead_after)} to send.`
     : base
+}
+
+/**
+ * Long-running network work belongs to the repository that started it, not to
+ * the component that happened to kick it off. Without a key, a mutation's
+ * pending flag lives on one hook instance, so the toolbar -- which follows
+ * whichever tab is active -- would keep showing another repository's pull as
+ * still running, and a tab menu opened fresh would show a running pull as idle.
+ * Keying by repository makes the state shared and correctly scoped.
+ */
+const syncKey = (id: string, op: string) => ['git-sync', id, op] as const
+
+/**
+ * Re-point a mutation's pending flags at the repository-scoped count, so every
+ * caller sees the same answer for the same repository regardless of which
+ * component instance it asks from.
+ */
+function scopeToRepo<TData, TError, TVariables, TContext>(
+  mutation: UseMutationResult<TData, TError, TVariables, TContext>,
+  running: number
+): UseMutationResult<TData, TError, TVariables, TContext> {
+  const isPending = running > 0
+  if (isPending === mutation.isPending) return mutation
+  return {
+    ...mutation,
+    isPending,
+    status: isPending ? 'pending' : mutation.status,
+  } as UseMutationResult<TData, TError, TVariables, TContext>
 }
 
 export function useGitMutations(repoId: string | null) {
@@ -782,6 +816,7 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const fetch = useMutation({
+    mutationKey: syncKey(id, 'fetch'),
     mutationFn: async () => unwrap(await commands.gitFetch(id)),
     onSuccess: () => {
       invalidate(qc, id, ['log', 'branches', 'remotes'])
@@ -848,6 +883,7 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const pull = useMutation({
+    mutationKey: syncKey(id, 'pull'),
     mutationFn: async () => unwrap(await commands.gitPull(id)),
     onSuccess: (result) => {
       // A pull just fetched, so the auto-fetch clock restarts here too.
@@ -864,6 +900,7 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const push = useMutation({
+    mutationKey: syncKey(id, 'push'),
     mutationFn: async () => unwrap(await commands.gitPush(id)),
     onSuccess: (result) => {
       invalidate(qc, id, REFS)
@@ -876,6 +913,7 @@ export function useGitMutations(repoId: string | null) {
   // Push a branch by name, which may not be the one checked out. A branch with
   // no upstream gets published and tracked in the same step.
   const pushBranch = useMutation({
+    mutationKey: syncKey(id, 'pushBranch'),
     mutationFn: async (branch: string) => unwrap(await commands.gitPushBranch(id, branch)),
     onSuccess: (result) => {
       invalidate(qc, id, REFS)
@@ -888,6 +926,7 @@ export function useGitMutations(repoId: string | null) {
   // Bring a branch up to date without checking it out. Only fast-forwards; a
   // diverged branch is refused with an explanation.
   const pullBranch = useMutation({
+    mutationKey: syncKey(id, 'pullBranch'),
     mutationFn: async (branch: string) => unwrap(await commands.gitPullBranch(id, branch)),
     onSuccess: (result) => {
       invalidate(qc, id, ['status', 'log', 'branches'])
@@ -918,6 +957,7 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const pushForce = useMutation({
+    mutationKey: syncKey(id, 'pushForce'),
     mutationFn: async () => unwrap(await commands.gitPushForce(id)),
     onSuccess: (result) => {
       invalidate(qc, id, REFS)
@@ -1312,6 +1352,18 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // One count per operation per repository, so a pull running in another tab
+  // never reads as this repository being busy, and a pull running in this
+  // repository reads as busy from every component that asks.
+  const running = {
+    fetch: useIsMutating({ mutationKey: syncKey(id, 'fetch') }),
+    pull: useIsMutating({ mutationKey: syncKey(id, 'pull') }),
+    push: useIsMutating({ mutationKey: syncKey(id, 'push') }),
+    pushBranch: useIsMutating({ mutationKey: syncKey(id, 'pushBranch') }),
+    pullBranch: useIsMutating({ mutationKey: syncKey(id, 'pullBranch') }),
+    pushForce: useIsMutating({ mutationKey: syncKey(id, 'pushForce') }),
+  }
+
   return {
     stageFile,
     stageFiles,
@@ -1355,14 +1407,14 @@ export function useGitMutations(repoId: string | null) {
     stashPop,
     stashApply,
     stashDrop,
-    fetch,
-    pull,
-    push,
-    pushBranch,
-    pullBranch,
+    fetch: scopeToRepo(fetch, running.fetch),
+    pull: scopeToRepo(pull, running.pull),
+    push: scopeToRepo(push, running.push),
+    pushBranch: scopeToRepo(pushBranch, running.pushBranch),
+    pullBranch: scopeToRepo(pullBranch, running.pullBranch),
     renameBranch,
     reconnectBranch,
-    pushForce,
+    pushForce: scopeToRepo(pushForce, running.pushForce),
     rebase,
     addRemote,
     renameRemote,

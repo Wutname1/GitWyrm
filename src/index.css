@@ -51,6 +51,33 @@
   cursor: grab;
 }
 
+/* The selected repository tab. A tinted fill alone reads as "hovered" more
+   than "selected", so the active tab also carries a solid accent edge along
+   the side it is attached to: the top in the horizontal strip, the left in the
+   vertical rail. Inside a group the edge takes the group's colour so the tab
+   still belongs to it visually. */
+.gw-tab-active::after {
+  content: '';
+  position: absolute;
+  background: var(--tab-group-color, var(--gw-accent));
+  pointer-events: none;
+}
+
+.gw-tab-active-top::after {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+
+.gw-tab-active-side::after {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  border-radius: 5px 0 0 5px;
+}
+
 /* While a group is being dragged, everything it can land on shows the move
    cursor instead of the pointer the tabs normally use. */
 .gw-repository-tabs[data-dragging-group='true'] * {
