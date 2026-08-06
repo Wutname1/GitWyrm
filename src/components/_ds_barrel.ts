@@ -44,7 +44,6 @@ export * from './domain/left-panel/SidebarSection';
 export * from './domain/MergeBanner';
 export * from './domain/NoRepoPlaceholder';
 export * from './domain/RepoIconDialog';
-export * from './domain/RepositoryPreviewCapture';
 export * from './domain/RepositoryTabs';
 export * from './domain/RightPanel';
 export * from './domain/settings/AboutSettings';

@@ -31,7 +31,6 @@ import {
 } from '@/stores/workspaceStore'
 import { ResizeHandle } from '@/components/ui/ResizeHandle'
 import { cn } from '@/lib/utils'
-import { RepositoryPreviewCapture } from '@/components/domain/RepositoryPreviewCapture'
 
 function CenterView() {
   const view = useUiStore((s) => s.centerView)
@@ -146,10 +145,7 @@ export function WorkspaceLayout() {
   const centerBody = inRepoPicker ? <RepoPickerView /> : panelRow
 
   const workspaceBody = (
-    <div
-      data-repository-preview-root
-      className="flex min-h-0 flex-1 flex-col bg-background"
-    >
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
       {!inRepoPicker && <Toolbar />}
       {!inRepoPicker && <MergeBanner />}
       {centerBody}
@@ -159,7 +155,6 @@ export function WorkspaceLayout() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
-      <RepositoryPreviewCapture />
       <SettingsView />
       <TabBar />
       {tabLayout === 'vertical' ? (

@@ -34,7 +34,6 @@ import type { RepoInfo } from "@/lib/bindings";
 import { commands } from "@/lib/bindings";
 import { cn } from "@/lib/utils";
 import { normalizePath } from "@/lib/paths";
-import { useRepositoryPreview } from "@/lib/repositoryPreviews";
 import {
   isSubmoduleGroup,
   TAB_GROUP_COLORS,
@@ -355,26 +354,11 @@ function RepoTabPreview({
   name: string;
   orientation: TabOrientation;
 }) {
-  const preview = useRepositoryPreview(repo.id);
-
   return (
     <TooltipContent
       side={orientation === "vertical" ? "right" : "bottom"}
       className="w-80 max-w-[calc(100vw-16px)] overflow-hidden p-0"
     >
-      {preview && (
-        <div
-          className="overflow-hidden border-b border-border bg-background"
-          style={{ aspectRatio: `${preview.width} / ${preview.height}` }}
-        >
-          <img
-            src={preview.dataUrl}
-            alt=""
-            draggable={false}
-            className="size-full object-cover object-top"
-          />
-        </div>
-      )}
       <div className="px-3 py-2.5">
         <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
@@ -915,33 +899,28 @@ export function RepositoryTabs({
   };
 
   /**
-   * Under Name or Has-changes the strip is a computed view: a move written to
-   * the manual order is real, but the sort rebuilds the arrangement on every
-   * render and the tab lands back where it started. Saying "moved" there would
-   * be a lie, so reordering explains why it did not stick and offers the switch
-   * that makes it stick -- the same one dragging a group performs outright.
+   * Under Name or Has-changes the strip is a computed view, so a move written to
+   * the manual order would not show up. Dragging a tab is the user asking to
+   * arrange things themselves, so switch to Manual -- freezing the arrangement
+   * they can see first, or every other tab would jump as the sort let go.
    *
-   * Returns true when the caller should stop; the drag is already finished.
+   * Returns true when the switch happened, so the caller can say so. Callers
+   * that resolve a position in tabOrder must do it AFTER this: adopting the
+   * displayed arrangement renumbers the order.
    */
-  const blockedBySort = (): boolean => {
+  const adoptOrderForDrag = (): boolean => {
     if (tabSort === "manual") return false;
-    const sortName = tabSort === "name" ? "Name" : "Has changes";
-    toast.info(`Tabs are sorted by ${sortName}, so they cannot be dragged.`, {
-      description:
-        "Switching to Manual keeps the order you see now and lets you rearrange it.",
-      action: {
-        label: "Switch to Manual",
-        onClick: () => {
-          useWorkspaceStore.getState().adoptDisplayedTabOrder(displayOrder);
-          toast.success(
-            "Tab order switched to Manual. Drag your tabs to rearrange them.",
-          );
-        },
-      },
-    });
-    finishDrag();
+    useWorkspaceStore.getState().adoptDisplayedTabOrder(displayOrder);
     return true;
   };
+
+  /** Appended to a move's toast when the drag also turned the sort off. */
+  const sortSwitchNote = " Tab order switched to Manual so your arrangement sticks.";
+
+  const sameOrderItem = (a: TabOrderItem, b: TabOrderItem) =>
+    a.type === "group"
+      ? b.type === "group" && b.id === a.id
+      : b.type === "repo" && samePath(b.path, a.path);
 
   const startRepoDrag = (event: DragEvent<HTMLElement>, repo: RepoInfo) => {
     event.stopPropagation();
@@ -966,18 +945,31 @@ export function RepositoryTabs({
     );
   };
 
-  const dropOnOrder = (index: number) => {
+  /**
+   * Drop into the gap that sits in front of `anchor` -- or at the very end when
+   * there is no anchor. Addressed by anchor rather than by index because
+   * switching to Manual renumbers tabOrder, so any index taken beforehand would
+   * point at the wrong tab.
+   */
+  const dropOnOrder = (anchor: TabOrderItem | null) => {
     if (!dragItem) return;
+    const switched = adoptOrderForDrag();
+    const store = useWorkspaceStore.getState();
+    const resolved = anchor
+      ? store.tabOrder.findIndex((item) => sameOrderItem(anchor, item))
+      : -1;
+    const insertAt = resolved < 0 ? store.tabOrder.length : resolved;
+    const note = switched ? sortSwitchNote : "";
+
     if (dragItem.type === "group") {
-      useWorkspaceStore.getState().moveGroupToOrder(dragItem.id, index);
+      store.moveGroupToOrder(dragItem.id, insertAt);
       const group = tabGroups.find((candidate) => candidate.id === dragItem.id);
-      toast.success(`${group?.name ?? "Group"} moved`);
+      toast.success(`${group?.name ?? "Group"} moved.${note}`);
     } else {
-      if (blockedBySort()) return;
-      useWorkspaceStore.getState().moveRepoToOrder(dragItem.path, index);
+      store.moveRepoToOrder(dragItem.path, insertAt);
       const repo = findRepo(openRepos, dragItem.path);
       toast.success(
-        `${repo ? repoName(repo) : "Repository"} moved between tabs`,
+        `${repo ? repoName(repo) : "Repository"} moved between tabs.${note}`,
       );
     }
     finishDrag();
@@ -995,18 +987,11 @@ export function RepositoryTabs({
     placement: TabDropPlacement,
   ) => {
     const group = tabGroups.find((candidate) => candidate.id === groupId);
-    const store = useWorkspaceStore.getState();
-    // Under Name or Has-changes the strip is a computed view, so a move written
-    // to the manual order would not show up. Dragging is the user asking to
-    // arrange tabs themselves, so switch to Manual -- freezing the arrangement
-    // they can see first, or every other tab would jump as the sort let go.
-    const wasSorted = tabSort !== "manual";
-    if (wasSorted) store.adoptDisplayedTabOrder(displayOrder);
+    const wasSorted = adoptOrderForDrag();
     // Resolved after the freeze: adopting the displayed arrangement renumbers
     // tabOrder, so an index taken beforehand would point at the wrong tab.
-    const targetIndex = useWorkspaceStore
-      .getState()
-      .tabOrder.findIndex(isTarget);
+    const store = useWorkspaceStore.getState();
+    const targetIndex = store.tabOrder.findIndex(isTarget);
     if (targetIndex < 0) {
       finishDrag();
       return;
@@ -1016,9 +1001,7 @@ export function RepositoryTabs({
       placement === "before" ? targetIndex : targetIndex + 1,
     );
     toast.success(
-      wasSorted
-        ? `${group?.name ?? "Group"} moved. Tab order switched to Manual so your arrangement sticks.`
-        : `${group?.name ?? "Group"} moved`,
+      `${group?.name ?? "Group"} moved.${wasSorted ? sortSwitchNote : ""}`,
     );
     finishDrag();
   };
@@ -1051,7 +1034,6 @@ export function RepositoryTabs({
   ) => {
     if (dragItem?.type !== "repo" || samePath(dragItem.path, targetPath))
       return;
-    const store = useWorkspaceStore.getState();
     const sourceRepo = findRepo(openRepos, dragItem.path);
     const targetRepo = findRepo(openRepos, targetPath);
     const targetGroup = tabGroups.find((group) =>
@@ -1062,12 +1044,15 @@ export function RepositoryTabs({
     );
 
     if (placement !== "group") {
-      // Grouping still works under any sort -- membership is not positional --
-      // so only the before/after moves have to answer to the sort rule.
-      if (blockedBySort()) return;
-      store.moveRepoBeside(dragItem.path, targetPath, placement);
+      // Grouping is unaffected by the sort -- membership is not positional --
+      // so only the before/after moves adopt the displayed order. Both tabs are
+      // addressed by path, which survives the renumbering, so no index to redo.
+      const switched = adoptOrderForDrag();
+      useWorkspaceStore
+        .getState()
+        .moveRepoBeside(dragItem.path, targetPath, placement);
       toast.success(
-        `${sourceRepo ? repoName(sourceRepo) : "Repository"} moved ${placement} ${targetRepo ? repoName(targetRepo) : "the tab"}`,
+        `${sourceRepo ? repoName(sourceRepo) : "Repository"} moved ${placement} ${targetRepo ? repoName(targetRepo) : "the tab"}.${switched ? sortSwitchNote : ""}`,
       );
     } else if (targetGroup) {
       if (sourceGroup?.id === targetGroup.id) {
@@ -1075,7 +1060,9 @@ export function RepositoryTabs({
           `${sourceRepo ? repoName(sourceRepo) : "Repository"} is already in ${targetGroup.name}`,
         );
       } else {
-        store.addRepoToGroup(dragItem.path, targetGroup.id);
+        useWorkspaceStore
+          .getState()
+          .addRepoToGroup(dragItem.path, targetGroup.id);
         toast.success(
           `${sourceRepo ? repoName(sourceRepo) : "Repository"} added to ${targetGroup.name}`,
         );
@@ -1891,17 +1878,17 @@ export function RepositoryTabs({
 
   /** Where a displayed item sits in tabOrder, which is what drops address. */
   const orderIndexOf = (item: TabOrderItem) =>
-    tabOrder.findIndex((candidate) =>
-      item.type === "group"
-        ? candidate.type === "group" && candidate.id === item.id
-        : candidate.type === "repo" && samePath(candidate.path, item.path),
-    );
+    tabOrder.findIndex((candidate) => sameOrderItem(item, candidate));
 
-  const renderOrderGap = (index: number) => {
-    // Under Name or Has-changes the strip is a computed view, so a gap between
-    // two tabs does not map to a spot in the manual order. Reordering there
-    // would silently do nothing, so the gaps sit out until Manual is back.
-    if (tabSort !== "manual" || index < 0) return null;
+  /**
+   * The gap in front of `anchor` -- or the trailing gap when it is null. Under
+   * Name or Has-changes a gap does not map to a spot in the stored order, but
+   * dropping into one adopts the displayed arrangement first and moves within
+   * that, so the gaps stay live under every sort. `index` only identifies the
+   * gap for highlighting; the drop itself is resolved from the anchor.
+   */
+  const renderOrderGap = (index: number, anchor: TabOrderItem | null) => {
+    if (index < 0) return null;
     const active = dropTarget?.type === "order" && dropTarget.index === index;
     return (
       <div
@@ -1923,7 +1910,7 @@ export function RepositoryTabs({
         onDrop={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          dropOnOrder(index);
+          dropOnOrder(anchor);
         }}
         className={cn(
           "grid flex-none place-items-center overflow-hidden rounded-[5px] border-dashed text-2xs font-semibold text-accent-text transition-[width,height,margin,border-color,background-color] duration-150",
@@ -2008,7 +1995,7 @@ export function RepositoryTabs({
                 : `repo-${pathKey(item.path)}`
             }
           >
-            {renderOrderGap(orderIndexOf(item))}
+            {renderOrderGap(orderIndexOf(item), item)}
             {item.type === "group"
               ? (() => {
                   const group = tabGroups.find(
@@ -2022,7 +2009,7 @@ export function RepositoryTabs({
                 })()}
           </Fragment>
         ))}
-        {renderOrderGap(tabOrder.length)}
+        {renderOrderGap(tabOrder.length, null)}
         <AddRepoTab
           orientation={orientation}
           iconOnly={effectiveIconOnly}
