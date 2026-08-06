@@ -113,3 +113,36 @@ pub enum PollOutcome {
   Token(String),
   Pending { interval: u32 },
 }
+
+/// The GitHub login for a token. Returns None when GitHub rejects the token
+/// (revoked, expired) so callers can treat it as "not connected" rather than
+/// as an error the user has to read.
+pub async fn account(token: &str) -> Result<Option<String>, AppError> {
+  #[derive(Deserialize)]
+  struct User {
+    login: String,
+  }
+
+  let res = client()
+    .get("https://api.github.com/user")
+    .header("Accept", "application/vnd.github+json")
+    .header("User-Agent", "GitWyrm")
+    .bearer_auth(token)
+    .timeout(TIMEOUT)
+    .send()
+    .await
+    .map_err(|e| AppError::Other(format!("could not reach GitHub: {e}")))?;
+
+  if res.status().as_u16() == 401 || res.status().as_u16() == 403 {
+    return Ok(None);
+  }
+  let res = res
+    .error_for_status()
+    .map_err(|e| AppError::Other(format!("GitHub rejected the request: {e}")))?;
+
+  let user: User = res
+    .json()
+    .await
+    .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
+  Ok(Some(user.login))
+}

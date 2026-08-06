@@ -2161,6 +2161,19 @@ async aiCopilotDevicePoll(deviceCode: string, interval: number) : Promise<Result
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * The GitHub login behind the stored Copilot token, so settings can show
+ * which account is connected. None when nothing is stored or the token no
+ * longer works, which is also the UI's cue that a reconnect is needed.
+ */
+async aiCopilotAccount() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_copilot_account") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async generateCommitMessage(repoId: string, provider: string, model: string) : Promise<Result<GeneratedCommitMessage, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("generate_commit_message", { repoId, provider, model }) };

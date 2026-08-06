@@ -113,6 +113,18 @@ pub async fn ai_copilot_device_poll(
   }
 }
 
+/// The GitHub login behind the stored Copilot token, so settings can show
+/// which account is connected. None when nothing is stored or the token no
+/// longer works, which is also the UI's cue that a reconnect is needed.
+#[tauri::command]
+#[specta::specta]
+pub async fn ai_copilot_account(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
+  let Some(info) = auth::get(&app, copilot_sdk::PROVIDER_ID)? else {
+    return Ok(None);
+  };
+  copilot::account(bearer_for(&info)).await
+}
+
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct GeneratedCommitMessage {
   pub summary: String,
