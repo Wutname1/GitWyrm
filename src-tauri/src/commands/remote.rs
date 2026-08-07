@@ -248,6 +248,56 @@ pub async fn git_pull(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Where a push should send a branch when the branch itself doesn't say.
+///
+/// A bare `git push` only works once a branch already tracks something. On a
+/// branch that has never been published -- or one whose upstream ref was
+/// deleted -- git refuses with "no upstream branch" and tells the user to type
+/// a command, which is exactly the moment the app should just handle it. So
+/// name the remote and the branch explicitly and pass `--set-upstream`, the
+/// same way `git_push_branch` publishes a branch by name.
+///
+/// Returns `None` when the branch already tracks a live upstream: the plain
+/// push is correct there and needs no extra arguments.
+#[derive(Debug)]
+struct PublishArgs {
+  remote: String,
+  refspec: String,
+}
+
+fn publish_args(state: &TrackingState, repo: &git2::Repository) -> Result<Option<PublishArgs>, AppError> {
+  // A live upstream already answers where this goes.
+  if state.upstream.is_some() && !state.upstream_gone {
+    return Ok(None);
+  }
+  // Detached HEAD has no branch to publish; let git report that itself rather
+  // than inventing a target.
+  let Some(branch) = state.branch.as_deref() else { return Ok(None) };
+
+  // Re-publishing a branch whose upstream ref went missing should go back to
+  // the remote it named, not the default one. `state.upstream` can't answer
+  // that: it is resolved *through* the remote-tracking ref, so a pruned ref
+  // reads as no upstream at all. The config entry outlives the ref, so ask it.
+  let remote = configured_remote(repo, branch)
+    .map(Ok)
+    .unwrap_or_else(|| default_remote(repo))?;
+
+  Ok(Some(PublishArgs { remote, refspec: format!("refs/heads/{branch}") }))
+}
+
+/// The remote a branch is configured to push to (`branch.<name>.remote`),
+/// regardless of whether its remote-tracking ref still exists. Returns `None`
+/// for a branch that was never published, or one naming a remote that has since
+/// been removed -- in both cases the caller falls back to the default.
+fn configured_remote(repo: &git2::Repository, branch: &str) -> Option<String> {
+  let config = repo.config().ok()?;
+  let remote = config.get_string(&format!("branch.{branch}.remote")).ok()?;
+  // A remote named in config but no longer set up would fail the push with a
+  // worse message than "pick a remote".
+  repo.find_remote(&remote).ok()?;
+  Some(remote)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn git_push(
@@ -258,12 +308,30 @@ pub async fn git_push(
   let open = manager.get(&repo_id)?;
   let path = open.path.to_string_lossy().into_owned();
   tauri::async_runtime::spawn_blocking(move || {
-    let before = { tracking_state(&open.repo.lock().unwrap()) };
-    run_streaming(&app, &repo_id, Some(&path), "push", &["push", "--progress"])?;
+    let (before, publish) = {
+      let repo = open.repo.lock().unwrap();
+      let state = tracking_state(&repo);
+      let publish = publish_args(&state, &repo)?;
+      (state, publish)
+    };
+
+    let mut args: Vec<&str> = vec!["push", "--progress"];
+    if let Some(p) = &publish {
+      args.push("--set-upstream");
+      args.push(&p.remote);
+      args.push(&p.refspec);
+    }
+    run_streaming(&app, &repo_id, Some(&path), "push", &args)?;
     let after = { tracking_state(&open.repo.lock().unwrap()) };
 
-    // Commits we were ahead by and no longer are is what the remote took.
-    let pushed = before.ahead.saturating_sub(after.ahead);
+    // A branch that was just published has no usable "before" count -- with no
+    // upstream, or a pruned one, it reads (0, 0) exactly like a branch that
+    // matches -- so subtracting would report zero after sending everything.
+    let pushed = match (&publish, after.branch.as_deref()) {
+      (Some(_), Some(branch)) => published_count(&open.repo.lock().unwrap(), branch),
+      // Commits we were ahead by and no longer are is what the remote took.
+      _ => before.ahead.saturating_sub(after.ahead),
+    };
 
     Ok(PushResult {
       branch: after.branch.or(before.branch),
@@ -289,28 +357,32 @@ pub async fn git_push_branch(
   let open = manager.get(&repo_id)?;
   let path = open.path.to_string_lossy().into_owned();
   tauri::async_runtime::spawn_blocking(move || {
-    let (before, had_upstream, remote) = {
+    let (before, publish, remote) = {
       let repo = open.repo.lock().unwrap();
       let state = branch_tracking_state(&repo, Some(&branch));
-      let had_upstream = state.upstream.is_some();
-      // The remote is needed either way: naming it is what lets the push
-      // target a branch other than the checked-out one.
-      let remote = match &state.upstream {
+      let publish = publish_args(&state, &repo)?;
+      // The remote is needed even when the branch already tracks one: naming it
+      // is what lets the push target a branch other than the checked-out one.
+      let remote = match &publish {
+        Some(p) => p.remote.clone(),
         // `origin/main` -> `origin`; the remote owns everything before the
         // first slash, and branch names may contain further slashes.
-        Some(up) => up.split_once('/').map(|(r, _)| r.to_string()).unwrap_or(default_remote(&repo)?),
-        None => default_remote(&repo)?,
+        None => state
+          .upstream
+          .as_ref()
+          .and_then(|up| up.split_once('/').map(|(r, _)| r.to_string()))
+          .unwrap_or(default_remote(&repo)?),
       };
-      (state, had_upstream, remote)
+      (state, publish, remote)
     };
 
     // Name the branch explicitly, so the push does not depend on which branch
     // happens to be checked out.
     let refspec = format!("refs/heads/{branch}");
     let mut args: Vec<&str> = vec!["push", "--progress"];
-    // Re-link on a first publish, and also when the upstream ref went missing:
+    // Link on a first publish, and also when the upstream ref went missing:
     // the config still names it, but the tracking ref needs recreating.
-    if !had_upstream || before.upstream_gone {
+    if publish.is_some() {
       args.push("--set-upstream");
     }
     args.push(&remote);
@@ -323,7 +395,7 @@ pub async fn git_push_branch(
     // it reads (0, 0) exactly like a branch that matches -- so subtracting
     // would report zero after a successful push. It is recreating the remote
     // branch, so count it the same way as a first publish.
-    let pushed = if had_upstream && !before.upstream_gone {
+    let pushed = if publish.is_none() {
       // Commits we were ahead by and no longer are is what the remote took.
       before.ahead.saturating_sub(after.ahead)
     } else {
@@ -919,20 +991,31 @@ pub async fn git_push_force(
   let open = manager.get(&repo_id)?;
   let path = open.path.to_string_lossy().into_owned();
   tauri::async_runtime::spawn_blocking(move || {
-    let before = { tracking_state(&open.repo.lock().unwrap()) };
-    run_streaming(
-      &app,
-      &repo_id,
-      Some(&path),
-      "push",
-      &["push", "--force-with-lease", "--progress"],
-    )?;
+    let (before, publish) = {
+      let repo = open.repo.lock().unwrap();
+      let state = tracking_state(&repo);
+      let publish = publish_args(&state, &repo)?;
+      (state, publish)
+    };
+
+    let mut args: Vec<&str> = vec!["push", "--force-with-lease", "--progress"];
+    if let Some(p) = &publish {
+      args.push("--set-upstream");
+      args.push(&p.remote);
+      args.push(&p.refspec);
+    }
+    run_streaming(&app, &repo_id, Some(&path), "push", &args)?;
     let after = { tracking_state(&open.repo.lock().unwrap()) };
+
+    let pushed = match (&publish, after.branch.as_deref()) {
+      (Some(_), Some(branch)) => published_count(&open.repo.lock().unwrap(), branch),
+      _ => before.ahead.saturating_sub(after.ahead),
+    };
 
     Ok(PushResult {
       branch: after.branch.or(before.branch),
       upstream: after.upstream.or(before.upstream),
-      pushed: before.ahead.saturating_sub(after.ahead),
+      pushed,
     })
   })
   .await
@@ -1067,4 +1150,127 @@ pub async fn git_clone(
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use git2::{Repository, Signature};
+  use std::fs;
+
+  fn commit_all(repo: &Repository, message: &str) {
+    let mut index = repo.index().expect("index");
+    index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None).expect("add");
+    index.write().expect("write index");
+    let tree = repo.find_tree(index.write_tree().expect("tree id")).expect("tree");
+    let sig = Signature::now("Push Test", "push@example.com").expect("signature");
+    let parents = repo.head().ok().and_then(|h| h.peel_to_commit().ok()).into_iter().collect::<Vec<_>>();
+    let parent_refs = parents.iter().collect::<Vec<_>>();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs).expect("commit");
+  }
+
+  fn repo_with_commit() -> (tempfile::TempDir, Repository) {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    fs::write(dir.path().join("base.txt"), "base\n").expect("write");
+    commit_all(&repo, "base");
+    (dir, repo)
+  }
+
+  /// Point the current branch at a remote-tracking ref, the way a branch that
+  /// has been published once looks.
+  fn track(repo: &Repository, remote: &str) {
+    let head = repo.head().expect("head").peel_to_commit().expect("commit");
+    let branch_name = repo.head().expect("head").shorthand().expect("name").to_string();
+    repo.remote(remote, "https://example.invalid/repo.git").expect("remote");
+    repo
+      .reference(&format!("refs/remotes/{remote}/{branch_name}"), head.id(), true, "test remote")
+      .expect("remote ref");
+    let mut branch = repo.find_branch(&branch_name, git2::BranchType::Local).expect("branch");
+    branch.set_upstream(Some(&format!("{remote}/{branch_name}"))).expect("upstream");
+  }
+
+  /// The reported bug: a branch that has never been pushed must be published
+  /// rather than left to a bare `git push`, which fails with "no upstream
+  /// branch" and asks the user to type a command.
+  #[test]
+  fn a_never_pushed_branch_gets_published() {
+    let (_dir, repo) = repo_with_commit();
+    repo.remote("origin", "https://example.invalid/repo.git").expect("remote");
+
+    let state = tracking_state(&repo);
+    let publish = publish_args(&state, &repo).expect("args").expect("must publish");
+    assert_eq!(publish.remote, "origin");
+    let branch = state.branch.expect("branch");
+    assert_eq!(publish.refspec, format!("refs/heads/{branch}"));
+  }
+
+  /// A branch already tracking a live upstream needs no extra arguments; the
+  /// plain push is correct and must stay that way.
+  #[test]
+  fn a_tracking_branch_pushes_plainly() {
+    let (_dir, repo) = repo_with_commit();
+    track(&repo, "origin");
+
+    let state = tracking_state(&repo);
+    assert!(publish_args(&state, &repo).expect("args").is_none(), "no republish needed");
+  }
+
+  /// An upstream named in config whose ref was pruned still needs re-linking,
+  /// and must go back to the remote it named rather than the default.
+  #[test]
+  fn a_pruned_upstream_is_republished_to_its_own_remote() {
+    let (_dir, repo) = repo_with_commit();
+    // A second remote exists, so falling back to the default would be visible.
+    repo.remote("origin", "https://example.invalid/other.git").expect("origin");
+    track(&repo, "upstream");
+    let branch_name = repo.head().expect("head").shorthand().expect("name").to_string();
+    // Prune the remote-tracking ref, leaving the config pointing at nothing.
+    repo
+      .find_reference(&format!("refs/remotes/upstream/{branch_name}"))
+      .expect("ref")
+      .delete()
+      .expect("prune");
+
+    let state = tracking_state(&repo);
+    let publish = publish_args(&state, &repo).expect("args").expect("must republish");
+    assert_eq!(publish.remote, "upstream", "goes back to the remote it named");
+  }
+
+  /// A detached HEAD has no branch to publish. Inventing a target would push
+  /// the wrong thing, so let git report the situation itself.
+  #[test]
+  fn a_detached_head_is_left_to_git() {
+    let (_dir, repo) = repo_with_commit();
+    repo.remote("origin", "https://example.invalid/repo.git").expect("remote");
+    let head = repo.head().expect("head").peel_to_commit().expect("commit");
+    repo.set_head_detached(head.id()).expect("detach");
+
+    let state = tracking_state(&repo);
+    assert!(publish_args(&state, &repo).expect("args").is_none(), "nothing to publish");
+  }
+
+  /// A branch naming a remote that has since been deleted must not push to a
+  /// remote that isn't there; fall back to the default instead.
+  #[test]
+  fn a_config_naming_a_deleted_remote_falls_back() {
+    let (_dir, repo) = repo_with_commit();
+    track(&repo, "gone");
+    repo.remote("origin", "https://example.invalid/repo.git").expect("origin");
+    repo.remote_delete("gone").expect("delete remote");
+
+    let state = tracking_state(&repo);
+    let publish = publish_args(&state, &repo).expect("args").expect("must publish");
+    assert_eq!(publish.remote, "origin", "falls back when the named remote is gone");
+  }
+
+  /// With no remote configured there is nowhere to publish to, and the message
+  /// has to say that plainly instead of surfacing git's raw complaint.
+  #[test]
+  fn no_remote_explains_itself() {
+    let (_dir, repo) = repo_with_commit();
+    let state = tracking_state(&repo);
+    let err = publish_args(&state, &repo).expect_err("no remote");
+    assert!(err.to_string().contains("no remote"), "got: {err}");
+  }
 }

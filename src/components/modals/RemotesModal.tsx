@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, Cloud, ExternalLink, Folder, GitBranch, Pencil, Plus, Target, Trash2, X } from 'lucide-react'
+import { ArrowLeftRight, ChevronRight, Cloud, ExternalLink, Folder, GitBranch, Pencil, Plus, Target, Trash2, X } from 'lucide-react'
 import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,39 @@ import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
+import { remoteUrlKind, swapRemoteUrl } from '@/lib/remoteUrlSwap'
+
+/**
+ * One-click toggle between a remote's HTTPS and SSH address. Hidden entirely
+ * when the URL is neither shape (a local path, a half-typed URL), so the button
+ * never offers a swap that would produce something broken.
+ */
+function SwapUrlButton({
+  url,
+  onSwap,
+  disabled,
+}: {
+  url: string
+  onSwap: (next: string) => void
+  disabled?: boolean
+}) {
+  const kind = remoteUrlKind(url)
+  const swapped = swapRemoteUrl(url)
+  if (!kind || !swapped) return null
+
+  const target = kind === 'https' ? 'SSH' : 'HTTPS'
+  return (
+    <TooltipButton
+      onClick={() => onSwap(swapped)}
+      tooltip={`Use the ${target} address instead: ${swapped}`}
+      disabled={disabled}
+      className="flex flex-none items-center gap-1 rounded border border-border px-1.5 py-1 text-2xs text-sub hover:border-primary hover:text-accent-text disabled:pointer-events-none disabled:opacity-40"
+    >
+      <ArrowLeftRight size={11} />
+      {target}
+    </TooltipButton>
+  )
+}
 
 function BranchNode({
   node,
@@ -368,13 +401,20 @@ export function RemotesModal() {
                   </div>
                   <div className="grid gap-1.5">
                     <label className="text-2xs font-semibold text-sub">URL</label>
-                    <Input
-                      value={editing.url}
-                      onChange={(e) => setEditing({ ...editing, url: e.target.value })}
-                      onKeyDown={(e) => e.key === 'Enter' && submitEdit()}
-                      className="h-auto bg-background py-1.5 font-mono text-xs"
-                      disabled={editPending}
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        value={editing.url}
+                        onChange={(e) => setEditing({ ...editing, url: e.target.value })}
+                        onKeyDown={(e) => e.key === 'Enter' && submitEdit()}
+                        className="h-auto min-w-0 flex-1 bg-background py-1.5 font-mono text-xs"
+                        disabled={editPending}
+                      />
+                      <SwapUrlButton
+                        url={editing.url}
+                        onSwap={(url) => setEditing({ ...editing, url })}
+                        disabled={editPending}
+                      />
+                    </div>
                   </div>
                   <div className="flex justify-end gap-2 pt-1">
                     <Button variant="secondary" size="sm" disabled={editPending} onClick={() => setEditing(null)}>
@@ -417,14 +457,21 @@ export function RemotesModal() {
                 </div>
                 <div className="grid gap-1.5">
                   <label className="text-2xs font-semibold text-sub">URL</label>
-                  <Input
-                    value={newUrl}
-                    onChange={(e) => setNewUrl(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && submitAdd()}
-                    placeholder="https://github.com/you/repo.git"
-                    className="h-auto bg-background py-1.5 font-mono text-xs"
-                    disabled={m.addRemote.isPending}
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      value={newUrl}
+                      onChange={(e) => setNewUrl(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && submitAdd()}
+                      placeholder="https://github.com/you/repo.git"
+                      className="h-auto min-w-0 flex-1 bg-background py-1.5 font-mono text-xs"
+                      disabled={m.addRemote.isPending}
+                    />
+                    <SwapUrlButton
+                      url={newUrl}
+                      onSwap={setNewUrl}
+                      disabled={m.addRemote.isPending}
+                    />
+                  </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-1">
                   <Button variant="secondary" size="sm" disabled={m.addRemote.isPending} onClick={() => setAdding(false)}>

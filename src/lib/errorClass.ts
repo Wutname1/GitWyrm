@@ -46,6 +46,29 @@ const RULES: Rule[] = [
     message: 'Your local changes conflict with that branch. Commit, stash, or discard them first.',
   },
   {
+    // A repository with nowhere to send work. Push publishes an unlinked branch
+    // by itself, so reaching this means there is genuinely no remote set up --
+    // a setup step the user has to do once, not a failure of the push.
+    match: (r) => r.includes('no remote to push to'),
+    severity: 'warning',
+    message: 'This project has no cloud copy yet. Add one in Remotes, then send your work.',
+  },
+  {
+    // Several remotes and no `origin` to break the tie -- the app should not
+    // guess which one the user meant to publish to.
+    match: (r) => r.includes('several remotes are set up'),
+    severity: 'warning',
+    message: 'This project has more than one cloud copy. Open Remotes and pick which one to send to.',
+  },
+  {
+    // Safety net. Push now publishes an unlinked branch on its own, so this
+    // should be unreachable -- but if any path still reaches git's raw
+    // complaint, say something useful instead of pasting a command at the user.
+    match: (r) => r.includes('has no upstream branch'),
+    severity: 'warning',
+    message: "This branch isn't on the cloud yet. Send it again to publish it and link it up.",
+  },
+  {
     // Server refused the update because the branch is protected -- most force
     // pushes to a shared main branch hit this. Nothing local will fix it.
     match: (r) =>
