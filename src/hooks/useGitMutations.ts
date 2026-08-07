@@ -732,10 +732,22 @@ export function useGitMutations(repoId: string | null) {
   const checkout = useMutation({
     mutationFn: async (name: string) => {
       const mode = useWorkspaceStore.getState().branchSwitchMode
-      return { name, outcome: unwrap(await commands.checkoutBranch(id, name, mode)) }
+      const t0 = performance.now()
+      log.info(`[cotime] checkout START ${name}`)
+      const outcome = unwrap(await commands.checkoutBranch(id, name, mode))
+      log.info(`[cotime] checkout IPC done in ${Math.round(performance.now() - t0)}ms`)
+      return { name, outcome, t0 }
     },
-    onSuccess: ({ name, outcome }) => {
+    onSuccess: ({ name, outcome, t0 }) => {
+      const since = () => Math.round(performance.now() - t0)
+      log.info(`[cotime] onSuccess, invalidating at ${since()}ms`)
       invalidate(qc, id, ['status', 'log', 'branches', 'stashes'])
+      for (const k of ['status', 'log', 'branches', 'stashes'] as const) {
+        qc.getQueryCache()
+          .find({ queryKey: keys[k](id) })
+          ?.promise?.then(() => log.info(`[cotime] ${k} refetched at ${since()}ms`))
+          .catch(() => {})
+      }
       // Compared as a string: `stash_not_reapplied` is a new backend variant and
       // bindings.ts only picks it up on the next `tauri dev` regeneration.
       const kind: string = outcome
