@@ -133,6 +133,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::status::get_repo_counts,
     commands::branch::list_branches,
     commands::branch::branch_relation,
+    commands::branch::divergent_commits,
     commands::branch::list_tags,
     commands::stash::list_stashes,
     commands::diff::get_file_diff,

@@ -1003,6 +1003,20 @@ async branchRelation(repoId: string, ours: string, theirs: string) : Promise<Res
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * The commits on each side of a divergence between two refs.
+ * 
+ * Backs the sync modal's tree preview, which needs the actual commits -- not
+ * just counts -- to show what each option would do to history.
+ */
+async divergentCommits(repoId: string, ours: string, theirs: string, limit: number) : Promise<Result<DivergentCommits, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("divergent_commits", { repoId, ours, theirs, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listTags(repoId: string) : Promise<Result<TagInfo[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_tags", { repoId }) };
@@ -1776,7 +1790,8 @@ async gitPushForce(repoId: string) : Promise<Result<PushResult, string>> {
  * out `branch` first and leaves HEAD there. A clean rebase returns no
  * conflicts. A rebase that hits conflicts leaves the repo paused
  * (rebase-in-progress) and returns the conflicted paths instead of erroring,
- * so the frontend can guide the user. Refuses to start over a dirty tree.
+ * so the frontend can guide the user. Uncommitted changes are auto-stashed and
+ * put back afterwards, so a dirty tree is not a reason to refuse.
  */
 async gitRebase(repoId: string, onto: string, branch: string | null) : Promise<Result<RebaseResult, string>> {
     try {
@@ -3099,6 +3114,19 @@ export type DirtyChoice =
  */
 export type DirtyCount = { modified: number; untracked: number }
 /**
+ * The commits that make two refs differ, as the sync preview draws them.
+ * 
+ * `ours` are commits only our side has, `theirs` only theirs -- the two arms
+ * of a divergence, which is what lets the UI show exactly which commits a
+ * force-push would discard or a rebase would replay. Newest first, matching
+ * the graph.
+ */
+export type DivergentCommits = { ours: PreviewCommit[]; theirs: PreviewCommit[]; 
+/**
+ * True when either side was cut off by the limit.
+ */
+truncated: boolean }
+/**
  * One artifact the AI drafted, as offered for review.
  * 
  * `content` is the exact file body that would be written, so the review card
@@ -3398,6 +3426,10 @@ export type PreflightItem = { label: string;
  * read" is said out loud rather than shown as a tick that implies work.
  */
 done: boolean; detail: string }
+/**
+ * A commit reduced to what the preview needs to draw one row.
+ */
+export type PreviewCommit = { sha: string; summary: string }
 /**
  * One identity you commit under.
  */
