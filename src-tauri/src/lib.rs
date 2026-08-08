@@ -21,6 +21,9 @@ pub use git::refs as git_refs;
 /// committing against a real repository rather than parsed strings.
 pub use git::spec_link as git_spec_link;
 pub use git::submodule as git_submodule;
+/// Exposed for the submodule integration test: "discard everything" is only
+/// meaningful against a real parent repo with a real nested checkout.
+pub use commands::staging::discard_everything;
 pub use git::trailers as git_trailers;
 pub use git::worktree as git_worktree;
 /// Exposed for the ssh_config integration test: this rewrites a file the app

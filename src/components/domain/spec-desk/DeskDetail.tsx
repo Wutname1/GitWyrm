@@ -504,7 +504,9 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
       const plan = unwrap(await commands.aiRunDiscardPlan(repoId))
 
       if (plan.kind === 'noFolder') {
-        unwrap(await commands.discardAll(repoId))
+        // Reset submodules too: undoing a run has to leave nothing of it
+        // behind, and a submodule it moved would otherwise survive.
+        unwrap(await commands.discardAll(repoId, true))
       } else if (plan.kind === 'handEdited' && !keepFolder) {
         // Ask before deleting a folder the user worked in. A discard is about
         // throwing away the AI's result, not theirs.

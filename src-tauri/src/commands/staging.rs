@@ -3,7 +3,7 @@ use std::path::Path;
 use tauri::State;
 
 use crate::error::AppError;
-use crate::git::submodule::is_submodule;
+use crate::git::submodule::{is_submodule, sync_submodule_workdirs};
 use crate::state::RepoManager;
 
 fn stage_paths(repo: &git2::Repository, root: &Path, paths: &[String]) -> Result<(), git2::Error> {
@@ -248,25 +248,45 @@ pub async fn discard_files(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// Discard every uncommitted change: unstage the index, restore all tracked
-/// files to HEAD, and remove untracked files. Irreversible; the caller confirms.
+/// Throw away every uncommitted change: unstage the index, restore all tracked
+/// files to HEAD, and remove untracked files.
+///
+/// `reset_submodules` additionally snaps every moved submodule back to the
+/// commit the parent records -- checking out the parent's tree moves the gitlink
+/// but never the nested checkout, so without it a moved submodule survives a
+/// "discard everything". This is pointer-only: files modified inside a submodule
+/// are left alone, matching what discarding a submodule row already does.
+pub fn discard_everything(
+  repo: &git2::Repository,
+  reset_submodules: bool,
+) -> Result<(), git2::Error> {
+  // Reset the index to HEAD so staged changes are dropped too.
+  let head = repo.head()?.peel(git2::ObjectType::Commit)?;
+  repo.reset(&head, git2::ResetType::Mixed, None)?;
+  // Force the working tree back to HEAD and delete untracked files.
+  let mut builder = git2::build::CheckoutBuilder::new();
+  builder.force().remove_untracked(true);
+  repo.checkout_head(Some(&mut builder))?;
+  // After the index reset each submodule's recorded id is HEAD's, so this moves
+  // the nested checkouts to where the parent now says they belong.
+  if reset_submodules {
+    sync_submodule_workdirs(repo);
+  }
+  Ok(())
+}
+
+/// Irreversible; the caller confirms. See [`discard_everything`].
 #[tauri::command]
 #[specta::specta]
 pub async fn discard_all(
   manager: State<'_, RepoManager>,
   repo_id: String,
+  reset_submodules: bool,
 ) -> Result<(), AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    // Reset the index to HEAD so staged changes are dropped too.
-    let head = repo.head()?.peel(git2::ObjectType::Commit)?;
-    repo.reset(&head, git2::ResetType::Mixed, None)?;
-    // Force the working tree back to HEAD and delete untracked files.
-    let mut builder = git2::build::CheckoutBuilder::new();
-    builder.force().remove_untracked(true);
-    repo.checkout_head(Some(&mut builder))?;
-    Ok(())
+    discard_everything(&repo, reset_submodules).map_err(AppError::Git)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

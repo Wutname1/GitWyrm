@@ -299,3 +299,34 @@ fn all_submodules_is_empty_without_any() {
   let repo = Repository::open(&plain).unwrap();
   assert!(gitwyrm_lib::git_submodule::all_submodules(&repo).is_empty());
 }
+
+/// The reported bug: "discard all changes" said everything was back to the last
+/// commit while the moved submodule was still sitting where the user left it.
+/// Checking out the parent's tree cannot move a nested checkout, so the reset
+/// has to be asked for explicitly.
+#[test]
+fn discard_all_resets_a_moved_submodule_when_asked() {
+  let Some((parent, recorded, workdir)) = fixture("discardsub") else { return };
+  let core = parent.join("packages/core");
+  fs::write(parent.join("note.txt"), "scratch").unwrap();
+  let repo = Repository::open(&parent).unwrap();
+
+  // Without the flag the ordinary file goes back but the submodule survives.
+  gitwyrm_lib::discard_everything(&repo, false).unwrap();
+  assert!(!parent.join("note.txt").exists(), "untracked file should be gone");
+  assert_eq!(git_out(&core, &["rev-parse", "HEAD"]), workdir, "submodule must be left alone");
+  assert!(
+    gitwyrm_lib::git_submodule::moved_submodules(&repo).contains_key("packages/core"),
+    "the submodule should still read as moved"
+  );
+
+  // With it, the nested checkout snaps back to the pinned commit and the repo
+  // is actually clean.
+  gitwyrm_lib::discard_everything(&repo, true).unwrap();
+  assert_eq!(git_out(&core, &["rev-parse", "HEAD"]), recorded, "submodule should be back at the pin");
+  assert!(
+    gitwyrm_lib::git_submodule::moved_submodules(&repo).is_empty(),
+    "nothing should read as moved after discarding everything"
+  );
+  assert!(git_out(&parent, &["status", "--short"]).is_empty(), "repo should be clean");
+}

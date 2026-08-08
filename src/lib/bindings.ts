@@ -1110,12 +1110,11 @@ async discardFiles(repoId: string, paths: string[]) : Promise<Result<null, strin
 }
 },
 /**
- * Discard every uncommitted change: unstage the index, restore all tracked
- * files to HEAD, and remove untracked files. Irreversible; the caller confirms.
+ * Irreversible; the caller confirms. See [`discard_everything`].
  */
-async discardAll(repoId: string) : Promise<Result<null, string>> {
+async discardAll(repoId: string, resetSubmodules: boolean) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("discard_all", { repoId }) };
+    return { status: "ok", data: await TAURI_INVOKE("discard_all", { repoId, resetSubmodules }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -4154,6 +4153,11 @@ tag_push_on_create?: boolean;
  * starts checked.
  */
 tag_delete_on_remote?: boolean; 
+/**
+ * Whether the "Discard all changes" dialog's "also reset submodules" box
+ * starts checked. The box only appears when a submodule has actually moved.
+ */
+discard_resets_submodules?: boolean; 
 /**
  * Per-repo tag overrides, keyed by repo path. Absent repos follow the
  * app-wide `tag_push_default` / `tag_push_on_create` / `tag_delete_on_remote`.

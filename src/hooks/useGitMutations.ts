@@ -349,11 +349,21 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // `resetSubmodules` also snaps moved submodules back to the recorded commit.
+  // The dialog only offers it when one has actually moved, so the plain toast
+  // stays right for the ordinary case.
   const discardAll = useMutation({
-    mutationFn: async () => unwrap(await commands.discardAll(id)),
-    onSuccess: () => {
-      invalidate(qc, id, ['status'])
-      toast('Discarded all changes')
+    mutationFn: async (resetSubmodules: boolean) => {
+      await unwrap(await commands.discardAll(id, resetSubmodules))
+      return resetSubmodules
+    },
+    onSuccess: (resetSubmodules) => {
+      invalidate(qc, id, ['status', 'submodules'])
+      toast(
+        resetSubmodules
+          ? 'Discarded all changes and reset submodules'
+          : 'Discarded all changes',
+      )
     },
     onError,
   })

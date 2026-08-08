@@ -641,6 +641,12 @@ interface WorkspaceState {
    */
   tagDeleteOnRemote: boolean;
   /**
+   * Whether the "Discard all changes" dialog's "also reset submodules" box
+   * starts checked. The box only appears when a submodule has actually moved
+   * (persisted).
+   */
+  discardResetsSubmodules: boolean;
+  /**
    * Per-repo tag settings that override the app-wide defaults, keyed by repo path.
    * A field is present only when that repo overrides it; absent fields follow the
    * app-wide default. A repo with no entry follows the defaults entirely (persisted).
@@ -827,6 +833,7 @@ interface WorkspaceState {
   setTagPushDefault: (mode: TagPushDefault) => void;
   setTagPushOnCreate: (enabled: boolean) => void;
   setTagDeleteOnRemote: (enabled: boolean) => void;
+  setDiscardResetsSubmodules: (enabled: boolean) => void;
   /**
    * Patch one repo's tag override. For each key, a value overrides that setting
    * for this repo; null clears it back to the app default. When no overridden
@@ -1034,6 +1041,7 @@ function toSettings(s: WorkspaceState): Settings {
     tag_push_default: s.tagPushDefault,
     tag_push_on_create: s.tagPushOnCreate,
     tag_delete_on_remote: s.tagDeleteOnRemote,
+    discard_resets_submodules: s.discardResetsSubmodules,
     tag_overrides_by_repo: serializeTagOverrides(s.tagOverridesByRepo),
     enable_worktrees: s.enableWorktrees,
     worktrees_setting_touched: s.worktreesSettingTouched,
@@ -1351,6 +1359,7 @@ export const SETTINGS_DEFAULTS = {
   tagPushDefault: "ask",
   tagPushOnCreate: true,
   tagDeleteOnRemote: true,
+  discardResetsSubmodules: true,
   aiInstruction: null,
   openspecArchiveCommitTemplate: null,
   changeSizeDisplay: "column",
@@ -1385,7 +1394,12 @@ export const SETTINGS_GROUPS = {
     "enableWorktrees",
     "worktreesSettingTouched",
   ],
-  behavior: ["restoreTabs", "autoFetch", "showTips"],
+  behavior: [
+    "restoreTabs",
+    "autoFetch",
+    "showTips",
+    "discardResetsSubmodules",
+  ],
   tags: ["tagPushDefault", "tagPushOnCreate", "tagDeleteOnRemote"],
   ai: ["aiInstruction"],
   openspec: [
@@ -1454,6 +1468,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   tagPushDefault: "ask",
   tagPushOnCreate: true,
   tagDeleteOnRemote: true,
+  discardResetsSubmodules: true,
   tagOverridesByRepo: {},
   enableWorktrees: false,
   worktreesSettingTouched: false,
@@ -1859,6 +1874,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setTagDeleteOnRemote: (enabled) => {
     set({ tagDeleteOnRemote: enabled });
+    schedulePersist();
+  },
+  setDiscardResetsSubmodules: (enabled) => {
+    set({ discardResetsSubmodules: enabled });
     schedulePersist();
   },
   setRepoTagOverride: (path, patch) => {
@@ -2749,6 +2768,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         tagPushDefault: normalizeTagPushDefault(settings.tag_push_default),
         tagPushOnCreate: settings.tag_push_on_create ?? false,
         tagDeleteOnRemote: settings.tag_delete_on_remote ?? false,
+        discardResetsSubmodules: settings.discard_resets_submodules ?? true,
         tagOverridesByRepo: normalizeTagOverrides(
           settings.tag_overrides_by_repo,
         ),

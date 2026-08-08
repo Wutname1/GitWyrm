@@ -9,7 +9,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { PendingIndicator } from "@/components/ui/pending-indicator";
-import { ConfirmDialog } from "@/components/modals/ConfirmDialog";
 import { useStatus } from "@/hooks/useGitQueries";
 import { useGitMutations } from "@/hooks/useGitMutations";
 import { useUiStore } from "@/stores/uiStore";
@@ -29,6 +28,7 @@ import { FileChangeRow, StageToggle } from "../FileChangeRow";
 import { GenerateCommitsDialog } from "./GenerateCommitsDialog";
 import { FileChangeTree } from "./FileChangeTree";
 import { ChangesMenu } from "./ChangesMenu";
+import { DiscardAllDialog } from "./DiscardAllDialog";
 
 function GroupHeader({
   label,
@@ -369,28 +369,9 @@ export function ChangesList() {
         canOffer={hasChanges && staged.length === 0}
       />
 
-      <ConfirmDialog
+      <DiscardAllDialog
         open={confirmDiscard}
         onOpenChange={setConfirmDiscard}
-        destructive
-        title="Discard all changes?"
-        description={
-          <>
-            This throws away every uncommitted change across{" "}
-            <span className="text-foreground">{changedFiles}</span> file
-            {changedFiles === 1 ? "" : "s"} and puts your project back to the
-            last commit. This can't be undone. Consider stashing instead.
-          </>
-        }
-        confirmLabel="Discard everything"
-        pending={m.discardAll.isPending}
-        pendingLabel="Discarding changes…"
-        keepOpenOnConfirm
-        onConfirm={() =>
-          m.discardAll.mutate(undefined, {
-            onSuccess: () => setConfirmDiscard(false),
-          })
-        }
       />
     </>
   );

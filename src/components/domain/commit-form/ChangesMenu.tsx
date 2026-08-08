@@ -9,12 +9,11 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
-import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
-import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { useStatus } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { plural } from '@/lib/gitDisplay'
+import { DiscardAllDialog } from './DiscardAllDialog'
 
 interface ChangesMenuProps {
   children: ReactNode
@@ -81,21 +80,7 @@ export function ChangesMenu({ children, asChild = true }: ChangesMenuProps) {
         </ContextMenuContent>
       </ContextMenu>
 
-      <ConfirmDialog
-        open={confirmDiscard}
-        onOpenChange={setConfirmDiscard}
-        destructive
-        title="Discard all changes?"
-        description={
-          <>
-            This throws away every uncommitted change across{' '}
-            <span className="text-foreground">{total}</span> file{total === 1 ? '' : 's'} and puts
-            your project back to the last commit. This can't be undone. Consider stashing instead.
-          </>
-        }
-        confirmLabel="Discard everything"
-        onConfirm={() => m.discardAll.mutate()}
-      />
+      <DiscardAllDialog open={confirmDiscard} onOpenChange={setConfirmDiscard} />
     </>
   )
 }

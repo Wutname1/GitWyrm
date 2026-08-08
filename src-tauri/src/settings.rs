@@ -407,6 +407,10 @@ pub struct Settings {
   /// starts checked.
   #[serde(default)]
   pub tag_delete_on_remote: bool,
+  /// Whether the "Discard all changes" dialog's "also reset submodules" box
+  /// starts checked. The box only appears when a submodule has actually moved.
+  #[serde(default = "default_discard_resets_submodules")]
+  pub discard_resets_submodules: bool,
   /// Per-repo tag overrides, keyed by repo path. Absent repos follow the
   /// app-wide `tag_push_default` / `tag_push_on_create` / `tag_delete_on_remote`.
   #[serde(default)]
@@ -471,6 +475,10 @@ fn default_show_tips() -> bool {
 }
 
 fn default_crash_reports() -> bool {
+  true
+}
+
+fn default_discard_resets_submodules() -> bool {
   true
 }
 
@@ -625,6 +633,7 @@ impl Default for Settings {
       tag_push_default: None,
       tag_push_on_create: false,
       tag_delete_on_remote: false,
+      discard_resets_submodules: default_discard_resets_submodules(),
       tag_overrides_by_repo: HashMap::new(),
       theme: None,
       theme_mode: None,
@@ -1134,6 +1143,24 @@ mod tests {
     let back = read_settings_in(dir.path());
     assert!(back.openspec_archive_without_asking);
     assert!(back.openspec_delete_without_asking);
+  }
+
+  /// A settings file written before this flag existed has to keep the helpful
+  /// behavior, so an absent value means "yes, reset submodules too" -- and an
+  /// explicit no has to survive, or the box the user unticked comes back.
+  #[test]
+  fn discard_resets_submodules_defaults_on_and_round_trips() {
+    let older: Settings = serde_json::from_str("{}").expect("empty settings should load");
+    assert!(older.discard_resets_submodules);
+    assert!(Settings::default().discard_resets_submodules);
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let settings = Settings {
+      discard_resets_submodules: false,
+      ..Default::default()
+    };
+    write_settings_in(dir.path(), &settings).expect("write");
+    assert!(!read_settings_in(dir.path()).discard_resets_submodules);
   }
 
   #[test]
