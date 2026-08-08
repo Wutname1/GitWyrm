@@ -231,7 +231,19 @@ pub async fn git_pull(
   let path = open.path.to_string_lossy().into_owned();
   tauri::async_runtime::spawn_blocking(move || {
     let before = { tracking_state(&open.repo.lock().unwrap()) };
-    run_streaming(&app, &repo_id, Some(&path), "pull", &["pull", "--progress"])?;
+
+    // `--autostash` is what keeps a pull from ever failing just because the
+    // working tree is dirty. Without it git refuses the whole operation with
+    // "your local changes would be overwritten by merge" and leaves the user to
+    // stash by hand -- a dead end the app should never hand back, since the
+    // stash/pull/reapply it asks for is exactly what git can do itself.
+    //
+    // Git performs it atomically: on a conflicting reapply it keeps the stash
+    // entry rather than dropping it, so the changes are always recoverable. It
+    // also applies to both the merge and rebase forms, so it holds regardless of
+    // the user's `pull.rebase` setting.
+    run_streaming(&app, &repo_id, Some(&path), "pull", &["pull", "--progress", "--autostash"])?;
+
     let after = { tracking_state(&open.repo.lock().unwrap()) };
 
     // Commits we were behind by and no longer are is what the pull brought in.
@@ -1027,7 +1039,8 @@ pub async fn git_push_force(
 /// out `branch` first and leaves HEAD there. A clean rebase returns no
 /// conflicts. A rebase that hits conflicts leaves the repo paused
 /// (rebase-in-progress) and returns the conflicted paths instead of erroring,
-/// so the frontend can guide the user. Refuses to start over a dirty tree.
+/// so the frontend can guide the user. Uncommitted changes are auto-stashed and
+/// put back afterwards, so a dirty tree is not a reason to refuse.
 #[tauri::command]
 #[specta::specta]
 pub async fn git_rebase(
@@ -1040,16 +1053,13 @@ pub async fn git_rebase(
   let open = manager.get(&repo_id)?;
   let path = open.path.to_string_lossy().into_owned();
   tauri::async_runtime::spawn_blocking(move || {
-    {
-      let repo = open.repo.lock().unwrap();
-      if refs::tracked_changes_present(&repo)? {
-        return Err(AppError::Other(
-          "working tree has changes; commit or stash before rebasing".into(),
-        ));
-      }
-    }
-
-    let mut args = vec!["rebase", "--progress", onto.as_str()];
+    // A dirty tree is not a reason to refuse: `--autostash` has git set the
+    // changes aside and put them back when the rebase lands, the same way pull
+    // does. Telling the user to go stash by hand would be asking them to do what
+    // git will do for them.
+    // No `--progress` here: unlike fetch/pull/push, `git rebase` has no such
+    // flag and exits with "unknown option `progress'" if given one.
+    let mut args = vec!["rebase", "--autostash", onto.as_str()];
     if let Some(b) = branch.as_deref() {
       args.push(b);
     }
