@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Check, Cloud, GitMerge, Repeat, Repeat2, RotateCcw, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, Cloud, CloudUpload, GitMerge, Repeat, Repeat2, RotateCcw, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -13,6 +13,7 @@ import { branchSync } from '@/lib/branchActions'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
+import { SyncTreePreview, type PreviewMode } from './SyncTreePreview'
 
 /** A ref chip styled to match the graph's pills. */
 function Chip({ name, tone }: { name: string; tone: 'source' | 'target' }) {
@@ -147,6 +148,46 @@ export function RemoteSyncModal() {
   // which is the only state that reaches the messages using them.
   const trackingSync =
     pair?.kind === 'tracking' ? branchSync(pair.branch) : { ahead: 0, behind: 0 }
+
+  // Real two-sided divergence against the upstream. Both drag directions land
+  // here and get the identical option set; `outgoing` only picks the default.
+  const isDivergedTracking =
+    action?.kind === 'diverged-incoming' || action?.kind === 'diverged-outgoing'
+  const outgoing = action?.kind === 'diverged-outgoing'
+
+  // Which option the preview is currently drawing. Hovering a button previews
+  // it; with nothing hovered the default action is shown, so opening the modal
+  // already answers "what happens if I just click the blue one".
+  const [hovered, setHovered] = useState<PreviewMode | null>(null)
+  const defaultMode: PreviewMode | null = isDivergedTracking
+    ? outgoing
+      ? 'blend'
+      : 'stack'
+    : action?.kind === 'fast-forward' || action?.kind === 'ff-branch'
+      ? 'catch-up'
+      : action?.kind === 'diverged-branches'
+        ? 'stack'
+        : null
+  const previewMode = hovered ?? defaultMode
+  // Every state where two refs genuinely differ gets a ladder. The "nothing to
+  // do" states (same commit, already contains) have no commits to draw, and
+  // upstream-gone has no second ref to compare against.
+  const showPreview =
+    isDivergedTracking ||
+    action?.kind === 'fast-forward' ||
+    action?.kind === 'ff-branch' ||
+    action?.kind === 'diverged-branches'
+  // Which two refs the ladder compares. A tracking pair is branch vs upstream;
+  // a branch pair is the moving branch (target) vs where it was dropped
+  // (source), matching the direction the copy already reads in.
+  const previewOurs = pair?.kind === 'tracking' ? pair.branch.name : (branchPair?.target.name ?? '')
+  const previewTheirs = pair?.kind === 'tracking' ? pair.upstream : (branchPair?.source.name ?? '')
+  const previewOn = (mode: PreviewMode) => ({
+    onMouseEnter: () => setHovered(mode),
+    onMouseLeave: () => setHovered(null),
+    onFocus: () => setHovered(mode),
+    onBlur: () => setHovered(null),
+  })
 
   // The chips show where commits will actually flow, which may be the reverse
   // of the drag: dropping origin/main onto main while you're ahead means a
@@ -311,16 +352,11 @@ export function RemoteSyncModal() {
                 gone. Send {tgtName} back up to recreate it.
               </span>
             )}
-            {action?.kind === 'diverged-incoming' && (
+            {isDivergedTracking && (
               <span className="flex items-center gap-1.5 text-modified">
-                <AlertTriangle size={12} className="flex-none" /> You both made changes. Stack yours
-                on top of theirs (tidy), or blend them together.
-              </span>
-            )}
-            {action?.kind === 'diverged-outgoing' && (
-              <span className="flex items-center gap-1.5 text-modified">
-                <AlertTriangle size={12} className="flex-none" /> Your history changed. Replace
-                what's in the cloud with what you have now.
+                <AlertTriangle size={12} className="flex-none" /> You both made changes -{' '}
+                {trackingSync.ahead} of yours, {trackingSync.behind} of theirs. Stack yours on top
+                (tidy), blend them together, or replace what's in the cloud.
               </span>
             )}
             {action?.kind === 'same-point' && (
@@ -354,6 +390,15 @@ export function RemoteSyncModal() {
               </span>
             )}
           </div>
+
+          {showPreview && previewOurs && previewTheirs && (
+            <SyncTreePreview
+              repoId={repo?.id ?? null}
+              ours={previewOurs}
+              theirs={previewTheirs}
+              mode={previewMode}
+            />
+          )}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
@@ -362,7 +407,7 @@ export function RemoteSyncModal() {
           </Button>
 
           {action?.kind === 'fast-forward' && (
-            <Button size="sm" disabled={pending} onClick={runPull}>
+            <Button size="sm" disabled={pending} onClick={runPull} {...previewOn('catch-up')}>
               {pending ? 'Updating…' : 'Update'}
             </Button>
           )}
@@ -376,29 +421,63 @@ export function RemoteSyncModal() {
               {pending ? 'Sending…' : 'Send up'}
             </Button>
           )}
-          {action?.kind === 'diverged-incoming' && (
+          {/* Both diverged directions offer the same three moves. Which pill
+              was dragged is a hint about intent, not a reason to hide the
+              others -- dragging local onto origin used to leave force-push as
+              the ONLY option, which is the most destructive of the three.
+              Force-push now always stays a secondary button and is never the
+              default; the drag direction only chooses between blend and stack
+              for the accent. */}
+          {isDivergedTracking && (
             <>
-              <Button variant="secondary" size="sm" disabled={pending} onClick={runPull}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={pending}
+                onClick={runForcePush}
+                {...previewOn('replace')}
+              >
+                <CloudUpload size={13} /> {pending ? 'Replacing…' : 'Replace cloud'}
+              </Button>
+              <Button
+                variant={outgoing ? 'default' : 'secondary'}
+                size="sm"
+                disabled={pending}
+                onClick={runPull}
+                {...previewOn('blend')}
+              >
                 <GitMerge size={13} /> Blend
               </Button>
-              <Button size="sm" disabled={pending} onClick={runRebaseOntoUpstream}>
+              <Button
+                variant={outgoing ? 'secondary' : 'default'}
+                size="sm"
+                disabled={pending}
+                onClick={runRebaseOntoUpstream}
+                {...previewOn('stack')}
+              >
                 <Repeat2 size={13} /> {pending ? 'Stacking…' : 'Stack on top'}
               </Button>
             </>
           )}
-          {action?.kind === 'diverged-outgoing' && (
-            <Button size="sm" disabled={pending} onClick={runForcePush}>
-              {pending ? 'Replacing…' : 'Replace cloud copy'}
-            </Button>
-          )}
           {action?.kind === 'ff-branch' && (
             <>
               {canReset && (
-                <Button variant="secondary" size="sm" disabled={pending} onClick={runReset}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={pending}
+                  onClick={runReset}
+                  {...previewOn('reset')}
+                >
                   <RotateCcw size={13} /> Reset to match
                 </Button>
               )}
-              <Button size="sm" disabled={pending} onClick={runFastForwardTarget}>
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={runFastForwardTarget}
+                {...previewOn('catch-up')}
+              >
                 {pending ? 'Updating…' : `Update ${tgtName}`}
               </Button>
             </>
@@ -406,14 +485,31 @@ export function RemoteSyncModal() {
           {action?.kind === 'diverged-branches' && (
             <>
               {canReset && (
-                <Button variant="secondary" size="sm" disabled={pending} onClick={runReset}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={pending}
+                  onClick={runReset}
+                  {...previewOn('reset')}
+                >
                   <RotateCcw size={13} /> Reset to match
                 </Button>
               )}
-              <Button variant="secondary" size="sm" disabled={pending} onClick={runMergeIntoTarget}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={pending}
+                onClick={runMergeIntoTarget}
+                {...previewOn('blend')}
+              >
                 <GitMerge size={13} /> Blend
               </Button>
-              <Button size="sm" disabled={pending} onClick={runRebaseTargetOntoSource}>
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={runRebaseTargetOntoSource}
+                {...previewOn('stack')}
+              >
                 <Repeat2 size={13} /> {pending ? 'Stacking…' : 'Stack on top'}
               </Button>
             </>
