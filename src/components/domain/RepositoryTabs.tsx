@@ -1130,8 +1130,12 @@ export function RepositoryTabs({
         : null;
     const inGroup = group != null;
     // A submodule tab is part of the project above it, not a tab of its own, so
-    // it neither travels nor accepts anything dropped onto it.
-    const attached = group != null && isSubmoduleGroup(group);
+    // it neither travels nor accepts anything dropped onto it. The project's own
+    // tab is a member of that same group but is NOT attached: it is the thing
+    // being hung from, and stays as draggable and droppable as any other tab.
+    const isGroupParent =
+      group?.parentPath != null && samePath(group.parentPath, repo.path);
+    const attached = group != null && isSubmoduleGroup(group) && !isGroupParent;
     const active = repo.id === activeRepoId;
     const groupsForMenu = tabGroups.filter(
       (candidate) => candidate.id !== group?.id,
@@ -1294,7 +1298,9 @@ export function RepositoryTabs({
                       ? // Indented past a normal group member: this tab sits
                         // one level inside the project it belongs to.
                         "h-[31px] w-full flex-none cursor-pointer rounded-[5px] border px-2 pl-9"
-                      : inGroup
+                      : // The project heading its own submodule group reads as a
+                        // top-level tab, not as a member indented inside one.
+                        inGroup && !isGroupParent
                         ? "h-[31px] w-full flex-none rounded-[5px] border px-2 pl-7"
                         : "h-[31px] w-full flex-none rounded-[5px] border px-2 pl-2",
                 effectiveIconOnly && orientation === "horizontal" && !hovered &&
@@ -1523,6 +1529,13 @@ export function RepositoryTabs({
       path,
       repo: findRepo(openRepos, path),
     }));
+    // An attached group holds its project as its first member and draws it as
+    // the row everything else hangs from, so the nested list leaves it out.
+    const nestedPaths = attached
+      ? group.repoPaths.filter(
+          (path) => group.parentPath == null || !samePath(path, group.parentPath),
+        )
+      : group.repoPaths;
     return (
       <Tooltip key={group.id}>
         <ContextMenu>
@@ -1588,6 +1601,10 @@ export function RepositoryTabs({
                 dropGroupBesideGroup(dragItem.id, group.id, sideTarget ?? "after");
               }}
             >
+              {/* An attached group has no label row of its own: its project's
+                  tab is the header, and the submodules indent under it. */}
+              {attached && parentRepo && renderRepoTab(parentRepo, group)}
+              {!attached && (
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1689,6 +1706,7 @@ export function RepositoryTabs({
                   />
                 </button>
               </TooltipTrigger>
+              )}
               {!group.collapsed && (
                 <div
                   className={cn(
@@ -1696,9 +1714,11 @@ export function RepositoryTabs({
                     orientation === "horizontal"
                       ? "h-full flex-none flex-row"
                       : "w-full flex-col gap-0.5",
+                    // Indentation for submodule rows lives on the tab itself
+                    // (pl-9 above), so the container adds none of its own.
                   )}
                 >
-                  {group.repoPaths.map((path) => {
+                  {nestedPaths.map((path) => {
                     const repo = findRepo(openRepos, path);
                     return repo ? renderRepoTab(repo, group) : null;
                   })}

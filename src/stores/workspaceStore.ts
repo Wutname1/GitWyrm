@@ -453,16 +453,34 @@ function removePathFromWorkspace(
   order: TabOrderItem[],
   repoPath: string,
 ): { groups: TabGroup[]; order: TabOrderItem[] } {
-  const nextGroups = groups
-    .map((group) => ({
-      ...group,
-      repoPaths: group.repoPaths.filter((path) => !samePath(path, repoPath)),
-    }))
-    .filter((group) => group.repoPaths.length > 0);
+  const trimmed = groups.map((group) => ({
+    ...group,
+    repoPaths: group.repoPaths.filter((path) => !samePath(path, repoPath)),
+  }));
+  // A submodule group holds its own project as its first member, so losing its
+  // last submodule leaves it holding just that -- a group of one, wrapping a
+  // tab that no longer has anything nested under it. Dissolve it back into an
+  // ordinary tab, in the slot the group occupied.
+  const dissolved = new Map<string, string>();
+  const nextGroups = trimmed.filter((group) => {
+    if (group.repoPaths.length === 0) return false;
+    if (
+      group.parentPath != null &&
+      group.repoPaths.length === 1 &&
+      samePath(group.repoPaths[0]!, group.parentPath)
+    ) {
+      dissolved.set(group.id, group.repoPaths[0]!);
+      return false;
+    }
+    return true;
+  });
   const survivingGroups = new Set(nextGroups.map((group) => group.id));
-  const nextOrder = order.filter((item) => {
-    if (item.type === "repo") return !samePath(item.path, repoPath);
-    return survivingGroups.has(item.id);
+  const nextOrder = order.flatMap<TabOrderItem>((item) => {
+    if (item.type === "repo")
+      return samePath(item.path, repoPath) ? [] : [item];
+    const loosened = dissolved.get(item.id);
+    if (loosened != null) return [{ type: "repo", path: loosened }];
+    return survivingGroups.has(item.id) ? [item] : [];
   });
   return { groups: nextGroups, order: nextOrder };
 }
@@ -501,31 +519,6 @@ function submoduleGroupFor(
   return groups.find(
     (group) => group.parentPath != null && samePath(group.parentPath, parentPath),
   );
-}
-
-/**
- * Put `groupId` immediately after its parent tab, so a project's submodules
- * always read as belonging to the tab above them. The parent may itself be
- * inside a group the user built, in which case the submodule group follows that
- * whole group rather than splitting it open.
- */
-function placeAfterParent(
-  groups: TabGroup[],
-  order: TabOrderItem[],
-  groupId: string,
-  parentPath: string,
-): TabOrderItem[] {
-  const without = order.filter(
-    (item) => !(item.type === "group" && item.id === groupId),
-  );
-  const parentIndex = workspaceIndexForPath(groups, without, parentPath);
-  const next = [...without];
-  next.splice(
-    parentIndex >= 0 ? parentIndex + 1 : next.length,
-    0,
-    { type: "group", id: groupId },
-  );
-  return next;
 }
 
 interface WorkspaceState {
@@ -1560,6 +1553,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       let groups = cleared.groups;
       let order = cleared.order;
 
+      const parentKey = normalizePath(parent.path);
       const existing = submoduleGroupFor(groups, parent.path);
       const groupId = existing?.id ?? newGroupId();
       if (existing) {
@@ -1569,8 +1563,17 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
             : group,
         );
       } else {
+        // The project's own tab is the first member, not a separate row above
+        // the group: the submodules attach directly under the tab they belong
+        // to. Taking the parent out of the loose order is what stops it being
+        // drawn twice -- and the group then takes the slot the parent held, so
+        // the project does not jump to the end of the strip.
+        const parentIndex = order.findIndex(
+          (item) => item.type === "repo" && samePath(item.path, parentKey),
+        );
+        const lifted = removePathFromWorkspace(groups, order, parentKey);
         groups = [
-          ...groups,
+          ...lifted.groups,
           {
             id: groupId,
             name: parent.name,
@@ -1578,12 +1581,16 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
             // rather than as another colour-coded group the user picked.
             color: TAB_GROUP_COLORS[groups.length % TAB_GROUP_COLORS.length]!,
             collapsed: false,
-            repoPaths: [path],
-            parentPath: normalizePath(parent.path),
+            repoPaths: [parentKey, path],
+            parentPath: parentKey,
           },
         ];
+        order = [...lifted.order];
+        order.splice(parentIndex >= 0 ? parentIndex : order.length, 0, {
+          type: "group",
+          id: groupId,
+        });
       }
-      order = placeAfterParent(groups, order, groupId, parent.path);
 
       const recents = isTutorialRepoPath(repo.path)
         ? s.recents

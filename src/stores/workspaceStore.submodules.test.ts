@@ -60,22 +60,34 @@ describe('submodule tabs', () => {
     expect(group).toBeDefined()
     expect(isSubmoduleGroup(group!)).toBe(true)
     expect(group!.parentPath).toBe(PARENT)
-    // The parent itself stays a loose tab; only its submodules are nested.
-    expect(groupOf(PARENT)).toBeUndefined()
+    // The project joins the group as its first member: it is the row the
+    // submodules attach under, not a separate tab above them.
+    expect(groupOf(PARENT)?.id).toBe(group!.id)
+    expect(group!.repoPaths[0]!.toLowerCase()).toBe(PARENT.toLowerCase())
+    // ...and it is no longer a loose tab in its own right, or it would draw twice.
+    expect(
+      useWorkspaceStore
+        .getState()
+        .tabOrder.some(
+          (i) => i.type === 'repo' && i.path.toLowerCase() === PARENT.toLowerCase()
+        )
+    ).toBe(false)
   })
 
-  it('puts the group directly after its project in the order', () => {
+  it('takes the slot its project held in the order', () => {
     const s = useWorkspaceStore.getState()
-    s.addRepo(loose)
     s.addRepo(parent)
+    s.addRepo(loose)
     s.addSubmoduleRepo(sub, PARENT)
 
+    // The project was first, so the group that now contains it is first too --
+    // opening a submodule must not shunt the project to the end of the strip.
     const order = useWorkspaceStore.getState().tabOrder
-    const parentIndex = order.findIndex(
-      (i) => i.type === 'repo' && i.path.toLowerCase() === PARENT.toLowerCase()
-    )
-    const groupIndex = order.findIndex((i) => i.type === 'group')
-    expect(groupIndex).toBe(parentIndex + 1)
+    expect(order[0]).toEqual({
+      type: 'group',
+      id: groupOf(SUB)!.id,
+    })
+    expect(order).toHaveLength(2)
   })
 
   it('reuses one group for every submodule of the same project', () => {
@@ -86,7 +98,8 @@ describe('submodule tabs', () => {
 
     const groups = useWorkspaceStore.getState().tabGroups
     expect(groups).toHaveLength(1)
-    expect(groups[0]!.repoPaths).toHaveLength(2)
+    // The project plus both submodules.
+    expect(groups[0]!.repoPaths).toHaveLength(3)
   })
 
   it('opens as an ordinary tab when the project is not open', () => {
@@ -141,7 +154,8 @@ describe('submodule tabs', () => {
     it('refuses to have another tab dropped in beside it', () => {
       useWorkspaceStore.getState().moveRepoBeside(LOOSE, SUB, 'after')
       expect(groupOf(LOOSE)).toBeUndefined()
-      expect(groupOf(SUB)!.repoPaths).toHaveLength(1)
+      // Still just the project and its one submodule.
+      expect(groupOf(SUB)!.repoPaths).toHaveLength(2)
     })
 
     it('cannot have its group ungrouped or saved', () => {
@@ -192,9 +206,14 @@ describe('submodule tabs', () => {
 
     useWorkspaceStore.getState().removeRepo(sub.id)
 
+    // With nothing left nested under it, the project goes back to being an
+    // ordinary tab rather than a group wrapping one member.
     expect(useWorkspaceStore.getState().tabGroups).toHaveLength(0)
     expect(useWorkspaceStore.getState().openRepos.map((r) => r.id)).toEqual([
       parent.id,
+    ])
+    expect(useWorkspaceStore.getState().tabOrder).toEqual([
+      { type: 'repo', path: PARENT },
     ])
   })
 
