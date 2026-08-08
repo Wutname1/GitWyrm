@@ -6,6 +6,7 @@ import {
   GitMerge,
   GitPullRequestArrow,
   RefreshCw,
+  Repeat2,
   RotateCcw,
   Trash2,
 } from 'lucide-react'
@@ -21,6 +22,7 @@ import {
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useBranches } from '@/hooks/useGitQueries'
+import { branchSync } from '@/lib/branchActions'
 import { useGithubPrForBranch } from '@/hooks/useGithub'
 import { useUiStore } from '@/stores/uiStore'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -68,10 +70,26 @@ export function RemoteBranchMenuItems({
   const deleteRemoteBranchPrompt = useUiStore((s) => s.deleteRemoteBranchPrompt)
 
   const fullName = `${remote.name}/${branch}`
-  const currentBranch = branches.data?.local.find((b) => b.is_head)?.name ?? ''
-  // Already standing on the local copy of this branch: switching to it again is
-  // a no-op, and it cannot be merged or reset into itself.
+  const head = branches.data?.local.find((b) => b.is_head)
+  const currentBranch = head?.name ?? ''
+  // Standing on the local copy of this branch. Switching to it again is a
+  // no-op, but that says nothing about whether the two point at the same
+  // COMMIT -- being on `main` while `origin/main` has moved ahead is the whole
+  // reason merge and rebase exist.
   const isCheckedOut = !!localCounterpart && localCounterpart === currentBranch
+
+  // How the checked-out branch stands against this exact remote branch. Only
+  // meaningful when this remote branch is HEAD's own upstream; otherwise the
+  // two are unrelated refs and the generic items apply.
+  const isUpstreamOfHead = !!head?.upstream && head.upstream === fullName
+  const headSync = head && isUpstreamOfHead ? branchSync(head) : null
+  // Commits the remote has that we don't. Drives merge/rebase: with nothing to
+  // get, both are genuinely no-ops and stay disabled.
+  const behind = headSync?.behind ?? 0
+  const ahead = headSync?.ahead ?? 0
+  // Same name AND same commit: nothing to bring across in either direction.
+  const isSameCommit = isCheckedOut && isUpstreamOfHead && behind === 0 && ahead === 0
+  const isRebasing = m.rebase.isPending && m.rebase.variables?.onto === fullName
 
   const pr = useGithubPrForBranch(repoId, branch)
   const webTarget = remoteWebTarget(remote)
@@ -116,15 +134,49 @@ export function RemoteBranchMenuItems({
       />
       <ContextMenuSeparator />
 
-      {/* Bringing its commits into the branch you are on. */}
+      {/* Straight-line catch-up: nothing of our own is in the way, so this
+          needs no merge decision at all. Offered ahead of blend/stack so the
+          easy case stays the obvious one. */}
+      {behind > 0 && ahead === 0 && (
+        <PendingMenuItem
+          icon={<Download />}
+          label={`Get ${behind} change${behind === 1 ? '' : 's'} from ${remote.name}`}
+          pendingLabel="Getting…"
+          pending={m.pull.isPending}
+          disabled={opInProgress || m.pull.isPending}
+          onRun={() => m.pull.mutate()}
+        />
+      )}
+
+      {/* Bringing its commits into the branch you are on. Standing on the
+          local branch of the same name does NOT rule these out -- that is the
+          usual case for "origin/main moved ahead of my main". Both stay live
+          whenever the remote has commits we don't. */}
       <ContextMenuItem
-        disabled={isCheckedOut || opInProgress}
+        disabled={isSameCommit || opInProgress}
         onSelect={() => openMerge(fullName)}
       >
         <GitMerge />
-        Merge into {currentBranch || 'current'}
+        <div className="flex flex-col">
+          <span>Blend into {currentBranch || 'current'}</span>
+          {behind > 0 && (
+            <span className="text-2xs text-muted-foreground">
+              Brings {behind} change{behind === 1 ? '' : 's'} down
+            </span>
+          )}
+        </div>
       </ContextMenuItem>
-      {!isCheckedOut && (
+      {behind > 0 && ahead > 0 && (
+        <PendingMenuItem
+          icon={<Repeat2 />}
+          label={`Stack my ${ahead} change${ahead === 1 ? '' : 's'} on top`}
+          pendingLabel="Stacking…"
+          pending={isRebasing}
+          disabled={opInProgress || m.rebase.isPending}
+          onRun={() => m.rebase.mutate({ onto: fullName })}
+        />
+      )}
+      {!isSameCommit && (
         <ContextMenuItem
           variant="destructive"
           disabled={opInProgress || resetting}
