@@ -12,6 +12,7 @@ import {
   removeConfirmCopy,
   removeOutcomeMessage,
   sectionVisibility,
+  visibleWorktrees,
   worktreeTabLabel,
 } from '@/lib/worktreeCopy'
 
@@ -271,5 +272,21 @@ describe('linked worktrees', () => {
     const list = [wt({ is_main: true, folder_name: 'project' }), wt()]
     expect(linkedWorktrees(list)).toHaveLength(1)
     expect(linkedWorktrees(list)[0].folder_name).toBe('project-feature')
+  })
+})
+
+describe('visible worktrees', () => {
+  it('draws nothing when only the main checkout exists', () => {
+    // A lone main row reads as "you have one worktree", which it is not.
+    expect(visibleWorktrees([wt({ is_main: true, folder_name: 'project' })])).toEqual([])
+  })
+
+  it('draws the main checkout once there is a sibling to tell it apart from', () => {
+    const list = [wt({ is_main: true, folder_name: 'project' }), wt()]
+    expect(visibleWorktrees(list)).toEqual(list)
+  })
+
+  it('draws nothing for an empty list', () => {
+    expect(visibleWorktrees([])).toEqual([])
   })
 })

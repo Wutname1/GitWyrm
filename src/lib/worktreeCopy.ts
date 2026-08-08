@@ -192,6 +192,15 @@ export function linkedWorktrees(list: Worktree[]): Worktree[] {
 }
 
 /**
+ * The rows the section should draw. The main checkout is context for telling
+ * sibling checkouts apart -- with no linked worktrees there is nothing to tell
+ * apart, and a lone main row reads as "you have one worktree", which it is not.
+ */
+export function visibleWorktrees(list: Worktree[]): Worktree[] {
+  return linkedWorktrees(list).length === 0 ? [] : list
+}
+
+/**
  * True when every linked worktree is broken at once, which is what a moved
  * *main repository* looks like. Offering one repair beats showing a list of
  * separately broken rows that all have the same cause.

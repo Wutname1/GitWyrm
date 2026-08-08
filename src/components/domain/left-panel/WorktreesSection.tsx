@@ -24,6 +24,7 @@ import {
   looksLikeMovedRepository,
   removeConfirmCopy,
   sectionVisibility,
+  visibleWorktrees,
 } from '@/lib/worktreeCopy'
 import {
   ContextMenu,
@@ -344,12 +345,13 @@ export function WorktreesSection() {
 
   const list = data ?? []
   const linked = linkedWorktrees(list)
+  const rows = visibleWorktrees(list)
   const { show, canAdd, explainNoAdd } = sectionVisibility(settingOn, linked.length)
   const movedRepo = looksLikeMovedRepository(list)
 
-  // The list is only the whole picture once the main checkout is in it, and it
-  // always is -- so an empty `list` means the query has not answered yet.
-  if (!show || list.length === 0) return null
+  // No rows is a real state now, not just an unanswered query, so the query's
+  // own signal is what says whether there is anything to draw yet.
+  if (!show || data == null) return null
 
   return (
     <div className="group/section">
@@ -381,7 +383,7 @@ export function WorktreesSection() {
         )}
 
         <span className={cn('font-mono text-2xs text-muted-foreground', canAdd ? 'ml-1.5' : 'ml-auto')}>
-          {list.length}
+          {rows.length}
         </span>
       </div>
 
@@ -409,7 +411,7 @@ export function WorktreesSection() {
             </div>
           )}
 
-          {list.map((w) => (
+          {rows.map((w) => (
             <WorktreeRow key={w.path} worktree={w} canAdd={canAdd} />
           ))}
 
