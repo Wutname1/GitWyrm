@@ -4,7 +4,6 @@ import {
   GitCommitHorizontal,
   Pencil,
   Sparkles,
-  Tag,
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -24,7 +23,6 @@ import { plural } from "@/lib/gitDisplay";
 import { branchSync } from "@/lib/branchActions";
 import { useAiMutations } from "@/hooks/useAi";
 import { useAiSelection } from "@/hooks/useAiSelection";
-import { useSpecLink } from "@/hooks/useSpecLink";
 import {
   useBranches,
   useCommitDetail,
@@ -65,10 +63,6 @@ export function CommitMessageForm() {
   };
   const [justGenerated, setJustGenerated] = useState(false);
   const generatedTimer = useRef<number | null>(null);
-  // Dropping the spec label for one commit only. Reset after every commit so
-  // the next one gets the label again -- removing it is a per-commit choice,
-  // not an unlink.
-  const [specDropped, setSpecDropped] = useState(false);
 
   const headSha = log.data?.pages[0]?.commits[0]?.sha ?? null;
   const headDetail = useCommitDetail(repo?.id ?? null, amend ? headSha : null);
@@ -85,9 +79,6 @@ export function CommitMessageForm() {
   const stagedCount = status.data?.staged.length ?? 0;
   const currentBranch =
     branches.data?.local.find((b) => b.is_head)?.name ?? "HEAD";
-  const specLink = useSpecLink(repo?.id ?? null, currentBranch);
-  const specId = specLink.data?.change_id ?? null;
-  const specIdForCommit = specDropped ? null : specId;
   const pushPending = m.push.isPending;
   const canAmend = headSha != null;
   // Amend can change just the message, so it does not require staged files.
@@ -159,11 +150,10 @@ export function CommitMessageForm() {
   const doCommit = (mode: CommitButtonMode = commitButtonMode) => {
     if (!canCommit) return;
     m.createCommit.mutate(
-      { summary: msg, description: desc, amend, specId: specIdForCommit },
+      { summary: msg, description: desc, amend, specId: null },
       {
         onSuccess: async () => {
           if (repoId) clearCommitDraft(repoId);
-          setSpecDropped(false);
           if (mode !== "commit_push") return;
           // Amending a commit the remote already has leaves the branch
           // diverged (behind > 0), so a plain push would be rejected. Refetch
@@ -322,43 +312,6 @@ export function CommitMessageForm() {
           </div>
         )}
       </div>
-      {specId && (
-        <div className="mb-[9px] flex items-center gap-1.5 text-2xs text-sub">
-          <Tag size={11} className="shrink-0 text-accent-text" />
-          {specDropped ? (
-            <>
-              <span className="min-w-0 flex-1 truncate">
-                This commit won't be labeled{" "}
-                <span className="font-mono text-muted-foreground line-through">
-                  {specId}
-                </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setSpecDropped(false)}
-                className="shrink-0 rounded px-1 py-0.5 text-accent-text hover:bg-soft"
-              >
-                Put it back
-              </button>
-            </>
-          ) : (
-            <>
-              <span className="min-w-0 flex-1 truncate">
-                Labeled <span className="font-mono text-foreground">{specId}</span>
-                <span className="text-muted-foreground"> · added for you</span>
-              </span>
-              <TooltipButton
-                type="button"
-                onClick={() => setSpecDropped(true)}
-                tooltip="Leave the label off this one commit. The branch stays linked."
-                className="shrink-0 rounded px-1 py-0.5 hover:bg-soft hover:text-foreground"
-              >
-                Remove
-              </TooltipButton>
-            </>
-          )}
-        </div>
-      )}
       {(stagedCount > 0 || amend) && canAmend && (
         <label
           className={cn(
