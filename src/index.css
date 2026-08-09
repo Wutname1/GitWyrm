@@ -267,6 +267,14 @@
   }
 }
 
+/* Sync modal preview: the dashed arrow between the "now" and "after" graphs
+   drifts toward the result, hinting at the direction commits move. */
+@keyframes syncDrift {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
 /* GitWyrm logo easter egg: spring bounce on click, blast on rapid clicks */
 @keyframes wyrm-spring {
   0% {

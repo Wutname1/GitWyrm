@@ -1,6 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Check, Cloud, CloudUpload, GitMerge, Repeat, Repeat2, RotateCcw, Zap } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
+  Check,
+  Cloud,
+  CloudUpload,
+  GitMerge,
+  Info,
+  Repeat2,
+  RotateCcw,
+  ArrowUpDown,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -13,14 +26,25 @@ import { branchSync } from '@/lib/branchActions'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
-import { SyncTreePreview, type PreviewMode } from './SyncTreePreview'
+import { modeCopy, modesFor, type Divergence, type PreviewMode, type Tone } from '@/lib/syncPreview'
+import { SyncTreePreview } from './SyncTreePreview'
+
+/** Icon per mode, used on both the mode button and the confirm button. */
+const MODE_ICON: Record<PreviewMode, typeof GitMerge> = {
+  replace: CloudUpload,
+  blend: GitMerge,
+  stack: Repeat2,
+  reset: RotateCcw,
+  get: ArrowDown,
+  send: ArrowUp,
+}
 
 /** A ref chip styled to match the graph's pills. */
 function Chip({ name, tone }: { name: string; tone: 'source' | 'target' }) {
   return (
     <span
       className={cn(
-        'max-w-[150px] overflow-hidden text-ellipsis whitespace-nowrap rounded-[5px] border px-2 py-1 font-mono text-2xs font-semibold',
+        'block max-w-[150px] overflow-hidden text-ellipsis whitespace-nowrap rounded-[5px] border px-2 py-1 text-center font-mono text-2xs font-semibold',
         tone === 'target'
           ? 'border-primary bg-soft text-accent-text'
           : 'border-border bg-panel2 text-foreground'
@@ -31,64 +55,17 @@ function Chip({ name, tone }: { name: string; tone: 'source' | 'target' }) {
   )
 }
 
-/**
- * The concrete action a drop resolves to. The refs' actual relationship
- * decides - not which way the pills were dragged - so any drag offers whatever
- * would put the two in sync. Drag direction only picks the options for the
- * tracking-pair diverged case (dropping local onto remote reads as "make the
- * cloud look like me" -> offer the overwrite).
- *
- * Tracking pair (branch vs its own upstream): up-to-date / fast-forward /
- * push / diverged. Branch pair (anything else dropped on a local branch,
- * "bring the source's work into the target"): same-point / contains /
- * ff-branch / diverged-branches.
- */
-type Action =
-  | { kind: 'up-to-date' }
-  | { kind: 'fast-forward' }
-  | { kind: 'push' }
-  | { kind: 'diverged-incoming' }
-  | { kind: 'diverged-outgoing' }
-  | { kind: 'upstream-gone' }
-  | { kind: 'same-point' }
-  | { kind: 'contains' }
-  | { kind: 'ff-branch' }
-  | { kind: 'diverged-branches' }
-
-/**
- * Reads `sync`, not the raw counts. `SyncState::counts()` reports (0, 0) for a
- * branch whose upstream ref is gone, which is indistinguishable from a branch
- * that matches -- so the raw counts would call a stale branch "up to date".
- */
-function chooseTrackingAction(pair: Extract<DropPair, { kind: 'tracking' }>): Action {
-  const sync = pair.branch.sync
-  switch (sync.kind) {
-    case 'in_sync':
-      return { kind: 'up-to-date' }
-    case 'upstream_gone':
-      return { kind: 'upstream-gone' }
-    // A pair only resolves when the branch has an upstream configured, so a
-    // never-pushed branch cannot reach here -- it is filtered by
-    // resolveSyncPair. Kept explicit so the switch stays exhaustive.
-    case 'never_pushed':
-      return { kind: 'up-to-date' }
-    case 'diverged': {
-      const { ahead, behind } = sync
-      if (behind > 0 && ahead === 0) return { kind: 'fast-forward' }
-      if (ahead > 0 && behind === 0) return { kind: 'push' }
-      return pair.direction === 'outgoing'
-        ? { kind: 'diverged-outgoing' }
-        : { kind: 'diverged-incoming' }
-    }
-  }
+const TONE_TEXT: Record<Tone, string> = {
+  good: 'text-accent-text',
+  warn: 'text-modified',
+  bad: 'text-removed',
+  plain: 'text-sub',
 }
-
-/** relation = target vs source: ahead = target-only commits, behind = source-only. */
-function chooseBranchAction(relation: { ahead: number; behind: number }): Action {
-  if (relation.ahead === 0 && relation.behind === 0) return { kind: 'same-point' }
-  if (relation.behind === 0) return { kind: 'contains' }
-  if (relation.ahead === 0) return { kind: 'ff-branch' }
-  return { kind: 'diverged-branches' }
+const TONE_BOX: Record<Tone, string> = {
+  good: 'border-primary/25 bg-soft',
+  warn: 'border-modified/25 bg-modified/10',
+  bad: 'border-removed/25 bg-removed/10',
+  plain: 'border-border bg-panel2',
 }
 
 export function RemoteSyncModal() {
@@ -131,79 +108,47 @@ export function RemoteSyncModal() {
       unwrap(await commands.branchRelation(repo!.id, branchPair!.target.name, branchPair!.source.name)),
   })
 
-  const action: Action | null =
-    pair?.kind === 'tracking'
-      ? chooseTrackingAction(pair)
-      : branchPair && relation.data
-        ? chooseBranchAction(relation.data)
-        : null
+  // The one number pair everything below is derived from: commits only we have,
+  // commits only they have. A tracking pair reads it from `sync` (the raw
+  // ahead/behind on BranchInfo report 0/0 for non-diverged states); a branch
+  // pair gets it from branchRelation.
+  const divergence: Divergence | null = useMemo(() => {
+    if (pair?.kind === 'tracking') {
+      const s = branchSync(pair.branch)
+      if (pair.branch.sync.kind === 'upstream_gone') return null
+      return { ours: s.ahead, theirs: s.behind }
+    }
+    if (branchPair && relation.data) {
+      return { ours: relation.data.ahead, theirs: relation.data.behind }
+    }
+    return null
+  }, [pair, branchPair, relation.data])
 
-  // Names used in the copy. For a branch pair the target is the dragged branch
-  // (the one that moves); the source is where it was dropped (where commits
-  // come from). So the copy reads "target catches up to source".
-  const srcName = pair?.kind === 'tracking' ? pair.upstream : (branchPair?.source.name ?? '')
-  const tgtName = pair?.kind === 'tracking' ? pair.branch.name : (branchPair?.target.name ?? '')
+  const upstreamGone = pair?.kind === 'tracking' && pair.branch.sync.kind === 'upstream_gone'
+  const modes = divergence ? modesFor(divergence) : []
 
-  // Counts for the copy below. Only meaningful for a diverged tracking pair,
-  // which is the only state that reaches the messages using them.
-  const trackingSync =
-    pair?.kind === 'tracking' ? branchSync(pair.branch) : { ahead: 0, behind: 0 }
+  // Which option is selected. Defaults to the least destructive useful one and
+  // resets whenever the pair changes, so a fresh drag never inherits a
+  // destructive selection from the previous one.
+  const [mode, setMode] = useState<PreviewMode | null>(null)
+  useEffect(() => {
+    setMode(null)
+  }, [syncSource, syncTarget])
+  const active: PreviewMode | null = mode && modes.includes(mode) ? mode : (modes.at(-1) ?? null)
 
-  // Real two-sided divergence against the upstream. Both drag directions land
-  // here and get the identical option set; `outgoing` only picks the default.
-  const isDivergedTracking =
-    action?.kind === 'diverged-incoming' || action?.kind === 'diverged-outgoing'
-  const outgoing = action?.kind === 'diverged-outgoing'
+  // Names. For a tracking pair "ours" is the local branch; for a branch pair it
+  // is the branch that moves (the target), which is the one the copy is about.
+  const ourName = pair?.kind === 'tracking' ? pair.branch.name : (branchPair?.target.name ?? '')
+  const theirName = pair?.kind === 'tracking' ? pair.upstream : (branchPair?.source.name ?? '')
 
-  // Which option the preview is currently drawing. Hovering a button previews
-  // it; with nothing hovered the default action is shown, so opening the modal
-  // already answers "what happens if I just click the blue one".
-  const [hovered, setHovered] = useState<PreviewMode | null>(null)
-  const defaultMode: PreviewMode | null = isDivergedTracking
-    ? outgoing
-      ? 'blend'
-      : 'stack'
-    : action?.kind === 'fast-forward' || action?.kind === 'ff-branch'
-      ? 'catch-up'
-      : action?.kind === 'diverged-branches'
-        ? 'stack'
-        : null
-  const previewMode = hovered ?? defaultMode
-  // Every state where two refs genuinely differ gets a ladder. The "nothing to
-  // do" states (same commit, already contains) have no commits to draw, and
-  // upstream-gone has no second ref to compare against.
-  const showPreview =
-    isDivergedTracking ||
-    action?.kind === 'fast-forward' ||
-    action?.kind === 'ff-branch' ||
-    action?.kind === 'diverged-branches'
-  // Which two refs the ladder compares. A tracking pair is branch vs upstream;
-  // a branch pair is the moving branch (target) vs where it was dropped
-  // (source), matching the direction the copy already reads in.
-  const previewOurs = pair?.kind === 'tracking' ? pair.branch.name : (branchPair?.target.name ?? '')
-  const previewTheirs = pair?.kind === 'tracking' ? pair.upstream : (branchPair?.source.name ?? '')
-  const previewOn = (mode: PreviewMode) => ({
-    onMouseEnter: () => setHovered(mode),
-    onMouseLeave: () => setHovered(null),
-    onFocus: () => setHovered(mode),
-    onBlur: () => setHovered(null),
-  })
-
-  // The chips show where commits will actually flow, which may be the reverse
-  // of the drag: dropping origin/main onto main while you're ahead means a
-  // push, so the picture reads main -> origin/main.
-  const commitsGoUp = action?.kind === 'push' || action?.kind === 'diverged-outgoing'
-  const flowFrom = pair ? (commitsGoUp ? tgtName : srcName) : syncSource
-  const flowInto = pair ? (commitsGoUp ? srcName : tgtName) : syncTarget
-
-  // Moving a branch that isn't checked out switches to it first.
+  // Reset only re-points HEAD's branch, so it is offered only when the branch
+  // that would move IS the checked-out one.
   const headName = branches.data?.local.find((b) => b.is_head)?.name
+  const canReset = !!branchPair && branchPair.target.name === headName
   const switchesBranch = !!branchPair && branchPair.target.name !== headName
 
-  // Offer a direction swap only when flipping still resolves to a valid pairing:
+  // Swapping is only meaningful when flipping still resolves to a valid pair:
   // both refs must be local branches, so either can be the one that moves.
-  // Dragging main onto feature moves main by default; the swap covers the rarer
-  // "no, move feature instead" without re-dragging.
   const canSwap =
     !!branchPair &&
     !!branches.data?.local.some((b) => b.name === syncSource) &&
@@ -222,66 +167,72 @@ export function RemoteSyncModal() {
     closeModal()
     if (conflicts.length > 0) openConflict(conflicts[0])
   }
+  const done = { onSuccess: () => closeModal() }
 
-  const runPull = () => m.pull.mutate(undefined, { onSuccess: () => closeModal() })
-  const runPush = () => m.push.mutate(undefined, { onSuccess: () => closeModal() })
-  // Republishing a branch whose cloud copy was deleted: the branch need not be
-  // the checked-out one, so this goes through the branch-aware push, which also
-  // re-links the upstream.
+  /** Map the chosen mode onto the mutation that performs it. */
+  const run = () => {
+    if (!active) return
+    const tracking = pair?.kind === 'tracking' ? pair : null
+
+    switch (active) {
+      case 'get':
+        if (tracking) return void m.pull.mutate(undefined, done)
+        if (branchPair)
+          return void m.fastForwardBranch.mutate(
+            { branch: branchPair.target.name, target: branchPair.source.name },
+            done
+          )
+        return
+      case 'send':
+        if (tracking) return void m.push.mutate(undefined, done)
+        return
+      case 'replace':
+        return void m.pushForce.mutate(undefined, done)
+      case 'blend':
+        if (tracking) return void m.pull.mutate(undefined, done)
+        if (branchPair)
+          return void m.mergeDirectional.mutate(
+            { target: branchPair.target.name, source: branchPair.source.name },
+            { onSuccess: ({ result }) => onConflicts(result.conflicts) }
+          )
+        return
+      case 'stack':
+        if (tracking)
+          return void m.rebase.mutate(
+            { onto: tracking.upstream },
+            { onSuccess: ({ result }) => onConflicts(result.conflicts) }
+          )
+        if (branchPair)
+          return void m.rebase.mutate(
+            {
+              onto: branchPair.source.name,
+              branch: branchPair.target.name === headName ? undefined : branchPair.target.name,
+            },
+            { onSuccess: ({ result }) => onConflicts(result.conflicts) }
+          )
+        return
+      case 'reset':
+        if (!branchPair) return
+        closeModal()
+        return void resetToBranchPrompt(branchPair.source.name)
+    }
+  }
+
+  // Republishing a branch whose cloud copy was deleted. Not a divergence, so it
+  // sits outside the mode machinery entirely.
   const runRepublish = () => {
     if (pair?.kind !== 'tracking') return
-    m.pushBranch.mutate(pair.branch.name, { onSuccess: () => closeModal() })
+    m.pushBranch.mutate(pair.branch.name, done)
   }
-  const runForcePush = () => m.pushForce.mutate(undefined, { onSuccess: () => closeModal() })
-  const runRebaseOntoUpstream = () => {
-    if (pair?.kind !== 'tracking') return
-    m.rebase.mutate({ onto: pair.upstream }, { onSuccess: ({ result }) => onConflicts(result.conflicts) })
-  }
-  // A clean fast-forward: slide the target up to the source with no merge
-  // commit and, crucially, no branch switch even when the target isn't the one
-  // checked out. That's the win over merge-directional, which would move you
-  // onto the target first.
-  const runFastForwardTarget = () => {
-    if (!branchPair) return
-    m.fastForwardBranch.mutate(
-      { branch: branchPair.target.name, target: branchPair.source.name },
-      { onSuccess: () => closeModal() }
-    )
-  }
-  // Branch pair with real divergence: bring source into target via
-  // merge-directional (it switches to the target and blends). Only reached for
-  // the diverged case now; the clean fast-forward uses runFastForwardTarget.
-  const runMergeIntoTarget = () => {
-    if (!branchPair) return
-    m.mergeDirectional.mutate(
-      { target: branchPair.target.name, source: branchPair.source.name },
-      { onSuccess: ({ result }) => onConflicts(result.conflicts) }
-    )
-  }
-  const runRebaseTargetOntoSource = () => {
-    if (!branchPair) return
-    m.rebase.mutate(
-      {
-        onto: branchPair.source.name,
-        branch: branchPair.target.name === headName ? undefined : branchPair.target.name,
-      },
-      { onSuccess: ({ result }) => onConflicts(result.conflicts) }
-    )
-  }
-  // Reset makes the checked-out branch match the source exactly, dropping its
-  // own later commits. It only re-points HEAD's branch, so it is offered only
-  // when the target IS the checked-out branch. Routes through the shared
-  // hard-reset confirm (hosted in the sidebar) after closing this modal.
-  const canReset = !!branchPair && branchPair.target.name === headName
-  const runReset = () => {
-    if (!branchPair) return
-    closeModal()
-    resetToBranchPrompt(branchPair.source.name)
-  }
+
+  const copy = active && divergence ? modeCopy(active, divergence) : null
+  // Reset is an extra option on branch pairs, not one of the three the
+  // divergence implies, so it is appended rather than returned by modesFor.
+  const shown: PreviewMode[] = canReset && modes.length === 3 ? [...modes, 'reset'] : modes
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && closeModal()}>
-      <DialogContent className="gap-0 p-0 sm:max-w-md" aria-describedby={undefined}>
+      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-md" aria-describedby={undefined}>
         <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Cloud size={15} strokeWidth={1.9} />
@@ -289,18 +240,20 @@ export function RemoteSyncModal() {
           </DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-3 px-4 py-4">
-          <div className="flex items-center justify-center gap-3 rounded-md border border-border bg-panel2 px-3 py-3">
-            <div className="flex flex-col items-center gap-1">
-              <Chip name={flowFrom ?? ''} tone="source" />
-              <span className="text-2xs uppercase tracking-[.06em] text-muted-foreground">
+        <div className="grid min-w-0 gap-2.5 px-4 py-3.5">
+          {/* Direction. The chips say where commits end up, and Swap fixes a
+              drag that went the wrong way without re-dragging. */}
+          <div className="flex min-w-0 items-center gap-2.5 rounded-md border border-border bg-panel2 px-2.5 py-2">
+            <div className="min-w-0">
+              <Chip name={ourName || syncSource || ''} tone="source" />
+              <span className="mt-0.5 block text-center text-2xs uppercase tracking-[.06em] text-muted-foreground">
                 from
               </span>
             </div>
-            <ArrowRight size={16} className="mt-[-14px] flex-none text-sub" />
-            <div className="flex flex-col items-center gap-1">
-              <Chip name={flowInto ?? ''} tone="target" />
-              <span className="text-2xs uppercase tracking-[.06em] text-muted-foreground">
+            <ArrowRight size={15} className="-mt-3 flex-none text-sub" />
+            <div className="min-w-0">
+              <Chip name={theirName || syncTarget || ''} tone="target" />
+              <span className="mt-0.5 block text-center text-2xs uppercase tracking-[.06em] text-muted-foreground">
                 into
               </span>
             </div>
@@ -308,96 +261,138 @@ export function RemoteSyncModal() {
               <TooltipButton
                 onClick={swapSync}
                 tooltip="Swap direction"
-                className="ml-1 flex size-7 flex-none items-center justify-center rounded border border-border bg-panel text-sub hover:border-primary hover:text-accent-text"
+                className="-mt-3 ml-auto flex size-7 flex-none items-center justify-center rounded border border-border bg-panel text-sub hover:border-primary hover:text-accent-text"
               >
-                <Repeat size={13} />
+                <ArrowUpDown size={13} />
               </TooltipButton>
             )}
           </div>
 
-          <div className="min-h-[34px] rounded-md border border-border bg-panel2 px-3 py-2 text-2xs">
-            {!pair && (
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <AlertTriangle size={12} className="flex-none" />
-                These two can't be synced together.
-              </span>
-            )}
-            {branchPair && relation.isLoading && (
-              <span className="text-muted-foreground">Checking how these compare…</span>
-            )}
-            {branchPair && relation.isError && (
-              <span className="text-removed">{(relation.error as Error).message}</span>
-            )}
-            {action?.kind === 'up-to-date' && (
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <Check size={12} className="flex-none" /> These already match. Nothing to do.
-              </span>
-            )}
-            {pair?.kind === 'tracking' && action?.kind === 'fast-forward' && (
-              <span className="flex items-center gap-1.5 text-added">
-                <Zap size={12} className="flex-none" /> The cloud has {trackingSync.behind} newer
-                change{trackingSync.behind === 1 ? '' : 's'}. Get {tgtName} up to date - clean and
-                easy.
-              </span>
-            )}
-            {pair?.kind === 'tracking' && action?.kind === 'push' && (
-              <span className="flex items-center gap-1.5 text-accent-text">
-                <Cloud size={12} className="flex-none" /> You have {trackingSync.ahead} change
-                {trackingSync.ahead === 1 ? '' : 's'} the cloud doesn't. Send them up.
-              </span>
-            )}
-            {action?.kind === 'upstream-gone' && (
-              <span className="flex items-center gap-1.5 text-modified">
-                <AlertTriangle size={12} className="flex-none" /> The cloud copy of this branch is
-                gone. Send {tgtName} back up to recreate it.
-              </span>
-            )}
-            {isDivergedTracking && (
-              <span className="flex items-center gap-1.5 text-modified">
-                <AlertTriangle size={12} className="flex-none" /> You both made changes -{' '}
-                {trackingSync.ahead} of yours, {trackingSync.behind} of theirs. Stack yours on top
-                (tidy), blend them together, or replace what's in the cloud.
-              </span>
-            )}
-            {action?.kind === 'same-point' && (
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <Check size={12} className="flex-none" /> {tgtName} and {srcName} point at the same
-                work. Nothing to do.
-              </span>
-            )}
-            {action?.kind === 'contains' && (
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <Check size={12} className="flex-none" /> {tgtName} already has everything from{' '}
-                {srcName}. Nothing to do.
-              </span>
-            )}
-            {action?.kind === 'ff-branch' && relation.data && (
-              <span className="flex items-center gap-1.5 text-added">
-                <Zap size={12} className="flex-none" /> {srcName} has {relation.data.behind} change
-                {relation.data.behind === 1 ? '' : 's'} that {tgtName} doesn't. {tgtName} catches up
-                - clean and easy.
-              </span>
-            )}
-            {action?.kind === 'diverged-branches' && (
-              <span className="flex items-center gap-1.5 text-modified">
-                <AlertTriangle size={12} className="flex-none" /> Both branches have their own
-                changes. Stack {tgtName}'s work on top of {srcName} (tidy), or blend them together.
-              </span>
-            )}
-            {switchesBranch && action?.kind === 'diverged-branches' && (
-              <span className="mt-1 block text-2xs text-muted-foreground">
-                This switches you to {tgtName} first.
-              </span>
-            )}
-          </div>
+          {!pair && (
+            <div className="flex items-center gap-1.5 rounded-md border border-border bg-panel2 px-3 py-2 text-2xs text-muted-foreground">
+              <AlertTriangle size={12} className="flex-none" />
+              These two can't be synced together.
+            </div>
+          )}
 
-          {showPreview && previewOurs && previewTheirs && (
-            <SyncTreePreview
-              repoId={repo?.id ?? null}
-              ours={previewOurs}
-              theirs={previewTheirs}
-              mode={previewMode}
-            />
+          {branchPair && relation.isLoading && (
+            <div className="rounded-md border border-border bg-panel2 px-3 py-2 text-2xs text-muted-foreground">
+              Checking how these compare…
+            </div>
+          )}
+          {branchPair && relation.isError && (
+            <div className="rounded-md border border-border bg-panel2 px-3 py-2 text-2xs text-removed">
+              {(relation.error as Error).message}
+            </div>
+          )}
+
+          {upstreamGone && (
+            <div className="flex items-start gap-1.5 rounded-md border border-modified/25 bg-modified/10 px-3 py-2 text-2xs text-modified">
+              <AlertTriangle size={12} className="mt-px flex-none" />
+              <span>The cloud copy of this branch is gone. Send {ourName} back up to recreate it.</span>
+            </div>
+          )}
+
+          {divergence && modes.length === 0 && (
+            <div className="flex items-center gap-1.5 rounded-md border border-border bg-panel2 px-3 py-2 text-2xs text-muted-foreground">
+              <Check size={12} className="flex-none" />
+              These already match. Nothing to do.
+            </div>
+          )}
+
+          {/* Mode buttons: label, icon, and the consequence underneath. */}
+          {divergence && shown.length > 0 && (
+            <div
+              className="grid min-w-0 gap-1.5"
+              style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}
+            >
+              {shown.map((k) => {
+                const c = modeCopy(k, divergence)
+                const Icon = MODE_ICON[k]
+                const on = k === active
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setMode(k)}
+                    className={cn(
+                      'min-w-0 rounded-md border px-2 py-1.5 text-left transition-colors',
+                      on && c.danger && 'border-removed bg-removed/10',
+                      on && !c.danger && 'border-primary bg-soft',
+                      !on && 'border-border bg-panel2 hover:border-border/80 hover:bg-panel3'
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'flex min-w-0 items-center gap-1.5 text-2xs font-semibold',
+                        on && c.danger && 'text-removed',
+                        on && !c.danger && 'text-accent-text'
+                      )}
+                    >
+                      <Icon size={11} className="flex-none" />
+                      <span className="overflow-hidden text-ellipsis whitespace-nowrap">{c.label}</span>
+                    </span>
+                    <span
+                      className={cn(
+                        'mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-2xs',
+                        on && c.danger && 'text-removed/80',
+                        on && !c.danger && 'text-accent-text/75',
+                        !on && 'text-muted-foreground'
+                      )}
+                    >
+                      {c.sub}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {/* The picture: current shape on the left, result on the right. */}
+          {divergence && active && copy && (
+            <>
+              <div className="min-w-0 overflow-hidden rounded-md border border-border bg-panel2 p-2.5">
+                <SyncTreePreview divergence={divergence} mode={active} />
+                <div className="mt-2 flex min-w-0 items-center justify-between gap-2 border-t border-border pt-2">
+                  <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-sub">
+                    {copy.caption}
+                  </span>
+                  <span
+                    className={cn(
+                      'flex-none rounded-full border px-2 py-0.5 text-2xs',
+                      copy.pill.tone === 'bad'
+                        ? 'border-removed/30 bg-removed/10 text-removed'
+                        : 'border-primary/30 bg-soft text-accent-text'
+                    )}
+                  >
+                    {copy.pill.text}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                className={cn(
+                  'flex min-w-0 items-start gap-1.5 rounded-md border px-2.5 py-2 text-2xs leading-relaxed',
+                  TONE_BOX[copy.note.tone],
+                  TONE_TEXT[copy.note.tone]
+                )}
+              >
+                {copy.note.tone === 'good' ? (
+                  <Check size={12} className="mt-px flex-none" />
+                ) : copy.note.tone === 'plain' ? (
+                  <Info size={12} className="mt-px flex-none" />
+                ) : (
+                  <AlertTriangle size={12} className="mt-px flex-none" />
+                )}
+                <span className="min-w-0">{copy.note.text}</span>
+              </div>
+
+              {switchesBranch && (
+                <span className="text-2xs text-muted-foreground">
+                  This switches you to {ourName} first.
+                </span>
+              )}
+            </>
           )}
         </div>
 
@@ -405,114 +400,24 @@ export function RemoteSyncModal() {
           <Button variant="secondary" size="sm" onClick={closeModal}>
             Cancel
           </Button>
-
-          {action?.kind === 'fast-forward' && (
-            <Button size="sm" disabled={pending} onClick={runPull} {...previewOn('catch-up')}>
-              {pending ? 'Updating…' : 'Update'}
-            </Button>
-          )}
-          {action?.kind === 'push' && (
-            <Button size="sm" disabled={pending} onClick={runPush}>
-              {pending ? 'Sending…' : 'Send up'}
-            </Button>
-          )}
-          {action?.kind === 'upstream-gone' && (
+          {upstreamGone && (
             <Button size="sm" disabled={pending} onClick={runRepublish}>
               {pending ? 'Sending…' : 'Send up'}
             </Button>
           )}
-          {/* Both diverged directions offer the same three moves. Which pill
-              was dragged is a hint about intent, not a reason to hide the
-              others -- dragging local onto origin used to leave force-push as
-              the ONLY option, which is the most destructive of the three.
-              Force-push now always stays a secondary button and is never the
-              default; the drag direction only chooses between blend and stack
-              for the accent. */}
-          {isDivergedTracking && (
-            <>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={pending}
-                onClick={runForcePush}
-                {...previewOn('replace')}
-              >
-                <CloudUpload size={13} /> {pending ? 'Replacing…' : 'Replace cloud'}
-              </Button>
-              <Button
-                variant={outgoing ? 'default' : 'secondary'}
-                size="sm"
-                disabled={pending}
-                onClick={runPull}
-                {...previewOn('blend')}
-              >
-                <GitMerge size={13} /> Blend
-              </Button>
-              <Button
-                variant={outgoing ? 'secondary' : 'default'}
-                size="sm"
-                disabled={pending}
-                onClick={runRebaseOntoUpstream}
-                {...previewOn('stack')}
-              >
-                <Repeat2 size={13} /> {pending ? 'Stacking…' : 'Stack on top'}
-              </Button>
-            </>
-          )}
-          {action?.kind === 'ff-branch' && (
-            <>
-              {canReset && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={pending}
-                  onClick={runReset}
-                  {...previewOn('reset')}
-                >
-                  <RotateCcw size={13} /> Reset to match
-                </Button>
-              )}
-              <Button
-                size="sm"
-                disabled={pending}
-                onClick={runFastForwardTarget}
-                {...previewOn('catch-up')}
-              >
-                {pending ? 'Updating…' : `Update ${tgtName}`}
-              </Button>
-            </>
-          )}
-          {action?.kind === 'diverged-branches' && (
-            <>
-              {canReset && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={pending}
-                  onClick={runReset}
-                  {...previewOn('reset')}
-                >
-                  <RotateCcw size={13} /> Reset to match
-                </Button>
-              )}
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={pending}
-                onClick={runMergeIntoTarget}
-                {...previewOn('blend')}
-              >
-                <GitMerge size={13} /> Blend
-              </Button>
-              <Button
-                size="sm"
-                disabled={pending}
-                onClick={runRebaseTargetOntoSource}
-                {...previewOn('stack')}
-              >
-                <Repeat2 size={13} /> {pending ? 'Stacking…' : 'Stack on top'}
-              </Button>
-            </>
+          {copy && active && (
+            <Button
+              size="sm"
+              disabled={pending}
+              onClick={run}
+              className={cn(copy.danger && 'bg-removed text-background hover:bg-removed/90')}
+            >
+              {(() => {
+                const Icon = MODE_ICON[active]
+                return <Icon size={13} />
+              })()}
+              {pending ? 'Working…' : copy.action}
+            </Button>
           )}
         </div>
       </DialogContent>
