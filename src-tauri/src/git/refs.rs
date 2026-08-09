@@ -4,66 +4,6 @@ use git2::{BranchType, Oid, Repository};
 
 use crate::error::AppError;
 
-/// The commits that make two refs differ, as the sync preview draws them.
-///
-/// `ours` are commits only our side has, `theirs` only theirs -- the two arms
-/// of a divergence, which is what lets the UI show exactly which commits a
-/// force-push would discard or a rebase would replay. Newest first, matching
-/// the graph.
-#[derive(Debug, serde::Serialize, specta::Type)]
-pub struct DivergentCommits {
-  pub ours: Vec<PreviewCommit>,
-  pub theirs: Vec<PreviewCommit>,
-  /// True when either side was cut off by the limit.
-  pub truncated: bool,
-}
-
-/// A commit reduced to what the preview needs to draw one row.
-#[derive(Debug, serde::Serialize, specta::Type)]
-pub struct PreviewCommit {
-  pub sha: String,
-  pub summary: String,
-}
-
-/// Both arms of a divergence between two already-resolved commits.
-pub fn divergence_between(
-  repo: &Repository,
-  our_oid: Oid,
-  their_oid: Oid,
-  limit: usize,
-) -> Result<DivergentCommits, AppError> {
-  let (ours, ours_cut) = divergent_arm(repo, our_oid, their_oid, limit)?;
-  let (theirs, theirs_cut) = divergent_arm(repo, their_oid, our_oid, limit)?;
-  Ok(DivergentCommits { ours, theirs, truncated: ours_cut || theirs_cut })
-}
-
-/// Walk one arm of a divergence: commits reachable from `from` but not `to`.
-fn divergent_arm(
-  repo: &Repository,
-  from: Oid,
-  to: Oid,
-  limit: usize,
-) -> Result<(Vec<PreviewCommit>, bool), AppError> {
-  let mut walk = repo.revwalk()?;
-  walk.push(from)?;
-  walk.hide(to)?;
-  let mut out = Vec::new();
-  let mut truncated = false;
-  for oid in walk {
-    if out.len() == limit {
-      truncated = true;
-      break;
-    }
-    let oid = oid?;
-    let commit = repo.find_commit(oid)?;
-    out.push(PreviewCommit {
-      sha: format!("{:.7}", oid),
-      summary: commit.summary().unwrap_or("(no message)").to_string(),
-    });
-  }
-  Ok((out, truncated))
-}
-
 /// One branch as read from the odb, before it is projected into whichever shape
 /// a given command needs. Gathered by [`walk_branches`] so the `/HEAD` skip and
 /// the tip/time lookups live in exactly one place.

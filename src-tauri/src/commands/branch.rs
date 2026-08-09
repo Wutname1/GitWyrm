@@ -126,30 +126,6 @@ pub async fn branch_relation(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// The commits on each side of a divergence between two refs.
-///
-/// Backs the sync modal's tree preview, which needs the actual commits -- not
-/// just counts -- to show what each option would do to history.
-#[tauri::command]
-#[specta::specta]
-pub async fn divergent_commits(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  ours: String,
-  theirs: String,
-  limit: u32,
-) -> Result<crate::git::refs::DivergentCommits, AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    let our_oid = repo.revparse_single(&ours)?.peel_to_commit()?.id();
-    let their_oid = repo.revparse_single(&theirs)?.peel_to_commit()?.id();
-    crate::git::refs::divergence_between(&repo, our_oid, their_oid, limit as usize)
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
-}
-
 /// Guidance shown when a branch switch is blocked by an un-stashable submodule
 /// move that also collides with the target branch.
 const SUBMODULE_SWITCH_HINT: &str = "a submodule points to a different commit than this branch expects. Commit the submodule change or reset the submodule to its recorded commit, then switch.";
