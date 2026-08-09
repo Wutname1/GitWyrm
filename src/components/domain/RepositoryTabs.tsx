@@ -16,6 +16,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  FolderOpen,
   GitBranch,
   ImageIcon,
   Layers3,
@@ -33,6 +34,7 @@ import { toast } from "sonner";
 import type { RepoInfo } from "@/lib/bindings";
 import { commands } from "@/lib/bindings";
 import { cn } from "@/lib/utils";
+import { EditorGlyph, editorLabel } from "@/lib/editors";
 import { normalizePath } from "@/lib/paths";
 import {
   isSubmoduleGroup,
@@ -730,6 +732,35 @@ function TabPushItem({ repo, name }: { repo: RepoInfo; name: string }) {
   );
 }
 
+/**
+ * Hand this tab's repository to Explorer or to the editor picked in Settings.
+ * Both commands take a repository id, so the tab does not have to become active
+ * first -- right-clicking a background tab opens that repository, not this one.
+ */
+function TabExternalItems({ repo }: { repo: RepoInfo }) {
+  const m = useGitMutations(repo.id);
+  const defaultEditor = useWorkspaceStore((state) => state.defaultEditor);
+
+  return (
+    <>
+      <PendingMenuItem
+        icon={<FolderOpen size={13} strokeWidth={2} />}
+        label="Open in Explorer"
+        pendingLabel="Opening…"
+        pending={m.revealInFileManager.isPending}
+        onRun={() => m.revealInFileManager.mutate()}
+      />
+      <PendingMenuItem
+        icon={<EditorGlyph kind={defaultEditor} size={13} className="flex-none" />}
+        label={`Open in ${editorLabel(defaultEditor)}`}
+        pendingLabel="Opening…"
+        pending={m.openInEditor.isPending}
+        onRun={() => m.openInEditor.mutate(defaultEditor)}
+      />
+    </>
+  );
+}
+
 export function RepositoryTabs({
   orientation,
 }: {
@@ -1387,6 +1418,8 @@ export function RepositoryTabs({
               <Settings2 size={13} strokeWidth={2} />
               Repository settings
             </ContextMenuItem>
+            <ContextMenuSeparator />
+            <TabExternalItems repo={repo} />
             <ContextMenuSeparator />
             <ContextMenuItem
               onSelect={() =>
