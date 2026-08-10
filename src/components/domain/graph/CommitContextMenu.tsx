@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from 'react'
 import {
   Copy,
+  CornerLeftUp,
   ExternalLink,
   GitBranchPlus,
   Info,
@@ -59,6 +60,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
   const m = useGitMutations(repo?.id ?? null)
   const openNewTag = useUiStore((s) => s.openNewTag)
   const openNewBranch = useUiStore((s) => s.openNewBranch)
+  const revealShaInGraph = useUiStore((s) => s.revealShaInGraph)
   const [pending, setPending] = useState<Pending>(null)
 
   // Only fetched when the reword dialog opens, so most right-clicks cost nothing.
@@ -125,6 +127,32 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
             <Info />
             View details
           </ContextMenuItem>
+          {/* A merge has more than one parent, so each is offered by sha. The
+              first parent is the branch the merge was made on, which is the one
+              people usually mean by "the previous commit". */}
+          {commit.parent_shas.length === 1 ? (
+            <ContextMenuItem onSelect={() => revealShaInGraph(commit.parent_shas[0])}>
+              <CornerLeftUp />
+              Go to previous commit
+            </ContextMenuItem>
+          ) : commit.parent_shas.length > 1 ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <CornerLeftUp />
+                Go to previous commit
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent>
+                {commit.parent_shas.map((sha, i) => (
+                  <ContextMenuItem key={sha} onSelect={() => revealShaInGraph(sha)}>
+                    <span className="font-mono">{sha.slice(0, 7)}</span>
+                    <span className="text-muted-foreground">
+                      {i === 0 ? 'merged into' : 'merged in'}
+                    </span>
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
           <ContextMenuItem onSelect={() => setPending({ kind: 'checkout' })}>
             <LogIn />
             Check out this commit

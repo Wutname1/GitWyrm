@@ -21,6 +21,7 @@ function initials(name: string): string {
 
 export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
   const selectCommit = useUiStore((s) => s.selectCommit)
+  const revealShaInGraph = useUiStore((s) => s.revealShaInGraph)
   const openDiff = useUiStore((s) => s.openDiff)
   const diffRequest = useUiStore((s) => s.diffRequest)
   const detail = useCommitDetail(repoId, sha)
@@ -52,9 +53,6 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
 
   const d = detail.data
   const color = authorColor(d.author_name)
-  const parents = d.parent_shas.length
-    ? d.parent_shas.map((p) => shortSha(p)).join(', ')
-    : '(root)'
   const adds = d.files.reduce((a, f) => a + f.additions, 0)
   const dels = d.files.reduce((a, f) => a + f.deletions, 0)
 
@@ -88,8 +86,28 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
             >
               <span className="cursor-default hover:text-foreground">{d.author_name}</span>
             </AuthorHoverCard>{' '}
-            committed · {formatCommitTime(d.time)} · parents{' '}
-            <span className="font-mono">{parents}</span>
+            committed · {formatCommitTime(d.time)} ·{' '}
+            {d.parent_shas.length === 0 ? (
+              <>no parent (first commit)</>
+            ) : (
+              <>
+                {d.parent_shas.length > 1 ? 'parents' : 'parent'}{' '}
+                {d.parent_shas.map((p, i) => (
+                  <span key={p}>
+                    {i > 0 && ', '}
+                    <TooltipHint label={`Go to parent commit ${shortSha(p)}`}>
+                      <button
+                        type="button"
+                        onClick={() => revealShaInGraph(p)}
+                        className="rounded-sm font-mono text-accent-text underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-[var(--gw-accent)]"
+                      >
+                        {shortSha(p)}
+                      </button>
+                    </TooltipHint>
+                  </span>
+                ))}
+              </>
+            )}
           </div>
         </div>
         <span className="rounded-[5px] border border-border bg-panel2 px-2 py-[3px] font-mono text-2xs text-sub">

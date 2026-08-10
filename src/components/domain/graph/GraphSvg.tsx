@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { CommitEntry, StashInfo } from '@/lib/bindings'
 import { laneColor } from '@/lib/gitDisplay'
+import { laneGeometry } from '@/lib/graphLanes'
 import { useUiStore } from '@/stores/uiStore'
-
-const X0 = 14
-const LANE_WIDTH = 20
 
 /**
  * Route an edge like a rail line: change lanes close to an endpoint, then run
@@ -73,6 +71,12 @@ interface GraphSvgProps {
   width: number
   /** Height shared by the virtualized rows and graph geometry. */
   rowHeight: number
+  /**
+   * More history is still to load. A parent that is not among the loaded rows
+   * is then simply further down the walk, so its lane is drawn continuing off
+   * the bottom rather than stopping dead.
+   */
+  hasMorePages?: boolean
 }
 
 /**
@@ -83,7 +87,7 @@ interface GraphSvgProps {
  * node in its base commit's lane with a dashed edge down to that commit, so a
  * stash reads as saved work attached to this point in history, not a commit.
  */
-export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHeight }: GraphSvgProps) {
+export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHeight, hasMorePages = false }: GraphSvgProps) {
   const rowCenterY = (row: number) => row * rowHeight + rowHeight / 2
 
   // Row index and lane of every loaded commit, keyed by sha.
@@ -181,26 +185,69 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
     setStashTracks(Object.fromEntries(stashTrackBySha))
   }, [stashTrackBySha, setStashTracks])
 
-  // Keep every lane inside the resized graph cell. At the default and wider
-  // sizes lanes retain their familiar 20px rhythm; narrowing the column
-  // compresses only the horizontal spacing, never the row or edge topology.
-  const maxTrack = useMemo(() => {
-    let max = pendingTrack ?? 0
-    for (const row of rows) {
-      if (row.kind !== 'commit') continue
-      max = Math.max(max, row.commit.lane, ...row.commit.parent_lanes)
-    }
-    for (const track of stashTrackBySha.values()) max = Math.max(max, track)
-    return max
-  }, [rows, pendingTrack, stashTrackBySha])
-  const laneSpacing = maxTrack === 0
-    ? LANE_WIDTH
-    : Math.min(LANE_WIDTH, (width - X0 * 2) / maxTrack)
-  const laneX = useCallback((lane: number) => X0 + lane * laneSpacing, [laneSpacing])
+  // Lanes keep a fixed width so a branch sits in the same column no matter how
+  // wide the graph is, and widening the column reveals more lanes instead of
+  // re-spacing the ones already drawn. Lanes that do not fit are folded onto
+  // the last visible column rather than compressing every lane to fit; that
+  // column then reads as "and more branches out here", which stays legible
+  // where 20-odd hairline rails would not.
+  const { laneX, isOverflow } = useMemo(() => laneGeometry(width), [width])
+
+  // Rows occupied by each lane, ascending, so a lane running off the loaded
+  // region can stop before reaching a commit that is not its parent. Built once
+  // per row set rather than rescanned for every unresolved edge.
+  const rowsByLane = useMemo(() => {
+    const byLane = new Map<number, number[]>()
+    rows.forEach((r, i) => {
+      if (r.kind !== 'commit') return
+      const list = byLane.get(r.commit.lane)
+      if (list) list.push(i)
+      else byLane.set(r.commit.lane, [i])
+    })
+    return byLane
+  }, [rows])
+
+  /**
+   * Y to run a lane down to when its parent has not been paged in.
+   *
+   * Reaches the next commit occupying the same lane, because a lane is one line
+   * of history: that commit is where this line continues, even though the
+   * immediate parent is on a page that has not loaded. Stopping short of it
+   * instead left a gap in the middle of a lane with nothing to fill it.
+   *
+   * With no later commit in the lane, the line runs off the loaded rows -- the
+   * branch really does carry on below.
+   */
+  const laneContinuesToY = (lane: number, fromRow: number) => {
+    const next = rowsByLane.get(lane)?.find((row) => row > fromRow)
+    if (next == null) return rows.length * rowHeight
+    return rowCenterY(next)
+  }
+
+  // How far above the window a commit can sit and still have an edge reaching
+  // into it. An edge is drawn when its CHILD is iterated, so a child further
+  // above than this leaves a gap where its rail should cross the viewport.
+  // Covers the long off-page lanes, which are the ones that span most rows.
+  const longestEdgeSpan = useMemo(() => {
+    let longest = 0
+    rows.forEach((r, i) => {
+      if (r.kind !== 'commit') return
+      for (const parentSha of r.commit.parent_shas) {
+        const parentRow = commitRowBySha.get(parentSha)?.row
+        if (parentRow != null && parentRow - i > longest) longest = parentRow - i
+      }
+    })
+    return longest
+  }, [rows, commitRowBySha])
 
   const edges = useMemo(() => {
     const out: { d: string; color: string; fade?: boolean; dashed?: boolean }[] = []
-    const lo = Math.max(0, startIndex - 30)
+    // Reach back far enough to catch every edge whose child is above the
+    // viewport but whose rail still crosses it. Without this, a long edge
+    // simply vanishes and leaves a gap in the middle of an otherwise solid
+    // lane. Bounded by the longest edge actually present, so a graph of short
+    // edges still only scans a little beyond the window.
+    const lo = Math.max(0, startIndex - Math.max(30, longestEdgeSpan))
     const hi = Math.min(rows.length - 1, endIndex + 30)
     for (let i = lo; i <= hi; i++) {
       const r = rows[i]
@@ -212,26 +259,82 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
         const y1 = rowCenterY(i)
         const parentLane = c.parent_lanes[pi] ?? c.lane
         if (parent == null) {
-          // Parent not loaded yet: draw a stub downward.
+          // The parent is real but has not been paged in. Parent lookup only
+          // covers loaded rows, and a branch tip near the top of the graph can
+          // easily have its parent hundreds of rows -- several pages -- below,
+          // so this is common rather than exceptional.
+          //
+          // The lane genuinely continues down there, so it is drawn running to
+          // the end of the loaded rows: "this branch carries on below" is true,
+          // and it reads as a lane rather than a severed stub.
+          //
+          // It follows the lane the BACKEND reserved for this parent, which for
+          // a merge's second parent is a lane of its own, not the merge's. That
+          // lane is already holding a column open, so drawing nothing there left
+          // a reserved-but-empty gap -- visible as a run of merge commits with
+          // space beside them and no line in it.
+          //
+          // With everything loaded, an unresolved parent instead means the
+          // commit is outside the walk (a graft, or a ref excluded from it),
+          // and there is nothing below to point at.
+          //
+          // The run reaches the next commit in that lane, which is where the
+          // line continues once the missing page arrives. It is drawn solid:
+          // the lane really is continuous there, and fading it made a real
+          // connection look like a loading artifact.
+          if (hasMorePages) {
+            const xParent = laneX(parentLane)
+            // Step across into the parent's lane first when it differs, so the
+            // line leaves the merge node instead of appearing beside it.
+            const d =
+              parentLane === c.lane
+                ? `M ${x1} ${y1} L ${x1} ${laneContinuesToY(c.lane, i)}`
+                : railPath(x1, y1, xParent, xParent, laneContinuesToY(parentLane, i), rowHeight)
+            out.push({ d, color: laneColor(parentLane) })
+          }
+          return
+        }
+        // Every overflowing lane clamps to the same x, so a rail drawn into
+        // that column would visually terminate at whatever unrelated commit
+        // happens to sit there -- a line that appears to connect two commits
+        // that have no relationship. Only the endpoint actually inside the
+        // column is drawn, as a short stub reading outward.
+        if (isOverflow(parent.lane) !== isOverflow(c.lane)) {
+          const inside = isOverflow(c.lane) ? parent : { row: i, lane: c.lane }
+          const xInside = laneX(inside.lane)
+          const yInside = rowCenterY(inside.row)
+          // Vertical, in the drawable end's own lane. A horizontal reach toward
+          // the overflow column would point at a column shared by many
+          // branches, which is exactly the false connection being avoided.
+          const towardParent = isOverflow(c.lane) ? -1 : 1
           out.push({
-            d: `M ${x1} ${y1} L ${laneX(parentLane)} ${y1 + rowHeight}`,
-            color: laneColor(parentLane),
+            d: `M ${xInside} ${yInside} L ${xInside} ${yInside + towardParent * rowHeight * 0.6}`,
+            color: laneColor(inside.lane),
             fade: true,
           })
           return
         }
-        const xTrack = laneX(parentLane)
+        // Both ends out in the overflow column: the whole edge lives somewhere
+        // we cannot draw truthfully, so nothing is drawn rather than a rail
+        // between two commits that only share a clamped column.
+        if (isOverflow(c.lane)) return
+
+        // Both endpoints are visible, but the track the edge would travel down
+        // is clamped. Route it along the parent's own lane instead, so the rail
+        // never detours through the shared overflow column.
+        const track = isOverflow(parentLane) ? parent.lane : parentLane
+        const xTrack = laneX(track)
         const x2 = laneX(parent.lane)
         const y2 = rowCenterY(parent.row)
         out.push({
           d: railPath(x1, y1, xTrack, x2, y2, rowHeight),
-          color: laneColor(parentLane),
+          color: laneColor(track),
         })
       })
     }
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, commitRowBySha, startIndex, endIndex, rowHeight, laneX])
+  }, [rows, commitRowBySha, startIndex, endIndex, rowHeight, laneX, isOverflow, hasMorePages, longestEdgeSpan])
 
   return (
     <svg
@@ -354,15 +457,20 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
         const c = r.commit
         const sel = selectedSha === c.sha
         const col = laneColor(c.lane)
+        // Commits whose lane folded into the overflow column are drawn smaller
+        // and hollow, so a stack of them reads as "more branches out here"
+        // rather than as several unrelated branches sharing one column.
+        const overflow = isOverflow(c.lane)
         return (
           <circle
             key={c.sha}
             cx={laneX(c.lane)}
             cy={rowCenterY(i)}
-            r={sel ? 7.5 : 6}
-            fill={c.is_merge ? 'var(--gw-bg)' : col}
-            stroke={sel ? 'var(--gw-text)' : c.is_merge ? col : 'var(--gw-bg)'}
-            strokeWidth={sel ? 2.5 : c.is_merge ? 2.5 : 2}
+            r={sel ? 7.5 : overflow ? 3.5 : 6}
+            fill={c.is_merge || overflow ? 'var(--gw-bg)' : col}
+            stroke={sel ? 'var(--gw-text)' : c.is_merge || overflow ? col : 'var(--gw-bg)'}
+            strokeWidth={sel ? 2.5 : c.is_merge ? 2.5 : overflow ? 1.5 : 2}
+            opacity={overflow && !sel ? 0.7 : 1}
           />
         )
       })}

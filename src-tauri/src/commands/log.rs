@@ -5,26 +5,56 @@ use tauri::State;
 
 use crate::error::AppError;
 use crate::git::graph::{initials, LaneState};
-use crate::git::refs;
 use crate::git::rename_detect;
 use crate::git::trailers;
 use crate::git::types::{CommitEntry, CommitStats, LogPage, RefInfo, RefKind};
 use crate::state::{OpenRepo, RepoManager};
 
+/// Which commits carry which branch/tag labels.
+///
+/// Deliberately does NOT go through [`refs::walk_branches`]. That helper also
+/// resolves each ref's tip commit for its timestamp and looks up its upstream
+/// from config -- two extra operations per ref that the graph never displays.
+/// On a repository with over a thousand refs that was tens of milliseconds
+/// repeated on every page fetch, which is felt as a stutter while scrolling.
+/// Reading the reference names and targets directly is all a row label needs.
 fn collect_refs(repo: &git2::Repository) -> HashMap<Oid, Vec<RefInfo>> {
   let mut map: HashMap<Oid, Vec<RefInfo>> = HashMap::new();
 
-  for rec in refs::walk_branches(repo).unwrap_or_default() {
-    let Some(oid) = rec.tip else { continue };
-    let ref_type = match (rec.is_remote, rec.is_head) {
-      (true, _) => RefKind::Remote,
-      (false, true) => RefKind::Head,
-      (false, false) => RefKind::Branch,
-    };
-    map.entry(oid).or_default().push(RefInfo {
-      name: rec.name,
-      ref_type,
-    });
+  let head_name = repo
+    .head()
+    .ok()
+    .filter(|head| head.is_branch())
+    .and_then(|head| head.shorthand().map(str::to_string));
+
+  if let Ok(references) = repo.references() {
+    for reference in references.flatten() {
+      let Some(name) = reference.name() else { continue };
+      let Some(oid) = reference.target() else { continue };
+
+      let (short, ref_type) = if let Some(short) = name.strip_prefix("refs/heads/") {
+        let kind = if Some(short) == head_name.as_deref() {
+          RefKind::Head
+        } else {
+          RefKind::Branch
+        };
+        (short, kind)
+      } else if let Some(short) = name.strip_prefix("refs/remotes/") {
+        // `origin/HEAD` is a symbolic pointer at the default branch, not a
+        // branch of its own; showing it would double-label that commit.
+        if short.ends_with("/HEAD") {
+          continue;
+        }
+        (short, RefKind::Remote)
+      } else {
+        continue;
+      };
+
+      map.entry(oid).or_default().push(RefInfo {
+        name: short.to_string(),
+        ref_type,
+      });
+    }
   }
   let _ = repo.tag_foreach(|oid, name| {
     let name = String::from_utf8_lossy(name);
@@ -233,8 +263,18 @@ pub async fn get_log(
     }
 
     let refs = collect_refs(&repo);
+    // Memoized on HEAD: this comparison runs over every ref and dominates the
+    // cost of a page, but its answer is identical for every page of the same
+    // scroll. See `OpenRepo::primary_lane`.
     let mut lanes = head_oid
-      .map(|head| LaneState::with_primary(primary_lane_oid(&repo, head)))
+      .map(|head| {
+        let primary = open.cached_primary_lane(head).unwrap_or_else(|| {
+          let computed = primary_lane_oid(&repo, head);
+          open.store_primary_lane(head, computed);
+          computed
+        });
+        LaneState::with_primary(primary)
+      })
       .unwrap_or_default();
     let mut commits = Vec::with_capacity(limit as usize);
     let mut has_more = false;
@@ -467,6 +507,100 @@ mod tests {
       primary_lane_oid(&repo, base),
       newer,
       "the straight line through HEAD must keep lane zero"
+    );
+  }
+
+  /// Row labels come from the raw references rather than the branch helper, so
+  /// the classification each ref gets is pinned down here: the checked-out
+  /// branch is `Head`, other locals are `Branch`, remotes are `Remote`, and the
+  /// symbolic `origin/HEAD` pointer is not a label at all.
+  #[test]
+  fn collect_refs_labels_head_branches_and_remotes() {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    let tip = commit_file(&repo, "a.txt", "a", "base");
+
+    repo
+      .reference("refs/heads/side", tip, true, "side branch")
+      .expect("side ref");
+    repo
+      .reference("refs/remotes/origin/master", tip, true, "remote ref")
+      .expect("remote ref");
+    // Symbolic default-branch pointer; must not become its own label.
+    repo
+      .reference_symbolic(
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/master",
+        true,
+        "remote head",
+      )
+      .expect("remote head");
+
+    let map = collect_refs(&repo);
+    let labels = map.get(&tip).expect("labels on the tip");
+
+    let kind_of = |name: &str| {
+      labels
+        .iter()
+        .find(|r| r.name == name)
+        .map(|r| r.ref_type)
+        .unwrap_or_else(|| panic!("missing label {name}"))
+    };
+
+    assert!(matches!(kind_of("master"), RefKind::Head), "checked-out branch");
+    assert!(matches!(kind_of("side"), RefKind::Branch), "other local");
+    assert!(matches!(kind_of("origin/master"), RefKind::Remote), "remote");
+    assert!(
+      !labels.iter().any(|r| r.name.ends_with("/HEAD")),
+      "origin/HEAD is a pointer at another ref, not a label of its own"
+    );
+  }
+
+  /// With HEAD detached no branch is checked out, so nothing may claim `Head`.
+  #[test]
+  fn collect_refs_marks_no_head_when_detached() {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    let tip = commit_file(&repo, "a.txt", "a", "base");
+    repo.set_head_detached(tip).expect("detach");
+
+    let map = collect_refs(&repo);
+    let labels = map.get(&tip).expect("labels on the tip");
+    assert!(
+      !labels.iter().any(|r| matches!(r.ref_type, RefKind::Head)),
+      "a detached HEAD is on no branch, so no branch is the head branch"
+    );
+  }
+
+  /// The cache must be a pure speedup: same answer as computing it fresh, and
+  /// keyed tightly enough that moving HEAD does not serve a stale lane.
+  #[test]
+  fn primary_lane_cache_matches_a_fresh_computation_and_follows_head() {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    let base = commit_file(&repo, "a.txt", "a", "base");
+    let newer = commit_file(&repo, "b.txt", "b", "newer");
+    repo
+      .reference("refs/remotes/origin/master", newer, true, "test remote")
+      .expect("remote ref");
+
+    let open = OpenRepo::for_test(repo);
+    let repo = open.repo.lock().unwrap();
+
+    // Cold: nothing cached for this HEAD yet.
+    assert!(open.cached_primary_lane(newer).is_none(), "starts empty");
+    let fresh = primary_lane_oid(&repo, newer);
+    open.store_primary_lane(newer, fresh);
+    assert_eq!(
+      open.cached_primary_lane(newer),
+      Some(fresh),
+      "a stored entry must be served back for the same HEAD"
+    );
+
+    // A different HEAD must miss rather than reuse the previous answer.
+    assert!(
+      open.cached_primary_lane(base).is_none(),
+      "moving HEAD must not serve the lane computed for the old HEAD"
     );
   }
 

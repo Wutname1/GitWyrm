@@ -37,7 +37,13 @@ interface CommitRowProps {
    */
   stats?: CommitStats | null;
   selected: boolean;
-  onSelect: (mods: SelectModifiers) => void;
+  /**
+   * Selection handler shared by every row, called with this row's own sha.
+   * Taking a stable function plus the sha -- rather than a per-row closure --
+   * is what lets `memo` hold while scrolling; a fresh closure per render would
+   * re-render every visible row on every scroll tick.
+   */
+  onSelectCommit: (sha: string, mods: SelectModifiers) => void;
   /**
    * All selected commits (graph order, newest first) when this row is part of
    * a multi-selection of 2+ commits; null otherwise. Switches the right-click
@@ -47,20 +53,32 @@ interface CommitRowProps {
   rowHeight: number;
   /** Faded out because a commit search is active and this row doesn't match. */
   dimmed?: boolean;
-  style?: React.CSSProperties;
+  /**
+   * Virtualizer offset. Passed as a number rather than a style object so the
+   * prop compares by value; a new object each render would defeat `memo`.
+   */
+  offsetY: number;
   /** Marks this row as a tutorial spotlight target. */
   tutorialId?: string;
 }
+
+/** Shared by every row; only the translate differs, applied per row. */
+const ROW_BASE_STYLE: React.CSSProperties = {
+  position: "absolute",
+  top: 0,
+  left: 0,
+  right: 0,
+};
 
 export const CommitRow = memo(function CommitRow({
   commit,
   stats,
   selected,
-  onSelect,
+  onSelectCommit,
   multiSelection,
   rowHeight,
   dimmed,
-  style,
+  offsetY,
   tutorialId,
 }: CommitRowProps) {
   const order = useWorkspaceStore((s) => s.columnOrder);
@@ -194,7 +212,9 @@ export const CommitRow = memo(function CommitRow({
   const row = (
       <div
         data-tutorial-id={tutorialId}
-        onClick={(e) => onSelect({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
+        onClick={(e) =>
+          onSelectCommit(commit.sha, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })
+        }
         // Right-clicking acts on the row under the cursor, so focus has to move
         // there or the menu describes one commit while the drawer shows another.
         // Radix opens on pointerdown, so this runs first and the menu is built
@@ -204,15 +224,21 @@ export const CommitRow = memo(function CommitRow({
         // multi-selection: every row in one is `selected`, so right-clicking a
         // group keeps it intact instead of collapsing to the clicked commit.
         onContextMenu={() => {
-          if (!selected) onSelect({ shift: false, ctrl: false });
+          if (!selected) onSelectCommit(commit.sha, { shift: false, ctrl: false });
         }}
         style={{
+          ...ROW_BASE_STYLE,
           height: rowHeight,
           gridTemplateColumns: gridTemplate(order, effectiveHidden, widths),
-          ...style,
+          transform: `translateY(${offsetY}px)`,
         }}
         className={cn(
           "grid cursor-pointer items-center pr-1 transition-opacity",
+          // Alternating tint. The graph column can sit far from the message, so
+          // a banded background keeps the eye on one row across the gap. Listed
+          // before the selected/hover rules so those still win.
+          "odd:bg-[color-mix(in_srgb,var(--gw-text)_3%,transparent)]",
+          "hover:bg-[color-mix(in_srgb,var(--gw-text)_6%,transparent)]",
           selected && "bg-soft shadow-[inset_2px_0_0_var(--gw-accent)]",
           dimmed && "opacity-30",
         )}
@@ -231,7 +257,7 @@ export const CommitRow = memo(function CommitRow({
   return (
     <CommitContextMenu
       commit={commit}
-      onViewDetails={() => onSelect({ shift: false, ctrl: false })}
+      onViewDetails={() => onSelectCommit(commit.sha, { shift: false, ctrl: false })}
     >
       {row}
     </CommitContextMenu>

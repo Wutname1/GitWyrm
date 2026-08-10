@@ -188,7 +188,15 @@ export function GraphView() {
     () => (selectedShas.length > 1 ? commits.filter((c) => selectedSet.has(c.sha)) : null),
     [selectedShas, commits, selectedSet]
   )
-  const handleCommitClick = (sha: string, mods: { shift: boolean; ctrl: boolean }) => {
+  // Click handling reads the current commit list and selection, but its
+  // identity must never change: it is passed to every visible row, and a new
+  // function each render would re-render all of them on every scroll tick.
+  // The ref carries the latest values into a callback that is created once.
+  const clickState = useRef({ commits, selectedShas, selectedSha, selectedSet })
+  clickState.current = { commits, selectedShas, selectedSha, selectedSet }
+
+  const handleCommitClick = useCallback((sha: string, mods: { shift: boolean; ctrl: boolean }) => {
+    const { commits, selectedShas, selectedSha, selectedSet } = clickState.current
     const order = commits.map((c) => c.sha)
     if (mods.shift && selectedSha) {
       const a = order.indexOf(selectedSha)
@@ -218,7 +226,7 @@ export function GraphView() {
     }
     // Plain click: select just this commit, or clear when it was the only one.
     selectCommit(selectedShas.length === 1 && selectedSha === sha ? null : sha)
-  }
+  }, [setSelection, selectCommit])
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -429,6 +437,7 @@ export function GraphView() {
                   endIndex={endIndex}
                   width={graphWidth}
                   rowHeight={rowHeight}
+                  hasMorePages={hasMorePages}
                 />
               </div>
             </div>
@@ -483,11 +492,14 @@ export function GraphView() {
                 commit={commit}
                 stats={lazyStats.get(commit.sha) ?? null}
                 selected={selected}
-                onSelect={(mods) => handleCommitClick(commit.sha, mods)}
+                // The stable handler plus the row's own sha, rather than a
+                // closure built here: a new function per render would change
+                // this prop every scroll tick and defeat CommitRow's memo.
+                onSelectCommit={handleCommitClick}
                 multiSelection={selected ? multiSelection : null}
                 rowHeight={rowHeight}
                 dimmed={matchRows != null && !matchRows.has(vi.index)}
-                style={rowStyle}
+                offsetY={vi.start}
               />
             )
           })}

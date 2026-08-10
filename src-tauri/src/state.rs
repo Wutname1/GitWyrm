@@ -33,6 +33,22 @@ pub struct OpenRepo {
   /// The in-flight tab-badge count read. Separate slot from `status_read` so a
   /// cheap count never waits on a full status scan that is already running.
   pub counts_read: Mutex<Option<Arc<SharedRead<crate::git::types::RepoCounts, String>>>>,
+  /// Memoized "which commit owns lane zero", keyed by the HEAD it was computed
+  /// for.
+  ///
+  /// Choosing it compares every local and remote ref against HEAD with
+  /// `graph_ahead_behind`, which is a merge-base plus a revision count per ref
+  /// -- on a repository with hundreds of refs that is the single most expensive
+  /// part of building a log page. The answer depends only on HEAD and the ref
+  /// tips, so recomputing it for page 2, 3, 4 ... of the same scroll is pure
+  /// waste, and it showed up as a multi-hundred-millisecond stall each time the
+  /// graph paged in more history.
+  ///
+  /// Keyed by HEAD so moving HEAD (checkout, commit, reset) misses and
+  /// recomputes. A ref that moves without HEAD moving can leave this stale
+  /// until the next HEAD change; that only affects which line renders straight
+  /// through, never which commits or edges exist.
+  pub primary_lane: Mutex<Option<(Oid, Oid)>>,
 }
 
 impl OpenRepo {
@@ -44,6 +60,7 @@ impl OpenRepo {
       commit_stats: Mutex::new(HashMap::new()),
       status_read: Mutex::new(None),
       counts_read: Mutex::new(None),
+      primary_lane: Mutex::new(None),
     }
   }
 
@@ -53,6 +70,18 @@ impl OpenRepo {
 
   pub fn store_stats(&self, oid: Oid, stats: ChangeStats) {
     self.commit_stats.lock().unwrap().insert(oid, stats);
+  }
+
+  /// The memoized primary-lane commit, if it was computed for this same HEAD.
+  pub fn cached_primary_lane(&self, head: Oid) -> Option<Oid> {
+    match *self.primary_lane.lock().unwrap() {
+      Some((cached_head, primary)) if cached_head == head => Some(primary),
+      _ => None,
+    }
+  }
+
+  pub fn store_primary_lane(&self, head: Oid, primary: Oid) {
+    *self.primary_lane.lock().unwrap() = Some((head, primary));
   }
 
   /// Runs `f` under the repository lock, but collapses concurrent callers that
@@ -216,6 +245,7 @@ impl RepoManager {
       commit_stats: Mutex::new(HashMap::new()),
       status_read: Mutex::new(None),
       counts_read: Mutex::new(None),
+      primary_lane: Mutex::new(None),
     });
     repos.insert(id.clone(), open.clone());
     Ok((id, open))
