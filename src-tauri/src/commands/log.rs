@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 use git2::{Commit, Oid, Sort};
 use tauri::State;
@@ -133,6 +135,39 @@ fn collect_log_roots(repo: &git2::Repository) -> Vec<Oid> {
   roots
 }
 
+/// A cheap fingerprint of where every branch and remote branch currently points.
+///
+/// [`primary_lane_oid`]'s answer depends on the ref tips as much as on HEAD, so
+/// they belong in its memo key. Keyed on HEAD alone, a fetch that moved
+/// `origin/<branch>` forward while HEAD stayed put kept serving the answer
+/// computed before the fetch: lane zero stayed reserved for the old tip and the
+/// commits the fetch brought in rendered as a lane forking off a history that
+/// never branched, until something else moved HEAD.
+///
+/// Targets are read directly -- no peel, no config lookup -- which is the same
+/// cheap pass [`collect_refs`] already makes, not the per-ref ahead/behind work
+/// the memo exists to avoid.
+fn ref_tips_fingerprint(repo: &git2::Repository) -> u64 {
+  let Ok(references) = repo.references() else {
+    return 0;
+  };
+  let mut fingerprint: u64 = 0;
+  for reference in references.flatten() {
+    let Some(name) = reference.name() else { continue };
+    if !(name.starts_with("refs/heads/") || name.starts_with("refs/remotes/")) {
+      continue;
+    }
+    let Some(oid) = reference.target() else { continue };
+    let mut hasher = DefaultHasher::new();
+    name.hash(&mut hasher);
+    oid.as_bytes().hash(&mut hasher);
+    // Summed rather than folded in sequence: `references()` promises no
+    // ordering, so a key that depended on one would churn for no reason.
+    fingerprint = fingerprint.wrapping_add(hasher.finish());
+  }
+  fingerprint
+}
+
 /// The commit lane zero is reserved for. Normally HEAD itself, but when another
 /// branch's tip sits directly above HEAD on the same first-parent line -- the
 /// remote branch after a rewind, or a local branch that moved ahead -- reserve
@@ -263,14 +298,15 @@ pub async fn get_log(
     }
 
     let refs = collect_refs(&repo);
-    // Memoized on HEAD: this comparison runs over every ref and dominates the
-    // cost of a page, but its answer is identical for every page of the same
-    // scroll. See `OpenRepo::primary_lane`.
+    // Memoized on HEAD plus the ref tips: this comparison runs over every ref
+    // and dominates the cost of a page, but its answer is identical for every
+    // page of the same scroll. See `OpenRepo::primary_lane`.
+    let ref_tips = ref_tips_fingerprint(&repo);
     let mut lanes = head_oid
       .map(|head| {
-        let primary = open.cached_primary_lane(head).unwrap_or_else(|| {
+        let primary = open.cached_primary_lane(head, ref_tips).unwrap_or_else(|| {
           let computed = primary_lane_oid(&repo, head);
-          open.store_primary_lane(head, computed);
+          open.store_primary_lane(head, ref_tips, computed);
           computed
         });
         LaneState::with_primary(primary)
@@ -510,6 +546,88 @@ mod tests {
     );
   }
 
+  /// A fetch moves a remote ref without moving HEAD. The memoized primary lane
+  /// has to notice, or lane zero stays reserved for the pre-fetch tip and every
+  /// commit the fetch brought in renders as a side lane forking off a history
+  /// that never branched.
+  #[test]
+  fn fetching_new_commits_invalidates_the_primary_lane_memo() {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    let base = commit_file(&repo, "a.txt", "a", "base");
+    let fetched = commit_file(&repo, "b.txt", "b", "newer");
+
+    // Pre-fetch: HEAD and the remote both sit at `base`; `fetched` exists in the
+    // object store but no ref points at it yet.
+    repo
+      .reference("refs/remotes/origin/master", base, true, "test remote")
+      .expect("remote ref");
+    {
+      let base_commit = repo.find_commit(base).expect("base commit");
+      repo
+        .reset(base_commit.as_object(), git2::ResetType::Hard, None)
+        .expect("rewind to base");
+    }
+
+    let open = OpenRepo::for_test(repo);
+    let repo = open.repo.lock().unwrap();
+
+    let before = ref_tips_fingerprint(&repo);
+    let primary = primary_lane_oid(&repo, base);
+    assert_eq!(primary, base, "nothing is ahead of HEAD yet");
+    open.store_primary_lane(base, before, primary);
+    assert_eq!(
+      open.cached_primary_lane(base, before),
+      Some(base),
+      "an unchanged repo must still hit the memo"
+    );
+
+    // The fetch: the remote ref moves ahead, HEAD does not.
+    repo
+      .reference("refs/remotes/origin/master", fetched, true, "fetched")
+      .expect("move remote ref");
+
+    let after = ref_tips_fingerprint(&repo);
+    assert_ne!(before, after, "a moved ref must change the fingerprint");
+    assert_eq!(
+      open.cached_primary_lane(base, after),
+      None,
+      "the pre-fetch answer must not be served after the fetch"
+    );
+    assert_eq!(
+      primary_lane_oid(&repo, base),
+      fetched,
+      "lane zero now belongs to the tip the fetch brought in"
+    );
+  }
+
+  /// Deleting a ref changes nothing about where the survivors point, so a
+  /// fingerprint built by combining tips must still notice it.
+  #[test]
+  fn ref_tips_fingerprint_notices_an_added_or_deleted_ref() {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = Repository::init(dir.path()).expect("repo");
+    let tip = commit_file(&repo, "a.txt", "a", "base");
+
+    let bare = ref_tips_fingerprint(&repo);
+    repo
+      .reference("refs/heads/side", tip, true, "side branch")
+      .expect("side ref");
+    let with_side = ref_tips_fingerprint(&repo);
+    assert_ne!(bare, with_side, "a new ref at a known commit still counts");
+
+    repo
+      .find_reference("refs/heads/side")
+      .expect("side ref")
+      .delete()
+      .expect("delete side ref");
+    assert_eq!(
+      ref_tips_fingerprint(&repo),
+      bare,
+      "removing the ref returns to the earlier fingerprint"
+    );
+  }
+
   /// Row labels come from the raw references rather than the branch helper, so
   /// the classification each ref gets is pinned down here: the checked-out
   /// branch is `Head`, other locals are `Branch`, remotes are `Remote`, and the
@@ -587,19 +705,21 @@ mod tests {
     let open = OpenRepo::for_test(repo);
     let repo = open.repo.lock().unwrap();
 
+    let tips = ref_tips_fingerprint(&repo);
+
     // Cold: nothing cached for this HEAD yet.
-    assert!(open.cached_primary_lane(newer).is_none(), "starts empty");
+    assert!(open.cached_primary_lane(newer, tips).is_none(), "starts empty");
     let fresh = primary_lane_oid(&repo, newer);
-    open.store_primary_lane(newer, fresh);
+    open.store_primary_lane(newer, tips, fresh);
     assert_eq!(
-      open.cached_primary_lane(newer),
+      open.cached_primary_lane(newer, tips),
       Some(fresh),
-      "a stored entry must be served back for the same HEAD"
+      "a stored entry must be served back for the same HEAD and ref tips"
     );
 
     // A different HEAD must miss rather than reuse the previous answer.
     assert!(
-      open.cached_primary_lane(base).is_none(),
+      open.cached_primary_lane(base, tips).is_none(),
       "moving HEAD must not serve the lane computed for the old HEAD"
     );
   }

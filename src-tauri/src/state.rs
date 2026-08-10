@@ -33,8 +33,7 @@ pub struct OpenRepo {
   /// The in-flight tab-badge count read. Separate slot from `status_read` so a
   /// cheap count never waits on a full status scan that is already running.
   pub counts_read: Mutex<Option<Arc<SharedRead<crate::git::types::RepoCounts, String>>>>,
-  /// Memoized "which commit owns lane zero", keyed by the HEAD it was computed
-  /// for.
+  /// Memoized "which commit owns lane zero", as `(head, ref tips, primary)`.
   ///
   /// Choosing it compares every local and remote ref against HEAD with
   /// `graph_ahead_behind`, which is a merge-base plus a revision count per ref
@@ -44,11 +43,12 @@ pub struct OpenRepo {
   /// waste, and it showed up as a multi-hundred-millisecond stall each time the
   /// graph paged in more history.
   ///
-  /// Keyed by HEAD so moving HEAD (checkout, commit, reset) misses and
-  /// recomputes. A ref that moves without HEAD moving can leave this stale
-  /// until the next HEAD change; that only affects which line renders straight
-  /// through, never which commits or edges exist.
-  pub primary_lane: Mutex<Option<(Oid, Oid)>>,
+  /// Both inputs are in the key, so moving HEAD (checkout, commit, reset) AND
+  /// moving a ref without HEAD (a fetch, a push, a branch delete) both miss and
+  /// recompute. Keying on HEAD alone made a fetch render the commits it brought
+  /// in as a lane forking off history that never branched, since lane zero was
+  /// still reserved for the tip the pre-fetch answer named.
+  pub primary_lane: Mutex<Option<(Oid, u64, Oid)>>,
 }
 
 impl OpenRepo {
@@ -72,16 +72,21 @@ impl OpenRepo {
     self.commit_stats.lock().unwrap().insert(oid, stats);
   }
 
-  /// The memoized primary-lane commit, if it was computed for this same HEAD.
-  pub fn cached_primary_lane(&self, head: Oid) -> Option<Oid> {
+  /// The memoized primary-lane commit, if it was computed for this same HEAD
+  /// and the same set of ref tips.
+  pub fn cached_primary_lane(&self, head: Oid, ref_tips: u64) -> Option<Oid> {
     match *self.primary_lane.lock().unwrap() {
-      Some((cached_head, primary)) if cached_head == head => Some(primary),
+      Some((cached_head, cached_tips, primary))
+        if cached_head == head && cached_tips == ref_tips =>
+      {
+        Some(primary)
+      }
       _ => None,
     }
   }
 
-  pub fn store_primary_lane(&self, head: Oid, primary: Oid) {
-    *self.primary_lane.lock().unwrap() = Some((head, primary));
+  pub fn store_primary_lane(&self, head: Oid, ref_tips: u64, primary: Oid) {
+    *self.primary_lane.lock().unwrap() = Some((head, ref_tips, primary));
   }
 
   /// Runs `f` under the repository lock, but collapses concurrent callers that
