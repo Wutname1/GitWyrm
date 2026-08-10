@@ -53,22 +53,52 @@ path, cdn_base, tag = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(path, encoding="utf-8") as fh:
     manifest = json.load(fh)
 
-# tauri keys platforms as "<os>-<arch>". Only Windows ships today; an unknown
-# key is a hard error rather than a pass-through, because a platform silently
-# left pointing at a GitHub asset URL is the 0.0.3 bug all over again.
+# tauri keys platforms as "<os>-<arch>", optionally with the bundle type
+# appended: it emits BOTH "windows-x86_64" and "windows-x86_64-nsis" for the
+# same installer, same signature. Older updater clients look up the bare key and
+# newer ones prefer the qualified one, so both have to be rewritten -- dropping
+# either would leave half the clients pointed at a GitHub asset URL.
+#
+# The arch is therefore matched as a prefix, with the bundle suffix allowed to
+# follow. An unrecognised platform is still a hard error rather than a
+# pass-through, because a key silently left on its GitHub URL is the 0.0.3 bug
+# all over again.
 SUFFIX = {"windows-x86_64": "", "windows-aarch64": "-ARM64"}
+# Bundle types tauri may append. Anything else is unknown and must not be
+# guessed at: a new bundle type could well need a different installer name.
+BUNDLES = ("nsis", "msi")
+
+
+def arch_of(key):
+    """The SUFFIX entry for a platform key, or None if it names something else."""
+    if key in SUFFIX:
+        return key
+    base, _, bundle = key.rpartition("-")
+    if bundle in BUNDLES and base in SUFFIX:
+        return base
+    return None
+
 
 platforms = manifest.get("platforms", {})
 if not platforms:
     sys.exit("::error::manifest has no platforms")
 
 for key in platforms:
-    if key not in SUFFIX:
+    arch = arch_of(key)
+    if arch is None:
         sys.exit(f"::error::unmapped platform '{key}' - add it to SUFFIX")
-    url = f"{cdn_base}/releases/{tag}/GitWyrm-Setup{SUFFIX[key]}.exe"
+    url = f"{cdn_base}/releases/{tag}/GitWyrm-Setup{SUFFIX[arch]}.exe"
     platforms[key]["url"] = url
     if not platforms[key].get("signature"):
         sys.exit(f"::error::platform '{key}' has no signature")
+
+# Every arch we ship must be reachable under some key. A manifest that lost one
+# entirely would publish and quietly strand that architecture on the old
+# version, which no per-key check above can catch.
+covered = {arch_of(k) for k in platforms}
+missing = sorted(set(SUFFIX) - covered)
+if missing:
+    sys.exit(f"::error::manifest is missing {', '.join(missing)}")
 
 # The updater compares this against the running build, so it must be the real
 # version and not the tag with decoration. They are the same string today; this
@@ -98,11 +128,13 @@ echo "Published ${CHANNEL}.json -> ${TAG}"
 
 # A manifest whose installer 404s bricks the update path, and it is cheap to
 # rule out here rather than discover from a user report.
+# Deduplicated: tauri lists each installer under both a bare and a
+# bundle-qualified key, so the raw list would check every URL twice.
 for url in $(python3 -c "
 import json,sys
 m = json.load(open('$workdir/latest.json', encoding='utf-8'))
-for p in m['platforms'].values():
-    print(p['url'])
+for u in sorted({p['url'] for p in m['platforms'].values()}):
+    print(u)
 "); do
   code=$(curl -s -o /dev/null -w '%{http_code}' -I -L "$url" || echo 000)
   if [ "$code" != "200" ]; then
