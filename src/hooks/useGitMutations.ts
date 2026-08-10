@@ -143,64 +143,41 @@ function describePush(r: PushResult, host: string | null): string {
 }
 
 /**
- * What the pull did to the project's linked folders, in the terms someone who
- * has never heard the word "submodule" can act on. Silent when none moved,
- * which is the common case.
+ * The one thing about a pull's submodule handling the UI cannot show by itself:
+ * that edits inside a linked folder were set aside, and where they went.
  *
- * A folder that could NOT be updated is the one worth naming individually: it
- * is still sitting there as a pending change, so the user needs to know which.
+ * Everything else is deliberately unsaid. A folder that updated cleanly is
+ * already visible in the Submodules section -- its row drops back to in-sync --
+ * and one that failed stays amber there with its own tooltip. Narrating either
+ * in a toast repeats what the panel is showing. A stash is different: it lives
+ * in the nested repository, where nothing on screen points at it.
  */
-function describeSubmodules(subs: PullResult['submodules']): string {
-  if (subs.length === 0) return ''
-
-  const failed = subs.filter((s) => s.failed)
-  const updated = subs.filter((s) => !s.failed)
-  const parts: string[] = []
-
-  if (updated.length > 0) {
-    const names = updated.map((s) => s.path).join(', ')
-    parts.push(
-      `Updated ${updated.length === 1 ? 'linked folder' : 'linked folders'} to the version that came with it: ${names}.`
-    )
-    // The stash lives in the linked folder's own repository, so say where to
-    // look rather than just that something was saved.
-    const stashed = updated.filter((s) => s.stashed)
-    if (stashed.length > 0) {
-      parts.push(
-        `Your changes in ${stashed.map((s) => s.path).join(', ')} were saved first - open the folder to restore them.`
-      )
-    }
-  }
-
-  if (failed.length > 0) {
-    parts.push(
-      `Could not update ${failed.map((s) => s.path).join(', ')} - ${failed.length === 1 ? 'it is' : 'they are'} still showing as a change.`
-    )
-  }
-
-  return parts.join(' ')
+function describeStashedSubmodules(subs: PullResult['submodules']): string {
+  const stashed = subs.filter((s) => s.stashed)
+  if (stashed.length === 0) return ''
+  const names = stashed.map((s) => s.path).join(', ')
+  return ` Your changes in ${names} were saved to its stash first.`
 }
 
 function describePull(r: PullResult, host: string | null): string {
-  const subs = describeSubmodules(r.submodules)
-  const withSubs = (s: string) => (subs ? `${s} ${subs}` : s)
+  const stashed = describeStashedSubmodules(r.submodules)
 
   if (r.received === 0) {
     const base = r.branch
       ? `Nothing new to get - ${r.branch} already matches ${describeTarget(r, host)}`
       : 'Nothing new to get - you are already up to date'
     // Checked for incoming work but still have outgoing work of our own.
-    return withSubs(
-      r.ahead_after > 0
+    return (
+      (r.ahead_after > 0
         ? `${base}. You still have ${commitCount(r.ahead_after)} to send.`
-        : base
+        : base) + stashed
     )
   }
   const base = `Got ${commitCount(r.received)} from ${describeTarget(r, host)}`
-  return withSubs(
-    r.ahead_after > 0
+  return (
+    (r.ahead_after > 0
       ? `${base}. You still have ${commitCount(r.ahead_after)} to send.`
-      : base
+      : base) + stashed
   )
 }
 
@@ -969,8 +946,13 @@ export function useGitMutations(repoId: string | null) {
     // A conflicting pull exits as an error but leaves a merge or rebase in
     // progress, so merge state must refresh on both outcomes for the banner
     // and conflict view to appear.
+    //
+    // `submodules` is in the list because a pull can move which version of a
+    // linked folder the project points at. The Submodules section is where that
+    // outcome is reported -- rows settle back to in-sync, or stay amber when one
+    // could not be updated -- so a stale list would leave it unreported.
     onSettled: () => {
-      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState', 'submodules'])
     },
   })
 

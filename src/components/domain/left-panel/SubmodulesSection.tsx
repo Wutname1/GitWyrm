@@ -63,7 +63,10 @@ function tooltip(s: SubmoduleStatus): string {
   if (s.ahead > 0) {
     return `${plural(s.ahead, 'newer commit')} than the project expects. Commit to save this update.${follows}${open}`
   }
-  return `${plural(s.behind, 'commit')} older than the project expects.${follows}${open}`
+  // Older than what the project pins is the shape a pull leaves behind when it
+  // could not move this folder itself -- so point at the fix rather than just
+  // stating the gap, which reads as something the user did.
+  return `${plural(s.behind, 'commit')} older than the project expects. Right-click and choose "Undo my changes" to catch it up.${follows}${open}`
 }
 
 function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
