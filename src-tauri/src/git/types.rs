@@ -473,6 +473,18 @@ pub struct PushResult {
   pub pushed: u32,
 }
 
+/// What a pull did to one submodule whose pinned version it changed.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct SubmoduleFollowed {
+  pub path: String,
+  /// Local edits inside the submodule were set aside first. They are recoverable
+  /// from the stash in the submodule's own repository.
+  pub stashed: bool,
+  /// Set when the submodule could NOT be moved to the pulled version, so it is
+  /// still showing as a pending change. Carries the reason.
+  pub failed: Option<String>,
+}
+
 /// Outcome of a pull, measured the same way as `PushResult`.
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct PullResult {
@@ -482,6 +494,9 @@ pub struct PullResult {
   pub received: u32,
   /// The pull left the branch with commits still to push.
   pub ahead_after: u32,
+  /// Submodules whose pinned version the pull changed, and what was done about
+  /// each. Empty when the repo has no submodules or none of them moved.
+  pub submodules: Vec<SubmoduleFollowed>,
 }
 
 /// Outcome of a rebase. A clean rebase returns no conflicts; a paused rebase

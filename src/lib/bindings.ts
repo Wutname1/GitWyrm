@@ -3490,7 +3490,12 @@ received: number;
 /**
  * The pull left the branch with commits still to push.
  */
-ahead_after: number }
+ahead_after: number; 
+/**
+ * Submodules whose pinned version the pull changed, and what was done about
+ * each. Empty when the repo has no submodules or none of them moved.
+ */
+submodules: SubmoduleFollowed[] }
 /**
  * Outcome of a push. Measured from the branch's ahead/behind against its
  * upstream before and after, so the report reflects what actually moved rather
@@ -4512,6 +4517,20 @@ time: number; files_changed: number; additions: number; deletions: number }
  */
 export type StashOutcome = "stashed" | "nothing_to_stash"
 export type StatusCode = "A" | "M" | "D" | "R" | "!"
+/**
+ * What a pull did to one submodule whose pinned version it changed.
+ */
+export type SubmoduleFollowed = { path: string; 
+/**
+ * Local edits inside the submodule were set aside first. They are recoverable
+ * from the stash in the submodule's own repository.
+ */
+stashed: boolean; 
+/**
+ * Set when the submodule could NOT be moved to the pulled version, so it is
+ * still showing as a pending change. Carries the reason.
+ */
+failed: string | null }
 /**
  * How a submodule's checked-out commit differs from the commit its parent repo
  * pins. `ahead`/`behind` are the workdir commit's position relative to the

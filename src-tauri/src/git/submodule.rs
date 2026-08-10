@@ -9,6 +9,8 @@
 
 use std::collections::HashMap;
 
+use crate::error::AppError;
+use crate::git::shell::run_git;
 use crate::git::types::{SubmoduleMove, SubmoduleState, SubmoduleStatus};
 
 /// A path -> pointer-move map for every submodule whose workdir HEAD differs
@@ -192,5 +194,306 @@ pub fn sync_submodule_workdirs(repo: &git2::Repository) {
       continue;
     }
     let _ = sub.update(false, None);
+  }
+}
+
+/// What happened to one submodule while following a pull.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FollowOutcome {
+  /// Its checkout now sits at the commit the parent records.
+  Updated,
+  /// Edits inside it were set aside first, then it was updated. The user has a
+  /// stash entry in the nested repo to recover.
+  StashedAndUpdated,
+  /// It could not be updated -- the reason is for the log, not the user.
+  Failed(String),
+}
+
+/// One submodule's result from [`follow_recorded_pins`].
+#[derive(Debug, Clone)]
+pub struct FollowResult {
+  pub path: String,
+  pub outcome: FollowOutcome,
+}
+
+/// True when the nested checkout at `path` has edits of its own -- modified
+/// tracked files or untracked ones. A moved pointer alone is not "dirty": that
+/// lives in the PARENT's index, and is exactly what we are about to fix.
+///
+/// `--ignore-submodules=all` keeps a grandchild submodule's own pointer move
+/// from reading as dirt here; the recursive update handles those separately.
+fn nested_is_dirty(repo_path: &str, path: &str) -> bool {
+  run_git(
+    Some(repo_path),
+    &[
+      "-C",
+      path,
+      "status",
+      "--porcelain",
+      "--untracked-files=normal",
+      "--ignore-submodules=all",
+    ],
+  )
+  .map(|out| !out.stdout.trim().is_empty())
+  .unwrap_or(false)
+}
+
+/// Move every initialized submodule to the commit the parent now records,
+/// stashing local edits inside a submodule first so nothing is destroyed.
+///
+/// This is the step plain `git pull` leaves undone. Pulling a commit that moves
+/// a submodule pointer updates the parent's index, but never touches the nested
+/// checkout -- so the submodule stays at the OLD commit and the parent reports
+/// it as a pending change. The user did not change anything, yet is handed a
+/// modification they have to understand submodules to interpret.
+///
+/// Why shell out rather than reuse [`sync_submodule_workdirs`]: after a pull the
+/// newly recorded commit is usually not in the nested repo's object database yet
+/// -- nobody fetched it. libgit2's `Submodule::update` has no remote to ask and
+/// fails. `git submodule update` fetches on demand, so it can actually land the
+/// commit that just arrived.
+///
+/// Edits inside a submodule are stashed rather than carried across: a checkout
+/// that would overwrite them fails outright, which would leave the pointer
+/// stale and put us back at the symptom. The stash entry lives in the nested
+/// repo, so the work is recoverable with a normal `stash pop` there.
+///
+/// Failures are per-submodule and never propagate: the pull already succeeded,
+/// and a submodule whose commit is unreachable must not turn that into an error.
+pub fn follow_recorded_pins(
+  repo: &git2::Repository,
+  repo_path: &str,
+) -> Result<Vec<FollowResult>, AppError> {
+  let mut results = Vec::new();
+
+  // Only submodules whose pin actually moved, so a repo with healthy submodules
+  // does no work and reports nothing.
+  let mut moved: Vec<SubmoduleMove> = moved_submodules(repo)
+    .into_values()
+    // An uninitialized submodule has no checkout to move. Downloading one is a
+    // separate, explicit choice the user makes, not a side effect of pulling.
+    .filter(|m| m.initialized)
+    .collect();
+  if moved.is_empty() {
+    return Ok(results);
+  }
+  moved.sort_by(|a, b| a.path.cmp(&b.path));
+
+  for m in moved {
+    let stashed = if nested_is_dirty(repo_path, &m.path) {
+      // Untracked files are included: a checkout that has to write one fails the
+      // same way a modified file does.
+      let saved = run_git(
+        Some(repo_path),
+        &[
+          "-C",
+          &m.path,
+          "stash",
+          "push",
+          "--include-untracked",
+          "--message",
+          "gitwyrm: changes set aside to follow the pulled submodule version",
+        ],
+      );
+      match saved {
+        Ok(_) => true,
+        Err(e) => {
+          // Nothing was set aside, so updating would overwrite real work. Leave
+          // the submodule alone and report why.
+          results.push(FollowResult {
+            path: m.path.clone(),
+            outcome: FollowOutcome::Failed(format!("could not set aside local changes: {e}")),
+          });
+          continue;
+        }
+      }
+    } else {
+      false
+    };
+
+    // `--init` covers a submodule added by the very commit just pulled;
+    // `--recursive` follows pointer moves in nested submodules too.
+    let updated = run_git(
+      Some(repo_path),
+      &[
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+        "--",
+        &m.path,
+      ],
+    );
+
+    let outcome = match updated {
+      Ok(_) if stashed => FollowOutcome::StashedAndUpdated,
+      Ok(_) => FollowOutcome::Updated,
+      Err(e) => FollowOutcome::Failed(e.to_string()),
+    };
+    results.push(FollowResult { path: m.path, outcome });
+  }
+
+  Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::path::Path;
+
+  /// A parent repo with one submodule, both on a real commit. Returns the temp
+  /// dir (kept alive by the caller) and the parent's path as a string.
+  ///
+  /// Built by shelling out rather than through libgit2: `submodule add` wires up
+  /// .gitmodules, .git/modules and the gitlink together, and reproducing that by
+  /// hand is exactly the setup a test should not be asserting about.
+  fn parent_with_submodule() -> (tempfile::TempDir, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let sub_src = root.join("sub-src");
+    std::fs::create_dir_all(&sub_src).unwrap();
+    let sub_src_s = sub_src.to_string_lossy().into_owned();
+    run_git(Some(&sub_src_s), &["init", "-q"]).unwrap();
+    std::fs::write(sub_src.join("f.txt"), "v1").unwrap();
+    run_git(Some(&sub_src_s), &["add", "."]).unwrap();
+    commit(&sub_src_s, "v1");
+
+    let parent = root.join("parent");
+    std::fs::create_dir_all(&parent).unwrap();
+    let parent_s = parent.to_string_lossy().into_owned();
+    run_git(Some(&parent_s), &["init", "-q"]).unwrap();
+    std::fs::write(parent.join("a.txt"), "one").unwrap();
+    run_git(Some(&parent_s), &["add", "."]).unwrap();
+    commit(&parent_s, "base");
+    // file:// submodules are refused by default since the 2022 CVE fixes.
+    run_git(
+      Some(&parent_s),
+      &[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        "--",
+        &sub_src_s,
+        "sub",
+      ],
+    )
+    .unwrap();
+    commit(&parent_s, "add sub");
+
+    (dir, parent_s)
+  }
+
+  /// Commit with an identity supplied inline, so the test does not depend on
+  /// whatever user.name the machine running it happens to have configured.
+  fn commit(repo_path: &str, message: &str) {
+    run_git(
+      Some(repo_path),
+      &[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-q",
+        "-m",
+        message,
+      ],
+    )
+    .unwrap();
+  }
+
+  fn head_of(repo_path: &str) -> String {
+    run_git(Some(repo_path), &["rev-parse", "HEAD"]).unwrap().stdout.trim().to_string()
+  }
+
+  /// Move the submodule's own checkout forward and record the new pin in the
+  /// parent, mimicking what arrives in a pulled commit.
+  fn bump_pin(parent: &str) {
+    let sub = format!("{parent}/sub");
+    std::fs::write(Path::new(&sub).join("f.txt"), "v2").unwrap();
+    run_git(Some(&sub), &["add", "."]).unwrap();
+    commit(&sub, "v2");
+    run_git(Some(parent), &["add", "sub"]).unwrap();
+    commit(parent, "bump sub");
+  }
+
+  /// The exact shape of the reported bug: the parent records a new commit for
+  /// the submodule while the nested checkout still sits at the old one.
+  fn strand_the_checkout(parent: &str) {
+    let sub = format!("{parent}/sub");
+    let old = run_git(Some(&sub), &["rev-parse", "HEAD~1"]).unwrap().stdout.trim().to_string();
+    run_git(Some(&sub), &["checkout", "-q", &old]).unwrap();
+  }
+
+  #[test]
+  fn a_submodule_left_behind_by_a_pull_is_moved_to_the_recorded_commit() {
+    let (_dir, parent) = parent_with_submodule();
+    bump_pin(&parent);
+    let recorded = run_git(Some(&format!("{parent}/sub")), &["rev-parse", "HEAD"])
+      .unwrap()
+      .stdout
+      .trim()
+      .to_string();
+    strand_the_checkout(&parent);
+
+    let repo = git2::Repository::open(&parent).unwrap();
+    // Precondition: this is the bug -- the parent sees a change nobody made.
+    assert!(!moved_submodules(&repo).is_empty(), "expected a stranded submodule to fix");
+
+    let results = follow_recorded_pins(&repo, &parent).unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].path, "sub");
+    assert_eq!(results[0].outcome, FollowOutcome::Updated);
+    assert_eq!(head_of(&format!("{parent}/sub")), recorded);
+    // And the phantom pending change is gone.
+    let repo = git2::Repository::open(&parent).unwrap();
+    assert!(moved_submodules(&repo).is_empty(), "submodule should no longer read as modified");
+  }
+
+  #[test]
+  fn edits_inside_a_submodule_are_stashed_rather_than_overwritten() {
+    let (_dir, parent) = parent_with_submodule();
+    bump_pin(&parent);
+    strand_the_checkout(&parent);
+
+    let sub = format!("{parent}/sub");
+    std::fs::write(Path::new(&sub).join("f.txt"), "MY WORK").unwrap();
+
+    let repo = git2::Repository::open(&parent).unwrap();
+    let results = follow_recorded_pins(&repo, &parent).unwrap();
+
+    assert_eq!(results[0].outcome, FollowOutcome::StashedAndUpdated);
+    // The pulled version won the working tree...
+    assert_eq!(std::fs::read_to_string(Path::new(&sub).join("f.txt")).unwrap(), "v2");
+    // ...but the user's work is recoverable, which is the whole point of
+    // stashing instead of discarding.
+    let stashes = run_git(Some(&sub), &["stash", "list"]).unwrap().stdout;
+    assert!(stashes.contains("gitwyrm"), "expected a gitwyrm stash entry, got: {stashes:?}");
+  }
+
+  #[test]
+  fn a_submodule_already_in_sync_is_left_alone() {
+    let (_dir, parent) = parent_with_submodule();
+    let repo = git2::Repository::open(&parent).unwrap();
+
+    // Nothing moved, so there is nothing to report and no work to do.
+    assert!(follow_recorded_pins(&repo, &parent).unwrap().is_empty());
+  }
+
+  #[test]
+  fn an_untracked_file_alone_counts_as_dirty() {
+    let (_dir, parent) = parent_with_submodule();
+    let sub = format!("{parent}/sub");
+
+    assert!(!nested_is_dirty(&parent, "sub"), "a clean submodule must not read as dirty");
+
+    // Untracked files matter: a checkout that has to write one fails the same
+    // way a modified tracked file does, so they have to be stashed too.
+    std::fs::write(Path::new(&sub).join("scratch.txt"), "notes").unwrap();
+    assert!(nested_is_dirty(&parent, "sub"));
   }
 }

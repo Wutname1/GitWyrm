@@ -11,8 +11,10 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
 use crate::git::refs;
+use crate::git::submodule::{follow_recorded_pins, FollowOutcome};
 use crate::git::types::{
-  PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo, RemoteTagInfo, UnpushedTag,
+  PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo, RemoteTagInfo,
+  SubmoduleFollowed, UnpushedTag,
 };
 use crate::state::RepoManager;
 
@@ -244,6 +246,29 @@ pub async fn git_pull(
     // the user's `pull.rebase` setting.
     run_streaming(&app, &repo_id, Some(&path), "pull", &["pull", "--progress", "--autostash"])?;
 
+    // A pulled commit can change which version of a submodule the project
+    // pins, and git leaves the nested checkout on the old one -- surfacing it
+    // as a pending change the user never made. Move it to what was just
+    // pulled, setting aside any edits inside it first.
+    let submodules = {
+      let repo = open.repo.lock().unwrap();
+      follow_recorded_pins(&repo, &path)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| {
+          let (stashed, failed) = match r.outcome {
+            FollowOutcome::Updated => (false, None),
+            FollowOutcome::StashedAndUpdated => (true, None),
+            FollowOutcome::Failed(why) => (false, Some(why)),
+          };
+          if let Some(why) = failed.as_deref() {
+            log::warn!("pull could not update submodule {}: {}", r.path, why);
+          }
+          SubmoduleFollowed { path: r.path, stashed, failed }
+        })
+        .collect()
+    };
+
     let after = { tracking_state(&open.repo.lock().unwrap()) };
 
     // Commits we were behind by and no longer are is what the pull brought in.
@@ -254,6 +279,7 @@ pub async fn git_pull(
       upstream: after.upstream.or(before.upstream),
       received,
       ahead_after: after.ahead,
+      submodules,
     })
   })
   .await
@@ -530,6 +556,9 @@ pub async fn git_pull_branch(
         upstream: before.upstream,
         received: 0,
         ahead_after: before.ahead,
+        // This updates a branch that is not checked out, so the working tree --
+        // and every submodule checkout in it -- is untouched by design.
+        submodules: Vec::new(),
       });
     }
 
@@ -544,6 +573,7 @@ pub async fn git_pull_branch(
       upstream: after.upstream.or(before.upstream),
       received: before.behind.saturating_sub(after.behind),
       ahead_after: after.ahead,
+      submodules: Vec::new(),
     })
   })
   .await
@@ -1078,7 +1108,21 @@ fn rebase_outcome(
   open: &crate::state::OpenRepo,
 ) -> Result<RebaseResult, AppError> {
   match run {
-    Ok(_) => Ok(RebaseResult { conflicts: Vec::new() }),
+    Ok(_) => {
+      // A replayed commit can move a submodule pointer just like a pulled one
+      // can, leaving the nested checkout behind. Same follow-up, best effort:
+      // the rebase itself already succeeded.
+      {
+        let repo = open.repo.lock().unwrap();
+        let path = open.path.to_string_lossy().into_owned();
+        for r in follow_recorded_pins(&repo, &path).unwrap_or_default() {
+          if let FollowOutcome::Failed(why) = r.outcome {
+            log::warn!("rebase could not update submodule {}: {}", r.path, why);
+          }
+        }
+      }
+      Ok(RebaseResult { conflicts: Vec::new() })
+    }
     Err(e) => {
       let repo = open.repo.lock().unwrap();
       let git_dir = repo.path();
