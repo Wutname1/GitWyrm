@@ -351,6 +351,28 @@ function AppInner() {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  // Ctrl/Cmd + Plus/Minus resizes the whole interface, Ctrl/Cmd+0 puts it back.
+  // `e.key` for the plus key varies with layout and shift state ('+', '=', and
+  // the numpad 'Add'), so match on the whole set.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return
+      const { uiScale, setUiScale } = useWorkspaceStore.getState()
+      if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') {
+        e.preventDefault()
+        setUiScale(uiScale + UI_SCALE_STEP)
+      } else if (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') {
+        e.preventDefault()
+        setUiScale(uiScale - UI_SCALE_STEP)
+      } else if (e.key === '0' || e.code === 'Numpad0') {
+        e.preventDefault()
+        setUiScale(DEFAULT_UI_SCALE)
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // Suppress the browser's native right-click menu everywhere it isn't wanted.
   // Our own Radix context menus still open (they handle the event first); text
   // fields keep their native menu so copy/paste works.

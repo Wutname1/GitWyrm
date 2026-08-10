@@ -279,7 +279,7 @@ export function AppearanceSettings() {
       >
         <ChangeSizeSettings />
       </SettingRow>
-      <SettingRow label="App zoom" searchId="app-zoom" hint="Makes everything in GitWyrm bigger or smaller.">
+      <SettingRow label="App zoom" searchId="app-zoom" hint="Makes everything in GitWyrm bigger or smaller. You can also press Ctrl and + or - from anywhere, or Ctrl and 0 to go back to 100%.">
         <ZoomSetting />
       </SettingRow>
       <ResetToDefaults group="appearance" />
