@@ -1,0 +1,116 @@
+name: Auto Beta
+
+# Cuts a beta tag for every push to main that changes shipping code. The tag
+# push is what starts an actual build: this workflow does nothing but decide the
+# number and create the tag, which release.yml already knows how to handle
+# (it accepts X.Y.Z-beta.N and marks it a GitHub prerelease).
+on:
+  push:
+    branches:
+      - main
+    # Pushes that cannot change what a user runs do not deserve a 20-minute
+    # two-arch Windows build. paths-ignore is a negative filter: a push that
+    # touches ANY file outside this list still builds.
+    paths-ignore:
+      - "docs/**"
+      - "openspec/**"
+      - "**/*.md"
+      - ".github/workflows/**"
+      - ".github/scripts/**"
+
+concurrency:
+  # Two quick pushes would otherwise race for the same beta number and one would
+  # fail on an existing tag. Serialised, not cancelled: the older run must finish
+  # creating its tag so the newer one sees it and picks the next number.
+  group: auto-beta
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    # `[skip beta]` anywhere in the commit message is the manual escape hatch for
+    # a push that is technically code but not worth a build.
+    if: "!contains(github.event.head_commit.message, '[skip beta]')"
+    permissions:
+      contents: write
+
+    steps:
+      # Tags are what the numbering reads, and a shallow clone has none of them.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Work out the next beta number
+        id: next
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # The floor is the newest STABLE tag, not the newest tag of any kind:
+          # betas are what we are numbering past, so counting them here would
+          # walk the base version forward on every push.
+          latest_stable=$(git tag --list '[0-9]*.[0-9]*.[0-9]*' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -n1 || true)
+
+          if [ -z "$latest_stable" ]; then
+            base="0.0.1"
+          else
+            # Patch bump. A beta on 0.6.0 becomes 0.6.1-beta.N; shipping 0.7.0
+            # instead is still legal, and release.yml's check-version accepts it
+            # because 0.7.0 is ahead of everything published.
+            IFS=. read -r major minor patch <<<"$latest_stable"
+            base="${major}.${minor}.$((patch + 1))"
+          fi
+
+          # Count what already exists for THIS base rather than assuming one
+          # beta per push: a run that failed after tagging, or a hand-cut beta,
+          # both leave a number that must not be reused.
+          highest=$(git tag --list "${base}-beta.*" \
+            | sed -E "s/^${base}-beta\.//" \
+            | grep -E '^[0-9]+$' \
+            | sort -n | tail -n1 || true)
+          next_n=$(( ${highest:-0} + 1 ))
+
+          tag="${base}-beta.${next_n}"
+
+          # A tag can exist locally-but-remotely-deleted, or upstream from a run
+          # whose tag push landed after our fetch. Walk forward rather than fail.
+          while git rev-parse -q --verify "refs/tags/${tag}" >/dev/null \
+             || gh release view "$tag" >/dev/null 2>&1; do
+            next_n=$(( next_n + 1 ))
+            tag="${base}-beta.${next_n}"
+          done
+
+          echo "Latest stable: ${latest_stable:-none} | next beta: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      # Pushing the tag is the whole job. release.yml is triggered by the tag
+      # push and does the build, CDN upload, and prerelease publish.
+      #
+      # GITHUB_TOKEN cannot trigger another workflow (GitHub blocks that to
+      # avoid recursion), so the tag is pushed with a PAT. Without RELEASE_PAT
+      # the tag would appear and no build would ever run - so fail loudly here
+      # rather than leave a silently dead tag behind.
+      - name: Create and push the beta tag
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::RELEASE_PAT is not set. A tag pushed with GITHUB_TOKEN does not start the Release workflow, so the beta would never build."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Beta build from ${GITHUB_SHA:0:7}"
+
+          git remote set-url origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "$TAG"
+
+          echo "Pushed $TAG - Release workflow will build it." >> "$GITHUB_STEP_SUMMARY"
