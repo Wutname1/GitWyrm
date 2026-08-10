@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useBranches } from '@/hooks/useGitQueries'
 import { branchSync } from '@/lib/branchActions'
+import { pullNeedsChoice } from '@/lib/syncPreview'
 import { plural } from '@/lib/gitDisplay'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
@@ -21,6 +22,7 @@ import { useActiveRepo } from '@/stores/workspaceStore'
 export function PushChoiceModal() {
   const open = useUiStore((s) => s.activeModal === 'push-choice')
   const closeModal = useUiStore((s) => s.closeModal)
+  const openRemoteSync = useUiStore((s) => s.openRemoteSync)
 
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
@@ -34,7 +36,18 @@ export function PushChoiceModal() {
 
   const pending = m.pull.isPending || m.pushForce.isPending
 
-  const getFirst = () => m.pull.mutate(undefined, { onSuccess: () => closeModal() })
+  // With work on both sides, "get first" would blend via a merge commit chosen
+  // for the user. Hand that to the sync modal, which offers blend / stack /
+  // replace and draws the result. A pure catch-up still pulls directly.
+  const canChooseSync = pullNeedsChoice({ upstream: head?.upstream, ahead, behind })
+  const getFirst = () => {
+    if (canChooseSync) {
+      closeModal()
+      openRemoteSync(head!.upstream!, head!.name)
+      return
+    }
+    m.pull.mutate(undefined, { onSuccess: () => closeModal() })
+  }
   const forcePush = () => m.pushForce.mutate(undefined, { onSuccess: () => closeModal() })
 
   return (
@@ -61,8 +74,12 @@ export function PushChoiceModal() {
 
           <ul className="grid gap-2 text-2xs leading-relaxed text-muted-foreground">
             <li>
-              <span className="font-medium text-foreground">Get changes first</span> pulls the
-              cloud's work into yours, then you can push. Nothing is lost.
+              <span className="font-medium text-foreground">
+                {canChooseSync ? 'Choose how to combine' : 'Get changes first'}
+              </span>{' '}
+              {canChooseSync
+                ? "lets you pick how the two sets of changes come together, then you can push. Nothing is lost."
+                : "pulls the cloud's work into yours, then you can push. Nothing is lost."}
             </li>
             <li>
               <span className="font-medium text-foreground">Force push</span> replaces the cloud's
@@ -77,7 +94,12 @@ export function PushChoiceModal() {
             Cancel
           </Button>
           <Button variant="secondary" size="sm" disabled={pending} onClick={getFirst}>
-            <ArrowDown size={13} /> {m.pull.isPending ? 'Getting…' : 'Get changes first'}
+            <ArrowDown size={13} />{' '}
+            {m.pull.isPending
+              ? 'Getting…'
+              : canChooseSync
+                ? 'Choose how to combine'
+                : 'Get changes first'}
           </Button>
           <Button variant="destructive" size="sm" disabled={pending} onClick={forcePush}>
             {m.pushForce.isPending ? 'Force pushing…' : 'Force push'}

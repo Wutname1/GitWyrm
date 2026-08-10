@@ -33,6 +33,7 @@ import {
 import { detectProvider, RemoteIcon } from "@/lib/remoteProvider";
 import { cn } from "@/lib/utils";
 import { branchSync } from "@/lib/branchActions";
+import { pullNeedsChoice } from "@/lib/syncPreview";
 import { SyncBadge } from "@/components/domain/branch/SyncBadge";
 import { OpenInEditorButton } from "@/components/domain/OpenInEditorButton";
 import { OpenSpecDeskButton } from "@/components/domain/OpenSpecDeskButton";
@@ -272,6 +273,7 @@ export function Toolbar() {
   const m = useGitMutations(repo?.id ?? null);
   const openMerge = useUiStore((s) => s.openMerge);
   const openModal = useUiStore((s) => s.openModal);
+  const openRemoteSync = useUiStore((s) => s.openRemoteSync);
   const head = branches.data?.local.find((b) => b.is_head);
   const syncAction = m.fetch.isPending
     ? "fetch"
@@ -291,6 +293,11 @@ export function Toolbar() {
       : headSync?.ahead
         ? String(headSync.ahead)
         : undefined;
+  const canChooseSync = pullNeedsChoice({
+    upstream: head?.upstream,
+    ahead: headSync?.ahead ?? 0,
+    behind: headSync?.behind ?? 0,
+  });
   const stashAction = m.stashSave.isPending
     ? "stash"
     : m.stashPop.isPending
@@ -322,7 +329,15 @@ export function Toolbar() {
         icon={<ArrowDown size={16} strokeWidth={1.9} />}
         label={m.pull.isPending ? "Pulling…" : "Pull"}
         badge={headSync?.behind ? String(headSync.behind) : undefined}
-        onClick={() => m.pull.mutate()}
+        // With work on both sides, a plain pull silently writes a merge commit
+        // -- a history decision made for the user. Hand that choice back: the
+        // sync modal shows blend / stack / replace with the resulting shape.
+        // A one-sided pull has no decision in it and still runs straight away.
+        onClick={() =>
+          canChooseSync
+            ? openRemoteSync(head!.upstream!, head!.name)
+            : m.pull.mutate()
+        }
         disabled={noRepo || syncPending}
         reason={noRepoReason}
         pending={m.pull.isPending}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { armTop, dotCount, modeCopy, modesFor, stackedLane } from './syncPreview'
+import { armTop, dotCount, modeCopy, modesFor, pullNeedsChoice, stackedLane } from './syncPreview'
 
 describe('modesFor', () => {
   it('offers the real three-way choice when both sides moved', () => {
@@ -18,6 +18,36 @@ describe('modesFor', () => {
 
   it('offers nothing when the two already match', () => {
     expect(modesFor({ ours: 0, theirs: 0 })).toEqual([])
+  })
+})
+
+describe('pullNeedsChoice', () => {
+  const up = 'origin/main'
+
+  it('asks first when both sides moved, instead of inventing a merge commit', () => {
+    // The reported bug: 2 local and 2 remote, and pull silently merged.
+    expect(pullNeedsChoice({ upstream: up, ahead: 2, behind: 2 })).toBe(true)
+  })
+
+  it('pulls straight through when only the cloud moved', () => {
+    // A pure fast-forward has no history decision in it, so a prompt would
+    // just be a click in the way.
+    expect(pullNeedsChoice({ upstream: up, ahead: 0, behind: 4 })).toBe(false)
+  })
+
+  it('pulls straight through when only we moved', () => {
+    expect(pullNeedsChoice({ upstream: up, ahead: 3, behind: 0 })).toBe(false)
+  })
+
+  it('does nothing special when the two already match', () => {
+    expect(pullNeedsChoice({ upstream: up, ahead: 0, behind: 0 })).toBe(false)
+  })
+
+  it('never routes a branch with no upstream to the modal', () => {
+    // The modal pairs the branch against its upstream ref; without one there
+    // is no pair to resolve and it would open empty.
+    expect(pullNeedsChoice({ upstream: null, ahead: 2, behind: 2 })).toBe(false)
+    expect(pullNeedsChoice({ ahead: 2, behind: 2 })).toBe(false)
   })
 })
 

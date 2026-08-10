@@ -50,6 +50,7 @@ import { useUiStore } from "@/stores/uiStore";
 import { useBranches, useRepoTabStatus } from "@/hooks/useGitQueries";
 import { useGitMutations } from "@/hooks/useGitMutations";
 import { branchSync } from "@/lib/branchActions";
+import { pullNeedsChoice } from "@/lib/syncPreview";
 import { Button } from "@/components/ui/button";
 import { PendingMenuItem } from "@/components/ui/pending-menu-item";
 import { Input } from "@/components/ui/input";
@@ -678,7 +679,20 @@ function TabStatusIcons({
  */
 function TabPullItem({ repo, name }: { repo: RepoInfo; name: string }) {
   const m = useGitMutations(repo.id);
-  const { behind } = useRepoTabStatus(repo.id);
+  const { ahead, behind } = useRepoTabStatus(repo.id);
+  const setActiveRepo = useWorkspaceStore((s) => s.setActiveRepo);
+  const openRemoteSync = useUiStore((s) => s.openRemoteSync);
+  const branches = useBranches(repo.id);
+
+  // Work on both sides means a plain pull would invent a merge commit. Send
+  // that to the sync modal instead -- but it reads the ACTIVE repo, so this
+  // switches to the tab first rather than showing another repo's branches.
+  const head = branches.data?.local.find((b) => b.is_head);
+  const canChooseSync = pullNeedsChoice({
+    upstream: head?.upstream,
+    ahead,
+    behind,
+  });
 
   return (
     <PendingMenuItem
@@ -686,7 +700,14 @@ function TabPullItem({ repo, name }: { repo: RepoInfo; name: string }) {
       label={behind > 0 ? `Pull ${behind} into ${name}` : `Pull into ${name}`}
       pendingLabel="Pulling…"
       pending={m.pull.isPending}
-      onRun={() => m.pull.mutate()}
+      onRun={() => {
+        if (canChooseSync) {
+          setActiveRepo(repo.id);
+          openRemoteSync(head!.upstream!, head!.name);
+          return;
+        }
+        m.pull.mutate();
+      }}
     />
   );
 }

@@ -148,6 +148,24 @@ export function modeCopy(mode: PreviewMode, d: Divergence): ModeCopy {
   }
 }
 
+/**
+ * Whether pressing Pull should open the sync modal instead of pulling.
+ *
+ * A plain `git pull` on a branch that has moved on BOTH sides silently writes a
+ * merge commit -- a permanent history decision taken on the user's behalf, and
+ * the exact thing the sync modal exists to hand back. When only one side moved
+ * there is nothing to decide, so the pull runs straight through.
+ *
+ * Needs an upstream because the modal pairs the branch against that exact ref.
+ */
+export function pullNeedsChoice(branch: {
+  upstream?: string | null
+  ahead: number
+  behind: number
+}): boolean {
+  return !!branch.upstream && branch.ahead > 0 && branch.behind > 0
+}
+
 /** Geometry shared by the before/after schematic, so both halves line up. */
 export const GRAPH = {
   /** Vertical distance between commits on a lane. */
