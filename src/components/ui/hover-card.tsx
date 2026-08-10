@@ -2,6 +2,10 @@ import * as React from 'react'
 import { HoverCard as HoverCardPrimitive } from 'radix-ui'
 
 import { cn } from '@/lib/utils'
+import {
+  OVERLAY_COLLISION_PADDING,
+  overlayCollisionBoundary,
+} from '@/lib/overlayCollision'
 
 function HoverCard({
   openDelay = 350,
@@ -26,6 +30,8 @@ function HoverCardContent({
   className,
   align = 'start',
   sideOffset = 6,
+  collisionBoundary = overlayCollisionBoundary(),
+  collisionPadding = OVERLAY_COLLISION_PADDING,
   ...props
 }: React.ComponentProps<typeof HoverCardPrimitive.Content>) {
   return (
@@ -34,6 +40,8 @@ function HoverCardContent({
         data-slot="hover-card-content"
         align={align}
         sideOffset={sideOffset}
+        collisionBoundary={collisionBoundary}
+        collisionPadding={collisionPadding}
         className={cn(
           'z-50 w-64 origin-(--radix-hover-card-content-transform-origin) rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md outline-hidden data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
           className

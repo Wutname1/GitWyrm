@@ -44,7 +44,7 @@ function ZoomControl() {
             ? 'App zoom - click to make everything bigger or smaller'
             : `App zoom is ${percent}% - click to change it, or use the arrow to go back to 100%`}
         </TooltipContent>
-        <PopoverContent align="end" side="top" collisionPadding={8} className="w-56">
+        <PopoverContent align="end" side="top" className="w-56">
           <div className="flex flex-col gap-3 text-text">
             <div className="flex items-center justify-between text-sm font-medium">
               <span>Zoom</span>
