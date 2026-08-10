@@ -387,7 +387,13 @@ jobs:
       # Publish the structured changelog to gitwyrm.com and render the same
       # items to CHANGELOG.md. Without CHANGELOG_API_KEY the upload is skipped
       # and only the render below runs, so the GitHub Release still gets notes.
+      # Stable releases only. The public changelog is a list of things people
+      # can actually install; a beta row would be one more entry to scroll past
+      # that is deleted again as soon as the release it precedes ships. The
+      # release that follows covers the same commits anyway, since its range
+      # runs from the previous STABLE tag.
       - name: Publish changelog to gitwyrm.com
+        if: "!contains(github.ref_name, '-beta.')"
         env:
           CHANGELOG_API_KEY: ${{ secrets.CHANGELOG_API_KEY }}
           CHANGELOG_API_URL: https://gitwyrm.com/api/v1/changelogs
