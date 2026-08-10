@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { Pencil, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
@@ -58,7 +58,7 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-none flex-col border-t border-border bg-panel">
-      <div className="flex flex-none items-center gap-2.5 border-b border-border px-3.5 py-[9px]">
+      <div className="flex max-h-[45%] flex-none items-start gap-2.5 overflow-y-auto border-b border-border px-3.5 py-[9px]">
         <AuthorHoverCard name={d.author_name} email={d.author_email} initials={initials(d.author_name)}>
           <span className="flex-none cursor-default">
             <Avatar
@@ -70,15 +70,10 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
           </span>
         </AuthorHoverCard>
         <div className="min-w-0 flex-1">
-          <TooltipHint label="Double-click to edit this message">
-            <div
-              onDoubleClick={() => setRewordOpen(true)}
-              className="cursor-text overflow-hidden text-ellipsis whitespace-nowrap text-[0.78125rem] font-semibold text-foreground"
-            >
-              {d.summary}
-            </div>
-          </TooltipHint>
-          <div className="text-2xs text-muted-foreground">
+          <div className="select-text break-words text-[0.78125rem] font-semibold text-foreground">
+            {d.summary}
+          </div>
+          <div className="select-text text-2xs text-muted-foreground">
             <AuthorHoverCard
               name={d.author_name}
               email={d.author_email}
@@ -110,34 +105,49 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
             )}
           </div>
         </div>
-        <span className="rounded-[5px] border border-border bg-panel2 px-2 py-[3px] font-mono text-2xs text-sub">
+        <span className="mt-0.5 flex-none select-text rounded-[5px] border border-border bg-panel2 px-2 py-[3px] font-mono text-2xs text-sub">
           {shortSha(d.sha)}
         </span>
         <Button
           variant="secondary"
           size="sm"
-          className="h-auto rounded border-border bg-panel3 px-[7px] py-0.5 text-2xs text-sub"
+          className="mt-0.5 h-auto flex-none rounded border-border bg-panel3 px-[7px] py-0.5 text-2xs text-sub"
           onClick={() => void copyToClipboard(d.sha, `Copied ${shortSha(d.sha)}`)}
         >
           Copy SHA
         </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="mt-0.5 h-auto flex-none rounded border-border bg-panel3 px-[7px] py-0.5 text-2xs text-sub"
+          onClick={() =>
+            void copyToClipboard(
+              d.body.trim() === '' ? d.summary : `${d.summary}\n\n${d.body}`,
+              'Copied commit message'
+            )
+          }
+        >
+          Copy message
+        </Button>
+        <TooltipButton
+          onClick={() => setRewordOpen(true)}
+          tooltip="Edit this message"
+          className="mt-0.5 flex size-6 flex-none items-center justify-center rounded-[5px] border border-border bg-panel2 text-xs text-sub hover:border-muted-foreground hover:bg-panel3"
+        >
+          <Pencil size={12} />
+        </TooltipButton>
         <TooltipButton
           onClick={() => selectCommit(null)}
           tooltip="Close"
-          className="flex size-6 flex-none items-center justify-center rounded-[5px] border border-border bg-panel2 text-xs text-sub hover:border-muted-foreground hover:bg-panel3"
+          className="mt-0.5 flex size-6 flex-none items-center justify-center rounded-[5px] border border-border bg-panel2 text-xs text-sub hover:border-muted-foreground hover:bg-panel3"
         >
           <X size={12} />
         </TooltipButton>
       </div>
       {d.body.trim() !== '' && (
-        <TooltipHint label="Double-click to edit this message">
-          <div
-            onDoubleClick={() => setRewordOpen(true)}
-            className="max-h-20 flex-none cursor-text overflow-y-auto whitespace-pre-wrap border-b border-border px-3.5 py-2 text-2xs leading-relaxed text-sub"
-          >
-            {d.body}
-          </div>
-        </TooltipHint>
+        <div className="max-h-[30%] flex-none select-text overflow-y-auto whitespace-pre-wrap break-words border-b border-border px-3.5 py-2 text-2xs leading-relaxed text-sub">
+          {d.body}
+        </div>
       )}
       <div className="flex flex-none items-center gap-3.5 border-b border-border px-3.5 py-[5px] text-2xs text-sub">
         <span className="font-semibold">{d.files.length} files changed</span>
