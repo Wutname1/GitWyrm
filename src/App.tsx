@@ -42,7 +42,12 @@ import { log } from '@/lib/log'
 import { samePath } from '@/lib/paths'
 import { hideSplash, setSplashProgress, setSplashStatus } from '@/lib/splash'
 import { useUiStore } from '@/stores/uiStore'
-import { flushPendingSettings, useWorkspaceStore } from '@/stores/workspaceStore'
+import {
+  DEFAULT_UI_SCALE,
+  UI_SCALE_STEP,
+  flushPendingSettings,
+  useWorkspaceStore,
+} from '@/stores/workspaceStore'
 
 const queryClient = new QueryClient({
   defaultOptions: {
