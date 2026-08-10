@@ -11,7 +11,7 @@ use crate::git::commit_write::{self, CommitIdentity};
 use crate::git::merge_ops::{self, Resolution};
 use crate::git::refs;
 use crate::git::types::{
-  ConflictContent, MergeAnalysis, MergeResult, MergeState, OperationKind,
+  ConflictContent, MergeAnalysis, MergeResult, MergeState,
 };
 use crate::state::RepoManager;
 
@@ -168,59 +168,7 @@ pub async fn get_merge_state(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    let operation = match repo.state() {
-      git2::RepositoryState::Merge => Some(OperationKind::Merge),
-      git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence => {
-        Some(OperationKind::CherryPick)
-      }
-      git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence => {
-        Some(OperationKind::Revert)
-      }
-      git2::RepositoryState::Rebase
-      | git2::RepositoryState::RebaseMerge
-      | git2::RepositoryState::RebaseInteractive => Some(OperationKind::Rebase),
-      _ => None,
-    };
-    let Some(operation) = operation else {
-      return Ok(MergeState {
-        merging: false,
-        operation: None,
-        incoming_label: None,
-        full_message: None,
-        conflicts: Vec::new(),
-      });
-    };
-
-    let (incoming_label, full_message) = if operation == OperationKind::Rebase {
-      // The message of the commit the rebase stopped on, else the branch being
-      // rebased. Finishing a rebase reuses each commit's message, so there is
-      // no full_message to carry.
-      let label = std::fs::read_to_string(repo.path().join("rebase-merge/message"))
-        .ok()
-        .and_then(|msg| msg.lines().next().map(str::to_string))
-        .or_else(|| {
-          std::fs::read_to_string(repo.path().join("rebase-merge/head-name"))
-            .ok()
-            .map(|name| name.trim().trim_start_matches("refs/heads/").to_string())
-        });
-      (label, None)
-    } else {
-      // Merge, cherry-pick, and revert leave the intended message in
-      // MERGE_MSG; its first line is the display label, the whole file is the
-      // message to commit with.
-      let msg = std::fs::read_to_string(repo.path().join("MERGE_MSG")).ok();
-      let label = msg.as_deref().and_then(|m| m.lines().next().map(str::to_string));
-      (label, msg.map(|m| m.trim_end().to_string()))
-    };
-
-    let conflicts = refs::conflicted_paths(&repo)?;
-    Ok(MergeState {
-      merging: true,
-      operation: Some(operation),
-      incoming_label,
-      full_message,
-      conflicts,
-    })
+    merge_ops::merge_state(&repo)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

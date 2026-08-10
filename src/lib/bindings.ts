@@ -3372,11 +3372,13 @@ fast_forwarded: boolean;
  */
 conflicts: string[] }
 /**
- * Current in-progress operation state of the repo (merge or cherry-pick).
+ * Current in-progress operation state of the repo (merge or cherry-pick), plus
+ * any conflicts left to resolve -- which can outlive every operation here.
  */
 export type MergeState = { 
 /**
  * True when an operation is underway (a merge or cherry-pick is in progress).
+ * False does NOT mean there is nothing to resolve -- check `conflicts`.
  */
 merging: boolean; 
 /**
@@ -3393,7 +3395,9 @@ incoming_label: string | null;
  */
 full_message: string | null; 
 /**
- * Paths still conflicted.
+ * Paths still conflicted, whether or not an operation is in progress. A
+ * stash apply, `checkout -m`, or three-way patch apply leaves these behind
+ * with `operation: None`.
  */
 conflicts: string[] }
 export type ModelList = { models: CatalogModel[]; 

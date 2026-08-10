@@ -540,10 +540,12 @@ pub struct RefMove {
   pub stashed: bool,
 }
 
-/// Current in-progress operation state of the repo (merge or cherry-pick).
+/// Current in-progress operation state of the repo (merge or cherry-pick), plus
+/// any conflicts left to resolve -- which can outlive every operation here.
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct MergeState {
   /// True when an operation is underway (a merge or cherry-pick is in progress).
+  /// False does NOT mean there is nothing to resolve -- check `conflicts`.
   pub merging: bool,
   /// Which operation is in progress, if any.
   pub operation: Option<OperationKind>,
@@ -552,7 +554,9 @@ pub struct MergeState {
   /// Full prepared commit message (MERGE_MSG), used when finishing the
   /// operation so multi-line messages survive intact. None during a rebase.
   pub full_message: Option<String>,
-  /// Paths still conflicted.
+  /// Paths still conflicted, whether or not an operation is in progress. A
+  /// stash apply, `checkout -m`, or three-way patch apply leaves these behind
+  /// with `operation: None`.
   pub conflicts: Vec<String>,
 }
 

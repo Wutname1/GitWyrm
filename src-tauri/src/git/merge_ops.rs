@@ -8,7 +8,8 @@ use serde::Deserialize;
 use specta::Type;
 
 use crate::error::AppError;
-use crate::git::types::ConflictContent;
+use crate::git::refs;
+use crate::git::types::{ConflictContent, MergeState, OperationKind};
 
 #[derive(Debug, Clone, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -42,6 +43,79 @@ fn side_text(side: &Option<(Vec<u8>, bool)>) -> String {
     Some((bytes, false)) => String::from_utf8_lossy(bytes).into_owned(),
     _ => String::new(),
   }
+}
+
+/// The in-progress operation the repo's state files describe, if any. A repo can
+/// hold conflicts without being in one of these -- see `merge_state`.
+fn operation_kind(repo: &Repository) -> Option<OperationKind> {
+  match repo.state() {
+    git2::RepositoryState::Merge => Some(OperationKind::Merge),
+    git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence => {
+      Some(OperationKind::CherryPick)
+    }
+    git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence => {
+      Some(OperationKind::Revert)
+    }
+    git2::RepositoryState::Rebase
+    | git2::RepositoryState::RebaseMerge
+    | git2::RepositoryState::RebaseInteractive => Some(OperationKind::Rebase),
+    _ => None,
+  }
+}
+
+/// What the repo is in the middle of, plus every path still conflicted.
+///
+/// The conflicted paths are read from the index in every case, NOT only while an
+/// operation is in progress. Applying a stash (including the auto-stash a branch
+/// switch does), `checkout -m`, and a three-way patch apply all leave unmerged
+/// index entries behind with no MERGE_HEAD and no rebase directory, so the repo
+/// state reads as Clean. Gating the paths on the operation made those conflicts
+/// invisible: the changes list marked the file `conflict` from `git status`
+/// while the conflict view -- which reads this -- insisted there was nothing to
+/// resolve. `merging` stays false for them, since there is no merge to commit or
+/// abort; only the conflicts themselves need resolving.
+pub fn merge_state(repo: &Repository) -> Result<MergeState, AppError> {
+  let conflicts = refs::conflicted_paths(repo)?;
+
+  let Some(operation) = operation_kind(repo) else {
+    return Ok(MergeState {
+      merging: false,
+      operation: None,
+      incoming_label: None,
+      full_message: None,
+      conflicts,
+    });
+  };
+
+  let (incoming_label, full_message) = if operation == OperationKind::Rebase {
+    // The message of the commit the rebase stopped on, else the branch being
+    // rebased. Finishing a rebase reuses each commit's message, so there is
+    // no full_message to carry.
+    let label = std::fs::read_to_string(repo.path().join("rebase-merge/message"))
+      .ok()
+      .and_then(|msg| msg.lines().next().map(str::to_string))
+      .or_else(|| {
+        std::fs::read_to_string(repo.path().join("rebase-merge/head-name"))
+          .ok()
+          .map(|name| name.trim().trim_start_matches("refs/heads/").to_string())
+      });
+    (label, None)
+  } else {
+    // Merge, cherry-pick, and revert leave the intended message in MERGE_MSG;
+    // its first line is the display label, the whole file is the message to
+    // commit with.
+    let msg = std::fs::read_to_string(repo.path().join("MERGE_MSG")).ok();
+    let label = msg.as_deref().and_then(|m| m.lines().next().map(str::to_string));
+    (label, msg.map(|m| m.trim_end().to_string()))
+  };
+
+  Ok(MergeState {
+    merging: true,
+    operation: Some(operation),
+    incoming_label,
+    full_message,
+    conflicts,
+  })
 }
 
 /// Read the three sides of a conflicted file plus the marker text on disk.

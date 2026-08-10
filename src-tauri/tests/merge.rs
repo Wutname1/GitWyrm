@@ -6,7 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use git2::{build::CheckoutBuilder, MergeOptions, Repository, Signature};
-use gitwyrm_lib::git_merge_ops::{apply_resolution, conflict_content, Resolution};
+use gitwyrm_lib::git_merge_ops::{apply_resolution, conflict_content, merge_state, Resolution};
+use gitwyrm_lib::git_types::OperationKind;
 
 fn scratch_repo(tag: &str) -> (PathBuf, Repository) {
   let dir = std::env::temp_dir().join(format!("gitwyrm-merge-{}-{}", tag, std::process::id()));
@@ -253,6 +254,86 @@ fn modify_delete_conflict_can_keep_or_delete() {
   assert!(!index.has_conflicts(), "both conflicts cleared");
   assert!(index.get_path(Path::new("keep.txt"), 0).is_some(), "kept file staged");
   assert!(index.get_path(Path::new("drop.txt"), 0).is_none(), "deletion staged");
+
+  let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn merge_state_reports_an_in_progress_merge() {
+  let (dir, repo) = scratch_repo("state-merge");
+
+  fs::write(dir.join("f.txt"), "line1\nSHARED\nline3\n").unwrap();
+  let base = commit_all(&repo, "base");
+  let main = default_branch(&repo);
+
+  let feat = diverge(
+    &repo,
+    base,
+    &main,
+    || fs::write(dir.join("f.txt"), "line1\nTHEIRS\nline3\n").unwrap(),
+    || fs::write(dir.join("f.txt"), "line1\nOURS\nline3\n").unwrap(),
+  );
+  merge_expect_conflict(&repo, feat);
+
+  let state = merge_state(&repo).unwrap();
+  assert!(state.merging, "a merge is in progress");
+  assert_eq!(state.operation, Some(OperationKind::Merge));
+  assert_eq!(state.conflicts, vec!["f.txt".to_string()]);
+
+  apply_resolution(&repo, &dir, "f.txt", &Resolution::Ours).unwrap();
+  let state = merge_state(&repo).unwrap();
+  assert!(state.merging, "still merging until it is committed");
+  assert!(state.conflicts.is_empty(), "resolved path drops out");
+
+  let _ = fs::remove_dir_all(&dir);
+}
+
+/// Applying a stash leaves conflicts with no MERGE_HEAD and no rebase directory,
+/// so the repo state reads Clean. Those paths must still be reported, or the
+/// changes list flags a file `conflict` while the conflict view claims there is
+/// nothing to resolve. This is the state a branch switch's auto-stash lands in.
+#[test]
+fn merge_state_reports_conflicts_without_an_operation() {
+  let (dir, mut repo) = scratch_repo("state-stash");
+
+  fs::write(dir.join("f.txt"), "line1\nSHARED\nline3\n").unwrap();
+  let base = commit_all(&repo, "base");
+  let main = default_branch(&repo);
+
+  // A feature branch that touches the same line the stash will.
+  repo.branch("feature", &repo.find_commit(base).unwrap(), false).unwrap();
+  checkout_branch(&repo, "feature");
+  fs::write(dir.join("f.txt"), "line1\nFEATURE\nline3\n").unwrap();
+  commit_all(&repo, "feature change");
+  checkout_branch(&repo, &main);
+
+  // Uncommitted work, stashed so the switch can happen, then reapplied on the
+  // other branch -- exactly what checkout_branch's auto-stash path does.
+  fs::write(dir.join("f.txt"), "line1\nMY WORK\nline3\n").unwrap();
+  repo.stash_save(&sig(), "auto-stash", Some(git2::StashFlags::INCLUDE_UNTRACKED)).unwrap();
+  checkout_branch(&repo, "feature");
+  let _ = repo.stash_apply(0, None);
+
+  assert!(repo.index().unwrap().has_conflicts(), "stash apply should conflict");
+  assert_eq!(
+    repo.state(),
+    git2::RepositoryState::Clean,
+    "a stash apply leaves no operation state behind"
+  );
+
+  let state = merge_state(&repo).unwrap();
+  assert_eq!(state.conflicts, vec!["f.txt".to_string()], "conflicted path is reported");
+  assert!(!state.merging, "there is no merge to commit or abort");
+  assert_eq!(state.operation, None);
+
+  // The conflict view's data path works the same here as during a merge.
+  let content = conflict_content(&repo, &dir, "f.txt").unwrap();
+  assert!(content.ours.contains("FEATURE"), "stage 2 = the branch we are on");
+  assert!(content.theirs.contains("MY WORK"), "stage 3 = the stashed work");
+  assert!(content.merged.contains("<<<<<<<"), "working tree has markers");
+
+  apply_resolution(&repo, &dir, "f.txt", &Resolution::Theirs).unwrap();
+  assert!(merge_state(&repo).unwrap().conflicts.is_empty(), "resolved path drops out");
 
   let _ = fs::remove_dir_all(&dir);
 }
