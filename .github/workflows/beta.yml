@@ -1,9 +1,12 @@
 name: Auto Beta
 
-# Cuts a beta tag for every push to main that changes shipping code. The tag
-# push is what starts an actual build: this workflow does nothing but decide the
-# number and create the tag, which release.yml already knows how to handle
-# (it accepts X.Y.Z-beta.N and marks it a GitHub prerelease).
+# Builds and ships a beta on every push to main that changes shipping code.
+#
+# Nothing is tagged and no GitHub release is created. Betas are throwaway builds
+# cut several times a week, and a tag per push would bury the handful of real
+# release tags in GitWyrm's own ref list. Everything a beta needs -- installers
+# and the signed manifest the updater reads -- lives on the CDN, so the repo
+# stays clean and cleanup is a single prefix delete.
 on:
   push:
     branches:
@@ -19,28 +22,26 @@ on:
       - ".github/scripts/**"
 
 concurrency:
-  # Two quick pushes would otherwise race for the same beta number and one would
-  # fail on an existing tag. Serialised, not cancelled: the older run must finish
-  # creating its tag so the newer one sees it and picks the next number.
+  # Serialised, not cancelled: two pushes in quick succession must not race to
+  # publish beta.json, or the channel could end up pointing at the older build.
   group: auto-beta
   cancel-in-progress: false
 
 jobs:
-  tag:
+  version:
     runs-on: ubuntu-latest
-    # `[skip beta]` anywhere in the commit message is the manual escape hatch for
-    # a push that is technically code but not worth a build.
+    # `[skip beta]` anywhere in the commit message is the manual escape hatch.
     if: "!contains(github.event.head_commit.message, '[skip beta]')"
-    permissions:
-      contents: write
-
+    outputs:
+      version: ${{ steps.next.outputs.version }}
     steps:
-      # Tags are what the numbering reads, and a shallow clone has none of them.
+      # Full history: the numbering reads release tags, and a shallow clone has
+      # none of them.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Work out the next beta number
+      - name: Work out the next beta version
         id: next
         shell: bash
         env:
@@ -48,9 +49,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The floor is the newest STABLE tag, not the newest tag of any kind:
-          # betas are what we are numbering past, so counting them here would
-          # walk the base version forward on every push.
+          # The floor is the newest stable release tag. Betas are not tagged, so
+          # the tag list only ever contains real releases and cannot drift.
           latest_stable=$(git tag --list '[0-9]*.[0-9]*.[0-9]*' \
             | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
             | sort -V | tail -n1 || true)
@@ -58,59 +58,209 @@ jobs:
           if [ -z "$latest_stable" ]; then
             base="0.0.1"
           else
-            # Patch bump. A beta on 0.6.0 becomes 0.6.1-beta.N; shipping 0.7.0
-            # instead is still legal, and release.yml's check-version accepts it
-            # because 0.7.0 is ahead of everything published.
+            # Patch bump. Shipping 0.7.0 instead of the predicted 0.6.1 is still
+            # fine: the next beta after it simply becomes 0.7.1-beta.1.
             IFS=. read -r major minor patch <<<"$latest_stable"
             base="${major}.${minor}.$((patch + 1))"
           fi
 
-          # Count what already exists for THIS base rather than assuming one
-          # beta per push: a run that failed after tagging, or a hand-cut beta,
-          # both leave a number that must not be reused.
-          highest=$(git tag --list "${base}-beta.*" \
-            | sed -E "s/^${base}-beta\.//" \
-            | grep -E '^[0-9]+$' \
-            | sort -n | tail -n1 || true)
-          next_n=$(( ${highest:-0} + 1 ))
+          # With no tags to count, the beta number comes from what is already
+          # published on the CDN. beta.json names the version it points at, so
+          # the current beta is read straight back out of it.
+          current=$(curl -fsSL "https://cdn.gitwyrm.com/updates/beta.json" 2>/dev/null \
+            | jq -r '.version // empty' || true)
 
-          tag="${base}-beta.${next_n}"
+          n=0
+          if [[ "$current" == "${base}-beta."* ]]; then
+            n="${current##*-beta.}"
+            # A malformed suffix must not silently restart numbering at 1 and
+            # overwrite a published build.
+            if ! [[ "$n" =~ ^[0-9]+$ ]]; then
+              echo "::error::Cannot parse beta number from published version '$current'"
+              exit 1
+            fi
+          fi
 
-          # A tag can exist locally-but-remotely-deleted, or upstream from a run
-          # whose tag push landed after our fetch. Walk forward rather than fail.
-          while git rev-parse -q --verify "refs/tags/${tag}" >/dev/null \
-             || gh release view "$tag" >/dev/null 2>&1; do
-            next_n=$(( next_n + 1 ))
-            tag="${base}-beta.${next_n}"
-          done
+          version="${base}-beta.$(( n + 1 ))"
+          echo "Latest stable: ${latest_stable:-none} | published beta: ${current:-none} | building: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-          echo "Latest stable: ${latest_stable:-none} | next beta: $tag"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            rust_target: x86_64-pc-windows-msvc
+            tauri_args: ""
+            bundle_base: src-tauri/target/release/bundle
+            cdn_suffix: ""
+          - arch: aarch64
+            rust_target: aarch64-pc-windows-msvc
+            tauri_args: "--target aarch64-pc-windows-msvc"
+            bundle_base: src-tauri/target/aarch64-pc-windows-msvc/release/bundle
+            cdn_suffix: "-ARM64"
+    runs-on: windows-latest
 
-      # Pushing the tag is the whole job. release.yml is triggered by the tag
-      # push and does the build, CDN upload, and prerelease publish.
-      #
-      # GITHUB_TOKEN cannot trigger another workflow (GitHub blocks that to
-      # avoid recursion), so the tag is pushed with a PAT. Without RELEASE_PAT
-      # the tag would appear and no build would ever run - so fail loudly here
-      # rather than leave a silently dead tag behind.
-      - name: Create and push the beta tag
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.arch }}
+
+      # The updater compares the manifest version against the version compiled
+      # into the running app, so these must match or a beta re-offers itself
+      # forever. Mirrors the release workflow's step; there is no tag to read
+      # the version from here, so it comes from the version job.
+      - name: Sync version
+        shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-          TAG: ${{ steps.next.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $version = $env:VERSION
+          Write-Host "Setting version to $version"
+
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $conf.version = $version
+          $conf | ConvertTo-Json -Depth 100 | Set-Content src-tauri/tauri.conf.json
+
+          # Only the first version= line, which is the [package] one.
+          $cargo = Get-Content src-tauri/Cargo.toml
+          $done = $false
+          $cargo = $cargo | ForEach-Object {
+            if (-not $done -and $_ -match '^version\s*=') {
+              $done = $true
+              "version = `"$version`""
+            } else {
+              $_
+            }
+          }
+          $cargo | Set-Content src-tauri/Cargo.toml
+
+          $lock = Get-Content src-tauri/Cargo.lock -Raw
+          $pattern = '(?m)^(name = "gitwyrm"\r?\nversion = )"[^"]*"'
+          if ($lock -notmatch $pattern) { throw "gitwyrm package entry not found in Cargo.lock" }
+          $lock = [regex]::Replace($lock, $pattern, "`$1`"$version`"")
+          Set-Content src-tauri/Cargo.lock -Value $lock -NoNewline
+
+          npm version $version --no-git-tag-version --allow-same-version
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Fetch bundled git and gpg
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x .github/scripts/*.sh
+          .github/scripts/fetch-bundled-tools.sh ${{ matrix.arch }} src-tauri/resources
+
+      # No tagName/releaseName: without them tauri-action builds and signs the
+      # bundle but creates no GitHub release, which is the whole point here.
+      # TAURI_SIGNING_PRIVATE_KEY still applies, so the .sig files a beta needs
+      # are produced exactly as they are for a release.
+      - name: Build (NSIS + signatures)
+        uses: tauri-apps/tauri-action@v1
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        with:
+          args: ${{ matrix.tauri_args }}
+
+      - name: Upload Rust debug symbols to Sentry
+        shell: pwsh
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: gitwyrm
+          SENTRY_PROJECT: gitwyrm-backend
+        run: |
+          $dir = "src-tauri/target/${{ matrix.rust_target }}/release"
+          if (-not (Test-Path "$dir/gitwyrm.exe")) {
+            $dir = "src-tauri/target/release"
+          }
+          npx @sentry/cli debug-files upload --include-sources "$dir"
+
+      # Installer plus its detached signature. The signature is what the updater
+      # verifies before running anything, so it has to travel with the binary --
+      # publish-beta-manifest.sh reads it back out to build beta.json.
+      - name: Upload installer to CDN
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          VERSION: ${{ needs.version.outputs.version }}
+          SUFFIX: ${{ matrix.cdn_suffix }}
         run: |
           set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::error::RELEASE_PAT is not set. A tag pushed with GITHUB_TOKEN does not start the Release workflow, so the beta would never build."
+          pip install --quiet awscli
+
+          NSIS_EXE=$(find "${{ matrix.bundle_base }}/nsis" -name "*-setup.exe" -type f | head -1)
+          if [ -z "$NSIS_EXE" ]; then
+            echo "::error::No NSIS installer found under ${{ matrix.bundle_base }}/nsis"
+            exit 1
+          fi
+          if [ ! -f "${NSIS_EXE}.sig" ]; then
+            echo "::error::No signature beside ${NSIS_EXE}; the updater would reject this build."
             exit 1
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Beta build from ${GITHUB_SHA:0:7}"
+          for src in "$NSIS_EXE" "${NSIS_EXE}.sig"; do
+            ext="exe"
+            [ "$src" = "${NSIS_EXE}.sig" ] && ext="exe.sig"
+            aws s3 cp "$src" \
+              "s3://gitwyrm-cdn/betas/${VERSION}/GitWyrm-Setup${SUFFIX}.${ext}" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --cache-control "public, max-age=31536000, immutable"
+          done
 
-          git remote set-url origin \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin "$TAG"
+          echo "Uploaded GitWyrm-Setup${SUFFIX}.exe for ${VERSION}"
 
-          echo "Pushed $TAG - Release workflow will build it." >> "$GITHUB_STEP_SUMMARY"
+  # Moves the beta channel pointer. Gated on the whole matrix so a leg that
+  # succeeds while the other fails cannot publish a manifest promising an
+  # installer that was never uploaded -- an ARM64 user would then update into a
+  # 404 and be left with nothing running.
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Publish beta channel manifest
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          pip install --quiet awscli
+          chmod +x .github/scripts/*.sh
+          .github/scripts/publish-beta-manifest.sh "$VERSION"
+
+      - name: Summary
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          {
+            echo "### Beta ${VERSION} published"
+            echo
+            echo "Testers on the Beta channel get it at their next update check."
+            echo
+            echo "Fresh install: <https://cdn.gitwyrm.com/betas/GitWyrm-Setup-Beta.exe>"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -469,6 +469,54 @@ async saveSettings(settings: Settings) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * A newer version on the user's channel, or None when up to date.
+ * 
+ * Returns the version string only. Installing re-checks against the same
+ * endpoint, so there is no `Update` handle for the frontend to hold or leak.
+ */
+async checkForUpdate() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_for_update") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Download and install the pending update, returning the version installed.
+ * 
+ * Relaunching is left to the caller so the frontend can show "restarting"
+ * before the window disappears.
+ * 
+ * This exists rather than the JS plugin's `downloadAndInstall` because that
+ * path rebuilds the updater from tauri.conf.json and so would always fetch the
+ * stable manifest -- a beta user would check beta, find a version, then
+ * install whatever stable happened to be.
+ */
+async installUpdate() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("install_update") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The manifest URL for the channel the user has chosen.
+ * 
+ * Exposed so the frontend can show which channel a check actually used, and
+ * so a bug report says which endpoint was consulted rather than leaving us to
+ * guess from the version alone.
+ */
+async updateEndpoint() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_endpoint") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async markRepoMissing(repoPath: string, missing: boolean) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("mark_repo_missing", { repoPath, missing }) };

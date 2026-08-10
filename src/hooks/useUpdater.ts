@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { toast } from "sonner";
-import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { commands } from "@/lib/bindings";
 
 export type UpdateState =
   | "idle"
@@ -62,21 +62,36 @@ function skipInDev(
 }
 
 async function runInstall(
-  update: { version: string; downloadAndInstall: () => Promise<void> },
+  version: string,
   set: (s: Partial<UpdaterStore>) => void,
 ) {
-  set({ state: "downloading", version: update.version });
-  await update.downloadAndInstall();
+  set({ state: "downloading", version });
+  await installUpdate();
   set({ state: "ready" });
-  toast(`Update ${update.version} installed - restarting...`);
+  toast(`Update ${version} installed - restarting...`);
   const { relaunch } = await import("@tauri-apps/plugin-process");
   await relaunch();
 }
 
-async function fetchUpdate(timeout?: number) {
-  const { check } = await import("@tauri-apps/plugin-updater");
-  const channel = useWorkspaceStore.getState().updateChannel;
-  return check({ headers: { "X-Update-Channel": channel }, timeout });
+/**
+ * Ask the backend whether a newer build exists on the user's channel.
+ *
+ * Goes through our own command rather than the updater plugin's `check()`,
+ * which rebuilds the updater from tauri.conf.json and so always reads the
+ * stable manifest. This previously sent an `X-Update-Channel` header to a
+ * static GitHub asset, which ignores headers -- and `/releases/latest` skips
+ * prereleases besides, so choosing Beta in Settings had no effect at all.
+ * Resolving the endpoint in Rust is what makes the setting real.
+ */
+async function fetchUpdate(): Promise<string | null> {
+  const res = await commands.checkForUpdate();
+  if (res.status === "error") throw new Error(res.error);
+  return res.data;
+}
+
+async function installUpdate(): Promise<void> {
+  const res = await commands.installUpdate();
+  if (res.status === "error") throw new Error(res.error);
 }
 
 /**
@@ -85,6 +100,30 @@ async function fetchUpdate(timeout?: number) {
  * server has to cost a few seconds, not the whole startup.
  */
 const LAUNCH_CHECK_TIMEOUT_MS = 8000;
+
+/**
+ * Resolve to `null` if `promise` has not settled within `ms`.
+ *
+ * Used only on the launch check, where the point is to stop *waiting* rather
+ * than to stop the work: the backend command carries on and its result is
+ * simply ignored, which is fine because a check has no side effects.
+ */
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** Shared updater state so a launch check and the status-bar button agree. */
 export const useUpdater = create<UpdaterStore>((set, get) => ({
@@ -97,14 +136,14 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
     if (get().state === "downloading") return;
     set({ state: "checking" });
     try {
-      const update = await fetchUpdate();
-      if (!update) {
+      const version = await fetchUpdate();
+      if (!version) {
         set({ state: "none", version: null });
         if (!silent) toast("GitWyrm is up to date");
         return;
       }
-      set({ state: "available", version: update.version });
-      if (!silent) toast(`Update ${update.version} is available`);
+      set({ state: "available", version });
+      if (!silent) toast(`Update ${version} is available`);
     } catch (e) {
       set({ state: "error" });
       if (!silent) toast.error(`Update check failed: ${(e as Error).message}`);
@@ -116,13 +155,13 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
     if (get().state === "downloading") return;
     set({ state: "checking" });
     try {
-      const update = await fetchUpdate();
-      if (!update) {
+      const version = await fetchUpdate();
+      if (!version) {
         set({ state: "none", version: null });
         toast("GitWyrm is up to date");
         return;
       }
-      await runInstall(update, set);
+      await runInstall(version, set);
     } catch (e) {
       set({ state: "error" });
       toast.error(`Update failed: ${(e as Error).message}`);
@@ -144,8 +183,12 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
     set({ state: "checking" });
     onStatus("Checking for updates");
     try {
-      const update = await fetchUpdate(LAUNCH_CHECK_TIMEOUT_MS);
-      if (!update) {
+      // The splash is covering the window for this whole wait, so an
+      // unreachable update server must cost a few seconds rather than the whole
+      // startup. The timeout lives here now: the check runs in Rust, and losing
+      // the race only abandons the wait, it does not cancel the command.
+      const version = await withTimeout(fetchUpdate(), LAUNCH_CHECK_TIMEOUT_MS);
+      if (!version) {
         set({ state: "none", version: null });
         return;
       }
@@ -153,13 +196,16 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
       // Auto-update off: note the update and let the status-bar button offer
       // it, rather than holding the splash on something the user declined.
       if (!auto) {
-        set({ state: "available", version: update.version });
+        set({ state: "available", version });
         return;
       }
 
-      set({ state: "downloading", version: update.version });
-      onStatus(`Installing update ${update.version}`);
-      await update.downloadAndInstall();
+      set({ state: "downloading", version });
+      onStatus(`Installing update ${version}`);
+      // Deliberately not wrapped in withTimeout: downloading an installer over
+      // a slow link legitimately takes longer than the check budget, and
+      // abandoning it mid-write is how you get a half-installed app.
+      await installUpdate();
       set({ state: "ready" });
       onStatus("Restarting to finish the update");
       const { relaunch } = await import("@tauri-apps/plugin-process");

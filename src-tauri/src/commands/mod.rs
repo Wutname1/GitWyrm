@@ -29,4 +29,5 @@ pub mod stash;
 pub mod status;
 pub mod submodule;
 pub mod tutorial;
+pub mod updates;
 pub mod worktree;

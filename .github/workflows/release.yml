@@ -464,87 +464,116 @@ jobs:
             exit 1
           fi
 
-  # Betas are throwaway builds cut on every push to main (see beta.yml), so they
-  # pile up fast. Once a stable release is live they have no audience left --
-  # anyone on a beta is offered this release by the updater -- and their CDN
-  # directories are pure storage cost. Purged here rather than on a schedule so
-  # cleanup is tied to the event that makes them obsolete.
-  #
-  # Runs only after `publish` succeeds: deleting the betas before the stable
-  # release is actually live would leave a window with nothing to install.
-  purge-betas:
-    needs: publish
-    # Stable tags only. A beta must not purge its own siblings -- 0.6.1-beta.3
-    # deleting 0.6.1-beta.2 would break anyone who had not updated yet.
-    if: "!contains(github.ref_name, '-beta.')"
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Purge superseded beta builds
-        shell: bash
+      # The channel manifest clients actually poll. Written last, once the
+      # release is live and its manifest verified, so no client is ever pointed
+      # at a build that might still be pulled back to draft.
+      #
+      # A beta writes ONLY updates/beta.json; the stable channel is untouched,
+      # so a prerelease can never reach someone on stable. A stable release
+      # writes both: anyone who opted into betas should move onto the shipped
+      # version rather than sit on a superseded prerelease forever.
+      - name: Publish CDN channel manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          pip install --quiet awscli
+          chmod +x .github/scripts/*.sh
+
+          .github/scripts/publish-cdn-manifest.sh beta "$TAG"
+
+          if [[ "$TAG" != *"-beta."* ]]; then
+            .github/scripts/publish-cdn-manifest.sh stable "$TAG"
+          fi
+
+
+  # Betas are throwaway builds cut on every push to main (see beta.yml). Once a
+  # stable release is live they have no audience left -- every beta client is
+  # offered this release at its next check -- and their CDN directories are pure
+  # storage cost. Purged here rather than on a schedule so cleanup is tied to
+  # the event that makes them obsolete.
+  #
+  # There are no tags or GitHub releases to clean up: betas never had any. This
+  # is a prefix delete plus resetting the channel pointer.
+  #
+  # Runs only after `publish` succeeds. Deleting betas before the stable release
+  # is actually live would strand testers with nothing to move to.
+  purge-betas:
+    needs: publish
+    # Stable releases only. A beta must never purge its siblings.
+    if: "!contains(github.ref_name, '-beta.')"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Purge superseded beta builds
+        shell: bash
+        env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           TAG: ${{ github.ref_name }}
+          BUCKET: gitwyrm-cdn
         run: |
           set -euo pipefail
           pip install --quiet awscli
 
-          # Every beta at or below this release is superseded. Comparing on the
-          # base version keeps a beta for a LATER version alive: if 0.7.0-beta.1
-          # is already out when 0.6.1 ships, it is still ahead and must survive.
+          # Point the beta channel at this release BEFORE deleting anything. A
+          # tester who checks for updates mid-purge then finds the stable build,
+          # rather than a manifest naming installers being deleted underneath
+          # them.
           #
-          # `sort -V` orders 0.6.1-beta.1 before 0.6.1, so a plain version sort
-          # answers "is this beta at or below the release" directly.
-          betas=$(git tag --list '*-beta.*' | sort -V)
-          if [ -z "$betas" ]; then
-            echo "No beta tags to purge."
+          # Betas are always a patch ahead of the last stable, so the shipped
+          # release is newer than every beta it supersedes and the updater
+          # offers it normally -- no downgrade involved.
+          aws s3 cp "s3://${BUCKET}/updates/stable.json" \
+            "s3://${BUCKET}/updates/beta.json" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --content-type "application/json" \
+            --cache-control "no-cache, no-store, must-revalidate"
+          echo "Beta channel now points at $TAG"
+
+          # Every versioned beta directory. Betas for a LATER version are kept:
+          # if 0.7.0-beta.1 is already out when 0.6.1 ships it is still ahead,
+          # and deleting it would strand whoever is testing it.
+          versions=$(aws s3 ls "s3://${BUCKET}/betas/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            | awk '/PRE/ { sub(/\/$/, "", $2); print $2 }' || true)
+
+          if [ -z "$versions" ]; then
+            echo "No beta builds to purge."
             exit 0
           fi
 
           purged=0
-          while IFS= read -r beta; do
-            [ -z "$beta" ] && continue
-            base="${beta%%-beta.*}"
+          for version in $versions; do
+            base="${version%%-beta.*}"
 
-            # Keep betas whose base version is beyond this release.
             older=$(printf '%s\n%s\n' "$base" "$TAG" | sort -V | head -n1)
             if [ "$base" != "$TAG" ] && [ "$older" = "$TAG" ]; then
-              echo "Keeping $beta (targets $base, ahead of $TAG)"
+              echo "Keeping $version (targets $base, ahead of $TAG)"
               continue
             fi
 
-            echo "Purging $beta"
-
-            # CDN first. If a later step fails, a re-run still finds the tag and
-            # release to clean up; the reverse order could leave orphaned bytes
-            # with no tag left to tell us they exist.
-            aws s3 rm "s3://gitwyrm-cdn/releases/${beta}/" \
-              --recursive --endpoint-url "$R2_ENDPOINT" || \
-              echo "::warning::CDN delete failed for $beta"
-
-            # --cleanup-tag removes the git tag along with the release, so the
-            # tag list stays readable and beta.yml's numbering scan stays fast.
-            if gh release view "$beta" >/dev/null 2>&1; then
-              gh release delete "$beta" --yes --cleanup-tag || \
-                echo "::warning::Release delete failed for $beta"
-            else
-              # Tag with no release: a beta whose build failed before publishing.
-              git push origin ":refs/tags/${beta}" || \
-                echo "::warning::Tag delete failed for $beta"
-            fi
-
+            echo "Purging betas/$version"
+            aws s3 rm "s3://${BUCKET}/betas/${version}/" \
+              --recursive --endpoint-url "$R2_ENDPOINT"
             purged=$(( purged + 1 ))
-          done <<<"$betas"
+          done
+
+          # The fixed-name first-install copy points at a build that may have
+          # just been deleted, so it has to go too. The next beta republishes
+          # it; until then testers install the stable release like everyone else.
+          if [ "$purged" -gt 0 ]; then
+            for suffix in "" "-ARM64"; do
+              aws s3 rm "s3://${BUCKET}/betas/GitWyrm-Setup-Beta${suffix}.exe" \
+                --endpoint-url "$R2_ENDPOINT" 2>/dev/null || true
+            done
+          fi
 
           echo "Purged $purged beta build(s) superseded by $TAG." \
             >> "$GITHUB_STEP_SUMMARY"
