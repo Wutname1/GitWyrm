@@ -9,7 +9,7 @@
 use std::collections::VecDeque;
 
 use super::driver::{
-  summarize, GateAnswer, GateRequest, PreflightItem, RunDriver, RunState, RunStep,
+  GateAnswer, GateRequest, PreflightItem, RunDriver, RunState, RunStep,
 };
 
 /// One scripted beat.
@@ -86,14 +86,16 @@ impl ScriptedDriver {
     self.awaiting_gate
   }
 
+  /// Notes the user queued. Assertions only: the console reads them back off
+  /// the emitted stream, not from here.
+  #[cfg(test)]
+  pub fn notes(&self) -> &[String] {
+    &self.notes
+  }
+
   /// Steps emitted so far, for assertions.
   pub fn emitted(&self) -> &[(RunStep, RunState)] {
     &self.emitted
-  }
-
-  /// Notes the user queued.
-  pub fn notes(&self) -> &[String] {
-    &self.notes
   }
 }
 
@@ -260,12 +262,6 @@ fn script_for(scenario: Scenario) -> Vec<Beat> {
     }
   }
   beats
-}
-
-/// The sentence for a beat, so the scripted path uses the same words as a real
-/// run rather than its own.
-pub fn beat_summary(beat: &Beat) -> String {
-  summarize(&beat.step)
 }
 
 #[cfg(test)]

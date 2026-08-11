@@ -30,29 +30,6 @@ pub enum RunState {
 }
 
 impl RunState {
-  /// The glyph the pill shows before its label.
-  pub fn glyph(self) -> &'static str {
-    match self {
-      RunState::Preparing | RunState::Working => "●",
-      RunState::NeedsYou => "⏸",
-      RunState::Finished => "✓",
-      RunState::Stopped => "■",
-      RunState::Failed => "✕",
-    }
-  }
-
-  /// The pill's label.
-  pub fn label(self) -> &'static str {
-    match self {
-      RunState::Preparing => "Getting ready",
-      RunState::Working => "Working",
-      RunState::NeedsYou => "Needs you",
-      RunState::Finished => "Finished",
-      RunState::Stopped => "Stopped",
-      RunState::Failed => "Didn't finish",
-    }
-  }
-
   /// Whether Stop should be offered.
   pub fn is_active(self) -> bool {
     matches!(self, RunState::Preparing | RunState::Working | RunState::NeedsYou)
@@ -106,34 +83,6 @@ impl GateRequest {
       }
       GateRequest::OutsideRepo { path } => format!("Touch {path}, outside this folder?"),
       GateRequest::Unclassified { summary } => format!("Allow this: {summary}?"),
-    }
-  }
-
-  /// The card's body: what actually happens if allowed.
-  pub fn body(&self) -> String {
-    match self {
-      GateRequest::AddDependency { name } => format!(
-        "This downloads {name} from the internet and adds it to your project's list of \
-         libraries. You'll see the change before anything is committed."
-      ),
-      GateRequest::RunInstall { command } => format!(
-        "This runs {command}, which downloads code from the internet onto this machine."
-      ),
-      GateRequest::NetworkAccess { target } => {
-        format!("This sends a request to {target} and waits for a reply.")
-      }
-      GateRequest::DeleteFiles { paths } => format!(
-        "This removes {} from your folder. You can undo the whole run afterwards.",
-        paths.join(", ")
-      ),
-      GateRequest::OutsideRepo { path } => format!(
-        "{path} is outside the folder you opened, so it isn't covered by undo. Changes \
-         there stay even if you undo this run."
-      ),
-      GateRequest::Unclassified { summary } => format!(
-        "The AI asked to do something GitWyrm doesn't recognise: {summary}. Only allow \
-         it if you understand what it will do."
-      ),
     }
   }
 }
@@ -251,17 +200,6 @@ mod tests {
   use super::*;
 
   #[test]
-  fn needs_you_is_distinguishable_from_needs_review() {
-    // These sit in the same window as the change-status "Needs review". The
-    // glyph is what separates them for someone not reading carefully.
-    assert_eq!(RunState::NeedsYou.label(), "Needs you");
-    assert_eq!(RunState::NeedsYou.glyph(), "⏸");
-    // Every state's glyph is distinct from the working one, except working.
-    assert_ne!(RunState::NeedsYou.glyph(), RunState::Working.glyph());
-    assert_ne!(RunState::Failed.glyph(), RunState::Finished.glyph());
-  }
-
-  #[test]
   fn stop_is_offered_exactly_while_a_run_is_live() {
     assert!(RunState::Preparing.is_active());
     assert!(RunState::Working.is_active());
@@ -275,14 +213,6 @@ mod tests {
   fn gate_titles_lead_with_the_consequence() {
     let g = GateRequest::AddDependency { name: "left-pad".into() };
     assert!(g.title().contains("left-pad"));
-    assert!(g.body().contains("downloads"), "{}", g.body());
-  }
-
-  #[test]
-  fn the_outside_repo_gate_warns_that_undo_wont_cover_it() {
-    // The one gate whose consequence outlives the run. Saying so is the point.
-    let g = GateRequest::OutsideRepo { path: "/etc/hosts".into() };
-    assert!(g.body().contains("undo"), "{}", g.body());
   }
 
   #[test]

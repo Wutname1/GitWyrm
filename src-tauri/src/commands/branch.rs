@@ -773,7 +773,7 @@ fn fast_forward_branch_to(
   target: &str,
 ) -> Result<RefMove, AppError> {
   {
-    let mut branch_ref = repo.find_branch(branch.trim(), BranchType::Local)?;
+    let branch_ref = repo.find_branch(branch.trim(), BranchType::Local)?;
     let branch_oid = branch_ref
       .get()
       .peel_to_commit()

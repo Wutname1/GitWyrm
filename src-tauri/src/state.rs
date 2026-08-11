@@ -347,7 +347,7 @@ mod tests {
     let slot: Mutex<Option<Arc<SharedRead<usize, String>>>> = Mutex::new(None);
     let runs = AtomicUsize::new(0);
 
-    let mut run = || {
+    let run = || {
       open.coalesced_read(&slot, |_repo| {
         Ok::<usize, String>(runs.fetch_add(1, Ordering::SeqCst))
       })

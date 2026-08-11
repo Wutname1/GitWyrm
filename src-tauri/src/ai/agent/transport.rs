@@ -1,9 +1,9 @@
-//! One interface, several transports.
+//! How a provider is named, and why a turn failed.
 //!
-//! The engine asks the default provider what it supports and uses that. It has
-//! no preference of its own: a user who signed in with Copilot gets the Copilot
-//! path, a user with an API key gets the API path, and neither is treated as
-//! the "real" one.
+//! The turn-shuttling types that used to live here are gone with the loop:
+//! the provider CLI carries its own conversation, so nothing in GitWyrm
+//! assembles turns or tool calls any more. What remains is the vocabulary the
+//! console needs to explain a failure.
 
 use std::fmt;
 
@@ -40,68 +40,6 @@ impl fmt::Display for Transport {
     };
     f.write_str(s)
   }
-}
-
-/// A tool the model asked to use.
-///
-/// The bounded set lives in the loop, not here: a transport's job is to carry
-/// the request faithfully, and refusing an unknown tool is the engine's call so
-/// the rule holds identically across all three transports.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCall {
-  /// Transport-assigned id, echoed back so a result can be matched to its call.
-  pub id: String,
-  pub name: String,
-  /// Arguments as the model produced them. Parsed and validated by the tool
-  /// itself, which is where a bad shape should be reported from.
-  pub arguments: serde_json::Value,
-}
-
-/// What a tool produced, fed back into the next turn.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolResult {
-  /// The [`ToolCall::id`] this answers.
-  pub id: String,
-  pub content: String,
-  /// True when the tool refused or failed. The model is told either way -- a
-  /// refusal it cannot see is a refusal it will retry.
-  pub is_error: bool,
-}
-
-/// One request to the provider: the conversation so far, plus what tools exist.
-pub struct TurnRequest<'a> {
-  pub model: &'a str,
-  pub system: &'a str,
-  /// Full conversation. Transports that are stateless replay it; a CLI holding
-  /// its own session may send only what is new.
-  pub messages: &'a [Message],
-  /// Tool schemas the model may call this turn.
-  pub tools: &'a [ToolSchema],
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "role", rename_all = "snake_case")]
-pub enum Message {
-  User { content: String },
-  Assistant { content: String, tool_calls: Vec<ToolCall> },
-  Tool { result: ToolResult },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolSchema {
-  pub name: String,
-  pub description: String,
-  /// JSON Schema for the arguments.
-  pub parameters: serde_json::Value,
-}
-
-/// What one turn produced.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentTurn {
-  /// Prose the model produced, if any. May be empty on a pure tool-call turn.
-  pub text: String,
-  /// Tools it wants run before the next turn. Empty means it is done talking.
-  pub tool_calls: Vec<ToolCall>,
 }
 
 /// Why a turn could not be taken.
@@ -147,36 +85,4 @@ impl From<AppError> for AgentError {
   fn from(e: AppError) -> Self {
     AgentError::Failed { detail: e.to_string() }
   }
-}
-
-/// A provider the engine can run turns against.
-///
-/// Implemented once per transport. Nothing provider-specific reaches the loop
-/// or the console: a Copilot run and an Anthropic run differ only in which
-/// implementation is behind this.
-///
-/// Uses native `async fn` in traits rather than `async_trait`, which keeps the
-/// dependency list as it is. The cost is that the trait is not object-safe, so
-/// the engine dispatches over an enum of implementations rather than a
-/// `dyn ProviderAgent` -- see [`super::select`].
-pub trait ProviderAgent: Send + Sync {
-  /// Which transport this is, for the console to name when something is wrong.
-  fn transport(&self) -> Transport;
-
-  /// Whether this transport can currently run, and why not when it cannot.
-  ///
-  /// Asks the underlying tool or endpoint rather than checking for a
-  /// credential file: a complete-looking credential whose scope is wrong looks
-  /// ready on disk and fails at generation time, which is the spike's own
-  /// failure case.
-  fn check(&self) -> impl std::future::Future<Output = Result<(), AgentError>> + Send;
-
-  /// Take one turn.
-  ///
-  /// Must remain cancellable throughout -- a turn is 10-20 seconds, so a Stop
-  /// that waits for it to finish is a Stop that looks broken.
-  fn turn(
-    &self,
-    req: TurnRequest<'_>,
-  ) -> impl std::future::Future<Output = Result<AgentTurn, AgentError>> + Send;
 }

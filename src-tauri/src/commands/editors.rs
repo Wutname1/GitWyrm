@@ -312,9 +312,13 @@ fn detect_visual_studio_uncached() -> Option<String> {
   None
 }
 
-/// Absolute path to devenv.exe for the newest install, used to launch a
-/// solution.
-#[cfg(windows)]
+/// Absolute path to devenv.exe for the newest install.
+///
+/// Solutions are launched by shell-open rather than by invoking devenv
+/// directly, so nothing in the app calls this. It stays because the detection
+/// test asserts that a detected Visual Studio resolves to a real executable --
+/// the check that `detect_visual_studio` agrees with vswhere.
+#[cfg(all(windows, test))]
 fn visual_studio_exe() -> Option<PathBuf> {
   let vswhere = vswhere_path()?;
 

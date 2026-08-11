@@ -12,7 +12,7 @@ use super::bitbucket::Bitbucket;
 use super::github::GitHub;
 use super::gitlab::GitLab;
 use super::HostProvider;
-use crate::git::remote_url::{self, RemoteProvider};
+use crate::git::remote_url;
 
 /// Stable identifier for a host, used as the `auth.json` key and in the UI.
 ///

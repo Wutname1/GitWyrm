@@ -599,7 +599,7 @@ mod tests {
     }
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
 
-    let Ok(mut child) = cmd.spawn() else {
+    let Ok(child) = cmd.spawn() else {
       eprintln!("NOTE: could not spawn a test child; skipping the orphan check");
       return;
     };

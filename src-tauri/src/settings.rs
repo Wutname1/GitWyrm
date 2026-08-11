@@ -866,11 +866,6 @@ pub async fn get_usage_telemetry_enabled(app: tauri::AppHandle) -> Result<bool, 
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// Write settings exactly as given.
-pub fn write_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(), AppError> {
-  write_settings_in(&app_data_dir(app)?, settings)
-}
-
 #[tauri::command]
 #[specta::specta]
 pub async fn save_settings(app: tauri::AppHandle, mut settings: Settings) -> Result<(), AppError> {

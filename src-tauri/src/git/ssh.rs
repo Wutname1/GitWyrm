@@ -538,7 +538,6 @@ pub fn rewrite_config(original: &str, host: &str, key: &str) -> String {
 
   if in_target && !replaced {
     out.push(format!("  IdentityFile {key}"));
-    replaced = true;
   }
 
   if !found_block {

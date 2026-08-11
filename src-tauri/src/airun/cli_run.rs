@@ -12,7 +12,7 @@
 
 use std::sync::mpsc;
 
-use crate::ai::agent::acp::{AcpConnection, Incoming, PermissionDecision, StopReason};
+use crate::ai::agent::acp::{Incoming, PermissionDecision, StopReason};
 use crate::ai::agent::cli_agent::CliAgent;
 use crate::ai::agent::transport::AgentError;
 

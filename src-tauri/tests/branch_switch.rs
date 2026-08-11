@@ -84,7 +84,7 @@ fn auto_stash_carries_nonconflicting_change() {
 #[test]
 fn carry_succeeds_when_no_conflict() {
   const TAG: &str = "carry_ok";
-  let (dir, mut repo) = scratch_repo_named(TAG);
+  let (dir, repo) = scratch_repo_named(TAG);
   fs::write(dir.join("a.txt"), "base\n").unwrap();
   commit_all(&repo, "init");
   repo.branch("feature", &repo.head().unwrap().peel_to_commit().unwrap(), false).unwrap();
