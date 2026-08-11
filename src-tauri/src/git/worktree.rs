@@ -380,12 +380,18 @@ pub fn list(repo: &git2::Repository, current_path: Option<&Path>) -> Vec<Worktre
 /// This is what turns "fatal: 'x' is already checked out at ..." into an offer
 /// to open that folder. Returned as the whole [`Worktree`] because the caller
 /// needs its path to open it, not just a name to print.
+///
+/// `repo`'s own workdir is passed through as the current path so the returned
+/// worktree carries a meaningful `is_current`. Callers gate on that to tell
+/// "some other folder has it" (a real refusal) from "you already have it here"
+/// (not a refusal at all) -- with `None` every worktree looked like someone
+/// else's, so switching to the branch you were already on was rejected.
 pub fn holder_of_branch(repo: &git2::Repository, branch: &str) -> Option<Worktree> {
   let branch = branch.trim();
   if branch.is_empty() {
     return None;
   }
-  list(repo, None)
+  list(repo, repo.workdir())
     .into_iter()
     .find(|wt| wt.state == WorktreeState::Ok && wt.branch.as_deref() == Some(branch))
 }
@@ -929,6 +935,36 @@ pub fn repair(repo_path: &str, new_path: Option<&str>) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// Regression: `holder_of_branch` used to call `list(repo, None)`, so no
+  /// worktree ever came back as `is_current`. The repo's own checkout then
+  /// looked like somebody else's, and callers refused to act on the branch the
+  /// user was already standing on ("already checked out in another worktree").
+  #[test]
+  fn the_repos_own_checkout_is_reported_as_current() {
+    let dir = tempfile::tempdir().expect("temp repo");
+    let repo = git2::Repository::init(dir.path()).expect("repo");
+    {
+      let mut config = repo.config().expect("config");
+      config.set_str("user.name", "Worktree Test").expect("name");
+      config.set_str("user.email", "worktree@example.com").expect("email");
+    }
+    std::fs::write(dir.path().join("a.txt"), "a").expect("write");
+    let mut index = repo.index().expect("index");
+    index.add_path(Path::new("a.txt")).expect("add");
+    index.write().expect("write index");
+    let tree = repo.find_tree(index.write_tree().expect("tree id")).expect("tree");
+    let sig = git2::Signature::now("Worktree Test", "worktree@example.com").expect("sig");
+    repo.commit(Some("HEAD"), &sig, &sig, "base", &tree, &[]).expect("commit");
+
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    let holder = holder_of_branch(&repo, &branch).expect("the checkout holding the branch");
+
+    assert!(
+      holder.is_current,
+      "the repo's own checkout must not look like another worktree holding the branch"
+    );
+  }
 
   #[test]
   fn slugs_are_folder_safe() {
