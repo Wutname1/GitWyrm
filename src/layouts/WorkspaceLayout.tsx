@@ -13,6 +13,7 @@ import { ConflictView } from '@/views/ConflictView'
 import { GithubView } from '@/views/GithubView'
 import { FileHistoryView } from '@/views/FileHistoryView'
 import { BlameView } from '@/views/BlameView'
+import { RawView } from '@/views/RawView'
 import { CommitDrawer } from '@/components/domain/graph/CommitDrawer'
 import { MultiCommitDrawer } from '@/components/domain/graph/MultiCommitDrawer'
 import { useUiStore } from '@/stores/uiStore'
@@ -39,6 +40,7 @@ function CenterView() {
   if (view === 'github') return <GithubView />
   if (view === 'fileHistory') return <FileHistoryView />
   if (view === 'blame') return <BlameView />
+  if (view === 'raw') return <RawView />
   return <GraphView />
 }
 

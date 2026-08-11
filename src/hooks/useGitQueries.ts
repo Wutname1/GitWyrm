@@ -215,6 +215,22 @@ export function useFileBlame(repoId: string | null, path: string | null, sha: st
 }
 
 /**
+ * The whole text of a file. `sha` reads it as of that commit; pass null to read
+ * the working copy off disk.
+ */
+export function useFileContent(
+  repoId: string | null,
+  path: string | null,
+  sha: string | null = null
+) {
+  return useQuery({
+    queryKey: keys.fileContent(repoId ?? 'none', path ?? 'none', sha),
+    enabled: repoId != null && path != null,
+    queryFn: async () => unwrap(await commands.getFileContent(repoId!, path!, sha)),
+  })
+}
+
+/**
  * True when a file has no commits behind it, so history and blame have nothing
  * to show. A file pinned to a commit is committed by definition; otherwise it
  * counts as new only if every entry the working tree has for it is an add -- a

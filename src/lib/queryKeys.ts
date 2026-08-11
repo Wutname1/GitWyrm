@@ -19,6 +19,8 @@ export const keys = {
   fileHistory: (repoId: string, path: string) => ['fileHistory', repoId, path] as const,
   fileBlame: (repoId: string, path: string, sha: string | null) =>
     ['fileBlame', repoId, path, sha] as const,
+  fileContent: (repoId: string, path: string, sha: string | null) =>
+    ['fileContent', repoId, path, sha] as const,
   mergeState: (repoId: string) => ['mergeState', repoId] as const,
   conflict: (repoId: string, path: string) => ['conflict', repoId, path] as const,
   openspecStatus: (repoId: string) => ['openspecStatus', repoId] as const,

@@ -432,6 +432,18 @@ async getFileBlame(repoId: string, path: string, sha: string | null) : Promise<R
 }
 },
 /**
+ * The full text of a file. `sha` reads it as of that commit; omit it to read
+ * the working copy from disk.
+ */
+async getFileContent(repoId: string, path: string, sha: string | null) : Promise<Result<FileContent, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_file_content", { repoId, path, sha }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Settings are read during startup by nearly every screen, so this must not
  * run on the IPC thread even though the file is small -- a disk read there
  * stalls every other command waiting to be dispatched.
@@ -1298,10 +1310,10 @@ async resetCurrentToRef(repoId: string, targetRef: string, mode: ResetMode) : Pr
 }
 },
 /**
- * Move the current branch ref to a commit without touching the working tree
- * (like `git branch -f <current> <sha>` re-pointing HEAD's branch). A dirty
- * tree no longer blocks the move: the changes are set aside in a stash first
- * so the tree never silently diverges from the new tip.
+ * Move the current branch to a commit, leaving the working tree exactly as
+ * that commit has it (`git reset --hard <sha>` on HEAD's branch). A dirty tree
+ * no longer blocks the move: the changes are set aside in a stash first, so
+ * nothing is lost and the tree never silently diverges from the new tip.
  */
 async moveCurrentBranch(repoId: string, sha: string) : Promise<Result<RefMove, string>> {
     try {
@@ -3238,6 +3250,26 @@ old_path: string | null; status: StatusCode; additions: number; deletions: numbe
  * submodule-specific handling instead.
  */
 submodule: SubmoduleMove | null }
+/**
+ * A whole file's text at one point in time, for the read-only Raw view.
+ */
+export type FileContent = { path: string; 
+/**
+ * Empty when `binary` or `too_large` is set.
+ */
+text: string; line_count: number; 
+/**
+ * Size of the file on disk or in the object database, in bytes.
+ */
+size: number; 
+/**
+ * The file holds bytes that aren't text, so there is nothing to show.
+ */
+binary: boolean; 
+/**
+ * The file is past `MAX_RAW_BYTES`, so it isn't loaded into the editor.
+ */
+too_large: boolean }
 export type FileDiff = { path: string; 
 /**
  * Rename source path, when the delta is a rename.

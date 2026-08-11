@@ -10,6 +10,7 @@ export type CenterView =
   | 'github'
   | 'fileHistory'
   | 'blame'
+  | 'raw'
   | 'repoPicker'
 
 export type ModalKind =
@@ -224,6 +225,8 @@ interface UiState {
   closeDiff: () => void
   openFileHistory: (path: string) => void
   openBlame: (path: string, sha?: string | null) => void
+  /** Show the whole file, as of the pinned commit or the working copy. */
+  openRaw: (path: string) => void
   openConflict: (path: string) => void
   showSettings: (section?: SettingsSection) => void
   showGraph: () => void
@@ -257,6 +260,7 @@ const REPO_SCOPED_VIEWS = new Set<CenterView>([
   'github',
   'fileHistory',
   'blame',
+  'raw',
 ])
 
 export const useUiStore = create<UiState>((set) => ({
@@ -393,6 +397,15 @@ export const useUiStore = create<UiState>((set) => ({
     })),
   openBlame: (path, sha = null) =>
     set({ centerView: 'blame', fileTarget: { path, sha }, diffRequest: null }),
+  // Keeps the pinned commit for the same file, like `openFileHistory`: Raw is
+  // there to read the version you were already looking at, so switching to it
+  // must not quietly retarget the working copy.
+  openRaw: (path) =>
+    set((s) => ({
+      centerView: 'raw',
+      fileTarget: { path, sha: s.fileTarget?.path === path ? (s.fileTarget.sha ?? null) : null },
+      diffRequest: null,
+    })),
   openConflict: (path) => set({ conflictPath: path, centerView: 'conflict' }),
   showSettings: (section) =>
     set((s) => ({
