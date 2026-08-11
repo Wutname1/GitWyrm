@@ -17,6 +17,42 @@ export const githubKeys = {
   pr: (owner: string, repo: string, number: number) => ['github-pr', owner, repo, number] as const,
   issue: (owner: string, repo: string, number: number) =>
     ['github-issue', owner, repo, number] as const,
+  sshKeys: ['github-ssh-keys'] as const,
+}
+
+/** Query keys for the host-agnostic provider list. */
+export const hostingKeys = {
+  providers: ['hosting-providers'] as const,
+  repoProvider: (repoId: string) => ['hosting-repo-provider', repoId] as const,
+}
+
+/**
+ * Every code host GitWyrm knows about, with each one's connection state.
+ *
+ * The backend owns this list, so a host added there shows up here without a
+ * frontend change. Sharing `githubKeys.auth` in the invalidation path is
+ * deliberate: connecting or disconnecting GitHub changes a row in this list, and
+ * the two must not disagree about who is signed in.
+ */
+export function useHostingProviders() {
+  return useQuery({
+    queryKey: hostingKeys.providers,
+    enabled: isTauri,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.hostingProviders()),
+  })
+}
+
+/** Which host a repository's origin is on, or null when unknown. */
+export function useRepoHostProvider(repoId: string | null) {
+  return useQuery({
+    queryKey: hostingKeys.repoProvider(repoId ?? ''),
+    enabled: isTauri && repoId != null,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.repoHostProvider(repoId!)),
+  })
 }
 
 /** The signed-in GitHub login, or null when not connected. */
@@ -27,6 +63,22 @@ export function useGithubAuth() {
     staleTime: 5 * 60 * 1000,
     retry: false,
     queryFn: async () => unwrap(await commands.githubAuthStatus()),
+  })
+}
+
+/**
+ * Local SSH keys paired against the ones on the signed-in GitHub account.
+ *
+ * Needs no extra sign-in: the `read:user` scope GitHub is already connected
+ * with implicitly covers reading public keys.
+ */
+export function useGithubSshKeys(connected: boolean) {
+  return useQuery({
+    queryKey: githubKeys.sshKeys,
+    enabled: isTauri && connected,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.githubSshKeyPairings()),
   })
 }
 
@@ -251,6 +303,10 @@ export function useGithubMutations(slug: GithubRepoRef | null | undefined) {
     mutationFn: async () => unwrap(await commands.githubSignOut()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: githubKeys.auth })
+      // The Integrations list carries its own copy of who is signed in, so it
+      // has to be refreshed alongside the auth query or the row keeps naming an
+      // account that was just disconnected.
+      qc.invalidateQueries({ queryKey: hostingKeys.providers })
       toast('Disconnected from GitHub')
     },
     onError,
@@ -294,6 +350,8 @@ export function useGithubSignIn(onComplete?: () => void) {
         if (poll.status === 'complete') {
           setStatus({ state: 'idle' })
           qc.invalidateQueries({ queryKey: githubKeys.auth })
+          // Keeps the Integrations row in step with the auth query; see signOut.
+          qc.invalidateQueries({ queryKey: hostingKeys.providers })
           toast('GitHub connected')
           onComplete?.()
           return

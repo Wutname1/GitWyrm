@@ -10,7 +10,7 @@ use tauri::State;
 
 use crate::ai::{auth, copilot};
 use crate::error::AppError;
-use crate::git::remote_url;
+use crate::hosting::{self, HostProvider, ProviderId};
 use crate::state::RepoManager;
 
 const PROVIDER_ID: &str = "github";
@@ -156,6 +156,87 @@ pub async fn github_auth_status(app: tauri::AppHandle) -> Result<Option<String>,
 }
 
 // ---------------------------------------------------------------------------
+// Provider list
+
+/// One host as the Integrations screen shows it.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct HostProviderInfo {
+  pub id: ProviderId,
+  pub display_name: String,
+  /// Whether GitWyrm can actually talk to this host yet. When false the UI
+  /// names it and explains it is not available, rather than offering a connect
+  /// button that cannot succeed.
+  pub implemented: bool,
+  /// "device_code" or "personal_access_token": which connect control to show.
+  pub auth_kind: String,
+  /// The signed-in account name, or None when not connected. Always None for
+  /// a provider that is not implemented.
+  pub connected_as: Option<String>,
+}
+
+/// Every host GitWyrm knows about, with the connection state of each.
+///
+/// Drives the Integrations screen. Only implemented providers are asked for
+/// their sign-in state -- the rest have no auth path to check, and probing one
+/// would be a request that can only fail.
+#[tauri::command]
+#[specta::specta]
+pub async fn hosting_providers(
+  app: tauri::AppHandle,
+) -> Result<Vec<HostProviderInfo>, AppError> {
+  let mut out = Vec::with_capacity(hosting::ALL_PROVIDERS.len());
+  for provider in hosting::ALL_PROVIDERS {
+    let connected_as = if provider.implemented() && provider.id() == ProviderId::Github {
+      // Best-effort: a network hiccup must not blank the whole screen, so a
+      // failed status read shows as "not connected" and the user can retry by
+      // reopening. Only GitHub has a status call today; the match keeps this
+      // honest rather than pretending the trait can answer it yet.
+      github_auth_status(app.clone()).await.unwrap_or(None)
+    } else {
+      None
+    };
+    out.push(HostProviderInfo {
+      id: provider.id(),
+      display_name: provider.display_name().to_string(),
+      implemented: provider.implemented(),
+      auth_kind: match provider.auth_kind() {
+        hosting::AuthKind::DeviceCode => "device_code".into(),
+        hosting::AuthKind::PersonalAccessToken => "personal_access_token".into(),
+      },
+      connected_as,
+    });
+  }
+  Ok(out)
+}
+
+/// Which host a repository's origin belongs to, or None when origin is missing
+/// or points at a host GitWyrm does not know.
+///
+/// Lets the UI say "this repository is on GitLab, which is not supported yet"
+/// instead of silently showing nothing on a repo whose host simply is not wired
+/// up.
+#[tauri::command]
+#[specta::specta]
+pub async fn repo_host_provider(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+) -> Result<Option<ProviderId>, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let Ok(remote) = repo.find_remote("origin") else {
+      return Ok(None);
+    };
+    let Some(url) = remote.url() else {
+      return Ok(None);
+    };
+    Ok(hosting::provider_for(url).map(|p| p.id()))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+// ---------------------------------------------------------------------------
 // Repo detection
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -267,16 +348,17 @@ pub async fn github_repo_slug(
 
 /// `git@github.com:o/r.git`, `ssh://git@github.com/o/r`, or
 /// `https://github.com/o/r.git` -> owner/repo. Non-GitHub hosts return None.
-/// Owner/repo for a github.com remote. Parsing lives in `git::remote_url`; this
-/// only applies the API-specific constraint that the host must be github.com
-/// proper - an Enterprise host has a different API base and is not supported here.
+/// Owner/repo for a github.com remote.
+///
+/// Delegates to the GitHub provider so there is one definition of "which
+/// remotes are ours", shared with the registry's routing. Kept as a thin
+/// wrapper because the command returns the wire type, not the trait's.
 fn parse_github_slug(url: &str) -> Option<GithubRepoRef> {
-  let parsed = remote_url::parse(url)?;
-  if parsed.host != "github.com" {
-    return None;
-  }
-  let (owner, repo) = parsed.owner_repo()?;
-  Some(GithubRepoRef { owner: owner.to_string(), repo: repo.to_string() })
+  let slug = hosting::github::GitHub.slug_from_remote(url)?;
+  Some(GithubRepoRef {
+    owner: slug.owner,
+    repo: slug.repo,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -692,9 +774,185 @@ pub async fn github_close_issue(
   Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// SSH keys
+
+/// One local key paired with what GitHub knows about it, or a GitHub key with
+/// no local counterpart.
+///
+/// Both halves are optional so the three real states are representable: a key
+/// on both sides (matched), a local key GitHub has never seen (needs adding),
+/// and a key registered from another computer (nothing to do, but worth
+/// showing so "my key is missing" is never a mystery).
+#[derive(Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SshKeyPairing {
+  /// Fingerprint, always `SHA256:...`. The join key between the two sides.
+  pub fingerprint: String,
+  /// Absolute path to the local public key, or None when only GitHub has it.
+  pub local_path: Option<String>,
+  /// The title shown on GitHub, which is often the only real label a key has.
+  pub github_title: Option<String>,
+  /// GitHub's last-used date (`YYYY-MM-DD`), when it reports one. None means
+  /// never used, which is a strong hint the key is dead weight.
+  pub last_used: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GithubKey {
+  key_id: String,
+  title: String,
+  last_used: Option<String>,
+}
+
+/// GitHub reports fingerprints with the `SHA256:` prefix, same as ssh-keygen,
+/// but normalise both sides so a change on either never silently stops
+/// matching -- a wrong answer here reads as "your key is not on GitHub", which
+/// would send someone off to re-upload a key that is already there.
+fn fingerprint_key(raw: &str) -> String {
+  raw.trim().trim_start_matches("SHA256:").to_owned()
+}
+
+/// Dates arrive as RFC 3339; only the day is worth showing.
+fn day_only(stamp: &str) -> String {
+  stamp.split('T').next().unwrap_or(stamp).to_owned()
+}
+
+/// Pairs local keys against GitHub's list, matched keys first.
+///
+/// Kept separate from the request so the three-way join is testable without a
+/// network round trip.
+fn pair_keys(local: Vec<crate::git::ssh::SshKey>, remote: Vec<GithubKey>) -> Vec<SshKeyPairing> {
+  let mut paired: Vec<SshKeyPairing> = Vec::new();
+  let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+  for key in local {
+    let id = fingerprint_key(&key.fingerprint);
+    let found = remote.iter().find(|r| fingerprint_key(&r.key_id) == id);
+    if found.is_some() {
+      seen.insert(id.clone());
+    }
+    paired.push(SshKeyPairing {
+      fingerprint: key.fingerprint.clone(),
+      local_path: Some(key.path),
+      github_title: found.map(|r| r.title.clone()),
+      last_used: found.and_then(|r| r.last_used.as_deref()).map(day_only),
+    });
+  }
+
+  // Whatever GitHub has that this computer does not: almost always a key added
+  // from another machine, so it is informational rather than a problem.
+  for r in &remote {
+    let id = fingerprint_key(&r.key_id);
+    if seen.contains(&id) {
+      continue;
+    }
+    paired.push(SshKeyPairing {
+      fingerprint: r.key_id.clone(),
+      local_path: None,
+      github_title: Some(r.title.clone()),
+      last_used: r.last_used.as_deref().map(day_only),
+    });
+  }
+
+  paired
+}
+
+/// Cross-references the SSH keys on this computer against the ones registered
+/// on the signed-in GitHub account.
+///
+/// Needs no extra consent: `read:user` (already in [`SCOPE`]) implicitly grants
+/// `read:public_key`, so anyone who connected GitHub for pull requests can use
+/// this without signing in again.
+#[tauri::command]
+#[specta::specta]
+pub async fn github_ssh_key_pairings(app: tauri::AppHandle) -> Result<Vec<SshKeyPairing>, AppError> {
+  let local = tauri::async_runtime::spawn_blocking(crate::git::ssh::list_keys)
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?;
+  let remote: Vec<GithubKey> = send(api(&app, reqwest::Method::GET, "/user/keys")?)
+    .await?
+    .json()
+    .await
+    .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
+  Ok(pair_keys(local, remote))
+}
+
 #[cfg(test)]
 mod tests {
-  use super::parse_github_slug;
+  use super::{pair_keys, parse_github_slug, GithubKey};
+
+  fn local(path: &str, fingerprint: &str) -> crate::git::ssh::SshKey {
+    crate::git::ssh::SshKey {
+      path: path.into(),
+      name: path.into(),
+      fingerprint: fingerprint.into(),
+      comment: String::new(),
+      algorithm: "ED25519".into(),
+    }
+  }
+
+  fn remote(fingerprint: &str, title: &str, last_used: Option<&str>) -> GithubKey {
+    GithubKey {
+      key_id: fingerprint.into(),
+      title: title.into(),
+      last_used: last_used.map(String::from),
+    }
+  }
+
+  #[test]
+  fn a_local_key_on_github_is_matched_and_titled() {
+    let out = pair_keys(
+      vec![local("id_ed25519.pub", "SHA256:abc")],
+      vec![remote("SHA256:abc", "Work laptop", Some("2026-08-01T10:00:00Z"))],
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].github_title.as_deref(), Some("Work laptop"));
+    // The title is the whole point: it is often the only real label a key has.
+    assert_eq!(out[0].last_used.as_deref(), Some("2026-08-01"));
+  }
+
+  #[test]
+  fn a_local_key_absent_from_github_has_no_title() {
+    let out = pair_keys(vec![local("id_ed25519.pub", "SHA256:abc")], vec![]);
+    assert_eq!(out.len(), 1);
+    assert!(out[0].github_title.is_none());
+    assert!(out[0].local_path.is_some());
+  }
+
+  #[test]
+  fn a_github_key_with_no_local_file_is_still_listed() {
+    // Registered from another computer. Nothing to fix, but it has to show up
+    // or "where did my key go" has no answer.
+    let out = pair_keys(vec![], vec![remote("SHA256:xyz", "Old desktop", None)]);
+    assert_eq!(out.len(), 1);
+    assert!(out[0].local_path.is_none());
+    assert_eq!(out[0].github_title.as_deref(), Some("Old desktop"));
+    assert!(out[0].last_used.is_none());
+  }
+
+  #[test]
+  fn matching_ignores_the_sha256_prefix_on_either_side() {
+    // A prefix mismatch would read as "not on GitHub" and send someone off to
+    // re-upload a key that is already there.
+    let out = pair_keys(
+      vec![local("id_ed25519.pub", "SHA256:abc")],
+      vec![remote("abc", "Bare", None)],
+    );
+    assert_eq!(out.len(), 1, "should pair, not produce two rows");
+    assert_eq!(out[0].github_title.as_deref(), Some("Bare"));
+  }
+
+  #[test]
+  fn local_keys_come_before_github_only_ones() {
+    let out = pair_keys(
+      vec![local("a.pub", "SHA256:a")],
+      vec![remote("SHA256:z", "Elsewhere", None)],
+    );
+    assert_eq!(out.len(), 2);
+    assert!(out[0].local_path.is_some());
+    assert!(out[1].local_path.is_none());
+  }
 
   #[test]
   fn parses_common_remote_urls() {

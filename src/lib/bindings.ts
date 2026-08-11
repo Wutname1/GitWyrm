@@ -2297,6 +2297,37 @@ async generateCommits(repoId: string, provider: string, model: string, commitCou
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Every host GitWyrm knows about, with the connection state of each.
+ * 
+ * Drives the Integrations screen. Only implemented providers are asked for
+ * their sign-in state -- the rest have no auth path to check, and probing one
+ * would be a request that can only fail.
+ */
+async hostingProviders() : Promise<Result<HostProviderInfo[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("hosting_providers") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Which host a repository's origin belongs to, or None when origin is missing
+ * or points at a host GitWyrm does not know.
+ * 
+ * Lets the UI say "this repository is on GitLab, which is not supported yet"
+ * instead of silently showing nothing on a repo whose host simply is not wired
+ * up.
+ */
+async repoHostProvider(repoId: string) : Promise<Result<ProviderId | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("repo_host_provider", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async githubDeviceStart() : Promise<Result<DeviceCodeInfo, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("github_device_start") };
@@ -2423,6 +2454,22 @@ async githubMergePr(owner: string, repo: string, number: number, method: MergeMe
 async githubCloseIssue(owner: string, repo: string, number: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("github_close_issue", { owner, repo, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Cross-references the SSH keys on this computer against the ones registered
+ * on the signed-in GitHub account.
+ * 
+ * Needs no extra consent: `read:user` (already in [`SCOPE`]) implicitly grants
+ * `read:public_key`, so anyone who connected GitHub for pull requests can use
+ * this without signing in again.
+ */
+async githubSshKeyPairings() : Promise<Result<SshKeyPairing[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_ssh_key_pairings") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -3331,6 +3378,25 @@ export type GithubComment = { author: string; author_is_bot: boolean; body: stri
 export type GithubRepoRef = { owner: string; repo: string }
 export type GithubRepository = { full_name: string; clone_url: string; html_url: string; description: string | null; private: boolean; pushed_at: string; starred: boolean }
 /**
+ * One host as the Integrations screen shows it.
+ */
+export type HostProviderInfo = { id: ProviderId; display_name: string; 
+/**
+ * Whether GitWyrm can actually talk to this host yet. When false the UI
+ * names it and explains it is not available, rather than offering a connect
+ * button that cannot succeed.
+ */
+implemented: boolean; 
+/**
+ * "device_code" or "personal_access_token": which connect control to show.
+ */
+auth_kind: string; 
+/**
+ * The signed-in account name, or None when not connected. Always None for
+ * a provider that is not implemented.
+ */
+connected_as: string | null }
+/**
  * A `@@ -old_start,old_lines +new_start,new_lines @@` hunk boundary.
  */
 export type HunkHeader = { old_start: number; old_lines: number; new_start: number; new_lines: number; 
@@ -3515,6 +3581,14 @@ export type Proposal = { why: string; what_changes: string; impact: string;
  * three sections came up empty.
  */
 raw: string }
+/**
+ * Stable identifier for a host, used as the `auth.json` key and in the UI.
+ * 
+ * Serialized in snake_case so the frontend's provider ids match these names
+ * exactly; the GitHub value must stay `"github"` because tokens are already
+ * stored under that key.
+ */
+export type ProviderId = "github" | "gitlab" | "bitbucket" | "azure_devops"
 /**
  * Outcome of a pull, measured the same way as `PushResult`.
  */
@@ -4502,6 +4576,33 @@ comment: string;
  * Key type as ssh-keygen reports it (ED25519, RSA...).
  */
 algorithm: string }
+/**
+ * One local key paired with what GitHub knows about it, or a GitHub key with
+ * no local counterpart.
+ * 
+ * Both halves are optional so the three real states are representable: a key
+ * on both sides (matched), a local key GitHub has never seen (needs adding),
+ * and a key registered from another computer (nothing to do, but worth
+ * showing so "my key is missing" is never a mystery).
+ */
+export type SshKeyPairing = { 
+/**
+ * Fingerprint, always `SHA256:...`. The join key between the two sides.
+ */
+fingerprint: string; 
+/**
+ * Absolute path to the local public key, or None when only GitHub has it.
+ */
+localPath: string | null; 
+/**
+ * The title shown on GitHub, which is often the only real label a key has.
+ */
+githubTitle: string | null; 
+/**
+ * GitHub's last-used date (`YYYY-MM-DD`), when it reports one. None means
+ * never used, which is a strong hint the key is dead weight.
+ */
+lastUsed: string | null }
 /**
  * What happened when we tried to reach a host over SSH.
  */

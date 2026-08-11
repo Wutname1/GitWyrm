@@ -3,6 +3,7 @@ mod airun;
 mod commands;
 mod error;
 mod git;
+mod hosting;
 mod missing_repos;
 mod openspec;
 mod perf;
@@ -244,6 +245,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::ai::ai_copilot_account,
     commands::ai::generate_commit_message,
     commands::ai_commits::generate_commits,
+    commands::github::hosting_providers,
+    commands::github::repo_host_provider,
     commands::github::github_device_start,
     commands::github::github_device_poll,
     commands::github::github_sign_out,
@@ -258,6 +261,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::github::github_approve_pr,
     commands::github::github_merge_pr,
     commands::github::github_close_issue,
+    commands::github::github_ssh_key_pairings,
     commands::airun::ai_run_start,
     commands::airun::ai_run_start_demo,
     commands::airun::ai_run_answer_gate,

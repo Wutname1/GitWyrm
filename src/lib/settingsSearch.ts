@@ -202,6 +202,30 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
       'revoke',
     ],
   },
+  // The planned hosts are searchable on purpose: someone typing "gitlab" is
+  // asking whether it works, and an empty result reads as "not a thing GitWyrm
+  // has heard of" rather than the true "known, not built yet".
+  {
+    id: 'host-gitlab',
+    section: 'integrations',
+    label: 'GitLab',
+    hint: 'Showing GitLab merge requests and issues in the app is not built yet.',
+    keywords: ['gitlab', 'merge request', 'mr', 'host', 'integration'],
+  },
+  {
+    id: 'host-bitbucket',
+    section: 'integrations',
+    label: 'Bitbucket',
+    hint: 'Showing Bitbucket pull requests and issues in the app is not built yet.',
+    keywords: ['bitbucket', 'atlassian', 'host', 'integration'],
+  },
+  {
+    id: 'host-azure_devops',
+    section: 'integrations',
+    label: 'Azure DevOps',
+    hint: 'Showing Azure DevOps pull requests and work items in the app is not built yet.',
+    keywords: ['azure', 'devops', 'vsts', 'visual studio team services', 'host', 'integration'],
+  },
   {
     id: 'tab-pr-count',
     section: 'integrations',
