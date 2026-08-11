@@ -4505,7 +4505,13 @@ configuredKey: string | null;
  * Set when the user's git config has a `gpg.format` git refuses to accept.
  * Git hard-fails every commit in this state, so the UI offers to repair it.
  */
-brokenFormat: string | null }
+brokenFormat: string | null; 
+/**
+ * True when `user.signingkey` is present but empty. Git treats blank as a
+ * real value and gpg rejects it, so signed commits fail until it is cleared.
+ * Repaired by the same button as `broken_format`.
+ */
+blankSigningKey: boolean }
 /**
  * One Visual Studio solution found inside a repository.
  */

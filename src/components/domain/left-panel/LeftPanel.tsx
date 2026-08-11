@@ -181,25 +181,26 @@ export function LeftPanel() {
                 }))
               : [{ name: `Connect ${hostName}` }],
           },
-          ...(host && !host.capabilities.issues
-            ? []
-            : [
-                {
-                  key: 'issues',
-                  label: 'ISSUES',
-                  type: 'issue',
-                  items: githubConnected
-                    ? (issues.data ?? []).map((i) => ({
-                        name: i.title,
-                        meta: `#${i.number}`,
-                        metaTitle: `#${i.number} by ${i.author}`,
-                        id: i.number,
-                        webUrl: i.html_url,
-                      }))
-                    : [{ name: `Connect ${hostName}` }],
-                },
-              ]),
-        ] satisfies SidebarSectionData[])),
+          {
+            key: 'issues',
+            label: 'ISSUES',
+            type: 'issue',
+            items: githubConnected
+              ? (issues.data ?? []).map((i) => ({
+                  name: i.title,
+                  meta: `#${i.number}`,
+                  metaTitle: `#${i.number} by ${i.author}`,
+                  id: i.number,
+                  webUrl: i.html_url,
+                }))
+              : [{ name: `Connect ${hostName}` }],
+          },
+          // Filtered after the fact rather than spread in conditionally: a
+          // conditional spread widens the literal types and `satisfies` stops
+          // checking the section keys at all.
+        ] satisfies SidebarSectionData[]).filter(
+          (s) => s.key !== 'issues' || host?.capabilities.issues !== false
+        )),
     {
       key: 'tags',
       label: 'TAGS',

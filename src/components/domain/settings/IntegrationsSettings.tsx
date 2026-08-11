@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, ExternalLink } from 'lucide-react'
+import { Check, ExternalLink, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
@@ -11,7 +11,7 @@ import {
   useHostAuthMutations,
   useHostingProviders,
 } from '@/hooks/useGithub'
-import type { HostProviderInfo } from '@/lib/bindings'
+import type { HostProviderInfo, ProviderId } from '@/lib/bindings'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { SettingRow } from './SettingRow'
 import { ResetToDefaults } from './ResetToDefaults'
@@ -27,12 +27,30 @@ import { ResetToDefaults } from './ResetToDefaults'
  */
 export function IntegrationsSettings() {
   const providers = useHostingProviders()
+  /** Which host's connect form is open, or null when none is. */
+  const [adding, setAdding] = useState<ProviderId | null>(null)
+
+  const connected = providers.data?.filter((p) => p.connected_as != null) ?? []
+  const available = providers.data?.filter((p) => p.connected_as == null) ?? []
 
   return (
     <div>
-      {providers.data?.map((provider) => (
+      {connected.map((provider) => (
         <ProviderRow key={provider.id} provider={provider} />
       ))}
+
+      {/* Four hosts' worth of token boxes and scope lists is a wall of inputs
+          for someone who wanted to connect one. Only the host being added shows
+          its form; the rest stay a single row of buttons. */}
+      {available.length > 0 && (
+        <AddIntegration
+          available={available}
+          adding={adding}
+          onPick={setAdding}
+          onDone={() => setAdding(null)}
+        />
+      )}
+
       {providers.isError && (
         <div className="py-3 text-2xs text-removed">
           Could not load the list of hosts. Close and reopen settings to try again.
@@ -44,11 +62,75 @@ export function IntegrationsSettings() {
   )
 }
 
-function ProviderRow({ provider }: { provider: HostProviderInfo }) {
+/**
+ * The unconnected hosts, as a row of buttons that each open one connect form.
+ *
+ * Deliberately not a dropdown: there are only ever a handful of hosts, and
+ * seeing the names is how someone answers "is my host supported?" without
+ * clicking anything.
+ */
+function AddIntegration({
+  available,
+  adding,
+  onPick,
+  onDone,
+}: {
+  available: HostProviderInfo[]
+  adding: ProviderId | null
+  onPick: (id: ProviderId | null) => void
+  onDone: () => void
+}) {
+  const open = available.find((p) => p.id === adding)
+
+  if (open) {
+    return (
+      <div className="border-t border-border pt-2">
+        <ProviderRow provider={open} onConnected={onDone} />
+        <div className="pb-3">
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onPick(null)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border-t border-border py-4">
+      <div className="text-xs font-semibold text-foreground">Add an integration</div>
+      <div className="mt-0.5 text-2xs text-muted-foreground">
+        Connect the site your code is hosted on to see its pull requests and issues in GitWyrm.
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        {available.map((provider) => (
+          <Button
+            key={provider.id}
+            variant="secondary"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => onPick(provider.id)}
+          >
+            <Plus size={13} />
+            {provider.display_name}
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ProviderRow({
+  provider,
+  onConnected,
+}: {
+  provider: HostProviderInfo
+  /** Closes the add-integration form once the host accepts the credential. */
+  onConnected?: () => void
+}) {
   return provider.auth_kind === 'device_code' ? (
-    <GithubConnection provider={provider} />
+    <GithubConnection provider={provider} onConnected={onConnected} />
   ) : (
-    <TokenConnection provider={provider} />
+    <TokenConnection provider={provider} onConnected={onConnected} />
   )
 }
 
@@ -125,7 +207,13 @@ function ScopeHelp({ provider }: { provider: HostProviderInfo }) {
   )
 }
 
-function TokenConnection({ provider }: { provider: HostProviderInfo }) {
+function TokenConnection({
+  provider,
+  onConnected,
+}: {
+  provider: HostProviderInfo
+  onConnected?: () => void
+}) {
   const { connect, disconnect } = useHostAuthMutations()
   const [token, setToken] = useState('')
   const [email, setEmail] = useState('')
@@ -148,6 +236,7 @@ function TokenConnection({ provider }: { provider: HostProviderInfo }) {
         onSuccess: () => {
           setToken('')
           setEmail('')
+          onConnected?.()
         },
       }
     )
@@ -234,8 +323,14 @@ function TokenConnection({ provider }: { provider: HostProviderInfo }) {
   )
 }
 
-function GithubConnection({ provider }: { provider: HostProviderInfo }) {
-  const signIn = useGithubSignIn()
+function GithubConnection({
+  provider,
+  onConnected,
+}: {
+  provider: HostProviderInfo
+  onConnected?: () => void
+}) {
+  const signIn = useGithubSignIn(onConnected)
   const { signOut } = useGithubMutations(null)
 
   return (

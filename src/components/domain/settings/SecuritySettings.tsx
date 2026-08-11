@@ -114,8 +114,17 @@ function SigningSection({ repoPath }: { repoPath: string | null }) {
       title="Signing"
       blurb="Signing proves a commit really came from you. Hosts like GitHub show a Verified badge next to signed commits."
     >
-      {status?.brokenFormat !== null && status?.brokenFormat !== undefined && (
-        <BrokenFormatWarning repoPath={repoPath} onFixed={refresh} />
+      {((status?.brokenFormat !== null && status?.brokenFormat !== undefined) ||
+        status?.blankSigningKey === true) && (
+        <BrokenFormatWarning
+          repoPath={repoPath}
+          onFixed={refresh}
+          // Both faults are "a blank value git treats as real", but they break
+          // different things: a bad gpg.format stops every commit, a blank
+          // signing key stops only signed ones. Saying which is what makes the
+          // warning match what the user just saw fail.
+          blankKeyOnly={status?.brokenFormat == null && status?.blankSigningKey === true}
+        />
       )}
 
       {status && status.keys.length === 0 ? (
@@ -128,11 +137,25 @@ function SigningSection({ repoPath }: { repoPath: string | null }) {
 }
 
 /**
+ * Two settings that are blank rather than absent, which git treats as real
+ * values and then chokes on.
+ *
  * A `gpg.format` git refuses to accept makes it reject *every* commit, signed
- * or not, with an error that names a config key most people have never heard
- * of. Offer to clear it rather than leaving them stuck.
+ * or not. A blank `user.signingkey` is handed straight to gpg, which answers
+ * `skipped "": Invalid user ID` and fails only the signed ones. Both errors
+ * name a config key most people have never heard of, and neither says which
+ * scope holds it, so offer to clear them rather than leaving anyone stuck.
  */
-function BrokenFormatWarning({ repoPath, onFixed }: { repoPath: string; onFixed: () => void }) {
+function BrokenFormatWarning({
+  repoPath,
+  onFixed,
+  blankKeyOnly,
+}: {
+  repoPath: string
+  onFixed: () => void
+  /** True when the only fault is an empty signing key, which breaks less. */
+  blankKeyOnly: boolean
+}) {
   const [fixing, setFixing] = useState(false)
 
   const fix = async () => {
@@ -140,7 +163,9 @@ function BrokenFormatWarning({ repoPath, onFixed }: { repoPath: string; onFixed:
     const res = await commands.repairSigningFormat(repoPath)
     setFixing(false)
     if (res.status === 'ok') {
-      toast.success('Fixed. Committing should work again.')
+      toast.success(
+        blankKeyOnly ? 'Fixed. Signing should work again.' : 'Fixed. Committing should work again.'
+      )
       onFixed()
     } else {
       toast.error(res.error)
@@ -152,11 +177,14 @@ function BrokenFormatWarning({ repoPath, onFixed }: { repoPath: string; onFixed:
       <AlertTriangle size={15} className="mt-0.5 flex-none text-amber-500" />
       <div className="min-w-0 flex-1">
         <div className="text-xs font-semibold text-foreground">
-          A setting on this computer is blocking every commit
+          {blankKeyOnly
+            ? 'A setting on this computer is blocking signed commits'
+            : 'A setting on this computer is blocking every commit'}
         </div>
         <div className="mt-0.5 text-2xs text-muted-foreground">
-          Your git settings have a signing format that git does not understand, so it refuses to
-          make commits. Clearing it puts things back to normal.
+          {blankKeyOnly
+            ? 'Your git settings have an empty signing key. Git treats that as a real choice and hands it to gpg, which turns it down, so signed commits fail. Clearing it lets your key be picked normally.'
+            : 'Your git settings have a signing format that git does not understand, so it refuses to make commits. Clearing it puts things back to normal.'}
         </div>
       </div>
       <Button size="sm" variant="secondary" className="h-7 flex-none" onClick={fix} disabled={fixing}>

@@ -281,6 +281,10 @@ pub struct SigningStatus {
   /// Set when the user's git config has a `gpg.format` git refuses to accept.
   /// Git hard-fails every commit in this state, so the UI offers to repair it.
   pub broken_format: Option<String>,
+  /// True when `user.signingkey` is present but empty. Git treats blank as a
+  /// real value and gpg rejects it, so signed commits fail until it is cleared.
+  /// Repaired by the same button as `broken_format`.
+  pub blank_signing_key: bool,
 }
 
 /// Read the user's current signing configuration.
@@ -304,7 +308,23 @@ pub fn signing_status(repo_path: &str) -> SigningStatus {
     signing_enabled,
     configured_key,
     broken_format: detect_broken_format(repo_path),
+    blank_signing_key: has_blank_signing_key(repo_path),
   }
+}
+
+/// Whether `user.signingkey` is set to an empty string somewhere.
+///
+/// Blank is not the same as absent: git treats it as a real value, so it wins
+/// over selecting a key by email, and hands the empty string to gpg, which
+/// answers `skipped "": Invalid user ID` and aborts the commit. Signing is then
+/// broken for the repository with an error that names neither the setting nor
+/// the scope holding it.
+///
+/// Reported so the Security screen can offer the same one-click repair it does
+/// for a broken `gpg.format`.
+fn has_blank_signing_key(repo_path: &str) -> bool {
+  run_git(Some(repo_path), &["config", "--get", "user.signingkey"])
+    .is_ok_and(|out| out.stdout.trim().is_empty())
 }
 
 /// Read one git config value, treating "unset" and "failed" alike as None.
@@ -484,7 +504,43 @@ pub fn repair_gpg_format(repo_path: &str) -> Result<(), AppError> {
     // that actually carry the value need clearing.
     let _ = run_git(Some(repo_path), &["config", scope, "--unset-all", "gpg.format"]);
   }
+  clear_blank_signing_keys(repo_path);
   Ok(())
+}
+
+/// Removes `user.signingkey` from any scope where it is set but empty.
+///
+/// An empty value is a real entry to git, not an absent one. It takes
+/// precedence over the email-based key selection that would otherwise work, and
+/// git passes the blank straight to gpg, which refuses it:
+///
+/// ```text
+/// gpg: skipped "": Invalid user ID
+/// fatal: failed to write commit object
+/// ```
+///
+/// Every signed commit in the repository fails until it is cleared, and the
+/// message names neither the setting nor the scope holding it, so it is close
+/// to undiagnosable from the error alone.
+///
+/// Only ever removes a value that is already useless, so it cannot discard a
+/// key anyone meant to keep. Best effort per scope: `--system` is usually not
+/// writable and simply exits non-zero.
+pub fn clear_blank_signing_keys(repo_path: &str) {
+  for scope in ["--local", "--global", "--system"] {
+    let value = run_git(
+      Some(repo_path),
+      &["config", scope, "--get", "user.signingkey"],
+    );
+    // Non-zero means absent in this scope, which is the state we want anyway.
+    let Ok(out) = value else { continue };
+    if out.stdout.trim().is_empty() {
+      let _ = run_git(
+        Some(repo_path),
+        &["config", scope, "--unset-all", "user.signingkey"],
+      );
+    }
+  }
 }
 
 #[cfg(test)]
@@ -526,6 +582,96 @@ fpr:::::::::FEDCBA9876543210FEDCBA9876543210FEDCBA98:";
   fn an_empty_listing_yields_no_keys() {
     assert!(parse_secret_keys("").is_empty());
     assert!(parse_secret_keys("gpg: checking the trustdb\n").is_empty());
+  }
+
+  /// A repository whose config is sealed off from the machine's real one.
+  ///
+  /// These tests read and clear `user.signingkey` in every scope, so without
+  /// this they would both consult and *modify* the developer's own global git
+  /// config -- clearing a real setting, and failing or passing depending on what
+  /// that machine happens to have. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM`
+  /// point both scopes at throwaway files.
+  ///
+  /// Env vars are process-wide and Rust runs tests in threads, so the guard also
+  /// serialises: two of these running at once would trade config paths.
+  struct IsolatedRepo {
+    dir: tempfile::TempDir,
+    _lock: std::sync::MutexGuard<'static, ()>,
+  }
+
+  static CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+  impl IsolatedRepo {
+    fn new() -> Self {
+      let lock = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+      let dir = tempfile::tempdir().unwrap();
+      std::env::set_var("GIT_CONFIG_GLOBAL", dir.path().join("gitconfig-global"));
+      std::env::set_var("GIT_CONFIG_SYSTEM", dir.path().join("gitconfig-system"));
+      let repo = Self { dir, _lock: lock };
+      run_git(Some(repo.path()), &["init", "-q", "."]).unwrap();
+      repo
+    }
+
+    fn path(&self) -> &str {
+      self.dir.path().to_str().unwrap()
+    }
+
+    fn set_local(&self, key: &str, value: &str) {
+      run_git(Some(self.path()), &["config", "--local", key, value]).unwrap();
+    }
+
+    fn local(&self, key: &str) -> Option<String> {
+      run_git(Some(self.path()), &["config", "--local", "--get", key])
+        .ok()
+        .map(|o| o.stdout.trim().to_owned())
+        .filter(|v| !v.is_empty())
+    }
+  }
+
+  impl Drop for IsolatedRepo {
+    fn drop(&mut self) {
+      std::env::remove_var("GIT_CONFIG_GLOBAL");
+      std::env::remove_var("GIT_CONFIG_SYSTEM");
+    }
+  }
+
+  #[test]
+  fn blank_signing_key_is_detected() {
+    let repo = IsolatedRepo::new();
+    repo.set_local("user.signingkey", "");
+    assert!(has_blank_signing_key(repo.path()));
+  }
+
+  #[test]
+  fn clearing_removes_the_blank_key() {
+    let repo = IsolatedRepo::new();
+    repo.set_local("user.signingkey", "");
+
+    clear_blank_signing_keys(repo.path());
+
+    assert!(!has_blank_signing_key(repo.path()));
+    // Absent, not merely empty: absent is the state that lets git fall back to
+    // choosing a key by email, which is the whole point of clearing it.
+    assert!(repo.local("user.signingkey").is_none());
+  }
+
+  /// The repair must never throw away a key someone meant to keep -- it only
+  /// ever removes a value that is already useless.
+  #[test]
+  fn clearing_leaves_a_real_key_alone() {
+    let repo = IsolatedRepo::new();
+    repo.set_local("user.signingkey", "1C7195BAAB12CF6A");
+
+    clear_blank_signing_keys(repo.path());
+
+    assert_eq!(repo.local("user.signingkey").as_deref(), Some("1C7195BAAB12CF6A"));
+    assert!(!has_blank_signing_key(repo.path()));
+  }
+
+  #[test]
+  fn a_repo_with_no_signing_key_is_not_flagged() {
+    let repo = IsolatedRepo::new();
+    assert!(!has_blank_signing_key(repo.path()));
   }
 
   #[test]

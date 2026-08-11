@@ -156,12 +156,41 @@ pub fn apply_to_repo(repo_path: &str, profile: &Profile) -> Result<(), AppError>
       // Leaving a stale key behind would sign the next commit as whoever the
       // previous profile was.
       let _ = run_git(Some(repo_path), &["config", "--local", "--unset", "user.signingkey"]);
+      // Unsetting locally exposes whatever the global config says, and an empty
+      // `user.signingkey` there is not the same as an absent one: git hands the
+      // empty string to gpg, which fails with `skipped "": Invalid user ID` and
+      // blocks every commit. Clearing the useless global value is the only way
+      // this repository can fall back to picking a key by email.
+      clear_blank_global_signing_key();
     }
   }
 
   let sign = profile.sign_commits && profile.signing != SigningMethod::None;
   set_local(repo_path, "commit.gpgsign", if sign { "true" } else { "false" })?;
   Ok(())
+}
+
+/// Removes `user.signingkey` from the global config when it is set but empty.
+///
+/// An empty value is a real entry as far as git is concerned, so it wins over
+/// the email-based key selection that would otherwise work, and every signed
+/// commit fails. Absent is the state that behaves sensibly; blank is a trap.
+///
+/// Best effort and deliberately narrow: it only ever removes a value that is
+/// already useless, so it cannot discard a key someone meant to keep.
+pub fn clear_blank_global_signing_key() {
+  let Ok(path) = crate::git::identity::global_config_path() else {
+    return;
+  };
+  let Ok(mut config) = git2::Config::open(&path) else {
+    return;
+  };
+  if config
+    .get_string("user.signingkey")
+    .is_ok_and(|v| v.trim().is_empty())
+  {
+    let _ = config.remove("user.signingkey");
+  }
 }
 
 /// Drop a repository's override so it follows the active profile again.
@@ -219,6 +248,8 @@ pub fn apply_globally(profile: &Profile) -> Result<(), AppError> {
     _ => {
       // A leftover key from the previous profile would sign the next commit as
       // the wrong person, which is the exact failure profiles exist to prevent.
+      // `remove`, never `set_str("")`: an empty value is not an absent one, and
+      // git feeds the blank straight to gpg, which refuses it.
       let _ = config.remove("user.signingkey");
     }
   }
