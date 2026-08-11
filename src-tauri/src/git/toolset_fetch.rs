@@ -20,7 +20,11 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-/// Where the manifest for this architecture lives.
+/// Where the component list for this architecture lives.
+///
+/// The same manifest the bootstrapper reads, deliberately: two lists describing
+/// the same tools would drift, and then a fresh install and an update would
+/// disagree about what should be on disk.
 ///
 /// Latest-only by design: there is no version in the path, so a new toolset
 /// replaces the old one and nothing accumulates on the CDN.
@@ -30,23 +34,61 @@ fn manifest_url() -> String {
   } else {
     "x86_64"
   };
-  format!("https://cdn.gitwyrm.com/tools/{arch}/toolset.json")
+  format!("https://cdn.gitwyrm.com/tools/{arch}/components.json")
 }
 
-/// What the CDN says the current toolset is.
+/// One downloadable component. Only `name` and `url` are required; the rest let
+/// the client skip work it has already done.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, specta::Type)]
 pub struct ToolsetManifest {
-  /// Upstream Git for Windows tag, e.g. `v2.55.0.windows.3`.
+  /// Component name, e.g. `toolset`.
+  #[serde(default = "default_component_name")]
+  pub name: String,
+  /// Upstream Git for Windows tag, e.g. `v2.55.0.windows.3`. Empty when the
+  /// manifest does not say, which forces a reinstall.
+  #[serde(default)]
   pub version: String,
-  /// Archive size in bytes, for progress reporting.
+  /// Archive size in bytes, for progress reporting. Zero when unknown.
+  #[serde(default)]
   pub size: u64,
-  /// SHA-256 of the archive, lowercase hex.
+  /// SHA-256 of the archive, lowercase hex. Empty means unverified.
+  #[serde(default)]
   pub sha256: String,
   /// Absolute URL of the tar.xz.
   pub url: String,
+  /// How to put it on disk: `archive` (the default) or `installer`. The app
+  /// only handles archives - an `installer` component is the bootstrapper's job
+  /// at install time, and is skipped here rather than run behind the user's
+  /// back during a routine update check.
+  #[serde(default)]
+  pub kind: String,
+  /// Subdirectory of the toolset dir to unpack into. Empty means the archive is
+  /// already rooted correctly.
+  #[serde(default)]
+  pub into: String,
+}
+
+impl ToolsetManifest {
+  /// Whether this component is one the app can install itself.
+  fn is_archive(&self) -> bool {
+    matches!(self.kind.as_str(), "" | "archive" | "tar.xz")
+  }
+}
+
+fn default_component_name() -> String {
+  "toolset".to_owned()
+}
+
+/// The component list, as published.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ComponentsDocument {
+  components: Vec<ToolsetManifest>,
 }
 
 /// Fetch the manifest describing the current toolset.
+///
+/// Returns the first component. Today one archive carries both git and gpg;
+/// should that ever split, this is the place that grows to install each in turn.
 pub async fn fetch_manifest() -> Result<ToolsetManifest, AppError> {
   let url = manifest_url();
   let response = reqwest::get(&url)
@@ -60,10 +102,20 @@ pub async fn fetch_manifest() -> Result<ToolsetManifest, AppError> {
     )));
   }
 
-  response
-    .json::<ToolsetManifest>()
+  let document = response
+    .json::<ComponentsDocument>()
     .await
-    .map_err(|e| AppError::Other(format!("could not read toolset manifest: {e}")))
+    .map_err(|e| AppError::Other(format!("could not read toolset manifest: {e}")))?;
+
+  // The first component the app can handle itself. An `installer` entry belongs
+  // to the bootstrapper at install time: running a vendor installer from a
+  // background update check would put a UAC prompt in front of someone who only
+  // opened their repositories.
+  document
+    .components
+    .into_iter()
+    .find(|c| c.is_archive())
+    .ok_or_else(|| AppError::Other("the toolset manifest lists no archive components".into()))
 }
 
 /// Whether a download is needed, and what it would install.
@@ -75,6 +127,12 @@ pub async fn needs_update() -> Result<Option<ToolsetManifest>, AppError> {
   let manifest = fetch_manifest().await?;
 
   if !toolset::is_installed() {
+    return Ok(Some(manifest));
+  }
+
+  // No version in the manifest means there is nothing to compare against, so
+  // the only safe answer is to fetch. Matches the bootstrapper's rule.
+  if manifest.version.is_empty() {
     return Ok(Some(manifest));
   }
 
@@ -131,12 +189,19 @@ where
   // -------------------------------------------------------------------- verify
   // Before anything is written, and before anything is unpacked: these are
   // executables, so an unverified archive must never touch the disk as a tree.
-  let actual = hex(&hasher.finalize());
-  if !actual.eq_ignore_ascii_case(&manifest.sha256) {
-    return Err(AppError::Other(format!(
-      "toolset checksum mismatch: expected {}, got {actual}",
-      manifest.sha256
-    )));
+  // A manifest without a hash is allowed (name and url are the only required
+  // fields) but worth shouting about: HTTPS authenticates the host, not the
+  // bytes a compromised bucket would serve.
+  if manifest.sha256.is_empty() {
+    log::warn!("toolset manifest carries no sha256; installing unverified");
+  } else {
+    let actual = hex(&hasher.finalize());
+    if !actual.eq_ignore_ascii_case(&manifest.sha256) {
+      return Err(AppError::Other(format!(
+        "toolset checksum mismatch: expected {}, got {actual}",
+        manifest.sha256
+      )));
+    }
   }
 
   // -------------------------------------------------------------------- unpack
@@ -146,10 +211,20 @@ where
   let _ = std::fs::remove_dir_all(&scratch);
   std::fs::create_dir_all(&scratch)?;
 
+  // `into` places an archive that is not already rooted the way the toolset
+  // expects; empty (the usual case) means its top-level names are correct.
+  let unpack_root = if manifest.into.is_empty() {
+    scratch.clone()
+  } else {
+    let nested = scratch.join(&manifest.into);
+    std::fs::create_dir_all(&nested)?;
+    nested
+  };
+
   let decoder = liblzma::read::XzDecoder::new(&bytes[..]);
   let mut archive = tar::Archive::new(decoder);
   archive
-    .unpack(&scratch)
+    .unpack(&unpack_root)
     .map_err(|e| AppError::Other(format!("could not unpack the toolset: {e}")))?;
 
   // The version file is what `needs_update` reads next time. Written last, so a
@@ -255,22 +330,86 @@ mod tests {
     // Latest-only on the CDN: a version in the path would mean history to prune.
     let url = manifest_url();
     assert!(
-      url.ends_with("/toolset.json"),
+      url.ends_with("/components.json"),
       "{url} should be the fixed latest manifest"
     );
   }
 
   #[test]
-  fn a_manifest_round_trips_through_json() {
+  fn the_app_and_the_bootstrapper_read_the_same_manifest() {
+    // Two lists describing the same tools would drift, and then a fresh install
+    // and an update would disagree about what belongs on disk.
+    assert!(
+      manifest_url().ends_with("/components.json"),
+      "must be the same file the bootstrapper fetches"
+    );
+  }
+
+  /// Byte-for-byte the output of `.github/scripts/publish-toolset.sh`, so a
+  /// change to that script's shape fails here rather than at release time.
+  #[test]
+  fn the_manifest_ci_actually_publishes_parses() {
     let raw = r#"{
+  "schema": 1,
+  "components": [
+    {
+      "name": "toolset",
       "version": "v2.55.0.windows.3",
-      "size": 24889372,
+      "url": "https://cdn.gitwyrm.com/tools/x86_64/toolset.tar.xz",
       "sha256": "bf4663aa238399c988dc3e3b2ca5ad51bc9e87df462e7bee308dd969e392126f",
-      "url": "https://cdn.gitwyrm.com/tools/x86_64/toolset.tar.xz"
+      "size": 24889372
+    }
+  ]
+}"#;
+    let document: ComponentsDocument = serde_json::from_str(raw).expect("CI manifest must parse");
+    let first = document.components.first().expect("one component");
+    assert_eq!(first.name, "toolset");
+    assert_eq!(first.version, "v2.55.0.windows.3");
+    assert_eq!(first.size, 24_889_372);
+    assert!(first.url.ends_with(".tar.xz"));
+  }
+
+  #[test]
+  fn an_installer_component_is_left_to_the_bootstrapper() {
+    // Running a vendor installer from a background update check would put a UAC
+    // prompt in front of someone who only opened their repositories.
+    let raw = r#"{"components":[
+      {"name":"thing","url":"https://example.invalid/t.exe","kind":"installer","args":"/S"},
+      {"name":"toolset","url":"https://example.invalid/t.tar.xz"}
+    ]}"#;
+    let document: ComponentsDocument = serde_json::from_str(raw).expect("should parse");
+    let chosen = document
+      .components
+      .into_iter()
+      .find(|c| c.is_archive())
+      .expect("should skip the installer and take the archive");
+    assert_eq!(chosen.name, "toolset");
+  }
+
+  #[test]
+  fn name_and_url_alone_are_enough() {
+    // The minimum useful manifest: a list of tools and where to get them.
+    let raw = r#"{"components":[{"name":"git","url":"https://example.invalid/git.tar.xz"}]}"#;
+    let document: ComponentsDocument =
+      serde_json::from_str(raw).expect("minimal manifest should parse");
+    let first = document.components.first().expect("one component");
+    assert_eq!(first.name, "git");
+    assert!(first.version.is_empty(), "absent version forces a reinstall");
+    assert!(first.sha256.is_empty());
+    assert_eq!(first.size, 0);
+  }
+
+  #[test]
+  fn unknown_fields_do_not_break_an_older_client() {
+    // Adding a component or a field must not require shipping a new client.
+    let raw = r#"{
+      "schema": 2,
+      "components": [
+        {"name": "git", "url": "https://example.invalid/g.tar.xz", "notes": "added later"}
+      ]
     }"#;
-    let parsed: ToolsetManifest = serde_json::from_str(raw).expect("manifest should parse");
-    assert_eq!(parsed.version, "v2.55.0.windows.3");
-    assert_eq!(parsed.size, 24_889_372);
-    assert!(parsed.url.ends_with(".tar.xz"));
+    let document: ComponentsDocument =
+      serde_json::from_str(raw).expect("should parse despite unknown keys");
+    assert_eq!(document.components.len(), 1);
   }
 }

@@ -296,6 +296,36 @@ fn gitwyrm_is_running() -> bool {
     }
 }
 
+/// Fetch the extra tools the app needs (git, gpg, whatever the manifest lists)
+/// after the app itself is installed.
+///
+/// Failure here never fails the install. The app re-checks the same manifest on
+/// launch and falls back to whatever git is on PATH, so the worst case is a
+/// slower first run - not a broken one. That is why every path logs and returns
+/// rather than sending `Error`, which would put the window into its failure
+/// state over something already recoverable.
+fn install_components(tx: &Sender<DownloadMsg>) {
+    let client = match crate::http_client() {
+        Ok(c) => c,
+        Err(e) => {
+            crate::log(&format!("WARNING: no HTTP client for components: {e}"));
+            return;
+        }
+    };
+
+    let pending = crate::components::pending(&client);
+    if pending.is_empty() {
+        crate::log("No components to install");
+        return;
+    }
+
+    for component in &pending {
+        if let Err(e) = crate::components::install(&client, component, tx) {
+            crate::log(&format!("WARNING: {} did not install: {e}", component.name));
+        }
+    }
+}
+
 fn run_silent_install(path: std::path::PathBuf, tx: Sender<DownloadMsg>, dry_run: bool) {
     std::thread::spawn(move || {
         if dry_run {
@@ -317,6 +347,7 @@ fn run_silent_install(path: std::path::PathBuf, tx: Sender<DownloadMsg>, dry_run
                 crate::log(&format!("Installer exited with code: {:?}", status.code()));
                 let _ = std::fs::remove_file(&path);
                 if status.success() {
+                    install_components(&tx);
                     let _ = tx.send(DownloadMsg::Installed);
                 } else {
                     let msg = format!("Installer exited with code {}", status.code().unwrap_or(-1));

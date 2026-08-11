@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod components;
 mod paint;
 mod window;
 
@@ -286,6 +287,30 @@ fn redact_credentials(url: &str) -> String {
     }
 }
 
+/// An HTTP client that honors the usual proxy environment variables.
+///
+/// reqwest is built here without default features, so it does no proxy
+/// auto-detection - corporate networks need this to be explicit.
+fn http_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
+    let mut builder = reqwest::blocking::Client::builder().user_agent("GitWyrm-Setup/1.0");
+
+    if let Some(proxy_url) = proxy_from_env() {
+        match reqwest::Proxy::all(&proxy_url) {
+            Ok(proxy) => {
+                log(&format!("Using proxy: {}", redact_credentials(&proxy_url)));
+                builder = builder.proxy(proxy);
+            }
+            Err(e) => log(&format!(
+                "WARNING: Ignoring invalid proxy {}: {}",
+                redact_credentials(&proxy_url),
+                e
+            )),
+        }
+    }
+
+    builder.build()
+}
+
 fn proxy_from_env() -> Option<String> {
     for key in ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {
         if let Ok(value) = std::env::var(key) {
@@ -316,26 +341,7 @@ fn download_installer(tx: mpsc::Sender<DownloadMsg>) {
     let temp_dir = std::env::temp_dir();
     let dest = temp_dir.join(format!("GitWyrm-Setup-{}.exe", std::process::id()));
 
-    let mut builder = reqwest::blocking::Client::builder().user_agent("GitWyrm-Setup/1.0");
-
-    // Corporate networks often require a proxy. reqwest is built here without
-    // default features, so it does no proxy auto-detection - honor the usual
-    // environment variables explicitly.
-    if let Some(proxy_url) = proxy_from_env() {
-        match reqwest::Proxy::all(&proxy_url) {
-            Ok(proxy) => {
-                log(&format!("Using proxy: {}", redact_credentials(&proxy_url)));
-                builder = builder.proxy(proxy);
-            }
-            Err(e) => log(&format!(
-                "WARNING: Ignoring invalid proxy {}: {}",
-                redact_credentials(&proxy_url),
-                e
-            )),
-        }
-    }
-
-    let client = match builder.build() {
+    let client = match http_client() {
         Ok(c) => c,
         Err(e) => {
             let _ = tx.send(DownloadMsg::Error(format!("HTTP client error: {}", e)));

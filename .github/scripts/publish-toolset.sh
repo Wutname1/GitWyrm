@@ -98,6 +98,54 @@ json.dump(
 PY
 cat "$WORK/toolset.json"
 
+# The component list the bootstrapper reads. Separate from toolset.json because
+# it answers a different question: that one describes *the* toolset, this one
+# lists which tools exist at all.
+#
+# This is what keeps the bootstrapper stable. It is published under a filename
+# that never changes and so is rebuilt far less often than the app; it knows
+# only "fetch everything this manifest lists". Adding or removing a tool means
+# editing the list below, and every bootstrapper already installed picks it up
+# with no new binary.
+#
+# Only `name` and `url` are required. The optional fields, and what they let a
+# future entry express without a new bootstrapper:
+#
+#   version  absent -> always reinstall (nothing to compare against)
+#   sha256   absent -> installed unverified, and logged loudly
+#   size     absent -> progress runs on Content-Length instead
+#   kind     "archive" (default) unpacks a tar.xz; "installer" runs an exe
+#   args     arguments for kind=installer, e.g. "/S" - the silent switch differs
+#            per vendor, so it belongs here rather than in the binary
+#   into     subdirectory to unpack an archive into; empty means already rooted
+#
+# An unknown kind is skipped rather than guessed at, so an older bootstrapper
+# meeting a newer manifest leaves that component to the app instead of running
+# something it does not understand.
+python3 - "$WORK/components.json" "$VERSION" "$SIZE" "$SHA" "$PUBLIC/toolset.tar.xz" <<'PY'
+import json, sys
+out, version, size, sha, url = sys.argv[1:6]
+# git and gpg travel in one archive today, so they are one component. Splitting
+# them later is a change to this list, not to the bootstrapper.
+json.dump(
+    {
+        "schema": 1,
+        "components": [
+            {
+                "name": "toolset",
+                "version": version,
+                "url": url,
+                "sha256": sha,
+                "size": int(size),
+            }
+        ],
+    },
+    open(out, "w"),
+    indent=2,
+)
+PY
+cat "$WORK/components.json"
+
 if [ "$DRY_RUN" = "--dry-run" ]; then
   echo "Dry run: not uploading."
   exit 0
@@ -117,10 +165,12 @@ aws s3 cp "$WORK/toolset.tar.xz" "$BASE/toolset.tar.xz" \
   --endpoint-url "$R2_ENDPOINT" \
   --cache-control "public, max-age=300"
 
-echo "Uploading manifest..."
-aws s3 cp "$WORK/toolset.json" "$BASE/toolset.json" \
-  --endpoint-url "$R2_ENDPOINT" \
-  --content-type "application/json" \
-  --cache-control "no-cache, no-store"
+echo "Uploading manifests..."
+for manifest in toolset.json components.json; do
+  aws s3 cp "$WORK/$manifest" "$BASE/$manifest" \
+    --endpoint-url "$R2_ENDPOINT" \
+    --content-type "application/json" \
+    --cache-control "no-cache, no-store"
+done
 
 echo "Published $VERSION to $PUBLIC/"
