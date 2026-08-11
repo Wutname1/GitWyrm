@@ -91,6 +91,10 @@ fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, App
       }
       None => repo.set_head_detached(target_oid)?,
     }
+    // The commits fast-forwarded onto can pin a submodule elsewhere, and
+    // `checkout_tree` moves only the parent's pointer -- same follow-up the
+    // merge-commit path below already does.
+    crate::git::submodule::sync_submodule_workdirs(&repo);
     return Ok(MergeResult { up_to_date: false, fast_forwarded: true, conflicts: Vec::new() });
   }
 
