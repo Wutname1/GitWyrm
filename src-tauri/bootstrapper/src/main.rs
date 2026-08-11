@@ -82,6 +82,8 @@ struct Options {
     log: Option<PathBuf>,
     help: bool,
     bad_arg: Option<String>,
+    /// Cover an in-place update the running app has already kicked off.
+    updating: bool,
 }
 
 fn parse_args<I: Iterator<Item = String>>(args: I) -> Options {
@@ -91,6 +93,7 @@ fn parse_args<I: Iterator<Item = String>>(args: I) -> Options {
         log: None,
         help: false,
         bad_arg: None,
+        updating: false,
     };
 
     let mut args = args.peekable();
@@ -100,6 +103,9 @@ fn parse_args<I: Iterator<Item = String>>(args: I) -> Options {
             "/s" | "/silent" | "--silent" => opts.silent = true,
             "/norestart" => {} // accepted and ignored; setup never reboots
             "--dry-run" => opts.dry_run = true,
+            // Undocumented in USAGE: the app passes this to itself, it is not
+            // something a person or a deployment tool has any reason to run.
+            "--updating" => opts.updating = true,
             "/?" | "/h" | "/help" | "-h" | "--help" => opts.help = true,
             "/log" | "--log" => match args.next() {
                 Some(p) => opts.log = Some(PathBuf::from(p)),
@@ -181,6 +187,15 @@ fn main() {
     }
 
     let (tx, rx) = mpsc::channel::<DownloadMsg>();
+
+    // Updating covers an install the app already started, so there is nothing
+    // to fetch: the window watches for the relaunched app instead. Silent makes
+    // no sense here either -- covering a gap is the entire job -- so it is
+    // ignored rather than exiting immediately and leaving the gap uncovered.
+    if opts.updating {
+        window::run(rx);
+        return;
+    }
 
     let dry_run = opts.dry_run;
     thread::spawn(move || {

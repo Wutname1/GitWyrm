@@ -496,10 +496,17 @@ async checkForUpdate() : Promise<Result<string | null, string>> {
 }
 },
 /**
- * Download and install the pending update, returning the version installed.
+ * Download and install the pending update.
  * 
- * Relaunching is left to the caller so the frontend can show "restarting"
- * before the window disappears.
+ * **This does not return on success.** The updater's Windows install path ends
+ * in `std::process::exit(0)` after handing the installer to ShellExecute, so
+ * the process is gone before this function's caller resumes. Anything that must
+ * happen before the app dies belongs in the `on_before_exit` hook below, not
+ * after the await in the frontend.
+ * 
+ * Progress is reported on `UPDATE_PROGRESS_EVENT` as the download runs, and the
+ * event's absence afterwards is what tells the frontend the install phase has
+ * begun.
  * 
  * This exists rather than the JS plugin's `downloadAndInstall` because that
  * path rebuilds the updater from tauri.conf.json and so would always fetch the

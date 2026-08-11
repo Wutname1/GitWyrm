@@ -151,6 +151,24 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # The same binary the website's download button serves, bundled into the
+      # app as well. Run with --updating it draws the "Updating GitWyrm" window
+      # that covers the gap between the old app exiting and the new one starting
+      # -- NSIS installs quietly, so without it that gap is a blank screen.
+      #
+      # Built from source here rather than downloaded from the CDN: an update is
+      # exactly when the network is least trustworthy, and a helper fetched at
+      # update time would add a download that can fail to the very moment it is
+      # meant to be covering. See spawn_update_cover in commands/updates.rs.
+      - name: Build the update cover helper
+        shell: bash
+        run: |
+          cargo build --release --target ${{ matrix.rust_target }} \
+            --manifest-path src-tauri/bootstrapper/Cargo.toml
+          mkdir -p src-tauri/resources
+          cp "src-tauri/bootstrapper/target/${{ matrix.rust_target }}/release/gitwyrm-setup.exe" \
+            src-tauri/resources/gitwyrm-setup.exe
+
       # GitWyrm ships its own git and gpg so a clean Windows machine can clone,
       # commit, sign, and push with nothing else installed. Fetched fresh on
       # every release rather than committed, so each build carries the current

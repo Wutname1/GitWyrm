@@ -54,6 +54,8 @@ struct AppState {
     font_small_bold: HFONT,
     exiting: bool,
     dry_run: bool,
+    /// Covering an in-place update rather than a first install.
+    updating: bool,
     installing: bool,
     anim_tick: u64,
     hover_close_x: bool,
@@ -66,6 +68,9 @@ struct AppState {
 
 pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
     let dry_run = std::env::args().any(|a| a == "--dry-run");
+    // Cover an in-place update rather than a first install: no download, no
+    // installer to run, just the wait while NSIS works and the app comes back.
+    let updating = std::env::args().any(|a| a == "--updating");
 
     // Replace the original channel with one we control,
     // so both download and install threads can send to it
@@ -82,8 +87,16 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
         tx,
         rx: unified_rx,
         progress: 0.0,
-        status: "Downloading GitWyrm...".into(),
-        detail: String::new(),
+        status: if updating {
+            "Updating GitWyrm...".into()
+        } else {
+            "Downloading GitWyrm...".into()
+        },
+        detail: if updating {
+            "This only takes a moment.".into()
+        } else {
+            String::new()
+        },
         error: String::new(),
         font_title: create_font(-32, 700),
         font_tagline: create_font(-20, 600),
@@ -92,7 +105,10 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
         font_small_bold: create_font(-16, 700),
         exiting: false,
         dry_run,
-        installing: false,
+        updating,
+        // Updating opens straight into the working state: there is no download
+        // phase, so a zeroed progress bar would just look stalled.
+        installing: updating,
         anim_tick: 0,
         hover_close_x: false,
         hover_close_btn: false,
@@ -160,6 +176,13 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
 
         SetTimer(Some(hwnd), 1, 50, None);
 
+        // Started here rather than before the window exists, so the card is
+        // already on screen when the watcher reports back -- otherwise a fast
+        // update could finish before there was anything to cover the gap with.
+        if updating {
+            watch_for_relaunch((*state_ptr).tx.clone(), dry_run);
+        }
+
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).into() {
             let _ = TranslateMessage(&msg);
@@ -168,6 +191,101 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
     }
 
     std::process::exit(0);
+}
+
+/// Give up covering the update after this long.
+///
+/// The helper is a cover for a gap, not a supervisor: if NSIS wedges, the user
+/// must get their screen back rather than staring at our card forever. Ten
+/// minutes is far beyond the 20-40s the gap actually takes, so hitting this is
+/// a real failure, not a slow disk.
+const UPDATE_WATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// How often to look for the relaunched app.
+const UPDATE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Cover the window between the old app exiting and the new one appearing.
+///
+/// Unlike the bootstrapper's own install, nothing here drives the installer:
+/// the Tauri updater already handed it to ShellExecute before the app exited,
+/// and NSIS `/UPDATE` relaunches GitWyrm itself. So this only watches, and the
+/// signal it watches for is a *new* GitWyrm process -- not the exe file, which
+/// exists the whole time and would end the cover the instant NSIS finished
+/// writing, before there was a window to hand over to.
+fn watch_for_relaunch(tx: Sender<DownloadMsg>, dry_run: bool) {
+    std::thread::spawn(move || {
+        if dry_run {
+            std::thread::sleep(std::time::Duration::from_secs(90));
+            let _ = tx.send(DownloadMsg::Installed);
+            return;
+        }
+
+        let started = std::time::Instant::now();
+        loop {
+            if started.elapsed() > UPDATE_WATCH_TIMEOUT {
+                crate::log("ERROR: timed out waiting for GitWyrm to reappear");
+                let _ = tx.send(DownloadMsg::Error(
+                    "The update is taking longer than expected.\n\nIt may still finish on its own. \
+                     If GitWyrm does not reopen, launch it from the Start Menu."
+                        .into(),
+                ));
+                return;
+            }
+
+            if gitwyrm_is_running() {
+                crate::log("GitWyrm is running again; handing over");
+                // Let the new window paint before this one vanishes, so the
+                // handover is a swap rather than a flash of desktop.
+                std::thread::sleep(std::time::Duration::from_millis(600));
+                let _ = tx.send(DownloadMsg::Installed);
+                return;
+            }
+
+            std::thread::sleep(UPDATE_POLL_INTERVAL);
+        }
+    });
+}
+
+/// Whether any GitWyrm process is alive.
+///
+/// Snapshots the process list rather than looking for a window, because the new
+/// app spends its first seconds behind its own boot splash and we want to hand
+/// over to it as soon as it exists.
+fn gitwyrm_is_running() -> bool {
+    use windows::Win32::System::Diagnostics::ToolHelp::*;
+
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return false;
+        };
+
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+
+        let mut found = false;
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let len = entry
+                    .szExeFile
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(entry.szExeFile.len());
+                let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
+                if name.eq_ignore_ascii_case(crate::APP_EXE_NAME) {
+                    found = true;
+                    break;
+                }
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+
+        let _ = CloseHandle(snapshot);
+        found
+    }
 }
 
 fn run_silent_install(path: std::path::PathBuf, tx: Sender<DownloadMsg>, dry_run: bool) {
@@ -295,12 +413,20 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         run_silent_install(path, s.tx.clone(), s.dry_run);
                     }
                     DownloadMsg::Installed => {
-                        s.status = "Launching GitWyrm...".into();
+                        s.status = if s.updating {
+                            "Update complete".into()
+                        } else {
+                            "Launching GitWyrm...".into()
+                        };
                         s.detail.clear();
                         s.installing = false;
                         let _ = InvalidateRect(Some(hwnd), None, false);
 
-                        let launch_failed = if !s.dry_run {
+                        // In updating mode the app is already back: NSIS `/UPDATE`
+                        // relaunched it, and that is the very thing the watcher
+                        // waited to see. Launching again would hand a second
+                        // process to the single-instance plugin for nothing.
+                        let launch_failed = if !s.dry_run && !s.updating {
                             match launch_app() {
                                 None => false,
                                 Some(e) => {
@@ -384,15 +510,32 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 fill_rounded_rect(mem_dc, content_x, btn_y, ERR_BTN_W, ERR_BTN_H, 8, btn_bg);
                 draw_text_center(mem_dc, "Close", content_x, btn_y, ERR_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_TEXT);
             } else {
-                draw_text(mem_dc, "Welcome to", content_x, 110, content_w, 44, s.font_title, COLOR_TEXT);
+                // An update is not a first meeting: someone mid-update already
+                // has GitWyrm and does not need to be sold it, so the welcome
+                // and the pitch give way to what is happening and why the app
+                // just vanished off their screen.
+                let heading = if s.updating { "Updating" } else { "Welcome to" };
+                draw_text(mem_dc, heading, content_x, 110, content_w, 44, s.font_title, COLOR_TEXT);
                 let wordmark_w = draw_wordmark_img(mem_dc, content_x, 156, 40);
-                draw_text(mem_dc, " Setup", content_x + wordmark_w, 154, content_w - wordmark_w, 44, s.font_title, COLOR_TEXT);
+                if !s.updating {
+                    draw_text(mem_dc, " Setup", content_x + wordmark_w, 154, content_w - wordmark_w, 44, s.font_title, COLOR_TEXT);
+                }
 
-                draw_text(mem_dc, "Fast. Focused. Familiar.", content_x, 212, content_w, 30, s.font_tagline, COLOR_ACCENT);
+                let tagline = if s.updating {
+                    "Hang tight."
+                } else {
+                    "Fast. Focused. Familiar."
+                };
+                draw_text(mem_dc, tagline, content_x, 212, content_w, 30, s.font_tagline, COLOR_ACCENT);
 
+                let blurb = if s.updating {
+                    "GitWyrm is installing the new version and will reopen on its own. Your tabs and repositories are exactly as you left them."
+                } else {
+                    "GitWyrm brings a fast, familiar, and beautiful experience to your Git workflows."
+                };
                 draw_text_wrap(
                     mem_dc,
-                    "GitWyrm brings a fast, familiar, and beautiful experience to your Git workflows.",
+                    blurb,
                     content_x,
                     250,
                     content_w,

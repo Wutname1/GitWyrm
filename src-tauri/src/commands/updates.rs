@@ -18,7 +18,25 @@
 
 use crate::error::AppError;
 use crate::settings::{self, UpdateChannel};
+use serde::Serialize;
+use tauri::Emitter;
 use tauri_plugin_updater::UpdaterExt;
+
+/// Event name carrying download progress to the splash.
+pub const UPDATE_PROGRESS_EVENT: &str = "update://progress";
+
+/// How far the download has got.
+///
+/// `total` is None when the server sends no Content-Length, which is why the
+/// splash has to cope with an unknown total rather than assuming a percentage
+/// is always available.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct UpdateProgress {
+  /// Bytes written so far.
+  pub downloaded: u64,
+  /// Total bytes expected, when the server declared one.
+  pub total: Option<u64>,
+}
 
 /// Manifest URL per channel.
 ///
@@ -74,12 +92,27 @@ async fn updater_for_channel(
   // plugin treats multiple configured endpoints as a failover chain, taking the
   // first that answers, so listing both channels there would hand everyone
   // whichever URL responded first rather than the one they chose.
-  app
+  let builder = app
     .updater_builder()
     .endpoints(vec![url])
-    .map_err(|e| AppError::Other(e.to_string()))?
-    .build()
-    .map_err(|e| AppError::Other(e.to_string()))
+    .map_err(|e| AppError::Other(e.to_string()))?;
+
+  // Raise the cover window in the last moment we control. The updater calls
+  // this immediately before `std::process::exit(0)`, which is the only hook
+  // that runs late enough to be sure the install is really happening and early
+  // enough to still be alive to spawn anything.
+  #[cfg(windows)]
+  let builder = {
+    let app = app.clone();
+    builder.on_before_exit(move || {
+      if let Err(e) = spawn_update_cover(&app) {
+        // Non-fatal: the update still installs, just without the cover.
+        log::warn!("update cover window did not start: {e}");
+      }
+    })
+  };
+
+  builder.build().map_err(|e| AppError::Other(e.to_string()))
 }
 
 /// A newer version on the user's channel, or None when up to date.
@@ -103,10 +136,83 @@ pub async fn check_for_update(app: tauri::AppHandle) -> Result<Option<String>, A
   }
 }
 
-/// Download and install the pending update, returning the version installed.
+/// Filename of the bundled update-cover helper, under the resources dir.
+#[cfg(windows)]
+const HELPER_EXE: &str = "gitwyrm-setup.exe";
+
+/// Show the update-cover window, and report whether it started.
 ///
-/// Relaunching is left to the caller so the frontend can show "restarting"
-/// before the window disappears.
+/// The gap this covers is the one between our process exiting and the updated
+/// app reappearing: NSIS runs with `installMode: "quiet"`, so without this there
+/// is simply nothing on screen for 20-40 seconds.
+///
+/// Two details are load-bearing:
+///
+/// - **Run from a temp copy.** NSIS is about to rewrite the install directory,
+///   and a helper running from inside it would be locked or replaced mid-update.
+/// - **Detached.** Our process is killed by `std::process::exit(0)` inside the
+///   updater moments from now; a child sharing our console or job would go with
+///   it, which is exactly when the cover is needed.
+///
+/// Failure here is deliberately non-fatal: a missing helper means the update
+/// proceeds with the old blank gap, which is worse-looking but still correct.
+#[cfg(windows)]
+fn spawn_update_cover(app: &tauri::AppHandle) -> Result<(), String> {
+  use std::os::windows::process::CommandExt;
+  use tauri::Manager;
+
+  // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: no inherited console, and no
+  // console-close signal following us down when this process exits.
+  const DETACHED_PROCESS: u32 = 0x0000_0008;
+  const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+  let source = app
+    .path()
+    .resource_dir()
+    .map_err(|e| format!("no resource dir: {e}"))?
+    .join("resources")
+    .join(HELPER_EXE);
+
+  if !source.is_file() {
+    return Err(format!("helper missing at {}", source.display()));
+  }
+
+  // Name the copy per-process so two updates racing cannot fight over one
+  // file, and so a stale copy left by a killed run is never reused.
+  let dest = std::env::temp_dir().join(format!("gitwyrm-update-{}.exe", std::process::id()));
+
+  std::fs::copy(&source, &dest)
+    .map_err(|e| format!("could not stage helper at {}: {e}", dest.display()))?;
+
+  std::process::Command::new(&dest)
+    .arg("--updating")
+    .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+    .spawn()
+    .map_err(|e| format!("could not start helper: {e}"))?;
+
+  log::info!("update cover window started from {}", dest.display());
+  Ok(())
+}
+
+/// Only emit once this many bytes have arrived since the last event.
+///
+/// `on_chunk` fires per HTTP chunk -- thousands of times across an installer --
+/// and every emit crosses the IPC boundary to the webview. Coalescing to 256 KB
+/// keeps the bar smooth (a hundred-odd updates over a typical installer) without
+/// making the download compete with its own progress reporting.
+const PROGRESS_EMIT_BYTES: u64 = 256 * 1024;
+
+/// Download and install the pending update.
+///
+/// **This does not return on success.** The updater's Windows install path ends
+/// in `std::process::exit(0)` after handing the installer to ShellExecute, so
+/// the process is gone before this function's caller resumes. Anything that must
+/// happen before the app dies belongs in the `on_before_exit` hook below, not
+/// after the await in the frontend.
+///
+/// Progress is reported on `UPDATE_PROGRESS_EVENT` as the download runs, and the
+/// event's absence afterwards is what tells the frontend the install phase has
+/// begun.
 ///
 /// This exists rather than the JS plugin's `downloadAndInstall` because that
 /// path rebuilds the updater from tauri.conf.json and so would always fetch the
@@ -124,11 +230,32 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<Option<String>, App
   };
 
   let version = update.version.clone();
+
+  let mut downloaded: u64 = 0;
+  let mut last_emit: u64 = 0;
+  let progress_app = app.clone();
+
+  let on_chunk = move |chunk: usize, total: Option<u64>| {
+    // `on_chunk` hands us the size of *this* chunk, not a running total.
+    downloaded = downloaded.saturating_add(chunk as u64);
+
+    // Always emit the final byte so the bar lands on 100% rather than
+    // stopping wherever the last threshold fell.
+    let complete = total.is_some_and(|t| downloaded >= t);
+    if downloaded - last_emit < PROGRESS_EMIT_BYTES && !complete {
+      return;
+    }
+    last_emit = downloaded;
+
+    let _ = progress_app.emit(UPDATE_PROGRESS_EVENT, UpdateProgress { downloaded, total });
+  };
+
   update
-    .download_and_install(|_, _| {}, || {})
+    .download_and_install(on_chunk, || {})
     .await
     .map_err(|e| AppError::Other(e.to_string()))?;
 
+  // Only reached if the platform's install path returns rather than exiting.
   Ok(Some(version))
 }
 
