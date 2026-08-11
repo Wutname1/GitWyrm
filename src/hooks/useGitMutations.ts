@@ -1149,9 +1149,13 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Sends the branch AND the working tree to the commit (a hard reset), so the
+  // undo has to be hard too -- a soft undo would restore the ref but leave the
+  // files behind, showing up as staged changes.
   const moveBranch = useMutation({
     mutationFn: async (sha: string) => unwrap(await commands.moveCurrentBranch(id, sha)),
-    onSuccess: (move) => afterRefMove(move.previous_sha, `Moved ${move.branch} — was at`, 'Soft'),
+    onSuccess: (move) =>
+      afterRefMove(move.previous_sha, `Sent ${move.branch} back — was at`, 'Hard'),
     onError,
   })
 
@@ -1166,7 +1170,10 @@ export function useGitMutations(repoId: string | null) {
       move: unwrap(await commands.fastForwardBranch(id, args.branch, args.target)),
     }),
     onSuccess: ({ target, move }) => {
-      invalidate(qc, id, REFS)
+      // `status` too, not just REFS: when the branch being moved is the one
+      // checked out, the backend checks the new tree out as well, so the file
+      // list and every cached diff are stale.
+      invalidate(qc, id, [...REFS, 'status'])
       toast(`Caught ${move.branch} up to ${target}`)
     },
     onError,

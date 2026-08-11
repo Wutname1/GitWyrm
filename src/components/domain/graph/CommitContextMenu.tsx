@@ -46,7 +46,6 @@ interface CommitContextMenuProps {
 }
 
 type Pending =
-  | { kind: 'reset'; mode: ResetMode }
   | { kind: 'move' }
   | { kind: 'checkout' }
   | { kind: 'drop' }
@@ -98,12 +97,10 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
 
   const copySha = () => void copyToClipboard(commit.sha, `Copied ${commit.short_sha}`)
 
-  const runReset = (mode: ResetMode) => {
-    // Soft/Mixed keep the working tree, so they run without a gate. Hard
-    // rewrites the working tree and can drop work: confirm first.
-    if (mode === 'Hard') setPending({ kind: 'reset', mode })
-    else m.reset.mutate({ sha: commit.sha, mode })
-  }
+  // Only Soft/Mixed run from here -- both keep every change on disk, so there
+  // is nothing to lose and nothing to confirm. Sending the files back too is
+  // "Go to this commit", which has its own confirm.
+  const runReset = (mode: ResetMode) => m.reset.mutate({ sha: commit.sha, mode })
 
   return (
     <>
@@ -204,9 +201,18 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
             disabled={!canCherryPick || m.cherryPick.isPending}
             onRun={() => m.cherryPick.mutate(commit.sha)}
           />
-          <ContextMenuItem disabled={!canRetarget} onSelect={() => setPending({ kind: 'move' })}>
+          <ContextMenuItem
+            variant="destructive"
+            disabled={!canRetarget}
+            onSelect={() => setPending({ kind: 'move' })}
+          >
             <MoveVertical />
-            Move {branchName} to this commit
+            <div className="flex flex-col">
+              <span>Go to this commit</span>
+              <span className="text-2xs opacity-80">
+                Your files end up exactly as they were here
+              </span>
+            </div>
           </ContextMenuItem>
           <ContextMenuSub>
             <ContextMenuSubTrigger
@@ -214,7 +220,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
               data-disabled={!canRetarget ? '' : undefined}
             >
               <RotateCcw />
-              Rewind {branchName} to here
+              Undo the commits after this one
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="w-64">
               <ContextMenuItem
@@ -226,9 +232,13 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
               >
                 {m.reset.isPending && m.reset.variables?.mode === 'Mixed' && <PendingIndicator />}
                 <div className="flex flex-col">
-                  <span>{m.reset.isPending && m.reset.variables?.mode === 'Mixed' ? 'Rewinding…' : 'Undo the later commits'}</span>
+                  <span>
+                    {m.reset.isPending && m.reset.variables?.mode === 'Mixed'
+                      ? 'Undoing…'
+                      : 'Keep their changes in my files'}
+                  </span>
                   <span className="text-2xs text-muted-foreground">
-                    Keeps their changes in your files
+                    Nothing is lost, just uncommitted
                   </span>
                 </div>
               </ContextMenuItem>
@@ -241,16 +251,12 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
               >
                 {m.reset.isPending && m.reset.variables?.mode === 'Soft' && <PendingIndicator />}
                 <div className="flex flex-col">
-                  <span>{m.reset.isPending && m.reset.variables?.mode === 'Soft' ? 'Rewinding…' : 'Undo, and keep changes ready to commit'}</span>
-                  <span className="text-2xs text-muted-foreground">
-                    Changes stay staged
+                  <span>
+                    {m.reset.isPending && m.reset.variables?.mode === 'Soft'
+                      ? 'Undoing…'
+                      : 'Keep their changes ready to commit'}
                   </span>
-                </div>
-              </ContextMenuItem>
-              <ContextMenuItem variant="destructive" onSelect={() => runReset('Hard')}>
-                <div className="flex flex-col">
-                  <span>Undo and erase the later changes</span>
-                  <span className="text-2xs opacity-80">Uncommitted work is saved to a stash</span>
+                  <span className="text-2xs text-muted-foreground">Changes stay staged</span>
                 </div>
               </ContextMenuItem>
             </ContextMenuSubContent>
@@ -330,46 +336,25 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
       />
 
       <ConfirmDialog
-        open={pending?.kind === 'reset'}
-        onOpenChange={(o) => !o && setPending(null)}
-        destructive
-        title={`Erase changes on ${branchName}?`}
-        description={
-          <>
-            This rewinds <span className="font-mono text-foreground">{branchName}</span> to{' '}
-            <span className="font-mono text-foreground">{commit.short_sha}</span>.{' '}
-            <span className="text-removed">The commits made after this point are removed</span> from
-            the branch. Any work you haven't committed is saved to a stash first, so nothing is
-            lost. You can undo this right after.
-          </>
-        }
-        confirmLabel="Erase and rewind"
-        pending={m.reset.isPending}
-        pendingLabel="Erasing and rewinding…"
-        keepOpenOnConfirm
-        onConfirm={() =>
-          m.reset.mutate(
-            { sha: commit.sha, mode: 'Hard' },
-            { onSuccess: () => setPending(null) }
-          )
-        }
-      />
-
-      <ConfirmDialog
         open={pending?.kind === 'move'}
         onOpenChange={(o) => !o && setPending(null)}
         destructive
-        title={`Move ${branchName} to this commit?`}
+        title={`Send ${branchName} back to this commit?`}
         description={
           <>
-            This moves <span className="font-mono text-foreground">{branchName}</span> to{' '}
-            <span className="font-mono text-foreground">{commit.short_sha}</span>. The commits made
-            after this point will be removed from the branch. You can undo this right after.
+            <span className="font-mono text-foreground">{branchName}</span> goes back to{' '}
+            <span className="font-mono text-foreground">{commit.short_sha}</span>, and your files
+            end up exactly as they were at that point.{' '}
+            <span className="text-removed">
+              The commits made after it are removed from the branch
+            </span>
+            . Any work you haven't committed is saved to a stash first, so nothing is lost. You can
+            undo this right after.
           </>
         }
-        confirmLabel="Move branch"
+        confirmLabel="Go to this commit"
         pending={m.moveBranch.isPending}
-        pendingLabel="Moving branch…"
+        pendingLabel="Going back…"
         keepOpenOnConfirm
         onConfirm={() =>
           m.moveBranch.mutate(commit.sha, { onSuccess: () => setPending(null) })
