@@ -77,11 +77,27 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
     if (nextOpen) setOpen(true)
   }
 
-  // Same as double-clicking the chip itself: the checkout mutation maps a
-  // remote-tracking ref onto its local branch, so the full ref name works either way.
-  const switchTo = (name: string) => {
-    if (m.checkout.isPending) return
-    m.checkout.mutate(name)
+  // Same as double-clicking the chip itself -- see RefBadge for why a ref that
+  // resolves to the branch you're already on fast-forwards instead of trying
+  // (and failing) to switch to it.
+  const currentBranch = branches.data?.local.find((b) => b.is_head)
+  const localFor = (refTag: RefInfo) =>
+    refTag.type === 'remote'
+      ? (branches.data?.local.find((b) => b.upstream === refTag.name)?.name ??
+        refTag.name.split('/').slice(1).join('/'))
+      : refTag.name
+  const willFastForward = (refTag: RefInfo) =>
+    !!currentBranch && localFor(refTag) === currentBranch.name
+
+  const switchTo = (refTag: RefInfo) => {
+    if (m.checkout.isPending || m.fastForwardBranch.isPending) return
+    if (willFastForward(refTag)) {
+      m.fastForwardBranch.mutate({ branch: currentBranch!.name, target: refTag.name })
+    } else {
+      // The checkout mutation maps a remote-tracking ref onto its local branch,
+      // so the full ref name works either way.
+      m.checkout.mutate(refTag.name)
+    }
     setOpen(false)
   }
 
@@ -193,7 +209,13 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
               // and swallow the right-click menu.
               const withHint = (node: ReactElement) =>
                 canSwitch ? (
-                  <TooltipHint label={`Double-click to switch to ${refTag.name}`}>
+                  <TooltipHint
+                    label={
+                      willFastForward(refTag)
+                        ? `Double-click to catch ${currentBranch!.name} up to ${refTag.name}`
+                        : `Double-click to switch to ${refTag.name}`
+                    }
+                  >
                     {node}
                   </TooltipHint>
                 ) : (
@@ -206,7 +228,7 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
                   onOpenChange={branchMenuChanged}
                 >
                   <div
-                    onDoubleClick={canSwitch ? () => switchTo(refTag.name) : undefined}
+                    onDoubleClick={canSwitch ? () => switchTo(refTag) : undefined}
                     className={cn(
                       'relative flex min-h-8 items-center gap-2.5 rounded-[5px] px-1.5 py-1 hover:bg-panel3',
                       canSwitch && 'cursor-pointer'

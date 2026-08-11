@@ -6,7 +6,7 @@ import type { RefInfo, RefKind } from '@/lib/bindings'
 import { type DraggedRef } from '@/lib/refSync'
 import { detectProvider, RemoteIcon } from '@/lib/remoteProvider'
 import { tutorialRefPillId } from '@/lib/tutorialLessons'
-import { useRemotes } from '@/hooks/useGitQueries'
+import { useBranches, useRemotes } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useRefDnd } from '@/hooks/useRefDnd'
 import { useActiveRepo } from '@/stores/workspaceStore'
@@ -40,17 +40,38 @@ export function RefBadge({
 }) {
   const repo = useActiveRepo()
   const remotes = useRemotes(repo?.id ?? null)
+  const branches = useBranches(repo?.id ?? null)
   const m = useGitMutations(repo?.id ?? null)
 
   const self: DraggedRef = { name: refTag.name, type: refTag.type }
 
-  // Double-click a local or remote branch chip to switch to it. Tags aren't
-  // branches, so they don't switch. `head` is already the current branch.
-  // The checkout mutation maps a remote-tracking ref (origin/foo) onto its
-  // local branch, so passing the full ref name works for either kind.
+  // Double-click a local or remote branch chip to go to it. Tags aren't
+  // branches, so they don't. `head` is already the current branch.
   const canSwitch = refTag.type === 'branch' || refTag.type === 'remote'
+
+  // A remote chip stands in for the local branch that tracks it, which is what
+  // a checkout would land on. When that local branch is the one already
+  // checked out, "switch to it" is a no-op -- but double-clicking a remote
+  // chip sitting ahead of you plainly means "bring me up to there", so
+  // fast-forward instead. Without this the click either did nothing visible or
+  // was refused outright as held-by-a-worktree.
+  const currentBranch = branches.data?.local.find((b) => b.is_head)
+  const localForRemote =
+    refTag.type === 'remote'
+      ? (branches.data?.local.find((b) => b.upstream === refTag.name)?.name ??
+        refTag.name.split('/').slice(1).join('/'))
+      : refTag.name
+  const isCurrentBranch = !!currentBranch && localForRemote === currentBranch.name
+  const willFastForward = canSwitch && isCurrentBranch
+
   const handleDoubleClick = () => {
-    if (!canSwitch || m.checkout.isPending) return
+    if (!canSwitch || m.checkout.isPending || m.fastForwardBranch.isPending) return
+    if (willFastForward) {
+      m.fastForwardBranch.mutate({ branch: currentBranch.name, target: refTag.name })
+      return
+    }
+    // The checkout mutation maps a remote-tracking ref (origin/foo) onto its
+    // local branch, so passing the full ref name works for either kind.
     m.checkout.mutate(refTag.name)
   }
 
@@ -141,7 +162,9 @@ export function RefBadge({
   // Outside the context menu, whose trigger is `asChild`: a tooltip nested
   // inside would become that trigger's target and swallow the right-click menu.
   const hint = syncedWith
-    ? `${refTag.name} and ${syncedWith.name} are both here - nothing to push or pull. Double-click to switch to it.`
-    : `Double-click to switch to ${refTag.name}`
+    ? `${refTag.name} and ${syncedWith.name} are both here - nothing to push or pull.`
+    : willFastForward
+      ? `Double-click to catch ${currentBranch.name} up to ${refTag.name}`
+      : `Double-click to switch to ${refTag.name}`
   return canSwitch ? <TooltipHint label={hint}>{withMenu}</TooltipHint> : withMenu
 }
