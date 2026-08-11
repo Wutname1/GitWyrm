@@ -8,6 +8,7 @@ import {
   GitPullRequestArrow,
   Link2,
   PenLine,
+  Repeat2,
   RotateCcw,
   Trash2,
   Zap,
@@ -32,14 +33,18 @@ import { useGithubPrForBranch } from '@/hooks/useGithub'
 import { branchActions } from '@/lib/branchActions'
 import { copyToClipboard } from '@/lib/clipboard'
 import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
+import type { PreviewMode } from '@/lib/syncPreview'
 import { BranchSpecLinkItems } from './BranchSpecLinkItems'
 
 export interface BranchMenuHandlers {
-  onMerge: (name: string) => void
+  /**
+   * Open the Sync window for "bring `name` into the current branch", optionally
+   * landing on a specific option. Every combining action goes through here so
+   * the same window explains all of them.
+   */
+  onMerge: (name: string, mode?: PreviewMode) => void
   onRename: (name: string) => void
   onDelete: (name: string) => void
-  /** Confirm hard-resetting the current branch to this branch. */
-  onResetTo: (name: string) => void
 }
 
 interface BranchMenuItemsProps {
@@ -162,11 +167,21 @@ export function BranchMenuItems({
           onRun={() => m.checkout.mutate(branch.name)}
         />
       )}
-      <ContextMenuItem disabled={isCurrent} onSelect={() => handlers.onMerge(branch.name)}>
+      {/* Combining work always opens the Sync window, which draws the outcome
+          and offers blend / stack / replace side by side. The menu item only
+          says which option to land on. */}
+      <ContextMenuItem disabled={isCurrent} onSelect={() => handlers.onMerge(branch.name, 'blend')}>
         {mergeIsFastForward ? <Zap /> : <GitMerge />}
         {mergeIsFastForward
           ? `Fast-forward ${currentBranch || 'current'} to ${branch.name}`
           : `Merge into ${currentBranch || 'current'}`}
+      </ContextMenuItem>
+      <ContextMenuItem disabled={isCurrent} onSelect={() => handlers.onMerge(branch.name, 'stack')}>
+        <Repeat2 />
+        <div className="flex flex-col">
+          <span>Stack my changes on top of {branch.name}</span>
+          <span className="text-2xs text-muted-foreground">Replays your work, no merge commit</span>
+        </div>
       </ContextMenuItem>
       {canFastForwardToCurrent && (
         <PendingMenuItem
@@ -214,10 +229,13 @@ export function BranchMenuItems({
                 <span className="text-2xs text-muted-foreground">Changes stay ready to commit</span>
               </div>
             </ContextMenuItem>
+            {/* Erasing your own commits is the same decision the Sync window's
+                "reset" option covers, so it goes there rather than to a
+                separate confirm -- one place shows what you would lose. */}
             <ContextMenuItem
               variant="destructive"
               disabled={resetting}
-              onSelect={() => handlers.onResetTo(branch.name)}
+              onSelect={() => handlers.onMerge(branch.name, 'reset')}
             >
               <div className="flex flex-col">
                 <span>Match it, erase your changes</span>

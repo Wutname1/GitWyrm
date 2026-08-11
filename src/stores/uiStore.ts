@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { DiffSource } from '@/lib/bindings'
+import type { PreviewMode } from '@/lib/syncPreview'
 import type { SectionKey } from '@/lib/types'
 
 export type CenterView =
@@ -84,6 +85,15 @@ interface UiState {
   mergeSource: string | null
   syncSource: string | null
   syncTarget: string | null
+  /**
+   * Which option the Sync window opens on. Set when the user already said what
+   * they wanted -- picking "Stack on top" from a menu lands on the rebase
+   * option rather than the default. Null lets the modal choose.
+   *
+   * Only a hint: a mode that doesn't apply to how the two branches actually
+   * diverged is ignored, so a stale preselect can never run the wrong action.
+   */
+  syncMode: PreviewMode | null
   tagTargetSha: string | null
   branchTargetSha: string | null
   /**
@@ -218,7 +228,12 @@ interface UiState {
   deleteBranchPrompt: (name: string | null) => void
   deleteRemoteBranchPrompt: (target: { remote: string; branch: string } | null) => void
   resetToBranchPrompt: (name: string | null) => void
-  openRemoteSync: (source: string, target: string) => void
+  /**
+   * Open the Sync window for a pair of refs. `source` is the ref being "picked
+   * up" (the drag's dragged side); for two local branches that is the one that
+   * moves. `mode` preselects an option -- see `syncMode`.
+   */
+  openRemoteSync: (source: string, target: string, mode?: PreviewMode) => void
   /** Flip the sync direction in the open Sync modal (source <-> target). */
   swapSync: () => void
   openDiff: (request: DiffRequest) => void
@@ -288,6 +303,7 @@ export const useUiStore = create<UiState>((set) => ({
   mergeSource: null,
   syncSource: null,
   syncTarget: null,
+  syncMode: null,
   tagTargetSha: null,
   branchTargetSha: null,
   tagsToPush: null,
@@ -371,8 +387,13 @@ export const useUiStore = create<UiState>((set) => ({
   deleteBranchPrompt: (name) => set({ branchToDelete: name }),
   deleteRemoteBranchPrompt: (target) => set({ remoteBranchToDelete: target }),
   resetToBranchPrompt: (name) => set({ branchToResetTo: name }),
-  openRemoteSync: (source, target) =>
-    set({ activeModal: 'remote-sync', syncSource: source, syncTarget: target }),
+  openRemoteSync: (source, target, mode) =>
+    set({
+      activeModal: 'remote-sync',
+      syncSource: source,
+      syncTarget: target,
+      syncMode: mode ?? null,
+    }),
   swapSync: () => set((s) => ({ syncSource: s.syncTarget, syncTarget: s.syncSource })),
   // Remember which commit a diff came from, so the file view tabs can offer
   // that commit's blame and diff rather than dropping back to the working tree.
@@ -438,6 +459,7 @@ export const useUiStore = create<UiState>((set) => ({
       activeModal: null,
       syncSource: null,
       syncTarget: null,
+      syncMode: null,
       tagTargetSha: null,
       branchTargetSha: null,
       remoteToEdit: null,

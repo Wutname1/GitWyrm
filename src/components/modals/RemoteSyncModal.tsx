@@ -76,6 +76,7 @@ export function RemoteSyncModal() {
   const swapSync = useUiStore((s) => s.swapSync)
   const syncSource = useUiStore((s) => s.syncSource)
   const syncTarget = useUiStore((s) => s.syncTarget)
+  const preselectedMode = useUiStore((s) => s.syncMode)
 
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
@@ -127,13 +128,16 @@ export function RemoteSyncModal() {
   const upstreamGone = pair?.kind === 'tracking' && pair.branch.sync.kind === 'upstream_gone'
   const modes = divergence ? modesFor(divergence) : []
 
-  // Which option is selected. Defaults to the least destructive useful one and
-  // resets whenever the pair changes, so a fresh drag never inherits a
-  // destructive selection from the previous one.
+  // Which option is selected. Resets whenever the pair changes, so a fresh drag
+  // never inherits a destructive selection from the previous one -- but a mode
+  // the caller asked for (picking "Stack on top" from a menu) is honoured, so
+  // the menu item and the window agree on what was chosen.
   const [mode, setMode] = useState<PreviewMode | null>(null)
   useEffect(() => {
-    setMode(null)
-  }, [syncSource, syncTarget])
+    setMode(preselectedMode)
+  }, [syncSource, syncTarget, preselectedMode])
+  // A preselect that doesn't apply to how these two actually diverged falls
+  // back to the default, so a stale hint can never run something unintended.
   const active: PreviewMode | null = mode && modes.includes(mode) ? mode : (modes.at(-1) ?? null)
 
   // Names. For a tracking pair "ours" is the local branch; for a branch pair it

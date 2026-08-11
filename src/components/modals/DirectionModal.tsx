@@ -30,7 +30,7 @@ function Chip({ name, tone }: { name: string; tone: 'source' | 'target' }) {
 export function DirectionModal() {
   const open = useUiStore((s) => s.activeModal === 'merge')
   const closeModal = useUiStore((s) => s.closeModal)
-  const openConflict = useUiStore((s) => s.openConflict)
+  const openRemoteSync = useUiStore((s) => s.openRemoteSync)
   const preselected = useUiStore((s) => s.mergeSource)
 
   const repo = useActiveRepo()
@@ -94,24 +94,17 @@ export function DirectionModal() {
     }
   }, [open, repo, other, reversed])
 
-  const pending = m.merge.isPending || m.mergeDirectional.isPending
-  const canRun =
-    !!other && !pending && !(analysis?.up_to_date === true && !reversed)
+  const canRun = !!other && !(analysis?.up_to_date === true && !reversed)
 
+  // This window's job is picking the pair; the Sync window owns what to DO with
+  // it, so blend / stack / replace are chosen in one place with the outcome
+  // drawn. Hand the chosen direction over rather than merging directly here.
+  //
+  // `target` is the branch that receives, which is the side the Sync window
+  // treats as the mover, so it goes first -- the same order a drag uses.
   const doMerge = () => {
     if (!other) return
-    const onDone = (result: { conflicts: string[] }) => {
-      closeModal()
-      if (result.conflicts.length > 0) openConflict(result.conflicts[0])
-    }
-    if (reversed) {
-      m.mergeDirectional.mutate(
-        { target, source },
-        { onSuccess: ({ result }) => onDone(result) }
-      )
-    } else {
-      m.merge.mutate(other, { onSuccess: ({ result }) => onDone(result) })
-    }
+    openRemoteSync(target, source, 'blend')
   }
 
   return (
@@ -220,7 +213,7 @@ export function DirectionModal() {
             Cancel
           </Button>
           <Button size="sm" disabled={!canRun} onClick={doMerge}>
-            {pending ? 'Merging…' : 'Merge'}
+            Continue
           </Button>
         </div>
       </DialogContent>

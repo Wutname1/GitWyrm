@@ -27,6 +27,7 @@ import { useGithubPrForBranch } from '@/hooks/useGithub'
 import { useUiStore } from '@/stores/uiStore'
 import { copyToClipboard } from '@/lib/clipboard'
 import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
+import type { PreviewMode } from '@/lib/syncPreview'
 
 interface RemoteBranchMenuItemsProps {
   /** The remote this branch lives on. */
@@ -65,8 +66,7 @@ export function RemoteBranchMenuItems({
 }: RemoteBranchMenuItemsProps) {
   const m = useGitMutations(repoId)
   const branches = useBranches(repoId)
-  const openMerge = useUiStore((s) => s.openMerge)
-  const resetToBranchPrompt = useUiStore((s) => s.resetToBranchPrompt)
+  const openRemoteSync = useUiStore((s) => s.openRemoteSync)
   const deleteRemoteBranchPrompt = useUiStore((s) => s.deleteRemoteBranchPrompt)
 
   const fullName = `${remote.name}/${branch}`
@@ -99,6 +99,12 @@ export function RemoteBranchMenuItems({
   const isCreating = m.createBranch.isPending && m.createBranch.variables?.name === branch
   const resetting = m.resetToBranch.isPending && m.resetToBranch.variables?.target === fullName
   const busy = opInProgress || m.checkout.isPending
+
+  // Same argument order as a drag: the remote ref is the one "picked up". It
+  // cannot move, so the Sync window resolves the local branch as the side that
+  // receives -- which is what every item here means.
+  const openSync = (source: string, mode: PreviewMode) =>
+    openRemoteSync(source, currentBranch, mode)
 
   return (
     <>
@@ -152,9 +158,11 @@ export function RemoteBranchMenuItems({
           local branch of the same name does NOT rule these out -- that is the
           usual case for "origin/main moved ahead of my main". Both stay live
           whenever the remote has commits we don't. */}
+      {/* All three open the Sync window on the matching option, so the choice
+          between them is made once, in one place, with the outcome drawn. */}
       <ContextMenuItem
         disabled={isSameCommit || opInProgress}
-        onSelect={() => openMerge(fullName)}
+        onSelect={() => openSync(fullName, 'blend')}
       >
         <GitMerge />
         <div className="flex flex-col">
@@ -167,20 +175,22 @@ export function RemoteBranchMenuItems({
         </div>
       </ContextMenuItem>
       {behind > 0 && ahead > 0 && (
-        <PendingMenuItem
-          icon={<Repeat2 />}
-          label={`Stack my ${ahead} change${ahead === 1 ? '' : 's'} on top`}
-          pendingLabel="Stacking…"
-          pending={isRebasing}
-          disabled={opInProgress || m.rebase.isPending}
-          onRun={() => m.rebase.mutate({ onto: fullName })}
-        />
+        <ContextMenuItem
+          disabled={opInProgress}
+          onSelect={() => openSync(fullName, 'stack')}
+        >
+          <Repeat2 />
+          <div className="flex flex-col">
+            <span>Stack my {ahead} change{ahead === 1 ? '' : 's'} on top</span>
+            <span className="text-2xs text-muted-foreground">Replays your work, no merge commit</span>
+          </div>
+        </ContextMenuItem>
       )}
       {!isSameCommit && (
         <ContextMenuItem
           variant="destructive"
           disabled={opInProgress || resetting}
-          onSelect={() => resetToBranchPrompt(fullName)}
+          onSelect={() => openSync(fullName, 'reset')}
         >
           <RotateCcw />
           <div className="flex flex-col">

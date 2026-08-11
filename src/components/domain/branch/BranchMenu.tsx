@@ -1,4 +1,5 @@
 import type { BranchInfo } from '@/lib/bindings'
+import type { PreviewMode } from '@/lib/syncPreview'
 import { useBranches } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
@@ -26,10 +27,9 @@ interface BranchMenuProps {
 export function BranchMenu({ branch, opInProgress, showWebLink = true }: BranchMenuProps) {
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
-  const openMerge = useUiStore((s) => s.openMerge)
+  const openRemoteSync = useUiStore((s) => s.openRemoteSync)
   const renameBranchPrompt = useUiStore((s) => s.renameBranchPrompt)
   const deleteBranchPrompt = useUiStore((s) => s.deleteBranchPrompt)
-  const resetToBranchPrompt = useUiStore((s) => s.resetToBranchPrompt)
 
   const resolved =
     typeof branch === 'string'
@@ -39,6 +39,16 @@ export function BranchMenu({ branch, opInProgress, showWebLink = true }: BranchM
 
   const currentBranch = branches.data?.local.find((b) => b.is_head)?.name ?? ''
 
+  // Every combining action opens the same window dragging one chip onto another
+  // does, so blend / stack / replace are offered together with the resulting
+  // shape drawn, instead of each menu item quietly picking one.
+  //
+  // Argument order matches a drag: the FIRST ref is the one "picked up", which
+  // for two local branches is the one that moves. The menu reads "merge <other>
+  // into <current>", so current is the branch that moves and goes first.
+  const onMerge = (name: string, mode?: PreviewMode) =>
+    openRemoteSync(currentBranch, name, mode)
+
   return (
     <BranchMenuItems
       branch={resolved}
@@ -47,10 +57,9 @@ export function BranchMenu({ branch, opInProgress, showWebLink = true }: BranchM
       opInProgress={opInProgress}
       showWebLink={showWebLink}
       handlers={{
-        onMerge: openMerge,
+        onMerge,
         onRename: renameBranchPrompt,
         onDelete: deleteBranchPrompt,
-        onResetTo: resetToBranchPrompt,
       }}
     />
   )
