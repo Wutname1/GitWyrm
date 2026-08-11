@@ -247,6 +247,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::ai_commits::generate_commits,
     commands::github::hosting_providers,
     commands::github::repo_host_provider,
+    commands::github::host_connect_token,
+    commands::github::host_sign_out,
     commands::github::github_device_start,
     commands::github::github_device_poll,
     commands::github::github_sign_out,

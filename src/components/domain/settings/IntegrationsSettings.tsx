@@ -1,32 +1,29 @@
 import { useState } from 'react'
-import { Check } from 'lucide-react'
+import { Check, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { GithubIcon } from '@/components/domain/github/GithubIcon'
 import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
 import {
   useGithubMutations,
   useGithubSignIn,
+  useHostAuthMutations,
   useHostingProviders,
 } from '@/hooks/useGithub'
 import type { HostProviderInfo } from '@/lib/bindings'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { SettingRow, settingRowClass, useRevealHighlight } from './SettingRow'
+import { SettingRow } from './SettingRow'
 import { ResetToDefaults } from './ResetToDefaults'
 
 /**
  * Connections to the sites your code is hosted on, and what those connections
  * are allowed to put on screen.
  *
- * Connecting used to be reachable only from the repository picker and the
- * sidebar, and disconnecting was not reachable at all -- `githubSignOut` existed
- * on both sides of the bridge with no button wired to it. Both live here now.
- *
  * The provider list comes from the backend rather than being written out here,
- * so a host added to the Rust registry appears without touching this file. Hosts
- * that are known but not built yet are listed and say so: someone whose work is
- * on GitLab gets a straight answer instead of finding GitHub alone and guessing
- * whether their host is unsupported or just undiscovered.
+ * so a host added to the Rust registry appears without touching this file. Each
+ * row renders the connect control its host actually uses -- GitHub's device
+ * code, a pasted token, or Bitbucket's email-plus-token pair.
  */
 export function IntegrationsSettings() {
   const providers = useHostingProviders()
@@ -48,114 +45,237 @@ export function IntegrationsSettings() {
 }
 
 function ProviderRow({ provider }: { provider: HostProviderInfo }) {
-  if (!provider.implemented) return <PlannedProviderRow provider={provider} />
-  // GitHub is the only implemented host today, and it is the only one with a
-  // device-code flow wired up. When a second lands, switch on `auth_kind` here
-  // rather than growing this branch.
-  return <GithubConnection provider={provider} />
+  return provider.auth_kind === 'device_code' ? (
+    <GithubConnection provider={provider} />
+  ) : (
+    <TokenConnection provider={provider} />
+  )
+}
+
+/** Shared "connected as X, with a Disconnect button" block. */
+function ConnectedState({
+  provider,
+  login,
+  onDisconnect,
+  pending,
+}: {
+  provider: HostProviderInfo
+  login: string
+  onDisconnect: () => void
+  pending: boolean
+}) {
+  const [confirming, setConfirming] = useState(false)
+
+  return (
+    <>
+      <div className="grid gap-2">
+        <div className="flex items-center gap-2 text-xs text-foreground">
+          {provider.auth_kind === 'device_code' && <GithubIcon size={15} />}
+          <span className="font-medium">Connected as {login}</span>
+          <Check size={13} className="text-accent-text" />
+        </div>
+        <div>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => setConfirming(true)}
+            disabled={pending}
+          >
+            {pending ? 'Disconnecting…' : 'Disconnect'}
+          </Button>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`Disconnect ${provider.display_name}?`}
+        description={
+          <>
+            GitWyrm will forget your {provider.display_name} sign-in. Pull requests and issues stop
+            showing up, and the counts on your tabs go away. Nothing on {provider.display_name}{' '}
+            changes, and none of your repositories or commits are touched. You can connect again any
+            time.
+          </>
+        }
+        confirmLabel="Disconnect"
+        destructive
+        onConfirm={onDisconnect}
+      />
+    </>
+  )
 }
 
 /**
- * A host GitWyrm knows the shape of but cannot talk to yet. Deliberately not a
- * disabled Connect button: a button that cannot ever work is a worse answer
- * than a sentence saying so.
+ * The permissions a token needs, listed verbatim.
+ *
+ * Worth the space: a token missing one scope is accepted when it is saved and
+ * then fails on the first real request with an error that does not name the
+ * cause. Showing the list next to the box is what stops that being a mystery.
  */
-function PlannedProviderRow({ provider }: { provider: HostProviderInfo }) {
-  const { ref, flash } = useRevealHighlight(`host-${provider.id}`)
+function ScopeHelp({ provider }: { provider: HostProviderInfo }) {
+  if (provider.required_scopes.length === 0) return null
+  return (
+    <div className="text-2xs text-muted-foreground">
+      Tick {provider.required_scopes.length === 1 ? 'this permission' : 'these permissions'} when you
+      make the token:{' '}
+      <span className="text-foreground">{provider.required_scopes.join(', ')}</span>
+    </div>
+  )
+}
+
+function TokenConnection({ provider }: { provider: HostProviderInfo }) {
+  const { connect, disconnect } = useHostAuthMutations()
+  const [token, setToken] = useState('')
+  const [email, setEmail] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+
+  const needsEmail = provider.auth_kind === 'email_and_token'
+  // Only the self-hostable products get a base-URL box; Bitbucket Cloud and
+  // dev.azure.com are fixed hosts for our purposes.
+  const allowsSelfHosted = provider.id === 'gitlab' || provider.id === 'azure_devops'
+
+  const submit = () => {
+    connect.mutate(
+      {
+        provider: provider.id,
+        token: token.trim(),
+        email: needsEmail ? email.trim() : null,
+        baseUrl: baseUrl.trim() || null,
+      },
+      {
+        onSuccess: () => {
+          setToken('')
+          setEmail('')
+        },
+      }
+    )
+  }
 
   return (
-    <div ref={ref} className={settingRowClass(flash)}>
-      <div className="w-52 flex-none">
-        <div className="text-xs font-semibold text-foreground">{provider.display_name}</div>
-        <div className="mt-0.5 text-2xs text-muted-foreground">
-          GitWyrm can open and work with repositories hosted here. Showing their pull requests and
-          issues in the app is not built yet.
+    <SettingRow
+      label={provider.display_name}
+      searchId={`host-${provider.id}`}
+      hint={
+        provider.capabilities.issues
+          ? `Show your ${provider.display_name} pull requests and issues in GitWyrm, and reply to them without opening a browser.`
+          : `Show your ${provider.display_name} pull requests in GitWyrm. Work items are not shown, because every project defines its own.`
+      }
+    >
+      {provider.connected_as ? (
+        <ConnectedState
+          provider={provider}
+          login={provider.connected_as}
+          pending={disconnect.isPending}
+          onDisconnect={() => disconnect.mutate(provider.id)}
+        />
+      ) : (
+        <div className="grid max-w-md gap-2">
+          {needsEmail && (
+            <Input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Your Atlassian account email"
+              className="h-8 bg-background text-xs"
+              autoComplete="off"
+            />
+          )}
+          <Input
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && token.trim() && submit()}
+            placeholder="Paste your token"
+            className="h-8 bg-background font-mono text-xs"
+            autoComplete="off"
+          />
+          {allowsSelfHosted && (
+            <Input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder={
+                provider.id === 'gitlab'
+                  ? 'Your own server address (leave blank for gitlab.com)'
+                  : 'Your own server address (leave blank for dev.azure.com)'
+              }
+              className="h-8 bg-background text-xs"
+              autoComplete="off"
+            />
+          )}
+          <ScopeHelp provider={provider} />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="h-8 text-xs"
+              disabled={!token.trim() || connect.isPending}
+              onClick={submit}
+            >
+              {connect.isPending ? 'Checking…' : `Connect ${provider.display_name}`}
+            </Button>
+            {provider.token_url && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={async () => {
+                  const { openUrl } = await import('@tauri-apps/plugin-opener')
+                  await openUrl(provider.token_url!)
+                }}
+              >
+                <ExternalLink size={13} />
+                Make a token
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
-      <div className="min-w-0 flex-1">
-        <span className="inline-flex items-center rounded-md border border-border px-2 py-1 text-2xs text-muted-foreground">
-          Not available yet
-        </span>
-      </div>
-    </div>
+      )}
+    </SettingRow>
   )
 }
 
 function GithubConnection({ provider }: { provider: HostProviderInfo }) {
   const signIn = useGithubSignIn()
   const { signOut } = useGithubMutations(null)
-  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false)
-
-  const login = provider.connected_as
 
   return (
-    <>
-      <SettingRow
-        label={provider.display_name}
-        searchId="github-connection"
-        hint="Lets GitWyrm show your pull requests and issues, and reply to them, without opening a browser. Your code is never sent anywhere -- this only reads the site."
-      >
-        {login ? (
-          <div className="grid gap-2">
-            <div className="flex items-center gap-2 text-xs text-foreground">
-              <GithubIcon size={15} />
-              <span className="font-medium">Connected as {login}</span>
-              <Check size={13} className="text-accent-text" />
-            </div>
-            <div>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => setConfirmingDisconnect(true)}
-                disabled={signOut.isPending}
-              >
-                {signOut.isPending ? 'Disconnecting…' : 'Disconnect'}
-              </Button>
-            </div>
+    <SettingRow
+      label={provider.display_name}
+      searchId="github-connection"
+      hint="Lets GitWyrm show your pull requests and issues, and reply to them, without opening a browser. Your code is never sent anywhere -- this only reads the site."
+    >
+      {provider.connected_as ? (
+        <ConnectedState
+          provider={provider}
+          login={provider.connected_as}
+          pending={signOut.isPending}
+          onDisconnect={() => signOut.mutate()}
+        />
+      ) : signIn.status.state === 'waiting' ? (
+        <DeviceCodePanel
+          userCode={signIn.status.userCode}
+          verificationUri={signIn.status.verificationUri}
+          onCancel={signIn.cancel}
+        />
+      ) : (
+        <div className="grid gap-2">
+          <div>
+            <Button
+              size="sm"
+              className="h-8 text-xs"
+              disabled={signIn.status.state === 'starting'}
+              onClick={signIn.start}
+            >
+              <GithubIcon size={14} />
+              {signIn.status.state === 'starting' ? 'Starting sign-in…' : 'Connect GitHub'}
+            </Button>
           </div>
-        ) : signIn.status.state === 'waiting' ? (
-          <DeviceCodePanel
-            userCode={signIn.status.userCode}
-            verificationUri={signIn.status.verificationUri}
-            onCancel={signIn.cancel}
-          />
-        ) : (
-          <div className="grid gap-2">
-            <div>
-              <Button
-                size="sm"
-                className="h-8 text-xs"
-                disabled={signIn.status.state === 'starting'}
-                onClick={signIn.start}
-              >
-                <GithubIcon size={14} />
-                {signIn.status.state === 'starting' ? 'Starting sign-in…' : 'Connect GitHub'}
-              </Button>
-            </div>
-            {signIn.status.state === 'error' && (
-              <div className="text-2xs text-removed">{signIn.status.message}</div>
-            )}
-          </div>
-        )}
-      </SettingRow>
-
-      <ConfirmDialog
-        open={confirmingDisconnect}
-        onOpenChange={setConfirmingDisconnect}
-        title="Disconnect GitHub?"
-        description={
-          <>
-            GitWyrm will forget your GitHub sign-in. Pull requests and issues stop showing up, and
-            the counts on your tabs go away. Nothing on GitHub changes, and none of your repositories
-            or commits are touched. You can connect again any time.
-          </>
-        }
-        confirmLabel="Disconnect"
-        destructive
-        onConfirm={() => signOut.mutate()}
-      />
-    </>
+          {signIn.status.state === 'error' && (
+            <div className="text-2xs text-removed">{signIn.status.message}</div>
+          )}
+        </div>
+      )}
+    </SettingRow>
   )
 }
 

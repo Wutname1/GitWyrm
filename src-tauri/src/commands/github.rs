@@ -1,7 +1,14 @@
-//! GitHub integration: sign-in, pull requests, and issues over the REST API.
-//! Reuses the device-code flow and auth.json store from the AI subsystem;
-//! the token lives under the "github" provider id and never reaches the
-//! webview.
+//! Code-host integration: sign-in, pull requests, and issues.
+//!
+//! Host-agnostic. Every command here resolves the repository's provider through
+//! `hosting::registry` and dispatches to it, so this layer never names a
+//! particular site. The commands keep their `github_*` names because they are
+//! part of the frontend contract and renaming them all would be churn with no
+//! user-visible gain -- the *behaviour* is whichever host the repository is on.
+//!
+//! Two things remain genuinely GitHub-only and say so: the device-code sign-in
+//! (the other hosts use tokens) and the repository picker and SSH key pairing,
+//! which have no equivalent elsewhere.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -10,79 +17,54 @@ use tauri::State;
 
 use crate::ai::{auth, copilot};
 use crate::error::AppError;
-use crate::hosting::{self, HostProvider, ProviderId};
+use crate::hosting::{
+  self, github::GitHub, http as host_http, Credential, HostProvider, ProviderId, RepoSlug,
+};
 use crate::state::RepoManager;
+
+pub use crate::hosting::{
+  HostComment as GithubComment, IssueDetail, IssueSummary, MergeMethod, PrDetail, PrSummary,
+};
 
 const PROVIDER_ID: &str = "github";
 const API_BASE: &str = "https://api.github.com";
 const TIMEOUT: Duration = Duration::from_secs(30);
-/// Scopes: `repo` covers reading and acting on PRs/issues in private and
-/// public repos; `read:user` lets us show who is signed in.
-const SCOPE: &str = "repo read:user";
 
-fn token(app: &tauri::AppHandle) -> Result<String, AppError> {
-  match auth::get(app, PROVIDER_ID)? {
-    Some(auth::AuthInfo::Oauth { access, .. }) => Ok(access),
-    Some(auth::AuthInfo::Api { key }) => Ok(key),
-    None => Err(AppError::Other(
-      "not signed in to GitHub; connect GitHub first".into(),
-    )),
-  }
-}
+// ---------------------------------------------------------------------------
+// Provider resolution
 
-fn api(app: &tauri::AppHandle, method: reqwest::Method, path: &str) -> Result<reqwest::RequestBuilder, AppError> {
-  let token = token(app)?;
-  Ok(request(method, path).bearer_auth(token))
-}
-
-fn request(method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
-  reqwest::Client::new()
-    .request(method, format!("{API_BASE}{path}"))
-    .header("Accept", "application/vnd.github+json")
-    .header("X-GitHub-Api-Version", "2022-11-28")
-    .header("User-Agent", "GitWyrm")
-    .timeout(TIMEOUT)
-}
-
-/// Signed-in request when a token is stored, anonymous otherwise.
+/// The provider that owns a repository, plus the slug to address it with.
 ///
-/// GitHub serves public repositories anonymously, so read-only lookups still
-/// work with nobody connected. The anonymous rate limit is much lower (60/hour
-/// per IP rather than 5000) and private repos return 404, which is why only
-/// small, cached reads use this -- anything that writes goes through [`api`]
-/// and keeps failing with "connect GitHub first".
-fn api_or_public(app: &tauri::AppHandle, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
-  match token(app) {
-    Ok(token) => request(method, path).bearer_auth(token),
-    Err(_) => request(method, path),
-  }
+/// Both come from `origin`. A repository whose remote is missing, or on a host
+/// GitWyrm has no integration for, has no provider -- callers treat that as
+/// "nothing to show" rather than an error, because it is the normal state for a
+/// local-only or self-hosted repository.
+async fn resolve(
+  manager: &State<'_, RepoManager>,
+  repo_id: &str,
+) -> Result<Option<(&'static dyn HostProvider, RepoSlug)>, AppError> {
+  let open = manager.get(repo_id)?;
+  let url = tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    repo
+      .find_remote("origin")
+      .ok()
+      .and_then(|r| r.url().map(String::from))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?;
+
+  let Some(url) = url else { return Ok(None) };
+  let Some(provider) = hosting::provider_for(&url) else {
+    return Ok(None);
+  };
+  Ok(provider.slug_from_remote(&url).map(|slug| (provider, slug)))
 }
 
-/// Turns a non-2xx response into a readable error, preferring GitHub's own
-/// `message` field over raw status codes.
-async fn check(res: reqwest::Response) -> Result<reqwest::Response, AppError> {
-  let status = res.status();
-  if status.is_success() {
-    return Ok(res);
-  }
-  let body = res.text().await.unwrap_or_default();
-  let message = serde_json::from_str::<serde_json::Value>(&body)
-    .ok()
-    .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(String::from))
-    .unwrap_or_else(|| body.chars().take(200).collect());
-  Err(AppError::Other(match status.as_u16() {
-    401 => "GitHub sign-in is no longer valid; connect GitHub again".into(),
-    403 if message.contains("rate limit") => "GitHub rate limit reached; try again in a few minutes".into(),
-    _ => format!("GitHub said: {message}"),
-  }))
-}
-
-async fn send(builder: reqwest::RequestBuilder) -> Result<reqwest::Response, AppError> {
-  let res = builder
-    .send()
-    .await
-    .map_err(|e| AppError::Other(format!("could not reach GitHub: {e}")))?;
-  check(res).await
+/// Looks up a provider by id for the commands that act on a named host rather
+/// than on a repository (connect, disconnect, status).
+fn by_id(id: ProviderId) -> Result<&'static dyn HostProvider, AppError> {
+  hosting::provider_for_id(id).ok_or_else(|| AppError::Other("unknown host".into()))
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +73,7 @@ async fn send(builder: reqwest::RequestBuilder) -> Result<reqwest::Response, App
 #[tauri::command]
 #[specta::specta]
 pub async fn github_device_start() -> Result<copilot::DeviceCodeInfo, AppError> {
-  copilot::device_start(SCOPE).await
+  copilot::device_start(GitHub::SCOPE).await
 }
 
 /// One poll pass; the frontend loops on Pending so sign-in stays cancellable.
@@ -120,39 +102,77 @@ pub async fn github_device_poll(
   }
 }
 
+/// Stores a token for a host that signs in with one, then verifies it works.
+///
+/// Verifying before reporting success is the point: a token with a missing
+/// scope is accepted by the store but fails on the first real request, and an
+/// error at that moment does not name the cause. Checking here lets the connect
+/// screen say "that token did not work" while the user still has the token page
+/// open.
+#[tauri::command]
+#[specta::specta]
+pub async fn host_connect_token(
+  app: tauri::AppHandle,
+  provider: ProviderId,
+  credential: Credential,
+) -> Result<String, AppError> {
+  let token = credential.token.trim();
+  if token.is_empty() {
+    return Err(AppError::Other("paste the token first".into()));
+  }
+  let host = by_id(provider)?;
+  if host.auth_kind() == crate::hosting::AuthKind::EmailAndToken
+    && credential.email.as_deref().map(str::trim).unwrap_or("").is_empty()
+  {
+    return Err(AppError::Other(
+      "Bitbucket needs the email address of your Atlassian account as well as the token".into(),
+    ));
+  }
+
+  let packed = host_http::pack_credential(
+    token,
+    credential.email.as_deref(),
+    credential.base_url.as_deref(),
+  );
+  auth::set(&app, provider.as_str(), auth::AuthInfo::Api { key: packed })?;
+
+  match host.auth_status(&app).await {
+    Ok(Some(login)) => Ok(login),
+    // Stored fine but the host does not recognise it: remove it again rather
+    // than leaving a credential behind that will fail every later request.
+    Ok(None) => {
+      let _ = auth::remove(&app, provider.as_str());
+      Err(AppError::Other(format!(
+        "{} did not accept that token. Check it was copied whole and has the permissions listed above.",
+        host.display_name()
+      )))
+    }
+    Err(e) => {
+      let _ = auth::remove(&app, provider.as_str());
+      Err(e)
+    }
+  }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn github_sign_out(app: tauri::AppHandle) -> Result<(), AppError> {
-  tauri::async_runtime::spawn_blocking(move || auth::remove(&app, PROVIDER_ID))
+  host_sign_out(app, ProviderId::Github).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn host_sign_out(app: tauri::AppHandle, provider: ProviderId) -> Result<(), AppError> {
+  tauri::async_runtime::spawn_blocking(move || auth::remove(&app, provider.as_str()))
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// The signed-in login, or None when no token is stored or the token no
-/// longer works (so the UI falls back to the connect prompt).
+/// The signed-in GitHub login, or None when not connected.
 #[tauri::command]
 #[specta::specta]
 pub async fn github_auth_status(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
-  if auth::get(&app, PROVIDER_ID)?.is_none() {
-    return Ok(None);
-  }
-  #[derive(Deserialize)]
-  struct User {
-    login: String,
-  }
-  let res = api(&app, reqwest::Method::GET, "/user")?
-    .send()
-    .await
-    .map_err(|e| AppError::Other(format!("could not reach GitHub: {e}")))?;
-  if res.status().as_u16() == 401 {
-    return Ok(None);
-  }
-  let user: User = check(res)
-    .await?
-    .json()
-    .await
-    .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
-  Ok(Some(user.login))
+  GitHub.auth_status(&app).await
 }
 
 // ---------------------------------------------------------------------------
@@ -163,47 +183,40 @@ pub async fn github_auth_status(app: tauri::AppHandle) -> Result<Option<String>,
 pub struct HostProviderInfo {
   pub id: ProviderId,
   pub display_name: String,
-  /// Whether GitWyrm can actually talk to this host yet. When false the UI
-  /// names it and explains it is not available, rather than offering a connect
-  /// button that cannot succeed.
-  pub implemented: bool,
-  /// "device_code" or "personal_access_token": which connect control to show.
+  /// "device_code", "personal_access_token" or "email_and_token": which connect
+  /// control to show.
   pub auth_kind: String,
-  /// The signed-in account name, or None when not connected. Always None for
-  /// a provider that is not implemented.
+  /// Where the user creates a token, for the connect screen's help link.
+  pub token_url: Option<String>,
+  /// The permissions the token needs, listed verbatim so a user can tick them.
+  pub required_scopes: Vec<String>,
+  /// The signed-in account name, or None when not connected.
   pub connected_as: Option<String>,
+  pub capabilities: crate::hosting::HostCapabilities,
 }
 
 /// Every host GitWyrm knows about, with the connection state of each.
 ///
-/// Drives the Integrations screen. Only implemented providers are asked for
-/// their sign-in state -- the rest have no auth path to check, and probing one
-/// would be a request that can only fail.
+/// Status is best-effort per host: one unreachable site must not blank the
+/// whole screen, so a failed check reads as "not connected" and the user can
+/// retry by reopening.
 #[tauri::command]
 #[specta::specta]
-pub async fn hosting_providers(
-  app: tauri::AppHandle,
-) -> Result<Vec<HostProviderInfo>, AppError> {
+pub async fn hosting_providers(app: tauri::AppHandle) -> Result<Vec<HostProviderInfo>, AppError> {
   let mut out = Vec::with_capacity(hosting::ALL_PROVIDERS.len());
   for provider in hosting::ALL_PROVIDERS {
-    let connected_as = if provider.implemented() && provider.id() == ProviderId::Github {
-      // Best-effort: a network hiccup must not blank the whole screen, so a
-      // failed status read shows as "not connected" and the user can retry by
-      // reopening. Only GitHub has a status call today; the match keeps this
-      // honest rather than pretending the trait can answer it yet.
-      github_auth_status(app.clone()).await.unwrap_or(None)
-    } else {
-      None
-    };
     out.push(HostProviderInfo {
       id: provider.id(),
       display_name: provider.display_name().to_string(),
-      implemented: provider.implemented(),
-      auth_kind: match provider.auth_kind() {
-        hosting::AuthKind::DeviceCode => "device_code".into(),
-        hosting::AuthKind::PersonalAccessToken => "personal_access_token".into(),
-      },
-      connected_as,
+      auth_kind: provider.auth_kind().as_str().to_string(),
+      token_url: provider.token_url().map(String::from),
+      required_scopes: provider
+        .required_scopes()
+        .iter()
+        .map(|s| s.to_string())
+        .collect(),
+      connected_as: provider.auth_status(&app).await.unwrap_or(None),
+      capabilities: provider.capabilities(),
     });
   }
   Ok(out)
@@ -211,29 +224,13 @@ pub async fn hosting_providers(
 
 /// Which host a repository's origin belongs to, or None when origin is missing
 /// or points at a host GitWyrm does not know.
-///
-/// Lets the UI say "this repository is on GitLab, which is not supported yet"
-/// instead of silently showing nothing on a repo whose host simply is not wired
-/// up.
 #[tauri::command]
 #[specta::specta]
 pub async fn repo_host_provider(
   manager: State<'_, RepoManager>,
   repo_id: String,
 ) -> Result<Option<ProviderId>, AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    let Ok(remote) = repo.find_remote("origin") else {
-      return Ok(None);
-    };
-    let Some(url) = remote.url() else {
-      return Ok(None);
-    };
-    Ok(hosting::provider_for(url).map(|p| p.id()))
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+  Ok(resolve(&manager, &repo_id).await?.map(|(p, _)| p.id()))
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +240,68 @@ pub async fn repo_host_provider(
 pub struct GithubRepoRef {
   pub owner: String,
   pub repo: String,
+}
+
+/// The owner/repo behind origin, or None when the repository is not on a host
+/// GitWyrm integrates with.
+///
+/// Named for GitHub because it predates the other hosts, but it resolves for
+/// any of them -- the frontend uses it purely as "an addressable project", and
+/// passes it straight back to the commands below.
+#[tauri::command]
+#[specta::specta]
+pub async fn github_repo_slug(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+) -> Result<Option<GithubRepoRef>, AppError> {
+  Ok(resolve(&manager, &repo_id).await?.map(|(_, slug)| {
+    GithubRepoRef {
+      // GitLab subgroups and Azure's organization ride in `extra`; packing them
+      // into `owner` keeps the wire shape two-part, and `slug_for` unpacks it.
+      owner: slug.extra.clone().unwrap_or_else(|| slug.owner.clone()),
+      repo: slug.repo,
+    }
+  }))
+}
+
+/// Rebuilds the internal slug from the two-part wire shape.
+///
+/// `owner` carries whatever `github_repo_slug` packed: a plain owner for GitHub
+/// and Bitbucket, a full namespace path for GitLab, an organization for Azure.
+/// Each provider reads the half it needs.
+fn slug_for(provider: ProviderId, owner: &str, repo: &str) -> RepoSlug {
+  match provider {
+    // The namespace path is the whole address; the last segment is the project.
+    ProviderId::Gitlab => {
+      let short = owner.rsplit('/').next().unwrap_or(owner);
+      RepoSlug::new(short, repo).with_extra(owner)
+    }
+    // `owner` is the organization; the project is carried alongside it.
+    ProviderId::AzureDevops => {
+      let (org, project) = owner.split_once('/').unwrap_or((owner, repo));
+      RepoSlug::new(project, repo).with_extra(org)
+    }
+    _ => RepoSlug::new(owner, repo),
+  }
+}
+
+/// Resolves the provider for a slug the frontend handed back.
+///
+/// The frontend does not know which host a slug belongs to, so this asks the
+/// repository. Falls back to GitHub when nothing resolves, which keeps
+/// already-open GitHub repos working if origin is briefly unreadable.
+async fn provider_and_slug(
+  manager: &State<'_, RepoManager>,
+  repo_id: Option<&str>,
+  owner: &str,
+  repo: &str,
+) -> Result<(&'static dyn HostProvider, RepoSlug), AppError> {
+  if let Some(repo_id) = repo_id {
+    if let Some((provider, _)) = resolve(manager, repo_id).await? {
+      return Ok((provider, slug_for(provider.id(), owner, repo)));
+    }
+  }
+  Ok((&GitHub, RepoSlug::new(owner, repo)))
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -284,32 +343,53 @@ impl ApiRepository {
   }
 }
 
+/// A signed-in GitHub request, for the two features that are GitHub-only.
+fn gh_api(
+  app: &tauri::AppHandle,
+  method: reqwest::Method,
+  path: &str,
+) -> Result<reqwest::RequestBuilder, AppError> {
+  let cred = host_http::credential(app, ProviderId::Github)?
+    .ok_or_else(|| crate::hosting::not_connected("GitHub"))?;
+  Ok(
+    reqwest::Client::new()
+      .request(method, format!("{API_BASE}{path}"))
+      .header("Accept", "application/vnd.github+json")
+      .header("X-GitHub-Api-Version", "2022-11-28")
+      .header("User-Agent", "GitWyrm")
+      .timeout(TIMEOUT)
+      .bearer_auth(cred.token),
+  )
+}
+
+async fn gh_json<T: serde::de::DeserializeOwned>(
+  builder: reqwest::RequestBuilder,
+) -> Result<T, AppError> {
+  host_http::send_json(builder, "GitHub", &["message", "errors"]).await
+}
+
 /// Repositories available to the signed-in account, with starred repositories
 /// marked so the add screen can keep those shortcuts first.
+///
+/// GitHub-only: the repository picker has no equivalent on the other hosts yet.
 #[tauri::command]
 #[specta::specta]
 pub async fn github_list_repositories(
   app: tauri::AppHandle,
 ) -> Result<Vec<GithubRepository>, AppError> {
-  let repositories: Vec<ApiRepository> = send(api(
+  let repositories: Vec<ApiRepository> = gh_json(gh_api(
     &app,
     reqwest::Method::GET,
     "/user/repos?sort=pushed&direction=desc&per_page=50&affiliation=owner,collaborator,organization_member",
   )?)
-  .await?
-  .json()
-  .await
-  .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
+  .await?;
 
-  let starred: Vec<ApiRepository> = send(api(
+  let starred: Vec<ApiRepository> = gh_json(gh_api(
     &app,
     reqwest::Method::GET,
     "/user/starred?sort=updated&direction=desc&per_page=50",
   )?)
-  .await?
-  .json()
-  .await
-  .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
+  .await?;
 
   let mut seen = std::collections::HashSet::new();
   let mut result = Vec::with_capacity(repositories.len() + starred.len());
@@ -325,457 +405,136 @@ pub async fn github_list_repositories(
   Ok(result)
 }
 
-/// The GitHub owner/repo behind the origin remote, or None when origin is
-/// missing or not hosted on github.com.
-#[tauri::command]
-#[specta::specta]
-pub async fn github_repo_slug(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-) -> Result<Option<GithubRepoRef>, AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    let Ok(remote) = repo.find_remote("origin") else {
-      return Ok(None);
-    };
-    let Some(url) = remote.url() else { return Ok(None) };
-    Ok(parse_github_slug(url))
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
-}
-
-/// `git@github.com:o/r.git`, `ssh://git@github.com/o/r`, or
-/// `https://github.com/o/r.git` -> owner/repo. Non-GitHub hosts return None.
-/// Owner/repo for a github.com remote.
-///
-/// Delegates to the GitHub provider so there is one definition of "which
-/// remotes are ours", shared with the registry's routing. Kept as a thin
-/// wrapper because the command returns the wire type, not the trait's.
-fn parse_github_slug(url: &str) -> Option<GithubRepoRef> {
-  let slug = hosting::github::GitHub.slug_from_remote(url)?;
-  Some(GithubRepoRef {
-    owner: slug.owner,
-    repo: slug.repo,
-  })
-}
-
 // ---------------------------------------------------------------------------
-// Response shapes (private, straight off the REST API)
-
-#[derive(Deserialize)]
-struct ApiUser {
-  login: String,
-  #[serde(default, rename = "type")]
-  kind: String,
-}
-
-#[derive(Deserialize)]
-struct ApiLabel {
-  name: String,
-}
-
-#[derive(Deserialize)]
-struct ApiBranchRef {
-  #[serde(rename = "ref")]
-  name: String,
-}
-
-#[derive(Deserialize)]
-struct ApiPr {
-  number: u32,
-  title: String,
-  state: String,
-  #[serde(default)]
-  body: Option<String>,
-  user: ApiUser,
-  #[serde(default)]
-  draft: bool,
-  #[serde(default)]
-  merged: bool,
-  #[serde(default)]
-  mergeable: Option<bool>,
-  head: ApiBranchRef,
-  base: ApiBranchRef,
-  #[serde(default)]
-  additions: u32,
-  #[serde(default)]
-  deletions: u32,
-  #[serde(default)]
-  changed_files: u32,
-  html_url: String,
-  created_at: String,
-  updated_at: String,
-}
-
-#[derive(Deserialize)]
-struct ApiIssue {
-  number: u32,
-  title: String,
-  state: String,
-  #[serde(default)]
-  body: Option<String>,
-  user: ApiUser,
-  #[serde(default)]
-  labels: Vec<ApiLabel>,
-  #[serde(default)]
-  assignee: Option<ApiUser>,
-  #[serde(default)]
-  comments: u32,
-  html_url: String,
-  created_at: String,
-  updated_at: String,
-  /// Present when an "issue" is really a pull request; used to filter.
-  #[serde(default)]
-  pull_request: Option<serde_json::Value>,
-}
-
-#[derive(Deserialize)]
-struct ApiComment {
-  user: ApiUser,
-  #[serde(default)]
-  body: Option<String>,
-  created_at: String,
-}
-
-// ---------------------------------------------------------------------------
-// Shapes sent to the webview
-
-#[derive(Debug, Clone, Serialize, Type)]
-pub struct PrSummary {
-  pub number: u32,
-  pub title: String,
-  pub author: String,
-  pub author_is_bot: bool,
-  pub draft: bool,
-  pub head_ref: String,
-  pub base_ref: String,
-  pub updated_at: String,
-  pub html_url: String,
-}
-
-#[derive(Debug, Clone, Serialize, Type)]
-pub struct IssueSummary {
-  pub number: u32,
-  pub title: String,
-  pub author: String,
-  pub labels: Vec<String>,
-  pub assignee: Option<String>,
-  pub comments: u32,
-  pub updated_at: String,
-  pub html_url: String,
-}
-
-#[derive(Debug, Clone, Serialize, Type)]
-pub struct GithubComment {
-  pub author: String,
-  pub author_is_bot: bool,
-  pub body: String,
-  pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Type)]
-pub struct PrDetail {
-  pub number: u32,
-  pub title: String,
-  pub body: String,
-  pub author: String,
-  pub author_is_bot: bool,
-  pub state: String,
-  pub draft: bool,
-  pub merged: bool,
-  pub mergeable: Option<bool>,
-  pub head_ref: String,
-  pub base_ref: String,
-  pub additions: u32,
-  pub deletions: u32,
-  pub changed_files: u32,
-  pub comments: Vec<GithubComment>,
-  pub html_url: String,
-  pub created_at: String,
-  pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Type)]
-pub struct IssueDetail {
-  pub number: u32,
-  pub title: String,
-  pub body: String,
-  pub author: String,
-  pub state: String,
-  pub labels: Vec<String>,
-  pub assignee: Option<String>,
-  pub comments: Vec<GithubComment>,
-  pub html_url: String,
-  pub created_at: String,
-  pub updated_at: String,
-}
-
-fn is_bot(user: &ApiUser) -> bool {
-  user.kind == "Bot"
-}
-
-fn to_comment(c: ApiComment) -> GithubComment {
-  GithubComment {
-    author_is_bot: is_bot(&c.user),
-    author: c.user.login,
-    body: c.body.unwrap_or_default(),
-    created_at: c.created_at,
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Lists
+// Lists, detail and actions -- dispatched to whichever host owns the repository
 
 #[tauri::command]
 #[specta::specta]
 pub async fn github_list_prs(
   app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
   owner: String,
   repo: String,
 ) -> Result<Vec<PrSummary>, AppError> {
-  let path = format!("/repos/{owner}/{repo}/pulls?state=open&per_page=50&sort=updated&direction=desc");
-  // Falls back to an anonymous read so PR links work in public repos without
-  // connecting GitHub. A private repo is invisible that way and answers 404, so
-  // treat that as "no open pull requests": the branch menu omits the item
-  // instead of the UI raising an error for a repo the user never connected.
-  let res = api_or_public(&app, reqwest::Method::GET, &path)
-    .send()
-    .await
-    .map_err(|e| AppError::Other(format!("could not reach GitHub: {e}")))?;
-  if res.status().as_u16() == 404 {
-    return Ok(Vec::new());
-  }
-  let prs: Vec<ApiPr> = check(res)
-    .await?
-    .json()
-    .await
-    .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
-  Ok(
-    prs
-      .into_iter()
-      .map(|p| PrSummary {
-        number: p.number,
-        title: p.title,
-        author_is_bot: is_bot(&p.user),
-        author: p.user.login,
-        draft: p.draft,
-        head_ref: p.head.name,
-        base_ref: p.base.name,
-        updated_at: p.updated_at,
-        html_url: p.html_url,
-      })
-      .collect(),
-  )
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  provider.list_prs(&app, &slug).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn github_list_issues(
   app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
   owner: String,
   repo: String,
 ) -> Result<Vec<IssueSummary>, AppError> {
-  let path = format!("/repos/{owner}/{repo}/issues?state=open&per_page=50&sort=updated&direction=desc");
-  let issues: Vec<ApiIssue> = send(api(&app, reqwest::Method::GET, &path)?)
-    .await?
-    .json()
-    .await
-    .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
-  Ok(
-    issues
-      .into_iter()
-      // The issues endpoint also returns pull requests; keep real issues only.
-      .filter(|i| i.pull_request.is_none())
-      .map(|i| IssueSummary {
-        number: i.number,
-        title: i.title,
-        author: i.user.login,
-        labels: i.labels.into_iter().map(|l| l.name).collect(),
-        assignee: i.assignee.map(|a| a.login),
-        comments: i.comments,
-        updated_at: i.updated_at,
-        html_url: i.html_url,
-      })
-      .collect(),
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Detail
-
-async fn fetch_comments(
-  app: &tauri::AppHandle,
-  owner: &str,
-  repo: &str,
-  number: u32,
-) -> Result<Vec<GithubComment>, AppError> {
-  let path = format!("/repos/{owner}/{repo}/issues/{number}/comments?per_page=100");
-  let comments: Vec<ApiComment> = send(api(app, reqwest::Method::GET, &path)?)
-    .await?
-    .json()
-    .await
-    .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
-  Ok(comments.into_iter().map(to_comment).collect())
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  // A host with no issue tracker answers empty rather than erroring: the panel
+  // shows nothing, which is the truth, instead of a failure the user cannot fix.
+  if !provider.capabilities().issues {
+    return Ok(Vec::new());
+  }
+  provider.list_issues(&app, &slug).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn github_pr_detail(
   app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
   owner: String,
   repo: String,
   number: u32,
 ) -> Result<PrDetail, AppError> {
-  let path = format!("/repos/{owner}/{repo}/pulls/{number}");
-  let pr: ApiPr = send(api(&app, reqwest::Method::GET, &path)?)
-    .await?
-    .json()
-    .await
-    .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
-  let comments = fetch_comments(&app, &owner, &repo, number).await?;
-  Ok(PrDetail {
-    number: pr.number,
-    title: pr.title,
-    body: pr.body.unwrap_or_default(),
-    author_is_bot: is_bot(&pr.user),
-    author: pr.user.login,
-    state: pr.state,
-    draft: pr.draft,
-    merged: pr.merged,
-    mergeable: pr.mergeable,
-    head_ref: pr.head.name,
-    base_ref: pr.base.name,
-    additions: pr.additions,
-    deletions: pr.deletions,
-    changed_files: pr.changed_files,
-    comments,
-    html_url: pr.html_url,
-    created_at: pr.created_at,
-    updated_at: pr.updated_at,
-  })
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  provider.pr_detail(&app, &slug, number).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn github_issue_detail(
   app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
   owner: String,
   repo: String,
   number: u32,
 ) -> Result<IssueDetail, AppError> {
-  let path = format!("/repos/{owner}/{repo}/issues/{number}");
-  let issue: ApiIssue = send(api(&app, reqwest::Method::GET, &path)?)
-    .await?
-    .json()
-    .await
-    .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
-  let comments = fetch_comments(&app, &owner, &repo, number).await?;
-  Ok(IssueDetail {
-    number: issue.number,
-    title: issue.title,
-    body: issue.body.unwrap_or_default(),
-    author: issue.user.login,
-    state: issue.state,
-    labels: issue.labels.into_iter().map(|l| l.name).collect(),
-    assignee: issue.assignee.map(|a| a.login),
-    comments,
-    html_url: issue.html_url,
-    created_at: issue.created_at,
-    updated_at: issue.updated_at,
-  })
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  provider.issue_detail(&app, &slug, number).await
 }
 
-// ---------------------------------------------------------------------------
-// Actions
-
-/// Posts a comment on an issue or pull request (GitHub uses the issues
-/// endpoint for both) and returns it for optimistic display.
+/// Posts a reply on a pull request or an issue.
 #[tauri::command]
 #[specta::specta]
 pub async fn github_comment(
   app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
   owner: String,
   repo: String,
   number: u32,
   body: String,
+  is_pr: Option<bool>,
 ) -> Result<GithubComment, AppError> {
   let body = body.trim();
   if body.is_empty() {
     return Err(AppError::Other("write a reply first".into()));
   }
-  let path = format!("/repos/{owner}/{repo}/issues/{number}/comments");
-  let created: ApiComment = send(
-    api(&app, reqwest::Method::POST, &path)?.json(&serde_json::json!({ "body": body })),
-  )
-  .await?
-  .json()
-  .await
-  .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
-  Ok(to_comment(created))
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  provider
+    .comment(&app, &slug, number, is_pr.unwrap_or(true), body)
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn github_approve_pr(
   app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
   owner: String,
   repo: String,
   number: u32,
 ) -> Result<(), AppError> {
-  let path = format!("/repos/{owner}/{repo}/pulls/{number}/reviews");
-  send(api(&app, reqwest::Method::POST, &path)?.json(&serde_json::json!({ "event": "APPROVE" })))
-    .await?;
-  Ok(())
-}
-
-#[derive(Debug, Clone, Deserialize, Type)]
-#[serde(rename_all = "snake_case")]
-pub enum MergeMethod {
-  Merge,
-  Squash,
-  Rebase,
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  provider.approve_pr(&app, &slug, number).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn github_merge_pr(
   app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
   owner: String,
   repo: String,
   number: u32,
   method: MergeMethod,
 ) -> Result<(), AppError> {
-  let method = match method {
-    MergeMethod::Merge => "merge",
-    MergeMethod::Squash => "squash",
-    MergeMethod::Rebase => "rebase",
-  };
-  let path = format!("/repos/{owner}/{repo}/pulls/{number}/merge");
-  send(
-    api(&app, reqwest::Method::PUT, &path)?.json(&serde_json::json!({ "merge_method": method })),
-  )
-  .await?;
-  Ok(())
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  provider.merge_pr(&app, &slug, number, method).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn github_close_issue(
   app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
   owner: String,
   repo: String,
   number: u32,
 ) -> Result<(), AppError> {
-  let path = format!("/repos/{owner}/{repo}/issues/{number}");
-  send(api(&app, reqwest::Method::PATCH, &path)?.json(&serde_json::json!({ "state": "closed" })))
-    .await?;
-  Ok(())
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  provider.close_issue(&app, &slug, number).await
 }
 
 // ---------------------------------------------------------------------------
-// SSH keys
+// SSH keys (GitHub only)
 
 /// One local key paired with what GitHub knows about it, or a GitHub key with
 /// no local counterpart.
@@ -827,31 +586,28 @@ fn pair_keys(local: Vec<crate::git::ssh::SshKey>, remote: Vec<GithubKey>) -> Vec
   let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
   for key in local {
-    let id = fingerprint_key(&key.fingerprint);
-    let found = remote.iter().find(|r| fingerprint_key(&r.key_id) == id);
-    if found.is_some() {
-      seen.insert(id.clone());
-    }
+    let fp = fingerprint_key(&key.fingerprint);
+    let found = remote.iter().find(|r| fingerprint_key(&r.key_id) == fp);
+    seen.insert(fp);
     paired.push(SshKeyPairing {
       fingerprint: key.fingerprint.clone(),
-      local_path: Some(key.path),
+      local_path: Some(key.path.clone()),
       github_title: found.map(|r| r.title.clone()),
-      last_used: found.and_then(|r| r.last_used.as_deref()).map(day_only),
+      last_used: found
+        .and_then(|r| r.last_used.as_deref())
+        .map(day_only),
     });
   }
 
-  // Whatever GitHub has that this computer does not: almost always a key added
-  // from another machine, so it is informational rather than a problem.
-  for r in &remote {
-    let id = fingerprint_key(&r.key_id);
-    if seen.contains(&id) {
+  for key in remote {
+    if seen.contains(&fingerprint_key(&key.key_id)) {
       continue;
     }
     paired.push(SshKeyPairing {
-      fingerprint: r.key_id.clone(),
+      fingerprint: key.key_id.clone(),
       local_path: None,
-      github_title: Some(r.title.clone()),
-      last_used: r.last_used.as_deref().map(day_only),
+      github_title: Some(key.title),
+      last_used: key.last_used.as_deref().map(day_only),
     });
   }
 
@@ -861,26 +617,22 @@ fn pair_keys(local: Vec<crate::git::ssh::SshKey>, remote: Vec<GithubKey>) -> Vec
 /// Cross-references the SSH keys on this computer against the ones registered
 /// on the signed-in GitHub account.
 ///
-/// Needs no extra consent: `read:user` (already in [`SCOPE`]) implicitly grants
-/// `read:public_key`, so anyone who connected GitHub for pull requests can use
-/// this without signing in again.
+/// Needs no extra consent: `read:user` (already in GitHub's scope) implicitly
+/// grants `read:public_key`, so anyone who connected GitHub for pull requests
+/// can use this without signing in again.
 #[tauri::command]
 #[specta::specta]
 pub async fn github_ssh_key_pairings(app: tauri::AppHandle) -> Result<Vec<SshKeyPairing>, AppError> {
   let local = tauri::async_runtime::spawn_blocking(crate::git::ssh::list_keys)
     .await
     .map_err(|e| AppError::Other(e.to_string()))?;
-  let remote: Vec<GithubKey> = send(api(&app, reqwest::Method::GET, "/user/keys")?)
-    .await?
-    .json()
-    .await
-    .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
+  let remote: Vec<GithubKey> = gh_json(gh_api(&app, reqwest::Method::GET, "/user/keys")?).await?;
   Ok(pair_keys(local, remote))
 }
 
 #[cfg(test)]
 mod tests {
-  use super::{pair_keys, parse_github_slug, GithubKey};
+  use super::*;
 
   fn local(path: &str, fingerprint: &str) -> crate::git::ssh::SshKey {
     crate::git::ssh::SshKey {
@@ -954,24 +706,30 @@ mod tests {
     assert!(out[1].local_path.is_none());
   }
 
+  /// The wire slug is two-part, but GitLab subgroups and Azure organizations
+  /// need more than that. Packing into `owner` and unpacking here is what keeps
+  /// the frontend contract unchanged; a break shows up as requests to the wrong
+  /// project.
   #[test]
-  fn parses_common_remote_urls() {
-    for url in [
-      "git@github.com:owner/repo.git",
-      "ssh://git@github.com/owner/repo",
-      "https://github.com/owner/repo.git",
-      "https://github.com/owner/repo/",
-    ] {
-      let slug = parse_github_slug(url).expect(url);
-      assert_eq!(slug.owner, "owner");
-      assert_eq!(slug.repo, "repo");
-    }
+  fn unpacks_gitlab_subgroup_slugs() {
+    let slug = slug_for(ProviderId::Gitlab, "group/sub/proj", "proj");
+    assert_eq!(slug.extra.as_deref(), Some("group/sub/proj"));
+    assert_eq!(slug.repo, "proj");
   }
 
   #[test]
-  fn rejects_non_github_hosts() {
-    assert!(parse_github_slug("git@gitlab.com:owner/repo.git").is_none());
-    assert!(parse_github_slug("https://example.com/owner/repo").is_none());
-    assert!(parse_github_slug("/local/path").is_none());
+  fn unpacks_azure_org_slugs() {
+    let slug = slug_for(ProviderId::AzureDevops, "myorg/MyProject", "myrepo");
+    assert_eq!(slug.extra.as_deref(), Some("myorg"));
+    assert_eq!(slug.owner, "MyProject");
+    assert_eq!(slug.repo, "myrepo");
+  }
+
+  #[test]
+  fn passes_simple_slugs_through() {
+    let slug = slug_for(ProviderId::Github, "owner", "repo");
+    assert_eq!(slug.owner, "owner");
+    assert_eq!(slug.repo, "repo");
+    assert!(slug.extra.is_none());
   }
 }

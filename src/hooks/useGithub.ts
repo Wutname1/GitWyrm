@@ -1,7 +1,12 @@
 import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { commands, type GithubRepoRef, type PrSummary } from '@/lib/bindings'
+import {
+  commands,
+  type GithubRepoRef,
+  type PrSummary,
+  type ProviderId,
+} from '@/lib/bindings'
 import { isTauri } from '@/lib/env'
 import { unwrap } from '@/lib/queryKeys'
 import { classifyError } from '@/lib/errorClass'
@@ -112,12 +117,17 @@ export function useGithubSlug(repoId: string | null) {
  * The `connected` argument is kept so callers re-fetch on sign-in, when the same
  * repo may start returning results.
  */
-export function useGithubPrs(slug: GithubRepoRef | null | undefined, connected: boolean) {
+export function useGithubPrs(
+  slug: GithubRepoRef | null | undefined,
+  connected: boolean,
+  repoId?: string | null
+) {
   return useQuery({
     queryKey: [...githubKeys.prs(slug?.owner ?? '', slug?.repo ?? ''), connected],
     enabled: isTauri && slug != null,
     staleTime: 60 * 1000,
-    queryFn: async () => unwrap(await commands.githubListPrs(slug!.owner, slug!.repo)),
+    queryFn: async () =>
+      unwrap(await commands.githubListPrs(repoId ?? null, slug!.owner, slug!.repo)),
   })
 }
 
@@ -136,17 +146,22 @@ export function useGithubPrForBranch(
 ): PrSummary | null {
   const auth = useGithubAuth()
   const slug = useGithubSlug(repoId)
-  const prs = useGithubPrs(slug.data, auth.data != null)
+  const prs = useGithubPrs(slug.data, auth.data != null, repoId)
   if (!branch) return null
   return prs.data?.find((pr) => pr.head_ref === branch) ?? null
 }
 
-export function useGithubIssues(slug: GithubRepoRef | null | undefined, connected: boolean) {
+export function useGithubIssues(
+  slug: GithubRepoRef | null | undefined,
+  connected: boolean,
+  repoId?: string | null
+) {
   return useQuery({
     queryKey: githubKeys.issues(slug?.owner ?? '', slug?.repo ?? ''),
     enabled: isTauri && slug != null && connected,
     staleTime: 60 * 1000,
-    queryFn: async () => unwrap(await commands.githubListIssues(slug!.owner, slug!.repo)),
+    queryFn: async () =>
+      unwrap(await commands.githubListIssues(repoId ?? null, slug!.owner, slug!.repo)),
   })
 }
 
@@ -189,7 +204,7 @@ export function useRepoGithubCounts(repoId: string | null): RepoGithubCounts {
     enabled: isTauri && showPrs && slug.data != null,
     staleTime: 60 * 1000,
     retry: false,
-    queryFn: async () => unwrap(await commands.githubListPrs(owner, repo)),
+    queryFn: async () => unwrap(await commands.githubListPrs(repoId, owner, repo)),
   })
 
   const issues = useQuery({
@@ -197,7 +212,7 @@ export function useRepoGithubCounts(repoId: string | null): RepoGithubCounts {
     enabled: isTauri && showIssues && connected && slug.data != null,
     staleTime: 60 * 1000,
     retry: false,
-    queryFn: async () => unwrap(await commands.githubListIssues(owner, repo)),
+    queryFn: async () => unwrap(await commands.githubListIssues(repoId, owner, repo)),
   })
 
   return {
@@ -206,24 +221,31 @@ export function useRepoGithubCounts(repoId: string | null): RepoGithubCounts {
   }
 }
 
-export function useGithubPrDetail(slug: GithubRepoRef | null | undefined, number: number | null) {
+export function useGithubPrDetail(
+  slug: GithubRepoRef | null | undefined,
+  number: number | null,
+  repoId?: string | null
+) {
   return useQuery({
     queryKey: githubKeys.pr(slug?.owner ?? '', slug?.repo ?? '', number ?? 0),
     enabled: isTauri && slug != null && number != null,
     staleTime: 30 * 1000,
-    queryFn: async () => unwrap(await commands.githubPrDetail(slug!.owner, slug!.repo, number!)),
+    queryFn: async () =>
+      unwrap(await commands.githubPrDetail(repoId ?? null, slug!.owner, slug!.repo, number!)),
   })
 }
 
 export function useGithubIssueDetail(
   slug: GithubRepoRef | null | undefined,
-  number: number | null
+  number: number | null,
+  repoId?: string | null
 ) {
   return useQuery({
     queryKey: githubKeys.issue(slug?.owner ?? '', slug?.repo ?? '', number ?? 0),
     enabled: isTauri && slug != null && number != null,
     staleTime: 30 * 1000,
-    queryFn: async () => unwrap(await commands.githubIssueDetail(slug!.owner, slug!.repo, number!)),
+    queryFn: async () =>
+      unwrap(await commands.githubIssueDetail(repoId ?? null, slug!.owner, slug!.repo, number!)),
   })
 }
 
@@ -237,10 +259,14 @@ const onError = (e: Error) => {
   else toast.error(message)
 }
 
-export function useGithubMutations(slug: GithubRepoRef | null | undefined) {
+export function useGithubMutations(
+  slug: GithubRepoRef | null | undefined,
+  repoId?: string | null
+) {
   const qc = useQueryClient()
   const owner = slug?.owner ?? ''
   const repo = slug?.repo ?? ''
+  const id = repoId ?? null
 
   const refreshItem = (kind: 'pr' | 'issue', number: number) => {
     qc.invalidateQueries({
@@ -253,19 +279,21 @@ export function useGithubMutations(slug: GithubRepoRef | null | undefined) {
 
   const comment = useMutation({
     mutationFn: async (v: { kind: 'pr' | 'issue'; number: number; body: string }) => {
-      await unwrap(await commands.githubComment(owner, repo, v.number, v.body))
+      await unwrap(
+        await commands.githubComment(id, owner, repo, v.number, v.body, v.kind === 'pr')
+      )
       return v
     },
     onSuccess: (v) => {
       refreshItem(v.kind, v.number)
-      toast('Reply posted on GitHub')
+      toast('Reply posted')
     },
     onError,
   })
 
   const approvePr = useMutation({
     mutationFn: async (number: number) => {
-      await unwrap(await commands.githubApprovePr(owner, repo, number))
+      await unwrap(await commands.githubApprovePr(id, owner, repo, number))
       return number
     },
     onSuccess: (number) => {
@@ -277,7 +305,7 @@ export function useGithubMutations(slug: GithubRepoRef | null | undefined) {
 
   const mergePr = useMutation({
     mutationFn: async (v: { number: number; method: 'merge' | 'squash' | 'rebase' }) => {
-      await unwrap(await commands.githubMergePr(owner, repo, v.number, v.method))
+      await unwrap(await commands.githubMergePr(id, owner, repo, v.number, v.method))
       return v
     },
     onSuccess: (v) => {
@@ -289,7 +317,7 @@ export function useGithubMutations(slug: GithubRepoRef | null | undefined) {
 
   const closeIssue = useMutation({
     mutationFn: async (number: number) => {
-      await unwrap(await commands.githubCloseIssue(owner, repo, number))
+      await unwrap(await commands.githubCloseIssue(id, owner, repo, number))
       return number
     },
     onSuccess: (number) => {
@@ -313,6 +341,56 @@ export function useGithubMutations(slug: GithubRepoRef | null | undefined) {
   })
 
   return { comment, approvePr, mergePr, closeIssue, signOut }
+}
+
+/**
+ * Connect and disconnect for the token-based hosts.
+ *
+ * Kept apart from `useGithubMutations` because these act on a named host rather
+ * than on a repository, and the Integrations screen has no slug to pass.
+ */
+export function useHostAuthMutations() {
+  const qc = useQueryClient()
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: hostingKeys.providers })
+    qc.invalidateQueries({ queryKey: githubKeys.auth })
+  }
+
+  const connect = useMutation({
+    mutationFn: async (v: {
+      provider: ProviderId
+      token: string
+      email?: string | null
+      baseUrl?: string | null
+    }) =>
+      unwrap(
+        await commands.hostConnectToken(v.provider, {
+          token: v.token,
+          email: v.email ?? null,
+          base_url: v.baseUrl ?? null,
+        })
+      ),
+    onSuccess: (login) => {
+      refresh()
+      toast.success(`Connected as ${login}`)
+    },
+    onError,
+  })
+
+  const disconnect = useMutation({
+    mutationFn: async (provider: ProviderId) => {
+      await unwrap(await commands.hostSignOut(provider))
+      return provider
+    },
+    onSuccess: () => {
+      refresh()
+      toast('Disconnected')
+    },
+    onError,
+  })
+
+  return { connect, disconnect }
 }
 
 export type GithubSignIn =

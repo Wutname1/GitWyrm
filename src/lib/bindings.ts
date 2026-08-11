@@ -2300,9 +2300,9 @@ async generateCommits(repoId: string, provider: string, model: string, commitCou
 /**
  * Every host GitWyrm knows about, with the connection state of each.
  * 
- * Drives the Integrations screen. Only implemented providers are asked for
- * their sign-in state -- the rest have no auth path to check, and probing one
- * would be a request that can only fail.
+ * Status is best-effort per host: one unreachable site must not blank the
+ * whole screen, so a failed check reads as "not connected" and the user can
+ * retry by reopening.
  */
 async hostingProviders() : Promise<Result<HostProviderInfo[], string>> {
     try {
@@ -2315,14 +2315,35 @@ async hostingProviders() : Promise<Result<HostProviderInfo[], string>> {
 /**
  * Which host a repository's origin belongs to, or None when origin is missing
  * or points at a host GitWyrm does not know.
- * 
- * Lets the UI say "this repository is on GitLab, which is not supported yet"
- * instead of silently showing nothing on a repo whose host simply is not wired
- * up.
  */
 async repoHostProvider(repoId: string) : Promise<Result<ProviderId | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("repo_host_provider", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stores a token for a host that signs in with one, then verifies it works.
+ * 
+ * Verifying before reporting success is the point: a token with a missing
+ * scope is accepted by the store but fails on the first real request, and an
+ * error at that moment does not name the cause. Checking here lets the connect
+ * screen say "that token did not work" while the user still has the token page
+ * open.
+ */
+async hostConnectToken(provider: ProviderId, credential: Credential) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("host_connect_token", { provider, credential }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async hostSignOut(provider: ProviderId) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("host_sign_out", { provider }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2356,8 +2377,7 @@ async githubSignOut() : Promise<Result<null, string>> {
 }
 },
 /**
- * The signed-in login, or None when no token is stored or the token no
- * longer works (so the UI falls back to the connect prompt).
+ * The signed-in GitHub login, or None when not connected.
  */
 async githubAuthStatus() : Promise<Result<string | null, string>> {
     try {
@@ -2370,6 +2390,8 @@ async githubAuthStatus() : Promise<Result<string | null, string>> {
 /**
  * Repositories available to the signed-in account, with starred repositories
  * marked so the add screen can keep those shortcuts first.
+ * 
+ * GitHub-only: the repository picker has no equivalent on the other hosts yet.
  */
 async githubListRepositories() : Promise<Result<GithubRepository[], string>> {
     try {
@@ -2380,8 +2402,12 @@ async githubListRepositories() : Promise<Result<GithubRepository[], string>> {
 }
 },
 /**
- * The GitHub owner/repo behind the origin remote, or None when origin is
- * missing or not hosted on github.com.
+ * The owner/repo behind origin, or None when the repository is not on a host
+ * GitWyrm integrates with.
+ * 
+ * Named for GitHub because it predates the other hosts, but it resolves for
+ * any of them -- the frontend uses it purely as "an addressable project", and
+ * passes it straight back to the commands below.
  */
 async githubRepoSlug(repoId: string) : Promise<Result<GithubRepoRef | null, string>> {
     try {
@@ -2391,69 +2417,68 @@ async githubRepoSlug(repoId: string) : Promise<Result<GithubRepoRef | null, stri
     else return { status: "error", error: e  as any };
 }
 },
-async githubListPrs(owner: string, repo: string) : Promise<Result<PrSummary[], string>> {
+async githubListPrs(repoId: string | null, owner: string, repo: string) : Promise<Result<PrSummary[], string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("github_list_prs", { owner, repo }) };
+    return { status: "ok", data: await TAURI_INVOKE("github_list_prs", { repoId, owner, repo }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async githubListIssues(owner: string, repo: string) : Promise<Result<IssueSummary[], string>> {
+async githubListIssues(repoId: string | null, owner: string, repo: string) : Promise<Result<IssueSummary[], string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("github_list_issues", { owner, repo }) };
+    return { status: "ok", data: await TAURI_INVOKE("github_list_issues", { repoId, owner, repo }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async githubPrDetail(owner: string, repo: string, number: number) : Promise<Result<PrDetail, string>> {
+async githubPrDetail(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<PrDetail, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("github_pr_detail", { owner, repo, number }) };
+    return { status: "ok", data: await TAURI_INVOKE("github_pr_detail", { repoId, owner, repo, number }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async githubIssueDetail(owner: string, repo: string, number: number) : Promise<Result<IssueDetail, string>> {
+async githubIssueDetail(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<IssueDetail, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("github_issue_detail", { owner, repo, number }) };
+    return { status: "ok", data: await TAURI_INVOKE("github_issue_detail", { repoId, owner, repo, number }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
 /**
- * Posts a comment on an issue or pull request (GitHub uses the issues
- * endpoint for both) and returns it for optimistic display.
+ * Posts a reply on a pull request or an issue.
  */
-async githubComment(owner: string, repo: string, number: number, body: string) : Promise<Result<GithubComment, string>> {
+async githubComment(repoId: string | null, owner: string, repo: string, number: number, body: string, isPr: boolean | null) : Promise<Result<HostComment, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("github_comment", { owner, repo, number, body }) };
+    return { status: "ok", data: await TAURI_INVOKE("github_comment", { repoId, owner, repo, number, body, isPr }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async githubApprovePr(owner: string, repo: string, number: number) : Promise<Result<null, string>> {
+async githubApprovePr(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("github_approve_pr", { owner, repo, number }) };
+    return { status: "ok", data: await TAURI_INVOKE("github_approve_pr", { repoId, owner, repo, number }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async githubMergePr(owner: string, repo: string, number: number, method: MergeMethod) : Promise<Result<null, string>> {
+async githubMergePr(repoId: string | null, owner: string, repo: string, number: number, method: MergeMethod) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("github_merge_pr", { owner, repo, number, method }) };
+    return { status: "ok", data: await TAURI_INVOKE("github_merge_pr", { repoId, owner, repo, number, method }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async githubCloseIssue(owner: string, repo: string, number: number) : Promise<Result<null, string>> {
+async githubCloseIssue(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("github_close_issue", { owner, repo, number }) };
+    return { status: "ok", data: await TAURI_INVOKE("github_close_issue", { repoId, owner, repo, number }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2463,9 +2488,9 @@ async githubCloseIssue(owner: string, repo: string, number: number) : Promise<Re
  * Cross-references the SSH keys on this computer against the ones registered
  * on the signed-in GitHub account.
  * 
- * Needs no extra consent: `read:user` (already in [`SCOPE`]) implicitly grants
- * `read:public_key`, so anyone who connected GitHub for pull requests can use
- * this without signing in again.
+ * Needs no extra consent: `read:user` (already in GitHub's scope) implicitly
+ * grants `read:public_key`, so anyone who connected GitHub for pull requests
+ * can use this without signing in again.
  */
 async githubSshKeyPairings() : Promise<Result<SshKeyPairing[], string>> {
     try {
@@ -3143,6 +3168,19 @@ ours_deleted: boolean;
  */
 theirs_deleted: boolean }
 /**
+ * The credential a provider needs, as entered by the user.
+ */
+export type Credential = { token: string; 
+/**
+ * Only used by [`AuthKind::EmailAndToken`]; ignored elsewhere.
+ */
+email?: string | null; 
+/**
+ * Base URL for self-hosted installs, e.g. `https://gitlab.mycorp.com`.
+ * None means the provider's public host.
+ */
+base_url?: string | null }
+/**
  * What kind of spec edit a delta describes.
  */
 export type DeltaKind = "ADDED" | "MODIFIED" | "REMOVED" | "RENAMED"
@@ -3374,28 +3412,54 @@ export type GitIdentitySnapshot = { name: string; email: string; signingKey: str
  */
 overridden: boolean }
 export type GitProgressPayload = { repo_id: string; operation: string; line: string }
-export type GithubComment = { author: string; author_is_bot: boolean; body: string; created_at: string }
 export type GithubRepoRef = { owner: string; repo: string }
 export type GithubRepository = { full_name: string; clone_url: string; html_url: string; description: string | null; private: boolean; pushed_at: string; starred: boolean }
+/**
+ * What a host can and cannot do, so the UI hides controls that would fail
+ * rather than showing buttons that error on click.
+ */
+export type HostCapabilities = { 
+/**
+ * Whether the host has an issue tracker GitWyrm reads. False for Azure
+ * DevOps, whose work items are defined per-project by the process template.
+ */
+issues: boolean; 
+/**
+ * Whether a merge method can be chosen per merge. False on GitLab, where the
+ * strategy is a project setting and honouring a per-merge choice would mean
+ * silently rewriting project config.
+ */
+choose_merge_method: boolean; 
+/**
+ * Whether the host reports a last-updated time for pull requests.
+ */
+pr_updated_at: boolean; 
+/**
+ * Whether PR line counts are available.
+ */
+pr_line_counts: boolean }
+export type HostComment = { author: string; author_is_bot: boolean; body: string; created_at: string }
 /**
  * One host as the Integrations screen shows it.
  */
 export type HostProviderInfo = { id: ProviderId; display_name: string; 
 /**
- * Whether GitWyrm can actually talk to this host yet. When false the UI
- * names it and explains it is not available, rather than offering a connect
- * button that cannot succeed.
- */
-implemented: boolean; 
-/**
- * "device_code" or "personal_access_token": which connect control to show.
+ * "device_code", "personal_access_token" or "email_and_token": which connect
+ * control to show.
  */
 auth_kind: string; 
 /**
- * The signed-in account name, or None when not connected. Always None for
- * a provider that is not implemented.
+ * Where the user creates a token, for the connect screen's help link.
  */
-connected_as: string | null }
+token_url: string | null; 
+/**
+ * The permissions the token needs, listed verbatim so a user can tick them.
+ */
+required_scopes: string[]; 
+/**
+ * The signed-in account name, or None when not connected.
+ */
+connected_as: string | null; capabilities: HostCapabilities }
 /**
  * A `@@ -old_start,old_lines +new_start,new_lines @@` hunk boundary.
  */
@@ -3429,8 +3493,8 @@ label: string;
  * The launcher that was found, e.g. "code" or "rider".
  */
 command: string }
-export type IssueDetail = { number: number; title: string; body: string; author: string; state: string; labels: string[]; assignee: string | null; comments: GithubComment[]; html_url: string; created_at: string; updated_at: string }
-export type IssueSummary = { number: number; title: string; author: string; labels: string[]; assignee: string | null; comments: number; updated_at: string; html_url: string }
+export type IssueDetail = { number: number; title: string; body: string; author: string; state: string; labels: string[]; assignee: string | null; comments: HostComment[]; html_url: string; created_at: string; updated_at: string | null }
+export type IssueSummary = { number: number; title: string; author: string; labels: string[]; assignee: string | null; comments: number; updated_at: string | null; html_url: string }
 export type LogPage = { commits: CommitEntry[]; has_more: boolean }
 /**
  * What a merge of a given ref into HEAD would do, without performing it.
@@ -3452,6 +3516,11 @@ normal: boolean;
  * Short sha the target ref resolves to.
  */
 target_sha: string }
+/**
+ * How a merge should be performed. Hosts support different subsets; each
+ * implementation maps these onto its own vocabulary and errors clearly when
+ * the host cannot honour the choice.
+ */
 export type MergeMethod = "merge" | "squash" | "rebase"
 /**
  * Outcome of starting a merge.
@@ -3538,8 +3607,17 @@ export type PollResult =
  * User has not finished authorizing yet; poll again after `interval`.
  */
 { status: "pending"; interval: number }
-export type PrDetail = { number: number; title: string; body: string; author: string; author_is_bot: boolean; state: string; draft: boolean; merged: boolean; mergeable: boolean | null; head_ref: string; base_ref: string; additions: number; deletions: number; changed_files: number; comments: GithubComment[]; html_url: string; created_at: string; updated_at: string }
-export type PrSummary = { number: number; title: string; author: string; author_is_bot: boolean; draft: boolean; head_ref: string; base_ref: string; updated_at: string; html_url: string }
+export type PrDetail = { number: number; title: string; body: string; author: string; author_is_bot: boolean; state: string; draft: boolean; merged: boolean; mergeable: boolean | null; head_ref: string; base_ref: string; 
+/**
+ * None on every host but GitHub; see the module docs.
+ */
+additions: number | null; deletions: number | null; changed_files: number | null; comments: HostComment[]; html_url: string; created_at: string; updated_at: string | null }
+export type PrSummary = { number: number; title: string; author: string; author_is_bot: boolean; draft: boolean; head_ref: string; base_ref: string; 
+/**
+ * When the pull request last changed. None on Azure DevOps, whose API has no
+ * such field; the UI falls back to `created_at` there.
+ */
+updated_at: string | null; created_at: string; html_url: string }
 /**
  * One preflight check, shown before any work starts.
  */

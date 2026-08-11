@@ -85,8 +85,8 @@ function PanelShell({
 function PrPanel({ number }: { number: number }) {
   const repo = useActiveRepo()
   const slug = useGithubSlug(repo?.id ?? null)
-  const pr = useGithubPrDetail(slug.data, number)
-  const gh = useGithubMutations(slug.data)
+  const pr = useGithubPrDetail(slug.data, number, repo?.id)
+  const gh = useGithubMutations(slug.data, repo?.id)
   const git = useGitMutations(repo?.id ?? null)
   const branches = useBranches(repo?.id ?? null)
 
@@ -243,8 +243,8 @@ function PrPanel({ number }: { number: number }) {
 function IssuePanel({ number }: { number: number }) {
   const repo = useActiveRepo()
   const slug = useGithubSlug(repo?.id ?? null)
-  const issue = useGithubIssueDetail(slug.data, number)
-  const gh = useGithubMutations(slug.data)
+  const issue = useGithubIssueDetail(slug.data, number, repo?.id)
+  const gh = useGithubMutations(slug.data, repo?.id)
   const git = useGitMutations(repo?.id ?? null)
   const branches = useBranches(repo?.id ?? null)
 

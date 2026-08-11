@@ -5,7 +5,13 @@ import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { useBranches, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useTagSync } from '@/hooks/useTagSync'
-import { useGithubAuth, useGithubIssues, useGithubPrs, useGithubSlug } from '@/hooks/useGithub'
+import {
+  useGithubIssues,
+  useGithubPrs,
+  useGithubSlug,
+  useHostingProviders,
+  useRepoHostProvider,
+} from '@/hooks/useGithub'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import {
@@ -38,7 +44,6 @@ export function LeftPanel() {
   const selectCommit = useUiStore((s) => s.selectCommit)
   const revealRefInGraph = useUiStore((s) => s.revealRefInGraph)
   const revealShaInGraph = useUiStore((s) => s.revealShaInGraph)
-  const openMerge = useUiStore((s) => s.openMerge)
   const openNewTag = useUiStore((s) => s.openNewTag)
   const openModal = useUiStore((s) => s.openModal)
   const m = useGitMutations(repo?.id ?? null)
@@ -56,11 +61,17 @@ export function LeftPanel() {
   const specDeskEnabled = useWorkspaceStore((s) => s.enableSpecDesk)
 
   const githubSlug = useGithubSlug(repo?.id ?? null)
-  const githubAuth = useGithubAuth()
-  const githubConnected = githubAuth.data != null
-  const prs = useGithubPrs(githubSlug.data, githubConnected)
-  const issues = useGithubIssues(githubSlug.data, githubConnected)
+  // Which site this repository is actually on, and whether that one is
+  // connected -- being signed in to GitHub says nothing about a GitLab repo.
+  const repoHost = useRepoHostProvider(repo?.id ?? null)
+  const providers = useHostingProviders()
+  const host = providers.data?.find((p) => p.id === repoHost.data)
+  const githubConnected = host?.connected_as != null
+  const hostName = host?.display_name ?? 'your code host'
+  const prs = useGithubPrs(githubSlug.data, githubConnected, repo?.id)
+  const issues = useGithubIssues(githubSlug.data, githubConnected, repo?.id)
   const openGithubItem = useUiStore((s) => s.openGithubItem)
+  const showSettings = useUiStore((s) => s.showSettings)
 
   const [toDelete, setToDelete] = useState<{ kind: 'branch' | 'tag'; name: string } | null>(null)
   /** Tag pending a remote-only delete; the local copy is untouched. */
@@ -150,7 +161,9 @@ export function LeftPanel() {
         metaTitle: `Stashed ${formatCommitTime(s.time)}${s.branch ? ` on ${s.branch}` : ''}`,
       })),
     },
-    // PR and issue sections only exist for repos hosted on github.com.
+    // PR and issue sections only exist for repos on a host GitWyrm integrates
+    // with. The issues section is dropped entirely for a host that has no
+    // issue tracker (Azure DevOps), rather than showing a permanently empty one.
     ...(githubSlug.data == null
       ? []
       : ([
@@ -166,22 +179,26 @@ export function LeftPanel() {
                   id: p.number,
                   webUrl: p.html_url,
                 }))
-              : [{ name: 'Connect GitHub' }],
+              : [{ name: `Connect ${hostName}` }],
           },
-          {
-            key: 'issues',
-            label: 'ISSUES',
-            type: 'issue',
-            items: githubConnected
-              ? (issues.data ?? []).map((i) => ({
-                  name: i.title,
-                  meta: `#${i.number}`,
-                  metaTitle: `#${i.number} by ${i.author}`,
-                  id: i.number,
-                  webUrl: i.html_url,
-                }))
-              : [{ name: 'Connect GitHub' }],
-          },
+          ...(host && !host.capabilities.issues
+            ? []
+            : [
+                {
+                  key: 'issues',
+                  label: 'ISSUES',
+                  type: 'issue',
+                  items: githubConnected
+                    ? (issues.data ?? []).map((i) => ({
+                        name: i.title,
+                        meta: `#${i.number}`,
+                        metaTitle: `#${i.number} by ${i.author}`,
+                        id: i.number,
+                        webUrl: i.html_url,
+                      }))
+                    : [{ name: `Connect ${hostName}` }],
+                },
+              ]),
         ] satisfies SidebarSectionData[])),
     {
       key: 'tags',
@@ -253,8 +270,13 @@ export function LeftPanel() {
         break
       case 'pr':
       case 'issue':
-        if (item.id == null) openModal('githubConnect')
-        else openGithubItem(section.type === 'pr' ? 'pr' : 'issue', item.id)
+        // GitHub signs in through the device-code modal; the token-based hosts
+        // have their box in Settings, so send the user there instead of opening
+        // a modal that cannot connect them.
+        if (item.id == null) {
+          if (repoHost.data === 'github') openModal('githubConnect')
+          else showSettings('integrations')
+        } else openGithubItem(section.type === 'pr' ? 'pr' : 'issue', item.id)
         break
       // Tags scroll to the commit they point at, matching branches and stashes.
       case 'tag':

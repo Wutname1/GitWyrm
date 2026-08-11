@@ -6,7 +6,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/clipboard'
 import { formatRelativeTime } from '@/lib/gitDisplay'
-import type { GithubComment, IssueDetail, PrDetail } from '@/lib/bindings'
+import type { HostComment as GithubComment, IssueDetail, PrDetail } from '@/lib/bindings'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { Textarea } from '@/components/ui/textarea'
@@ -196,9 +196,13 @@ export function GithubView() {
   const qc = useQueryClient()
 
   const slug = useGithubSlug(repo?.id ?? null)
-  const pr = useGithubPrDetail(slug.data, item?.kind === 'pr' ? item.number : null)
-  const issue = useGithubIssueDetail(slug.data, item?.kind === 'issue' ? item.number : null)
-  const m = useGithubMutations(slug.data)
+  const pr = useGithubPrDetail(slug.data, item?.kind === 'pr' ? item.number : null, repo?.id)
+  const issue = useGithubIssueDetail(
+    slug.data,
+    item?.kind === 'issue' ? item.number : null,
+    repo?.id
+  )
+  const m = useGithubMutations(slug.data, repo?.id)
 
   // Jump back to the top when switching between items.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
@@ -251,7 +255,15 @@ export function GithubView() {
             {kindLabel} #{item.number}
           </h2>
           <p className="truncate text-2xs text-sub">
-            {detail ? `Updated ${ago(detail.updated_at)}` : query.isError ? 'Could not load' : 'Loading…'}
+            {detail
+              ? // Azure DevOps reports no updated time, so fall back to when it
+                // was opened rather than showing a blank or a wrong "just now".
+                detail.updated_at
+                ? `Updated ${ago(detail.updated_at)}`
+                : `Opened ${ago(detail.created_at)}`
+              : query.isError
+                ? 'Could not load'
+                : 'Loading…'}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-1.5">
@@ -333,7 +345,8 @@ export function GithubView() {
               <div className="flex items-center gap-2 border-b border-border pb-4 text-2xs text-sub">
                 <Avatar name={detail.author} bot={isPr ? pr.data?.author_is_bot : false} />
                 <span>
-                  {detail.author} opened this · updated {ago(detail.updated_at)}
+                  {detail.author} opened this
+                  {detail.updated_at ? ` · updated ${ago(detail.updated_at)}` : ''}
                 </span>
                 {statusPill}
               </div>

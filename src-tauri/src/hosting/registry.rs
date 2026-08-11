@@ -7,8 +7,11 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use super::azure::AzureDevOps;
+use super::bitbucket::Bitbucket;
 use super::github::GitHub;
-use super::{AuthKind, HostProvider};
+use super::gitlab::GitLab;
+use super::HostProvider;
 use crate::git::remote_url::{self, RemoteProvider};
 
 /// Stable identifier for a host, used as the `auth.json` key and in the UI.
@@ -38,65 +41,14 @@ impl ProviderId {
   }
 }
 
-/// A host that GitWyrm knows the shape of but cannot talk to yet.
-///
-/// Listing these is deliberate. Someone whose work lives on GitLab should be
-/// able to open Integrations and get a straight answer -- "known, not built
-/// yet" -- instead of finding GitHub alone and having to guess whether their
-/// host is unsupported or merely undiscovered.
-struct Planned {
-  id: ProviderId,
-  display_name: &'static str,
-  remote: RemoteProvider,
-  auth_kind: AuthKind,
-}
-
-impl HostProvider for Planned {
-  fn id(&self) -> ProviderId {
-    self.id
-  }
-  fn display_name(&self) -> &'static str {
-    self.display_name
-  }
-  fn matches(&self, provider: RemoteProvider) -> bool {
-    provider == self.remote
-  }
-  fn auth_kind(&self) -> AuthKind {
-    self.auth_kind
-  }
-  fn implemented(&self) -> bool {
-    false
-  }
-  fn slug_from_remote(&self, _url: &str) -> Option<super::RepoSlug> {
-    None
-  }
-}
-
-const GITLAB: Planned = Planned {
-  id: ProviderId::Gitlab,
-  display_name: "GitLab",
-  remote: RemoteProvider::GitLab,
-  // GitLab's device flow is not enabled for arbitrary apps, so a token the user
-  // creates themselves is the realistic path when this is built.
-  auth_kind: AuthKind::PersonalAccessToken,
-};
-
-const BITBUCKET: Planned = Planned {
-  id: ProviderId::Bitbucket,
-  display_name: "Bitbucket",
-  remote: RemoteProvider::Bitbucket,
-  auth_kind: AuthKind::PersonalAccessToken,
-};
-
-const AZURE: Planned = Planned {
-  id: ProviderId::AzureDevops,
-  display_name: "Azure DevOps",
-  remote: RemoteProvider::AzureDevOps,
-  auth_kind: AuthKind::PersonalAccessToken,
-};
-
 /// Every known host, in the order the settings list shows them.
-pub const ALL_PROVIDERS: &[&dyn HostProvider] = &[&GitHub, &GITLAB, &BITBUCKET, &AZURE];
+pub const ALL_PROVIDERS: &[&dyn HostProvider] =
+  &[&GitHub, &GitLab, &Bitbucket, &AzureDevOps];
+
+/// The provider for an id.
+pub fn provider_for_id(id: ProviderId) -> Option<&'static dyn HostProvider> {
+  ALL_PROVIDERS.iter().copied().find(|p| p.id() == id)
+}
 
 /// The provider that owns a remote URL, or None when no known host claims it.
 ///
@@ -114,6 +66,7 @@ pub fn provider_for(remote_url: &str) -> Option<&'static dyn HostProvider> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::hosting::AuthKind;
 
   #[test]
   fn routes_remotes_to_their_host() {
@@ -138,14 +91,53 @@ mod tests {
     assert!(provider_for("not a url at all").is_none());
   }
 
+  /// Every listed provider must resolve by id, or the settings screen shows a
+  /// row whose connect button cannot find its own implementation.
   #[test]
-  fn only_github_is_implemented_today() {
-    let built: Vec<_> = ALL_PROVIDERS
-      .iter()
-      .filter(|p| p.implemented())
-      .map(|p| p.id())
-      .collect();
-    assert_eq!(built, vec![ProviderId::Github]);
+  fn every_provider_resolves_by_id() {
+    for provider in ALL_PROVIDERS {
+      let found = provider_for_id(provider.id()).expect("resolves");
+      assert_eq!(found.display_name(), provider.display_name());
+    }
+  }
+
+  /// A host that says it has no issue tracker must not be asked for issues.
+  /// Azure is the case: its work items are process-template-defined.
+  #[test]
+  fn azure_reports_no_issue_tracker() {
+    let azure = provider_for_id(ProviderId::AzureDevops).expect("azure");
+    assert!(!azure.capabilities().issues);
+    // Everyone else does have one.
+    for id in [ProviderId::Github, ProviderId::Gitlab, ProviderId::Bitbucket] {
+      assert!(provider_for_id(id).expect("provider").capabilities().issues, "{id:?}");
+    }
+  }
+
+  /// Only GitHub reports line counts in its PR payload; the rest must say so
+  /// rather than showing a confident zero.
+  #[test]
+  fn only_github_reports_line_counts() {
+    for provider in ALL_PROVIDERS {
+      let expected = provider.id() == ProviderId::Github;
+      assert_eq!(provider.capabilities().pr_line_counts, expected, "{:?}", provider.id());
+    }
+  }
+
+  /// Every token-based host must tell the user where to make a token and which
+  /// permissions to tick; a missing scope fails later without naming the cause.
+  #[test]
+  fn token_hosts_document_their_setup() {
+    for provider in ALL_PROVIDERS {
+      if provider.auth_kind() == AuthKind::DeviceCode {
+        continue;
+      }
+      assert!(provider.token_url().is_some(), "{:?} has no token URL", provider.id());
+      assert!(
+        !provider.required_scopes().is_empty(),
+        "{:?} lists no scopes",
+        provider.id()
+      );
+    }
   }
 
   /// Auth keys are what stored tokens are filed under; changing one signs the
