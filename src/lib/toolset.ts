@@ -19,6 +19,16 @@ import { setSplashBar, clearSplashBar } from '@/lib/splash'
 /** Event the backend emits toolset download progress on. Matches updates.rs. */
 const TOOLSET_PROGRESS_EVENT = 'toolset://progress'
 
+/**
+ * The in-flight (or finished) check, so this only ever runs once per process.
+ *
+ * Module-level rather than a component ref: a dev hot-reload remounts the tree
+ * without restarting the backend, and the launch effect's own guard resets with
+ * it. Two overlapping calls would mean two 23 MB downloads unpacking into the
+ * same scratch directory, racing each other into the swap.
+ */
+let inFlight: Promise<void> | null = null
+
 interface ToolsetProgress {
 	downloaded: number
 	total: number | null
@@ -37,6 +47,14 @@ function formatMb(bytes: number): string {
  * installed should not be held at the splash over this.
  */
 export async function ensureToolset(onStatus: (message: string) => void): Promise<void> {
+	// Later callers await the first call rather than starting their own.
+	// Deliberately never reset: a second check within one process has nothing
+	// new to find, and the cost of being wrong is a duplicate 23 MB download.
+	inFlight ??= runEnsureToolset(onStatus)
+	return inFlight
+}
+
+async function runEnsureToolset(onStatus: (message: string) => void): Promise<void> {
 	try {
 		const status = await commands.toolsetStatus()
 		if (status.status === 'error') return
