@@ -16,8 +16,10 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  CircleDot,
   FolderOpen,
   GitBranch,
+  GitPullRequest,
   ImageIcon,
   Layers3,
   Pencil,
@@ -48,6 +50,7 @@ import { arrangeTabs } from "@/lib/tabSorting";
 import { useTabStatusStore } from "@/stores/tabStatusStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useBranches, useRepoTabStatus } from "@/hooks/useGitQueries";
+import { useRepoGithubCounts } from "@/hooks/useGithub";
 import { useGitMutations } from "@/hooks/useGitMutations";
 import { branchSync } from "@/lib/branchActions";
 import { pullNeedsChoice } from "@/lib/syncPreview";
@@ -82,8 +85,13 @@ const MAX_HORIZONTAL_TAB_WIDTH = 208;
 const ICON_ONLY_TAB_WIDTH = 38;
 const VERTICAL_ICON_ONLY_WIDTH = 72;
 // Under this width a horizontal tab is too tight for the numbered status
-// badges, so they collapse to pulsing glyphs.
+// badges, so they collapse to pulsing glyphs. Sized for the three git badges.
 const STATUS_NUMBERS_MIN_WIDTH = 116;
+// Each GitHub badge the user turns on needs about this much more before the
+// numbers still fit. Without it, enabling both counts pushes five numbered
+// badges into a width budgeted for three and the repository name is squeezed
+// out of its own tab.
+const EXTRA_BADGE_WIDTH = 26;
 
 type DragItem = { type: "repo"; path: string } | { type: "group"; id: string };
 
@@ -611,11 +619,17 @@ function GroupStatusIcons({
 }
 
 /**
- * The push / pull / uncommitted badges a repository tab shows on its right side.
- * Each badge only appears when its count is above zero, so a clean repo shows
- * nothing. When the tab is shrunk to icons the numbers drop away and a pulsing
- * green ring wraps the cluster to keep the pending state noticeable -- except on
- * the active tab, which the user is already looking at.
+ * The push / pull / uncommitted badges a repository tab shows on its right side,
+ * plus the optional GitHub pull request and issue counts. Each badge only
+ * appears when its count is above zero, so a clean repo shows nothing. When the
+ * tab is shrunk to icons the numbers drop away and a pulsing green ring wraps
+ * the cluster to keep the pending state noticeable -- except on the active tab,
+ * which the user is already looking at.
+ *
+ * The GitHub counts sit after the git ones deliberately: what you have not
+ * pushed is about work in your hands, and is what the pulse is for. Pull
+ * requests and issues are other people's work waiting on you, so they read as a
+ * second group and never pulse.
  */
 function TabStatusIcons({
   repoId,
@@ -627,15 +641,27 @@ function TabStatusIcons({
   pulse: boolean;
 }) {
   const { ahead, behind, uncommitted } = useRepoTabStatus(repoId);
+  const { prs, issues } = useRepoGithubCounts(repoId);
 
-  if (ahead === 0 && behind === 0 && uncommitted === 0) return null;
+  if (
+    ahead === 0 &&
+    behind === 0 &&
+    uncommitted === 0 &&
+    prs === 0 &&
+    issues === 0
+  )
+    return null;
+
+  const hasGitWork = ahead > 0 || behind > 0 || uncommitted > 0;
 
   return (
     <span
       className={cn(
         "flex flex-none items-center gap-1",
         collapsed ? "px-0.5" : "gap-1.5",
-        pulse && "wyrm-tab-status-pulse",
+        // Only pending git work pulses. A tab that merely has open issues is
+        // not something the user has left half-done.
+        pulse && hasGitWork && "wyrm-tab-status-pulse",
       )}
     >
       {ahead > 0 && (
@@ -662,6 +688,24 @@ function TabStatusIcons({
           count={uncommitted}
           color="var(--gw-amber)"
           label="uncommitted"
+          collapsed={collapsed}
+        />
+      )}
+      {prs > 0 && (
+        <StatusBadge
+          icon={<GitPullRequest size={11} strokeWidth={2.4} />}
+          count={prs}
+          color="var(--gw-purple)"
+          label={prs === 1 ? "open pull request" : "open pull requests"}
+          collapsed={collapsed}
+        />
+      )}
+      {issues > 0 && (
+        <StatusBadge
+          icon={<CircleDot size={11} strokeWidth={2.4} />}
+          count={issues}
+          color="var(--gw-green)"
+          label={issues === 1 ? "open issue" : "open issues"}
           collapsed={collapsed}
         />
       )}
@@ -792,6 +836,8 @@ export function RepositoryTabs({
   const tabAliases = useWorkspaceStore((state) => state.tabAliases);
   const showRepoIcons = useWorkspaceStore((state) => state.showRepoIcons);
   const tabIconOnly = useWorkspaceStore((state) => state.tabIconOnly);
+  const showTabPrCount = useWorkspaceStore((state) => state.showTabPrCount);
+  const showTabIssueCount = useWorkspaceStore((state) => state.showTabIssueCount);
   const verticalTabWidth = useWorkspaceStore((state) => state.verticalTabWidth);
   const tabGroups = useWorkspaceStore((state) => state.tabGroups);
   const tabOrder = useWorkspaceStore((state) => state.tabOrder);
@@ -1216,8 +1262,12 @@ export function RepositoryTabs({
     // Below the size that fits a numbered badge the status icons drop their
     // counts and pulse instead. Named vertical tabs always have room; horizontal
     // tabs collapse once the shared width budget squeezes them narrow.
+    const statusNumbersMinWidth =
+      STATUS_NUMBERS_MIN_WIDTH +
+      (showTabPrCount ? EXTRA_BADGE_WIDTH : 0) +
+      (showTabIssueCount ? EXTRA_BADGE_WIDTH : 0);
     const statusCollapsed = showName
-      ? orientation === "horizontal" && horizontalWidth < STATUS_NUMBERS_MIN_WIDTH
+      ? orientation === "horizontal" && horizontalWidth < statusNumbersMinWidth
       : true;
     const horizontalDropGap =
       orientation === "horizontal" && (target === "before" || target === "after") ? 100 : 0;

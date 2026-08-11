@@ -754,6 +754,10 @@ interface WorkspaceState {
   tabLayout: TabLayout;
   /** Give horizontal tabs their own row under the app bar instead of sharing it (persisted). */
   horizontalTabRow: boolean;
+  /** Show the open pull request count on repository tabs (persisted, off by default). */
+  showTabPrCount: boolean;
+  /** Show the open issue count on repository tabs (persisted, off by default). */
+  showTabIssueCount: boolean;
   /** Groups that currently wrap open repository tabs (persisted while open). */
   tabGroups: TabGroup[];
   /** Shared order of loose repository tabs and complete groups (persisted). */
@@ -857,6 +861,8 @@ interface WorkspaceState {
   markSigningKeyPublished: (fingerprint: string) => void;
   setTabLayout: (layout: TabLayout) => void;
   setHorizontalTabRow: (enabled: boolean) => void;
+  setShowTabPrCount: (enabled: boolean) => void;
+  setShowTabIssueCount: (enabled: boolean) => void;
   /** Set the whole-app zoom factor (clamped to the supported range). */
   setUiScale: (scale: number) => void;
   /** Set the UI font by id (see lib/fonts.ts). */
@@ -1061,6 +1067,8 @@ function toSettings(s: WorkspaceState): Settings {
     vertical_tab_width: s.verticalTabWidth,
     tab_layout: s.tabLayout,
     horizontal_tab_row: s.horizontalTabRow,
+    show_tab_pr_count: s.showTabPrCount,
+    show_tab_issue_count: s.showTabIssueCount,
     tab_groups: s.tabGroups.map((group) => ({
       id: group.id,
       name: group.name,
@@ -1368,6 +1376,8 @@ export const SETTINGS_DEFAULTS = {
   showRepoIcons: true,
   tabIconOnly: false,
   changesViewMode: "tree",
+  showTabPrCount: false,
+  showTabIssueCount: false,
 } satisfies Partial<WorkspaceState>;
 
 /** A resettable preference key. */
@@ -1418,6 +1428,9 @@ export const SETTINGS_GROUPS = {
     "tabIconOnly",
     "changesViewMode",
   ],
+  // Only the tab badges. Resetting this screen must not sign the user out of
+  // GitHub -- disconnecting is a deliberate act with its own button.
+  integrations: ["showTabPrCount", "showTabIssueCount"],
 } satisfies Record<string, SettingsKey[]>;
 
 export type SettingsGroup = keyof typeof SETTINGS_GROUPS;
@@ -1492,6 +1505,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   repoIconRevisions: {},
   tabLayout: "vertical",
   horizontalTabRow: false,
+  showTabPrCount: false,
+  showTabIssueCount: false,
   tabGroups: [],
   tabOrder: [],
   tabSort: "manual",
@@ -1998,6 +2013,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setHorizontalTabRow: (enabled) => {
     set({ horizontalTabRow: enabled });
+    schedulePersist();
+  },
+  setShowTabPrCount: (enabled) => {
+    set({ showTabPrCount: enabled });
+    schedulePersist();
+  },
+  setShowTabIssueCount: (enabled) => {
+    set({ showTabIssueCount: enabled });
     schedulePersist();
   },
   setUiScale: (scale) => {
@@ -2832,6 +2855,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         tabLayout:
           settings.tab_layout === "horizontal" ? "horizontal" : "vertical",
         horizontalTabRow: settings.horizontal_tab_row ?? false,
+        showTabPrCount: settings.show_tab_pr_count ?? false,
+        showTabIssueCount: settings.show_tab_issue_count ?? false,
         tabGroups,
         tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),
         tabSort: normalizeTabSort(settings.tab_sort),

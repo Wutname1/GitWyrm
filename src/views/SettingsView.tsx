@@ -14,6 +14,7 @@ const TITLES: Record<SettingsSection, string> = {
   tags: 'Tags',
   profiles: 'Profiles',
   ai: 'AI',
+  integrations: 'Integrations',
   openspec: 'OpenSpec',
   security: 'Security',
   appearance: 'Appearance',
@@ -27,6 +28,7 @@ const SUBTITLES: Partial<Record<SettingsSection, string>> = {
   repositoryTags: 'Tag rules for the repository open in the active tab.',
   tags: 'The default tag rules for every repository.',
   profiles: 'Who you commit as, and the key you sign with.',
+  integrations: 'Connect GitWyrm to the site your code is hosted on.',
   openspec: 'How GitWyrm works with your openspec/ folder.',
   security: 'Prove your commits came from you, and choose the programs GitWyrm uses.',
 }
@@ -62,6 +64,10 @@ const SECTION_BODIES: Record<SettingsSection, React.ComponentType> = {
   })),
   ai: lazy(async () => ({
     default: (await import('@/components/domain/settings/AiSettings')).AiSettings,
+  })),
+  integrations: lazy(async () => ({
+    default: (await import('@/components/domain/settings/IntegrationsSettings'))
+      .IntegrationsSettings,
   })),
   openspec: lazy(async () => ({
     default: (await import('@/components/domain/settings/OpenspecSettings')).OpenspecSettings,

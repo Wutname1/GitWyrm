@@ -363,6 +363,14 @@ pub struct Settings {
   /// Give horizontal tabs their own row under the app bar instead of sharing it.
   #[serde(default)]
   pub horizontal_tab_row: bool,
+  /// Show the count of open pull requests on each repository tab. Off by
+  /// default: it costs a network call per repository, so the user opts in.
+  #[serde(default)]
+  pub show_tab_pr_count: bool,
+  /// Show the count of open issues on each repository tab. Off by default for
+  /// the same reason as `show_tab_pr_count`.
+  #[serde(default)]
+  pub show_tab_issue_count: bool,
   /// Open tab groups. These disappear when their last repository is closed.
   #[serde(default)]
   pub tab_groups: Vec<TabGroupSetting>,
@@ -619,6 +627,8 @@ impl Default for Settings {
       vertical_tab_width: default_vertical_tab_width(),
       tab_layout: None,
       horizontal_tab_row: false,
+      show_tab_pr_count: false,
+      show_tab_issue_count: false,
       tab_groups: Vec::new(),
       tab_order: Vec::new(),
       tab_sort: None,

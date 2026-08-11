@@ -26,6 +26,7 @@ export const SECTION_LABELS: Record<SettingsSection, string> = {
   tags: 'Tags',
   profiles: 'Profiles',
   ai: 'AI',
+  integrations: 'Integrations',
   openspec: 'OpenSpec',
   security: 'Security',
   appearance: 'Appearance',
@@ -179,6 +180,41 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     label: 'Commit instructions',
     hint: 'What you want the generated commit messages to look like.',
     keywords: ['prompt', 'system prompt', 'style', 'commit message', 'format'],
+  },
+
+  // ---------------------------------------------------------- integrations
+  {
+    id: 'github-connection',
+    section: 'integrations',
+    label: 'GitHub',
+    hint: 'Connect or disconnect the GitHub account GitWyrm reads your pull requests and issues from.',
+    keywords: [
+      'github',
+      'gitlab',
+      'connect',
+      'disconnect',
+      'sign in',
+      'sign out',
+      'log out',
+      'account',
+      'token',
+      'integration',
+      'revoke',
+    ],
+  },
+  {
+    id: 'tab-pr-count',
+    section: 'integrations',
+    label: 'Pull requests on tabs',
+    hint: 'Show the number of open pull requests on each repository tab.',
+    keywords: ['pull request', 'pr', 'count', 'badge', 'tab', 'number', 'github'],
+  },
+  {
+    id: 'tab-issue-count',
+    section: 'integrations',
+    label: 'Issues on tabs',
+    hint: 'Show the number of open issues on each repository tab.',
+    keywords: ['issue', 'issues', 'count', 'badge', 'tab', 'number', 'github'],
   },
 
   // -------------------------------------------------------------- openspec

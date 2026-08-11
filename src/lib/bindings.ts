@@ -4188,6 +4188,16 @@ tab_layout?: string | null;
  */
 horizontal_tab_row?: boolean; 
 /**
+ * Show the count of open pull requests on each repository tab. Off by
+ * default: it costs a network call per repository, so the user opts in.
+ */
+show_tab_pr_count?: boolean; 
+/**
+ * Show the count of open issues on each repository tab. Off by default for
+ * the same reason as `show_tab_pr_count`.
+ */
+show_tab_issue_count?: boolean; 
+/**
  * Open tab groups. These disappear when their last repository is closed.
  */
 tab_groups?: TabGroupSetting[]; 

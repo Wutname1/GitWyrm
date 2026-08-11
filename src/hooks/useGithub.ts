@@ -6,6 +6,7 @@ import { isTauri } from '@/lib/env'
 import { unwrap } from '@/lib/queryKeys'
 import { classifyError } from '@/lib/errorClass'
 import { log } from '@/lib/log'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 export const githubKeys = {
   auth: ['github-auth'] as const,
@@ -95,6 +96,62 @@ export function useGithubIssues(slug: GithubRepoRef | null | undefined, connecte
     staleTime: 60 * 1000,
     queryFn: async () => unwrap(await commands.githubListIssues(slug!.owner, slug!.repo)),
   })
+}
+
+/** Open pull request and issue counts for one repository's tab badge. */
+export interface RepoGithubCounts {
+  prs: number
+  issues: number
+}
+
+/**
+ * The GitHub counts a repository tab shows, or zeroes.
+ *
+ * Both halves are opt-in and independently gated, because each one costs a
+ * request per open repository: someone who wants pull request counts should not
+ * also pay for issues. When a toggle is off the query never runs, so a user who
+ * leaves both off -- the default -- makes no GitHub requests from the tab strip
+ * at all.
+ *
+ * Issues additionally need a connected account; the API does not serve them
+ * anonymously. Pull requests do come back for public repositories signed out,
+ * matching [`useGithubPrs`].
+ *
+ * Counts are what the list endpoints return, which is capped at 50. A repo with
+ * more than that shows 50, which reads as "a lot" rather than a wrong number.
+ */
+export function useRepoGithubCounts(repoId: string | null): RepoGithubCounts {
+  const showPrs = useWorkspaceStore((s) => s.showTabPrCount)
+  const showIssues = useWorkspaceStore((s) => s.showTabIssueCount)
+  const auth = useGithubAuth()
+  const connected = auth.data != null
+
+  // The slug query is shared with the GitHub panel and cached for five minutes,
+  // so enabling a badge does not add a second origin lookup per repo.
+  const slug = useGithubSlug(showPrs || showIssues ? repoId : null)
+  const owner = slug.data?.owner ?? ''
+  const repo = slug.data?.repo ?? ''
+
+  const prs = useQuery({
+    queryKey: [...githubKeys.prs(owner, repo), connected],
+    enabled: isTauri && showPrs && slug.data != null,
+    staleTime: 60 * 1000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.githubListPrs(owner, repo)),
+  })
+
+  const issues = useQuery({
+    queryKey: githubKeys.issues(owner, repo),
+    enabled: isTauri && showIssues && connected && slug.data != null,
+    staleTime: 60 * 1000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.githubListIssues(owner, repo)),
+  })
+
+  return {
+    prs: showPrs ? (prs.data?.length ?? 0) : 0,
+    issues: showIssues ? (issues.data?.length ?? 0) : 0,
+  }
 }
 
 export function useGithubPrDetail(slug: GithubRepoRef | null | undefined, number: number | null) {
