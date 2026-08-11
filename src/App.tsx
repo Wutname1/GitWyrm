@@ -41,6 +41,7 @@ import { unwrap } from '@/lib/queryKeys'
 import { log } from '@/lib/log'
 import { samePath } from '@/lib/paths'
 import { hideSplash, setSplashProgress, setSplashStatus } from '@/lib/splash'
+import { ensureToolset } from '@/lib/toolset'
 import { useUiStore } from '@/stores/uiStore'
 import {
   DEFAULT_UI_SCALE,
@@ -135,6 +136,13 @@ function AppInner() {
         await useUpdater
           .getState()
           .runLaunchUpdate(settings.auto_update !== false, setSplashStatus)
+
+        // Git and gpg ship from the CDN rather than inside the installer, so
+        // that an app update stops re-extracting 103 MB of tools that change
+        // about once a month. This is what picks up a new Git for Windows: it
+        // only downloads when the version actually moved, and never blocks the
+        // boot -- someone with their own git on PATH does not need ours at all.
+        await ensureToolset(setSplashStatus)
 
         // A folder from Explorer's right-click entry. Drained here rather than
         // delivered as an event because the backend parses it before the webview

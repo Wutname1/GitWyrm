@@ -90,6 +90,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::updates::check_for_update,
     commands::updates::install_update,
     commands::updates::update_endpoint,
+    commands::updates::toolset_status,
+    commands::updates::install_toolset,
     missing_repos::mark_repo_missing,
     commands::repo::open_repo,
     commands::repo::close_repo,

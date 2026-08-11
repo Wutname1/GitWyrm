@@ -536,6 +536,34 @@ async updateEndpoint() : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * What the toolset looks like right now, and whether it is behind.
+ * 
+ * Reaching the CDN can fail (offline, blocked); that is reported as "no
+ * available version" rather than an error, because a stale-but-working toolset
+ * is not a problem the user needs to be told about.
+ */
+async toolsetStatus() : Promise<Result<ToolsetStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("toolset_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Download and unpack the current toolset, reporting progress as it goes.
+ * 
+ * Returns the version installed, or None when it was already current.
+ */
+async installToolset() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("install_toolset") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async markRepoMissing(repoPath: string, missing: boolean) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("mark_repo_missing", { repoPath, missing }) };
@@ -4963,6 +4991,22 @@ export type ToolSource =
  * Not found anywhere.
  */
 "missing"
+/**
+ * State of the git/gpg toolset, for the frontend to show and act on.
+ */
+export type ToolsetStatus = { 
+/**
+ * Version unpacked on disk, if any.
+ */
+installed: string | null; 
+/**
+ * Version the CDN is serving, when it could be reached.
+ */
+available: string | null; 
+/**
+ * Whether a download would change anything.
+ */
+updateAvailable: boolean }
 export type TutorialRepo = { 
 /**
  * Working directory to open as a tab.

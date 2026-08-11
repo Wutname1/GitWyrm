@@ -79,6 +79,9 @@ tauri-plugin-single-instance = "2"
 # real -- it takes the release binary from 20.3 MB to 114.5 MB -- but turning it
 # off produces a build that cannot run.
 github-copilot-sdk = "1.0.8"
+liblzma = { version = "0.4.8", features = ["static"] }
+tar = "0.4.46"
+sha2 = "0.11.0"
 
 # Explorer's right-click entry is a set of HKCU registry verbs, so the app can
 # add and remove it without elevation.

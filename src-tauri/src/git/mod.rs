@@ -14,6 +14,7 @@ pub mod spec_link;
 pub mod ssh;
 pub mod submodule;
 pub mod toolset;
+pub mod toolset_fetch;
 pub mod trailers;
 pub mod types;
 pub mod version_sort;

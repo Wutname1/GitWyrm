@@ -136,6 +136,88 @@ pub async fn check_for_update(app: tauri::AppHandle) -> Result<Option<String>, A
   }
 }
 
+/// Event name carrying toolset download progress.
+pub const TOOLSET_PROGRESS_EVENT: &str = "toolset://progress";
+
+/// State of the git/gpg toolset, for the frontend to show and act on.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolsetStatus {
+  /// Version unpacked on disk, if any.
+  pub installed: Option<String>,
+  /// Version the CDN is serving, when it could be reached.
+  pub available: Option<String>,
+  /// Whether a download would change anything.
+  pub update_available: bool,
+}
+
+/// What the toolset looks like right now, and whether it is behind.
+///
+/// Reaching the CDN can fail (offline, blocked); that is reported as "no
+/// available version" rather than an error, because a stale-but-working toolset
+/// is not a problem the user needs to be told about.
+#[tauri::command]
+#[specta::specta]
+pub async fn toolset_status() -> Result<ToolsetStatus, AppError> {
+  let installed = crate::git::toolset::installed_version();
+
+  match crate::git::toolset_fetch::needs_update().await {
+    Ok(Some(manifest)) => Ok(ToolsetStatus {
+      installed,
+      available: Some(manifest.version),
+      update_available: true,
+    }),
+    Ok(None) => Ok(ToolsetStatus {
+      available: installed.clone(),
+      installed,
+      update_available: false,
+    }),
+    Err(e) => {
+      log::warn!("could not check the toolset manifest: {e}");
+      Ok(ToolsetStatus {
+        installed,
+        available: None,
+        update_available: false,
+      })
+    }
+  }
+}
+
+/// Download and unpack the current toolset, reporting progress as it goes.
+///
+/// Returns the version installed, or None when it was already current.
+#[tauri::command]
+#[specta::specta]
+pub async fn install_toolset(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
+  let Some(manifest) = crate::git::toolset_fetch::needs_update().await? else {
+    return Ok(None);
+  };
+
+  let version = manifest.version.clone();
+  let progress_app = app.clone();
+  let mut last_emit: u64 = 0;
+
+  crate::git::toolset_fetch::install(&manifest, move |downloaded, total| {
+    // Same coalescing rationale as the app updater: one IPC message per chunk
+    // would cost more than the download.
+    let complete = downloaded >= total;
+    if downloaded - last_emit < PROGRESS_EMIT_BYTES && !complete {
+      return;
+    }
+    last_emit = downloaded;
+    let _ = progress_app.emit(
+      TOOLSET_PROGRESS_EVENT,
+      UpdateProgress {
+        downloaded,
+        total: Some(total),
+      },
+    );
+  })
+  .await?;
+
+  Ok(Some(version))
+}
+
 /// Filename of the bundled update-cover helper, under the resources dir.
 #[cfg(windows)]
 const HELPER_EXE: &str = "gitwyrm-setup.exe";
