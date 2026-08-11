@@ -1,8 +1,10 @@
 //! Locates the git and gpg executables the app shells out to.
 //!
-//! GitWyrm ships its own copies of both (MinGit and GnuPG, unpacked into the
-//! install dir by the bundler) so someone with a clean Windows machine can
-//! clone, commit, sign, and push without installing anything first.
+//! GitWyrm provides its own copies of both (MinGit and GnuPG) so someone with a
+//! clean Windows machine can clone, commit, sign, and push without installing
+//! anything first. They are downloaded from the CDN rather than unpacked by the
+//! installer, and live outside the install directory - see `git::toolset` for
+//! why that location is what makes app updates cheap.
 //!
 //! Resolution is **fallback-only**, per tool, in this order:
 //!
@@ -18,13 +20,17 @@
 //! the answer cannot change while the app is running (a Settings change calls
 //! the setter, which clears the cache).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{OnceLock, RwLock};
+use std::sync::RwLock;
 
-/// Root of the unpacked bundled tools, resolved from the Tauri resource dir at
-/// startup. `None` in dev builds, where no resources are bundled.
-static BUNDLE_ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
+/// Root of the unpacked toolset. `None` when nothing has been downloaded yet,
+/// which is normal on a dev build and before the first fetch completes.
+///
+/// A lock rather than a `OnceLock`: the toolset can arrive *after* startup, and
+/// the resolution caches below have to be dropped when it does or a session that
+/// began without git would keep reporting it missing.
+static BUNDLE_ROOT: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 /// Cached resolution for each tool, cleared when the user changes a path.
 static GIT_RESOLVED: RwLock<Option<Resolved>> = RwLock::new(None);
@@ -61,25 +67,32 @@ impl Resolved {
   }
 }
 
-/// Record the bundled-tools root. Called once from `setup()`, where the
-/// `AppHandle` that knows the resource directory is available.
+/// Record the toolset root, dropping any cached resolutions.
+///
+/// Called at startup and again after a download completes. The cache clear is
+/// the load-bearing part: without it a session that started with no git would
+/// go on reporting it missing even once the tools had landed.
 pub fn set_bundle_root(root: Option<PathBuf>) {
   if let Some(path) = root.as_ref() {
-    log::info!("bundled tools root: {}", path.display());
+    log::info!("toolset root: {}", path.display());
   } else {
-    log::info!("no bundled tools (dev build or resources absent)");
+    log::info!("no toolset (dev build, or not downloaded yet)");
   }
-  let _ = BUNDLE_ROOT.set(root);
+
+  if let Ok(mut guard) = BUNDLE_ROOT.write() {
+    *guard = root;
+  }
+
+  clear_git_cache();
+  clear_gpg_cache();
+  clear_ssh_keygen_cache();
 }
 
-fn bundle_root() -> Option<&'static Path> {
-  BUNDLE_ROOT.get().and_then(|o| o.as_deref())
-}
-
-/// Path to a bundled executable, if the bundle exists and the file is present.
-/// A missing file is normal on a dev build and must not be treated as an error.
+/// Path to a toolset executable, if the toolset exists and the file is present.
+/// A missing file is normal before the first download and must not be an error.
 fn bundled_path(relative: &str) -> Option<String> {
-  let candidate = bundle_root()?.join(relative);
+  let guard = BUNDLE_ROOT.read().ok()?;
+  let candidate = guard.as_ref()?.join(relative);
   candidate
     .is_file()
     .then(|| candidate.to_string_lossy().into_owned())
@@ -187,6 +200,15 @@ pub fn clear_git_cache() {
 
 pub fn clear_gpg_cache() {
   if let Ok(mut guard) = GPG_RESOLVED.write() {
+    *guard = None;
+  }
+}
+
+/// Dropped alongside the others when the toolset root changes: ssh-keygen is
+/// resolved from the same tree, so a stale "missing" here would outlast the
+/// download that fixed it.
+pub fn clear_ssh_keygen_cache() {
+  if let Ok(mut guard) = SSH_KEYGEN_RESOLVED.write() {
     *guard = None;
   }
 }

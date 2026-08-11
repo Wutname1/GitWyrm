@@ -13,6 +13,7 @@ pub mod signing;
 pub mod spec_link;
 pub mod ssh;
 pub mod submodule;
+pub mod toolset;
 pub mod trailers;
 pub mod types;
 pub mod version_sort;

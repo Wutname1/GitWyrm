@@ -538,15 +538,12 @@ pub fn run() {
         std::env::consts::ARCH,
       );
 
-      // Tell the tool resolver where the bundled git and gpg live before any
-      // shell-out happens. Resources sit under the install dir in a packaged
-      // build and are simply absent in dev, where the system tools are used.
-      let bundle_root = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|dir| dir.join("resources"))
-        .filter(|dir| dir.is_dir());
+      // Tell the tool resolver where git and gpg live before any shell-out
+      // happens. They are downloaded rather than installed with the app, and
+      // sit outside the install directory so an app update leaves them alone;
+      // see git::toolset. Absent in dev and before the first download, where
+      // the system tools are used instead.
+      let bundle_root = git::toolset::toolset_dir().filter(|dir| dir.is_dir());
       git::bundled::set_bundle_root(bundle_root);
 
       // Point git and gpg shell-outs at the saved executables (if any) before
