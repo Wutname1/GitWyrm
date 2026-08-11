@@ -140,10 +140,18 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
         let screen_w = GetSystemMetrics(SM_CXSCREEN);
         let screen_h = GetSystemMetrics(SM_CYSCREEN);
 
+        // The taskbar label. "Setup" would misdescribe an update to someone who
+        // already has the app, so this follows the same split as the heading.
+        let title = HSTRING::from(if updating {
+            "Updating GitWyrm"
+        } else {
+            "GitWyrm Setup"
+        });
+
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
             class_name,
-            w!("GitWyrm Setup"),
+            PCWSTR(title.as_ptr()),
             WS_POPUP | WS_VISIBLE,
             (screen_w - WND_W) / 2,
             (screen_h - WND_H) / 2,
@@ -215,7 +223,7 @@ const UPDATE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_mill
 fn watch_for_relaunch(tx: Sender<DownloadMsg>, dry_run: bool) {
     std::thread::spawn(move || {
         if dry_run {
-            std::thread::sleep(std::time::Duration::from_secs(90));
+            std::thread::sleep(std::time::Duration::from_secs(4));
             let _ = tx.send(DownloadMsg::Installed);
             return;
         }
@@ -491,7 +499,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             // Title bar (icon + wordmark, over the right panel)
             draw_logo(mem_dc, PANEL_W + 24, 12, 32, 32);
             let wordmark_w = draw_wordmark_img(mem_dc, PANEL_W + 68, 16, 24);
-            draw_text(mem_dc, " Setup", PANEL_W + 68 + wordmark_w, 18, 100, 24, s.font_body, COLOR_TEXT);
+            // "Setup" belongs to a first install; during an update the wordmark
+            // alone is right, and the taskbar title matches it (see below).
+            if !s.updating {
+                draw_text(mem_dc, " Setup", PANEL_W + 68 + wordmark_w, 18, 100, 24, s.font_body, COLOR_TEXT);
+            }
             fill_rect(mem_dc, PANEL_W, TITLEBAR_H, WND_W - PANEL_W, 1, COLOR_DIVIDER);
 
             // X close button (top-right)
