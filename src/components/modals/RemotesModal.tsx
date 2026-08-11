@@ -174,7 +174,7 @@ function RemoteRow({
     () => buildBranchTreeFrom(remote.branches, (b) => b.name),
     [remote.branches]
   )
-  const provider = detectProvider(remote.url)
+  const provider = detectProvider(remote)
   const webTarget = remoteWebTarget(remote)
 
   return (

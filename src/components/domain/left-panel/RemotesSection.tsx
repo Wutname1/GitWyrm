@@ -186,7 +186,7 @@ function RemoteNode({ remote }: { remote: RemoteInfo }) {
     () => buildBranchTreeFrom(remote.branches, (b) => b.name),
     [remote.branches]
   )
-  const provider = detectProvider(remote.url)
+  const provider = detectProvider(remote)
   const webTarget = remoteWebTarget(remote)
   const incoming = useMemo(
     () => remote.branches.filter((b) => b.ahead_of_local > 0).length,

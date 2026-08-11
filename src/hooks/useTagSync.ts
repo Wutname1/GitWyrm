@@ -31,7 +31,7 @@ export function useTagSync(repoId: string | null, enabled = true) {
     return list.find((r) => r.name === 'origin') ?? list[0] ?? null
   }, [remotes.data])
 
-  const hostLabel = providerLabel(detectProvider(defaultRemote?.url)) ?? 'the remote'
+  const hostLabel = providerLabel(detectProvider(defaultRemote)) ?? 'the remote'
 
   const onRemote = useMemo(() => {
     if (!remoteTags.data) return null

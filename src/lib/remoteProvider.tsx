@@ -1,21 +1,82 @@
 import { Cloud } from 'lucide-react'
 import type { SVGProps } from 'react'
+import type { RemoteProvider as BackendRemoteProvider } from '@/lib/bindings'
 
 export type RemoteProvider = 'github' | 'gitlab' | 'bitbucket' | 'azure' | 'unknown'
 
 /**
- * Identify the hosting provider from a remote URL (ssh or https). Returns
- * 'unknown' for self-hosted or unrecognized hosts, which fall back to the cloud
- * glyph. Matches on the host substring so enterprise subdomains still resolve
- * (e.g. github.myco.com -> github).
+ * Rust (`git::remote_url`) classifies more hosts than we draw glyphs for. Map
+ * its vocabulary onto the four we can badge; the rest fall back to the cloud
+ * icon.
  */
-export function detectProvider(url: string | undefined): RemoteProvider {
-  if (!url) return 'unknown'
-  const u = url.toLowerCase()
-  if (u.includes('github')) return 'github'
-  if (u.includes('gitlab')) return 'gitlab'
-  if (u.includes('bitbucket')) return 'bitbucket'
-  if (u.includes('dev.azure.com') || u.includes('visualstudio.com')) return 'azure'
+const PROVIDER_FROM_BACKEND: Record<BackendRemoteProvider, RemoteProvider> = {
+  git_hub: 'github',
+  git_lab: 'gitlab',
+  bitbucket: 'bitbucket',
+  azure_dev_ops: 'azure',
+  gitea: 'unknown',
+  source_hut: 'unknown',
+  code_commit: 'unknown',
+  self_hosted: 'unknown',
+}
+
+/** Bare host from a remote URL (ssh, scp-style, or https), lowercased. */
+function hostOf(url: string): string | null {
+  const value = url.trim()
+  if (!value || /^[a-z]:[\\/]/i.test(value)) return null
+
+  let authority: string
+  if (value.includes('://')) {
+    try {
+      authority = new URL(value).host
+    } catch {
+      return null
+    }
+  } else {
+    const scp = value.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/)
+    if (!scp || scp[1].length === 1) return null
+    authority = scp[1]
+  }
+
+  // Drop credentials and any port so `user@host:443` can't smuggle a label in.
+  const afterCredentials = authority.includes('@') ? authority.slice(authority.lastIndexOf('@') + 1) : authority
+  if (afterCredentials.startsWith('[')) return null
+  const bare = afterCredentials.split(':')[0]
+  return bare ? bare.toLowerCase() : null
+}
+
+/**
+ * Identify the hosting provider for a remote.
+ *
+ * Prefer passing the whole `RemoteInfo`: Rust already parsed the host in
+ * `git::remote_url` and ships the answer on every remote, so the UI and the
+ * backend can never disagree. The string overload re-derives it for the few
+ * call sites that only hold a URL.
+ *
+ * Matching is per host label, never a bare substring, so `github.myco.com`
+ * resolves to GitHub while `github-phishing.example.com` does not. This
+ * mirrors `provider_for_host` in `git::remote_url`; keep the two in step.
+ */
+export function detectProvider(
+  remote: string | { url: string; provider?: BackendRemoteProvider } | undefined
+): RemoteProvider {
+  if (!remote) return 'unknown'
+  if (typeof remote !== 'string' && remote.provider) {
+    return PROVIDER_FROM_BACKEND[remote.provider] ?? 'unknown'
+  }
+
+  const host = hostOf(typeof remote === 'string' ? remote : remote.url)
+  if (!host) return 'unknown'
+
+  const labels = host.split('.')
+  const has = (needle: string) => labels.includes(needle)
+
+  if (has('github')) return 'github'
+  if (has('gitlab')) return 'gitlab'
+  if (has('bitbucket')) return 'bitbucket'
+  if (host === 'dev.azure.com' || host === 'ssh.dev.azure.com' || host === 'visualstudio.com' || host.endsWith('.visualstudio.com')) {
+    return 'azure'
+  }
   return 'unknown'
 }
 

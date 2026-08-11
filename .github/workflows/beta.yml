@@ -30,6 +30,10 @@ concurrency:
 jobs:
   version:
     runs-on: ubuntu-latest
+    # Reads tags and release metadata only; the beta channel ships to the CDN,
+    # not to a GitHub release.
+    permissions:
+      contents: read
     # `[skip beta]` anywhere in the commit message is the manual escape hatch.
     if: "!contains(github.event.head_commit.message, '[skip beta]')"
     outputs:
@@ -87,6 +91,9 @@ jobs:
 
   build:
     needs: version
+    # Checkout plus reading upstream release assets for the bundled toolset.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -269,6 +276,10 @@ jobs:
   publish:
     needs: [version, build]
     runs-on: ubuntu-latest
+    # Publishes to R2 with its own credentials; needs nothing from the GitHub
+    # token beyond checkout.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
 

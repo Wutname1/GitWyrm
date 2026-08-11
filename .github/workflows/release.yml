@@ -320,6 +320,9 @@ jobs:
   promote-cdn-latest:
     needs: release
     runs-on: ubuntu-latest
+    # Pure R2 work under its own credentials, and no checkout, so the GitHub
+    # token needs nothing at all.
+    permissions: {}
     steps:
       - name: Determine channel
         id: channel
@@ -554,6 +557,10 @@ jobs:
     # Stable releases only. A beta must never purge its siblings.
     if: "!contains(github.ref_name, '-beta.')"
     runs-on: ubuntu-latest
+    # Deletes superseded betas from R2 under its own credentials, and no
+    # checkout. Withholding the GitHub token keeps this job unable to touch
+    # releases or refs even if a step is changed later.
+    permissions: {}
 
     steps:
       - name: Purge superseded beta builds

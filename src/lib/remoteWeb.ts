@@ -3,22 +3,6 @@ import { log } from '@/lib/log'
 import type { RemoteProvider as BackendRemoteProvider } from '@/lib/bindings'
 import { detectProvider, providerLabel, type RemoteProvider } from '@/lib/remoteProvider'
 
-/**
- * Rust (`git::remote_url`) knows more hosts than we draw glyphs for. Map its
- * vocabulary onto the four we can badge; everything else falls back to the
- * cloud icon and gets its host name as a label.
- */
-const PROVIDER_FROM_BACKEND: Record<BackendRemoteProvider, RemoteProvider> = {
-  git_hub: 'github',
-  git_lab: 'gitlab',
-  bitbucket: 'bitbucket',
-  azure_dev_ops: 'azure',
-  gitea: 'unknown',
-  source_hut: 'unknown',
-  code_commit: 'unknown',
-  self_hosted: 'unknown',
-}
-
 export interface RemoteWebTarget {
   provider: RemoteProvider
   label: string
@@ -68,7 +52,7 @@ function azureWebBase(remote: ParsedRemote): string | null {
   if (host === 'ssh.dev.azure.com' && parts[0]?.toLowerCase() === 'v3' && parts.length >= 4) {
     return `https://dev.azure.com/${parts[1]}/${parts[2]}/_git/${parts.slice(3).join('/')}`
   }
-  if (host.endsWith('vs-ssh.visualstudio.com') && parts[0]?.toLowerCase() === 'v3' && parts.length >= 4) {
+  if (host.endsWith('.vs-ssh.visualstudio.com') && parts[0]?.toLowerCase() === 'v3' && parts.length >= 4) {
     return `https://${parts[1]}.visualstudio.com/${parts[2]}/_git/${parts.slice(3).join('/')}`
   }
 
@@ -91,7 +75,7 @@ export function remoteWebTarget(
   remote: string | { url: string; provider?: BackendRemoteProvider; web_base?: string | null },
 ): RemoteWebTarget | null {
   if (typeof remote !== 'string' && remote.web_base && remote.provider) {
-    const provider = PROVIDER_FROM_BACKEND[remote.provider] ?? 'unknown'
+    const provider = detectProvider(remote)
     return {
       provider,
       label: providerLabel(provider) ?? remote.web_base,

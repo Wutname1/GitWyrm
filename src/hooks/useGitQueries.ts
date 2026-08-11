@@ -158,7 +158,7 @@ export function useHostResolver(repoId: string | null): (upstream: string | null
       if (!remotes?.length) return null
       const name = upstream?.split('/')[0]
       const remote = (name && remotes.find((r) => r.name === name)) || remotes[0]
-      return providerLabel(detectProvider(remote.url))
+      return providerLabel(detectProvider(remote))
     },
     [remotes]
   )

@@ -102,13 +102,13 @@ export function RefBadge({
   const remoteName = refTag.type === 'remote' ? refTag.name.split('/')[0] : null
   const remoteList = remotes.data ?? []
   const remoteInfo = remoteName ? remoteList.find((r) => r.name === remoteName) : null
-  const provider = detectProvider(remoteInfo?.url)
+  const provider = detectProvider(remoteInfo ?? undefined)
   const hasProviderIcon = refTag.type === 'remote' && provider !== 'unknown'
 
   // The synced remote's own provider, for the trailing glyph on a merged chip.
   const syncedRemote = syncedWith ? syncedWith.name.split('/')[0] : null
   const syncedProvider = detectProvider(
-    remoteList.find((r) => r.name === syncedRemote)?.url
+    remoteList.find((r) => r.name === syncedRemote)
   )
 
   // Label: for a remote pill, drop the `origin/` prefix when the provider logo

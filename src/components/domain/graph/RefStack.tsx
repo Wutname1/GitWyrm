@@ -50,7 +50,7 @@ function sourceDetails(refTag: RefInfo, remotes: RemoteInfo[]) {
     case 'remote': {
       const remote = remoteName(refTag)
       const info = remotes.find((item) => item.name === remote)
-      const host = providerLabel(detectProvider(info?.url))
+      const host = providerLabel(detectProvider(info))
       return host ? `From ${host} · ${remote}` : `From ${remote ?? 'a remote'}`
     }
   }
