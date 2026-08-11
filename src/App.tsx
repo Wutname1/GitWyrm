@@ -139,9 +139,10 @@ function AppInner() {
 
         // Git and gpg ship from the CDN rather than inside the installer, so
         // that an app update stops re-extracting 103 MB of tools that change
-        // about once a month. This is what picks up a new Git for Windows: it
-        // only downloads when the version actually moved, and never blocks the
-        // boot -- someone with their own git on PATH does not need ours at all.
+        // about once a month. The installer fetches them; this picks up a newer
+        // Git for Windows and covers anyone the installer missed. Only downloads
+        // when the version actually moved, and never blocks the boot -- someone
+        // with their own git on PATH does not need ours at all.
         await ensureToolset(setSplashStatus)
 
         // A folder from Explorer's right-click entry. Drained here rather than

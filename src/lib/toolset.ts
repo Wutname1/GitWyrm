@@ -1,10 +1,16 @@
 /**
- * Keeps the bundled git and gpg current.
+ * Keeps git and gpg current.
  *
  * These used to ship inside the installer, which meant every app update deleted
  * and re-extracted the whole tree - 408 files, 103 MB - for tools that only move
- * when Git for Windows ships, roughly monthly. They come from the CDN now, and
- * this is what notices a new version and fetches it.
+ * when Git for Windows ships, roughly monthly. They come from the CDN now.
+ *
+ * **The first install is the bootstrapper's job**, not this one: GitWyrm-Setup
+ * fetches the tools right after installing the app, so a clean machine has them
+ * before the app ever starts. This is the update half - it notices a newer
+ * version and fetches it - and doubles as the safety net for the two cases the
+ * bootstrapper cannot cover: someone who ran the NSIS installer directly from
+ * the GitHub release, and an install-time download that failed.
  */
 
 import { commands } from '@/lib/bindings'
