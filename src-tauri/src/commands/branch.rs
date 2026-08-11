@@ -6,6 +6,7 @@ use crate::git::commit_write::{self, CommitIdentity};
 use crate::git::history;
 use crate::git::refs;
 use crate::git::remote_url;
+use crate::git::submodule;
 use crate::git::types::{
   BranchDeleteOutcome, BranchInfo, BranchList, BranchRelation, CheckoutOutcome, RefMove, ResetMode,
   SyncState, TagInfo,
@@ -637,13 +638,21 @@ fn reset_current_to_commit(
   let checkout = if mode == ResetMode::Hard { Some(&mut checkout) } else { None };
   repo.reset(commit.as_object(), kind, checkout)?;
 
+  // A hard reset rewrites the working tree, so a submodule pinned at a
+  // different commit by the target needs its nested checkout moved too --
+  // otherwise the parent reports a pending change asking to undo the move it
+  // just made. Soft/Mixed leave the tree alone and must not touch submodules.
+  if mode == ResetMode::Hard {
+    submodule::sync_submodule_workdirs(repo);
+  }
+
   Ok(RefMove { branch, previous_sha, stashed })
 }
 
-/// Move the current branch ref to a commit without touching the working tree
-/// (like `git branch -f <current> <sha>` re-pointing HEAD's branch). A dirty
-/// tree no longer blocks the move: the changes are set aside in a stash first
-/// so the tree never silently diverges from the new tip.
+/// Move the current branch to a commit, leaving the working tree exactly as
+/// that commit has it (`git reset --hard <sha>` on HEAD's branch). A dirty tree
+/// no longer blocks the move: the changes are set aside in a stash first, so
+/// nothing is lost and the tree never silently diverges from the new tip.
 #[tauri::command]
 #[specta::specta]
 pub async fn move_current_branch(
@@ -654,21 +663,37 @@ pub async fn move_current_branch(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let mut repo = open.repo.lock().unwrap();
-    let branch = current_branch_name(&repo)?;
-
-    let stashed = stash_changes_aside(&mut repo, &format!("moving {branch}"))?;
-
-    let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
     let target_oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
-    // A soft reset re-points the branch ref and updates the index/HEAD tree to
-    // match, keeping the working tree in sync with the new tip.
-    let target = repo.find_object(target_oid, None)?;
-    repo.reset(&target, ResetType::Soft, None)?;
-
-    Ok(RefMove { branch, previous_sha, stashed })
+    move_current_branch_to_commit(&mut repo, target_oid)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Shared core for [`move_current_branch`], split out so it can be tested
+/// without a running app.
+fn move_current_branch_to_commit(
+  repo: &mut git2::Repository,
+  target_oid: Oid,
+) -> Result<RefMove, AppError> {
+  let branch = current_branch_name(repo)?;
+
+  let stashed = stash_changes_aside(repo, &format!("moving {branch}"))?;
+
+  let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
+  // Hard, not soft: a soft reset moves only the branch ref and leaves the index
+  // at the old tip, so every difference between the two commits turns up as
+  // staged changes. The user asked to *be at* this commit, so send the index
+  // and working tree there too.
+  let target = repo.find_object(target_oid, None)?;
+  repo.reset(&target, ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
+
+  // The reset rewrote the working tree, so a submodule the target pins at a
+  // different commit needs its nested checkout moved too -- otherwise the
+  // parent reports a pending change asking to undo the move it just made.
+  submodule::sync_submodule_workdirs(repo);
+
+  Ok(RefMove { branch, previous_sha, stashed })
 }
 
 /// Fast-forward a branch to another ref, without merging or a merge commit.
@@ -694,8 +719,23 @@ pub async fn fast_forward_branch(
 ) -> Result<RefMove, AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
+    let repo_path = open.path.to_string_lossy().into_owned();
     let repo = open.repo.lock().unwrap();
+    fast_forward_branch_to(&repo, &repo_path, &branch, &target)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
 
+/// Shared core for [`fast_forward_branch`], split out so it can be tested
+/// without a running app.
+fn fast_forward_branch_to(
+  repo: &git2::Repository,
+  repo_path: &str,
+  branch: &str,
+  target: &str,
+) -> Result<RefMove, AppError> {
+  {
     let mut branch_ref = repo.find_branch(branch.trim(), BranchType::Local)?;
     let branch_oid = branch_ref
       .get()
@@ -750,6 +790,19 @@ pub async fn fast_forward_branch(
         }
         None => repo.set_head_detached(target_oid)?,
       }
+
+      // The commits we just moved onto can pin a submodule at a different
+      // commit. `checkout_tree` writes the new pointer into the parent's index
+      // but never touches the nested checkout, so the submodule stays where it
+      // was and the parent reports a pending change the user never made --
+      // pointing the wrong way, at rolling the pin BACK. Same follow-up pull
+      // and rebase already do, and best-effort for the same reason: the
+      // fast-forward itself has already landed.
+      for r in submodule::follow_recorded_pins(repo, repo_path).unwrap_or_default() {
+        if let submodule::FollowOutcome::Failed(why) = r.outcome {
+          log::warn!("fast-forward could not update submodule {}: {}", r.path, why);
+        }
+      }
     } else {
       // Not checked out: a pure ref move. The working tree and HEAD are
       // untouched, so the user stays on their current branch.
@@ -761,9 +814,7 @@ pub async fn fast_forward_branch(
     }
 
     Ok(RefMove { branch: branch.trim().to_string(), previous_sha, stashed: false })
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+  }
 }
 
 /// Check out a commit directly, leaving HEAD detached (not on any branch).
@@ -892,8 +943,10 @@ pub async fn reword_commit(
       "editing this message causes conflicts in a later commit; nothing was changed",
     )?;
 
-    // Point the branch at the rebuilt tip and sync the working tree.
+    // Point the branch at the rebuilt tip and sync the working tree, including
+    // any submodule a replayed commit pins somewhere else.
     repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
+    submodule::sync_submodule_workdirs(&repo);
 
     Ok(reworded_sha)
   })
@@ -1017,8 +1070,10 @@ pub async fn drop_commit(
       "dropping this commit causes conflicts in a later commit; nothing was changed",
     )?;
 
-    // Point the branch at the rebuilt tip and sync the working tree.
+    // Point the branch at the rebuilt tip and sync the working tree, including
+    // any submodule a replayed commit pins somewhere else.
     repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
+    submodule::sync_submodule_workdirs(&repo);
 
     Ok(RefMove { branch, previous_sha, stashed: false })
   })
@@ -1191,6 +1246,170 @@ mod tests {
       })
       .expect("stash list");
     assert_eq!(stashes, 1, "the uncommitted work must be recoverable");
+  }
+
+  /// A parent repo with a submodule, plus a second branch `ahead` that bumps
+  /// the pin. Leaves you on the trailing branch with the nested checkout at the
+  /// OLD pin -- the state every "move the working tree" operation starts from.
+  ///
+  /// Returns (tempdir, parent path, submodule path, trailing branch name, the
+  /// commit `ahead` pins the submodule at, the sha `ahead` points to).
+  struct PinFixture {
+    _dir: tempfile::TempDir,
+    parent: String,
+    sub: String,
+    base_branch: String,
+    bumped: String,
+    ahead_sha: String,
+  }
+
+  fn parent_with_bumped_pin() -> PinFixture {
+    use crate::git::shell::run_git;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = |at: &str, args: &[&str]| run_git(Some(at), args).unwrap();
+    let commit_at = |at: &str, msg: &str| {
+      git(
+        at,
+        &["-c", "user.name=T", "-c", "user.email=t@e.com", "commit", "-q", "-m", msg],
+      );
+    };
+
+    // A submodule source with two commits, so the pin has somewhere to move to.
+    let sub_src = root.join("sub-src").to_string_lossy().into_owned();
+    std::fs::create_dir_all(&sub_src).unwrap();
+    git(&sub_src, &["init", "-q"]);
+    std::fs::write(root.join("sub-src/f.txt"), "v1").unwrap();
+    git(&sub_src, &["add", "."]);
+    commit_at(&sub_src, "v1");
+
+    let parent = root.join("parent").to_string_lossy().into_owned();
+    std::fs::create_dir_all(&parent).unwrap();
+    git(&parent, &["init", "-q"]);
+    std::fs::write(root.join("parent/a.txt"), "one").unwrap();
+    git(&parent, &["add", "."]);
+    commit_at(&parent, "base");
+    // file:// submodules are refused by default since the 2022 CVE fixes.
+    git(
+      &parent,
+      &["-c", "protocol.file.allow=always", "submodule", "add", "-q", "--", &sub_src, "sub"],
+    );
+    commit_at(&parent, "add sub");
+
+    // Whatever `init` named the first branch -- init.defaultBranch varies by
+    // machine, so never hardcode `main` here.
+    let base_branch =
+      git(&parent, &["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim().to_string();
+
+    // A second branch that bumps the pin -- stands in for origin/main sitting
+    // ahead of you with a submodule bump in it.
+    git(&parent, &["branch", "ahead"]);
+    git(&parent, &["checkout", "-q", "ahead"]);
+    let sub = root.join("parent/sub").to_string_lossy().into_owned();
+    std::fs::write(root.join("parent/sub/f.txt"), "v2").unwrap();
+    git(&sub, &["add", "."]);
+    commit_at(&sub, "v2");
+    let bumped = git(&sub, &["rev-parse", "HEAD"]).stdout.trim().to_string();
+    git(&parent, &["add", "sub"]);
+    commit_at(&parent, "bump sub");
+    let ahead_sha = git(&parent, &["rev-parse", "HEAD"]).stdout.trim().to_string();
+
+    // Back on the branch that trails, with the submodule checkout where the OLD
+    // pin says it belongs. Switching branches does NOT move a nested checkout,
+    // so strand it explicitly -- that is the real starting state.
+    git(&parent, &["checkout", "-q", &base_branch]);
+    git(&sub, &["checkout", "-q", "HEAD~1"]);
+    assert_ne!(
+      git(&sub, &["rev-parse", "HEAD"]).stdout.trim(),
+      bumped,
+      "setup: the submodule must start behind the pin being moved to"
+    );
+
+    PinFixture { _dir: dir, parent, sub, base_branch, bumped, ahead_sha }
+  }
+
+  /// Assert the nested checkout followed the pin and left no phantom change.
+  fn assert_pin_followed(f: &PinFixture) {
+    use crate::git::shell::run_git;
+    let head = run_git(Some(&f.sub), &["rev-parse", "HEAD"]).unwrap().stdout.trim().to_string();
+    assert_eq!(head, f.bumped, "the nested checkout must follow the pin that was landed");
+    let repo = git2::Repository::open(&f.parent).unwrap();
+    assert!(
+      crate::git::submodule::moved_submodules(&repo).is_empty(),
+      "no phantom pending change should be left behind"
+    );
+  }
+
+  /// Regression: fast-forwarding onto commits that move a submodule pin wrote
+  /// the new pointer into the parent's index but left the nested checkout
+  /// behind, so the user was handed a "pending change" asking to roll the pin
+  /// BACK -- a change they never made, pointing the wrong way.
+  #[test]
+  fn fast_forward_moves_the_submodule_checkout_too() {
+    let f = parent_with_bumped_pin();
+    let repo = git2::Repository::open(&f.parent).unwrap();
+
+    fast_forward_branch_to(&repo, &f.parent, &f.base_branch, "ahead").expect("fast-forward");
+
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id().to_string(), f.ahead_sha);
+    assert_pin_followed(&f);
+  }
+
+  /// Same bug via "Go to this commit", which hard-resets onto the target. The
+  /// reset rewrites the working tree but not the nested checkout.
+  #[test]
+  fn going_to_a_commit_moves_the_submodule_checkout_too() {
+    let f = parent_with_bumped_pin();
+    let mut repo = git2::Repository::open(&f.parent).unwrap();
+    let target = git2::Oid::from_str(&f.ahead_sha).unwrap();
+
+    move_current_branch_to_commit(&mut repo, target).expect("move");
+
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id().to_string(), f.ahead_sha);
+    assert_pin_followed(&f);
+  }
+
+  /// And via the hard-reset form ("Undo the commits after this one" -> erase),
+  /// which shares `reset_current_to_commit` with every other reset mode.
+  #[test]
+  fn a_hard_reset_moves_the_submodule_checkout_too() {
+    let f = parent_with_bumped_pin();
+    let mut repo = git2::Repository::open(&f.parent).unwrap();
+    let target = git2::Oid::from_str(&f.ahead_sha).unwrap();
+
+    reset_current_to_commit(&mut repo, target, ResetMode::Hard).expect("reset");
+
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id().to_string(), f.ahead_sha);
+    assert_pin_followed(&f);
+  }
+
+  /// Regression: this used to run a *soft* reset, which moved the branch ref
+  /// but left the index at the old tip -- so going back to a commit with a
+  /// clean tree handed the user a pile of staged changes they never made.
+  #[test]
+  fn moving_the_branch_back_leaves_nothing_staged() {
+    let (dir, mut repo) = test_repo();
+    let base = commit_file(&repo, "a.txt", "a", "base");
+    commit_file(&repo, "a.txt", "b", "second");
+    commit_file(&repo, "later.txt", "later", "third");
+
+    let result = move_current_branch_to_commit(&mut repo, base).expect("move");
+
+    assert!(!result.stashed, "a clean tree needs no stash");
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id(), base);
+    assert_eq!(
+      fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+      "a",
+      "files must land as they were at the target commit"
+    );
+    assert!(!dir.path().join("later.txt").exists(), "later files must be gone");
+    let statuses = repo.statuses(None).expect("status");
+    assert!(
+      statuses.is_empty(),
+      "moving back must leave a clean tree, not staged changes: {:?}",
+      statuses.iter().map(|s| (s.path().map(str::to_owned), s.status())).collect::<Vec<_>>()
+    );
   }
 
   #[test]
