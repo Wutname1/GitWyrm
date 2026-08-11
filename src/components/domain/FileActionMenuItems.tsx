@@ -9,6 +9,30 @@ import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import { EditorGlyph, editorLabel } from '@/lib/editors'
 
+/**
+ * Confirm state for the two file actions that ask before acting.
+ *
+ * It lives outside the menu on purpose. Choosing an item closes the context
+ * menu, which unmounts everything rendered inside ContextMenuContent -- a
+ * dialog rendered there would open and disappear in the same frame. The owner
+ * holds this state and renders {@link FileActionDialogs} as a sibling of the
+ * menu, so the dialog outlives the menu that opened it.
+ */
+export interface FileActionConfirm {
+  open: null | 'delete' | 'restore'
+  ask: (which: 'delete' | 'restore') => void
+  close: () => void
+}
+
+export function useFileActionConfirm(): FileActionConfirm {
+  const [open, setOpen] = useState<null | 'delete' | 'restore'>(null)
+  return {
+    open,
+    ask: (which) => setOpen(which),
+    close: () => setOpen(null),
+  }
+}
+
 interface FileActionMenuItemsProps {
   path: string
   /**
@@ -18,22 +42,23 @@ interface FileActionMenuItemsProps {
    * nothing to do with the revision on screen.
    */
   sha?: string | null
+  confirm: FileActionConfirm
 }
 
 /**
  * The file actions shared by every changed-file row: open it elsewhere, remove
  * or restore it, and the two history views. Rendered inside an existing
  * ContextMenuContent, after the caller's own stage/discard entries.
+ *
+ * The caller must also render {@link FileActionDialogs} outside its
+ * `<ContextMenu>`, passing the same `confirm`.
  */
-export function FileActionMenuItems({ path, sha = null }: FileActionMenuItemsProps) {
+export function FileActionMenuItems({ path, sha = null, confirm }: FileActionMenuItemsProps) {
   const repo = useActiveRepo()
   const m = useGitMutations(repo?.id ?? null)
   const defaultEditor = useWorkspaceStore((s) => s.defaultEditor)
   const openFileHistory = useUiStore((s) => s.openFileHistory)
   const openBlame = useUiStore((s) => s.openBlame)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [confirmRestore, setConfirmRestore] = useState(false)
-  const name = path.split('/').pop() ?? path
   const workingCopy = sha == null
   // A file with no commits behind it has no history to show and nothing to be
   // restored to, so both are left out rather than offered and then failing.
@@ -75,21 +100,36 @@ export function FileActionMenuItems({ path, sha = null }: FileActionMenuItemsPro
         <>
           <ContextMenuSeparator />
           {!neverCommitted && (
-            <ContextMenuItem onSelect={() => setConfirmRestore(true)}>
+            <ContextMenuItem onSelect={() => confirm.ask('restore')}>
               <Undo2 />
               Restore file
             </ContextMenuItem>
           )}
-          <ContextMenuItem variant="destructive" onSelect={() => setConfirmDelete(true)}>
+          <ContextMenuItem variant="destructive" onSelect={() => confirm.ask('delete')}>
             <Trash2 />
             Delete file
           </ContextMenuItem>
         </>
       )}
+    </>
+  )
+}
 
+/**
+ * The confirmations behind Delete file and Restore file. Render this as a
+ * sibling of the `<ContextMenu>`, never inside it -- see
+ * {@link FileActionConfirm}.
+ */
+export function FileActionDialogs({ path, confirm }: { path: string; confirm: FileActionConfirm }) {
+  const repo = useActiveRepo()
+  const m = useGitMutations(repo?.id ?? null)
+  const name = path.split('/').pop() ?? path
+
+  return (
+    <>
       <ConfirmDialog
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
+        open={confirm.open === 'delete'}
+        onOpenChange={(next) => !next && confirm.close()}
         destructive
         title={`Delete ${name}?`}
         description={
@@ -105,8 +145,8 @@ export function FileActionMenuItems({ path, sha = null }: FileActionMenuItemsPro
       />
 
       <ConfirmDialog
-        open={confirmRestore}
-        onOpenChange={setConfirmRestore}
+        open={confirm.open === 'restore'}
+        onOpenChange={(next) => !next && confirm.close()}
         destructive
         title={`Restore ${name}?`}
         description={

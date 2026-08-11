@@ -12,7 +12,11 @@ import {
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { IgnoreMenuItems } from '@/components/domain/commit-form/IgnoreMenuItems'
-import { FileActionMenuItems } from '@/components/domain/FileActionMenuItems'
+import {
+  FileActionDialogs,
+  FileActionMenuItems,
+  useFileActionConfirm,
+} from '@/components/domain/FileActionMenuItems'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
@@ -27,6 +31,7 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
   const repo = useActiveRepo()
   const m = useGitMutations(repo?.id ?? null)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const confirm = useFileActionConfirm()
   const name = file.path.split('/').pop() ?? file.path
   const stagePending = m.stageFile.isPending || m.unstageFile.isPending
   const sub = file.submodule
@@ -65,7 +70,7 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
             />
           )}
           {!sub && !file.conflicted && <IgnoreMenuItems path={file.path} isFolder={false} />}
-          {!sub && <FileActionMenuItems path={file.path} />}
+          {!sub && <FileActionMenuItems path={file.path} confirm={confirm} />}
           {sub ? (
             <>
               <ContextMenuSeparator />
@@ -98,6 +103,8 @@ export function FileChangeMenu({ file, staged, onOpen, children }: FileChangeMen
           )}
         </ContextMenuContent>
       </ContextMenu>
+
+      {!sub && <FileActionDialogs path={file.path} confirm={confirm} />}
 
       <ConfirmDialog
         open={confirmDiscard}

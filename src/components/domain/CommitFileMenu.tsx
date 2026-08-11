@@ -8,7 +8,11 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import { FileActionMenuItems } from './FileActionMenuItems'
+import {
+  FileActionDialogs,
+  FileActionMenuItems,
+  useFileActionConfirm,
+} from './FileActionMenuItems'
 
 interface CommitFileMenuProps {
   path: string
@@ -25,21 +29,26 @@ interface CommitFileMenuProps {
  */
 export function CommitFileMenu({ path, sha, onOpen, children }: CommitFileMenuProps) {
   const name = path.split('/').pop() ?? path
+  const confirm = useFileActionConfirm()
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-56">
-        <ContextMenuLabel className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-sub">
-          {name}
-        </ContextMenuLabel>
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={onOpen}>
-          <FileText />
-          View changes
-        </ContextMenuItem>
-        <FileActionMenuItems path={path} sha={sha} />
-      </ContextMenuContent>
-    </ContextMenu>
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+        <ContextMenuContent className="w-56">
+          <ContextMenuLabel className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-sub">
+            {name}
+          </ContextMenuLabel>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={onOpen}>
+            <FileText />
+            View changes
+          </ContextMenuItem>
+          <FileActionMenuItems path={path} sha={sha} confirm={confirm} />
+        </ContextMenuContent>
+      </ContextMenu>
+
+      <FileActionDialogs path={path} confirm={confirm} />
+    </>
   )
 }
