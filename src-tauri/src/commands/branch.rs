@@ -177,6 +177,11 @@ fn resolve_switch_target(repo: &git2::Repository, name: &str) -> Result<String, 
 
 /// Move HEAD to `name` and update the working tree to its content. Uses a SAFE
 /// checkout, so git refuses to clobber conflicting local changes.
+///
+/// Deliberately does NOT touch submodules: this is called on recovery paths too
+/// (restoring a stash after a failed switch), where moving nested checkouts
+/// would be wrong. Callers that landed on the new branch for real follow up
+/// with [`follow_switched_pins`].
 fn switch_to(repo: &git2::Repository, name: &str) -> Result<(), AppError> {
   let (object, reference) = repo.revparse_ext(name)?;
   let mut builder = git2::build::CheckoutBuilder::new();
@@ -189,6 +194,24 @@ fn switch_to(repo: &git2::Repository, name: &str) -> Result<(), AppError> {
   Ok(())
 }
 
+/// Move nested checkouts to the commits the branch we just switched to records.
+///
+/// Switching branches writes the new gitlink into the parent's index but leaves
+/// the submodule folder on its old commit, so the parent reports a pending
+/// change the user never made. Best-effort: the switch itself has already
+/// succeeded, and a submodule whose commit is unreachable must not turn that
+/// into an error.
+///
+/// Only call this once the switch has actually landed -- never on a path that
+/// is unwinding a failed switch.
+fn follow_switched_pins(repo: &git2::Repository, repo_path: &str) {
+  for r in submodule::follow_recorded_pins(repo, repo_path).unwrap_or_default() {
+    if let submodule::FollowOutcome::Failed(why) = r.outcome {
+      log::warn!("switching branches could not update submodule {}: {}", r.path, why);
+    }
+  }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn checkout_branch(
@@ -199,6 +222,7 @@ pub async fn checkout_branch(
 ) -> Result<CheckoutOutcome, AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
+    let repo_path = open.path.to_string_lossy().into_owned();
     let mut repo = open.repo.lock().unwrap();
 
     // Picking a remote branch lands on a local tracking branch, not detached HEAD.
@@ -216,6 +240,7 @@ pub async fn checkout_branch(
 
     if !refs::any_changes_present(&repo)? {
       switch_to(&repo, &name)?;
+      follow_switched_pins(&repo, &repo_path);
       return Ok(CheckoutOutcome::Clean);
     }
 
@@ -233,6 +258,7 @@ pub async fn checkout_branch(
               .into(),
           )
         })?;
+        follow_switched_pins(&repo, &repo_path);
         Ok(CheckoutOutcome::Clean)
       }
 
@@ -245,6 +271,7 @@ pub async fn checkout_branch(
       // reapply.
       BranchSwitchMode::AutoStash => {
         if switch_to(&repo, &name).is_ok() {
+          follow_switched_pins(&repo, &repo_path);
           return Ok(CheckoutOutcome::Clean);
         }
 
@@ -293,6 +320,12 @@ pub async fn checkout_branch(
           return Err(e);
         }
 
+        // The switch landed. Move nested checkouts now, BEFORE restoring the
+        // stash -- the stash can carry the user's own submodule pointer move,
+        // and re-applying it after this would put their choice back on top
+        // rather than have it overwritten.
+        follow_switched_pins(&repo, &repo_path);
+
         // A failed re-apply leaves the user on the new branch WITHOUT their
         // changes. Report where the work went instead of propagating a raw error.
         if repo.stash_apply(0, None).is_err() {
@@ -327,6 +360,7 @@ pub async fn create_branch(
 ) -> Result<(), AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
+    let repo_path = open.path.to_string_lossy().into_owned();
     let repo = open.repo.lock().unwrap();
     let name = name.trim();
     validate_ref_name(name, "refs/heads/", "branch")?;
@@ -351,6 +385,9 @@ pub async fn create_branch(
       let object = repo.revparse_single(&refname)?;
       repo.checkout_tree(&object, None)?;
       repo.set_head(&refname)?;
+      // Branching from an older commit can pin a submodule elsewhere, and the
+      // checkout moves only the parent's pointer.
+      follow_switched_pins(&repo, &repo_path);
     }
     Ok(())
   })
@@ -829,6 +866,7 @@ pub async fn checkout_commit(
 ) -> Result<(), AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
+    let repo_path = open.path.to_string_lossy().into_owned();
     let repo = open.repo.lock().unwrap();
 
     if refs::any_changes_present(&repo)? {
@@ -841,6 +879,7 @@ pub async fn checkout_commit(
     let object = repo.find_object(oid, None)?;
     repo.checkout_tree(&object, Some(CheckoutBuilder::new().safe()))?;
     repo.set_head_detached(oid)?;
+    follow_switched_pins(&repo, &repo_path);
     Ok(())
   })
   .await
@@ -1367,6 +1406,36 @@ mod tests {
     move_current_branch_to_commit(&mut repo, target).expect("move");
 
     assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id().to_string(), f.ahead_sha);
+    assert_pin_followed(&f);
+  }
+
+  /// Switching branches has the same shape: git writes the new gitlink into
+  /// the parent's index but leaves the nested checkout on its old commit.
+  #[test]
+  fn switching_branches_moves_the_submodule_checkout_too() {
+    let f = parent_with_bumped_pin();
+    let repo = git2::Repository::open(&f.parent).unwrap();
+
+    switch_to(&repo, "ahead").expect("switch");
+    follow_switched_pins(&repo, &f.parent);
+
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id().to_string(), f.ahead_sha);
+    assert_pin_followed(&f);
+  }
+
+  /// Checking out a commit directly (detached) moves the tree the same way, so
+  /// it needs the same follow-up.
+  #[test]
+  fn checking_out_a_commit_moves_the_submodule_checkout_too() {
+    let f = parent_with_bumped_pin();
+    let repo = git2::Repository::open(&f.parent).unwrap();
+    let oid = git2::Oid::from_str(&f.ahead_sha).unwrap();
+
+    let object = repo.find_object(oid, None).unwrap();
+    repo.checkout_tree(&object, Some(CheckoutBuilder::new().safe())).unwrap();
+    repo.set_head_detached(oid).unwrap();
+    follow_switched_pins(&repo, &f.parent);
+
     assert_pin_followed(&f);
   }
 
