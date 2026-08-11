@@ -82,6 +82,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::file::restore_file,
     commands::file::get_file_history,
     commands::file::get_file_blame,
+    commands::file::get_file_content,
     settings::get_settings,
     settings::get_usage_telemetry_enabled,
     settings::save_settings,

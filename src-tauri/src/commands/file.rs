@@ -59,6 +59,26 @@ pub struct FileBlame {
   pub binary: bool,
 }
 
+/// A whole file's text at one point in time, for the read-only Raw view.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct FileContent {
+  pub path: String,
+  /// Empty when `binary` or `too_large` is set.
+  pub text: String,
+  pub line_count: u32,
+  /// Size of the file on disk or in the object database, in bytes.
+  pub size: f64,
+  /// The file holds bytes that aren't text, so there is nothing to show.
+  pub binary: bool,
+  /// The file is past `MAX_RAW_BYTES`, so it isn't loaded into the editor.
+  pub too_large: bool,
+}
+
+/// Ceiling on what the Raw view will load. Past a few megabytes CodeMirror
+/// stops being a viewer and starts being a stall, and a file that big is not
+/// something anyone is reading in a side panel.
+const MAX_RAW_BYTES: u64 = 5 * 1024 * 1024;
+
 /// Resolve a repo-relative path against the working directory, refusing
 /// anything that escapes the repo. The path comes from the UI, but a crafted
 /// `..` segment must never let a delete land outside the project.
@@ -369,6 +389,92 @@ pub async fn get_file_blame(
       path,
       lines,
       binary: false,
+    })
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// The full text of a file. `sha` reads it as of that commit; omit it to read
+/// the working copy from disk.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_file_content(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  path: String,
+  sha: Option<String>,
+) -> Result<FileContent, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    let file_path = Path::new(&path);
+
+    let contents: Vec<u8> = match &sha {
+      Some(sha) => {
+        let commit = repo.find_commit(Oid::from_str(sha)?)?;
+        let entry = commit.tree()?.get_path(file_path)?;
+        let blob = repo.find_blob(entry.id())?;
+        if blob.size() as u64 > MAX_RAW_BYTES {
+          return Ok(FileContent {
+            path,
+            text: String::new(),
+            line_count: 0,
+            size: blob.size() as f64,
+            binary: false,
+            too_large: true,
+          });
+        }
+        blob.content().to_vec()
+      }
+      None => {
+        let workdir = repo
+          .workdir()
+          .ok_or_else(|| AppError::Other("This repository has no working folder".into()))?;
+        // The path comes from the UI, so it goes through the same guard as
+        // delete and restore before anything is read off disk.
+        let full = resolve_in_repo(workdir, &path)?;
+        let size = std::fs::metadata(&full).map_err(AppError::Io)?.len();
+        if size > MAX_RAW_BYTES {
+          return Ok(FileContent {
+            path,
+            text: String::new(),
+            line_count: 0,
+            size: size as f64,
+            binary: false,
+            too_large: true,
+          });
+        }
+        std::fs::read(&full).map_err(AppError::Io)?
+      }
+    };
+
+    let size = contents.len() as f64;
+    if contents.contains(&0) {
+      return Ok(FileContent {
+        path,
+        text: String::new(),
+        line_count: 0,
+        size,
+        binary: true,
+        too_large: false,
+      });
+    }
+
+    let text = String::from_utf8_lossy(&contents).into_owned();
+    let line_count = if text.is_empty() {
+      0
+    } else {
+      text.lines().count() as u32
+    };
+
+    Ok(FileContent {
+      path,
+      text,
+      line_count,
+      size,
+      binary: false,
+      too_large: false,
     })
   })
   .await
