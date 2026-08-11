@@ -13,9 +13,25 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The unpacked bundle, or None when the tools have not been fetched.
+/// The unpacked toolset, or None when the tools have not been fetched.
+///
+/// `GITWYRM_TOOLSET_DIR` overrides the location, which is what CI uses: the
+/// tools are staged outside `resources/` there so they never enter the NSIS
+/// bundle. Relative paths resolve against the repo root (the manifest's
+/// parent), since that is where the workflow's working directory sits.
 fn bundle() -> Option<PathBuf> {
-  let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
+  let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+  let root = match std::env::var_os("GITWYRM_TOOLSET_DIR") {
+    Some(dir) => {
+      let dir = PathBuf::from(dir);
+      if dir.is_absolute() {
+        dir
+      } else {
+        manifest.parent().unwrap_or(manifest).join(dir)
+      }
+    }
+    None => manifest.join("resources"),
+  };
   root.join("git/cmd/git.exe").is_file().then_some(root)
 }
 

@@ -171,32 +171,54 @@ jobs:
 
       # GitWyrm ships its own git and gpg so a clean Windows machine can clone,
       # commit, sign, and push with nothing else installed. Fetched fresh on
-      # every release rather than committed, so each build carries the current
+      # every release rather than committed, so each build picks up the current
       # upstream version. At runtime a system install still wins; see
       # src-tauri/src/git/bundled.rs.
-      - name: Fetch bundled git and gpg
+      #
+      # Staged OUTSIDE src-tauri/resources on purpose. Anything under resources/
+      # goes through the NSIS resources loop, which deletes and re-extracts every
+      # file on every app update - 408 files, 103 MB, for tools that change about
+      # once a month. They are published to the CDN below and fetched by the
+      # installer instead.
+      - name: Fetch git and gpg
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x .github/scripts/*.sh
-          .github/scripts/fetch-bundled-tools.sh ${{ matrix.arch }} src-tauri/resources
+          .github/scripts/fetch-bundled-tools.sh ${{ matrix.arch }} toolset-staging
 
-      # Proves the bundle can actually sign a commit. fetch-bundled-tools.sh
+      # Proves the toolset can actually sign a commit. fetch-bundled-tools.sh
       # copies only the MSYS libraries GnuPG needs rather than all 73 in usr/bin;
       # this is what catches an incomplete list, before it reaches a user.
-      # Skipped when cross-compiling, where the bundled binaries cannot run.
-      - name: Verify the bundled tools can sign a commit
+      # Skipped when cross-compiling, where the fetched binaries cannot run.
+      - name: Verify the toolset can sign a commit
         if: matrix.arch == 'x86_64'
         shell: pwsh
-        run: .github/scripts/smoke-test-bundled-tools.ps1 src-tauri/resources
+        run: .github/scripts/smoke-test-bundled-tools.ps1 toolset-staging
 
-      # Checks the bundle's shape (agent, pinentry, credential manager present)
+      # Checks the toolset's shape (agent, pinentry, credential manager present)
       # rather than just that git.exe starts. Cheap, and catches an upstream
       # layout change that would otherwise ship broken.
-      - name: Check the bundle contents
+      - name: Check the toolset contents
         if: matrix.arch == 'x86_64'
+        env:
+          GITWYRM_TOOLSET_DIR: toolset-staging
         run: cargo test --manifest-path src-tauri/Cargo.toml --test bundled_tools -- --ignored
+
+      # Publishes the toolset only when its upstream version differs from what
+      # the CDN already serves, so a GitWyrm release whose tools did not move
+      # costs nothing and leaves the hash clients cached alone. A new Git for
+      # Windows release is therefore picked up by the next GitWyrm release.
+      - name: Publish the toolset to the CDN
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          pip install awscli
+          .github/scripts/publish-toolset.sh ${{ matrix.arch }} toolset-staging
 
       - name: Build and release (NSIS + updater manifest)
         uses: tauri-apps/tauri-action@v1
