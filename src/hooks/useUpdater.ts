@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { commands } from "@/lib/bindings";
+import { clearSplashBar, setSplashBar } from "@/lib/splash";
 
 export type UpdateState =
   | "idle"
@@ -61,16 +62,35 @@ function skipInDev(
   return true;
 }
 
+/**
+ * Download and install, narrating progress in a toast.
+ *
+ * The toast is updated in place by id rather than stacking a new one per
+ * chunk. On Windows `installUpdate()` never returns -- the process exits inside
+ * it -- so the last thing the user sees here is the download completing, and
+ * the helper window takes over from there.
+ */
 async function runInstall(
   version: string,
   set: (s: Partial<UpdaterStore>) => void,
 ) {
   set({ state: "downloading", version });
-  await installUpdate();
+
+  const toastId = `update-${version}`;
+  toast.loading(`Downloading update ${version}`, { id: toastId });
+
+  const unlisten = await watchDownload(
+    (message) => toast.loading(message, { id: toastId }),
+    () => {},
+  );
+  try {
+    await installUpdate();
+  } finally {
+    unlisten();
+  }
+
   set({ state: "ready" });
-  toast(`Update ${version} installed - restarting...`);
-  const { relaunch } = await import("@tauri-apps/plugin-process");
-  await relaunch();
+  toast.loading("Restarting to finish the update", { id: toastId });
 }
 
 /**
@@ -92,6 +112,43 @@ async function fetchUpdate(): Promise<string | null> {
 async function installUpdate(): Promise<void> {
   const res = await commands.installUpdate();
   if (res.status === "error") throw new Error(res.error);
+}
+
+/** Event name the backend emits download progress on. Matches updates.rs. */
+const UPDATE_PROGRESS_EVENT = "update://progress";
+
+interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
+}
+
+/** "4.2 MB", for the download line. */
+function formatMb(bytes: number): string {
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+/**
+ * Narrate the download, and hand back an unsubscribe.
+ *
+ * Reports through the same `onStatus`/bar pair the splash already uses, so this
+ * works whether the caller is the launch splash or a future in-app surface.
+ */
+async function watchDownload(
+  onStatus: (message: string) => void,
+  onFraction: (fraction: number | null) => void,
+): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<UpdateProgress>(UPDATE_PROGRESS_EVENT, ({ payload }) => {
+    const { downloaded, total } = payload;
+    if (total && total > 0) {
+      onStatus(`Downloading ${formatMb(downloaded)} of ${formatMb(total)}`);
+      onFraction(downloaded / total);
+    } else {
+      // No Content-Length: report what has arrived, and let the bar shuttle.
+      onStatus(`Downloading ${formatMb(downloaded)}`);
+      onFraction(null);
+    }
+  });
 }
 
 /**
@@ -201,15 +258,26 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
       }
 
       set({ state: "downloading", version });
-      onStatus(`Installing update ${version}`);
-      // Deliberately not wrapped in withTimeout: downloading an installer over
-      // a slow link legitimately takes longer than the check budget, and
-      // abandoning it mid-write is how you get a half-installed app.
-      await installUpdate();
+      onStatus(`Downloading update ${version}`);
+
+      const unlisten = await watchDownload(onStatus, setSplashBar);
+      try {
+        // Deliberately not wrapped in withTimeout: downloading an installer over
+        // a slow link legitimately takes longer than the check budget, and
+        // abandoning it mid-write is how you get a half-installed app.
+        //
+        // On Windows this call does not return: the updater hands the installer
+        // to ShellExecute and then calls std::process::exit(0). The lines below
+        // are for platforms whose install path does return -- and as a safety
+        // net if that ever changes.
+        await installUpdate();
+      } finally {
+        unlisten();
+        clearSplashBar();
+      }
+
       set({ state: "ready" });
       onStatus("Restarting to finish the update");
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      await relaunch();
     } catch {
       // A failed update must never keep someone out of their repositories:
       // fall through to a normal boot and let them retry from Settings.

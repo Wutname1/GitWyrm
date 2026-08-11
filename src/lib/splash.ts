@@ -24,6 +24,35 @@ export function setSplashProgress(done: number, total: number) {
 }
 
 /**
+ * Drive the download bar.
+ *
+ * `fraction` is 0..1, or null when the server declared no Content-Length -- in
+ * which case the bar shuttles rather than claiming a percentage it cannot know.
+ */
+export function setSplashBar(fraction: number | null) {
+  const splash = el()
+  const fill = document.getElementById('splash-progress-fill')
+  if (!splash || !fill) return
+
+  if (fraction === null) {
+    splash.dataset.progress = 'indeterminate'
+    return
+  }
+
+  splash.dataset.progress = 'true'
+  const pct = Math.max(0, Math.min(1, fraction)) * 100
+  fill.style.width = `${pct}%`
+}
+
+/** Hide the download bar and reset it, once the download is done. */
+export function clearSplashBar() {
+  const splash = el()
+  if (splash) delete splash.dataset.progress
+  const fill = document.getElementById('splash-progress-fill')
+  if (fill) fill.style.width = '0%'
+}
+
+/**
  * Fade the splash out and remove it. Safe to call more than once.
  *
  * The rAF pair lets React paint before the cover lifts, but it is only a

@@ -176,6 +176,53 @@
         text-align: center;
       }
 
+      /*
+        The download bar. Absent from the layout until an update is actually
+        downloading, so a normal boot keeps the composition it has always had
+        rather than reserving a gap for a bar that never appears.
+      */
+      #splash-progress {
+        display: none;
+        width: min(calc(var(--splash-size) * 1.15), 78vw);
+        height: 3px;
+        border-radius: 999px;
+        background: rgba(29, 181, 132, 0.16);
+        overflow: hidden;
+      }
+
+      #splash[data-progress='true'] #splash-progress {
+        display: block;
+      }
+
+      #splash-progress-fill {
+        width: 0%;
+        height: 100%;
+        border-radius: inherit;
+        background: #1db584;
+        /* Chunked progress arrives in steps; ease between them so the bar
+           glides rather than ticking. */
+        transition: width 220ms ease-out;
+      }
+
+      /*
+        No Content-Length means no percentage to show, so the bar slides as an
+        indeterminate shuttle instead of sitting at zero looking stalled.
+      */
+      #splash[data-progress='indeterminate'] #splash-progress-fill {
+        width: 34%;
+        animation: splash-shuttle 1.5s ease-in-out infinite;
+        transition: none;
+      }
+
+      @keyframes splash-shuttle {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(295%);
+        }
+      }
+
       @keyframes splash-spin {
         to {
           transform: rotate(360deg);
@@ -229,6 +276,16 @@
         .splash-graph .trace {
           stroke-dasharray: none;
         }
+        /*
+          The rule above stops the shuttle mid-track, which would read as a
+          stalled download. With no motion available, fill the bar instead: a
+          solid accent track says "working" without implying a percentage.
+        */
+        #splash[data-progress='indeterminate'] #splash-progress-fill {
+          width: 100%;
+          transform: none;
+          opacity: 0.55;
+        }
       }
     </style>
   </head>
@@ -258,6 +315,14 @@
         <circle cx="76" cy="8" r="3.5" />
         <circle cx="124" cy="22" r="3.5" />
       </svg>
+      <!--
+        Shown only while an update downloads. aria-hidden because the status
+        line above already announces the same progress in words, and a live
+        percentage would otherwise be read out on every tick.
+      -->
+      <div id="splash-progress" aria-hidden="true">
+        <div id="splash-progress-fill"></div>
+      </div>
       <!--
         Seeded here so the line is never blank while settings load; lib/splash.ts
         swaps in "Reopening N of M repositories" once the restore knows the count.
