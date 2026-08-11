@@ -57,8 +57,18 @@ PUBLIC="https://cdn.gitwyrm.com/tools/$ARCH"
 # already cached. Compared by version rather than by hashing the tree, because
 # the archive is not reproducible byte-for-byte (timestamps).
 if [ "$DRY_RUN" != "--dry-run" ]; then
-  PUBLISHED="$(curl -fsSL "$PUBLIC/toolset.json" 2>/dev/null \
+  # Cache-busted deliberately. The manifest is served no-store, but an edge or a
+  # runner-side proxy can still hold a copy, and a stale read here is the one
+  # that hurts: it would republish an unchanged toolset, changing the archive
+  # bytes and its hash while clients are mid-download against the old one.
+  PUBLISHED="$(curl -fsSL -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+    "$PUBLIC/toolset.json?t=$(date +%s)" 2>/dev/null \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))' 2>/dev/null || true)"
+
+  # An unreadable manifest (404, malformed, offline) falls through to
+  # publishing. That is the safe direction: shipping a toolset nobody needed
+  # costs bandwidth, whereas skipping one that was actually missing leaves a
+  # clean machine with no git.
   if [ "$PUBLISHED" = "$VERSION" ]; then
     echo "CDN already serves $VERSION for $ARCH - nothing to publish."
     exit 0
@@ -68,6 +78,16 @@ fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+
+# Self-check before touching the CDN. Cheap, and the properties it guards
+# (skip-before-pack, uncached version read, per-arch paths, archive-before-
+# manifest) all fail silently in ways a green build would hide.
+if [ -x "$(dirname "$0")/test-publish-toolset.sh" ]; then
+  "$(dirname "$0")/test-publish-toolset.sh" >/dev/null || {
+    echo "::error::publish-toolset self-check failed; refusing to publish"
+    exit 1
+  }
+fi
 
 # ---------------------------------------------------------------------- pack
 # tar.xz, not zip: measured on the real tree, xz gets 103.5 MB down to 29.0 MB
