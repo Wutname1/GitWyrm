@@ -160,13 +160,45 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Fetch bundled git and gpg
+      # The window that covers the gap between the old app exiting and the new
+      # one starting. Betas update far more often than releases, so this is the
+      # channel where its absence would be most obvious -- and where it gets
+      # tested before a release depends on it.
+      - name: Build the update cover helper
+        shell: bash
+        run: |
+          cargo build --release --target ${{ matrix.rust_target }} \
+            --manifest-path src-tauri/bootstrapper/Cargo.toml
+          mkdir -p src-tauri/resources
+          cp "src-tauri/bootstrapper/target/${{ matrix.rust_target }}/release/gitwyrm-setup.exe" \
+            src-tauri/resources/gitwyrm-setup.exe
+
+      # Staged OUTSIDE src-tauri/resources, matching release.yml: anything under
+      # resources/ goes through the NSIS resources loop, which deletes and
+      # re-extracts every file on every app update. The tools are published to
+      # the CDN below and fetched by the bootstrapper instead.
+      - name: Fetch git and gpg
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x .github/scripts/*.sh
-          .github/scripts/fetch-bundled-tools.sh ${{ matrix.arch }} src-tauri/resources
+          .github/scripts/fetch-bundled-tools.sh ${{ matrix.arch }} toolset-staging
+
+      # Betas and releases share one toolset: it is keyed by the upstream Git for
+      # Windows tag, not by the GitWyrm version, so whichever channel ships a new
+      # upstream git first publishes it and the other skips. Without this a beta
+      # tester on a clean machine would have no git at all -- the manifest the
+      # app and bootstrapper both read would be missing or stale.
+      - name: Publish the toolset to the CDN
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          pip install --quiet awscli
+          .github/scripts/publish-toolset.sh ${{ matrix.arch }} toolset-staging
 
       # No tagName/releaseName: without them tauri-action builds and signs the
       # bundle but creates no GitHub release, which is the whole point here.
