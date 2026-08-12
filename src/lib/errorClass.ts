@@ -136,8 +136,28 @@ function stripGitDiagnostics(raw: string): string {
     .trim()
 }
 
+/**
+ * Marks where an actionable sentence ends and its diagnostics begin.
+ *
+ * Kept in step with `DETAIL_SEPARATOR` in `src-tauri/src/git/commit_write.rs`.
+ */
+const DETAIL_SEPARATOR = '\n␞\n'
+
 export function classifyError(e: unknown): ClassifiedError {
   const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : String(e)
+
+  // A backend message may carry its diagnostics behind the separator. The toast
+  // gets the sentence; `raw` keeps everything, so the log and the copy button
+  // still have the full text to diagnose from.
+  const at = raw.indexOf(DETAIL_SEPARATOR)
+  if (at !== -1) {
+    return {
+      severity: 'error',
+      message: raw.slice(0, at).trim(),
+      raw: `${raw.slice(0, at).trim()}\n\n${raw.slice(at + DETAIL_SEPARATOR.length).trim()}`,
+    }
+  }
+
   const lower = raw.toLowerCase()
 
   for (const rule of RULES) {

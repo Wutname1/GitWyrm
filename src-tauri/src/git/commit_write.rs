@@ -169,8 +169,20 @@ fn rfc2822_ish(sig: &git2::Signature<'_>) -> String {
 fn signing_failure_message(stderr: &str) -> String {
   let lower = stderr.to_lowercase();
 
-  let hint = if lower.contains("secret key not available") || lower.contains("no secret key") {
-    "The signing key set for this repository is missing. Pick a different key in Settings > Security, or turn signing off."
+  let hint = if lower.contains("secret key not available")
+    || lower.contains("no secret key")
+    // gpg reports a key it cannot find as a skipped signer rather than a
+    // missing secret key. The status line is the reliable marker: `INV_SGNR`
+    // means "invalid signer", whatever errno it decided to pair with it.
+    || lower.contains("inv_sgnr")
+    || lower.contains("skipped")
+  {
+    "The signing key this repository uses is missing. Pick a different key in Settings > Security, or turn signing off."
+  } else if lower.contains("keyboxd") || lower.contains("no keybox daemon") {
+    // gpg could not reach its own key database. Almost always a relocated gpg
+    // resolving POSIX paths that do not exist on Windows, which reads to the
+    // user as a broken key when the key is fine.
+    "GitWyrm could not reach your keyring to sign this commit. Open Settings > Security and check the gpg it is using, or turn signing off."
   } else if lower.contains("no pinentry") || lower.contains("no agent running") {
     "Your signing key needs a passphrase but nothing could ask you for it. Try again, or turn signing off in Settings > Security."
   } else if lower.contains("failed to sign") || lower.contains("gpg") || lower.contains("ssh") {
@@ -179,8 +191,18 @@ fn signing_failure_message(stderr: &str) -> String {
     "Your commit could not be created."
   };
 
-  format!("{hint}\n\n{stderr}")
+  // The raw text stays on the error so the log and the copy button keep a real
+  // diagnosis, but it goes after a marker the UI splits on. Concatenating it
+  // straight onto the hint put a screenful of gpg internals in a toast, which
+  // nobody reads and which buried the one sentence that said what to do.
+  format!("{hint}{DETAIL_SEPARATOR}{stderr}")
 }
+
+/// Separates the sentence a user acts on from the diagnostics behind it.
+///
+/// Deliberately not a bare blank line: plenty of messages contain those, and
+/// splitting on one would truncate them mid-sentence.
+pub const DETAIL_SEPARATOR: &str = "\n\u{241E}\n";
 
 /// Point a reference at `oid`, following it first if it is symbolic.
 ///
@@ -300,6 +322,57 @@ mod tests {
       &git2::Time::new(1_700_000_000, offset_minutes),
       )
     .unwrap()
+  }
+
+  /// The real stderr from the report that prompted this: gpg reports a key it
+  /// cannot find as a skipped signer, not as a missing secret key, so the
+  /// original matcher fell through to the vague catch-all.
+  const MISSING_KEY_STDERR: &str = "\
+error: gpg failed to sign the data:
+gpg: skipped \"32BD8D9B66ABAD8B\": Input/output error
+[GNUPG:] INV_SGNR 0 32BD8D9B66ABAD8B
+gpg: signing failed: Input/output error";
+
+  #[test]
+  fn a_skipped_signer_is_reported_as_a_missing_key() {
+    let msg = signing_failure_message(MISSING_KEY_STDERR);
+    let hint = msg.split(DETAIL_SEPARATOR).next().unwrap();
+    assert!(
+      hint.contains("no longer exists") || hint.contains("is missing"),
+      "expected a missing-key hint, got: {hint}"
+    );
+  }
+
+  #[test]
+  fn the_hint_is_one_short_sentence_not_a_wall_of_gpg_output() {
+    let msg = signing_failure_message(MISSING_KEY_STDERR);
+    let hint = msg.split(DETAIL_SEPARATOR).next().unwrap();
+    // The whole point: a toast shows this, so gpg internals must not be in it.
+    assert!(!hint.contains("gpg:"), "raw gpg output leaked: {hint}");
+    assert!(!hint.contains("GNUPG"), "status lines leaked: {hint}");
+    assert!(hint.len() < 200, "hint is too long for a toast: {hint}");
+  }
+
+  /// The details still have to survive -- the log and the copy button need a
+  /// real diagnosis, they just must not be in the headline.
+  #[test]
+  fn the_raw_diagnostics_are_kept_behind_the_separator() {
+    let msg = signing_failure_message(MISSING_KEY_STDERR);
+    let (_, detail) = msg.split_once(DETAIL_SEPARATOR).expect("separator present");
+    assert!(detail.contains("INV_SGNR"));
+    assert!(detail.contains("32BD8D9B66ABAD8B"));
+  }
+
+  #[test]
+  fn a_broken_keyring_is_named_rather_than_blamed_on_the_key() {
+    // gpg could not reach its key database. The key is fine; saying "check your
+    // signing key" sends the user to fix something that is not broken.
+    let msg = signing_failure_message(
+      "gpg: error running '/usr/lib/gnupg/keyboxd': probably not installed\n\
+       gpg: can't connect to the keyboxd: Configuration error",
+    );
+    let hint = msg.split(DETAIL_SEPARATOR).next().unwrap();
+    assert!(hint.contains("keyring"), "got: {hint}");
   }
 
   #[test]

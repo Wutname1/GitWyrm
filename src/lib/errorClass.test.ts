@@ -51,3 +51,36 @@ describe('a push with nowhere to go', () => {
     expect(classifyError(new Error(raw)).raw).toContain(raw)
   })
 })
+
+describe('a backend message carrying diagnostics', () => {
+  // What the commit path now sends: one actionable sentence, then the raw gpg
+  // output behind the separator.
+  const SEPARATOR = '\n␞\n'
+  const HINT =
+    'The signing key this repository uses is missing. Pick a different key in Settings > Security, or turn signing off.'
+  const DETAIL = [
+    'error: gpg failed to sign the data:',
+    'gpg: skipped "32BD8D9B66ABAD8B": Input/output error',
+    '[GNUPG:] INV_SGNR 0 32BD8D9B66ABAD8B',
+  ].join('\n')
+
+  it('shows only the sentence, not the gpg wall', () => {
+    const { message } = classifyError(new Error(`${HINT}${SEPARATOR}${DETAIL}`))
+    expect(message).toBe(HINT)
+    expect(message).not.toMatch(/gpg:/)
+    expect(message).not.toMatch(/GNUPG/)
+  })
+
+  it('keeps the diagnostics on raw for the log and the copy button', () => {
+    const { raw } = classifyError(new Error(`${HINT}${SEPARATOR}${DETAIL}`))
+    expect(raw).toContain('INV_SGNR')
+    expect(raw).toContain('32BD8D9B66ABAD8B')
+    // The separator itself is an internal marker and should never be shown.
+    expect(raw).not.toContain('␞')
+  })
+
+  it('leaves an ordinary message alone', () => {
+    const { message } = classifyError(new Error('Something ordinary broke.'))
+    expect(message).toBe('Something ordinary broke.')
+  })
+})
