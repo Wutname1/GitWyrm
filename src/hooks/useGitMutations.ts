@@ -17,7 +17,7 @@ import {
   type ResetMode,
   type SelectedLine,
 } from '@/lib/bindings'
-import { keys, trimLogToFirstPage, unwrap } from '@/lib/queryKeys'
+import { beginGitOperation, keys, trimLogToFirstPage, unwrap } from '@/lib/queryKeys'
 import { useHostResolver } from '@/hooks/useGitQueries'
 import { noteManualFetch } from '@/hooks/useAutoFetch'
 import { classifyError } from '@/lib/errorClass'
@@ -42,6 +42,22 @@ type QueryName =
 interface FolderFilesArgs {
   folder: string
   paths: string[]
+}
+
+/**
+ * Runs a merge/pick/revert with the repo marked busy, so the file watcher does
+ * not cache the operation's own half-written state as the result. See
+ * `beginGitOperation`. Wraps the whole call including the throw path, or a
+ * failure would leave the repo permanently marked busy and stop `mergeState`
+ * ever refreshing from the watcher again.
+ */
+async function asGitOperation<T>(repoId: string, run: () => Promise<T>): Promise<T> {
+  const done = beginGitOperation(repoId)
+  try {
+    return await run()
+  } finally {
+    done()
+  }
 }
 
 /**
@@ -1047,10 +1063,11 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const merge = useMutation({
-    mutationFn: async (reference: string) => ({
-      reference,
-      result: unwrap(await commands.mergeBranch(id, reference)),
-    }),
+    mutationFn: (reference: string) =>
+      asGitOperation(id, async () => ({
+        reference,
+        result: unwrap(await commands.mergeBranch(id, reference)),
+      })),
     onSuccess: ({ reference, result }) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
       if (result.up_to_date) {
@@ -1069,10 +1086,11 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const mergeDirectional = useMutation({
-    mutationFn: async (args: { target: string; source: string }) => ({
-      ...args,
-      result: unwrap(await commands.mergeDirectional(id, args.target, args.source)),
-    }),
+    mutationFn: (args: { target: string; source: string }) =>
+      asGitOperation(id, async () => ({
+        ...args,
+        result: unwrap(await commands.mergeDirectional(id, args.target, args.source)),
+      })),
     onSuccess: ({ target, source, result }) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
       if (result.up_to_date) {
@@ -1091,10 +1109,11 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const cherryPick = useMutation({
-    mutationFn: async (sha: string) => ({
-      sha,
-      result: unwrap(await commands.cherryPick(id, sha)),
-    }),
+    mutationFn: (sha: string) =>
+      asGitOperation(id, async () => ({
+        sha,
+        result: unwrap(await commands.cherryPick(id, sha)),
+      })),
     onSuccess: ({ sha, result }) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
       const short = shortSha(sha)
@@ -1229,10 +1248,11 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const revertCommit = useMutation({
-    mutationFn: async (sha: string) => ({
-      sha,
-      result: unwrap(await commands.revertCommit(id, sha)),
-    }),
+    mutationFn: (sha: string) =>
+      asGitOperation(id, async () => ({
+        sha,
+        result: unwrap(await commands.revertCommit(id, sha)),
+      })),
     onSuccess: ({ sha, result }) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
       const short = shortSha(sha)
@@ -1260,18 +1280,24 @@ export function useGitMutations(repoId: string | null) {
   // land in their original order. The first conflict stops the loop: the
   // shared conflict flow takes over that pick and the rest stay unapplied.
   const cherryPickMany = useMutation({
-    mutationFn: async (shas: string[]) => {
-      const ordered = [...shas].reverse()
-      let done = 0
-      for (const sha of ordered) {
-        const result = unwrap(await commands.cherryPick(id, sha))
-        if (result.conflicts.length > 0) {
-          return { done, total: ordered.length, conflictSha: sha, conflicts: result.conflicts.length }
+    mutationFn: (shas: string[]) =>
+      asGitOperation(id, async () => {
+        const ordered = [...shas].reverse()
+        let done = 0
+        for (const sha of ordered) {
+          const result = unwrap(await commands.cherryPick(id, sha))
+          if (result.conflicts.length > 0) {
+            return {
+              done,
+              total: ordered.length,
+              conflictSha: sha,
+              conflicts: result.conflicts.length,
+            }
+          }
+          done++
         }
-        done++
-      }
-      return { done, total: ordered.length, conflictSha: null as string | null, conflicts: 0 }
-    },
+        return { done, total: ordered.length, conflictSha: null as string | null, conflicts: 0 }
+      }),
     onSuccess: (r) => {
       if (r.conflictSha) {
         toast.warning(
@@ -1291,17 +1317,18 @@ export function useGitMutations(repoId: string | null) {
   // later commits haven't touched yet. Same stop-at-first-conflict shape as
   // cherryPickMany.
   const revertMany = useMutation({
-    mutationFn: async (shas: string[]) => {
-      let done = 0
-      for (const sha of shas) {
-        const result = unwrap(await commands.revertCommit(id, sha))
-        if (result.conflicts.length > 0) {
-          return { done, total: shas.length, conflictSha: sha, conflicts: result.conflicts.length }
+    mutationFn: (shas: string[]) =>
+      asGitOperation(id, async () => {
+        let done = 0
+        for (const sha of shas) {
+          const result = unwrap(await commands.revertCommit(id, sha))
+          if (result.conflicts.length > 0) {
+            return { done, total: shas.length, conflictSha: sha, conflicts: result.conflicts.length }
+          }
+          done++
         }
-        done++
-      }
-      return { done, total: shas.length, conflictSha: null as string | null, conflicts: 0 }
-    },
+        return { done, total: shas.length, conflictSha: null as string | null, conflicts: 0 }
+      }),
     onSuccess: (r) => {
       if (r.conflictSha) {
         toast.warning(
@@ -1360,7 +1387,7 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const abortMerge = useMutation({
-    mutationFn: async () => unwrap(await commands.abortMerge(id)),
+    mutationFn: () => asGitOperation(id, async () => unwrap(await commands.abortMerge(id))),
     onSuccess: () => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
       toast('Operation aborted')
@@ -1379,7 +1406,8 @@ export function useGitMutations(repoId: string | null) {
   })
 
   const commitMerge = useMutation({
-    mutationFn: async (message: string) => unwrap(await commands.commitMerge(id, message)),
+    mutationFn: (message: string) =>
+      asGitOperation(id, async () => unwrap(await commands.commitMerge(id, message))),
     onSuccess: (sha) => {
       invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
       toast(`Committed ${shortSha(sha)}`)

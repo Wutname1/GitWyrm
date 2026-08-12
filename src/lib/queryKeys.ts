@@ -45,6 +45,35 @@ export const keys = {
 }
 
 /**
+ * Repos with a merge/cherry-pick/revert running right now, by id.
+ *
+ * A git operation is several file writes, not one: `cherrypick` drops
+ * CHERRY_PICK_HEAD and MERGE_MSG and rewrites the working tree, and only then
+ * does the command commit the result and clear that state. Every one of those
+ * writes wakes the file watcher, so a refetch landing mid-operation reads a
+ * half-finished repository and caches "merge in progress, no conflicts" as
+ * though it were the outcome -- which is what put a stale "ready to commit"
+ * banner on screen after a pick that had already committed.
+ *
+ * Deliberately a module-level set rather than store or ref state: the watcher
+ * callback and the mutations both need it, it must be readable synchronously
+ * from inside an event handler, and a change to it should never re-render
+ * anything. The mutation that adds an id is responsible for removing it and
+ * invalidating afterwards, so the settled state is always read exactly once.
+ */
+const operationsInFlight = new Set<string>()
+
+/** Marks an operation as running; returns the matching release function. */
+export function beginGitOperation(repoId: string): () => void {
+  operationsInFlight.add(repoId)
+  return () => operationsInFlight.delete(repoId)
+}
+
+export function isGitOperationInFlight(repoId: string): boolean {
+  return operationsInFlight.has(repoId)
+}
+
+/**
  * Refresh everything derived from a repo's `openspec/` folder.
  *
  * Called both after our own writes and when the watcher reports an external

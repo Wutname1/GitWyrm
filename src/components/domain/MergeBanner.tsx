@@ -32,10 +32,19 @@ export function MergeBanner() {
   if (!state?.merging || !state.operation) return null
 
   const isRebase = state.operation === 'Rebase'
-  const copy = COPY[state.operation]
-
   const conflicts = state.conflicts
   const remaining = conflicts.length
+
+  // The banner exists for one job: hold the screen while conflicts get cleaned
+  // up. A merge, cherry-pick, or revert that applied cleanly is already
+  // committed by the time it returns, so there is nothing to ask for -- showing
+  // a bar would both nag about finished work and, because the file watcher can
+  // read the operation's own mid-flight state, sometimes describe a step that
+  // already happened. A rebase is the exception: it stops between commits by
+  // design and genuinely needs a "continue" control.
+  if (remaining === 0 && !isRebase) return null
+
+  const copy = COPY[state.operation]
   const label = incomingName(state.incoming_label)
 
   const finishPending = m.commitMerge.isPending || m.rebaseContinue.isPending

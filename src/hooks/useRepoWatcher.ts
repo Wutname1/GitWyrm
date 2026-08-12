@@ -1,7 +1,12 @@
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { listen } from '@tauri-apps/api/event'
-import { invalidateOpenspec, keys, trimLogToFirstPage } from '@/lib/queryKeys'
+import {
+  invalidateOpenspec,
+  isGitOperationInFlight,
+  keys,
+  trimLogToFirstPage,
+} from '@/lib/queryKeys'
 
 interface RepoChangedPayload {
   repo_id: string
@@ -36,7 +41,13 @@ export function useRepoWatcher(onlyRepoId?: string | null) {
       queryClient.invalidateQueries({ queryKey: keys.branches(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.stashes(repoId) })
       queryClient.invalidateQueries({ queryKey: keys.tags(repoId) })
-      queryClient.invalidateQueries({ queryKey: keys.mergeState(repoId) })
+      // Skipped while one of our own merges/picks is mid-flight: the writes
+      // waking this watcher are that operation's intermediate state, and
+      // caching it would leave a banner describing a step already finished. The
+      // mutation invalidates once it settles, so the real outcome still lands.
+      if (!isGitOperationInFlight(repoId)) {
+        queryClient.invalidateQueries({ queryKey: keys.mergeState(repoId) })
+      }
       // A worktree added or removed in a terminal lands in `.git/worktrees`,
       // which the backend watcher now reports. Invalidating here is what makes
       // the section appear (or a row disappear) while the window is open and

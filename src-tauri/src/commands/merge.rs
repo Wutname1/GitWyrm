@@ -98,15 +98,59 @@ fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, App
     return Ok(MergeResult { up_to_date: false, fast_forwarded: true, conflicts: Vec::new() });
   }
 
-  // Normal merge: write conflicts into the working tree/index. The frontend
-  // resolves them and creates the merge commit via the normal commit flow.
+  // Normal merge: write the merged result into the working tree/index.
   let mut opts = MergeOptions::new();
   let mut checkout = CheckoutBuilder::new();
   checkout.allow_conflicts(true).conflict_style_merge(true);
   repo.merge(&[&annotated], Some(&mut opts), Some(&mut checkout))?;
 
   let conflicts = refs::conflicted_paths(repo)?;
-  Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts })
+  if !conflicts.is_empty() {
+    // Leave MERGE_HEAD and the conflicted index in place for the conflict flow
+    // to resolve and finish.
+    return Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts });
+  }
+
+  // A merge that applied cleanly is finished here rather than left staged: the
+  // user asked to merge, so merging is the whole action. Only conflicts earn a
+  // second step.
+  let mut index = repo.index()?;
+  let tree = repo.find_tree(index.write_tree()?)?;
+  let committer = repo.signature()?;
+  let head_commit = repo.head()?.peel_to_commit()?;
+  let merge_commit = repo.find_commit(annotated.id())?;
+  let message = merge_message(repo, reference);
+  let identity = CommitIdentity {
+    author: committer.clone(),
+    committer,
+  };
+  commit_write::create(
+    repo,
+    &commit_write::workdir_of(repo),
+    Some("HEAD"),
+    &identity,
+    &message,
+    &tree,
+    &[&head_commit, &merge_commit],
+  )?;
+  repo.cleanup_state()?;
+
+  // The merged tree may move submodule pointers the nested checkouts have not
+  // followed; without this the merge "succeeds" and leaves the repo dirty.
+  crate::git::submodule::sync_submodule_workdirs(repo);
+
+  Ok(MergeResult { up_to_date: false, fast_forwarded: false, conflicts: Vec::new() })
+}
+
+/// The message for an auto-committed merge. Prefers the MERGE_MSG git2 prepared
+/// (it carries the same "Merge branch 'x'" wording git itself would use) and
+/// falls back to building one from the ref name.
+fn merge_message(repo: &git2::Repository, reference: &str) -> String {
+  std::fs::read_to_string(repo.path().join("MERGE_MSG"))
+    .ok()
+    .map(|m| m.trim_end().to_string())
+    .filter(|m| !m.is_empty())
+    .unwrap_or_else(|| format!("Merge '{reference}'"))
 }
 
 #[tauri::command]
