@@ -120,9 +120,79 @@ fn to_cygdrive(path: &Path) -> String {
 /// opens unix-style sockets inside this directory and silently refuses to
 /// start when the resulting socket path is too long ("socket name ... is too
 /// long"), which surfaces to the user as the useless "No agent running".
+///
+/// **Not under `%LOCALAPPDATA%\GitWyrm`.** That is the NSIS install directory,
+/// and an app update runs a full uninstall before reinstalling - so a signing
+/// key kept there is one uninstaller checkbox away from being deleted, and the
+/// user's commits stop verifying with no way back. `GitWyrm-Data` sits beside
+/// it: still short enough for the agent's socket, but nothing the installer
+/// touches.
 fn managed_gnupg_home() -> Option<PathBuf> {
   let base = dirs_local_app_data()?;
+  Some(base.join("GitWyrm-Data").join("gnupg"))
+}
+
+/// The pre-0.7.2 location, inside the install directory.
+///
+/// Kept only so an existing keyring can be moved out of harm's way; nothing
+/// should ever write here.
+fn legacy_gnupg_home() -> Option<PathBuf> {
+  let base = dirs_local_app_data()?;
   Some(base.join("GitWyrm").join("gnupg"))
+}
+
+/// Move an existing keyring out of the install directory, once.
+///
+/// Runs before anything reads the home, so a user who already has a signing key
+/// keeps it across the move. Deliberately a rename rather than a copy: two
+/// keyrings that drift apart would be worse than either alone, and leaving the
+/// original behind means the next uninstall still eats it.
+///
+/// Every failure here is non-fatal. The worst case is that signing carries on
+/// against the old location exactly as it does today, which is what happens
+/// anyway if this code is not reached.
+fn migrate_legacy_gnupg_home() {
+  let (Some(legacy), Some(current)) = (legacy_gnupg_home(), managed_gnupg_home()) else {
+    return;
+  };
+
+  // Nothing to move, or the move already happened.
+  if !legacy.join("pubring.kbx").is_file() || current.join("pubring.kbx").is_file() {
+    return;
+  }
+
+  if let Some(parent) = current.parent() {
+    if let Err(e) = std::fs::create_dir_all(parent) {
+      log::warn!("could not create the signing key directory: {e}");
+      return;
+    }
+  }
+
+  match std::fs::rename(&legacy, &current) {
+    Ok(()) => {
+      // gpg-agent's sockets carry the path they were created for, so the ones
+      // that travelled with the directory point at the old location. gpg reads
+      // them, fails to connect, and reports "problem with fast path key
+      // listing" - the key is fine, the socket is not. They are recreated on
+      // demand, so deleting them is free.
+      if let Ok(entries) = std::fs::read_dir(&current) {
+        for entry in entries.flatten() {
+          if entry.file_name().to_string_lossy().starts_with("S.") {
+            let _ = std::fs::remove_file(entry.path());
+          }
+        }
+      }
+      log::info!(
+        "moved signing keys out of the install directory: {} -> {}",
+        legacy.display(),
+        current.display()
+      )
+    }
+    Err(e) => log::warn!(
+      "could not move signing keys from {}: {e}",
+      legacy.display()
+    ),
+  }
 }
 
 /// `%LOCALAPPDATA%`, the shortest stable per-user writable root on Windows.
@@ -144,6 +214,11 @@ pub fn ensure_bundled_gpg_configured() -> Result<(), AppError> {
   if gpg_source() != ToolSource::Bundled {
     return Ok(());
   }
+
+  // Before the home is read: an existing keyring still sitting in the install
+  // directory has to come with us, or the user loses their key on the next
+  // update.
+  migrate_legacy_gnupg_home();
 
   let Some(home) = managed_gnupg_home() else {
     return Err(AppError::Other(
@@ -751,6 +826,40 @@ fpr:::::::::FEDCBA9876543210FEDCBA9876543210FEDCBA98:";
     // gpg parses "Name <email>"; an embedded bracket would corrupt the uid.
     assert!(generate_key("Ev<il", "a@b.com").is_err());
     assert!(generate_key("Name", "a@b.com>extra").is_err());
+  }
+
+  #[test]
+  fn signing_keys_live_outside_the_install_directory() {
+    // %LOCALAPPDATA%\GitWyrm is the NSIS $INSTDIR, and an update runs a full
+    // uninstall before reinstalling. A keyring kept there is one uninstaller
+    // checkbox away from deletion, and the user's commits stop verifying.
+    let (Some(home), Some(legacy)) = (managed_gnupg_home(), legacy_gnupg_home()) else {
+      return; // No LOCALAPPDATA in this environment.
+    };
+    assert_ne!(home, legacy, "the keyring must not sit in the install dir");
+
+    let install_dir = legacy.parent().expect("legacy home has a parent");
+    assert!(
+      !home.starts_with(install_dir),
+      "{} must not be under the install directory {}",
+      home.display(),
+      install_dir.display()
+    );
+  }
+
+  #[test]
+  fn the_gnupg_home_stays_short_enough_for_the_agent_socket() {
+    // gpg-agent opens unix-style sockets inside this directory and refuses to
+    // start when the path grows too long, surfacing as "No agent running".
+    let Some(home) = managed_gnupg_home() else {
+      return;
+    };
+    let len = home.to_string_lossy().chars().count();
+    assert!(
+      len < 80,
+      "GNUPGHOME is {len} chars ({}); the agent socket will not fit",
+      home.display()
+    );
   }
 
   #[test]
