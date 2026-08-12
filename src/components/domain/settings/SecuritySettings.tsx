@@ -127,12 +127,106 @@ function SigningSection({ repoPath }: { repoPath: string | null }) {
         />
       )}
 
+      {status?.missingSigningKey === true && (
+        <MissingKeyWarning repoPath={repoPath} status={status} onFixed={refresh} />
+      )}
+
       {status && status.keys.length === 0 ? (
         <CreateKeyForm repoPath={repoPath} onCreated={refresh} />
       ) : (
         status && <HasKey repoPath={repoPath} status={status} onChanged={refresh} />
       )}
     </Section>
+  )
+}
+
+/**
+ * Signing is on, but the key it names is not in the keyring.
+ *
+ * The worst version of this is silent: with no keys at all the panel used to
+ * show "Set up signing", so a repository failing every commit looked like one
+ * that had never been configured -- and the fix on offer (make a new key) was
+ * not the fix needed. Says which scope turned signing on, because a repository
+ * signing against a global default of off is exactly where people stop looking.
+ */
+function MissingKeyWarning({
+  repoPath,
+  status,
+  onFixed,
+}: {
+  repoPath: string
+  status: SigningStatus
+  onFixed: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+
+  const turnOff = async () => {
+    setBusy(true)
+    const res = await commands.setSigningEnabled(repoPath, false, null)
+    setBusy(false)
+    if (res.status === 'ok') {
+      toast.success('Signing is off. Your commits will go through now.')
+      onFixed()
+    } else {
+      toast.error(res.error)
+    }
+  }
+
+  const useInstead = async (key: SigningKey) => {
+    setBusy(true)
+    const res = await commands.setSigningEnabled(repoPath, true, key.id)
+    setBusy(false)
+    if (res.status === 'ok') {
+      toast.success('Signing now uses that key.')
+      onFixed()
+    } else {
+      toast.error(res.error)
+    }
+  }
+
+  return (
+    <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
+      <div className="flex items-start gap-3">
+        <AlertTriangle size={15} className="mt-0.5 flex-none text-amber-500" />
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-semibold text-foreground">
+            Your commits are being signed with a key that no longer exists
+          </div>
+          <div className="mt-0.5 text-2xs text-muted-foreground">
+            Signing is turned on
+            {status.signingScope != null ? ` in ${status.signingScope}` : ''} and set to use{' '}
+            <span className="font-mono text-foreground">{status.configuredKey}</span>, which is not
+            on this computer. Every commit here will fail until you pick another key or turn
+            signing off.
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {status.keys.map((k) => (
+              <Button
+                key={k.id}
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => void useInstead(k)}
+              >
+                <KeyRound size={12} />
+                Use {k.uid || k.id}
+              </Button>
+            ))}
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void turnOff()}>
+              Turn signing off
+            </Button>
+          </div>
+
+          {status.keys.length === 0 && (
+            <div className="mt-2 text-2xs text-muted-foreground">
+              There are no keys on this computer to switch to. Turn signing off, or make a key
+              below.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 

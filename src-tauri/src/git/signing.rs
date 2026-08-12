@@ -368,6 +368,16 @@ pub struct SigningStatus {
   /// real value and gpg rejects it, so signed commits fail until it is cleared.
   /// Repaired by the same button as `broken_format`.
   pub blank_signing_key: bool,
+  /// True when signing is on and `user.signingkey` names a key gpg cannot find.
+  ///
+  /// Every commit fails, and nothing on screen says why: the key list looks
+  /// normal (or empty), and the configured id matches nothing in it. Usually a
+  /// key that was deleted, or config copied from another machine.
+  pub missing_signing_key: bool,
+  /// Which scope turned signing on, when it is on. A repository can sign while
+  /// the global default is off, so reporting only the effective value leaves
+  /// the user hunting for a setting that is not where they are looking.
+  pub signing_scope: Option<String>,
 }
 
 /// Read the user's current signing configuration.
@@ -383,6 +393,14 @@ pub fn signing_status(repo_path: &str) -> SigningStatus {
     .map(|v| v.eq_ignore_ascii_case("true"))
     .unwrap_or(false);
 
+  // A configured key that gpg cannot see signs nothing. Compared loosely
+  // because git accepts a short id, a long id or a full fingerprint, and any of
+  // them may be what the user pasted.
+  let missing_signing_key = signing_enabled
+    && configured_key
+      .as_deref()
+      .is_some_and(|c| !c.is_empty() && !keys.iter().any(|k| key_matches(k, c)));
+
   SigningStatus {
     gpg_available: version.is_some(),
     gpg_source: gpg_source(),
@@ -392,7 +410,59 @@ pub fn signing_status(repo_path: &str) -> SigningStatus {
     configured_key,
     broken_format: detect_broken_format(repo_path),
     blank_signing_key: has_blank_signing_key(repo_path),
+    missing_signing_key,
+    signing_scope: signing_enabled.then(|| gpgsign_scope(repo_path)).flatten(),
   }
+}
+
+/// Whether a configured `user.signingkey` refers to this key.
+///
+/// Git takes a short id, a long id or a full fingerprint, so an exact match on
+/// the long id alone would call a perfectly good fingerprint "missing" and
+/// nag the user about a setup that works. Suffix matching is how gpg itself
+/// resolves a short id: they are all tails of the fingerprint.
+fn key_matches(key: &SigningKey, configured: &str) -> bool {
+  let configured = configured.trim().trim_start_matches("0x");
+  if configured.is_empty() {
+    return false;
+  }
+  let fpr = key.fingerprint.as_str();
+  let id = key.id.as_str();
+  fpr.eq_ignore_ascii_case(configured)
+    || id.eq_ignore_ascii_case(configured)
+    // A shorter configured value is a tail of the longer real one.
+    || (configured.len() < fpr.len() && ends_with_ignore_case(fpr, configured))
+    || (configured.len() < id.len() && ends_with_ignore_case(id, configured))
+}
+
+fn ends_with_ignore_case(haystack: &str, needle: &str) -> bool {
+  haystack
+    .len()
+    .checked_sub(needle.len())
+    .and_then(|at| haystack.get(at..))
+    .is_some_and(|tail| tail.eq_ignore_ascii_case(needle))
+}
+
+/// Which config scope switched signing on.
+///
+/// `--get` alone returns the effective value with no clue where it came from,
+/// which is exactly the confusion this exists to remove: a repository can sign
+/// while the global default is off, so the Settings screen can otherwise say
+/// "signing is off" about a repository that signs every commit. Checked
+/// narrowest-first, matching git's own precedence.
+fn gpgsign_scope(repo_path: &str) -> Option<String> {
+  for (scope, label) in [
+    ("--local", "this repository"),
+    ("--global", "your global git config"),
+    ("--system", "this computer's git config"),
+  ] {
+    let found = run_git(Some(repo_path), &["config", scope, "--get", "commit.gpgsign"])
+      .is_ok_and(|out| out.stdout.trim().eq_ignore_ascii_case("true"));
+    if found {
+      return Some(label.to_owned());
+    }
+  }
+  None
 }
 
 /// Whether `user.signingkey` is set to an empty string somewhere.
@@ -755,6 +825,85 @@ fpr:::::::::FEDCBA9876543210FEDCBA9876543210FEDCBA98:";
   fn a_repo_with_no_signing_key_is_not_flagged() {
     let repo = IsolatedRepo::new();
     assert!(!has_blank_signing_key(repo.path()));
+  }
+
+  fn key(id: &str, fingerprint: &str) -> SigningKey {
+    SigningKey {
+      id: id.into(),
+      fingerprint: fingerprint.into(),
+      uid: "Test <t@e.com>".into(),
+    }
+  }
+
+  const FPR: &str = "1314AEE835E15F0E6ED2AB641C7195BAAB12CF6A";
+
+  #[test]
+  fn a_key_matches_its_long_id_and_fingerprint() {
+    let k = key("1C7195BAAB12CF6A", FPR);
+    assert!(key_matches(&k, "1C7195BAAB12CF6A"));
+    assert!(key_matches(&k, FPR));
+  }
+
+  /// git accepts a short id, and gpg resolves it as a tail of the fingerprint.
+  /// Treating one as "missing" would nag about a setup that works fine.
+  #[test]
+  fn a_short_id_still_matches() {
+    let k = key("1C7195BAAB12CF6A", FPR);
+    assert!(key_matches(&k, "AB12CF6A"));
+    assert!(key_matches(&k, "0x1C7195BAAB12CF6A"));
+    assert!(key_matches(&k, "1c7195baab12cf6a"));
+  }
+
+  #[test]
+  fn an_unrelated_key_does_not_match() {
+    let k = key("1C7195BAAB12CF6A", FPR);
+    // The stale id from the real report that started this.
+    assert!(!key_matches(&k, "32BD8D9B66ABAD8B"));
+    assert!(!key_matches(&k, ""));
+    assert!(!key_matches(&k, "   "));
+  }
+
+  /// A configured value longer than the real one is not a prefix match.
+  #[test]
+  fn a_longer_configured_value_does_not_match() {
+    let k = key("1C7195BAAB12CF6A", FPR);
+    assert!(!key_matches(&k, &format!("{FPR}EXTRA")));
+  }
+
+  /// Suffix matching must not panic when the split lands mid-character.
+  #[test]
+  fn multibyte_values_do_not_panic() {
+    let k = key("1C7195BAAB12CF6A", FPR);
+    assert!(!key_matches(&k, "café"));
+    assert!(!key_matches(&k, "🔑🔑🔑"));
+  }
+
+  #[test]
+  fn signing_scope_names_the_repository_when_set_locally() {
+    let repo = IsolatedRepo::new();
+    repo.set_local("commit.gpgsign", "true");
+    assert_eq!(gpgsign_scope(repo.path()).as_deref(), Some("this repository"));
+  }
+
+  /// The exact shape that made Settings say "signing is off" while every commit
+  /// was signed: global false, local true. Local wins, and the user is told so.
+  #[test]
+  fn a_local_override_beats_a_global_false() {
+    let repo = IsolatedRepo::new();
+    run_git(
+      Some(repo.path()),
+      &["config", "--global", "commit.gpgsign", "false"],
+    )
+    .unwrap();
+    repo.set_local("commit.gpgsign", "true");
+
+    assert_eq!(gpgsign_scope(repo.path()).as_deref(), Some("this repository"));
+  }
+
+  #[test]
+  fn signing_scope_is_none_when_nothing_enables_it() {
+    let repo = IsolatedRepo::new();
+    assert!(gpgsign_scope(repo.path()).is_none());
   }
 
   #[test]

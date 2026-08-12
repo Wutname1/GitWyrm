@@ -4546,7 +4546,21 @@ brokenFormat: string | null;
  * real value and gpg rejects it, so signed commits fail until it is cleared.
  * Repaired by the same button as `broken_format`.
  */
-blankSigningKey: boolean }
+blankSigningKey: boolean; 
+/**
+ * True when signing is on and `user.signingkey` names a key gpg cannot find.
+ * 
+ * Every commit fails, and nothing on screen says why: the key list looks
+ * normal (or empty), and the configured id matches nothing in it. Usually a
+ * key that was deleted, or config copied from another machine.
+ */
+missingSigningKey: boolean; 
+/**
+ * Which scope turned signing on, when it is on. A repository can sign while
+ * the global default is off, so reporting only the effective value leaves
+ * the user hunting for a setting that is not where they are looking.
+ */
+signingScope: string | null }
 /**
  * One Visual Studio solution found inside a repository.
  */
