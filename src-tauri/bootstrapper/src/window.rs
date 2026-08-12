@@ -229,6 +229,26 @@ fn watch_for_relaunch(tx: Sender<DownloadMsg>, dry_run: bool) {
         }
 
         let started = std::time::Instant::now();
+
+        // Phase 1: wait for the OLD app to go.
+        //
+        // This window is spawned from the updater's on_before_exit hook, which
+        // runs while the app that spawned it is still alive - so "is GitWyrm
+        // running?" is true the moment this thread starts. Without waiting for
+        // it to disappear first, the very first poll sees the *dying parent*,
+        // decides the app is already back, and closes this window immediately.
+        // That is exactly the flash the cover exists to prevent.
+        while gitwyrm_is_running() {
+            if started.elapsed() > UPDATE_WATCH_TIMEOUT {
+                crate::log("ERROR: GitWyrm never exited; giving up");
+                let _ = tx.send(DownloadMsg::Installed);
+                return;
+            }
+            std::thread::sleep(UPDATE_POLL_INTERVAL);
+        }
+        crate::log("Old GitWyrm has exited; waiting for the update to finish");
+
+        // Phase 2: wait for the NEW app to appear.
         loop {
             if started.elapsed() > UPDATE_WATCH_TIMEOUT {
                 crate::log("ERROR: timed out waiting for GitWyrm to reappear");

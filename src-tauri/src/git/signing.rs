@@ -184,6 +184,14 @@ pub fn ensure_bundled_gpg_configured() -> Result<(), AppError> {
 /// Set a single `key value` directive in a gpg config file, replacing any
 /// existing line for that key and leaving everything else untouched.
 fn write_conf_line(path: &Path, key: &str, value: &str) -> Result<(), AppError> {
+  // Strip the extended-length prefix before anything else. Rust hands back
+  // `\\?\C:\...` from canonicalize and from Tauri's path APIs, and the
+  // backslash rewrite below would turn it into `//?/C:/...`, which gpg reads as
+  // a UNC host named `?`. It then fails to find its agent and reports the
+  // useless "No agent running", or - once keyboxd is involved - refuses to open
+  // the keyring at all.
+  let value = value.strip_prefix(r"\\?\").unwrap_or(value);
+
   // gpg wants forward slashes even on Windows; a backslash reads as an escape.
   let value = value.replace('\\', "/");
 
@@ -743,6 +751,41 @@ fpr:::::::::FEDCBA9876543210FEDCBA9876543210FEDCBA98:";
     // gpg parses "Name <email>"; an embedded bracket would corrupt the uid.
     assert!(generate_key("Ev<il", "a@b.com").is_err());
     assert!(generate_key("Name", "a@b.com>extra").is_err());
+  }
+
+  #[test]
+  fn the_extended_length_prefix_is_stripped() {
+    // Rust's canonicalize and Tauri's path APIs both return `\\?\C:\...`.
+    // Rewriting its backslashes would produce `//?/C:/...`, which gpg treats as
+    // a UNC host called `?` - it then cannot find its agent or its keyring.
+    let dir = tempfile::tempdir().unwrap();
+    let conf = dir.path().join("gpg.conf");
+
+    write_conf_line(&conf, "agent-program", r"\\?\C:\tools\gpg\gpg-agent.exe").unwrap();
+
+    let body = std::fs::read_to_string(&conf).unwrap();
+    assert!(
+      body.contains("C:/tools/gpg/gpg-agent.exe"),
+      "expected a plain drive path, got: {body}"
+    );
+    assert!(!body.contains("//?/"), "UNC-looking path survived: {body}");
+    assert!(!body.contains('?'), "prefix remnant survived: {body}");
+  }
+
+  #[test]
+  fn a_real_unc_path_is_left_alone() {
+    // `\\server\share` is a genuine network path, not the extended-length
+    // prefix, and gpg handles it once the slashes are flipped.
+    let dir = tempfile::tempdir().unwrap();
+    let conf = dir.path().join("gpg.conf");
+
+    write_conf_line(&conf, "agent-program", r"\\server\share\gpg-agent.exe").unwrap();
+
+    let body = std::fs::read_to_string(&conf).unwrap();
+    assert!(
+      body.contains("//server/share/gpg-agent.exe"),
+      "a real UNC path should survive: {body}"
+    );
   }
 
   #[test]
