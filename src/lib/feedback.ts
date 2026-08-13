@@ -16,6 +16,7 @@ import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { scrubText } from '@/lib/scrub'
 import { log, describeError } from '@/lib/log'
+import { perfMarksText } from '@/lib/perfTrail'
 import { Sentry } from '@/lib/sentry'
 
 /** Everything a report carries besides the user's own description. */
@@ -30,6 +31,15 @@ export interface Diagnostics {
   logTail: string
   /** Set when reading the log failed, so the report says so rather than lying. */
   logError?: string
+  /**
+   * Recent timings, newest last. Empty when nothing has been measured yet.
+   *
+   * Carried because "it is slow" is the one complaint a log tail answers
+   * badly: the durations live in Sentry's performance dataset, keyed by
+   * nothing that connects them to the report. Attaching them here means a
+   * report about a slow open arrives with the actual number on it.
+   */
+  perfTrail: string
 }
 
 /**
@@ -45,6 +55,8 @@ export async function collectDiagnostics(): Promise<Diagnostics> {
     platform: navigator.platform,
     userAgent: navigator.userAgent,
     logTail: '',
+    // Read straight away: this is in-memory and cannot fail, unlike the log.
+    perfTrail: perfMarksText(),
   }
 
   try {
@@ -100,6 +112,12 @@ export function bugReportMarkdown(
     '',
   ]
 
+  // Ahead of the log: it is a handful of lines and it is the part that answers
+  // "why was it slow", which the log tail buries.
+  if (d.perfTrail) {
+    parts.push('## Recent timings', '', '```', d.perfTrail, '```', '')
+  }
+
   if (d.logError) {
     parts.push('## Log', '', `_Could not read the log: ${d.logError}_`, '')
   } else if (includeLog && d.logTail) {
@@ -114,6 +132,27 @@ export function bugReportMarkdown(
   }
 
   return parts.join('\n')
+}
+
+/**
+ * Files to attach to a report: the log tail, and the recent timings.
+ *
+ * Both ride as attachments rather than inside the message -- the log is far
+ * past Sentry's message size limit, and as files they stay readable on the
+ * issue instead of being truncated away. Returns undefined rather than an
+ * empty array when there is nothing to attach.
+ */
+export function attachmentsFor(
+  d: Diagnostics
+): { filename: string; data: string; contentType: string }[] | undefined {
+  const files: { filename: string; data: string; contentType: string }[] = []
+  if (d.logTail) {
+    files.push({ filename: 'gitwyrm.log', data: d.logTail, contentType: 'text/plain' })
+  }
+  if (d.perfTrail) {
+    files.push({ filename: 'timings.txt', data: d.perfTrail, contentType: 'text/plain' })
+  }
+  return files.length > 0 ? files : undefined
 }
 
 export type SubmitResult =
@@ -160,6 +199,10 @@ export async function submitFeedback(
       })
       scope.setTag('report', 'user-feedback')
       if (d.logError) scope.setContext('log', { error: d.logError })
+      // On the event itself, not only the attachment: a context block is
+      // visible on the issue page without downloading anything, which is what
+      // makes a "this is slow" report triageable at a glance.
+      if (d.perfTrail) scope.setContext('recent_timings', { trail: d.perfTrail })
 
       return Sentry.captureFeedback(
         {
@@ -168,12 +211,7 @@ export async function submitFeedback(
           message: scrubText(description.trim() || '(no description given)'),
         },
         {
-          // The log rides as an attachment rather than inside the message: it is
-          // far past Sentry's message size limit, and as an attachment it stays
-          // a readable file on the issue instead of being truncated away.
-          attachments: d.logTail
-            ? [{ filename: 'gitwyrm.log', data: d.logTail, contentType: 'text/plain' }]
-            : undefined,
+          attachments: attachmentsFor(d),
         },
         scope
       )

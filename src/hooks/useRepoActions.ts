@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { commands, type RepoInfo, type ScannedRepo } from '@/lib/bindings'
 import { normalizePath, pathKey } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
+import { timed } from '@/lib/perfTrail'
 import { Sentry } from '@/lib/sentry'
 import { useUiStore } from '@/stores/uiStore'
 import { primaryFirst, useWorkspaceStore, type CodeFolder } from '@/stores/workspaceStore'
@@ -159,8 +160,13 @@ export function useOpenRepo() {
       try {
         // Spans the whole IPC round-trip so the felt open latency (dominated by
         // the backend discover + head phases) lands in the Sentry dashboard.
-        return await Sentry.startSpan({ name: 'openRepo', op: 'git.open' }, () =>
-          commands.openRepo(path).then(unwrap)
+        // Also recorded to the in-memory perf trail, so a bug report about a
+        // slow open carries the actual number. The Sentry span alone cannot:
+        // it lands in a separate dataset with nothing tying it to the report.
+        return await timed('openRepo', () =>
+          Sentry.startSpan({ name: 'openRepo', op: 'git.open' }, () =>
+            commands.openRepo(path).then(unwrap)
+          )
         )
       } finally {
         toast.dismiss(toastId)
@@ -198,8 +204,13 @@ export function useOpenSubmoduleRepo() {
       const name = path.split('\\').pop() ?? path
       const toastId = toast.loading(`Opening ${name}…`)
       try {
-        return await Sentry.startSpan({ name: 'openRepo', op: 'git.open' }, () =>
-          commands.openRepo(path).then(unwrap)
+        // Also recorded to the in-memory perf trail, so a bug report about a
+        // slow open carries the actual number. The Sentry span alone cannot:
+        // it lands in a separate dataset with nothing tying it to the report.
+        return await timed('openRepo', () =>
+          Sentry.startSpan({ name: 'openRepo', op: 'git.open' }, () =>
+            commands.openRepo(path).then(unwrap)
+          )
         )
       } finally {
         toast.dismiss(toastId)

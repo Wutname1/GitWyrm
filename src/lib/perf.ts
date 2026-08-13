@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { Span } from '@sentry/react'
+import { recordPerfMark } from '@/lib/perfTrail'
 import { Sentry } from '@/lib/sentry'
 
 /**
@@ -76,6 +77,9 @@ export function nextGraphLoadAction(
 export function useGraphLoadSpan(repoId: string | null, isLoading: boolean): void {
   const spanRef = useRef<Span | null>(null)
   const measuredId = useRef<string | null>(null)
+  // Wall-clock start of the open span, for the perf trail. The Sentry span
+  // keeps its own clock; this one is read back when the report is written.
+  const startedRef = useRef<number | null>(null)
 
   useEffect(() => {
     const openSpanId = spanRef.current != null ? measuredId.current : null
@@ -94,6 +98,7 @@ export function useGraphLoadSpan(repoId: string | null, isLoading: boolean): voi
     // A new repo that is loading: open a span once for this id.
     if (action === 'start' || (action === 'abandon' && isLoading)) {
       measuredId.current = repoId
+      startedRef.current = performance.now()
       Sentry.startSpanManual({ name: 'graph.load', op: 'ui.load' }, (span) => {
         span.setAttribute('repo_id', repoId)
         spanRef.current = span
@@ -105,8 +110,14 @@ export function useGraphLoadSpan(repoId: string | null, isLoading: boolean): voi
     // The load for the span we opened just finished: stop after the next paint.
     if (action === 'finish' && spanRef.current != null) {
       const span = spanRef.current
+      const startedAt = startedRef.current
       spanRef.current = null
-      const stop = () => span.end()
+      const stop = () => {
+        span.end()
+        // Kept in the perf trail as well, so a report about a slow open shows
+        // the render tail next to the IPC call rather than only the call.
+        if (startedAt != null) recordPerfMark('graph.load', performance.now() - startedAt)
+      }
       if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(() => requestAnimationFrame(stop))
       } else {

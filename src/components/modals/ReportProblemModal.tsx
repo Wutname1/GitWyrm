@@ -87,6 +87,9 @@ export function ReportProblemModal({
   }
 
   const logLines = diagnostics?.logTail ? diagnostics.logTail.split('\n').length : 0
+  // Recent durations ride along with the log. Counted so the panel can say so:
+  // the point of this box is that nothing is sent the user was not shown.
+  const timingLines = diagnostics?.perfTrail ? diagnostics.perfTrail.split('\n').length : 0
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -151,7 +154,8 @@ export function ReportProblemModal({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-xs font-medium text-foreground">
-                      Your log is attached automatically
+                      Your log{timingLines > 0 ? ' and recent timings are' : ' is'} attached
+                      automatically
                     </div>
                     <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
                       {!diagnostics ? (
@@ -163,15 +167,21 @@ export function ReportProblemModal({
                       ) : logLines > 0 ? (
                         <>
                           The last {logLines.toLocaleString()} lines, with tokens,
-                          emails, and your username removed. GitWyrm{' '}
-                          {diagnostics.version} · {diagnostics.platform}
+                          emails, and your username removed
+                          {timingLines > 0 && (
+                            <>
+                              , plus how long the last {timingLines.toLocaleString()}{' '}
+                              {timingLines === 1 ? 'action' : 'actions'} took
+                            </>
+                          )}
+                          . GitWyrm {diagnostics.version} · {diagnostics.platform}
                         </>
                       ) : (
                         'The log is empty, so the report will go without it.'
                       )}
                     </p>
                   </div>
-                  {diagnostics?.logTail && (
+                  {(diagnostics?.logTail || diagnostics?.perfTrail) && (
                     <button
                       onClick={() => setShowLog((v) => !v)}
                       className="flex-none text-2xs font-medium text-accent-text hover:underline"
@@ -180,6 +190,11 @@ export function ReportProblemModal({
                     </button>
                   )}
                 </div>
+                {showLog && diagnostics?.perfTrail && (
+                  <pre className="mt-2.5 max-h-32 overflow-auto rounded border border-border bg-background p-2 font-mono text-[10px] leading-[1.5] text-sub">
+                    {diagnostics.perfTrail}
+                  </pre>
+                )}
                 {showLog && diagnostics?.logTail && (
                   <pre className="mt-2.5 max-h-56 overflow-auto rounded border border-border bg-background p-2 font-mono text-[10px] leading-[1.5] text-sub">
                     {diagnostics.logTail}
