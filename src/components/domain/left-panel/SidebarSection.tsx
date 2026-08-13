@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ChevronRight, Plus } from 'lucide-react'
+import { ChevronRight, Plus, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SidebarSectionData, SectionItem } from '@/lib/types'
 import { useUiStore } from '@/stores/uiStore'
@@ -35,6 +35,11 @@ interface SidebarSectionProps {
   /** When set, a `+` button appears on hover in the section header. */
   onAdd?: () => void
   addLabel?: string
+  /** When set, a refresh button appears on hover in the section header. */
+  onRefresh?: () => void
+  refreshLabel?: string
+  /** Spins the refresh icon while a reload is in flight. */
+  refreshing?: boolean
   isItemPending?: (section: SidebarSectionData, item: SectionItem) => boolean
   isItemDisabled?: (section: SidebarSectionData, item: SectionItem) => boolean
   getPendingLabel?: (section: SidebarSectionData, item: SectionItem) => string
@@ -54,6 +59,9 @@ export function SidebarSection({
   renderItem,
   onAdd,
   addLabel,
+  onRefresh,
+  refreshLabel,
+  refreshing,
   isItemPending,
   isItemDisabled,
   getPendingLabel,
@@ -102,10 +110,32 @@ export function SidebarSection({
             <Plus size={12} strokeWidth={2.4} />
           </TooltipButton>
         )}
+        {onRefresh && (
+          <TooltipButton
+            onClick={(e) => {
+              e.stopPropagation()
+              onRefresh()
+            }}
+            tooltip={refreshLabel ?? 'Refresh'}
+            className={cn(
+              'flex size-4 flex-none items-center justify-center rounded text-muted-foreground hover:bg-panel3 hover:text-foreground focus:opacity-100',
+              onAdd ? 'ml-1' : 'ml-auto',
+              // Keep it visible while it spins, so the click has a lasting
+              // response even if the pointer leaves the header.
+              refreshing ? 'opacity-100' : 'opacity-0 group-hover/section:opacity-100'
+            )}
+          >
+            <RefreshCw
+              size={11}
+              strokeWidth={2.4}
+              className={cn(refreshing && 'animate-spin')}
+            />
+          </TooltipButton>
+        )}
         <span
           className={cn(
             'font-mono text-2xs text-muted-foreground',
-            onAdd ? 'ml-1.5' : 'ml-auto'
+            onAdd || onRefresh ? 'ml-1.5' : 'ml-auto'
           )}
         >
           {section.items.length}

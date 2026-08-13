@@ -223,6 +223,30 @@ export function LeftPanel() {
     tags: { run: () => openNewTag(), label: 'New tag' },
   }
 
+  // Pull requests and issues come from the same host in one trip each, and
+  // someone checking one almost always wants the other current too -- so the
+  // button on either header reloads both.
+  const refreshHostLists = () => {
+    void prs.refetch()
+    void issues.refetch()
+  }
+  const hostListsRefreshing = prs.isFetching || issues.isFetching
+  const refreshAction: Partial<Record<string, { run: () => void; label: string; busy: boolean }>> =
+    githubConnected
+      ? {
+          prs: {
+            run: refreshHostLists,
+            label: 'Refresh pull requests and issues',
+            busy: hostListsRefreshing,
+          },
+          issues: {
+            run: refreshHostLists,
+            label: 'Refresh pull requests and issues',
+            busy: hostListsRefreshing,
+          },
+        }
+      : {}
+
   const stashBySha = (sha?: string) => (stashes.data ?? []).find((s) => s.sha === sha)
   const stashBusy = m.stashPop.isPending || m.stashApply.isPending || m.stashDrop.isPending
 
@@ -485,6 +509,9 @@ export function LeftPanel() {
           renderItemMenu={renderItemMenu}
           onAdd={addAction[section.key]?.run}
           addLabel={addAction[section.key]?.label}
+          onRefresh={refreshAction[section.key]?.run}
+          refreshLabel={refreshAction[section.key]?.label}
+          refreshing={refreshAction[section.key]?.busy}
           isItemPending={isItemPending}
           isItemDisabled={isItemDisabled}
           getPendingLabel={getPendingLabel}

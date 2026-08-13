@@ -1020,8 +1020,16 @@ export function useGitMutations(repoId: string | null) {
 
   // Distinct from `setUpstream`, which points HEAD at a remote branch the user
   // picked. This links a named branch to the remote branch of the same name.
+  //
+  // Accepts an optional remote so a caller acting on a specific remote branch
+  // links to THAT remote. Passing nothing falls back to the default remote,
+  // which is right for the repair path but wrong when the user right-clicked
+  // `otherremote/develop` -- that would silently link them to `origin`.
   const reconnectBranch = useMutation({
-    mutationFn: async (branch: string) => unwrap(await commands.setBranchUpstream(id, branch, null)),
+    mutationFn: async (v: string | { branch: string; remote?: string }) => {
+      const { branch, remote } = typeof v === 'string' ? { branch: v, remote: undefined } : v
+      return unwrap(await commands.setBranchUpstream(id, branch, remote ?? null))
+    },
     onSuccess: (upstream) => {
       invalidate(qc, id, ['branches'])
       toast(`Now linked to ${upstream}`)

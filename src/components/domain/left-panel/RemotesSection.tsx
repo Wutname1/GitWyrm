@@ -160,13 +160,18 @@ function BranchNode({
           branch={node.branch}
           repoId={repoId}
           localCounterpart={b?.local_counterpart}
+          trackedBy={b?.tracked_by}
           tip={b?.tip}
         />
         {b?.local_counterpart && (
           <>
             <ContextMenuSeparator />
+            {/* Says whether the two are actually linked. A shared name alone
+                used to read as "connected", which is exactly the impression
+                that left people unable to tell why setting it did nothing. */}
             <ContextMenuLabel className="text-2xs text-muted-foreground">
               Your copy: {b.local_counterpart}
+              {b.tracked_by ? '' : ' (not linked to this branch yet)'}
             </ContextMenuLabel>
             <BranchMenu branch={b.local_counterpart} showWebLink={false} />
           </>

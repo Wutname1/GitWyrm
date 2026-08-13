@@ -70,6 +70,7 @@ export function RefContextMenu({ refTag, children, onOpenChange }: RefContextMen
             branch={remoteBranch}
             repoId={repo?.id ?? null}
             localCounterpart={localCounterpart}
+            trackedBy={record?.tracked_by}
             tip={record?.tip}
             opInProgress={opInProgress}
           />

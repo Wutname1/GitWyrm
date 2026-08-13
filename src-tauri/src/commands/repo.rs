@@ -196,7 +196,13 @@ pub async fn open_repo(
   let tx = sentry::start_transaction(sentry::TransactionContext::new("open_repo", "git.open"));
   let parent: sentry::TransactionOrSpan = tx.clone().into();
 
-  let (id, open) = timed_phase(&parent, "discover", &path, || manager.open(&path))?;
+  let (id, open, reused) =
+    timed_phase(&parent, "discover", &path, || manager.open(&path))?;
+
+  // "Slow the first time" is the shape of the complaint, so the measurement has
+  // to tell a cold open from a repeat: a warm reopen skips nearly all the work
+  // and would otherwise sit in the same average, hiding the case being reported.
+  tx.set_data("cold_open", (!reused).into());
 
   // Registering a recursive watch walks the whole working tree, so a repo with
   // a large node_modules/target directory could spend seconds here. It is not

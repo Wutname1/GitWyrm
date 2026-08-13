@@ -481,6 +481,20 @@ fn published_count(repo: &git2::Repository, branch: &str) -> u32 {
   walk.count() as u32
 }
 
+/// The local branch configured to track `remote_full` (`origin/develop`), if any.
+///
+/// Reads the upstream recorded in git config. A local branch that merely shares
+/// the remote branch's name is NOT tracking it -- that is the ordinary state of
+/// a branch nobody has linked yet, and reporting it as tracked is what left
+/// users seeing "already set" on a link that was never written, with no way to
+/// set it.
+fn tracking_local(records: &[refs::RefRecord], remote_full: &str) -> Option<String> {
+  records
+    .iter()
+    .find(|r| !r.is_remote && r.upstream.as_deref() == Some(remote_full))
+    .map(|r| r.name.clone())
+}
+
 /// Link a local branch to a remote branch of the same name, so push and pull
 /// know where it belongs. Used to repair a branch whose remote branch was
 /// deleted; publishing a brand-new branch happens through `git_push_branch`.
@@ -854,6 +868,12 @@ pub async fn list_remotes(
           let local_only_missing = counterpart.is_none();
           let baseline = counterpart.as_ref().map(|(_, oid)| *oid);
 
+          // Who actually tracks this branch, from config. Deliberately not the
+          // name match above: sharing a name is not tracking, and conflating
+          // the two is what made the menu claim a branch was already connected
+          // when no upstream had ever been set.
+          let tracked_by = tracking_local(&records, &rec.name);
+
           let (ahead_of_local, behind_local) = match (rec.tip, baseline) {
             (Some(remote_oid), Some(base_oid)) => {
               refs::ahead_behind(&repo, remote_oid, base_oid).unwrap_or((0, 0))
@@ -868,6 +888,7 @@ pub async fn list_remotes(
             time: rec.time.map(|t| t as f64),
             summary: commit.as_ref().and_then(|c| c.summary()).map(str::to_string),
             local_counterpart: counterpart.map(|(n, _)| n),
+            tracked_by,
             ahead_of_local,
             behind_local,
             local_only_missing,
@@ -1229,6 +1250,70 @@ mod tests {
     fs::write(dir.path().join("base.txt"), "base\n").expect("write");
     commit_all(&repo, "base");
     (dir, repo)
+  }
+
+  /// A local branch that shares a remote branch's name but tracks nothing --
+  /// the state the upstream bug was reported in.
+  fn untracked_namesake(repo: &Repository, remote: &str, branch: &str) {
+    let head = repo.head().expect("head").peel_to_commit().expect("commit");
+    if repo.find_remote(remote).is_err() {
+      repo.remote(remote, "https://example.invalid/repo.git").expect("remote");
+    }
+    repo
+      .reference(&format!("refs/remotes/{remote}/{branch}"), head.id(), true, "test remote")
+      .expect("remote ref");
+    // Local branch of the same name, with no upstream set.
+    repo.branch(branch, &head, true).expect("local branch");
+  }
+
+  #[test]
+  fn a_shared_name_is_not_tracking() {
+    // The reported bug: local `develop` beside `origin/develop`, never linked.
+    // The menu read the shared name as a tracking link, so it claimed the
+    // branch was already set up and hid the action that would set it.
+    let (dir, repo) = repo_with_commit();
+    untracked_namesake(&repo, "origin", "develop");
+
+    let records = refs::walk_branches(&repo).expect("walk");
+    assert_eq!(
+      tracking_local(&records, "origin/develop"),
+      None,
+      "a same-named local branch with no upstream must not count as tracking"
+    );
+    drop(dir);
+  }
+
+  #[test]
+  fn a_configured_upstream_is_tracking() {
+    let (dir, repo) = repo_with_commit();
+    track(&repo, "origin");
+
+    let records = refs::walk_branches(&repo).expect("walk");
+    let head = repo.head().expect("head").shorthand().expect("name").to_string();
+    assert_eq!(tracking_local(&records, &format!("origin/{head}")), Some(head));
+    drop(dir);
+  }
+
+  #[test]
+  fn tracking_follows_config_not_the_name() {
+    // A local branch may track a remote branch with a different name. Reading
+    // the name would miss this link entirely and report the wrong branch.
+    let (dir, repo) = repo_with_commit();
+    let head_commit = repo.head().expect("head").peel_to_commit().expect("commit");
+    repo.remote("origin", "https://example.invalid/repo.git").expect("remote");
+    repo
+      .reference("refs/remotes/origin/develop", head_commit.id(), true, "test remote")
+      .expect("remote ref");
+    let mut local = repo.branch("my-work", &head_commit, true).expect("local branch");
+    local.set_upstream(Some("origin/develop")).expect("upstream");
+
+    let records = refs::walk_branches(&repo).expect("walk");
+    assert_eq!(
+      tracking_local(&records, "origin/develop"),
+      Some("my-work".to_string()),
+      "tracking must be read from config, including a differently-named branch"
+    );
+    drop(dir);
   }
 
   /// Point the current branch at a remote-tracking ref, the way a branch that

@@ -5,6 +5,7 @@ import {
   GitBranch,
   GitMerge,
   GitPullRequestArrow,
+  Link2,
   RefreshCw,
   Repeat2,
   RotateCcw,
@@ -37,6 +38,13 @@ interface RemoteBranchMenuItemsProps {
   repoId: string | null
   /** The local branch of the same name, when there is one. */
   localCounterpart?: string | null
+  /**
+   * The local branch that really has this one set as its upstream, from git
+   * config. Not the same as `localCounterpart`: sharing a name is not
+   * tracking, and reading the name match as tracking is what made this menu
+   * report a branch as already connected when nothing had been set.
+   */
+  trackedBy?: string | null
   /** Tip commit of the remote branch, for "copy commit ID". */
   tip?: string | null
   /** Set while a merge or similar is mid-flight, which blocks remote work. */
@@ -61,6 +69,7 @@ export function RemoteBranchMenuItems({
   branch,
   repoId,
   localCounterpart,
+  trackedBy,
   tip,
   opInProgress,
 }: RemoteBranchMenuItemsProps) {
@@ -81,7 +90,15 @@ export function RemoteBranchMenuItems({
   // How the checked-out branch stands against this exact remote branch. Only
   // meaningful when this remote branch is HEAD's own upstream; otherwise the
   // two are unrelated refs and the generic items apply.
+  //
+  // Read from git config, never from the shared name. A local `develop` beside
+  // an `origin/develop` with no upstream set is the ordinary state right
+  // before someone tries to connect them, and calling that "tracking" both
+  // hid the action and claimed the link already existed.
   const isUpstreamOfHead = !!head?.upstream && head.upstream === fullName
+  // A local copy exists and this branch is not what it tracks, so connecting
+  // them is a real, missing action rather than a no-op.
+  const canConnect = !!localCounterpart && !trackedBy
   const headSync = head && isUpstreamOfHead ? branchSync(head) : null
   // Commits the remote has that we don't. Drives merge/rebase: with nothing to
   // get, both are genuinely no-ops and stay disabled.
@@ -128,6 +145,22 @@ export function RemoteBranchMenuItems({
           pending={isCreating}
           disabled={busy || !tip || m.createBranch.isPending}
           onRun={() => m.createBranch.mutate({ name: branch, sha: tip ?? undefined, checkout: false })}
+        />
+      )}
+      {/* Only when a local copy exists and nothing tracks this branch yet.
+          Previously hidden entirely, because a shared name was read as a
+          tracking link that had never actually been set -- so the one action
+          that would have fixed it was the one the menu would not show. */}
+      {canConnect && (
+        <PendingMenuItem
+          icon={<Link2 />}
+          label={`Link ${localCounterpart} to this branch`}
+          pendingLabel="Linking…"
+          pending={m.reconnectBranch.isPending}
+          disabled={busy || m.reconnectBranch.isPending}
+          onRun={() =>
+            m.reconnectBranch.mutate({ branch: localCounterpart!, remote: remote.name })
+          }
         />
       )}
       <PendingMenuItem

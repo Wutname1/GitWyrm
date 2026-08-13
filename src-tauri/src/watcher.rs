@@ -286,14 +286,25 @@ impl WatcherRegistry {
       let waited = queued.elapsed().as_millis();
       let start = std::time::Instant::now();
       let registry = app.state::<WatcherRegistry>();
-      match registry.watch(app.clone(), repo_id.clone(), &workdir) {
-        // Wait and work are reported separately: a long total is only a problem
-        // when the *work* is long, and the old single number could not say which.
-        Ok(()) => log::info!(
-          "watch: armed in {}ms (waited {waited}ms) for {}",
-          start.elapsed().as_millis(),
-          workdir.display()
-        ),
+      let result = registry.watch(app.clone(), repo_id.clone(), &workdir);
+      let armed = start.elapsed().as_millis();
+
+      // Also reported to Sentry, not just the local log. Arming is the leading
+      // suspect for "opening a repo the first time is slow", and the log alone
+      // cannot confirm it: it is release-only and needs the user to send a
+      // file. Wait and work stay separate -- a long total only matters when the
+      // *work* is long, and one number cannot say which.
+      let tx = sentry::start_transaction(sentry::TransactionContext::new(
+        "watch.arm",
+        "fs.watch",
+      ));
+      tx.set_data("waited_ms", (waited as u64).into());
+      tx.set_data("armed_ms", (armed as u64).into());
+      tx.set_data("ok", result.is_ok().into());
+      tx.finish();
+
+      match result {
+        Ok(()) => log::info!("watch: armed in {armed}ms (waited {waited}ms) for {}", workdir.display()),
         Err(e) => log::warn!("watch: failed to arm for {}: {e}", workdir.display()),
       }
     });
