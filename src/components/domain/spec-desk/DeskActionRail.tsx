@@ -373,6 +373,17 @@ export function DeskActionRail({
             setArchiveBlock(attempt);
             return;
           }
+          // The tool claimed success but moved nothing. Treated exactly like a
+          // reported failure: the change is still here, so saying otherwise is
+          // what sent people round the same archive three times.
+          if (attempt.kind === "changedNothing") {
+            setConfirmArchive(false);
+            setArchiveProblem({
+              changeId: change.id,
+              outcome: { kind: "failed", output: attempt.output },
+            });
+            return;
+          }
           const outcome = attempt.outcome;
           if (outcome.kind === "ok") {
             toast.success(`Archived ${change.id}.`, {

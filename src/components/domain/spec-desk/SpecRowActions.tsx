@@ -153,6 +153,14 @@ export function SpecRowActions({
             })
             return
           }
+          // The tool exited cleanly but nothing moved. Saying "Archived" here is
+          // what made this look done while the change stayed put.
+          if (attempt.kind === 'changedNothing') {
+            toast.error(`${change.id} was not archived.`, {
+              description: `${attempt.diagnosis.summary} Open the Spec Desk to see how to fix it.`,
+            })
+            return
+          }
           reportCliOutcome(attempt.outcome, {
             ok: `Archived ${change.id}.`,
             failed: `Could not archive ${change.id}.`,

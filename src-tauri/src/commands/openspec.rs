@@ -694,11 +694,13 @@ pub async fn openspec_archive_change(
 
   tauri::async_runtime::spawn_blocking(move || {
     let outcome = cli::archive_change(&root, &change_id);
-    if matches!(outcome, cli::CliOutcome::Ok { .. }) {
+    let committed = if matches!(outcome, cli::CliOutcome::Ok { .. }) {
       let repo = open.repo.lock().unwrap();
-      cli::commit_archive(&repo, &root, &change_id, template.as_deref())?;
-    }
-    Ok(ArchiveAttempt::Ran { outcome })
+      cli::commit_archive(&repo, &root, &change_id, template.as_deref())?.is_some()
+    } else {
+      false
+    };
+    Ok(settle_archive(&change_id, outcome, committed))
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

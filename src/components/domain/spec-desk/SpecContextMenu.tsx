@@ -65,6 +65,13 @@ export function SpecContextMenu({ change, repoId, children }: SpecContextMenuPro
             })
             return
           }
+          // Exited cleanly, moved nothing. Report it as the failure it is.
+          if (attempt.kind === 'changedNothing') {
+            toast.error(`${change.id} was not archived.`, {
+              description: `${attempt.diagnosis.summary} Open the Spec Desk to see how to fix it.`,
+            })
+            return
+          }
           reportCliOutcome(attempt.outcome, {
             ok: `Archived ${change.id}.`,
             failed: `Could not archive ${change.id}.`,
