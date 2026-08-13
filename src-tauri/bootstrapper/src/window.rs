@@ -210,7 +210,11 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
 const UPDATE_WATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// How often to look for the relaunched app.
-const UPDATE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(400);
+///
+/// This is pure handover latency once the new window is up, so it is kept short.
+/// Both probes are a process snapshot (plus, in phase 2, one `EnumWindows` pass)
+/// -- cheap enough at 8/sec against a gap measured in tens of seconds.
+const UPDATE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(125);
 
 /// Cover the window between the old app exiting and the new one appearing.
 ///
@@ -260,11 +264,12 @@ fn watch_for_relaunch(tx: Sender<DownloadMsg>, dry_run: bool) {
                 return;
             }
 
-            if gitwyrm_is_running() {
-                crate::log("GitWyrm is running again; handing over");
-                // Let the new window paint before this one vanishes, so the
-                // handover is a swap rather than a flash of desktop.
-                std::thread::sleep(std::time::Duration::from_millis(600));
+            // A process is not a window: the relaunched app spends its first
+            // seconds behind its own boot splash restoring tabs. Handing over on
+            // the process alone leaves this card sitting on screen with nothing
+            // to swap to, which reads as the cover being slow to close.
+            if gitwyrm_window_is_up() {
+                crate::log("GitWyrm has a window again; handing over");
                 let _ = tx.send(DownloadMsg::Installed);
                 return;
             }
@@ -276,15 +281,22 @@ fn watch_for_relaunch(tx: Sender<DownloadMsg>, dry_run: bool) {
 
 /// Whether any GitWyrm process is alive.
 ///
-/// Snapshots the process list rather than looking for a window, because the new
-/// app spends its first seconds behind its own boot splash and we want to hand
-/// over to it as soon as it exists.
+/// Phase 1 of the watch only needs to know the *old* app has gone, and a dying
+/// process loses its window well before it loses its process entry -- so this
+/// stays a process check, deliberately.
 fn gitwyrm_is_running() -> bool {
+    !gitwyrm_pids().is_empty()
+}
+
+/// Process IDs of every running GitWyrm.
+fn gitwyrm_pids() -> Vec<u32> {
     use windows::Win32::System::Diagnostics::ToolHelp::*;
+
+    let mut pids = Vec::new();
 
     unsafe {
         let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
-            return false;
+            return pids;
         };
 
         let mut entry = PROCESSENTRY32W {
@@ -292,7 +304,6 @@ fn gitwyrm_is_running() -> bool {
             ..Default::default()
         };
 
-        let mut found = false;
         if Process32FirstW(snapshot, &mut entry).is_ok() {
             loop {
                 let len = entry
@@ -302,8 +313,7 @@ fn gitwyrm_is_running() -> bool {
                     .unwrap_or(entry.szExeFile.len());
                 let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
                 if name.eq_ignore_ascii_case(crate::APP_EXE_NAME) {
-                    found = true;
-                    break;
+                    pids.push(entry.th32ProcessID);
                 }
                 if Process32NextW(snapshot, &mut entry).is_err() {
                     break;
@@ -312,8 +322,55 @@ fn gitwyrm_is_running() -> bool {
         }
 
         let _ = CloseHandle(snapshot);
-        found
     }
+
+    pids
+}
+
+/// Collects a visible top-level window belonging to one of the target PIDs.
+struct WindowProbe {
+    pids: Vec<u32>,
+    found: bool,
+}
+
+/// Whether the relaunched app has a visible window yet.
+///
+/// This is the handover signal rather than "the process exists" because the app
+/// spends its first seconds starting up with nothing on screen. Swapping on the
+/// process would leave this card up over an empty desktop -- the very gap it is
+/// here to cover -- and make the close look sluggish.
+fn gitwyrm_window_is_up() -> bool {
+    let pids = gitwyrm_pids();
+    if pids.is_empty() {
+        return false;
+    }
+
+    let mut probe = WindowProbe { pids, found: false };
+
+    unsafe {
+        let _ = EnumWindows(
+            Some(probe_window),
+            LPARAM(&mut probe as *mut WindowProbe as isize),
+        );
+    }
+
+    probe.found
+}
+
+unsafe extern "system" fn probe_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let probe = &mut *(lparam.0 as *mut WindowProbe);
+
+    if IsWindowVisible(hwnd).as_bool() {
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if probe.pids.contains(&pid) {
+            probe.found = true;
+            // Returning FALSE stops the enumeration; we have our answer.
+            return BOOL(0);
+        }
+    }
+
+    BOOL(1)
 }
 
 /// Fetch the extra tools the app needs (git, gpg, whatever the manifest lists)
@@ -505,7 +562,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         if !launch_failed {
                             s.exiting = true;
                             KillTimer(Some(hwnd), 1).ok();
-                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            // No sleep before destroying: this runs on the message
+                            // thread, so waiting here freezes the card mid-close
+                            // instead of letting it disappear. Anything that needs
+                            // to settle first belongs in the watcher thread.
                             let _ = DestroyWindow(hwnd);
                             return LRESULT(0);
                         }
@@ -812,5 +872,45 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
 
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The window probe must never claim a window when no matching process
+    /// exists -- that would end the cover over an empty desktop.
+    #[test]
+    fn window_probe_requires_a_matching_process() {
+        if gitwyrm_pids().is_empty() {
+            assert!(
+                !gitwyrm_window_is_up(),
+                "no GitWyrm process, so no GitWyrm window can be reported"
+            );
+        }
+    }
+
+    /// Phase 2 is strictly stronger than phase 1: a visible window implies a
+    /// live process. If this ever inverted, the cover would hand over to
+    /// something that had already gone.
+    #[test]
+    fn a_window_implies_a_running_process() {
+        if gitwyrm_window_is_up() {
+            assert!(
+                gitwyrm_is_running(),
+                "a reported window must belong to a running process"
+            );
+        }
+    }
+
+    /// Handover latency is the poll interval, so it must stay well under the
+    /// point a user reads the close as sluggish.
+    #[test]
+    fn handover_latency_is_not_perceptible() {
+        assert!(
+            UPDATE_POLL_INTERVAL <= std::time::Duration::from_millis(200),
+            "poll interval is pure handover delay once the new window is up"
+        );
     }
 }
