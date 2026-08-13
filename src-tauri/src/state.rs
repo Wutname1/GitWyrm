@@ -227,7 +227,13 @@ pub struct RepoManager {
 }
 
 impl RepoManager {
-  pub fn open(&self, path: &str) -> Result<(String, Arc<OpenRepo>), AppError> {
+  /// Opens `path`, returning its id, handle, and whether an existing handle was
+  /// reused.
+  ///
+  /// The reuse flag exists for the open-latency measurement: "slow the first
+  /// time" cannot be read from a duration alone, since a warm reopen skips
+  /// nearly all the work and would otherwise sit in the same average.
+  pub fn open(&self, path: &str) -> Result<(String, Arc<OpenRepo>, bool), AppError> {
     let repo = Repository::discover(path)?;
     let workdir = repo
       .workdir()
@@ -241,7 +247,7 @@ impl RepoManager {
     // would leave in-flight work holding a repository nobody can look up.
     let mut repos = self.repos.lock().unwrap();
     if let Some(existing) = repos.get(&id) {
-      return Ok((id, existing.clone()));
+      return Ok((id, existing.clone(), true));
     }
 
     let open = Arc::new(OpenRepo {
@@ -253,7 +259,7 @@ impl RepoManager {
       primary_lane: Mutex::new(None),
     });
     repos.insert(id.clone(), open.clone());
-    Ok((id, open))
+    Ok((id, open, false))
   }
 
   pub fn get(&self, id: &str) -> Result<Arc<OpenRepo>, AppError> {

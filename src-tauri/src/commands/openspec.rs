@@ -627,6 +627,19 @@ pub enum ArchiveAttempt {
     summary: String,
     detail: String,
   },
+  /// The CLI exited successfully but the working tree came back identical, so
+  /// nothing was actually archived.
+  ///
+  /// Reporting this as success is what made archiving look like it worked while
+  /// the change stayed put -- the user retries, gets the same cheerful toast,
+  /// and has no way to tell the difference. `diagnosis` runs the same reader
+  /// used for an outright failure, so a half-finished earlier archive still
+  /// offers its repair.
+  ChangedNothing {
+    diagnosis: archive_repair::ArchiveDiagnosis,
+    /// The CLI's own text, kept so an unrecognised case is still inspectable.
+    output: String,
+  },
   /// The CLI ran; its outcome is inside.
   Ran { outcome: cli::CliOutcome },
 }
@@ -689,4 +702,116 @@ pub async fn openspec_archive_change(
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Decides what an archive attempt actually amounted to.
+///
+/// `committed` is whether the follow-up commit wrote anything. A successful
+/// exit code with an unchanged working tree means the tool reported archiving
+/// while leaving the change exactly where it was -- the case that had users
+/// archiving the same change repeatedly against a cheerful success toast. The
+/// CLI's output still goes through `diagnose`, so a half-finished earlier
+/// archive keeps offering its one-click repair.
+///
+/// Split out from the command so the decision is testable without a live repo
+/// or a Tauri `State`.
+fn settle_archive(
+  change_id: &str,
+  outcome: cli::CliOutcome,
+  committed: bool,
+) -> ArchiveAttempt {
+  if let cli::CliOutcome::Ok { output } = &outcome {
+    if !committed {
+      log::warn!(
+        "openspec archive {change_id} exited 0 but changed nothing; \
+         reporting it as unarchived"
+      );
+      return ArchiveAttempt::ChangedNothing {
+        diagnosis: archive_repair::diagnose(change_id, output),
+        output: output.clone(),
+      };
+    }
+  }
+  ArchiveAttempt::Ran { outcome }
+}
+
+#[cfg(test)]
+mod archive_settle_tests {
+  use super::*;
+
+  #[test]
+  fn success_that_changed_nothing_is_not_reported_as_archived() {
+    // The regression: exit 0, empty working tree diff. Reporting `Ran { ok }`
+    // here is what told the user it worked while the change stayed put.
+    let attempt = settle_archive(
+      "add-thing",
+      cli::CliOutcome::Ok { output: "Archived add-thing".into() },
+      false,
+    );
+    assert!(
+      matches!(attempt, ArchiveAttempt::ChangedNothing { .. }),
+      "a clean exit that moved nothing must not report success"
+    );
+  }
+
+  #[test]
+  fn leftover_archive_still_offers_its_repair() {
+    // The likeliest way to hit this: an earlier archive merged the specs and
+    // stopped, so the tool now exits without doing anything. The diagnosis has
+    // to survive the new arm, otherwise the user loses the one-click fix.
+    let output = "Error: Archive '2026-07-30-add-thing' already exists.";
+    let attempt =
+      settle_archive("add-thing", cli::CliOutcome::Ok { output: output.into() }, false);
+    match attempt {
+      ArchiveAttempt::ChangedNothing { diagnosis, .. } => {
+        assert!(matches!(
+          diagnosis.problem,
+          archive_repair::ArchiveProblem::LeftoverArchive { .. }
+        ));
+        assert!(diagnosis.fix_label.is_some(), "this one is repairable");
+      }
+      other => panic!("expected ChangedNothing, got {other:?}"),
+    }
+  }
+
+  #[test]
+  fn success_that_committed_is_still_success() {
+    let attempt = settle_archive(
+      "add-thing",
+      cli::CliOutcome::Ok { output: "Archived add-thing".into() },
+      true,
+    );
+    assert!(matches!(
+      attempt,
+      ArchiveAttempt::Ran { outcome: cli::CliOutcome::Ok { .. } }
+    ));
+  }
+
+  #[test]
+  fn a_reported_failure_passes_through_untouched() {
+    // Failure already has its own path; nothing committed is expected there and
+    // must not be re-labelled as the no-op case.
+    let attempt = settle_archive(
+      "add-thing",
+      cli::CliOutcome::Failed { output: "boom".into() },
+      false,
+    );
+    assert!(matches!(
+      attempt,
+      ArchiveAttempt::Ran { outcome: cli::CliOutcome::Failed { .. } }
+    ));
+  }
+
+  #[test]
+  fn a_missing_cli_passes_through_untouched() {
+    let attempt = settle_archive(
+      "add-thing",
+      cli::CliOutcome::CliMissing { hint: "install it".into() },
+      false,
+    );
+    assert!(matches!(
+      attempt,
+      ArchiveAttempt::Ran { outcome: cli::CliOutcome::CliMissing { .. } }
+    ));
+  }
 }

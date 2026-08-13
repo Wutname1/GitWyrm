@@ -2840,6 +2840,17 @@ export type ArchiveAttempt =
  */
 { kind: "blocked"; block: ArchiveBlock; summary: string; detail: string } | 
 /**
+ * The CLI exited successfully but the working tree came back identical, so
+ * nothing was actually archived.
+ * 
+ * Reporting this as success is what made archiving look like it worked while
+ * the change stayed put -- the user retries, gets the same cheerful toast,
+ * and has no way to tell the difference. `diagnosis` runs the same reader
+ * used for an outright failure, so a half-finished earlier archive still
+ * offers its repair.
+ */
+{ kind: "changedNothing"; diagnosis: ArchiveDiagnosis; output: string } | 
+/**
  * The CLI ran; its outcome is inside.
  */
 { kind: "ran"; outcome: CliOutcome }
@@ -3790,8 +3801,24 @@ time: number | null;
 summary: string | null; 
 /**
  * Name of the local branch this was compared against, when one exists.
+ * 
+ * Matched on name alone, which is what makes the ahead/behind counts
+ * meaningful. It says nothing about tracking: a local `develop` and an
+ * `origin/develop` share a name whether or not either knows about the
+ * other. Read [`Self::tracked_by`] for that.
  */
 local_counterpart: string | null; 
+/**
+ * The local branch that actually has this branch configured as its
+ * upstream, read from branch config rather than inferred from the name.
+ * 
+ * Separate from `local_counterpart` because the two genuinely disagree:
+ * a same-named local branch with no upstream set is the ordinary state
+ * right before someone tries to set one. Treating the name match as
+ * tracking told users a branch was already connected while the setting
+ * they were reaching for had never been written.
+ */
+tracked_by: string | null; 
 /**
  * Commits this remote branch has that the local counterpart lacks.
  * Zero when there is no same-named local branch to compare with.
