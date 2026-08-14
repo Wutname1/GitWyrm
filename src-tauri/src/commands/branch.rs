@@ -8,8 +8,8 @@ use crate::git::refs;
 use crate::git::remote_url;
 use crate::git::submodule;
 use crate::git::types::{
-  BranchDeleteOutcome, BranchInfo, BranchList, BranchRelation, CheckoutOutcome, RefMove, ResetMode,
-  SyncState, TagInfo,
+  BranchDeleteOutcome, BranchInfo, BranchList, BranchRelation, CheckoutOutcome, CheckoutReport,
+  RefMove, ResetMode, SubmoduleFollowed, SyncState, TagInfo,
 };
 use crate::git::version_sort::compare_tag_names;
 use crate::git::worktree;
@@ -204,12 +204,8 @@ fn switch_to(repo: &git2::Repository, name: &str) -> Result<(), AppError> {
 ///
 /// Only call this once the switch has actually landed -- never on a path that
 /// is unwinding a failed switch.
-fn follow_switched_pins(repo: &git2::Repository, repo_path: &str) {
-  for r in submodule::follow_recorded_pins(repo, repo_path).unwrap_or_default() {
-    if let submodule::FollowOutcome::Failed(why) = r.outcome {
-      log::warn!("switching branches could not update submodule {}: {}", r.path, why);
-    }
-  }
+fn follow_switched_pins(repo: &git2::Repository, repo_path: &str) -> Vec<SubmoduleFollowed> {
+  submodule::follow_and_report(repo, repo_path, "switching branches")
 }
 
 #[tauri::command]
@@ -219,7 +215,7 @@ pub async fn checkout_branch(
   repo_id: String,
   name: String,
   mode: BranchSwitchMode,
-) -> Result<CheckoutOutcome, AppError> {
+) -> Result<CheckoutReport, AppError> {
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo_path = open.path.to_string_lossy().into_owned();
@@ -234,14 +230,15 @@ pub async fn checkout_branch(
     // open that folder is the only useful thing to do about it.
     if let Some(holder) = worktree::holder_of_branch(&repo, &name) {
       if !holder.is_current {
-        return Ok(CheckoutOutcome::HeldByWorktree);
+        // Nothing was switched, so nothing could have moved a pin.
+        return Ok(CheckoutReport { outcome: CheckoutOutcome::HeldByWorktree, submodules: Vec::new() });
       }
     }
 
     if !refs::any_changes_present(&repo)? {
       switch_to(&repo, &name)?;
-      follow_switched_pins(&repo, &repo_path);
-      return Ok(CheckoutOutcome::Clean);
+      let submodules = follow_switched_pins(&repo, &repo_path);
+      return Ok(CheckoutReport { outcome: CheckoutOutcome::Clean, submodules });
     }
 
     match mode {
@@ -258,8 +255,8 @@ pub async fn checkout_branch(
               .into(),
           )
         })?;
-        follow_switched_pins(&repo, &repo_path);
-        Ok(CheckoutOutcome::Clean)
+        let submodules = follow_switched_pins(&repo, &repo_path);
+        Ok(CheckoutReport { outcome: CheckoutOutcome::Clean, submodules })
       }
 
       // Try to carry the changes across with a plain checkout first, exactly
@@ -271,8 +268,8 @@ pub async fn checkout_branch(
       // reapply.
       BranchSwitchMode::AutoStash => {
         if switch_to(&repo, &name).is_ok() {
-          follow_switched_pins(&repo, &repo_path);
-          return Ok(CheckoutOutcome::Clean);
+          let submodules = follow_switched_pins(&repo, &repo_path);
+          return Ok(CheckoutReport { outcome: CheckoutOutcome::Clean, submodules });
         }
 
         // The plain checkout was refused (a real collision). Stash the changes,
@@ -324,21 +321,21 @@ pub async fn checkout_branch(
         // stash -- the stash can carry the user's own submodule pointer move,
         // and re-applying it after this would put their choice back on top
         // rather than have it overwritten.
-        follow_switched_pins(&repo, &repo_path);
+        let submodules = follow_switched_pins(&repo, &repo_path);
 
         // A failed re-apply leaves the user on the new branch WITHOUT their
         // changes. Report where the work went instead of propagating a raw error.
         if repo.stash_apply(0, None).is_err() {
-          return Ok(CheckoutOutcome::StashNotReapplied);
+          return Ok(CheckoutReport { outcome: CheckoutOutcome::StashNotReapplied, submodules });
         }
 
         if repo.index()?.has_conflicts() {
           // Leave stash@{0} in place as a backup; the working tree has markers.
-          Ok(CheckoutOutcome::StashPopConflict)
+          Ok(CheckoutReport { outcome: CheckoutOutcome::StashPopConflict, submodules })
         } else {
           // Clean apply: drop the now-redundant stash entry.
           repo.stash_drop(0)?;
-          Ok(CheckoutOutcome::Stashed)
+          Ok(CheckoutReport { outcome: CheckoutOutcome::Stashed, submodules })
         }
       }
     }
@@ -683,7 +680,7 @@ fn reset_current_to_commit(
     submodule::sync_submodule_workdirs(repo);
   }
 
-  Ok(RefMove { branch, previous_sha, stashed })
+  Ok(RefMove { branch, previous_sha, stashed, submodules: Vec::new() })
 }
 
 /// Move the current branch to a commit, leaving the working tree exactly as
@@ -730,7 +727,7 @@ fn move_current_branch_to_commit(
   // parent reports a pending change asking to undo the move it just made.
   submodule::sync_submodule_workdirs(repo);
 
-  Ok(RefMove { branch, previous_sha, stashed })
+  Ok(RefMove { branch, previous_sha, stashed, submodules: Vec::new() })
 }
 
 /// Fast-forward a branch to another ref, without merging or a merge commit.
@@ -807,6 +804,9 @@ fn fast_forward_branch_to(
       == Some(branch.trim());
 
     let previous_sha = branch_oid.to_string();
+    // Only the checked-out arm can move a nested checkout; a pure ref move
+    // leaves the working tree alone and has nothing to report.
+    let mut followed = Vec::new();
 
     if is_head {
       // The branch is checked out, so the working tree must move with it. Refuse
@@ -835,11 +835,7 @@ fn fast_forward_branch_to(
       // pointing the wrong way, at rolling the pin BACK. Same follow-up pull
       // and rebase already do, and best-effort for the same reason: the
       // fast-forward itself has already landed.
-      for r in submodule::follow_recorded_pins(repo, repo_path).unwrap_or_default() {
-        if let submodule::FollowOutcome::Failed(why) = r.outcome {
-          log::warn!("fast-forward could not update submodule {}: {}", r.path, why);
-        }
-      }
+      followed = submodule::follow_and_report(repo, repo_path, "fast-forward");
     } else {
       // Not checked out: a pure ref move. The working tree and HEAD are
       // untouched, so the user stays on their current branch.
@@ -850,7 +846,12 @@ fn fast_forward_branch_to(
       repo.reference(&refname, target_oid, true, "fast-forward")?;
     }
 
-    Ok(RefMove { branch: branch.trim().to_string(), previous_sha, stashed: false })
+    Ok(RefMove {
+      branch: branch.trim().to_string(),
+      previous_sha,
+      stashed: false,
+      submodules: followed,
+    })
   }
 }
 
@@ -1114,7 +1115,7 @@ pub async fn drop_commit(
     repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
     submodule::sync_submodule_workdirs(&repo);
 
-    Ok(RefMove { branch, previous_sha, stashed: false })
+    Ok(RefMove { branch, previous_sha, stashed: false, submodules: Vec::new() })
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?

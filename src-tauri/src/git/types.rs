@@ -307,6 +307,21 @@ pub enum CheckoutOutcome {
   HeldByWorktree,
 }
 
+/// A branch switch's outcome plus what it did to any linked folders.
+///
+/// The submodule list rides alongside the enum rather than inside it: what
+/// happened to the user's uncommitted changes and what happened to a submodule
+/// are independent -- a switch can stash cleanly and still fail to move a
+/// nested checkout -- and folding them together would multiply the variants
+/// every call site matches on. `outcome` stays the flat string union it was.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct CheckoutReport {
+  pub outcome: CheckoutOutcome,
+  /// Submodules whose pinned version the switch changed, and what was done
+  /// about each. Empty when the repo has no submodules or none of them moved.
+  pub submodules: Vec<SubmoduleFollowed>,
+}
+
 /// What happened when a branch deletion was attempted.
 ///
 /// Typed rather than an error string because the refusal carries an offer: the
@@ -520,6 +535,9 @@ pub struct PullResult {
 pub struct RebaseResult {
   /// Paths left in a conflicted state; the rebase is paused until resolved.
   pub conflicts: Vec<String>,
+  /// Submodules whose pinned version the replayed commits changed, and what was
+  /// done about each. Empty on a paused rebase, which has not moved anything yet.
+  pub submodules: Vec<SubmoduleFollowed>,
 }
 
 /// A pending index-level operation that can leave conflicts to resolve.
@@ -552,6 +570,11 @@ pub struct RefMove {
   /// Uncommitted changes were set aside in a stash so the move could proceed.
   /// The stash is kept, so the frontend must tell the user where the work went.
   pub stashed: bool,
+  /// Submodules whose pinned version the move changed, and what was done about
+  /// each. Only a fast-forward onto fetched commits fills this in: the other
+  /// moves land on commits that are already local, where the nested checkout is
+  /// re-pointed in process and cannot fail to fetch.
+  pub submodules: Vec<SubmoduleFollowed>,
 }
 
 /// Current in-progress operation state of the repo (merge or cherry-pick), plus

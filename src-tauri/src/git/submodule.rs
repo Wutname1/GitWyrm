@@ -11,7 +11,24 @@ use std::collections::HashMap;
 
 use crate::error::AppError;
 use crate::git::shell::run_git;
-use crate::git::types::{SubmoduleMove, SubmoduleState, SubmoduleStatus};
+use crate::git::types::{SubmoduleFollowed, SubmoduleMove, SubmoduleState, SubmoduleStatus};
+
+/// Re-read `.git/index` when it changed underneath us.
+///
+/// The app keeps one long-lived `git2::Repository` per repo, but pull, rebase
+/// and clone shell out to git.exe, which rewrites the index behind libgit2's
+/// back. A handle opened before that runs still answers from the index it
+/// cached, so the gitlink it reports is the OLD commit -- and a submodule
+/// pointer that just moved reads as not moved at all. The move is then never
+/// followed and the user is left holding a pending change nobody made.
+///
+/// `read(false)` is a stat check that reloads only when the file actually
+/// changed, so calling it before every read costs nothing when nothing moved.
+fn refresh_index(repo: &git2::Repository) {
+  if let Ok(mut index) = repo.index() {
+    let _ = index.read(false);
+  }
+}
 
 /// A path -> pointer-move map for every submodule whose workdir HEAD differs
 /// from the commit the parent repo records. Paths not present are in sync (or
@@ -20,6 +37,7 @@ use crate::git::types::{SubmoduleMove, SubmoduleState, SubmoduleStatus};
 pub fn moved_submodules(repo: &git2::Repository) -> HashMap<String, SubmoduleMove> {
   let mut moves = HashMap::new();
 
+  refresh_index(repo);
   let Ok(subs) = repo.submodules() else {
     return moves;
   };
@@ -92,6 +110,7 @@ pub fn moved_submodules(repo: &git2::Repository) -> HashMap<String, SubmoduleMov
 /// commits are not in the parent's object database, so asking the parent
 /// returns 0/0.
 pub fn all_submodules(repo: &git2::Repository) -> Vec<SubmoduleStatus> {
+  refresh_index(repo);
   let Ok(subs) = repo.submodules() else {
     return Vec::new();
   };
@@ -336,6 +355,38 @@ pub fn follow_recorded_pins(
   Ok(results)
 }
 
+/// Follow the recorded pins, then say what happened in the shape the UI reads.
+///
+/// Pull, rebase and branch switch all need the same three things after moving a
+/// pin: run the follow, record any failure in the log against the operation that
+/// caused it, and hand back a list the frontend can report from. A failure here
+/// is the case that most needs saying out loud -- the operation itself
+/// succeeded, so nothing else on screen explains why a linked folder is now
+/// sitting in the user's changes.
+///
+/// `operation` names the caller in the log line ("pull", "rebase", ...).
+pub fn follow_and_report(
+  repo: &git2::Repository,
+  repo_path: &str,
+  operation: &str,
+) -> Vec<SubmoduleFollowed> {
+  follow_recorded_pins(repo, repo_path)
+    .unwrap_or_default()
+    .into_iter()
+    .map(|r| {
+      let (stashed, failed) = match r.outcome {
+        FollowOutcome::Updated => (false, None),
+        FollowOutcome::StashedAndUpdated => (true, None),
+        FollowOutcome::Failed(why) => (false, Some(why)),
+      };
+      if let Some(why) = failed.as_deref() {
+        log::warn!("{operation} could not update submodule {}: {}", r.path, why);
+      }
+      SubmoduleFollowed { path: r.path, stashed, failed }
+    })
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -473,6 +524,115 @@ mod tests {
     // stashing instead of discarding.
     let stashes = run_git(Some(&sub), &["stash", "list"]).unwrap().stdout;
     assert!(stashes.contains("gitwyrm"), "expected a gitwyrm stash entry, got: {stashes:?}");
+  }
+
+  /// Clone `origin` to a sibling `clone` directory, submodules and all.
+  fn clone_of(origin: &str) -> String {
+    let dest = format!("{}/clone", Path::new(origin).parent().unwrap().to_string_lossy());
+    run_git(
+      None,
+      &[
+        "-c",
+        "protocol.file.allow=always",
+        "clone",
+        "-q",
+        "--recurse-submodules",
+        "--",
+        origin,
+        &dest,
+      ],
+    )
+    .unwrap();
+    dest
+  }
+
+  /// The real pull flow, which the other tests skip: the app keeps ONE
+  /// long-lived `git2::Repository` per repo, opened long before the pull runs.
+  /// The pull shells out to git.exe, which rewrites `.git/index` on disk behind
+  /// libgit2's back -- so a handle opened earlier is reading a stale index and
+  /// sees the old pin on both sides. The pointer move it is supposed to follow
+  /// is invisible to it, and the user is left with the phantom pending change.
+  #[test]
+  fn a_pull_is_followed_through_a_handle_opened_before_it() {
+    let (_dir, origin) = parent_with_submodule();
+    let clone = clone_of(&origin);
+    bump_pin(&origin);
+    // Publish the submodule's new commit so the clone can actually fetch it,
+    // the way a real remote would already have it. A side ref keeps the push
+    // off sub-src's checked-out branch.
+    run_git(
+      Some(&format!("{origin}/sub")),
+      &["push", "-q", "origin", "HEAD:refs/heads/pinned"],
+    )
+    .unwrap();
+
+    // Opened before the pull, exactly as RepoManager holds it.
+    let repo = git2::Repository::open(&clone).unwrap();
+    // Warm the submodule/index cache the way the running app does -- status
+    // runs constantly, so the handle has always read the pre-pull index.
+    let _ = moved_submodules(&repo);
+
+    run_git(
+      Some(&clone),
+      &["-c", "protocol.file.allow=always", "pull", "-q", "--autostash"],
+    )
+    .unwrap();
+
+    let results = follow_recorded_pins(&repo, &clone).unwrap();
+
+    assert_eq!(results.len(), 1, "the pull moved the pin, so it must be followed");
+    assert_eq!(results[0].outcome, FollowOutcome::Updated);
+    // The point of it all: no phantom pending change is left behind.
+    let fresh = git2::Repository::open(&clone).unwrap();
+    assert!(
+      moved_submodules(&fresh).is_empty(),
+      "submodule should sit at the pulled commit, not read as modified"
+    );
+  }
+
+  /// A pin naming a commit that exists nowhere is the shape of a failed follow:
+  /// `git submodule update` has to fetch it and cannot. The operation that
+  /// recorded it has already succeeded, so this comes back as a reported
+  /// failure rather than an error -- and reporting it is the only thing that
+  /// explains the pending change the user is left holding.
+  #[test]
+  fn a_pin_that_cannot_be_fetched_is_reported_as_failed() {
+    let (_dir, parent) = parent_with_submodule();
+    // A commit no repository has, so no fetch can produce it.
+    run_git(
+      Some(&parent),
+      &[
+        "update-index",
+        "--cacheinfo",
+        "160000,0000000000000000000000000000000000000001,sub",
+      ],
+    )
+    .unwrap();
+
+    let repo = git2::Repository::open(&parent).unwrap();
+    let reported = follow_and_report(&repo, &parent, "pull");
+
+    assert_eq!(reported.len(), 1, "the stranded submodule must be reported");
+    assert_eq!(reported[0].path, "sub");
+    assert!(reported[0].failed.is_some(), "an unfetchable pin must come back as failed");
+    // Nothing was set aside: the nested checkout was clean.
+    assert!(!reported[0].stashed);
+  }
+
+  /// The quiet case: a follow that worked reports itself as neither failed nor
+  /// stashed, so the UI has nothing to interrupt the user about.
+  #[test]
+  fn a_clean_follow_is_reported_without_a_failure() {
+    let (_dir, parent) = parent_with_submodule();
+    bump_pin(&parent);
+    strand_the_checkout(&parent);
+
+    let repo = git2::Repository::open(&parent).unwrap();
+    let reported = follow_and_report(&repo, &parent, "pull");
+
+    assert_eq!(reported.len(), 1);
+    assert_eq!(reported[0].failed, None);
+    assert!(!reported[0].stashed);
   }
 
   #[test]

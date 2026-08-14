@@ -16,6 +16,7 @@ import {
   type Resolution,
   type ResetMode,
   type SelectedLine,
+  type SubmoduleFollowed,
 } from '@/lib/bindings'
 import { beginGitOperation, keys, trimLogToFirstPage, unwrap } from '@/lib/queryKeys'
 import { useHostResolver } from '@/hooks/useGitQueries'
@@ -159,14 +160,46 @@ function describePush(r: PushResult, host: string | null): string {
 }
 
 /**
+ * A linked folder the operation could not move to the version the project now
+ * expects.
+ *
+ * This is the one submodule outcome that has to interrupt. The operation
+ * reports success, so the only trace left is a row in the changes list the user
+ * never put there -- and working out that it means "this folder is stale"
+ * rather than "I edited this" takes exactly the git knowledge Rule #2 says a
+ * screen must not assume. A folder that updated cleanly needs no toast: its row
+ * in the Submodules section simply drops back to in-sync.
+ *
+ * The reason the backend logged is deliberately not shown. It is raw git output
+ * ("fatal: remote error: upload-pack: not our ref ..."), which names nothing the
+ * user can act on. What they can act on is that the version was never
+ * downloaded, and that pulling again retries it -- the follow-up runs on every
+ * pull, not only on one that brings in new commits.
+ */
+function warnStrandedSubmodules(subs: SubmoduleFollowed[]) {
+  const failed = subs.filter((s) => s.failed)
+  if (failed.length === 0) return
+  const one = failed.length === 1
+  toast.warning(
+    one ? `Couldn't update ${failed[0].path}` : `Couldn't update ${failed.length} linked folders`,
+    {
+      description:
+        `This project points at a newer version of ${one ? 'it' : 'them'}, but that version ` +
+        `could not be downloaded, so ${one ? 'it still shows' : 'they still show'} up in your ` +
+        `changes. Check that you can reach the linked project, then pull again.`,
+    }
+  )
+}
+
+/**
  * The one thing about a pull's submodule handling the UI cannot show by itself:
  * that edits inside a linked folder were set aside, and where they went.
  *
- * Everything else is deliberately unsaid. A folder that updated cleanly is
- * already visible in the Submodules section -- its row drops back to in-sync --
- * and one that failed stays amber there with its own tooltip. Narrating either
- * in a toast repeats what the panel is showing. A stash is different: it lives
- * in the nested repository, where nothing on screen points at it.
+ * A folder that updated cleanly is deliberately unsaid -- its row in the
+ * Submodules section drops back to in-sync, and narrating that repeats what the
+ * panel already shows. A failure gets its own toast from
+ * [`warnStrandedSubmodules`]. A stash is different again: it lives in the nested
+ * repository, where nothing on screen points at it.
  */
 function describeStashedSubmodules(subs: PullResult['submodules']): string {
   const stashed = subs.filter((s) => s.stashed)
@@ -783,14 +816,17 @@ export function useGitMutations(repoId: string | null) {
       const mode = useWorkspaceStore.getState().branchSwitchMode
       const t0 = performance.now()
       log.info(`[cotime] checkout START ${name}`)
-      const outcome = unwrap(await commands.checkoutBranch(id, name, mode))
+      const report = unwrap(await commands.checkoutBranch(id, name, mode))
       log.info(`[cotime] checkout IPC done in ${Math.round(performance.now() - t0)}ms`)
-      return { name, outcome, t0 }
+      return { name, report, t0 }
     },
-    onSuccess: ({ name, outcome, t0 }) => {
+    onSuccess: ({ name, report, t0 }) => {
       const since = () => Math.round(performance.now() - t0)
       log.info(`[cotime] onSuccess, invalidating at ${since()}ms`)
-      invalidate(qc, id, ['status', 'log', 'branches', 'stashes'])
+      // `submodules` too: a switch can move which version of a linked folder
+      // the project points at, so the section's rows are stale without it.
+      invalidate(qc, id, ['status', 'log', 'branches', 'stashes', 'submodules'])
+      warnStrandedSubmodules(report.submodules)
       for (const k of ['status', 'log', 'branches', 'stashes'] as const) {
         qc.getQueryCache()
           .find({ queryKey: keys[k](id) })
@@ -799,7 +835,7 @@ export function useGitMutations(repoId: string | null) {
       }
       // Compared as a string: `stash_not_reapplied` is a new backend variant and
       // bindings.ts only picks it up on the next `tauri dev` regeneration.
-      const kind: string = outcome
+      const kind: string = report.outcome
       if (kind === 'held_by_worktree') {
         // Nothing happened. Git would refuse this, and its message names
         // neither the folder nor a way forward -- so say which folder has it.
@@ -957,6 +993,7 @@ export function useGitMutations(repoId: string | null) {
       // A pull just fetched, so the auto-fetch clock restarts here too.
       noteManualFetch(id)
       toast(describePull(result, hostOf(result.upstream)))
+      warnStrandedSubmodules(result.submodules)
     },
     onError,
     // A conflicting pull exits as an error but leaves a merge or rebase in
@@ -1058,7 +1095,8 @@ export function useGitMutations(repoId: string | null) {
       result: unwrap(await commands.gitRebase(id, args.onto, args.branch ?? null)),
     }),
     onSuccess: ({ onto, result }) => {
-      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState'])
+      // `submodules`: replayed commits can move a pin just like pulled ones can.
+      invalidate(qc, id, ['status', 'log', 'branches', 'mergeState', 'submodules'])
       if (result.conflicts.length > 0) {
         toast.warning(
           `Rebase paused on ${plural(result.conflicts.length, 'conflict')} - resolve them, then continue the rebase`
@@ -1066,6 +1104,7 @@ export function useGitMutations(repoId: string | null) {
       } else {
         toast(`Rebased onto ${onto}`)
       }
+      warnStrandedSubmodules(result.submodules)
     },
     onError,
   })
@@ -1200,8 +1239,9 @@ export function useGitMutations(repoId: string | null) {
       // `status` too, not just REFS: when the branch being moved is the one
       // checked out, the backend checks the new tree out as well, so the file
       // list and every cached diff are stale.
-      invalidate(qc, id, [...REFS, 'status'])
+      invalidate(qc, id, [...REFS, 'status', 'submodules'])
       toast(`Caught ${move.branch} up to ${target}`)
+      warnStrandedSubmodules(move.submodules)
     },
     onError,
   })

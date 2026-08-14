@@ -260,7 +260,7 @@ pub fn squash_commits(
 
   repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
   crate::git::submodule::sync_submodule_workdirs(repo);
-  Ok(RefMove { branch, previous_sha, stashed: false })
+  Ok(RefMove { branch, previous_sha, stashed: false, submodules: Vec::new() })
 }
 
 /// Drop several commits from the current branch in one rewrite: replay the
@@ -297,5 +297,5 @@ pub fn drop_commits(repo: &git2::Repository, shas: &[String]) -> Result<RefMove,
 
   repo.reset(new_tip.as_object(), ResetType::Hard, Some(CheckoutBuilder::new().force()))?;
   crate::git::submodule::sync_submodule_workdirs(repo);
-  Ok(RefMove { branch, previous_sha, stashed: false })
+  Ok(RefMove { branch, previous_sha, stashed: false, submodules: Vec::new() })
 }

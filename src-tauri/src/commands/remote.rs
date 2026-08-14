@@ -11,10 +11,9 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
 use crate::git::refs;
-use crate::git::submodule::{follow_recorded_pins, FollowOutcome};
+use crate::git::submodule::follow_and_report;
 use crate::git::types::{
-  PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo, RemoteTagInfo,
-  SubmoduleFollowed, UnpushedTag,
+  PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo, RemoteTagInfo, UnpushedTag,
 };
 use crate::state::RepoManager;
 
@@ -252,21 +251,7 @@ pub async fn git_pull(
     // pulled, setting aside any edits inside it first.
     let submodules = {
       let repo = open.repo.lock().unwrap();
-      follow_recorded_pins(&repo, &path)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| {
-          let (stashed, failed) = match r.outcome {
-            FollowOutcome::Updated => (false, None),
-            FollowOutcome::StashedAndUpdated => (true, None),
-            FollowOutcome::Failed(why) => (false, Some(why)),
-          };
-          if let Some(why) = failed.as_deref() {
-            log::warn!("pull could not update submodule {}: {}", r.path, why);
-          }
-          SubmoduleFollowed { path: r.path, stashed, failed }
-        })
-        .collect()
+      follow_and_report(&repo, &path, "pull")
     };
 
     let after = { tracking_state(&open.repo.lock().unwrap()) };
@@ -1133,16 +1118,12 @@ fn rebase_outcome(
       // A replayed commit can move a submodule pointer just like a pulled one
       // can, leaving the nested checkout behind. Same follow-up, best effort:
       // the rebase itself already succeeded.
-      {
+      let submodules = {
         let repo = open.repo.lock().unwrap();
         let path = open.path.to_string_lossy().into_owned();
-        for r in follow_recorded_pins(&repo, &path).unwrap_or_default() {
-          if let FollowOutcome::Failed(why) = r.outcome {
-            log::warn!("rebase could not update submodule {}: {}", r.path, why);
-          }
-        }
-      }
-      Ok(RebaseResult { conflicts: Vec::new() })
+        follow_and_report(&repo, &path, "rebase")
+      };
+      Ok(RebaseResult { conflicts: Vec::new(), submodules })
     }
     Err(e) => {
       let repo = open.repo.lock().unwrap();
@@ -1151,7 +1132,8 @@ fn rebase_outcome(
         git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists();
       if in_progress {
         let conflicts = refs::conflicted_paths(&repo)?;
-        Ok(RebaseResult { conflicts })
+        // Paused mid-rebase: nothing has landed, so no pin has moved yet.
+        Ok(RebaseResult { conflicts, submodules: Vec::new() })
       } else {
         Err(e)
       }

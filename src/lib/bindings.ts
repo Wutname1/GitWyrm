@@ -1242,7 +1242,7 @@ async createCommit(repoId: string, summary: string, description: string, amend: 
     else return { status: "error", error: e  as any };
 }
 },
-async checkoutBranch(repoId: string, name: string, mode: BranchSwitchMode) : Promise<Result<CheckoutOutcome, string>> {
+async checkoutBranch(repoId: string, name: string, mode: BranchSwitchMode) : Promise<Result<CheckoutReport, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("checkout_branch", { repoId, name, mode }) };
 } catch (e) {
@@ -3084,6 +3084,21 @@ export type CheckoutOutcome =
  */
 "held_by_worktree"
 /**
+ * A branch switch's outcome plus what it did to any linked folders.
+ * 
+ * The submodule list rides alongside the enum rather than inside it: what
+ * happened to the user's uncommitted changes and what happened to a submodule
+ * are independent -- a switch can stash cleanly and still fail to move a
+ * nested checkout -- and folding them together would multiply the variants
+ * every call site matches on. `outcome` stays the flat string union it was.
+ */
+export type CheckoutReport = { outcome: CheckoutOutcome; 
+/**
+ * Submodules whose pinned version the switch changed, and what was done
+ * about each. Empty when the repo has no submodules or none of them moved.
+ */
+submodules: SubmoduleFollowed[] }
+/**
  * Whether the CLI is usable, and which version answered.
  */
 export type CliInfo = { available: boolean; 
@@ -3757,7 +3772,12 @@ export type RebaseResult = {
 /**
  * Paths left in a conflicted state; the rebase is paused until resolved.
  */
-conflicts: string[] }
+conflicts: string[]; 
+/**
+ * Submodules whose pinned version the replayed commits changed, and what was
+ * done about each. Empty on a paused rebase, which has not moved anything yet.
+ */
+submodules: SubmoduleFollowed[] }
 export type RecentRepo = { name: string; path: string }
 export type RefInfo = { name: string; type: RefKind }
 export type RefKind = "head" | "branch" | "remote" | "tag"
@@ -3777,7 +3797,14 @@ previous_sha: string;
  * Uncommitted changes were set aside in a stash so the move could proceed.
  * The stash is kept, so the frontend must tell the user where the work went.
  */
-stashed: boolean }
+stashed: boolean; 
+/**
+ * Submodules whose pinned version the move changed, and what was done about
+ * each. Only a fast-forward onto fetched commits fills this in: the other
+ * moves land on commits that are already local, where the nested checkout is
+ * re-pointed in process and cannot fail to fetch.
+ */
+submodules: SubmoduleFollowed[] }
 /**
  * How a remote-tracking branch relates to the local repo. This is what makes a
  * remote branch legible without checking it out.
