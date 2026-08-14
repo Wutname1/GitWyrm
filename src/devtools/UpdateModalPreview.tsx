@@ -81,6 +81,9 @@ export function UpdateModalPreview() {
       onClose={() => {}}
       state={state}
       version="0.9.0"
+      // `?current=` exercises the header's fallback: an empty value stands in
+      // for a version that could not be read.
+      currentVersion={params.get('current') ?? '0.6.1'}
       progress={
         state === 'downloading' ? { downloaded: 42_300_000, total: 96_100_000 } : null
       }

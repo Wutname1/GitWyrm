@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Download, ExternalLink, Loader2, RefreshCw } from 'lucide-react'
+import { ArrowRight, Download, ExternalLink, Loader2, RefreshCw } from 'lucide-react'
 // The unified `radix-ui` package, matching components/ui/dialog.tsx.
 // `@radix-ui/react-dialog` resolves here only as a transitive install and is
 // not a declared dependency.
@@ -170,6 +170,7 @@ export function UpdateModal() {
   const closeModal = useUpdater((s) => s.closeModal)
   const state = useUpdater((s) => s.state)
   const version = useUpdater((s) => s.version)
+  const currentVersion = useUpdater((s) => s.currentVersion)
   const progress = useUpdater((s) => s.progress)
   const changelog = useUpdater((s) => s.changelog)
   const loading = useUpdater((s) => s.changelogLoading)
@@ -185,6 +186,7 @@ export function UpdateModal() {
       onClose={closeModal}
       state={state}
       version={version}
+      currentVersion={currentVersion}
       progress={progress}
       changelog={changelog}
       loading={loading}
@@ -201,6 +203,7 @@ export interface UpdateModalViewProps {
   onClose: () => void
   state: UpdateState
   version: string | null
+  currentVersion: string | null
   progress: DownloadProgress | null
   changelog: ChangelogEntry[]
   loading: boolean
@@ -223,6 +226,7 @@ export function UpdateModalView({
   onClose,
   state,
   version,
+  currentVersion,
   progress,
   changelog,
   loading,
@@ -259,8 +263,20 @@ export function UpdateModalView({
             <DialogPrimitive.Title className="font-sans text-sm font-semibold text-text">
               Update available
             </DialogPrimitive.Title>
+            {/* Both ends of the jump, so the size of the change is obvious --
+                0.8.0 to 0.9.0 reads very differently from 0.3.0 to 0.9.0, and
+                the target alone hid that. Falls back to the target on its own
+                if the running version could not be read. */}
             {version && (
-              <span className="font-mono text-xs text-accent-text">{version}</span>
+              <span className="flex items-baseline gap-1.5 font-mono text-xs">
+                {currentVersion && (
+                  <>
+                    <span className="text-muted-foreground">{currentVersion}</span>
+                    <ArrowRight className="size-3 self-center text-muted-foreground" />
+                  </>
+                )}
+                <span className="text-accent-text">{version}</span>
+              </span>
             )}
             <DialogPrimitive.Description className="sr-only">
               Release notes for the versions newer than the one you are running.

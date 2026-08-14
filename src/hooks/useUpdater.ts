@@ -27,6 +27,11 @@ interface UpdaterStore {
   state: UpdateState;
   /** Version string of the pending update, once one is found. */
   version: string | null;
+  /**
+   * The running version, so the modal can show what the update moves away
+   * from. Resolved when the modal opens, which is the only place it is shown.
+   */
+  currentVersion: string | null;
   /** Live download progress, or null when nothing is downloading. */
   progress: DownloadProgress | null;
   /** Release notes for every version newer than the running one. */
@@ -231,6 +236,7 @@ async function withTimeout<T>(
 export const useUpdater = create<UpdaterStore>((set, get) => ({
   state: "idle",
   version: null,
+  currentVersion: null,
   progress: null,
   changelog: [],
   changelogLoading: false,
@@ -238,6 +244,16 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
 
   openModal: () => {
     set({ modalOpen: true });
+
+    // Resolved on every open, and before the changelog guard below: the notes
+    // are fetched once per session, so leaving this inside that branch would
+    // skip it on a reopen and leave the header with no "from" version.
+    if (!get().currentVersion) {
+      void getVersion()
+        .then((v) => set({ currentVersion: v }))
+        // Header falls back to showing the target alone.
+        .catch(() => {});
+    }
 
     // Notes are fetched once per session. They cannot change under a running
     // app -- a new release would need a fresh check, which resets this anyway.
