@@ -32,13 +32,15 @@ const PANEL_W: i32 = 500; // left splash panel width
 // the art panel is deliberately shorter than the source and cover-fit crops it
 // to a landscape band -- the dragon sits in the middle of the composition, so
 // what a centred crop keeps is the part worth showing.
-const UPDATE_W: i32 = 380;
+const UPDATE_W: i32 = 350;
 /// Icon + wordmark band, drawn over the top of the art.
 const UPDATE_HEADER_H: i32 = 52;
 /// Bottom of the art panel. The header sits inside this, so the art actually
 /// visible is `UPDATE_ART_H - UPDATE_HEADER_H` tall.
-const UPDATE_ART_H: i32 = 0 + UPDATE_HEADER_H;
-const UPDATE_STRIP_H: i32 = 92; // status line + progress bar below the art
+const UPDATE_ART_H: i32 = 500 + UPDATE_HEADER_H;
+const UPDATE_STRIP_H: i32 = 85; // status line + progress bar below the art
+/// Clearance between the progress bar and the bottom edge.
+const UPDATE_BAR_MARGIN: i32 = 5;
 const UPDATE_H: i32 = UPDATE_ART_H + UPDATE_STRIP_H;
 
 const TITLEBAR_H: i32 = 56;
@@ -633,11 +635,16 @@ fn draw_progress(hdc: HDC, s: &AppState, x: i32, bar_y: i32, w: i32) {
 unsafe fn paint_update(hdc: HDC, s: &AppState) {
     let l = s.layout;
 
-    // Art across the top, cover-fit into the full window width.
-    draw_splash(hdc, 0, 0, l.w, UPDATE_ART_H);
+    // Art fills the band BELOW the header, not the whole panel.
+    //
+    // `draw_splash` centres the scaled image on the rect it is given, so
+    // drawing it across the full panel and then painting the header on top left
+    // the visible art centred on a region 52px taller than the one the eye
+    // sees -- the composition read as sitting high. Handing it the visible band
+    // directly is what makes it look vertically centred.
+    draw_splash(hdc, 0, UPDATE_HEADER_H, l.w, UPDATE_ART_H - UPDATE_HEADER_H);
 
-    // Header band over the art, so the wordmark reads against a flat ground
-    // instead of whatever part of the illustration happens to be behind it.
+    // Header band above the art, carrying the icon and wordmark.
     fill_rect(hdc, 0, 0, l.w, UPDATE_HEADER_H, COLOR_BG);
     fill_rect(hdc, 0, UPDATE_HEADER_H, l.w, 1, COLOR_DIVIDER);
     draw_logo(hdc, 20, 12, 28, 28);
@@ -661,9 +668,7 @@ unsafe fn paint_update(hdc: HDC, s: &AppState) {
         return;
     }
 
-    // 24px of clearance under the bar, matching the side inset, so the strip
-    // reads as a panel with padding rather than content pushed against an edge.
-    draw_progress(hdc, s, l.content_x, l.h - 24 - 16, l.content_w);
+    draw_progress(hdc, s, l.content_x, l.h - UPDATE_BAR_MARGIN - 16, l.content_w);
 }
 
 /// The full-size welcome card shown on a first install.
@@ -1139,7 +1144,7 @@ mod tests {
 
         // Status text, then the bar, then the bottom margin -- the layout
         // paint_update actually draws.
-        let bar_y = l.h - 24 - 16;
+        let bar_y = l.h - UPDATE_BAR_MARGIN - 16;
         assert!(
             bar_y + 16 <= l.h,
             "the progress bar runs past the bottom of the window"
