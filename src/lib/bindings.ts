@@ -17,11 +17,26 @@ async pathExists(path: string) : Promise<boolean> {
     return await TAURI_INVOKE("path_exists", { path });
 },
 /**
- * Returns the current log file contents ("" when it does not exist yet).
+ * Lists the log files on disk, newest first.
  */
-async readLog() : Promise<Result<string, string>> {
+async listLogs() : Promise<Result<LogFile[], string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("read_log") };
+    return { status: "ok", data: await TAURI_INVOKE("list_logs") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Returns one log file's contents ("" when it does not exist).
+ * 
+ * Takes a bare file name, not a path: the viewer only ever asks for something
+ * `list_logs` handed it, and resolving anything else would turn a log viewer
+ * into a file reader.
+ */
+async readLogFile(name: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_log_file", { name }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -30,10 +45,10 @@ async readLog() : Promise<Result<string, string>> {
 /**
  * Returns the tail of the log for attaching to a bug report.
  * 
- * Reports want recent history, not the whole rotating file, so this trims to
- * the last `REPORT_LOG_BYTES` and drops the leading partial line so the result
- * always starts on a real log entry. The frontend scrubs the text before it
- * leaves the machine.
+ * Reports want recent history, so this reaches back through the daily files
+ * until it has `REPORT_LOG_BYTES` -- a report filed just after midnight would
+ * otherwise carry only the handful of lines written since. The frontend scrubs
+ * the text before it leaves the machine.
  */
 async readLogTail() : Promise<Result<string, string>> {
     try {
@@ -44,7 +59,8 @@ async readLogTail() : Promise<Result<string, string>> {
 }
 },
 /**
- * Truncates the log file in place so the logger's open handle stays valid.
+ * Empties the log folder: the file being written is truncated in place so the
+ * logger's open handle stays valid, and every other log file is deleted.
  */
 async clearLog() : Promise<Result<null, string>> {
     try {
@@ -3556,6 +3572,23 @@ label: string;
 command: string }
 export type IssueDetail = { number: number; title: string; body: string; author: string; state: string; labels: string[]; assignee: string | null; comments: HostComment[]; html_url: string; created_at: string; updated_at: string | null }
 export type IssueSummary = { number: number; title: string; author: string; labels: string[]; assignee: string | null; comments: number; updated_at: string | null; html_url: string }
+/**
+ * One file in the log folder, for the day picker in the log viewer.
+ */
+export type LogFile = { name: string; 
+/**
+ * Bytes on disk. An `f64` because specta refuses to export the 64-bit
+ * integer types, and JavaScript would widen them to this anyway.
+ */
+size: number; 
+/**
+ * Last written, in Unix milliseconds.
+ */
+modified_ms: number; 
+/**
+ * Whether this is the file the app is writing to right now.
+ */
+active: boolean }
 export type LogPage = { commits: CommitEntry[]; has_more: boolean }
 /**
  * What a merge of a given ref into HEAD would do, without performing it.

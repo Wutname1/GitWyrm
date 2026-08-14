@@ -6,12 +6,10 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 use specta::Type;
-use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::error::AppError;
-
-pub const LOG_FILE_NAME: &str = "gitwyrm";
+use crate::logs;
 
 /// Folder passed on the command line, waiting for the UI to collect it.
 ///
@@ -94,22 +92,70 @@ fn exists_on_disk(path: &str) -> bool {
   std::path::Path::new(path).exists()
 }
 
-fn log_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, AppError> {
-  let dir = app
-    .path()
-    .app_log_dir()
-    .map_err(|e| AppError::Other(e.to_string()))?;
-  Ok(dir.join(format!("{LOG_FILE_NAME}.log")))
+/// One file in the log folder, for the day picker in the log viewer.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct LogFile {
+  pub name: String,
+  /// Bytes on disk. An `f64` because specta refuses to export the 64-bit
+  /// integer types, and JavaScript would widen them to this anyway.
+  pub size: f64,
+  /// Last written, in Unix milliseconds.
+  pub modified_ms: f64,
+  /// Whether this is the file the app is writing to right now.
+  pub active: bool,
 }
 
-/// Returns the current log file contents ("" when it does not exist yet).
+/// Lists the log files on disk, newest first.
 #[tauri::command]
 #[specta::specta]
-pub async fn read_log(app: tauri::AppHandle) -> Result<String, AppError> {
-  let path = log_path(&app)?;
-  tauri::async_runtime::spawn_blocking(move || Ok(fs::read_to_string(path).unwrap_or_default()))
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?
+pub async fn list_logs(app: tauri::AppHandle) -> Result<Vec<LogFile>, AppError> {
+  let dir = logs::log_dir(&app)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let active = logs::active_path();
+    let mut files: Vec<LogFile> = logs::entries(&dir, None)
+      .into_iter()
+      .map(|entry| LogFile {
+        name: entry.path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+        size: entry.size as f64,
+        modified_ms: modified_ms(&entry.path),
+        active: active.as_deref() == Some(entry.path.as_path()),
+      })
+      .collect();
+    // `entries` is oldest first because that is the order the sweep needs; the
+    // picker wants today at the top.
+    files.reverse();
+    Ok(files)
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+fn modified_ms(path: &std::path::Path) -> f64 {
+  fs::metadata(path)
+    .and_then(|meta| meta.modified())
+    .ok()
+    .and_then(|when| when.duration_since(std::time::UNIX_EPOCH).ok())
+    .map(|since| since.as_millis() as f64)
+    .unwrap_or(0.0)
+}
+
+/// Returns one log file's contents ("" when it does not exist).
+///
+/// Takes a bare file name, not a path: the viewer only ever asks for something
+/// `list_logs` handed it, and resolving anything else would turn a log viewer
+/// into a file reader.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_log_file(app: tauri::AppHandle, name: String) -> Result<String, AppError> {
+  if !logs::is_managed_name(&name) {
+    return Err(AppError::Other(format!("{name} is not a log file")));
+  }
+  let dir = logs::log_dir(&app)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    Ok(fs::read_to_string(dir.join(name)).unwrap_or_default())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// How much of the log a bug report carries. Big enough to hold app startup
@@ -118,49 +164,32 @@ const REPORT_LOG_BYTES: usize = 200_000;
 
 /// Returns the tail of the log for attaching to a bug report.
 ///
-/// Reports want recent history, not the whole rotating file, so this trims to
-/// the last `REPORT_LOG_BYTES` and drops the leading partial line so the result
-/// always starts on a real log entry. The frontend scrubs the text before it
-/// leaves the machine.
+/// Reports want recent history, so this reaches back through the daily files
+/// until it has `REPORT_LOG_BYTES` -- a report filed just after midnight would
+/// otherwise carry only the handful of lines written since. The frontend scrubs
+/// the text before it leaves the machine.
 #[tauri::command]
 #[specta::specta]
 pub async fn read_log_tail(app: tauri::AppHandle) -> Result<String, AppError> {
-  let path = log_path(&app)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let text = fs::read_to_string(path).unwrap_or_default();
-    Ok(tail_from_line_boundary(&text, REPORT_LOG_BYTES))
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+  let dir = logs::log_dir(&app)?;
+  tauri::async_runtime::spawn_blocking(move || Ok(logs::recent_text(&dir, REPORT_LOG_BYTES)))
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// Keep the last `max_bytes` of `text`, starting at the next line boundary so
-/// the first entry is never a fragment. Returns the whole input when it fits.
-fn tail_from_line_boundary(text: &str, max_bytes: usize) -> String {
-  if text.len() <= max_bytes {
-    return text.to_string();
-  }
-  // Slice on a char boundary first: the cut point can land mid-UTF-8, and
-  // indexing a &str there panics.
-  let mut start = text.len() - max_bytes;
-  while start < text.len() && !text.is_char_boundary(start) {
-    start += 1;
-  }
-  let cut = &text[start..];
-  match cut.find('\n') {
-    Some(nl) => cut[nl + 1..].to_string(),
-    None => cut.to_string(),
-  }
-}
-
-/// Truncates the log file in place so the logger's open handle stays valid.
+/// Empties the log folder: the file being written is truncated in place so the
+/// logger's open handle stays valid, and every other log file is deleted.
 #[tauri::command]
 #[specta::specta]
 pub async fn clear_log(app: tauri::AppHandle) -> Result<(), AppError> {
-  let path = log_path(&app)?;
+  let dir = logs::log_dir(&app)?;
   tauri::async_runtime::spawn_blocking(move || {
-    if path.exists() {
-      fs::OpenOptions::new().write(true).truncate(true).open(path)?;
+    let active = logs::active_path();
+    for entry in logs::entries(&dir, active.as_deref()) {
+      let _ = fs::remove_file(&entry.path);
+    }
+    if let Some(active) = active.filter(|path| path.exists()) {
+      fs::OpenOptions::new().write(true).truncate(true).open(active)?;
     }
     Ok(())
   })
@@ -172,14 +201,8 @@ pub async fn clear_log(app: tauri::AppHandle) -> Result<(), AppError> {
 #[tauri::command]
 #[specta::specta]
 pub async fn open_logs_folder(app: tauri::AppHandle) -> Result<(), AppError> {
-  let dir = app
-    .path()
-    .app_log_dir()
-    .map_err(|e| AppError::Other(e.to_string()))?;
+  let dir = logs::log_dir(&app)?;
   tauri::async_runtime::spawn_blocking(move || {
-    if !dir.exists() {
-      fs::create_dir_all(&dir)?;
-    }
     app
       .opener()
       .open_path(dir.to_string_lossy().to_string(), None::<&str>)
@@ -191,41 +214,7 @@ pub async fn open_logs_folder(app: tauri::AppHandle) -> Result<(), AppError> {
 
 #[cfg(test)]
 mod tests {
-  use super::{exists_on_disk, repo_path_from_args, tail_from_line_boundary};
-
-  #[test]
-  fn short_logs_are_returned_whole() {
-    let text = "[INFO] one\n[INFO] two\n";
-    assert_eq!(tail_from_line_boundary(text, 1000), text);
-  }
-
-  #[test]
-  fn long_logs_start_on_a_whole_entry() {
-    let text = "[INFO] aaaaaaaaaa\n[INFO] bbbbbbbbbb\n[INFO] cccccccccc\n";
-    // Cuts inside the second line; the partial entry must be dropped.
-    let out = tail_from_line_boundary(text, 25);
-    assert!(out.starts_with("[INFO] "), "got {out:?}");
-    assert!(out.ends_with("[INFO] cccccccccc\n"));
-    assert!(!out.contains("aaaaaaaaaa"));
-  }
-
-  #[test]
-  fn multibyte_text_does_not_panic_at_the_cut() {
-    // A cut landing mid-UTF-8 would panic on a naive slice.
-    let text = "[INFO] ✅✅✅✅✅✅✅✅✅✅\n[INFO] done\n";
-    for max in 1..text.len() {
-      let out = tail_from_line_boundary(text, max);
-      assert!(text.ends_with(&out) || out.is_empty(), "max={max}");
-    }
-  }
-
-  #[test]
-  fn a_single_huge_line_is_still_trimmed() {
-    // No newline to cut on: return the tail rather than the whole line.
-    let text = format!("[INFO] {}", "x".repeat(500));
-    let out = tail_from_line_boundary(&text, 100);
-    assert_eq!(out.len(), 100);
-  }
+  use super::{exists_on_disk, repo_path_from_args};
 
   #[test]
   fn path_exists_reports_existing_and_missing_paths() {

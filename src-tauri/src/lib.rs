@@ -4,6 +4,7 @@ mod commands;
 mod error;
 mod git;
 mod hosting;
+mod logs;
 mod missing_repos;
 mod openspec;
 mod perf;
@@ -53,7 +54,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
   tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
     commands::app::build_info,
     commands::app::path_exists,
-    commands::app::read_log,
+    commands::app::list_logs,
+    commands::app::read_log_file,
     commands::app::read_log_tail,
     commands::app::clear_log,
     commands::app::open_logs_folder,
@@ -373,22 +375,21 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
   )))
 }
 
-/// Shared configuration for the log plugin: stdout + a rotating gitwyrm.log.
+/// Shared configuration for the log plugin: level, timestamps, and stdout.
+///
+/// The file target is added separately, in setup, because opening the file is
+/// fallible and needs the app handle to find the log folder. See `logs` for the
+/// daily file itself -- none of the plugin's own rotation settings apply to it.
 fn log_builder() -> tauri_plugin_log::Builder {
   tauri_plugin_log::Builder::new()
-    .targets([
-      tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-      tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-        file_name: Some(commands::app::LOG_FILE_NAME.into()),
-      }),
-    ])
+    .targets([tauri_plugin_log::Target::new(
+      tauri_plugin_log::TargetKind::Stdout,
+    )])
     .level(if cfg!(debug_assertions) {
       log::LevelFilter::Debug
     } else {
       log::LevelFilter::Info
     })
-    .max_file_size(5_000_000)
-    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
     .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
 }
 
@@ -440,14 +441,15 @@ pub fn run() {
       .or_else(|| info.payload().downcast_ref::<String>().cloned())
       .unwrap_or_else(|| "<non-string panic payload>".into());
     let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
-    // Write synchronously to a dedicated file next to the exe. The async log
-    // plugin can be killed before it flushes when a spawn_blocking thread
-    // aborts the process, so bypass it entirely for panics.
+    // Write synchronously to a dedicated file in the log folder. The log plugin
+    // can be killed before it flushes when a spawn_blocking thread aborts the
+    // process, so bypass it entirely for panics. Falls back to a file next to
+    // the exe when the panic beats the logger to opening its own file.
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new()
       .create(true)
       .append(true)
-      .open("gitwyrm-panic.log")
+      .open(logs::panic_log_path())
     {
       let _ = writeln!(f, "PANIC [thread {thread}] at {location}: {payload}");
     }
@@ -525,7 +527,16 @@ pub fn run() {
       // SentryLogger and attach the pair. Records still reach the file and
       // stdout exactly as before; errors additionally become Sentry events,
       // and warn/info become breadcrumbs that give those events context.
-      let (_plugin, max_level, logger) = log_builder().split(app.handle())?;
+      //
+      // The daily file target is attached here too. If it cannot be opened
+      // GitWyrm still starts, with stdout and Sentry as the only destinations --
+      // a log folder we cannot write to is not a reason to refuse to run.
+      let mut builder = log_builder();
+      match logs::file_target(app.handle()) {
+        Ok(target) => builder = builder.target(target),
+        Err(e) => eprintln!("could not open the log file: {e}"),
+      }
+      let (_plugin, max_level, logger) = builder.split(app.handle())?;
       let bridged = sentry_log::SentryLogger::with_dest(logger);
       tauri_plugin_log::attach_logger(max_level, Box::new(bridged))?;
 
@@ -559,6 +570,12 @@ pub fn run() {
       // here keeps it strictly before the webview can issue any save. Cost is
       // one `is_dir` per known repository, so it stays off the critical path.
       missing_repos::sweep(app.handle());
+
+      // Drop log files past the retention window, and the oldest ones beyond
+      // that if the folder is still too big. The writer sweeps again whenever it
+      // opens a new file, so this only has to cover what an idle app leaves
+      // behind between sessions.
+      logs::sweep(app.handle());
 
       // Stash any folder Explorer passed us. The webview does not exist yet, so
       // this waits in a slot for the frontend to collect once it is ready.

@@ -34,6 +34,13 @@ serde_json = "1"
 # drives a child process over pipes and needs these features explicitly.
 tokio = { version = "1", features = ["process", "io-util", "sync", "time", "rt", "macros"] }
 log = "0.4"
+# The logging backend tauri-plugin-log is built on. Named directly so GitWyrm can
+# hand the plugin its own writer (see src/logs.rs) instead of the size-only
+# rotation the plugin's file targets come with.
+fern = "0.7"
+# Dates for the daily log file names, and the local-offset handling that keeps a
+# file's name agreeing with the timestamps written inside it.
+time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 thiserror = "2"
 git2 = "0.20"
 notify = "8"

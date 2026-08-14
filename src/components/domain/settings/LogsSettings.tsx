@@ -24,7 +24,11 @@ export function LogsSettings() {
         </Button>
       </SettingRow>
 
-      <SettingRow label="Application log" searchId="application-log" hint="Diagnostic output written to the app log folder.">
+      <SettingRow
+        label="Application log"
+        searchId="application-log"
+        hint="Diagnostic output, written to one file per day. Logs older than two weeks are deleted for you, and so are the oldest days if the folder gets large."
+      >
         <div className="flex items-center gap-2">
           <Button
             variant="secondary"
