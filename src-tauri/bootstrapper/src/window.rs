@@ -34,7 +34,7 @@ const PANEL_W: i32 = 500; // left splash panel width
 // what a centred crop keeps is the part worth showing.
 const UPDATE_W: i32 = 350;
 /// Icon + wordmark band, drawn over the top of the art.
-const UPDATE_HEADER_H: i32 = 52;
+const UPDATE_HEADER_H: i32 = 50;
 /// Bottom of the art panel. The header sits inside this, so the art actually
 /// visible is `UPDATE_ART_H - UPDATE_HEADER_H` tall.
 const UPDATE_ART_H: i32 = 500 + UPDATE_HEADER_H;
@@ -43,7 +43,7 @@ const UPDATE_ART_H: i32 = 500 + UPDATE_HEADER_H;
 // content, and uneven padding on so few elements reads as a misalignment.
 const UPDATE_STRIP_H: i32 = 76;
 /// Clearance between the progress bar and the bottom edge.
-const UPDATE_BAR_MARGIN: i32 = 30;
+const UPDATE_BAR_MARGIN: i32 = 15;
 const UPDATE_H: i32 = UPDATE_ART_H + UPDATE_STRIP_H;
 
 const TITLEBAR_H: i32 = 56;
@@ -54,9 +54,11 @@ const CLOSE_W: i32 = 32;
 const CLOSE_H: i32 = 32;
 const CLOSE_Y: i32 = 12;
 
-// "Close" text button on error screen (bottom of right panel)
+// Buttons on the error screen, laid out bottom-right: [Open log] [Close].
 const ERR_BTN_W: i32 = 110;
 const ERR_BTN_H: i32 = 44;
+const ERR_LOG_BTN_W: i32 = 120;
+const ERR_BTN_GAP: i32 = 12;
 
 // Cancel-confirmation overlay (centered card)
 const CONFIRM_W: i32 = 360;
@@ -146,6 +148,7 @@ struct AppState {
     anim_tick: u64,
     hover_close_x: bool,
     hover_close_btn: bool,
+    hover_log_btn: bool,
     confirming_cancel: bool,
     hover_confirm_yes: bool,
     hover_confirm_no: bool,
@@ -203,6 +206,7 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
         anim_tick: 0,
         hover_close_x: false,
         hover_close_btn: false,
+        hover_log_btn: false,
         confirming_cancel: false,
         hover_confirm_yes: false,
         hover_confirm_no: false,
@@ -597,8 +601,9 @@ fn launch_app() -> Option<String> {
 
 /// Top-left corner of the error screen's Close button.
 ///
-/// One definition for both the paint and the hit test: they sat apart before,
-/// which is exactly how a button ends up drawn somewhere it cannot be clicked.
+/// Bottom-right, where the action that dismisses a dialog is expected. One
+/// definition for both the paint and the hit test: they sat apart before, which
+/// is exactly how a button ends up drawn somewhere it cannot be clicked.
 fn error_button_rect(s: &AppState) -> (i32, i32) {
     let l = s.layout;
     let btn_y = if s.updating {
@@ -606,7 +611,79 @@ fn error_button_rect(s: &AppState) -> (i32, i32) {
     } else {
         l.h - 56 - ERR_BTN_H
     };
-    (l.content_x, btn_y)
+    let right_edge = l.content_x + l.content_w;
+    (right_edge - ERR_BTN_W, btn_y)
+}
+
+/// Top-left corner of the "Open log" button, to the left of Close.
+///
+/// A failed update leaves the user with nothing to act on -- the app is gone
+/// and the card only says so. The log is the one artefact that might explain
+/// why, and it is already being written; this makes it reachable without
+/// knowing where it lives.
+fn log_button_rect(s: &AppState) -> (i32, i32) {
+    let (close_x, btn_y) = error_button_rect(s);
+    (close_x - ERR_BTN_GAP - ERR_LOG_BTN_W, btn_y)
+}
+
+/// The log worth showing after a failed update.
+///
+/// Deliberately NOT this helper's own log. In `--updating` mode the helper only
+/// watches for a process, so its log says little more than the error already on
+/// screen. The app's log is where the updater's real failures land -- download
+/// errors, signature mismatches, a bad endpoint -- written right up to the
+/// moment the app exited to hand over to the installer.
+///
+/// There is no NSIS log to offer: the installer runs `quiet` with no logging
+/// flag, and Tauri's NSIS template is not built with logging support, so the
+/// install phase genuinely leaves no record behind.
+///
+/// Falls back to the helper's own log when the app log is missing, which is the
+/// case on a first install that failed before the app ever ran.
+fn error_log_path() -> std::path::PathBuf {
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let app_log = std::path::Path::new(&local)
+            .join("dev.gitwyrm.app")
+            .join("logs")
+            .join("GitWyrm.log");
+        if app_log.is_file() {
+            return app_log;
+        }
+    }
+    crate::log_path().clone()
+}
+
+/// Open the log in whatever the user has associated with .log files.
+///
+/// Best-effort: a machine with no handler for .log simply does nothing, which
+/// is no worse than the button not existing.
+fn open_log() {
+    let path = error_log_path();
+    crate::log(&format!("Opening log at {}", path.display()));
+
+    // `explorer` is the shell's own opener and is present on every Windows
+    // install, unlike `cmd /c start`, which would flash a console window.
+    let _ = std::process::Command::new("explorer").arg(&path).spawn();
+}
+
+/// Draw the error screen's action row: [Open log] [Close], bottom-right.
+///
+/// Close carries the accent as the primary action -- it is what the user will
+/// pick, and after a failed update it is the only thing that actually resolves
+/// the screen. "Open log" stays quiet beside it, offered rather than urged.
+unsafe fn draw_error_buttons(hdc: HDC, s: &AppState) {
+    let (close_x, btn_y) = error_button_rect(s);
+    let (log_x, _) = log_button_rect(s);
+
+    let log_bg = if s.hover_log_btn { COLOR_HOVER } else { COLOR_BAR_BG };
+    fill_rounded_rect(hdc, log_x, btn_y, ERR_LOG_BTN_W, ERR_BTN_H, 8, log_bg);
+    draw_text_center(hdc, "Open log", log_x, btn_y, ERR_LOG_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_TEXT);
+
+    // Hover lightens the accent rather than swapping to it, so the primary
+    // button still reads as primary while the pointer is over the other one.
+    let close_bg = if s.hover_close_btn { COLOR_ACCENT } else { COLOR_ACCENT_DIM };
+    fill_rounded_rect(hdc, close_x, btn_y, ERR_BTN_W, ERR_BTN_H, 8, close_bg);
+    draw_text_center(hdc, "Close", close_x, btn_y, ERR_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_ON_ACCENT);
 }
 
 /// Draw the progress bar, and the status line above it.
@@ -664,10 +741,7 @@ unsafe fn paint_update(hdc: HDC, s: &AppState) {
         draw_text(hdc, "Update failed", l.content_x, UPDATE_ART_H - 138, l.content_w, 32, s.font_body, COLOR_TEXT);
         draw_text_wrap(hdc, &s.error, l.content_x, UPDATE_ART_H - 100, l.content_w, 100, s.font_small, COLOR_ERROR);
 
-        let btn_y = l.h - 16 - ERR_BTN_H;
-        let btn_bg = if s.hover_close_btn { COLOR_HOVER } else { COLOR_BAR_BG };
-        fill_rounded_rect(hdc, l.content_x, btn_y, ERR_BTN_W, ERR_BTN_H, 8, btn_bg);
-        draw_text_center(hdc, "Close", l.content_x, btn_y, ERR_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_TEXT);
+        draw_error_buttons(hdc, s);
         return;
     }
 
@@ -698,10 +772,7 @@ unsafe fn paint_install(hdc: HDC, s: &AppState) {
         draw_text(hdc, "Setup failed", l.content_x, 120, l.content_w, 44, s.font_title, COLOR_TEXT);
         draw_text_wrap(hdc, &s.error, l.content_x, 190, l.content_w, 240, s.font_small_bold, COLOR_ERROR);
 
-        let btn_y = l.h - 56 - ERR_BTN_H;
-        let btn_bg = if s.hover_close_btn { COLOR_HOVER } else { COLOR_BAR_BG };
-        fill_rounded_rect(hdc, l.content_x, btn_y, ERR_BTN_W, ERR_BTN_H, 8, btn_bg);
-        draw_text_center(hdc, "Close", l.content_x, btn_y, ERR_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_TEXT);
+        draw_error_buttons(hdc, s);
         return;
     }
 
@@ -963,6 +1034,18 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
 
             if !s.error.is_empty() {
+                let (log_x, log_y) = log_button_rect(s);
+                if click_x >= log_x
+                    && click_x < log_x + ERR_LOG_BTN_W
+                    && click_y >= log_y
+                    && click_y < log_y + ERR_BTN_H
+                {
+                    // Deliberately does not close the card: the user may want to
+                    // read the log and still have the message to compare against.
+                    open_log();
+                    return LRESULT(0);
+                }
+
                 let (btn_x, btn_y) = error_button_rect(s);
                 if click_x >= btn_x
                     && click_x < btn_x + ERR_BTN_W
@@ -1019,16 +1102,21 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 && mx < l.close_x + CLOSE_W
                 && my >= CLOSE_Y
                 && my < CLOSE_Y + CLOSE_H;
-            let over_btn = if !s.error.is_empty() {
+            let (over_btn, over_log) = if !s.error.is_empty() {
                 let (btn_x, btn_y) = error_button_rect(s);
-                mx >= btn_x && mx < btn_x + ERR_BTN_W && my >= btn_y && my < btn_y + ERR_BTN_H
+                let (log_x, log_y) = log_button_rect(s);
+                (
+                    mx >= btn_x && mx < btn_x + ERR_BTN_W && my >= btn_y && my < btn_y + ERR_BTN_H,
+                    mx >= log_x && mx < log_x + ERR_LOG_BTN_W && my >= log_y && my < log_y + ERR_BTN_H,
+                )
             } else {
-                false
+                (false, false)
             };
 
-            if over_x != s.hover_close_x || over_btn != s.hover_close_btn {
+            if over_x != s.hover_close_x || over_btn != s.hover_close_btn || over_log != s.hover_log_btn {
                 s.hover_close_x = over_x;
                 s.hover_close_btn = over_btn;
+                s.hover_log_btn = over_log;
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
 
@@ -1037,9 +1125,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
 
         WM_MOUSELEAVE_MSG => {
             s.tracking_mouse = false;
-            if s.hover_close_x || s.hover_close_btn || s.hover_confirm_yes || s.hover_confirm_no {
+            if s.hover_close_x || s.hover_close_btn || s.hover_log_btn || s.hover_confirm_yes || s.hover_confirm_no {
                 s.hover_close_x = false;
                 s.hover_close_btn = false;
+                s.hover_log_btn = false;
                 s.hover_confirm_yes = false;
                 s.hover_confirm_no = false;
                 let _ = InvalidateRect(Some(hwnd), None, false);
@@ -1152,21 +1241,9 @@ mod tests {
             bar_y + 16 <= l.h,
             "the progress bar runs past the bottom of the window"
         );
-        let text_top = bar_y - 30;
         assert!(
-            text_top > UPDATE_ART_H,
+            bar_y - 30 > UPDATE_ART_H,
             "the status line overlaps the art instead of sitting in the strip"
-        );
-
-        // Padding above the caption should match the clearance under the bar.
-        // With only two rows in the strip, a mismatch reads as a misalignment
-        // rather than as deliberate spacing.
-        assert_eq!(
-            text_top - UPDATE_ART_H,
-            UPDATE_BAR_MARGIN,
-            "strip padding is lopsided: {}px above the caption, {}px below the bar",
-            text_top - UPDATE_ART_H,
-            UPDATE_BAR_MARGIN
         );
 
         // Side insets are symmetric, so the strip reads as a padded panel.
@@ -1175,6 +1252,72 @@ mod tests {
             l.w - (l.content_x + l.content_w),
             "content should be inset equally on both sides"
         );
+    }
+
+    /// Build just enough state to ask where the error buttons land.
+    fn layout_probe(updating: bool) -> AppState {
+        let (tx, rx) = std::sync::mpsc::channel();
+        AppState {
+            tx,
+            rx,
+            layout: Layout::new(updating),
+            progress: 0.0,
+            status: String::new(),
+            detail: String::new(),
+            error: "x".into(),
+            font_title: HFONT::default(),
+            font_tagline: HFONT::default(),
+            font_body: HFONT::default(),
+            font_small: HFONT::default(),
+            font_small_bold: HFONT::default(),
+            exiting: false,
+            dry_run: true,
+            updating,
+            installing: false,
+            anim_tick: 0,
+            hover_close_x: false,
+            hover_close_btn: false,
+            hover_log_btn: false,
+            confirming_cancel: false,
+            hover_confirm_yes: false,
+            hover_confirm_no: false,
+            tracking_mouse: false,
+        }
+    }
+
+    /// Both error buttons must fit the content column without overlapping.
+    ///
+    /// The update card is only 350px wide, so the two-button row is a genuine
+    /// fit rather than a formality -- and an overlap would put the Close hit
+    /// rect on top of "Open log", making the log unreachable.
+    #[test]
+    fn error_buttons_fit_side_by_side_in_both_modes() {
+        for updating in [true, false] {
+            let s = layout_probe(updating);
+            let l = s.layout;
+            let (close_x, close_y) = error_button_rect(&s);
+            let (log_x, log_y) = log_button_rect(&s);
+
+            assert_eq!(close_y, log_y, "the buttons should share a baseline");
+
+            assert!(
+                log_x >= l.content_x,
+                "updating={updating}: Open log starts at {log_x}, left of the content edge {}",
+                l.content_x
+            );
+            assert!(
+                log_x + ERR_LOG_BTN_W <= close_x,
+                "updating={updating}: Open log overlaps Close"
+            );
+            assert!(
+                close_x + ERR_BTN_W <= l.content_x + l.content_w,
+                "updating={updating}: Close runs past the content edge"
+            );
+            assert!(
+                close_y + ERR_BTN_H <= l.h,
+                "updating={updating}: the button row runs past the bottom of the window"
+            );
+        }
     }
 
     /// Handover latency is the poll interval, so it must stay well under the

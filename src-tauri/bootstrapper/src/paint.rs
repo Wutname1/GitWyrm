@@ -10,6 +10,11 @@ pub const COLOR_PANEL: COLORREF = COLORREF(rgb(15, 20, 20));
 pub const COLOR_TEXT: COLORREF = COLORREF(rgb(246, 246, 246));
 pub const COLOR_SUBTEXT: COLORREF = COLORREF(rgb(160, 170, 168));
 pub const COLOR_ACCENT: COLORREF = COLORREF(rgb(45, 212, 191)); // teal #2dd4bf
+/// Resting fill for a primary button; COLOR_ACCENT is its hover state.
+pub const COLOR_ACCENT_DIM: COLORREF = COLORREF(rgb(16, 150, 132));
+/// Text on an accent fill. The teal is light enough that white text on it
+/// fails to separate, so the primary button uses the dark ground instead.
+pub const COLOR_ON_ACCENT: COLORREF = COLORREF(rgb(6, 20, 18));
 pub const COLOR_BAR_BG: COLORREF = COLORREF(rgb(30, 38, 37));
 pub const COLOR_ERROR: COLORREF = COLORREF(rgb(220, 90, 90));
 pub const COLOR_HOVER: COLORREF = COLORREF(rgb(45, 212, 191));
