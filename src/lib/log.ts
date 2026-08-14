@@ -4,7 +4,7 @@ import { debug, info, warn, error as logError } from '@tauri-apps/plugin-log'
  * Frontend logging bridge.
  *
  * Every message here is forwarded to the Rust `tauri-plugin-log`, which writes
- * it to `gitwyrm.log` alongside the backend's own entries. Before this existed,
+ * it to the app log alongside the backend's own entries. Before this existed,
  * frontend failures only ever became toasts and never reached the log file --
  * so a user reporting "there's an error toast but nothing in the logs" had no
  * durable trace to hand us. Now they do.

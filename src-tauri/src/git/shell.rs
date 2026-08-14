@@ -54,7 +54,7 @@ pub fn git_source() -> super::bundled::ToolSource {
 pub struct GitOutput {
   pub stdout: String,
   /// Git's diagnostics from a SUCCESSFUL run. Callers take `.stdout` and drop
-  /// the rest, so `log_stderr` records this to gitwyrm.log instead of losing it:
+  /// the rest, so `log_stderr` records this to the app log instead of losing it:
   /// git reports real warnings here even on exit 0 ("redirecting to a new URL",
   /// ref-update notices, hook output), and those explain later surprises.
   pub stderr: String,

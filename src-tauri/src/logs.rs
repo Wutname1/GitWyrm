@@ -440,8 +440,19 @@ impl Write for DailyLogFile {
       self.open()?;
     }
     if self.size > 0 && self.size + self.buffer.len() as u64 > MAX_PART_BYTES {
-      let (day, part) = (self.day, self.part + 1);
-      self.roll(day, part)?;
+      // "Clear logs" truncates this file underneath us, so confirm against disk
+      // before starting a new part -- otherwise clearing a nearly full day would
+      // be followed by an immediate roll into an empty one.
+      self.size = self
+        .file
+        .as_ref()
+        .and_then(|file| file.metadata().ok())
+        .map(|meta| meta.len())
+        .unwrap_or(self.size);
+      if self.size + self.buffer.len() as u64 > MAX_PART_BYTES {
+        let (day, part) = (self.day, self.part + 1);
+        self.roll(day, part)?;
+      }
     }
 
     if let Some(file) = self.file.as_mut() {
@@ -618,6 +629,31 @@ mod tests {
     assert_eq!(fs::read_to_string(&first).expect("first day"), "before\n");
     assert_eq!(fs::read_to_string(&second).expect("second day"), "after\n");
     assert_eq!(active_path().as_deref(), Some(second.as_path()));
+  }
+
+  #[test]
+  fn records_logged_through_fern_reach_the_daily_file() {
+    // The writer is driven by fern, which writes a record and then flushes.
+    // This stands up the same chain the log plugin builds around a Dispatch
+    // target, so a change to that contract fails here rather than in the app.
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let writer = DailyLogFile::new(dir.path().to_path_buf()).expect("open writer");
+    let (_level, logger) = fern::Dispatch::new()
+      .level(log::LevelFilter::Debug)
+      .chain(fern::Output::writer(Box::new(writer), "\n"))
+      .into_log();
+
+    logger.log(
+      &log::Record::builder()
+        .args(format_args!("hello from the daily file"))
+        .level(log::Level::Info)
+        .build(),
+    );
+    logger.flush();
+
+    let path = dir.path().join(file_name_for(today(), 1));
+    let text = fs::read_to_string(&path).expect("daily log file");
+    assert_eq!(text, "hello from the daily file\n");
   }
 
   #[test]

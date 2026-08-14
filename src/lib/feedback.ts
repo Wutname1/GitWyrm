@@ -27,7 +27,7 @@ export interface Diagnostics {
   debug: boolean
   platform: string
   userAgent: string
-  /** Scrubbed tail of gitwyrm.log, or '' when it could not be read. */
+  /** Scrubbed tail of the app log, or '' when it could not be read. */
   logTail: string
   /** Set when reading the log failed, so the report says so rather than lying. */
   logError?: string

@@ -115,7 +115,12 @@ pub async fn list_logs(app: tauri::AppHandle) -> Result<Vec<LogFile>, AppError> 
     let mut files: Vec<LogFile> = logs::entries(&dir, None)
       .into_iter()
       .map(|entry| LogFile {
-        name: entry.path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+        name: entry
+          .path
+          .file_name()
+          .unwrap_or_default()
+          .to_string_lossy()
+          .into_owned(),
         size: entry.size as f64,
         modified_ms: modified_ms(&entry.path),
         active: active.as_deref() == Some(entry.path.as_path()),

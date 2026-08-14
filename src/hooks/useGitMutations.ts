@@ -106,7 +106,7 @@ function invalidate(qc: QueryClient, repoId: string, which: QueryName[]) {
 
 /**
  * Every mutation failure flows through here. It logs the raw error to
- * gitwyrm.log (so there is always a durable trace) and shows the user a
+ * the app log (so there is always a durable trace) and shows the user a
  * classified, plain-language toast at the right severity -- info for benign
  * no-ops, warning for recoverable conflicts, error for real failures.
  */

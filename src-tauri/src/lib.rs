@@ -426,7 +426,7 @@ pub fn run() {
     }
   }
 
-  // Route panics through the logger so a backend crash lands in gitwyrm.log
+  // Route panics through the logger so a backend crash lands in the log folder
   // (with location + payload) instead of only the detached dev terminal.
   let default_hook = std::panic::take_hook();
   std::panic::set_hook(Box::new(move |info| {
@@ -521,7 +521,7 @@ pub fn run() {
     )
     .setup(|app| {
       // `tauri_plugin_log` normally claims the global `log` logger for itself,
-      // which left `log::error!` writing to gitwyrm.log and nothing else --
+      // which left `log::error!` writing to the log file and nothing else --
       // the backend Sentry project only ever saw panics. Splitting hands back
       // the plugin's logger instead of installing it, so we wrap it in a
       // SentryLogger and attach the pair. Records still reach the file and

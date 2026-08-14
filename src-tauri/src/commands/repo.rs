@@ -163,7 +163,7 @@ fn log_phase(phase: &str, path: &str, elapsed_ms: u128) {
 
 /// Times one phase of opening a repo: logs it (with the slow-warning threshold)
 /// and records it as a Sentry child span so the phase breakdown shows up in the
-/// performance dashboard, not just gitwyrm.log. The span is a no-op when Sentry
+/// performance dashboard, not just the app log. The span is a no-op when Sentry
 /// is disabled (dev builds), so this is safe to call unconditionally.
 fn timed_phase<T>(parent: &sentry::TransactionOrSpan, phase: &'static str, path: &str, f: impl FnOnce() -> T) -> T {
   let span = parent.start_child(phase, phase);

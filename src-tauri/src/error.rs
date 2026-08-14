@@ -47,11 +47,11 @@ impl Serialize for AppError {
     let message = self.to_string();
     // Tauri serializes command errors before returning them to the UI. Logging
     // at this boundary guarantees that an error shown to the user also has a
-    // durable entry in gitwyrm.log.
+    // durable entry in the app log.
     //
     // Expected conditions log at `warn` rather than `error` because
     // SentryLogger turns every `error!` into an issue. They stay in
-    // gitwyrm.log either way -- and as Sentry breadcrumbs, so they still give
+    // the app log either way -- and as Sentry breadcrumbs, so they still give
     // context to a real error that follows -- without burying genuine bugs
     // under hundreds of reports of the remote saying no.
     if is_expected(&message) {

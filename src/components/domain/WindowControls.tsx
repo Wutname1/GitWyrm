@@ -22,7 +22,7 @@ async function closeWindow() {
     await getCurrentWindow().close()
   } catch (e) {
     // Swallowing this is what made the button look dead with nothing in
-    // gitwyrm.log to explain it. Report it instead: the message names the cause
+    // the app log to explain it. Report it instead: the message names the cause
     // (an ACL refusal, a listener that vetoed the close) far better than a
     // guess made here could.
     log.error(`window close failed: ${describeError(e)}`)
