@@ -97,10 +97,10 @@ async fn updater_for_channel(
     .endpoints(vec![url])
     .map_err(|e| AppError::Other(e.to_string()))?;
 
-  // Raise the cover window in the last moment we control. The updater calls
-  // this immediately before `std::process::exit(0)`, which is the only hook
-  // that runs late enough to be sure the install is really happening and early
-  // enough to still be alive to spawn anything.
+  // Backstop only -- `install_update` raises the cover before it starts, and
+  // `spawn_update_cover` is idempotent, so this fires for real only if that
+  // earlier attempt failed. Keeping it means a cover that could not be staged
+  // while the app was busy still gets one last chance at the moment of exit.
   #[cfg(windows)]
   let builder = {
     let app = app.clone();
@@ -238,10 +238,26 @@ const HELPER_EXE: &str = "gitwyrm-setup.exe";
 ///
 /// Failure here is deliberately non-fatal: a missing helper means the update
 /// proceeds with the old blank gap, which is worse-looking but still correct.
+/// Set once the cover has been started, so it is never started twice.
+///
+/// Two call sites race for it: `install_update` raises the cover up front, and
+/// the updater's `on_before_exit` hook is still wired as a backstop. Without
+/// this the common path would spawn two identical windows stacked on each
+/// other, and the second would outlive the handover the first performed.
+#[cfg(windows)]
+static COVER_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(windows)]
 fn spawn_update_cover(app: &tauri::AppHandle) -> Result<(), String> {
   use std::os::windows::process::CommandExt;
+  use std::sync::atomic::Ordering;
   use tauri::Manager;
+
+  // `swap` rather than a load-then-store: the two call sites can in principle
+  // reach here on different threads.
+  if COVER_STARTED.swap(true, Ordering::SeqCst) {
+    return Ok(());
+  }
 
   // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: no inherited console, and no
   // console-close signal following us down when this process exits.
@@ -255,25 +271,58 @@ fn spawn_update_cover(app: &tauri::AppHandle) -> Result<(), String> {
     .join("resources")
     .join(HELPER_EXE);
 
-  if !source.is_file() {
-    return Err(format!("helper missing at {}", source.display()));
+  // Release the claim on any failure below, so a cover that could not be
+  // staged now is still attempted by the `on_before_exit` backstop rather than
+  // being suppressed by a flag set for an attempt that never produced a window.
+  let start = || -> Result<(), String> {
+    if !source.is_file() {
+      return Err(format!("helper missing at {}", source.display()));
+    }
+
+    // Name the copy per-process so two updates racing cannot fight over one
+    // file, and so a stale copy left by a killed run is never reused.
+    let dest = std::env::temp_dir().join(format!("gitwyrm-update-{}.exe", std::process::id()));
+
+    std::fs::copy(&source, &dest)
+      .map_err(|e| format!("could not stage helper at {}: {e}", dest.display()))?;
+
+    std::process::Command::new(&dest)
+      .arg("--updating")
+      .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+      .spawn()
+      .map_err(|e| format!("could not start helper: {e}"))?;
+
+    log::info!("update cover window started from {}", dest.display());
+    Ok(())
+  };
+
+  match start() {
+    Ok(()) => Ok(()),
+    Err(e) => {
+      COVER_STARTED.store(false, Ordering::SeqCst);
+      Err(e)
+    }
   }
+}
 
-  // Name the copy per-process so two updates racing cannot fight over one
-  // file, and so a stale copy left by a killed run is never reused.
-  let dest = std::env::temp_dir().join(format!("gitwyrm-update-{}.exe", std::process::id()));
+/// Take the app's own windows off screen, now that the cover is up.
+///
+/// Only cosmetic, and deliberately so: the process carries on downloading and
+/// hands off to the installer exactly as before. Hiding rather than closing
+/// matters -- closing the last window runs the app's exit path, which would
+/// tear down the very process that still has an installer to launch.
+///
+/// Failures are logged and ignored. A window that refuses to hide leaves the
+/// old overlap, which is the behaviour we already had.
+#[cfg(windows)]
+fn hide_all_windows(app: &tauri::AppHandle) {
+  use tauri::Manager;
 
-  std::fs::copy(&source, &dest)
-    .map_err(|e| format!("could not stage helper at {}: {e}", dest.display()))?;
-
-  std::process::Command::new(&dest)
-    .arg("--updating")
-    .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
-    .spawn()
-    .map_err(|e| format!("could not start helper: {e}"))?;
-
-  log::info!("update cover window started from {}", dest.display());
-  Ok(())
+  for (label, window) in app.webview_windows() {
+    if let Err(e) = window.hide() {
+      log::warn!("could not hide window {label} for the update: {e}");
+    }
+  }
 }
 
 /// Only emit once this many bytes have arrived since the last event.
@@ -312,6 +361,27 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<Option<String>, App
   };
 
   let version = update.version.clone();
+
+  // Hand the screen over before the install starts, not as the process dies.
+  //
+  // The plugin's `on_before_exit` hook sounds like the right moment but runs far
+  // too late: `install_inner` writes the ~100 MB installer out to a temp file
+  // (unzipping it first, when the bundle is zipped) *before* calling the hook,
+  // and only then exits. So the cover appeared several seconds after the user
+  // clicked, with the app sitting there fully interactive in the meantime -- the
+  // 5-10s of apparently-nothing-happening that this replaces.
+  //
+  // Raising the cover here and hiding our own window in the same breath makes
+  // the swap immediate. The hook stays wired as a backstop; the flag inside
+  // `spawn_update_cover` keeps it from producing a second window.
+  #[cfg(windows)]
+  {
+    if let Err(e) = spawn_update_cover(&app) {
+      log::warn!("update cover window did not start: {e}");
+    } else {
+      hide_all_windows(&app);
+    }
+  }
 
   let mut downloaded: u64 = 0;
   let mut last_emit: u64 = 0;

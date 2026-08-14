@@ -13,16 +13,41 @@ use crate::paint::*;
 use crate::DownloadMsg;
 
 const WM_MOUSELEAVE_MSG: u32 = 0x02A3;
-const WND_W: i32 = 1080;
-const WND_H: i32 = 720;
+
+// Install mode: a wide two-panel card -- splash art on the left, the welcome
+// copy and progress on the right.
+const INSTALL_W: i32 = 1080;
+const INSTALL_H: i32 = 720;
 const PANEL_W: i32 = 500; // left splash panel width
+
+// Update mode: the splash art and nothing else.
+//
+// An update has nothing to say. There is no welcome, no pitch and no choice to
+// make -- the app vanished for a moment and is coming back. Sizing the window
+// to the art plus a status strip removes the empty right-hand panel that made
+// the old card look like a form waiting to be filled in.
+//
+// The art is 586x841. Drawn at its own aspect ratio the card comes out taller
+// than a phone, which is far more screen than "back in a moment" deserves, so
+// the art panel is deliberately shorter than the source and cover-fit crops it
+// to a landscape band -- the dragon sits in the middle of the composition, so
+// what a centred crop keeps is the part worth showing.
+const UPDATE_W: i32 = 380;
+/// Icon + wordmark band, drawn over the top of the art.
+const UPDATE_HEADER_H: i32 = 52;
+/// Bottom of the art panel. The header sits inside this, so the art actually
+/// visible is `UPDATE_ART_H - UPDATE_HEADER_H` tall.
+const UPDATE_ART_H: i32 = 0 + UPDATE_HEADER_H;
+const UPDATE_STRIP_H: i32 = 92; // status line + progress bar below the art
+const UPDATE_H: i32 = UPDATE_ART_H + UPDATE_STRIP_H;
+
 const TITLEBAR_H: i32 = 56;
 
-// Close button rect (top-right corner)
-const CLOSE_X: i32 = WND_W - 44;
-const CLOSE_Y: i32 = 12;
+// Close button size (top-right corner). Its x/y depend on the window width, so
+// they are resolved per-mode rather than baked in here.
 const CLOSE_W: i32 = 32;
 const CLOSE_H: i32 = 32;
+const CLOSE_Y: i32 = 12;
 
 // "Close" text button on error screen (bottom of right panel)
 const ERR_BTN_W: i32 = 110;
@@ -31,18 +56,74 @@ const ERR_BTN_H: i32 = 44;
 // Cancel-confirmation overlay (centered card)
 const CONFIRM_W: i32 = 360;
 const CONFIRM_H: i32 = 160;
-const CONFIRM_X: i32 = (WND_W - CONFIRM_W) / 2;
-const CONFIRM_Y: i32 = (WND_H - CONFIRM_H) / 2;
 const CONFIRM_BTN_W: i32 = 130;
 const CONFIRM_BTN_H: i32 = 40;
 const CONFIRM_BTN_GAP: i32 = 16;
-const CONFIRM_YES_X: i32 = CONFIRM_X + CONFIRM_W - 24 - CONFIRM_BTN_W;
-const CONFIRM_NO_X: i32 = CONFIRM_YES_X - CONFIRM_BTN_GAP - CONFIRM_BTN_W;
-const CONFIRM_BTN_Y: i32 = CONFIRM_Y + CONFIRM_H - 24 - CONFIRM_BTN_H;
+
+/// Where everything sits, for the mode this window is running in.
+///
+/// The two modes are different enough in shape that sharing one set of
+/// constants meant the update card inherited an install card's proportions --
+/// a 500px art panel beside 580px of mostly-empty text column. Resolving the
+/// geometry once at startup lets each mode be laid out for what it actually
+/// shows, while the paint and hit-test code stays common.
+#[derive(Clone, Copy)]
+struct Layout {
+    w: i32,
+    h: i32,
+    /// Width of the splash art panel. In update mode this is the whole window.
+    panel_w: i32,
+    /// Left edge of the text/progress content.
+    content_x: i32,
+    /// Width available to that content.
+    content_w: i32,
+    close_x: i32,
+    confirm_x: i32,
+    confirm_y: i32,
+    confirm_yes_x: i32,
+    confirm_no_x: i32,
+    confirm_btn_y: i32,
+}
+
+impl Layout {
+    fn new(updating: bool) -> Self {
+        let (w, h, panel_w, content_x, content_w) = if updating {
+            // Content spans the strip beneath the art, inset by a small margin.
+            (UPDATE_W, UPDATE_H, UPDATE_W, 20, UPDATE_W - 40)
+        } else {
+            (
+                INSTALL_W,
+                INSTALL_H,
+                PANEL_W,
+                PANEL_W + 56,
+                INSTALL_W - PANEL_W - 112,
+            )
+        };
+
+        let confirm_x = (w - CONFIRM_W) / 2;
+        let confirm_y = (h - CONFIRM_H) / 2;
+        let confirm_yes_x = confirm_x + CONFIRM_W - 24 - CONFIRM_BTN_W;
+
+        Self {
+            w,
+            h,
+            panel_w,
+            content_x,
+            content_w,
+            close_x: w - 44,
+            confirm_x,
+            confirm_y,
+            confirm_yes_x,
+            confirm_no_x: confirm_yes_x - CONFIRM_BTN_GAP - CONFIRM_BTN_W,
+            confirm_btn_y: confirm_y + CONFIRM_H - 24 - CONFIRM_BTN_H,
+        }
+    }
+}
 
 struct AppState {
     tx: Sender<DownloadMsg>,
     rx: std::sync::mpsc::Receiver<DownloadMsg>,
+    layout: Layout,
     progress: f64,
     status: String,
     detail: String,
@@ -83,20 +164,25 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
         }
     });
 
+    let layout = Layout::new(updating);
+
     let app = Box::new(AppState {
         tx,
         rx: unified_rx,
+        layout,
         progress: 0.0,
+        // Phase 1 of the watch: the old app is still shutting down and NSIS has
+        // not started writing yet. "Preparing update" names a step that ends,
+        // where a bare "Updating" only repeats the window title and leaves the
+        // later switch to "Installing" looking like the first real progress.
         status: if updating {
-            "Updating GitWyrm...".into()
+            "Preparing update".into()
         } else {
             "Downloading GitWyrm...".into()
         },
-        detail: if updating {
-            "This only takes a moment.".into()
-        } else {
-            String::new()
-        },
+        // The compact update card has one line for the status and no room for a
+        // second; the reassurance that used to live here is the status line now.
+        detail: String::new(),
         error: String::new(),
         font_title: create_font(-32, 700),
         font_tagline: create_font(-20, 600),
@@ -153,10 +239,10 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
             class_name,
             PCWSTR(title.as_ptr()),
             WS_POPUP | WS_VISIBLE,
-            (screen_w - WND_W) / 2,
-            (screen_h - WND_H) / 2,
-            WND_W,
-            WND_H,
+            (screen_w - layout.w) / 2,
+            (screen_h - layout.h) / 2,
+            layout.w,
+            layout.h,
             None,
             None,
             Some(hinstance.into()),
@@ -201,6 +287,13 @@ pub fn run(rx: std::sync::mpsc::Receiver<DownloadMsg>) {
     std::process::exit(0);
 }
 
+/// How long `--updating --dry-run` holds the card before closing it.
+///
+/// This is a UI workbench, not a simulation: the point is to have the window
+/// stay put long enough to iterate on it, so it deliberately outlasts the few
+/// seconds a real handover takes.
+const DRY_RUN_UPDATE_HOLD: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Give up covering the update after this long.
 ///
 /// The helper is a cover for a gap, not a supervisor: if NSIS wedges, the user
@@ -227,7 +320,24 @@ const UPDATE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_mill
 fn watch_for_relaunch(tx: Sender<DownloadMsg>, dry_run: bool) {
     std::thread::spawn(move || {
         if dry_run {
+            // Long enough to actually look at the card and tweak it, rather than
+            // the few seconds a real handover takes. `--fail` drives the error
+            // state instead, which is otherwise only reachable by breaking a
+            // real update.
+            if std::env::args().any(|a| a == "--fail") {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                let _ = tx.send(DownloadMsg::Error(
+                    "The update is taking longer than expected.\n\nIt may still finish on its own. \
+                     If GitWyrm does not reopen, launch it from the Start Menu."
+                        .into(),
+                ));
+                return;
+            }
+            // Walk the same caption change a real update goes through, so the
+            // workbench shows both phases rather than only the first.
             std::thread::sleep(std::time::Duration::from_secs(4));
+            let _ = tx.send(DownloadMsg::Status("Installing the new version".into()));
+            std::thread::sleep(DRY_RUN_UPDATE_HOLD);
             let _ = tx.send(DownloadMsg::Installed);
             return;
         }
@@ -251,6 +361,11 @@ fn watch_for_relaunch(tx: Sender<DownloadMsg>, dry_run: bool) {
             std::thread::sleep(UPDATE_POLL_INTERVAL);
         }
         crate::log("Old GitWyrm has exited; waiting for the update to finish");
+
+        // Phase 2 is the long one -- NSIS rewriting 400-odd files -- so it gets
+        // its own caption. Leaving "Updating GitWyrm" up for the whole wait made
+        // the slowest part of the update look like nothing was happening.
+        let _ = tx.send(DownloadMsg::Status("Installing the new version".into()));
 
         // Phase 2: wait for the NEW app to appear.
         loop {
@@ -475,14 +590,152 @@ fn launch_app() -> Option<String> {
     Some(msg)
 }
 
+/// Top-left corner of the error screen's Close button.
+///
+/// One definition for both the paint and the hit test: they sat apart before,
+/// which is exactly how a button ends up drawn somewhere it cannot be clicked.
+fn error_button_rect(s: &AppState) -> (i32, i32) {
+    let l = s.layout;
+    let btn_y = if s.updating {
+        l.h - 16 - ERR_BTN_H
+    } else {
+        l.h - 56 - ERR_BTN_H
+    };
+    (l.content_x, btn_y)
+}
+
+/// Draw the progress bar, and the status line above it.
+///
+/// Shared because the two modes differ in where the bar sits, not in what it
+/// looks like or what the three states (indeterminate, determinate, idle) mean.
+fn draw_progress(hdc: HDC, s: &AppState, x: i32, bar_y: i32, w: i32) {
+    if !s.status.is_empty() {
+        draw_text(hdc, &s.status, x, bar_y - 30, w, 26, s.font_body, COLOR_TEXT);
+    }
+    fill_rounded_rect(hdc, x, bar_y, w, 16, 8, COLOR_BAR_BG);
+    if s.installing {
+        fill_indeterminate_bar(hdc, x, bar_y, w, 16, 8, COLOR_BAR_START, COLOR_BAR_END, s.anim_tick);
+    } else if s.progress > 0.001 {
+        let fill_w = ((w as f64) * s.progress) as i32;
+        if fill_w > 0 {
+            fill_gradient_bar(hdc, x, bar_y, fill_w, 16, 8, COLOR_BAR_START, COLOR_BAR_END);
+        }
+    }
+}
+
+/// The compact card shown while an in-place update installs.
+///
+/// Deliberately almost empty: the art fills the window, and a single strip
+/// underneath carries the status and the bar. Someone whose app just vanished
+/// mid-session needs to see that it is coming back, which the animation says on
+/// its own -- a heading, a tagline and a paragraph of copy only added the
+/// negative space this layout exists to remove.
+unsafe fn paint_update(hdc: HDC, s: &AppState) {
+    let l = s.layout;
+
+    // Art across the top, cover-fit into the full window width.
+    draw_splash(hdc, 0, 0, l.w, UPDATE_ART_H);
+
+    // Header band over the art, so the wordmark reads against a flat ground
+    // instead of whatever part of the illustration happens to be behind it.
+    fill_rect(hdc, 0, 0, l.w, UPDATE_HEADER_H, COLOR_BG);
+    fill_rect(hdc, 0, UPDATE_HEADER_H, l.w, 1, COLOR_DIVIDER);
+    draw_logo(hdc, 20, 12, 28, 28);
+    draw_wordmark_img(hdc, 56, 15, 24);
+
+    // Status strip.
+    fill_rect(hdc, 0, UPDATE_ART_H, l.w, UPDATE_STRIP_H, COLOR_PANEL);
+    fill_rect(hdc, 0, UPDATE_ART_H, l.w, 1, COLOR_DIVIDER);
+
+    if !s.error.is_empty() {
+        // The error text needs more room than the strip has, so it takes over
+        // the lower part of the art rather than being clipped to two lines.
+        fill_rect(hdc, 0, UPDATE_ART_H - 150, l.w, 150 + UPDATE_STRIP_H, COLOR_PANEL);
+        draw_text(hdc, "Update failed", l.content_x, UPDATE_ART_H - 138, l.content_w, 32, s.font_body, COLOR_TEXT);
+        draw_text_wrap(hdc, &s.error, l.content_x, UPDATE_ART_H - 100, l.content_w, 100, s.font_small, COLOR_ERROR);
+
+        let btn_y = l.h - 16 - ERR_BTN_H;
+        let btn_bg = if s.hover_close_btn { COLOR_HOVER } else { COLOR_BAR_BG };
+        fill_rounded_rect(hdc, l.content_x, btn_y, ERR_BTN_W, ERR_BTN_H, 8, btn_bg);
+        draw_text_center(hdc, "Close", l.content_x, btn_y, ERR_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_TEXT);
+        return;
+    }
+
+    // 24px of clearance under the bar, matching the side inset, so the strip
+    // reads as a panel with padding rather than content pushed against an edge.
+    draw_progress(hdc, s, l.content_x, l.h - 24 - 16, l.content_w);
+}
+
+/// The full-size welcome card shown on a first install.
+unsafe fn paint_install(hdc: HDC, s: &AppState) {
+    let l = s.layout;
+
+    // Left splash panel (fills full height behind the title bar)
+    draw_splash(hdc, 0, 0, l.panel_w, l.h);
+
+    // Right content panel background
+    fill_rect(hdc, l.panel_w, 0, l.w - l.panel_w, l.h, COLOR_PANEL);
+
+    // Title bar (icon + wordmark, over the right panel)
+    draw_logo(hdc, l.panel_w + 24, 12, 32, 32);
+    let wordmark_w = draw_wordmark_img(hdc, l.panel_w + 68, 16, 24);
+    draw_text(hdc, " Setup", l.panel_w + 68 + wordmark_w, 18, 100, 24, s.font_body, COLOR_TEXT);
+    fill_rect(hdc, l.panel_w, TITLEBAR_H, l.w - l.panel_w, 1, COLOR_DIVIDER);
+
+    // X close button (top-right)
+    let x_color = if s.hover_close_x { COLOR_HOVER } else { COLOR_SUBTEXT };
+    draw_text_center(hdc, "\u{00D7}", l.close_x, CLOSE_Y, CLOSE_W, CLOSE_H, s.font_body, x_color);
+
+    if !s.error.is_empty() {
+        draw_text(hdc, "Setup failed", l.content_x, 120, l.content_w, 44, s.font_title, COLOR_TEXT);
+        draw_text_wrap(hdc, &s.error, l.content_x, 190, l.content_w, 240, s.font_small_bold, COLOR_ERROR);
+
+        let btn_y = l.h - 56 - ERR_BTN_H;
+        let btn_bg = if s.hover_close_btn { COLOR_HOVER } else { COLOR_BAR_BG };
+        fill_rounded_rect(hdc, l.content_x, btn_y, ERR_BTN_W, ERR_BTN_H, 8, btn_bg);
+        draw_text_center(hdc, "Close", l.content_x, btn_y, ERR_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_TEXT);
+        return;
+    }
+
+    draw_text(hdc, "Welcome to", l.content_x, 110, l.content_w, 44, s.font_title, COLOR_TEXT);
+    let wordmark_w = draw_wordmark_img(hdc, l.content_x, 156, 40);
+    draw_text(hdc, " Setup", l.content_x + wordmark_w, 154, l.content_w - wordmark_w, 44, s.font_title, COLOR_TEXT);
+
+    draw_text(hdc, "Fast. Focused. Familiar.", l.content_x, 212, l.content_w, 30, s.font_tagline, COLOR_ACCENT);
+
+    draw_text_wrap(
+        hdc,
+        "GitWyrm brings a fast, familiar, and beautiful experience to your Git workflows.",
+        l.content_x,
+        250,
+        l.content_w,
+        50,
+        s.font_small,
+        COLOR_SUBTEXT,
+    );
+
+    fill_rect(hdc, l.content_x, 320, l.content_w, 1, COLOR_DIVIDER);
+
+    let bar_y = l.h - 56 - 20 - 16;
+    draw_progress(hdc, s, l.content_x, bar_y, l.content_w);
+
+    if !s.detail.is_empty() {
+        draw_text(hdc, &s.detail, l.content_x, bar_y + 24, l.content_w, 20, s.font_small, COLOR_SUBTEXT);
+    }
+}
+
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState;
 
     if ptr.is_null() {
         if msg == WM_PAINT {
+            // No state yet, so the mode is unknown: fill whatever the window
+            // actually is rather than guessing at one mode's dimensions.
+            let mut rc = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rc);
             let mut ps = PAINTSTRUCT::default();
             let hdc = BeginPaint(hwnd, &mut ps);
-            fill_rect(hdc, 0, 0, WND_W, WND_H, COLOR_BG);
+            fill_rect(hdc, 0, 0, rc.right, rc.bottom, COLOR_BG);
             let _ = EndPaint(hwnd, &ps);
             return LRESULT(0);
         }
@@ -570,6 +823,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                             return LRESULT(0);
                         }
                     }
+                    DownloadMsg::Status(text) => {
+                        s.status = text;
+                    }
                     DownloadMsg::Error(err) => {
                         s.status.clear();
                         s.detail.clear();
@@ -591,114 +847,32 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
 
         WM_PAINT => {
+            let l = s.layout;
             let mut ps = PAINTSTRUCT::default();
             let hdc = BeginPaint(hwnd, &mut ps);
 
             // Double-buffer
             let mem_dc = CreateCompatibleDC(Some(hdc));
-            let bmp = CreateCompatibleBitmap(hdc, WND_W, WND_H);
+            let bmp = CreateCompatibleBitmap(hdc, l.w, l.h);
             let old = SelectObject(mem_dc, bmp.into());
 
-            fill_rect(mem_dc, 0, 0, WND_W, WND_H, COLOR_BG);
+            fill_rect(mem_dc, 0, 0, l.w, l.h, COLOR_BG);
 
-            // Left splash panel (fills full height behind the title bar)
-            draw_splash(mem_dc, 0, 0, PANEL_W, WND_H);
-
-            // Right content panel background
-            fill_rect(mem_dc, PANEL_W, 0, WND_W - PANEL_W, WND_H, COLOR_PANEL);
-
-            // Title bar (icon + wordmark, over the right panel)
-            draw_logo(mem_dc, PANEL_W + 24, 12, 32, 32);
-            let wordmark_w = draw_wordmark_img(mem_dc, PANEL_W + 68, 16, 24);
-            // "Setup" belongs to a first install; during an update the wordmark
-            // alone is right, and the taskbar title matches it (see below).
-            if !s.updating {
-                draw_text(mem_dc, " Setup", PANEL_W + 68 + wordmark_w, 18, 100, 24, s.font_body, COLOR_TEXT);
-            }
-            fill_rect(mem_dc, PANEL_W, TITLEBAR_H, WND_W - PANEL_W, 1, COLOR_DIVIDER);
-
-            // X close button (top-right)
-            let x_color = if s.hover_close_x { COLOR_HOVER } else { COLOR_SUBTEXT };
-            draw_text_center(mem_dc, "\u{00D7}", CLOSE_X, CLOSE_Y, CLOSE_W, CLOSE_H, s.font_body, x_color);
-
-            let content_x = PANEL_W + 56;
-            let content_w = WND_W - PANEL_W - 112;
-
-            if !s.error.is_empty() {
-                draw_text(mem_dc, "Setup failed", content_x, 120, content_w, 44, s.font_title, COLOR_TEXT);
-                draw_text_wrap(mem_dc, &s.error, content_x, 190, content_w, 240, s.font_small_bold, COLOR_ERROR);
-
-                let btn_y = WND_H - 56 - ERR_BTN_H;
-                let btn_bg = if s.hover_close_btn { COLOR_HOVER } else { COLOR_BAR_BG };
-                fill_rounded_rect(mem_dc, content_x, btn_y, ERR_BTN_W, ERR_BTN_H, 8, btn_bg);
-                draw_text_center(mem_dc, "Close", content_x, btn_y, ERR_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_TEXT);
+            if s.updating {
+                paint_update(mem_dc, s);
             } else {
-                // An update is not a first meeting: someone mid-update already
-                // has GitWyrm and does not need to be sold it, so the welcome
-                // and the pitch give way to what is happening and why the app
-                // just vanished off their screen.
-                let heading = if s.updating { "Updating" } else { "Welcome to" };
-                draw_text(mem_dc, heading, content_x, 110, content_w, 44, s.font_title, COLOR_TEXT);
-                let wordmark_w = draw_wordmark_img(mem_dc, content_x, 156, 40);
-                if !s.updating {
-                    draw_text(mem_dc, " Setup", content_x + wordmark_w, 154, content_w - wordmark_w, 44, s.font_title, COLOR_TEXT);
-                }
-
-                let tagline = if s.updating {
-                    "Hang tight."
-                } else {
-                    "Fast. Focused. Familiar."
-                };
-                draw_text(mem_dc, tagline, content_x, 212, content_w, 30, s.font_tagline, COLOR_ACCENT);
-
-                let blurb = if s.updating {
-                    "GitWyrm is installing the new version and will reopen on its own. Your tabs and repositories are exactly as you left them."
-                } else {
-                    "GitWyrm brings a fast, familiar, and beautiful experience to your Git workflows."
-                };
-                draw_text_wrap(
-                    mem_dc,
-                    blurb,
-                    content_x,
-                    250,
-                    content_w,
-                    50,
-                    s.font_small,
-                    COLOR_SUBTEXT,
-                );
-
-                fill_rect(mem_dc, content_x, 320, content_w, 1, COLOR_DIVIDER);
-
-                // Status + progress bar anchored near the bottom of the right panel
-                let bar_y = WND_H - 56 - 20 - 16;
-
-                if !s.status.is_empty() {
-                    draw_text(mem_dc, &s.status, content_x, bar_y - 30, content_w, 26, s.font_body, COLOR_TEXT);
-                }
-                fill_rounded_rect(mem_dc, content_x, bar_y, content_w, 16, 8, COLOR_BAR_BG);
-                if s.installing {
-                    fill_indeterminate_bar(mem_dc, content_x, bar_y, content_w, 16, 8, COLOR_BAR_START, COLOR_BAR_END, s.anim_tick);
-                } else if s.progress > 0.001 {
-                    let fill_w = ((content_w as f64) * s.progress) as i32;
-                    if fill_w > 0 {
-                        fill_gradient_bar(mem_dc, content_x, bar_y, fill_w, 16, 8, COLOR_BAR_START, COLOR_BAR_END);
-                    }
-                }
-
-                if !s.detail.is_empty() {
-                    draw_text(mem_dc, &s.detail, content_x, bar_y + 24, content_w, 20, s.font_small, COLOR_SUBTEXT);
-                }
+                paint_install(mem_dc, s);
             }
 
             if s.confirming_cancel {
-                fill_rect(mem_dc, 0, 0, WND_W, WND_H, COLOR_SCRIM);
-                fill_rounded_rect(mem_dc, CONFIRM_X, CONFIRM_Y, CONFIRM_W, CONFIRM_H, 10, COLOR_PANEL);
-                draw_text(mem_dc, "Cancel setup?", CONFIRM_X + 24, CONFIRM_Y + 24, CONFIRM_W - 48, 28, s.font_body, COLOR_TEXT);
+                fill_rect(mem_dc, 0, 0, l.w, l.h, COLOR_SCRIM);
+                fill_rounded_rect(mem_dc, l.confirm_x, l.confirm_y, CONFIRM_W, CONFIRM_H, 10, COLOR_PANEL);
+                draw_text(mem_dc, "Cancel setup?", l.confirm_x + 24, l.confirm_y + 24, CONFIRM_W - 48, 28, s.font_body, COLOR_TEXT);
                 draw_text_wrap(
                     mem_dc,
                     "GitWyrm has not finished installing yet.",
-                    CONFIRM_X + 24,
-                    CONFIRM_Y + 56,
+                    l.confirm_x + 24,
+                    l.confirm_y + 56,
                     CONFIRM_W - 48,
                     40,
                     s.font_small,
@@ -706,15 +880,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 );
 
                 let no_bg = if s.hover_confirm_no { COLOR_HOVER } else { COLOR_BAR_BG };
-                fill_rounded_rect(mem_dc, CONFIRM_NO_X, CONFIRM_BTN_Y, CONFIRM_BTN_W, CONFIRM_BTN_H, 8, no_bg);
-                draw_text_center(mem_dc, "Keep going", CONFIRM_NO_X, CONFIRM_BTN_Y, CONFIRM_BTN_W, CONFIRM_BTN_H, s.font_small_bold, COLOR_TEXT);
+                fill_rounded_rect(mem_dc, l.confirm_no_x, l.confirm_btn_y, CONFIRM_BTN_W, CONFIRM_BTN_H, 8, no_bg);
+                draw_text_center(mem_dc, "Keep going", l.confirm_no_x, l.confirm_btn_y, CONFIRM_BTN_W, CONFIRM_BTN_H, s.font_small_bold, COLOR_TEXT);
 
                 let yes_bg = if s.hover_confirm_yes { COLOR_ERROR } else { COLOR_BAR_BG };
-                fill_rounded_rect(mem_dc, CONFIRM_YES_X, CONFIRM_BTN_Y, CONFIRM_BTN_W, CONFIRM_BTN_H, 8, yes_bg);
-                draw_text_center(mem_dc, "Cancel setup", CONFIRM_YES_X, CONFIRM_BTN_Y, CONFIRM_BTN_W, CONFIRM_BTN_H, s.font_small_bold, COLOR_TEXT);
+                fill_rounded_rect(mem_dc, l.confirm_yes_x, l.confirm_btn_y, CONFIRM_BTN_W, CONFIRM_BTN_H, 8, yes_bg);
+                draw_text_center(mem_dc, "Cancel setup", l.confirm_yes_x, l.confirm_btn_y, CONFIRM_BTN_W, CONFIRM_BTN_H, s.font_small_bold, COLOR_TEXT);
             }
 
-            let _ = BitBlt(hdc, 0, 0, WND_W, WND_H, Some(mem_dc), 0, 0, SRCCOPY);
+            let _ = BitBlt(hdc, 0, 0, l.w, l.h, Some(mem_dc), 0, 0, SRCCOPY);
 
             SelectObject(mem_dc, old);
             let _ = DeleteObject(bmp.into());
@@ -731,14 +905,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
 
         WM_LBUTTONUP => {
+            let l = s.layout;
             let click_x = (lparam.0 & 0xFFFF) as i16 as i32;
             let click_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
 
             if s.confirming_cancel {
-                if click_x >= CONFIRM_YES_X
-                    && click_x < CONFIRM_YES_X + CONFIRM_BTN_W
-                    && click_y >= CONFIRM_BTN_Y
-                    && click_y < CONFIRM_BTN_Y + CONFIRM_BTN_H
+                if click_x >= l.confirm_yes_x
+                    && click_x < l.confirm_yes_x + CONFIRM_BTN_W
+                    && click_y >= l.confirm_btn_y
+                    && click_y < l.confirm_btn_y + CONFIRM_BTN_H
                 {
                     s.exiting = true;
                     KillTimer(Some(hwnd), 1).ok();
@@ -746,10 +921,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     return LRESULT(0);
                 }
 
-                if click_x >= CONFIRM_NO_X
-                    && click_x < CONFIRM_NO_X + CONFIRM_BTN_W
-                    && click_y >= CONFIRM_BTN_Y
-                    && click_y < CONFIRM_BTN_Y + CONFIRM_BTN_H
+                if click_x >= l.confirm_no_x
+                    && click_x < l.confirm_no_x + CONFIRM_BTN_W
+                    && click_y >= l.confirm_btn_y
+                    && click_y < l.confirm_btn_y + CONFIRM_BTN_H
                 {
                     s.confirming_cancel = false;
                     let _ = InvalidateRect(Some(hwnd), None, false);
@@ -759,7 +934,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 return LRESULT(0);
             }
 
-            if click_x >= CLOSE_X && click_x < CLOSE_X + CLOSE_W && click_y >= CLOSE_Y && click_y < CLOSE_Y + CLOSE_H {
+            // The update card has no close button: there is nothing to cancel
+            // -- the installer is already running in another process, and this
+            // window is only a cover over the gap it leaves.
+            if !s.updating
+                && click_x >= l.close_x
+                && click_x < l.close_x + CLOSE_W
+                && click_y >= CLOSE_Y
+                && click_y < CLOSE_Y + CLOSE_H
+            {
                 if s.error.is_empty() {
                     s.confirming_cancel = true;
                     let _ = InvalidateRect(Some(hwnd), None, false);
@@ -772,10 +955,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
 
             if !s.error.is_empty() {
-                let content_x = PANEL_W + 56;
-                let btn_y = WND_H - 56 - ERR_BTN_H;
-                if click_x >= content_x
-                    && click_x < content_x + ERR_BTN_W
+                let (btn_x, btn_y) = error_button_rect(s);
+                if click_x >= btn_x
+                    && click_x < btn_x + ERR_BTN_W
                     && click_y >= btn_y
                     && click_y < btn_y + ERR_BTN_H
                 {
@@ -790,6 +972,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
 
         WM_MOUSEMOVE => {
+            let l = s.layout;
             let mx = (lparam.0 & 0xFFFF) as i16 as i32;
             let my = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
 
@@ -805,14 +988,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
 
             if s.confirming_cancel {
-                let over_yes = mx >= CONFIRM_YES_X
-                    && mx < CONFIRM_YES_X + CONFIRM_BTN_W
-                    && my >= CONFIRM_BTN_Y
-                    && my < CONFIRM_BTN_Y + CONFIRM_BTN_H;
-                let over_no = mx >= CONFIRM_NO_X
-                    && mx < CONFIRM_NO_X + CONFIRM_BTN_W
-                    && my >= CONFIRM_BTN_Y
-                    && my < CONFIRM_BTN_Y + CONFIRM_BTN_H;
+                let over_yes = mx >= l.confirm_yes_x
+                    && mx < l.confirm_yes_x + CONFIRM_BTN_W
+                    && my >= l.confirm_btn_y
+                    && my < l.confirm_btn_y + CONFIRM_BTN_H;
+                let over_no = mx >= l.confirm_no_x
+                    && mx < l.confirm_no_x + CONFIRM_BTN_W
+                    && my >= l.confirm_btn_y
+                    && my < l.confirm_btn_y + CONFIRM_BTN_H;
 
                 if over_yes != s.hover_confirm_yes || over_no != s.hover_confirm_no {
                     s.hover_confirm_yes = over_yes;
@@ -823,11 +1006,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 return LRESULT(0);
             }
 
-            let over_x = mx >= CLOSE_X && mx < CLOSE_X + CLOSE_W && my >= CLOSE_Y && my < CLOSE_Y + CLOSE_H;
+            let over_x = !s.updating
+                && mx >= l.close_x
+                && mx < l.close_x + CLOSE_W
+                && my >= CLOSE_Y
+                && my < CLOSE_Y + CLOSE_H;
             let over_btn = if !s.error.is_empty() {
-                let content_x = PANEL_W + 56;
-                let btn_y = WND_H - 56 - ERR_BTN_H;
-                mx >= content_x && mx < content_x + ERR_BTN_W && my >= btn_y && my < btn_y + ERR_BTN_H
+                let (btn_x, btn_y) = error_button_rect(s);
+                mx >= btn_x && mx < btn_x + ERR_BTN_W && my >= btn_y && my < btn_y + ERR_BTN_H
             } else {
                 false
             };
@@ -857,14 +1043,28 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         // and the close button - the close button must stay a real client-area hit so it gets
         // WM_LBUTTONUP instead of being swallowed as a caption drag).
         WM_NCHITTEST => {
+            let l = s.layout;
             let x = (lparam.0 & 0xFFFF) as i16 as i32;
             let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
             let mut rect = RECT::default();
             let _ = GetWindowRect(hwnd, &mut rect);
             let local_x = x - rect.left;
             let local_y = y - rect.top;
-            let over_close = local_x >= CLOSE_X && local_x < CLOSE_X + CLOSE_W && local_y >= CLOSE_Y && local_y < CLOSE_Y + CLOSE_H;
-            if !over_close && local_y >= 0 && local_y < TITLEBAR_H && local_x >= PANEL_W && local_x < WND_W {
+
+            // The update card has no title bar to grab, so the art itself is the
+            // drag handle -- otherwise a window with no chrome could not be moved
+            // off whatever it happens to be covering.
+            let draggable = if s.updating {
+                local_y >= 0 && local_y < UPDATE_ART_H && local_x >= 0 && local_x < l.w
+            } else {
+                let over_close = local_x >= l.close_x
+                    && local_x < l.close_x + CLOSE_W
+                    && local_y >= CLOSE_Y
+                    && local_y < CLOSE_Y + CLOSE_H;
+                !over_close && local_y >= 0 && local_y < TITLEBAR_H && local_x >= l.panel_w && local_x < l.w
+            };
+
+            if draggable {
                 LRESULT(2) // HTCAPTION
             } else {
                 DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -902,6 +1102,59 @@ mod tests {
                 "a reported window must belong to a running process"
             );
         }
+    }
+
+    /// The update card exists to be small. If it ever grows back toward the
+    /// install card's proportions, the redesign has been undone by accident.
+    #[test]
+    fn the_update_card_is_much_smaller_than_the_install_card() {
+        let update = Layout::new(true);
+        let install = Layout::new(false);
+
+        assert!(
+            update.w < install.w / 2 && update.h < install.h,
+            "update card {}x{} should be far smaller than the install card {}x{}",
+            update.w,
+            update.h,
+            install.w,
+            install.h
+        );
+    }
+
+    /// Every piece of the update card has to fit inside it. The strip is only
+    /// 92px tall, so a caption or bar drawn from the wrong origin lands off the
+    /// bottom edge and simply is not painted -- no error, just a missing bar.
+    #[test]
+    fn update_content_fits_inside_the_window() {
+        let l = Layout::new(true);
+
+        assert_eq!(l.w, UPDATE_W);
+        assert_eq!(l.h, UPDATE_ART_H + UPDATE_STRIP_H);
+
+        // The header is drawn over the art, so it must not exceed it.
+        assert!(
+            UPDATE_HEADER_H < UPDATE_ART_H,
+            "the wordmark header must sit inside the art panel"
+        );
+
+        // Status text, then the bar, then the bottom margin -- the layout
+        // paint_update actually draws.
+        let bar_y = l.h - 24 - 16;
+        assert!(
+            bar_y + 16 <= l.h,
+            "the progress bar runs past the bottom of the window"
+        );
+        assert!(
+            bar_y - 30 > UPDATE_ART_H,
+            "the status line overlaps the art instead of sitting in the strip"
+        );
+
+        // Side insets are symmetric, so the strip reads as a padded panel.
+        assert_eq!(
+            l.content_x,
+            l.w - (l.content_x + l.content_w),
+            "content should be inset equally on both sides"
+        );
     }
 
     /// Handover latency is the poll interval, so it must stay well under the

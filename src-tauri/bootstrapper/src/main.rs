@@ -67,6 +67,12 @@ pub enum DownloadMsg {
     Done(PathBuf),
     Installed,
     Error(String),
+    /// Replace the status line without changing anything else.
+    ///
+    /// The update watcher has two phases that take noticeably different
+    /// amounts of time, and one frozen caption across both makes the longer of
+    /// them look like a hang.
+    Status(String),
 }
 
 pub const APP_EXE_NAME: &str = "GitWyrm.exe";
@@ -107,6 +113,9 @@ fn parse_args<I: Iterator<Item = String>>(args: I) -> Options {
             // Undocumented in USAGE: the app passes this to itself, it is not
             // something a person or a deployment tool has any reason to run.
             "--updating" => opts.updating = true,
+            // Development only, and only meaningful with --dry-run: forces the
+            // error screen so it can be worked on without breaking an update.
+            "--fail" => {}
             "/?" | "/h" | "/help" | "-h" | "--help" => opts.help = true,
             "/log" | "--log" => match args.next() {
                 Some(p) => opts.log = Some(PathBuf::from(p)),
@@ -237,6 +246,8 @@ fn run_silent(rx: mpsc::Receiver<DownloadMsg>, opts: &Options) -> i32 {
                 return EXIT_DOWNLOAD_FAILED;
             }
             Ok(DownloadMsg::Installed) => return EXIT_OK,
+            // Status is a caption for a window there isn't one of here.
+            Ok(DownloadMsg::Status(_)) => {}
             Err(e) => {
                 log(&format!("ERROR: download ended unexpectedly: {}", e));
                 return EXIT_DOWNLOAD_FAILED;

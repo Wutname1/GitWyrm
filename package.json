@@ -15,7 +15,9 @@
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "test": "npm run typecheck && npm run test:unit && npm run test:rust && tauri dev",
-    "bootstrapper:dev": "cargo run --manifest-path src-tauri/bootstrapper/Cargo.toml --release -- --dry-run"
+    "bootstrapper:dev": "cargo run --manifest-path src-tauri/bootstrapper/Cargo.toml --release -- --dry-run",
+    "bootstrapper:updater:dev": "cargo run --manifest-path src-tauri/bootstrapper/Cargo.toml --release -- --updating --dry-run",
+    "bootstrapper:updater:dev:error": "cargo run --manifest-path src-tauri/bootstrapper/Cargo.toml --release -- --updating --dry-run --fail"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",
