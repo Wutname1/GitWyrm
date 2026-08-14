@@ -1,21 +1,51 @@
 import { create } from "zustand";
 import { toast } from "sonner";
-import { commands } from "@/lib/bindings";
+import { getVersion } from "@tauri-apps/api/app";
+import { commands, type ChangelogEntry } from "@/lib/bindings";
 import { clearSplashBar, setSplashBar } from "@/lib/splash";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 export type UpdateState =
   | "idle"
   | "checking"
   | "available"
+  /** Bytes are arriving; `progress` tracks how far along. */
   | "downloading"
+  /** Downloaded and verified, waiting for the user to restart. */
+  | "downloaded"
   | "ready"
   | "none"
   | "error";
+
+/** How far a download has got, for the modal's bar. */
+export interface DownloadProgress {
+  downloaded: number;
+  total: number | null;
+}
 
 interface UpdaterStore {
   state: UpdateState;
   /** Version string of the pending update, once one is found. */
   version: string | null;
+  /** Live download progress, or null when nothing is downloading. */
+  progress: DownloadProgress | null;
+  /** Release notes for every version newer than the running one. */
+  changelog: ChangelogEntry[];
+  /** True while the changelog request is in flight. */
+  changelogLoading: boolean;
+  /** Whether the update modal is open. */
+  modalOpen: boolean;
+  /** Show the update details modal, and fetch notes if not already loaded. */
+  openModal: () => void;
+  /** Hide the modal. The download, if any, carries on. */
+  closeModal: () => void;
+  /**
+   * Fetch and hold the installer without restarting, so the user can pick
+   * their moment. Moves to 'downloaded' on success.
+   */
+  download: () => Promise<void>;
+  /** Install what `download` fetched and restart into it. */
+  restartAndInstall: () => Promise<void>;
   /**
    * Look for a newer release without installing it. On success, moves to
    * 'available' (with `version` set) or 'none'. `silent` suppresses the
@@ -152,6 +182,21 @@ async function watchDownload(
 }
 
 /**
+ * Report raw download progress, and hand back an unsubscribe.
+ *
+ * Distinct from `watchDownload`, which formats a status line for the splash.
+ * The modal draws its own bar and needs the numbers, not a sentence.
+ */
+async function watchDownloadProgress(
+  onProgress: (progress: DownloadProgress) => void,
+): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<UpdateProgress>(UPDATE_PROGRESS_EVENT, ({ payload }) => {
+    onProgress({ downloaded: payload.downloaded, total: payload.total });
+  });
+}
+
+/**
  * How long the launch check may take before booting carries on without it. The
  * splash is covering the window for the whole wait, so an unreachable update
  * server has to cost a few seconds, not the whole startup.
@@ -186,6 +231,76 @@ async function withTimeout<T>(
 export const useUpdater = create<UpdaterStore>((set, get) => ({
   state: "idle",
   version: null,
+  progress: null,
+  changelog: [],
+  changelogLoading: false,
+  modalOpen: false,
+
+  openModal: () => {
+    set({ modalOpen: true });
+
+    // Notes are fetched once per session. They cannot change under a running
+    // app -- a new release would need a fresh check, which resets this anyway.
+    if (get().changelog.length > 0 || get().changelogLoading) return;
+
+    set({ changelogLoading: true });
+    void (async () => {
+      try {
+        const current = await getVersion();
+        const res = await commands.changelogSince(current);
+        // A missing changelog must not block the update: the modal shows the
+        // version and its buttons regardless, just without notes.
+        set({ changelog: res.status === "ok" ? res.data : [] });
+      } catch {
+        set({ changelog: [] });
+      } finally {
+        set({ changelogLoading: false });
+      }
+    })();
+  },
+
+  closeModal: () => set({ modalOpen: false }),
+
+  download: async () => {
+    if (skipInDev(false, set)) return;
+    if (get().state === "downloading") return;
+
+    set({ state: "downloading", progress: null });
+
+    const unlisten = await watchDownloadProgress((progress) => set({ progress }));
+    try {
+      const res = await commands.downloadUpdate();
+      if (res.status === "error") throw new Error(res.error);
+      if (!res.data) {
+        set({ state: "none", version: null, progress: null });
+        return;
+      }
+
+      set({ state: "downloaded", version: res.data, progress: null });
+
+      // Skip the second click when the user has asked us to.
+      if (useWorkspaceStore.getState().autoRestartAfterDownload) {
+        await get().restartAndInstall();
+      }
+    } catch (e) {
+      set({ state: "error", progress: null });
+      toast.error(`Download failed: ${(e as Error).message}`);
+    } finally {
+      unlisten();
+    }
+  },
+
+  restartAndInstall: async () => {
+    set({ state: "ready" });
+    try {
+      // Does not return on Windows: the process exits inside the handoff.
+      const res = await commands.installDownloadedUpdate();
+      if (res.status === "error") throw new Error(res.error);
+    } catch (e) {
+      set({ state: "error" });
+      toast.error(`Update failed: ${(e as Error).message}`);
+    }
+  },
 
   check: async (silent = false) => {
     if (skipInDev(silent, set)) return;

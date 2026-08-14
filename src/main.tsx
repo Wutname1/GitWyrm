@@ -7,6 +7,13 @@ import { hideSplash, killSplash } from './lib/splash'
 import { initSentry, Sentry } from './lib/sentry'
 import './index.css'
 
+// Component preview, before anything below touches Tauri.
+//
+// The boot sequence calls Tauri commands, which do not exist in a plain
+// browser, so the app cannot render there at all. This branch mounts a single
+// component against fixtures instead -- the only way to look at a dialog's
+// visuals without producing a release build. Dev-only, and the dynamic import
+// keeps the fixtures out of a production bundle.
 // Crash reporting and usage telemetry are both opt-out, and honouring that
 // means asking before the reporter starts. These reads are two quick commands,
 // so they run ahead of the first render rather than letting the app boot

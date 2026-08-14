@@ -19,7 +19,7 @@
 use crate::error::AppError;
 use crate::settings::{self, UpdateChannel};
 use serde::Serialize;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
 /// Event name carrying download progress to the splash.
@@ -134,6 +134,103 @@ pub async fn check_for_update(app: tauri::AppHandle) -> Result<Option<String>, A
     Ok(None) => Ok(None),
     Err(e) => Err(AppError::Other(e.to_string())),
   }
+}
+
+/// One line of a release's changelog.
+///
+/// Mirrors the website's stored shape. `section` is the commit-prefix category
+/// (`feature`, `fix`, `change`, `docs`, `breaking`) and `tags` are the explicit
+/// `[tag]`/`#tag` markers the commit author wrote, which the UI renders as
+/// chips. Both arrive already parsed, so nothing here re-derives them from
+/// markdown.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+pub struct ChangelogItem {
+  pub section: String,
+  pub text: String,
+  #[serde(default)]
+  pub tags: Vec<String>,
+}
+
+/// One release, with its notes.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, specta::Type)]
+pub struct ChangelogEntry {
+  pub version: String,
+  pub released_at: Option<String>,
+  #[serde(default)]
+  pub items: Vec<ChangelogItem>,
+}
+
+#[derive(serde::Deserialize)]
+struct ChangelogResponse {
+  #[serde(default)]
+  entries: Vec<ChangelogEntry>,
+}
+
+/// Structured release notes, newest first.
+const CHANGELOG_URL: &str = "https://gitwyrm.com/api/v1/changelogs";
+
+/// Release notes for everything newer than the running build.
+///
+/// Fetched here rather than in the webview because the page's CSP would have to
+/// be widened to reach gitwyrm.com, and this keeps the network surface in one
+/// place.
+///
+/// Someone updating 0.3.0 -> 0.5.0 skipped 0.4.x entirely and never saw those
+/// notes, so the filter is "newer than what is running" rather than "the target
+/// release" -- the modal is the only chance they get to read them.
+///
+/// A failure here is not an update failure: the caller shows the update without
+/// notes rather than blocking on them.
+#[tauri::command]
+#[specta::specta]
+pub async fn changelog_since(current: String) -> Result<Vec<ChangelogEntry>, AppError> {
+  let response = reqwest::get(CHANGELOG_URL)
+    .await
+    .map_err(|e| AppError::Other(format!("could not reach the changelog: {e}")))?;
+
+  if !response.status().is_success() {
+    return Err(AppError::Other(format!(
+      "changelog request failed: {}",
+      response.status()
+    )));
+  }
+
+  let body: ChangelogResponse = response
+    .json()
+    .await
+    .map_err(|e| AppError::Other(format!("could not read the changelog: {e}")))?;
+
+  let current = parse_version(&current);
+
+  let mut entries: Vec<ChangelogEntry> = body
+    .entries
+    .into_iter()
+    .filter(|e| parse_version(&e.version) > current)
+    .collect();
+
+  // Newest first. The API already returns them that way, but sorting here means
+  // the UI does not depend on that staying true.
+  entries.sort_by(|a, b| parse_version(&b.version).cmp(&parse_version(&a.version)));
+
+  Ok(entries)
+}
+
+/// A version as comparable parts, for ordering releases.
+///
+/// Deliberately lenient: anything unparseable becomes 0 so a malformed entry
+/// sorts to the bottom instead of failing the whole request. A prerelease
+/// suffix (`0.9.0-beta.1`) is trimmed, which orders it equal to its release --
+/// good enough for "is this newer than what I am running", and the updater
+/// itself is what decides which build is actually offered.
+fn parse_version(v: &str) -> (u32, u32, u32) {
+  let core = v.trim_start_matches('v');
+  let core = core.split(['-', '+']).next().unwrap_or(core);
+  let mut parts = core.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+  (
+    parts.next().unwrap_or(0),
+    parts.next().unwrap_or(0),
+    parts.next().unwrap_or(0),
+  )
 }
 
 /// Event name carrying toolset download progress.
@@ -316,8 +413,6 @@ fn spawn_update_cover(app: &tauri::AppHandle) -> Result<(), String> {
 /// old overlap, which is the behaviour we already had.
 #[cfg(windows)]
 fn hide_all_windows(app: &tauri::AppHandle) {
-  use tauri::Manager;
-
   for (label, window) in app.webview_windows() {
     if let Err(e) = window.hide() {
       log::warn!("could not hide window {label} for the update: {e}");
@@ -332,6 +427,125 @@ fn hide_all_windows(app: &tauri::AppHandle) {
 /// keeps the bar smooth (a hundred-odd updates over a typical installer) without
 /// making the download compete with its own progress reporting.
 const PROGRESS_EMIT_BYTES: u64 = 256 * 1024;
+
+/// An update downloaded and signature-checked, waiting to be installed.
+///
+/// The installer bytes live here between `download_update` and
+/// `install_downloaded_update` so the user can read the changelog, or leave the
+/// modal open, without the download being thrown away. Re-downloading ~100 MB
+/// because they took a minute to decide would be worse than holding it.
+///
+/// Dropped on install, and never persisted -- a restart re-checks from scratch.
+#[derive(Default)]
+pub struct PendingUpdate(pub std::sync::Mutex<Option<PendingUpdateInner>>);
+
+pub struct PendingUpdateInner {
+  version: String,
+  bytes: Vec<u8>,
+}
+
+/// Download the pending update and hold it, without installing.
+///
+/// Split from `install_update` so the UI can offer "Download" and "Restart to
+/// update" as two steps: someone mid-task should be able to fetch an update now
+/// and choose their own moment to restart.
+///
+/// The signature is verified inside `download`, so bytes reaching the state
+/// below have already been checked.
+#[tauri::command]
+#[specta::specta]
+pub async fn download_update(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
+  let updater = updater_for_channel(&app).await?;
+
+  let update = match updater.check().await {
+    Ok(Some(update)) => update,
+    Ok(None) => return Ok(None),
+    Err(e) => return Err(AppError::Other(e.to_string())),
+  };
+
+  let version = update.version.clone();
+
+  let mut downloaded: u64 = 0;
+  let mut last_emit: u64 = 0;
+  let progress_app = app.clone();
+
+  let on_chunk = move |chunk: usize, total: Option<u64>| {
+    downloaded = downloaded.saturating_add(chunk as u64);
+    let complete = total.is_some_and(|t| downloaded >= t);
+    if downloaded - last_emit < PROGRESS_EMIT_BYTES && !complete {
+      return;
+    }
+    last_emit = downloaded;
+    let _ = progress_app.emit(UPDATE_PROGRESS_EVENT, UpdateProgress { downloaded, total });
+  };
+
+  let bytes = update
+    .download(on_chunk, || {})
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?;
+
+  {
+    let state = app.state::<PendingUpdate>();
+    let mut slot = state.0.lock().map_err(|e| AppError::Other(e.to_string()))?;
+    *slot = Some(PendingUpdateInner {
+      version: version.clone(),
+      bytes,
+    });
+  }
+
+  Ok(Some(version))
+}
+
+/// Install an update already fetched by `download_update`, and restart.
+///
+/// **This does not return on success** -- same as `install_update`, the process
+/// exits inside the installer handoff. Errors if nothing has been downloaded,
+/// which would mean the UI offered a restart it had no bytes for.
+#[tauri::command]
+#[specta::specta]
+pub async fn install_downloaded_update(app: tauri::AppHandle) -> Result<(), AppError> {
+  let pending = {
+    let state = app.state::<PendingUpdate>();
+    let mut slot = state.0.lock().map_err(|e| AppError::Other(e.to_string()))?;
+    slot.take()
+  };
+
+  let Some(pending) = pending else {
+    return Err(AppError::Other(
+      "no update has been downloaded yet".to_string(),
+    ));
+  };
+
+  // Same handover as install_update: cover the screen before the installer
+  // starts, since the app is about to disappear.
+  #[cfg(windows)]
+  {
+    if let Err(e) = spawn_update_cover(&app) {
+      log::warn!("update cover window did not start: {e}");
+    } else {
+      hide_all_windows(&app);
+    }
+  }
+
+  let updater = updater_for_channel(&app).await?;
+  let update = match updater.check().await {
+    Ok(Some(update)) => update,
+    Ok(None) => {
+      return Err(AppError::Other(
+        "the update is no longer being offered".to_string(),
+      ))
+    }
+    Err(e) => return Err(AppError::Other(e.to_string())),
+  };
+
+  log::info!("installing downloaded update {}", pending.version);
+
+  update
+    .install(pending.bytes)
+    .map_err(|e| AppError::Other(e.to_string()))?;
+
+  Ok(())
+}
 
 /// Download and install the pending update.
 ///
@@ -435,6 +649,40 @@ mod tests {
       "beta must not resolve through /releases/latest - it skips prereleases"
     );
     assert!(beta.contains("beta"), "beta endpoint should name its channel");
+  }
+
+  #[test]
+  fn versions_order_numerically_not_lexically() {
+    // The bug this guards: as strings, "0.10.0" sorts BEFORE "0.9.0", which
+    // would hide the newest release's notes exactly when they matter most.
+    assert!(parse_version("0.10.0") > parse_version("0.9.0"));
+    assert!(parse_version("1.0.0") > parse_version("0.99.99"));
+    assert!(parse_version("0.5.0") > parse_version("0.4.1"));
+  }
+
+  #[test]
+  fn a_leading_v_and_prerelease_suffix_are_ignored() {
+    assert_eq!(parse_version("v0.8.0"), parse_version("0.8.0"));
+    assert_eq!(parse_version("0.9.0-beta.1"), parse_version("0.9.0"));
+  }
+
+  #[test]
+  fn an_unparseable_version_does_not_panic() {
+    // A malformed entry must sort harmlessly rather than fail the request.
+    assert_eq!(parse_version(""), (0, 0, 0));
+    assert_eq!(parse_version("not-a-version"), (0, 0, 0));
+  }
+
+  #[test]
+  fn a_skipped_release_still_counts_as_newer() {
+    // Someone on 0.3.0 going to 0.5.0 must be offered 0.4.x notes too --
+    // otherwise the intermediate releases are never read by anyone.
+    let current = parse_version("0.3.0");
+    for skipped in ["0.4.0", "0.4.1", "0.5.0"] {
+      assert!(parse_version(skipped) > current, "{skipped} should be newer");
+    }
+    // The running version itself is not "newer", so it never appears.
+    assert!(parse_version("0.3.0") <= current);
   }
 
   #[test]

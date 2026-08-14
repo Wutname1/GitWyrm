@@ -160,6 +160,17 @@ pub struct Settings {
   /// the user to press the update button. On by default.
   #[serde(default = "default_auto_update")]
   pub auto_update: bool,
+  /// Restart as soon as a manually-triggered download finishes, rather than
+  /// waiting for the user to press "Restart to update".
+  ///
+  /// Distinct from `auto_update`, which decides whether the launch splash
+  /// installs silently before the app is ever shown. This one only governs the
+  /// step after a download the user asked for, so someone who wants to choose
+  /// their moment to update can still skip the second click once they have
+  /// decided. Off by default: restarting on its own is a surprise the first
+  /// time, and the user is already at the keyboard.
+  #[serde(default)]
+  pub auto_restart_after_download: bool,
   #[serde(default = "default_branch_switch_mode")]
   pub branch_switch_mode: BranchSwitchMode,
   /// Provider every AI feature uses unless pointed elsewhere: commit messages,
@@ -581,6 +592,7 @@ impl Default for Settings {
       gpg_executable: None,
       update_channel: default_update_channel(),
       auto_update: default_auto_update(),
+      auto_restart_after_download: false,
       branch_switch_mode: default_branch_switch_mode(),
       ai_provider: None,
       ai_model: None,

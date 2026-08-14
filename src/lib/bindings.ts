@@ -538,6 +538,61 @@ async installUpdate() : Promise<Result<string | null, string>> {
 }
 },
 /**
+ * Release notes for everything newer than the running build.
+ * 
+ * Fetched here rather than in the webview because the page's CSP would have to
+ * be widened to reach gitwyrm.com, and this keeps the network surface in one
+ * place.
+ * 
+ * Someone updating 0.3.0 -> 0.5.0 skipped 0.4.x entirely and never saw those
+ * notes, so the filter is "newer than what is running" rather than "the target
+ * release" -- the modal is the only chance they get to read them.
+ * 
+ * A failure here is not an update failure: the caller shows the update without
+ * notes rather than blocking on them.
+ */
+async changelogSince(current: string) : Promise<Result<ChangelogEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("changelog_since", { current }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Download the pending update and hold it, without installing.
+ * 
+ * Split from `install_update` so the UI can offer "Download" and "Restart to
+ * update" as two steps: someone mid-task should be able to fetch an update now
+ * and choose their own moment to restart.
+ * 
+ * The signature is verified inside `download`, so bytes reaching the state
+ * below have already been checked.
+ */
+async downloadUpdate() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("download_update") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Install an update already fetched by `download_update`, and restart.
+ * 
+ * **This does not return on success** -- same as `install_update`, the process
+ * exits inside the installer handoff. Errors if nothing has been downloaded,
+ * which would mean the UI offered a restart it had no bytes for.
+ */
+async installDownloadedUpdate() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("install_downloaded_update") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * The manifest URL for the channel the user has chosen.
  * 
  * Exposed so the frontend can show which channel a check actually used, and
@@ -3069,6 +3124,20 @@ export type ChangeStatus =
  */
 "readyToArchive"
 /**
+ * One release, with its notes.
+ */
+export type ChangelogEntry = { version: string; released_at: string | null; items?: ChangelogItem[] }
+/**
+ * One line of a release's changelog.
+ * 
+ * Mirrors the website's stored shape. `section` is the commit-prefix category
+ * (`feature`, `fix`, `change`, `docs`, `breaking`) and `tags` are the explicit
+ * `[tag]`/`#tag` markers the commit author wrote, which the UI renders as
+ * chips. Both arrive already parsed, so nothing here re-derives them from
+ * markdown.
+ */
+export type ChangelogItem = { section: string; text: string; tags?: string[] }
+/**
  * What happened to uncommitted changes during a branch switch.
  */
 export type CheckoutOutcome = 
@@ -4215,7 +4284,19 @@ gpg_executable?: string | null; update_channel?: UpdateChannel;
  * Install updates automatically on the launch splash instead of waiting for
  * the user to press the update button. On by default.
  */
-auto_update?: boolean; branch_switch_mode?: BranchSwitchMode; 
+auto_update?: boolean; 
+/**
+ * Restart as soon as a manually-triggered download finishes, rather than
+ * waiting for the user to press "Restart to update".
+ * 
+ * Distinct from `auto_update`, which decides whether the launch splash
+ * installs silently before the app is ever shown. This one only governs the
+ * step after a download the user asked for, so someone who wants to choose
+ * their moment to update can still skip the second click once they have
+ * decided. Off by default: restarting on its own is a surprise the first
+ * time, and the user is already at the keyboard.
+ */
+auto_restart_after_download?: boolean; branch_switch_mode?: BranchSwitchMode; 
 /**
  * Provider every AI feature uses unless pointed elsewhere: commit messages,
  * commit generation, and Spec Desk runs.

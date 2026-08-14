@@ -25,6 +25,7 @@ import { AddSubmoduleModal } from '@/components/modals/AddSubmoduleModal'
 import { AddWorktreeModal } from '@/components/modals/AddWorktreeModal'
 import { NewChangeModal } from '@/components/modals/NewChangeModal'
 import { AiSettingsModal } from '@/components/modals/AiSettingsModal'
+import { UpdateModal } from '@/components/domain/UpdateModal'
 import { PushTagsModal } from '@/components/modals/PushTagsModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
@@ -444,6 +445,9 @@ function AppInner() {
       <RemotesModal />
       <GithubConnectModal />
       <AiSettingsModal />
+      {/* Main window only. A detached repo window should not announce an
+          update the user would then act on from two places at once. */}
+      <UpdateModal />
       <Toaster position="bottom-center" />
     </>
   )

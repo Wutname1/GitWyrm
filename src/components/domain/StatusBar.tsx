@@ -179,9 +179,28 @@ function OpenspecSegment() {
 function UpdateButton() {
   const state = useUpdater((s) => s.state)
   const version = useUpdater((s) => s.version)
-  const install = useUpdater((s) => s.install)
+  const openModal = useUpdater((s) => s.openModal)
 
-  if (state !== 'available' && state !== 'downloading' && state !== 'ready') return null
+  if (
+    state !== 'available' &&
+    state !== 'downloading' &&
+    state !== 'downloaded' &&
+    state !== 'ready'
+  ) {
+    return null
+  }
+
+  // The pill stays clickable while downloading: it is how the user reopens the
+  // modal after dismissing it, and closing that modal deliberately leaves the
+  // download running.
+  const label =
+    state === 'ready'
+      ? 'Restarting…'
+      : state === 'downloaded'
+        ? 'Restart to update'
+        : state === 'downloading'
+          ? `Downloading ${version ?? ''}…`
+          : `Update now${version ? ` to ${version}` : ''}`
 
   const busy = state === 'downloading' || state === 'ready'
 
@@ -189,21 +208,15 @@ function UpdateButton() {
     <div className="pointer-events-none absolute inset-x-0 flex justify-center">
       <button
         type="button"
-        onClick={() => install()}
-        disabled={busy}
-        className="titlebar-no-drag pointer-events-auto flex h-[18px] items-center gap-1.5 rounded-full bg-blue-600 px-3 font-sans text-2xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 disabled:opacity-80"
+        onClick={() => openModal()}
+        className="titlebar-no-drag pointer-events-auto flex h-[18px] items-center gap-1.5 rounded-full bg-blue-600 px-3 font-sans text-2xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-500"
       >
         {busy ? (
-          <>
-            <Loader2 className="size-3 animate-spin" />
-            {state === 'ready' ? 'Restarting…' : `Downloading ${version ?? ''}…`}
-          </>
+          <Loader2 className="size-3 animate-spin" />
         ) : (
-          <>
-            <Download className="size-3" />
-            Update now{version ? ` to ${version}` : ''}
-          </>
+          <Download className="size-3" />
         )}
+        {label}
       </button>
     </div>
   )

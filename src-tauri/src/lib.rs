@@ -91,6 +91,9 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     settings::save_settings,
     commands::updates::check_for_update,
     commands::updates::install_update,
+    commands::updates::changelog_since,
+    commands::updates::download_update,
+    commands::updates::install_downloaded_update,
     commands::updates::update_endpoint,
     commands::updates::toolset_status,
     commands::updates::install_toolset,
@@ -588,6 +591,7 @@ pub fn run() {
     .manage(commands::airun::DriverRegistry::default())
     .manage(RepoManager::default())
     .manage(WatcherRegistry::default())
+    .manage(commands::updates::PendingUpdate::default())
     .invoke_handler(builder.invoke_handler())
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

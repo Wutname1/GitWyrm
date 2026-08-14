@@ -556,6 +556,15 @@ interface WorkspaceState {
   updateChannel: UpdateChannel;
   /** Install updates on the launch splash without asking (persisted). */
   autoUpdate: boolean;
+  /**
+   * Restart as soon as a download the user started finishes, instead of
+   * waiting for them to press "Restart to update" (persisted).
+   *
+   * Separate from `autoUpdate`: that one covers the silent install at launch,
+   * this one only removes the second click once the user has already chosen to
+   * update.
+   */
+  autoRestartAfterDownload: boolean;
   /** What to do with uncommitted changes when switching branches (persisted). */
   branchSwitchMode: BranchSwitchMode;
   /**
@@ -815,6 +824,7 @@ interface WorkspaceState {
   setGpgExecutable: (path: string) => void;
   setUpdateChannel: (channel: UpdateChannel) => void;
   setAutoUpdate: (enabled: boolean) => void;
+  setAutoRestartAfterDownload: (enabled: boolean) => void;
   setBranchSwitchMode: (mode: BranchSwitchMode) => void;
   setAiSelection: (provider: string | null, model: string | null) => void;
   /** Make a provider the default, restoring the model it was last set to. */
@@ -1014,6 +1024,7 @@ function toSettings(s: WorkspaceState): Settings {
     gpg_executable: s.gpgExecutable.trim() ? s.gpgExecutable.trim() : null,
     update_channel: s.updateChannel === "beta" ? "beta" : "stable",
     auto_update: s.autoUpdate,
+    auto_restart_after_download: s.autoRestartAfterDownload,
     branch_switch_mode: s.branchSwitchMode,
     ai_provider: s.aiProvider,
     // Still written so a downgrade keeps working; ai_models is the source of truth.
@@ -1338,6 +1349,7 @@ export const SETTINGS_DEFAULTS = {
   // Not in any per-screen group: only the global "Reset all" restores them.
   updateChannel: "stable",
   autoUpdate: true,
+  autoRestartAfterDownload: false,
   branchSwitchMode: "auto_stash",
   commitButtonMode: "commit",
   defaultEditor: DEFAULT_EDITOR,
@@ -1460,6 +1472,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   gpgExecutable: "",
   updateChannel: "stable",
   autoUpdate: true,
+  autoRestartAfterDownload: false,
   branchSwitchMode: "auto_stash",
   aiProvider: null,
   aiModel: null,
@@ -1815,6 +1828,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setAutoUpdate: (enabled) => {
     set({ autoUpdate: enabled });
+    schedulePersist();
+  },
+  setAutoRestartAfterDownload: (enabled) => {
+    set({ autoRestartAfterDownload: enabled });
     schedulePersist();
   },
   setBranchSwitchMode: (mode) => {
@@ -2765,6 +2782,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         gpgExecutable: settings.gpg_executable ?? "",
         updateChannel: settings.update_channel === "beta" ? "beta" : "stable",
         autoUpdate: settings.auto_update !== false,
+        // Defaults off, so an absent value must read as false -- unlike
+        // autoUpdate above, whose default is on.
+        autoRestartAfterDownload: settings.auto_restart_after_download === true,
         branchSwitchMode: settings.branch_switch_mode ?? "auto_stash",
         aiProvider: settings.ai_provider ?? null,
         aiModel: settings.ai_model ?? null,
