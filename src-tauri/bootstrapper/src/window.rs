@@ -58,7 +58,6 @@ const CLOSE_Y: i32 = 12;
 const ERR_BTN_W: i32 = 110;
 const ERR_BTN_H: i32 = 44;
 const ERR_LOG_BTN_W: i32 = 120;
-const ERR_BTN_GAP: i32 = 12;
 
 // Cancel-confirmation overlay (centered card)
 const CONFIRM_W: i32 = 360;
@@ -615,39 +614,43 @@ fn error_button_rect(s: &AppState) -> (i32, i32) {
     (right_edge - ERR_BTN_W, btn_y)
 }
 
-/// Top-left corner of the "Open log" button, to the left of Close.
+/// Top-left corner of the "Open log" button, at the left edge of the content.
+///
+/// Pushed to the opposite end from Close rather than paired beside it: the two
+/// are not a set of alternatives to weigh up, and separating them puts the
+/// destination-changing action well away from the one the user will reach for.
 ///
 /// A failed update leaves the user with nothing to act on -- the app is gone
 /// and the card only says so. The log is the one artefact that might explain
 /// why, and it is already being written; this makes it reachable without
 /// knowing where it lives.
 fn log_button_rect(s: &AppState) -> (i32, i32) {
-    let (close_x, btn_y) = error_button_rect(s);
-    (close_x - ERR_BTN_GAP - ERR_LOG_BTN_W, btn_y)
+    let (_, btn_y) = error_button_rect(s);
+    (s.layout.content_x, btn_y)
 }
 
-/// The log worth showing after a failed update.
+/// The log worth showing after a failed update, most specific first.
 ///
-/// Deliberately NOT this helper's own log. In `--updating` mode the helper only
-/// watches for a process, so its log says little more than the error already on
-/// screen. The app's log is where the updater's real failures land -- download
-/// errors, signature mismatches, a bad endpoint -- written right up to the
-/// moment the app exited to hand over to the installer.
+/// Deliberately NOT this helper's own log by preference. In `--updating` mode
+/// the helper only watches for a process, so its log says little more than the
+/// error already on screen.
 ///
-/// There is no NSIS log to offer: the installer runs `quiet` with no logging
-/// flag, and Tauri's NSIS template is not built with logging support, so the
-/// install phase genuinely leaves no record behind.
-///
-/// Falls back to the helper's own log when the app log is missing, which is the
-/// case on a first install that failed before the app ever ran.
+/// 1. **The install log**, written by `installer-hooks.nsh`. This covers the
+///    phase the user is staring at when the cover times out, and it is the only
+///    record of it -- the app has already exited by then. A log ending before
+///    "Install finished successfully" is the diagnosis.
+/// 2. **The app log**, where the updater's earlier failures land: download
+///    errors, signature mismatches, a bad endpoint.
+/// 3. **This helper's log**, for a first install that failed before either of
+///    the above existed.
 fn error_log_path() -> std::path::PathBuf {
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        let app_log = std::path::Path::new(&local)
-            .join("dev.gitwyrm.app")
-            .join("logs")
-            .join("GitWyrm.log");
-        if app_log.is_file() {
-            return app_log;
+        let logs = std::path::Path::new(&local).join("dev.gitwyrm.app").join("logs");
+        for name in ["GitWyrm-Install.log", "GitWyrm.log"] {
+            let candidate = logs.join(name);
+            if candidate.is_file() {
+                return candidate;
+            }
         }
     }
     crate::log_path().clone()
@@ -675,13 +678,21 @@ unsafe fn draw_error_buttons(hdc: HDC, s: &AppState) {
     let (close_x, btn_y) = error_button_rect(s);
     let (log_x, _) = log_button_rect(s);
 
-    let log_bg = if s.hover_log_btn { COLOR_HOVER } else { COLOR_BAR_BG };
-    fill_rounded_rect(hdc, log_x, btn_y, ERR_LOG_BTN_W, ERR_BTN_H, 8, log_bg);
-    draw_text_center(hdc, "Open log", log_x, btn_y, ERR_LOG_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_TEXT);
+    // Outline rather than a grey fill. A filled secondary still reads as a
+    // button competing for the click; an outline offers the log without
+    // suggesting it is the thing to do next.
+    let (log_border, log_text) = if s.hover_log_btn {
+        (COLOR_ACCENT, COLOR_ACCENT)
+    } else {
+        (COLOR_BORDER, COLOR_SUBTEXT)
+    };
+    stroke_rounded_rect(hdc, log_x, btn_y, ERR_LOG_BTN_W, ERR_BTN_H, 8, log_border);
+    draw_text_center(hdc, "Open log", log_x, btn_y, ERR_LOG_BTN_W, ERR_BTN_H, s.font_small_bold, log_text);
 
-    // Hover lightens the accent rather than swapping to it, so the primary
-    // button still reads as primary while the pointer is over the other one.
-    let close_bg = if s.hover_close_btn { COLOR_ACCENT } else { COLOR_ACCENT_DIM };
+    // Full accent at rest so the primary action carries its own weight, and a
+    // brighter step on hover -- dimming the resting state to leave room for a
+    // hover made the main action look disabled.
+    let close_bg = if s.hover_close_btn { COLOR_ACCENT_BRIGHT } else { COLOR_ACCENT };
     fill_rounded_rect(hdc, close_x, btn_y, ERR_BTN_W, ERR_BTN_H, 8, close_bg);
     draw_text_center(hdc, "Close", close_x, btn_y, ERR_BTN_W, ERR_BTN_H, s.font_small_bold, COLOR_ON_ACCENT);
 }

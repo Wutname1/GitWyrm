@@ -10,8 +10,10 @@ pub const COLOR_PANEL: COLORREF = COLORREF(rgb(15, 20, 20));
 pub const COLOR_TEXT: COLORREF = COLORREF(rgb(246, 246, 246));
 pub const COLOR_SUBTEXT: COLORREF = COLORREF(rgb(160, 170, 168));
 pub const COLOR_ACCENT: COLORREF = COLORREF(rgb(45, 212, 191)); // teal #2dd4bf
-/// Resting fill for a primary button; COLOR_ACCENT is its hover state.
-pub const COLOR_ACCENT_DIM: COLORREF = COLORREF(rgb(16, 150, 132));
+/// Hover fill for a primary button, a step brighter than COLOR_ACCENT.
+pub const COLOR_ACCENT_BRIGHT: COLORREF = COLORREF(rgb(94, 231, 213));
+/// Outline for a secondary button, and the divider under the wordmark band.
+pub const COLOR_BORDER: COLORREF = COLORREF(rgb(70, 82, 80));
 /// Text on an accent fill. The teal is light enough that white text on it
 /// fails to separate, so the primary button uses the dark ground instead.
 pub const COLOR_ON_ACCENT: COLORREF = COLORREF(rgb(6, 20, 18));
@@ -53,6 +55,21 @@ pub fn fill_rounded_rect(hdc: HDC, x: i32, y: i32, w: i32, h: i32, radius: i32, 
         let rgn = CreateRoundRectRgn(x, y, x + w, y + h, radius * 2, radius * 2);
         let brush = CreateSolidBrush(color);
         let _ = FillRgn(hdc, rgn, brush);
+        let _ = DeleteObject(rgn.into());
+        let _ = DeleteObject(brush.into());
+    }
+}
+
+/// Stroke a rounded rectangle, leaving the interior untouched.
+///
+/// For secondary buttons: an outline reads as available without competing with
+/// a filled primary beside it, which a filled-but-grey button still does.
+pub fn stroke_rounded_rect(hdc: HDC, x: i32, y: i32, w: i32, h: i32, radius: i32, color: COLORREF) {
+    unsafe {
+        let rgn = CreateRoundRectRgn(x, y, x + w, y + h, radius * 2, radius * 2);
+        let brush = CreateSolidBrush(color);
+        // A 1px frame; FrameRgn strokes the region's edge rather than filling it.
+        let _ = FrameRgn(hdc, rgn, brush, 1, 1);
         let _ = DeleteObject(rgn.into());
         let _ = DeleteObject(brush.into());
     }
