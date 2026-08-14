@@ -10,11 +10,13 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 export function OpenspecSettings() {
   return (
     <div>
-      <SettingsGroup title="Spec Desk">
+      <SettingsGroup title="Spec Desk" blurb="Plan work as written specs beside your code.">
         <SpecDeskSetting />
+      </SettingsGroup>
+      <SettingsGroup title="Archive messages">
         <ArchiveCommitTemplateSetting />
       </SettingsGroup>
-      <SettingsGroup title="Warnings">
+      <SettingsGroup title="Safety prompts" blurb="Restore a warning after choosing not to see it again.">
         <ConfirmationSetting kind="archive" />
         <ConfirmationSetting kind="delete" />
       </SettingsGroup>
@@ -38,7 +40,7 @@ function ConfirmationSetting({ kind }: { kind: 'archive' | 'delete' }) {
     <SettingRow
       label={label}
       searchId={`openspec-${kind}-confirmation`}
-      hint={`The warning explains what will happen before ${verb}.`}
+      hint={`Show a warning before ${verb}.`}
     >
       {skip ? (
         <Button variant="secondary" size="sm" onClick={() => setSkip(false)}>
@@ -62,7 +64,7 @@ function SpecDeskSetting() {
     <SettingRow
       label="Spec Desk"
       searchId="spec-desk"
-      hint="Plan work as written specs alongside your code. Shows the Spec Desk button and the Specs list in the sidebar, even before a repository has an openspec/ folder, so you can start one."
+      hint="Show the Spec Desk button and Specs list in the sidebar."
     >
       <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
         <input

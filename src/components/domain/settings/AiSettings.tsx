@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
 import { AiDefaultProviders } from './AiDefaultProviders'
 import { ResetToDefaults } from './ResetToDefaults'
-import { settingRowClass, useRevealHighlight } from './SettingRow'
+import { SettingsGroup, settingRowClass, useRevealHighlight } from './SettingRow'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -145,14 +145,18 @@ export function AiSettings() {
 
   return (
     <div className="space-y-0">
+      {configuredIds.size > 0 && (
+      <SettingsGroup title="AI features">
       <AiUseToggle anyConfigured={configuredIds.size > 0} />
       <AiDefaultProviders providers={providers} configuredIds={configuredIds} />
-      <div ref={providerReveal.ref} className={settingRowClass(providerReveal.flash)}>
+      </SettingsGroup>
+      )}
+      <SettingsGroup title="Connection" blurb="Choose a provider, connect your account, and select a model.">
+      <div ref={providerReveal.ref} data-settings-row className={settingRowClass(providerReveal.flash)}>
         <div className="w-52 flex-none">
           <div className="text-xs font-semibold text-foreground">Provider</div>
           <div className="mt-0.5 text-2xs text-muted-foreground">
-            Bring your own API key. Keys are stored locally and never leave this machine except
-            to call the provider.
+            Where AI requests are sent. Keys stay on this computer.
           </div>
         </div>
         <div className="min-w-0 flex-1 space-y-2">
@@ -342,7 +346,7 @@ export function AiSettings() {
       </div>
 
       {provider && (
-        <div ref={modelReveal.ref} className={settingRowClass(modelReveal.flash)}>
+        <div ref={modelReveal.ref} data-settings-row className={settingRowClass(modelReveal.flash)}>
           <div className="w-52 flex-none">
             <div className="text-xs font-semibold text-foreground">Model</div>
             <div className="mt-0.5 text-2xs text-muted-foreground">
@@ -380,8 +384,11 @@ export function AiSettings() {
           </div>
         </div>
       )}
+      </SettingsGroup>
 
+      <SettingsGroup title="Commit messages">
       <InstructionSetting />
+      </SettingsGroup>
       <ResetToDefaults group="ai" label="Reset commit instructions to default" />
     </div>
   )
@@ -427,7 +434,7 @@ function InstructionSetting() {
   )
 
   return (
-    <div ref={reveal.ref} className={settingRowClass(reveal.flash)}>
+    <div ref={reveal.ref} data-settings-row className={settingRowClass(reveal.flash)}>
       <div className="w-52 flex-none">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-foreground">Instructions</span>
@@ -438,8 +445,7 @@ function InstructionSetting() {
           )}
         </div>
         <div className="mt-0.5 text-2xs text-muted-foreground">
-          Guidance for tone and style. GitWyrm always enforces the summary and
-          description format on top of this.
+          Tell AI how your team writes commits. GitWyrm still keeps the required format.
         </div>
       </div>
       <div className="min-w-0 flex-1 space-y-2">

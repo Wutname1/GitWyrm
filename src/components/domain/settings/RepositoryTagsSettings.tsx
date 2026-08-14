@@ -6,7 +6,7 @@ import {
   useWorkspaceStore,
   type TagPushDefault,
 } from '@/stores/workspaceStore'
-import { SettingRow } from './SettingRow'
+import { SettingRow, SettingsGroup } from './SettingRow'
 import { ResetToDefaults } from './ResetToDefaults'
 
 const selectClass =
@@ -63,16 +63,11 @@ export function RepositoryTagsSettings() {
 
   return (
     <div>
-      <p className="pt-3 text-2xs leading-relaxed text-muted-foreground">
-        By default this repository uses your application tag settings. Turn on a custom setting
-        below to give <span className="font-medium text-foreground">{repo.name}</span> its own tag
-        rules. Other repositories are not affected.
-      </p>
-
+      <SettingsGroup title="Rule source" blurb={`Choose whether ${repo.name} follows your defaults or has its own rules.`}>
       <SettingRow
-        label="Custom tag settings"
+        label="Custom tag rules"
         searchId="repo-tag-override"
-        hint="When off, this repository follows whatever you set under Application > Tags."
+        hint="Turn on to override the default tag rules."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
           <input
@@ -84,6 +79,7 @@ export function RepositoryTagsSettings() {
           Use custom tag settings for this repository
         </label>
       </SettingRow>
+      </SettingsGroup>
 
       {!hasOverride ? (
         <div className="mt-1 flex items-start gap-3 rounded-lg border border-border bg-panel2 px-3.5 py-3">
@@ -114,11 +110,11 @@ export function RepositoryTagsSettings() {
           </div>
         </div>
       ) : (
-        <>
+        <SettingsGroup title="Current rules">
           <SettingRow
             label="After pushing"
             searchId="repo-tag-push"
-            hint="What this repository does with local-only tags after a push."
+            hint="Choose what happens to tags still on this computer after a push."
           >
             <select
               className={selectClass}
@@ -136,7 +132,7 @@ export function RepositoryTagsSettings() {
           <SettingRow
             label="New tags"
             searchId="repo-tag-on-create"
-            hint="How the send box starts out in the New tag window for this repository."
+            hint="Choose whether new tags start ready to send."
           >
             <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
               <input
@@ -154,7 +150,7 @@ export function RepositoryTagsSettings() {
           <SettingRow
             label="Deleting tags"
             searchId="repo-tag-delete"
-            hint="How the remove-from-remote box starts out in the Delete tag window for this repository."
+            hint="Choose whether deleting a tag also removes its remote copy."
           >
             <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
               <input
@@ -178,7 +174,7 @@ export function RepositoryTagsSettings() {
             <RotateCcw size={12} />
             Follow application settings instead
           </Button>
-        </>
+        </SettingsGroup>
       )}
 
       <ResetToDefaults

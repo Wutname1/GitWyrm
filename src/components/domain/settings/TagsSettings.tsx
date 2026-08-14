@@ -21,14 +21,7 @@ export function TagsSettings() {
 
   return (
     <div>
-      <p className="pt-3 text-2xs leading-relaxed text-muted-foreground">
-        A tag is a name you pin to one commit, usually to mark a release. Tags are not sent when you
-        push, so they stay on your computer until you send them on purpose. These are the defaults
-        for every repository. A single repository can use its own rules under This repository &gt;
-        Tags.
-      </p>
-
-      <SettingsGroup title="Sending tags">
+      <SettingsGroup title="Sending tags" blurb="These defaults apply unless a repository has its own tag rules.">
         <SettingRow label="After pushing" searchId="tag-push-default" hint={tagPushHints[tagPushDefault]}>
           <select
             className={selectClass}
@@ -42,11 +35,11 @@ export function TagsSettings() {
         </SettingRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Creating and deleting">
+      <SettingsGroup title="New and deleted tags">
         <SettingRow
           label="New tags"
           searchId="tag-push-on-create"
-          hint="Sets how the box starts out in the New tag window. You can still change it for any one tag."
+          hint="Choose whether new tags start ready to send."
         >
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
             <input
@@ -62,7 +55,7 @@ export function TagsSettings() {
         <SettingRow
           label="Deleting tags"
           searchId="tag-delete-on-remote"
-          hint="Sets how the box starts out in the Delete tag window. You can still change it for any one tag."
+          hint="Choose whether deleting a tag also removes its remote copy."
         >
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
             <input

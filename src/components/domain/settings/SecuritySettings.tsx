@@ -500,7 +500,7 @@ function HasKey({
       <SettingRow
         label="Key to sign with"
         searchId="signing-key"
-        hint="The key your commits here are signed with. Your other repositories are not affected."
+        hint="The key used for new commits in this repository."
       >
         <div className="grid gap-2">
           <div className="flex gap-2">
@@ -740,7 +740,7 @@ function ToolsSection() {
   return (
     <Section
       title="Programs GitWyrm uses"
-      blurb="GitWyrm comes with its own copies of git and gpg, so it works on a computer that has neither. If you already have your own, GitWyrm uses those instead."
+      blurb="Choose a specific Git or GPG program, or let GitWyrm decide."
     >
       <SettingRow
         label="Git"
@@ -786,8 +786,8 @@ function Section({
 }) {
   return (
     <section>
-      <h3 className="text-xs font-bold uppercase tracking-[.06em] text-sub">{title}</h3>
-      <p className="mb-3 mt-1 max-w-prose text-2xs text-muted-foreground">{blurb}</p>
+      <h3 className="text-xs font-semibold text-foreground">{title}</h3>
+      <p className="mb-3 mt-0.5 max-w-prose text-2xs leading-relaxed text-muted-foreground">{blurb}</p>
       {children}
     </section>
   )

@@ -216,16 +216,16 @@ export function AppearanceSettings() {
   return (
     <div>
       <SettingsGroup title="Color">
-        <SettingRow label="Mode" searchId="theme-mode" hint="Use light, dark, or match your system setting.">
+        <SettingRow label="Mode" searchId="theme-mode" hint="Choose light, dark, or follow Windows.">
           <ModeSetting />
         </SettingRow>
-        <SettingRow label="Theme" searchId="theme" hint="Pick a color scheme. Auto follows the mode above.">
+        <SettingRow label="Theme" searchId="theme" hint="Pick the colors used across GitWyrm.">
           <ThemeSetting />
         </SettingRow>
         <SettingRow
           label="Mint accent"
           searchId="mint-accent"
-          hint="Keep GitWyrm's mint highlight, or let each theme show its own accent color."
+          hint="Use mint for selections and active controls."
         >
           <MintSetting />
         </SettingRow>
@@ -235,14 +235,14 @@ export function AppearanceSettings() {
         <SettingRow
           label="Font"
           searchId="font"
-          hint="Choose the font used across GitWyrm. Included fonts always work; you can also pick any font installed on this PC."
+          hint="Use an included font or one installed on this computer."
         >
           <FontFamilySetting />
         </SettingRow>
-        <SettingRow label="Text size" searchId="text-size" hint="Makes all text bigger or smaller. App zoom still applies on top of this.">
+        <SettingRow label="Text size" searchId="text-size" hint="Change text without resizing the whole interface.">
           <FontSizeSetting />
         </SettingRow>
-        <SettingRow label="Text weight" searchId="text-weight" hint="Makes text lighter or bolder throughout the app.">
+        <SettingRow label="Text weight" searchId="text-weight" hint="Make labels lighter or stronger.">
           <FontWeightSetting />
         </SettingRow>
         <SettingRow label="Reset fonts" searchId="reset-fonts" hint="Put the font, size, and weight back to GitWyrm's defaults.">
@@ -252,11 +252,11 @@ export function AppearanceSettings() {
         </SettingRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Tabs and changes">
+      <SettingsGroup title="Repository tabs">
         <SettingRow
           label="Repository icons"
           searchId="repo-icons"
-          hint="Shows a favicon or logo beside each repository tab when one is available."
+          hint="Show a small icon beside each repository name."
         >
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
             <input
@@ -271,7 +271,7 @@ export function AppearanceSettings() {
         <SettingRow
           label="Icon-only tabs"
           searchId="icon-only-tabs"
-          hint="Fits more repositories by hiding tab names. Point at a tab to expand its name."
+          hint="Hide names until you point at a tab."
         >
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
             <input
@@ -283,10 +283,13 @@ export function AppearanceSettings() {
             Show only icons in repository tabs
           </label>
         </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Changed files">
         <SettingRow
           label="Changed files"
           searchId="changes-view"
-          hint="Group changed files into folders, or show one simple list. The same choice is available above the Changes panel."
+          hint="Group files by folder or show one simple list."
         >
           <div className="inline-flex rounded-md border border-border bg-background p-0.5">
             {([
@@ -314,20 +317,20 @@ export function AppearanceSettings() {
         <SettingRow
           label="Commit change size"
           searchId="change-size"
-          hint="See how large each commit is without opening it."
+          hint="Show added and removed line counts beside commits."
         >
           <ChangeSizeSettings />
         </SettingRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Size and layout">
-        <SettingRow label="App zoom" searchId="app-zoom" hint="Makes everything in GitWyrm bigger or smaller. You can also press Ctrl and + or - from anywhere, or Ctrl and 0 to go back to 100%.">
+      <SettingsGroup title="Window size">
+        <SettingRow label="App zoom" searchId="app-zoom" hint="Resize the whole interface. Ctrl + 0 returns to 100%.">
           <ZoomSetting />
         </SettingRow>
         <SettingRow
           label="Panel sizes"
           searchId="restore-panel-sizes"
-          hint="Put the branches, graph, changes, conflict, and details panels back at their starting sizes."
+          hint="Return every resizable panel to its starting size."
         >
           <Button
             variant="outline"

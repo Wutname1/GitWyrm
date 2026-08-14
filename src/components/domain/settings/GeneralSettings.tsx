@@ -20,14 +20,14 @@ const selectClass =
   'h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring'
 
 const branchSwitchHints: Record<BranchSwitchMode, string> = {
-  auto_stash: 'Your changes are stashed, then reapplied on the new branch. If they conflict, the stash is kept as a backup.',
-  carry: 'Your changes move to the new branch. The switch is refused if a change would be overwritten.',
-  refuse: 'Switching is blocked while you have uncommitted changes.',
+  auto_stash: 'Save unfinished work, switch branches, then bring the work back.',
+  carry: 'Move unfinished work with you. The switch stops if a file would be overwritten.',
+  refuse: 'Stop the switch until you commit or discard your changes.',
 }
 
 const commitButtonHints: Record<CommitButtonMode, string> = {
-  commit: 'The commit button just commits. You can push later from the toolbar.',
-  commit_push: 'The commit button commits, then pushes to your branch in one step.',
+  commit: 'Save the commit locally. Push later from the toolbar.',
+  commit_push: 'Make the commit and send it to the remote in one step.',
 }
 
 export function GeneralSettings() {
@@ -47,25 +47,28 @@ export function GeneralSettings() {
 
   return (
     <div>
-      <SettingsGroup title="Your work">
+      <SettingsGroup title="Commit identity" blurb="The details attached to new commits.">
         <SettingRow
           label="Your name and email"
           searchId="git-identity"
-          hint="Goes on every commit you make, so other people can see who did the work. Shared with git itself, so other git tools see it too."
+          hint="Shown on every commit you make."
         >
           <IdentitySetting />
         </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Project folders" blurb="Where GitWyrm finds and creates repositories.">
         <SettingRow
           label="Code folders"
           searchId="code-folder"
-          hint="Folders searched for projects to open. Add as many as you like. The starred one is your main folder: new projects and copies are saved there."
+          hint="Places GitWyrm checks for repositories. The starred folder is your main one."
         >
           <CodeFoldersSetting />
         </SettingRow>
         <SettingRow
-          label="Default clone directory"
+          label="New copies go here"
           searchId="clone-directory"
-          hint="Where new copies go. Falls back to your main code folder when empty."
+          hint="Default folder for cloned repositories. Uses your main code folder when empty."
         >
           <FolderSetting
             value={cloneDirectory}
@@ -75,7 +78,7 @@ export function GeneralSettings() {
         </SettingRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Everyday actions">
+      <SettingsGroup title="Git actions" blurb="Choose what common buttons do.">
         <SettingRow
           label="When switching branches"
           searchId="branch-switch-mode"
@@ -104,14 +107,17 @@ export function GeneralSettings() {
         <SettingRow
           label="Open in editor"
           searchId="editor"
-          hint="Which editor the open button and the file right-click menu use. Only editors found on this computer are listed."
+          hint="Used by Open and the file right-click menu."
         >
           <EditorSetting />
         </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Workspace" blurb="How repositories are arranged while you work.">
         <SettingRow
           label="Repository tabs"
           searchId="tab-layout"
-          hint="Put repository tabs across the top or in a scrollable list on the left. Groups work in both layouts."
+          hint="Place open repositories across the top or down the left."
         >
           <select
             className={selectClass}
@@ -126,7 +132,7 @@ export function GeneralSettings() {
           <SettingRow
             label="Tab row"
             searchId="tab-row"
-            hint="Give the tabs a row of their own under the app bar, so long repository names have the full width to themselves."
+            hint="Give top tabs their own row so long names have more room."
           >
             <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
               <input
@@ -142,7 +148,7 @@ export function GeneralSettings() {
         <SettingRow
           label="Worktrees"
           searchId="worktrees"
-          hint="Worktrees let you check out more than one branch at once, each in its own folder. An advanced feature, off by default. Turns on by itself if this repo already uses them. Turning it off stops GitWyrm offering to add new ones - worktrees you already have stay listed and manageable."
+          hint="Work on two branches at once in separate folders."
         >
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
             <input
@@ -158,7 +164,7 @@ export function GeneralSettings() {
           <SettingRow
             label="Hands-on tour"
             searchId="tutorial"
-            hint="Builds a small practice repository and walks you through the gestures that are quick but easy to miss: double-click, drag, and right-click. Deleted when you finish."
+            hint="Practice double-click, drag, and right-click in a temporary repository."
           >
             <ReplayTutorialButton />
           </SettingRow>

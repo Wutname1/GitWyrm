@@ -110,7 +110,7 @@ export function SshAccess() {
       <SettingRow
         label="Host"
         searchId="ssh-host"
-        hint="Which git host to check. Testing tells you whether it accepts a key from this computer."
+        hint="Check whether a code host accepts a key from this computer."
       >
         <div className="flex gap-2">
           <Input
@@ -151,7 +151,7 @@ export function SshAccess() {
       <SettingRow
         label="Your keys"
         searchId="ssh-keys"
-        hint="Keys in your .ssh folder. Add one to a host's account settings to let it recognise you."
+        hint="Keys stored on this computer for secure Git connections."
       >
         <div className="grid gap-2">
           {keys === null ? (

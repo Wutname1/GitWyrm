@@ -17,20 +17,20 @@ export interface SettingsIndexEntry {
   keywords?: string[]
 }
 
-/** Section labels, duplicated across App / This repository where the nav does. */
+/** Page names shown beside search results. Keep these in sync with Settings navigation. */
 export const SECTION_LABELS: Record<SettingsSection, string> = {
   general: 'General',
   behavior: 'Behavior',
-  repository: 'Repository',
-  repositoryTags: 'Tags (this repository)',
-  tags: 'Tags',
+  repository: 'This repository',
+  repositoryTags: 'Repository tags',
+  tags: 'Default tag rules',
   profiles: 'Profiles',
   ai: 'AI',
   integrations: 'Integrations',
   openspec: 'OpenSpec',
   security: 'Security',
   appearance: 'Appearance',
-  logs: 'Logs',
+  logs: 'Help & logs',
   about: 'About',
 }
 
@@ -48,7 +48,7 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     id: 'git-identity',
     section: 'general',
     label: 'Your name and email',
-    hint: 'Goes on every commit you make, so other people can see who did the work.',
+    hint: 'Shown on every commit you make.',
     keywords: ['identity', 'author', 'user.name', 'user.email', 'username', 'who am i'],
   },
   {
@@ -71,8 +71,8 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
   {
     id: 'clone-directory',
     section: 'general',
-    label: 'Default clone directory',
-    hint: 'Where new copies go. Falls back to your main code folder when empty.',
+    label: 'New copies go here',
+    hint: 'Default folder for cloned repositories.',
     keywords: ['download', 'copy repository', 'folder', 'path'],
   },
   {

@@ -13,7 +13,7 @@ import {
 } from '@/lib/bindings'
 import { cn } from '@/lib/utils'
 import { useActiveRepo } from '@/stores/workspaceStore'
-import { SettingRow } from './SettingRow'
+import { SettingRow, SettingsGroup } from './SettingRow'
 
 const selectClass =
   'h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring'
@@ -68,10 +68,13 @@ export function ProfilesSettings() {
 
   return (
     <div>
-      <p className="pt-3 text-2xs leading-relaxed text-muted-foreground">
-        A profile is the name, email, and signing key that go on your commits. Switch profiles to
-        change all three at once, so a work commit never goes out under your personal address.
-      </p>
+      <section className="mt-6">
+        <div className="px-1">
+          <h3 className="text-xs font-semibold text-foreground">Your profiles</h3>
+          <p className="mt-0.5 text-2xs text-muted-foreground">
+            Switch your name, email, and signing key together.
+          </p>
+        </div>
 
       {profiles.length === 0 ? (
         <div className="mt-4 rounded-lg border border-border bg-panel px-4 py-6 text-center">
@@ -137,6 +140,7 @@ export function ProfilesSettings() {
           </Button>
         </>
       )}
+      </section>
 
       <RepoOverride profiles={profiles} />
 
@@ -287,7 +291,8 @@ function ProfileEditor({
       : null
 
   return (
-    <div className="pt-3">
+    <div>
+      <SettingsGroup title="Profile details">
       <SettingRow label="Profile name" hint="What you call this identity, like Work or Personal.">
         <Input
           value={draft.label}
@@ -298,7 +303,7 @@ function ProfileEditor({
         />
       </SettingRow>
 
-      <SettingRow label="Your name" hint="Goes on every commit made under this profile.">
+      <SettingRow label="Your name" hint="Shown on commits made with this profile.">
         <Input
           value={draft.name}
           onChange={(e) => set('name', e.target.value)}
@@ -308,7 +313,7 @@ function ProfileEditor({
         />
       </SettingRow>
 
-      <SettingRow label="Your email" hint="Your host matches commits to your account by this.">
+      <SettingRow label="Your email" hint="Used to match commits to your hosting account.">
         <Input
           value={draft.email}
           onChange={(e) => set('email', e.target.value)}
@@ -320,7 +325,7 @@ function ProfileEditor({
 
       <SettingRow
         label="Signing key"
-        hint="Proves the commit came from you. Leave off if you are not signing yet."
+        hint="Optional proof that a commit came from you."
       >
         <div className="grid gap-2">
           <select
@@ -372,11 +377,14 @@ function ProfileEditor({
           )}
         </div>
       </SettingRow>
+      </SettingsGroup>
 
+      <SettingsGroup title="Where to use it">
       <FolderRules
         folders={draft.folders}
         onChange={(folders) => set('folders', folders)}
       />
+      </SettingsGroup>
 
       <div className="mt-4 flex items-center gap-2">
         <Button size="sm" className="h-8" disabled={!ready} onClick={() => onSave(draft)}>
@@ -433,7 +441,7 @@ function FolderRules({
     <SettingRow
       label="Use for these folders"
       searchId="profile-folders"
-      hint="Repositories inside these folders use this profile automatically, in GitWyrm and in your terminal."
+      hint="Use this profile automatically for repositories inside these folders."
     >
       <div className="grid gap-2">
         {folders.length > 0 && (
@@ -508,16 +516,11 @@ function RepoOverride({ profiles }: { profiles: LoadedProfile[] }) {
   }
 
   return (
-    <div className="mt-8">
-      <h3 className="text-xs font-bold uppercase tracking-[.06em] text-sub">This repository</h3>
-      <p className="mb-1 mt-1 max-w-prose text-2xs text-muted-foreground">
-        Settings for {repo.name}, the repository open in the active tab.
-      </p>
-
+    <SettingsGroup title="This repository" blurb={`Choose the profile used only for ${repo.name}.`}>
       <SettingRow
         label="Commit as"
         searchId="repo-profile"
-        hint="Pin this one repository to a profile. It keeps that identity even when you switch profiles elsewhere."
+        hint="Keep this repository on one identity when your active profile changes."
       >
         <div className="grid gap-2">
           <select
@@ -542,6 +545,6 @@ function RepoOverride({ profiles }: { profiles: LoadedProfile[] }) {
           )}
         </div>
       </SettingRow>
-    </div>
+    </SettingsGroup>
   )
 }

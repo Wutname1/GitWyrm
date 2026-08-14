@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RepoIconDialog } from '@/components/domain/RepoIconDialog'
-import { SettingRow } from '@/components/domain/settings/SettingRow'
+import { SettingRow, SettingsGroup } from '@/components/domain/settings/SettingRow'
 import { ResetToDefaults } from '@/components/domain/settings/ResetToDefaults'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -140,10 +140,11 @@ export function RepositorySettings() {
         </div>
       </div>
 
+      <SettingsGroup title="Tab appearance">
       <SettingRow
         label="Tab name"
         searchId="repo-tab-name"
-        hint="This changes only the name shown in GitWyrm. Your folder keeps its original name."
+        hint="Use a shorter name in GitWyrm. The folder name does not change."
       >
         <form
           className="grid gap-2"
@@ -187,7 +188,7 @@ export function RepositorySettings() {
       <SettingRow
         label="Tab icon"
         searchId="repo-tab-icon"
-        hint="GitWyrm can find a favicon or logo in this repository, or you can choose your own image."
+        hint="Use a found logo or choose your own image."
       >
         <div className="grid gap-2">
           <div className="flex items-center gap-3">
@@ -222,8 +223,10 @@ export function RepositorySettings() {
           )}
         </div>
       </SettingRow>
+      </SettingsGroup>
 
-      <SettingRow label="Repository folder" searchId="repo-folder" hint="Quick ways to open this repository outside GitWyrm.">
+      <SettingsGroup title="Folder access">
+      <SettingRow label="Repository folder" searchId="repo-folder" hint="Open this project in another Windows app.">
         <div className="grid gap-2">
           <Input readOnly value={repo.path} className="h-8 bg-background font-mono text-xs" />
           <div className="flex flex-wrap gap-2">
@@ -269,6 +272,7 @@ export function RepositorySettings() {
           </div>
         </div>
       </SettingRow>
+      </SettingsGroup>
 
       <ResetToDefaults
         label="Reset this repository's tab name"

@@ -31,7 +31,7 @@ export function useRevealHighlight(searchId: string | undefined) {
 /** Row shell classes, shared with the few blocks that lay out their own row. */
 export function settingRowClass(flash: boolean) {
   return cn(
-    'mt-2 flex scroll-mt-6 items-start gap-6 rounded-lg border border-border bg-panel px-4 py-3 transition-colors duration-500',
+    'flex scroll-mt-6 items-start gap-8 px-1 py-3.5 transition-colors duration-500',
     flash && 'bg-primary/10 ring-1 ring-primary/50'
   )
 }
@@ -53,11 +53,11 @@ export function SettingsGroup({
 }) {
   return (
     <section className="mt-6">
-      <div className="mb-2 px-0.5">
-        <h3 className="text-2xs font-bold uppercase tracking-[.08em] text-sub">{title}</h3>
-        {blurb && <p className="mt-0.5 text-2xs text-muted-foreground">{blurb}</p>}
+      <div className="mb-2.5 px-1">
+        <h3 className="text-xs font-semibold text-foreground">{title}</h3>
+        {blurb && <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">{blurb}</p>}
       </div>
-      <div className="overflow-hidden rounded-lg border border-border bg-panel [&>[data-settings-row]]:mt-0 [&>[data-settings-row]]:rounded-none [&>[data-settings-row]]:border-x-0 [&>[data-settings-row]]:border-t-0 [&>[data-settings-row]]:border-b [&>[data-settings-row]:last-child]:border-b-0">
+      <div className="divide-y divide-border/70 rounded-lg bg-panel/60 px-4 ring-1 ring-border/60 [&>[data-settings-row]]:px-0">
         {children}
       </div>
     </section>

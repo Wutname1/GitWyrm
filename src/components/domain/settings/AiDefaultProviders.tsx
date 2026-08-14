@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import type { CatalogProvider } from '@/lib/bindings'
 import { useAiModels } from '@/hooks/useAi'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { settingRowClass } from './SettingRow'
 
 /**
  * Model choice for one configured provider.
@@ -63,12 +64,11 @@ export function AiDefaultProviders({
   if (configured.length < 2) return null
 
   return (
-    <div className="flex items-start gap-4 border-b border-border px-1 py-3">
+    <div data-settings-row className={settingRowClass(false)}>
       <div className="w-52 flex-none">
         <div className="text-xs font-semibold text-foreground">Default</div>
         <div className="mt-0.5 text-2xs text-muted-foreground">
-          Which AI writes your commit messages and runs spec tasks. Each provider keeps its
-          own model.
+          Choose which connected provider GitWyrm uses first.
         </div>
       </div>
       <div className="min-w-0 flex-1 space-y-1">

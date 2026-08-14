@@ -1,29 +1,68 @@
 import { useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Search, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  Bot,
+  CircleHelp,
+  FolderGit2,
+  Info,
+  NotebookTabs,
+  Palette,
+  Plug,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Tag,
+  Tags,
+  Users,
+  X,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SECTION_LABELS, searchSettings } from '@/lib/settingsSearch'
 import type { SettingsSection } from '@/stores/uiStore'
 import { useUiStore } from '@/stores/uiStore'
 
-type NavItem = { key: SettingsSection; label: string }
+type NavItem = { key: SettingsSection; label: string; icon: LucideIcon }
+type NavGroup = { label: string; items: NavItem[] }
 
-const APP_ITEMS: NavItem[] = [
-  { key: 'general', label: 'General' },
-  { key: 'behavior', label: 'Behavior' },
-  { key: 'tags', label: 'Tags' },
-  { key: 'profiles', label: 'Profiles' },
-  { key: 'ai', label: 'AI' },
-  { key: 'integrations', label: 'Integrations' },
-  { key: 'openspec', label: 'OpenSpec' },
-  { key: 'security', label: 'Security' },
-  { key: 'appearance', label: 'Appearance' },
-  { key: 'logs', label: 'Logs' },
-  { key: 'about', label: 'About' },
-]
-
-const REPO_ITEMS: NavItem[] = [
-  { key: 'repository', label: 'Repository' },
-  { key: 'repositoryTags', label: 'Tags' },
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Application',
+    items: [
+      { key: 'general', label: 'General', icon: Settings2 },
+      { key: 'behavior', label: 'Behavior', icon: Zap },
+      { key: 'appearance', label: 'Appearance', icon: Palette },
+    ],
+  },
+  {
+    label: 'Identity & services',
+    items: [
+      { key: 'profiles', label: 'Profiles', icon: Users },
+      { key: 'ai', label: 'AI', icon: Bot },
+      { key: 'integrations', label: 'Integrations', icon: Plug },
+      { key: 'security', label: 'Security', icon: ShieldCheck },
+    ],
+  },
+  {
+    label: 'Automation',
+    items: [{ key: 'openspec', label: 'OpenSpec', icon: NotebookTabs }],
+  },
+  {
+    label: 'Repository',
+    items: [
+      { key: 'repository', label: 'This repository', icon: FolderGit2 },
+      { key: 'repositoryTags', label: 'Repository tags', icon: Tags },
+      { key: 'tags', label: 'Default tag rules', icon: Tag },
+    ],
+  },
+  {
+    label: 'Help',
+    items: [
+      { key: 'logs', label: 'Help & logs', icon: CircleHelp },
+      { key: 'about', label: 'About', icon: Info },
+    ],
+  },
 ]
 
 export function SettingsNav({
@@ -51,18 +90,25 @@ export function SettingsNav({
     setQuery('')
   }
 
-  const renderItem = (item: NavItem) => (
-    <button
-      key={item.key}
-      onClick={() => onSelect(item.key)}
-      className={cn(
-        'block w-full rounded-md px-3 py-1.5 text-left text-xs font-medium text-sub hover:bg-panel2 hover:text-foreground',
-        active === item.key && 'bg-panel2 text-foreground'
-      )}
-    >
-      {item.label}
-    </button>
-  )
+  const renderItem = (item: NavItem) => {
+    const Icon = item.icon
+    const selected = active === item.key
+    return (
+      <button
+        key={item.key}
+        onClick={() => onSelect(item.key)}
+        aria-current={selected ? 'page' : undefined}
+        className={cn(
+          'flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-left text-xs font-medium text-sub transition-colors hover:bg-panel2 hover:text-foreground',
+          selected && 'bg-[var(--gw-accent-soft)] text-foreground'
+        )}
+      >
+        <Icon size={13} className={cn('flex-none text-muted-foreground', selected && 'text-accent-text')} />
+        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        {selected && <span className="size-1.5 flex-none rounded-full bg-[var(--gw-accent)]" />}
+      </button>
+    )
+  }
 
   return (
     <div className="flex w-56 flex-none flex-col border-r border-border bg-panel">
@@ -116,17 +162,14 @@ export function SettingsNav({
           <SearchResults results={results} onPick={pick} />
         ) : (
           <>
-            <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[.08em] text-muted-foreground">
-              Application
-            </div>
-            {APP_ITEMS.map(renderItem)}
-
-            <div className="mx-3 my-2 border-t border-border" />
-
-            <div className="px-3 pb-1 pt-1 text-[10px] font-bold uppercase tracking-[.08em] text-muted-foreground">
-              This repository
-            </div>
-            {REPO_ITEMS.map(renderItem)}
+            {NAV_GROUPS.map((group, index) => (
+              <div key={group.label} className={cn(index > 0 && 'mt-3')}>
+                <div className="px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[.1em] text-muted-foreground">
+                  {group.label}
+                </div>
+                <div className="grid gap-0.5">{group.items.map(renderItem)}</div>
+              </div>
+            ))}
           </>
         )}
       </div>

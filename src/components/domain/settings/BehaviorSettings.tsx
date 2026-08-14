@@ -22,11 +22,11 @@ export function BehaviorSettings() {
 
   return (
     <div>
-      <SettingsGroup title="Start and refresh">
+      <SettingsGroup title="Opening GitWyrm">
         <SettingRow
           label="On startup"
           searchId="restore-tabs"
-          hint="Reopen the repositories you had open when you last closed GitWyrm. Turn this off to start with a clean slate and pick a repository yourself."
+          hint="Bring back the repositories that were open last time."
         >
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
             <input
@@ -39,24 +39,9 @@ export function BehaviorSettings() {
           </label>
         </SettingRow>
         <SettingRow
-          label="Check for remote changes"
-          searchId="auto-fetch"
-          hint="Quietly check your remotes in the background so you can see when a branch is ahead or behind without pressing Fetch. This only downloads history - it never changes your files."
-        >
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
-            <input
-              type="checkbox"
-              checked={autoFetch}
-              onChange={(e) => setAutoFetch(e.target.checked)}
-              className="size-3.5 accent-[var(--gw-accent)]"
-            />
-            Check automatically
-          </label>
-        </SettingRow>
-        <SettingRow
           label="Tips"
           searchId="show-tips"
-          hint="The short explanations in the sidebar and panels that describe what a feature is for. Turning them off leaves every button, count, and list exactly where it is - only the explaining goes away."
+          hint="Show short explanations beside unfamiliar features."
         >
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
             <input
@@ -70,11 +55,29 @@ export function BehaviorSettings() {
         </SettingRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Changes">
+      <SettingsGroup title="Background updates">
+        <SettingRow
+          label="Remote changes"
+          searchId="auto-fetch"
+          hint="Check for new remote work without changing your files."
+        >
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={autoFetch}
+              onChange={(e) => setAutoFetch(e.target.checked)}
+              className="size-3.5 accent-[var(--gw-accent)]"
+            />
+            Check automatically
+          </label>
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Safety defaults">
         <SettingRow
           label="Discarding everything"
           searchId="discard-submodules"
-          hint="Sets how the extra box starts when a moved submodule is part of the changes you are throwing away. You can still change it in the warning."
+          hint="Choose whether moved submodules start selected in the discard warning."
         >
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
             <input
@@ -88,14 +91,14 @@ export function BehaviorSettings() {
         </SettingRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Privacy">
+      <SettingsGroup title="Privacy & data" blurb="Both choices take effect the next time GitWyrm starts.">
       {/* Deliberately outside the "behavior" reset group (see
           SETTINGS_DEFAULTS): resetting this page must not turn reporting back
           on for someone who switched it off. */}
       <SettingRow
         label="Crash reports"
         searchId="crash-reports"
-        hint="When GitWyrm hits an error, it sends a report so the problem can be fixed. Reports say what went wrong and where in the code -- never your files, your code, or your commit history. Paths, branch names, and keys are removed before anything is sent. Takes effect next time you start GitWyrm."
+        hint="Send anonymous error details. Paths, keys, files, and code are never included."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
           <input
@@ -123,7 +126,7 @@ export function BehaviorSettings() {
       <SettingRow
         label="Usage data"
         searchId="usage-telemetry"
-        hint="Sends timings for things like how long a repository takes to open, so slow parts of GitWyrm can be found and fixed. This is separate from crash reports -- you can turn this off and still report crashes. It never includes your files, your code, or your commit history. Takes effect next time you start GitWyrm."
+        hint="Send anonymous feature and speed measurements. Files and code are never included."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
           <input
@@ -147,7 +150,7 @@ export function BehaviorSettings() {
       </SettingRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Windows">
+      <SettingsGroup title="Windows integration">
       {/* Registry-backed, so it is deliberately outside the "behavior" reset
           group -- resetting preferences should not silently uninstall an
           Explorer integration the user set up. */}

@@ -13,11 +13,11 @@ export function LogsSettings() {
 
   return (
     <div>
-      <SettingsGroup title="Get help">
+      <SettingsGroup title="Report a problem">
         <SettingRow
           label="Report a problem"
           searchId="report-problem"
-          hint="Send us what went wrong. Your log is attached for you, with tokens and personal details removed."
+          hint="Create a report with useful app details. Tokens and personal details are removed."
         >
           <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setReportOpen(true)}>
             <Bug size={12} />
@@ -25,10 +25,13 @@ export function LogsSettings() {
           </Button>
         </SettingRow>
 
+      </SettingsGroup>
+
+      <SettingsGroup title="Diagnostic logs">
         <SettingRow
           label="Application log"
           searchId="application-log"
-          hint="View and search the diagnostic output GitWyrm writes each day. Logs older than two weeks are removed for you."
+          hint="Read, search, open, or clear GitWyrm's recent activity log."
         >
           <div className="flex flex-wrap items-center gap-2">
             <Button

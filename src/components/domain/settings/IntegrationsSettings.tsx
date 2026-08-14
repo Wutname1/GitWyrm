@@ -13,7 +13,7 @@ import {
 } from '@/hooks/useGithub'
 import type { HostProviderInfo, ProviderId } from '@/lib/bindings'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { SettingRow } from './SettingRow'
+import { SettingRow, SettingsGroup } from './SettingRow'
 import { ResetToDefaults } from './ResetToDefaults'
 
 /**
@@ -35,6 +35,7 @@ export function IntegrationsSettings() {
 
   return (
     <div>
+      <SettingsGroup title="Code hosts" blurb="Connect the sites where your repositories are stored.">
       {connected.map((provider) => (
         <ProviderRow key={provider.id} provider={provider} />
       ))}
@@ -50,13 +51,16 @@ export function IntegrationsSettings() {
           onDone={() => setAdding(null)}
         />
       )}
+      </SettingsGroup>
 
       {providers.isError && (
         <div className="py-3 text-2xs text-removed">
           Could not load the list of hosts. Close and reopen settings to try again.
         </div>
       )}
-      <TabCountSettings />
+      <SettingsGroup title="Show on repository tabs">
+        <TabCountSettings />
+      </SettingsGroup>
       <ResetToDefaults group="integrations" />
     </div>
   )
@@ -248,8 +252,8 @@ function TokenConnection({
       searchId={`host-${provider.id}`}
       hint={
         provider.capabilities.issues
-          ? `Show your ${provider.display_name} pull requests and issues in GitWyrm, and reply to them without opening a browser.`
-          : `Show your ${provider.display_name} pull requests in GitWyrm. Work items are not shown, because every project defines its own.`
+          ? `See and reply to ${provider.display_name} pull requests and issues in GitWyrm.`
+          : `See ${provider.display_name} pull requests in GitWyrm.`
       }
     >
       {provider.connected_as ? (
@@ -337,7 +341,7 @@ function GithubConnection({
     <SettingRow
       label={provider.display_name}
       searchId="github-connection"
-      hint="Lets GitWyrm show your pull requests and issues, and reply to them, without opening a browser. Your code is never sent anywhere -- this only reads the site."
+      hint="See and reply to GitHub pull requests and issues in GitWyrm."
     >
       {provider.connected_as ? (
         <ConnectedState
@@ -389,7 +393,7 @@ function TabCountSettings() {
       <SettingRow
         label="Pull requests on tabs"
         searchId="tab-pr-count"
-        hint="Adds the number of open pull requests to each repository tab, beside the push and pull counts. Only repositories on a connected host show one."
+        hint="Show the open pull request count beside each connected repository."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
           <input
@@ -404,7 +408,7 @@ function TabCountSettings() {
       <SettingRow
         label="Issues on tabs"
         searchId="tab-issue-count"
-        hint="Adds the number of open issues to each repository tab. Needs a connected host, because issues are not readable without signing in."
+        hint="Show the open issue count beside each connected repository."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
           <input

@@ -12,7 +12,7 @@ import { useUpdater } from '@/hooks/useUpdater'
 import { commands, type BuildInfo } from '@/lib/bindings'
 import { useWorkspaceStore, type UpdateChannel } from '@/stores/workspaceStore'
 import { cn } from '@/lib/utils'
-import { SettingRow, useRevealHighlight } from './SettingRow'
+import { SettingRow, SettingsGroup, useRevealHighlight } from './SettingRow'
 
 const CHANNEL_LABELS: Record<UpdateChannel, string> = {
   stable: 'Stable',
@@ -48,7 +48,8 @@ export function AboutSettings() {
 
   return (
     <div>
-      <SettingRow label="Version" searchId="version">
+      <SettingsGroup title="Version & updates">
+      <SettingRow label="Version" searchId="version" hint="The build installed on this computer.">
         <div className="text-xs text-sub">
           <span className="font-mono text-foreground">{build ? `v${build.version}` : '—'}</span>
           {build && (
@@ -62,7 +63,7 @@ export function AboutSettings() {
       <SettingRow
         label="Update channel"
         searchId="update-channel"
-        hint="Beta receives pre-release builds. Updates are delivered from GitHub releases."
+        hint="Choose stable releases or early preview builds."
       >
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -81,9 +82,9 @@ export function AboutSettings() {
         </DropdownMenu>
       </SettingRow>
       <SettingRow
-        label="Auto update"
+        label="Automatic updates"
         searchId="auto-update"
-        hint="GitWyrm installs new versions on the loading screen when it starts, then opens straight into the new one. Turn this off to be asked first."
+        hint="Install new versions at startup instead of asking first."
       >
         <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
           <input
@@ -95,7 +96,7 @@ export function AboutSettings() {
           Install updates automatically
         </label>
       </SettingRow>
-      <SettingRow label="Updates" searchId="updates">
+      <SettingRow label="Check now" searchId="updates" hint="Look for a newer version of GitWyrm.">
         <div className="flex items-center gap-3">
           <Button
             variant="secondary"
@@ -123,6 +124,7 @@ export function AboutSettings() {
           )}
         </div>
       </SettingRow>
+      </SettingsGroup>
 
       <div
         ref={resetReveal.ref}
@@ -133,15 +135,13 @@ export function AboutSettings() {
       >
         <div className="flex items-center gap-2">
           <AlertTriangle size={15} className="text-red-400" />
-          <h3 className="text-xs font-bold uppercase tracking-[.06em] text-red-400">Danger</h3>
+          <h3 className="text-xs font-semibold text-red-400">Restore app settings</h3>
         </div>
         <div className="mt-3 flex items-start gap-4">
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold text-foreground">Reset all settings</div>
             <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
-              Puts every setting on every page back to its default. Your open
-              repositories, tabs, and groups are not touched. You can undo this
-              right after.
+              Restore every page to its default choices. Your repositories and commits stay safe.
             </p>
           </div>
           <Button

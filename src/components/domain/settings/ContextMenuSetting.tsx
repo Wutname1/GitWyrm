@@ -63,7 +63,7 @@ export function ContextMenuSetting() {
     <SettingRow
       label="Right-click menu"
       searchId="context-menu"
-      hint="Adds 'Open with GitWyrm' when you right-click a folder in File Explorer, so you can open a project without switching to GitWyrm first."
+      hint="Add Open with GitWyrm when you right-click a folder in File Explorer."
     >
       <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
         <input
