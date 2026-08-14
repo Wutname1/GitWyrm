@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { shortSha } from '@/lib/gitDisplay'
@@ -9,9 +10,10 @@ interface FileHeaderProps {
   request: DiffRequest
   additions: number
   deletions: number
+  children?: ReactNode
 }
 
-export function FileHeader({ request, additions, deletions }: FileHeaderProps) {
+export function FileHeader({ request, additions, deletions, children }: FileHeaderProps) {
   const closeDiff = useUiStore((s) => s.closeDiff)
   const pending = request.source.kind !== 'commit'
 
@@ -38,6 +40,7 @@ export function FileHeader({ request, additions, deletions }: FileHeaderProps) {
       <span className="font-mono text-2xs text-added">+{additions}</span>
       <span className="font-mono text-2xs text-removed">-{deletions}</span>
       <div className="flex-1" />
+      {children}
       <FileViewTabs path={request.path} mode="diff" />
       <TooltipButton
         onClick={closeDiff}

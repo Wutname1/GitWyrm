@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, RotateCcw } from 'lucide-react'
 import { ResetToDefaults } from './ResetToDefaults'
-import { SettingRow, settingRowClass, useRevealHighlight } from './SettingRow'
+import { SettingRow, SettingsGroup, settingRowClass, useRevealHighlight } from './SettingRow'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useOpenspecDefaultArchiveTemplate } from '@/hooks/useOpenspec'
@@ -9,11 +9,47 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 export function OpenspecSettings() {
   return (
-    <div className="mt-2">
-      <SpecDeskSetting />
-      <ArchiveCommitTemplateSetting />
+    <div>
+      <SettingsGroup title="Spec Desk">
+        <SpecDeskSetting />
+        <ArchiveCommitTemplateSetting />
+      </SettingsGroup>
+      <SettingsGroup title="Warnings">
+        <ConfirmationSetting kind="archive" />
+        <ConfirmationSetting kind="delete" />
+      </SettingsGroup>
       <ResetToDefaults group="openspec" label="Reset OpenSpec settings to default" />
     </div>
+  )
+}
+
+/** Restore either prompt after the user chose "Don't ask again" at the action. */
+function ConfirmationSetting({ kind }: { kind: 'archive' | 'delete' }) {
+  const skip = useWorkspaceStore((s) =>
+    kind === 'archive' ? s.openspecArchiveWithoutAsking : s.openspecDeleteWithoutAsking
+  )
+  const setSkip = useWorkspaceStore((s) =>
+    kind === 'archive' ? s.setOpenspecArchiveWithoutAsking : s.setOpenspecDeleteWithoutAsking
+  )
+  const label = kind === 'archive' ? 'Before archiving' : 'Before deleting'
+  const verb = kind === 'archive' ? 'archiving a change' : 'deleting a change'
+
+  return (
+    <SettingRow
+      label={label}
+      searchId={`openspec-${kind}-confirmation`}
+      hint={`The warning explains what will happen before ${verb}.`}
+    >
+      {skip ? (
+        <Button variant="secondary" size="sm" onClick={() => setSkip(false)}>
+          Ask me again
+        </Button>
+      ) : (
+        <span className="flex items-center gap-1.5 text-xs text-accent-text">
+          <Check size={13} /> GitWyrm will ask first
+        </span>
+      )}
+    </SettingRow>
   )
 }
 
@@ -81,7 +117,7 @@ function ArchiveCommitTemplateSetting() {
   )
 
   return (
-    <div ref={reveal.ref} className={settingRowClass(reveal.flash)}>
+    <div ref={reveal.ref} data-settings-row className={settingRowClass(reveal.flash)}>
       <div className="w-52 flex-none">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-foreground">Archive commit message</span>

@@ -117,6 +117,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     hint: 'Check out more than one branch at once, each in its own folder.',
     keywords: ['worktree', 'multiple branches', 'advanced'],
   },
+  {
+    id: 'tutorial',
+    section: 'general',
+    label: 'Hands-on tour',
+    hint: 'Practice useful clicks, drags, and menus in a safe sample repository.',
+    keywords: ['tutorial', 'tour', 'practice', 'learn', 'help', 'replay'],
+  },
 
   // --------------------------------------------------------------- behavior
   {
@@ -125,6 +132,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     label: 'On startup',
     hint: 'Reopen the repositories you had open when you last closed GitWyrm.',
     keywords: ['restore', 'reopen', 'session', 'launch', 'start'],
+  },
+  {
+    id: 'auto-fetch',
+    section: 'behavior',
+    label: 'Check for remote changes',
+    hint: 'Quietly check remotes so ahead and behind counts stay current.',
+    keywords: ['fetch', 'remote', 'background', 'automatic', 'refresh', 'ahead', 'behind'],
   },
   {
     id: 'show-tips',
@@ -158,8 +172,22 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     hint: 'Add GitWyrm to the Windows folder right-click menu.',
     keywords: ['explorer', 'windows', 'shell', 'open with', 'integration'],
   },
+  {
+    id: 'discard-submodules',
+    section: 'behavior',
+    label: 'Discarding everything',
+    hint: 'Choose whether moved submodules start selected when discarding all changes.',
+    keywords: ['discard', 'reset', 'submodule', 'throw away', 'changes'],
+  },
 
   // -------------------------------------------------------------------- ai
+  {
+    id: 'ai-enabled',
+    section: 'ai',
+    label: 'Use AI',
+    hint: 'Turn AI features off without removing providers or saved keys.',
+    keywords: ['disable', 'turn off', 'enable', 'stop', 'privacy', 'ai'],
+  },
   {
     id: 'ai-provider',
     section: 'ai',
@@ -202,29 +230,26 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
       'revoke',
     ],
   },
-  // The planned hosts are searchable on purpose: someone typing "gitlab" is
-  // asking whether it works, and an empty result reads as "not a thing GitWyrm
-  // has heard of" rather than the true "known, not built yet".
   {
     id: 'host-gitlab',
     section: 'integrations',
     label: 'GitLab',
-    hint: 'Showing GitLab merge requests and issues in the app is not built yet.',
-    keywords: ['gitlab', 'merge request', 'mr', 'host', 'integration'],
+    hint: 'Connect GitLab to show merge requests and issues in GitWyrm.',
+    keywords: ['gitlab', 'merge request', 'mr', 'host', 'integration', 'token', 'self hosted'],
   },
   {
     id: 'host-bitbucket',
     section: 'integrations',
     label: 'Bitbucket',
-    hint: 'Showing Bitbucket pull requests and issues in the app is not built yet.',
-    keywords: ['bitbucket', 'atlassian', 'host', 'integration'],
+    hint: 'Connect Bitbucket to show pull requests and issues in GitWyrm.',
+    keywords: ['bitbucket', 'atlassian', 'host', 'integration', 'token'],
   },
   {
     id: 'host-azure_devops',
     section: 'integrations',
     label: 'Azure DevOps',
-    hint: 'Showing Azure DevOps pull requests and work items in the app is not built yet.',
-    keywords: ['azure', 'devops', 'vsts', 'visual studio team services', 'host', 'integration'],
+    hint: 'Connect Azure DevOps to show pull requests in GitWyrm.',
+    keywords: ['azure', 'devops', 'vsts', 'visual studio team services', 'host', 'integration', 'token'],
   },
   {
     id: 'tab-pr-count',
@@ -255,6 +280,20 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     label: 'Archive commit message',
     hint: 'The message used when archiving a spec commits automatically.',
     keywords: ['archive', 'spec', 'commit message', 'template', 'chore', 'openspec'],
+  },
+  {
+    id: 'openspec-archive-confirmation',
+    section: 'openspec',
+    label: 'Before archiving',
+    hint: 'Restore the warning shown before a Spec Desk change is archived.',
+    keywords: ['ask again', 'warning', 'confirm', 'archive', 'do not ask'],
+  },
+  {
+    id: 'openspec-delete-confirmation',
+    section: 'openspec',
+    label: 'Before deleting',
+    hint: 'Restore the warning shown before a Spec Desk change is deleted.',
+    keywords: ['ask again', 'warning', 'confirm', 'delete', 'do not ask'],
   },
 
   // -------------------------------------------------------------- profiles
@@ -418,11 +457,25 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['lines changed', 'diff size', 'bar', 'insertions', 'deletions'],
   },
   {
+    id: 'changes-view',
+    section: 'appearance',
+    label: 'Changed files',
+    hint: 'Group changed files by folder or show them in one list.',
+    keywords: ['tree', 'list', 'folders', 'changes panel', 'files'],
+  },
+  {
     id: 'app-zoom',
     section: 'appearance',
     label: 'App zoom',
     hint: 'Makes everything in GitWyrm bigger or smaller.',
     keywords: ['zoom', 'scale', 'dpi', 'bigger', 'smaller'],
+  },
+  {
+    id: 'restore-panel-sizes',
+    section: 'appearance',
+    label: 'Panel sizes',
+    hint: 'Put draggable workspace panels back at their starting sizes.',
+    keywords: ['layout', 'reset', 'restore', 'width', 'height', 'splitter', 'panels'],
   },
 
   // ------------------------------------------------------------------ tags

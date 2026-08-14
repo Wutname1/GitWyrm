@@ -487,11 +487,12 @@ function InstructionSetting() {
 function AiUseToggle({ anyConfigured }: { anyConfigured: boolean }) {
   const aiEnabled = useWorkspaceStore((s) => s.aiEnabled)
   const setAiEnabled = useWorkspaceStore((s) => s.setAiEnabled)
+  const reveal = useRevealHighlight('ai-enabled')
 
   if (!anyConfigured) return null
 
   return (
-    <div className="flex items-start gap-4 border-b border-border px-1 py-3">
+    <div ref={reveal.ref} data-settings-row className={settingRowClass(reveal.flash)}>
       <div className="w-52 flex-none">
         <div className="text-xs font-semibold text-foreground">Use AI</div>
         <div className="mt-0.5 text-2xs text-muted-foreground">

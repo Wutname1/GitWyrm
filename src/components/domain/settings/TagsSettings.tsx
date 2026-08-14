@@ -1,5 +1,5 @@
 import { useWorkspaceStore, type TagPushDefault } from '@/stores/workspaceStore'
-import { SettingRow } from './SettingRow'
+import { SettingRow, SettingsGroup } from './SettingRow'
 import { ResetToDefaults } from './ResetToDefaults'
 
 const selectClass =
@@ -28,49 +28,53 @@ export function TagsSettings() {
         Tags.
       </p>
 
-      <SettingRow label="After pushing" searchId="tag-push-default" hint={tagPushHints[tagPushDefault]}>
-        <select
-          className={selectClass}
-          value={tagPushDefault}
-          onChange={(e) => setTagPushDefault(e.target.value as TagPushDefault)}
+      <SettingsGroup title="Sending tags">
+        <SettingRow label="After pushing" searchId="tag-push-default" hint={tagPushHints[tagPushDefault]}>
+          <select
+            className={selectClass}
+            value={tagPushDefault}
+            onChange={(e) => setTagPushDefault(e.target.value as TagPushDefault)}
+          >
+            <option value="ask">Ask me about tags I have not sent</option>
+            <option value="always">Always send my tags</option>
+            <option value="never">Never send my tags</option>
+          </select>
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Creating and deleting">
+        <SettingRow
+          label="New tags"
+          searchId="tag-push-on-create"
+          hint="Sets how the box starts out in the New tag window. You can still change it for any one tag."
         >
-          <option value="ask">Ask me about tags I have not sent</option>
-          <option value="always">Always send my tags</option>
-          <option value="never">Never send my tags</option>
-        </select>
-      </SettingRow>
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={tagPushOnCreate}
+              onChange={(e) => setTagPushOnCreate(e.target.checked)}
+              className="size-3.5 accent-[var(--gw-accent)]"
+            />
+            Send a new tag as soon as I make it
+          </label>
+        </SettingRow>
 
-      <SettingRow
-        label="New tags"
-        searchId="tag-push-on-create"
-        hint="Sets how the box starts out in the New tag window. You can still change it for any one tag."
-      >
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
-          <input
-            type="checkbox"
-            checked={tagPushOnCreate}
-            onChange={(e) => setTagPushOnCreate(e.target.checked)}
-            className="size-3.5 accent-[var(--gw-accent)]"
-          />
-          Send a new tag as soon as I make it
-        </label>
-      </SettingRow>
-
-      <SettingRow
-        label="Deleting tags"
-        searchId="tag-delete-on-remote"
-        hint="Sets how the box starts out in the Delete tag window. You can still change it for any one tag."
-      >
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
-          <input
-            type="checkbox"
-            checked={tagDeleteOnRemote}
-            onChange={(e) => setTagDeleteOnRemote(e.target.checked)}
-            className="size-3.5 accent-[var(--gw-accent)]"
-          />
-          Also remove the tag from the remote
-        </label>
-      </SettingRow>
+        <SettingRow
+          label="Deleting tags"
+          searchId="tag-delete-on-remote"
+          hint="Sets how the box starts out in the Delete tag window. You can still change it for any one tag."
+        >
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={tagDeleteOnRemote}
+              onChange={(e) => setTagDeleteOnRemote(e.target.checked)}
+              className="size-3.5 accent-[var(--gw-accent)]"
+            />
+            Also remove the tag from the remote
+          </label>
+        </SettingRow>
+      </SettingsGroup>
       <ResetToDefaults group="tags" />
     </div>
   )

@@ -10,7 +10,7 @@ import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { useTutorialStore } from '@/stores/tutorialStore'
 import { TUTORIAL_ENABLED } from '@/lib/tutorialEnabled'
-import { FolderSetting, SettingRow } from './SettingRow'
+import { FolderSetting, SettingRow, SettingsGroup } from './SettingRow'
 import { CodeFoldersSetting } from './CodeFoldersSetting'
 import { IdentitySetting } from './IdentitySetting'
 import { EditorSetting } from './EditorSetting'
@@ -47,118 +47,123 @@ export function GeneralSettings() {
 
   return (
     <div>
-      <SettingRow
-        label="Your name and email"
-        searchId="git-identity"
-        hint="Goes on every commit you make, so other people can see who did the work. Shared with git itself, so other git tools see it too."
-      >
-        <IdentitySetting />
-      </SettingRow>
-      <SettingRow
-        label="Code folders"
-        searchId="code-folder"
-        hint="Folders searched for projects to open. Add as many as you like. The starred one is your main folder: new projects and copies are saved there."
-      >
-        <CodeFoldersSetting />
-      </SettingRow>
-      <SettingRow
-        label="Default clone directory"
-        searchId="clone-directory"
-        hint="Where new copies go. Falls back to your main code folder when empty."
-      >
-        <FolderSetting
-          value={cloneDirectory}
-          placeholder={primaryCodeFolder ?? 'Not set'}
-          onCommit={setCloneDirectory}
-        />
-      </SettingRow>
-      <SettingRow
-        label="When switching branches"
-        searchId="branch-switch-mode"
-        hint={branchSwitchHints[branchSwitchMode]}
-      >
-        <select
-          className={selectClass}
-          value={branchSwitchMode}
-          onChange={(e) => setBranchSwitchMode(e.target.value as BranchSwitchMode)}
-        >
-          <option value="auto_stash">Stash my changes and bring them along</option>
-          <option value="carry">Carry my changes over (like git checkout)</option>
-          <option value="refuse">Don't let me switch with changes</option>
-        </select>
-      </SettingRow>
-      <SettingRow label="Commit button" searchId="commit-button-mode" hint={commitButtonHints[commitButtonMode]}>
-        <select
-          className={selectClass}
-          value={commitButtonMode}
-          onChange={(e) => setCommitButtonMode(e.target.value as CommitButtonMode)}
-        >
-          <option value="commit">Commit only</option>
-          <option value="commit_push">Commit and push</option>
-        </select>
-      </SettingRow>
-      <SettingRow
-        label="Open in editor"
-        searchId="editor"
-        hint="Which editor the open button and the file right-click menu use. Only editors found on this computer are listed."
-      >
-        <EditorSetting />
-      </SettingRow>
-      <SettingRow
-        label="Repository tabs"
-        searchId="tab-layout"
-        hint="Put repository tabs across the top or in a scrollable list on the left. Groups work in both layouts."
-      >
-        <select
-          className={selectClass}
-          value={tabLayout}
-          onChange={(event) => setTabLayout(event.target.value as TabLayout)}
-        >
-          <option value="horizontal">Across the top</option>
-          <option value="vertical">Down the left side</option>
-        </select>
-      </SettingRow>
-      {tabLayout === 'horizontal' && (
+      <SettingsGroup title="Your work">
         <SettingRow
-          label="Tab row"
-          searchId="tab-row"
-          hint="Give the tabs a row of their own under the app bar, so long repository names have the full width to themselves."
+          label="Your name and email"
+          searchId="git-identity"
+          hint="Goes on every commit you make, so other people can see who did the work. Shared with git itself, so other git tools see it too."
+        >
+          <IdentitySetting />
+        </SettingRow>
+        <SettingRow
+          label="Code folders"
+          searchId="code-folder"
+          hint="Folders searched for projects to open. Add as many as you like. The starred one is your main folder: new projects and copies are saved there."
+        >
+          <CodeFoldersSetting />
+        </SettingRow>
+        <SettingRow
+          label="Default clone directory"
+          searchId="clone-directory"
+          hint="Where new copies go. Falls back to your main code folder when empty."
+        >
+          <FolderSetting
+            value={cloneDirectory}
+            placeholder={primaryCodeFolder ?? 'Not set'}
+            onCommit={setCloneDirectory}
+          />
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Everyday actions">
+        <SettingRow
+          label="When switching branches"
+          searchId="branch-switch-mode"
+          hint={branchSwitchHints[branchSwitchMode]}
+        >
+          <select
+            className={selectClass}
+            value={branchSwitchMode}
+            onChange={(e) => setBranchSwitchMode(e.target.value as BranchSwitchMode)}
+          >
+            <option value="auto_stash">Save my changes and bring them along</option>
+            <option value="carry">Carry my changes over</option>
+            <option value="refuse">Don't let me switch with changes</option>
+          </select>
+        </SettingRow>
+        <SettingRow label="Commit button" searchId="commit-button-mode" hint={commitButtonHints[commitButtonMode]}>
+          <select
+            className={selectClass}
+            value={commitButtonMode}
+            onChange={(e) => setCommitButtonMode(e.target.value as CommitButtonMode)}
+          >
+            <option value="commit">Commit only</option>
+            <option value="commit_push">Commit and push</option>
+          </select>
+        </SettingRow>
+        <SettingRow
+          label="Open in editor"
+          searchId="editor"
+          hint="Which editor the open button and the file right-click menu use. Only editors found on this computer are listed."
+        >
+          <EditorSetting />
+        </SettingRow>
+        <SettingRow
+          label="Repository tabs"
+          searchId="tab-layout"
+          hint="Put repository tabs across the top or in a scrollable list on the left. Groups work in both layouts."
+        >
+          <select
+            className={selectClass}
+            value={tabLayout}
+            onChange={(event) => setTabLayout(event.target.value as TabLayout)}
+          >
+            <option value="horizontal">Across the top</option>
+            <option value="vertical">Down the left side</option>
+          </select>
+        </SettingRow>
+        {tabLayout === 'horizontal' && (
+          <SettingRow
+            label="Tab row"
+            searchId="tab-row"
+            hint="Give the tabs a row of their own under the app bar, so long repository names have the full width to themselves."
+          >
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+              <input
+                type="checkbox"
+                checked={horizontalTabRow}
+                onChange={(e) => setHorizontalTabRow(e.target.checked)}
+                className="size-3.5 accent-[var(--gw-accent)]"
+              />
+              Put tabs on their own row
+            </label>
+          </SettingRow>
+        )}
+        <SettingRow
+          label="Worktrees"
+          searchId="worktrees"
+          hint="Worktrees let you check out more than one branch at once, each in its own folder. An advanced feature, off by default. Turns on by itself if this repo already uses them. Turning it off stops GitWyrm offering to add new ones - worktrees you already have stay listed and manageable."
         >
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
             <input
               type="checkbox"
-              checked={horizontalTabRow}
-              onChange={(e) => setHorizontalTabRow(e.target.checked)}
+              checked={enableWorktrees}
+              onChange={(e) => setEnableWorktrees(e.target.checked)}
               className="size-3.5 accent-[var(--gw-accent)]"
             />
-            Put tabs on their own row
+            Enable worktrees
           </label>
         </SettingRow>
-      )}
-      <SettingRow
-        label="Worktrees"
-        searchId="worktrees"
-        hint="Worktrees let you check out more than one branch at once, each in its own folder. An advanced feature, off by default. Turns on by itself if this repo already uses them. Turning it off stops GitWyrm offering to add new ones — worktrees you already have stay listed and manageable."
-      >
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
-          <input
-            type="checkbox"
-            checked={enableWorktrees}
-            onChange={(e) => setEnableWorktrees(e.target.checked)}
-            className="size-3.5 accent-[var(--gw-accent)]"
-          />
-          Enable worktrees
-        </label>
-      </SettingRow>
-      {TUTORIAL_ENABLED && (
-        <SettingRow
-          label="Hands-on tour"
-          searchId="tutorial"
-          hint="Builds a small practice repository and walks you through the gestures that are quick but easy to miss: double-click, drag, and right-click. Deleted when you finish."
-        >
-          <ReplayTutorialButton />
-        </SettingRow>
-      )}
+        {TUTORIAL_ENABLED && (
+          <SettingRow
+            label="Hands-on tour"
+            searchId="tutorial"
+            hint="Builds a small practice repository and walks you through the gestures that are quick but easy to miss: double-click, drag, and right-click. Deleted when you finish."
+          >
+            <ReplayTutorialButton />
+          </SettingRow>
+        )}
+      </SettingsGroup>
       <ResetToDefaults group="general" />
     </div>
   )

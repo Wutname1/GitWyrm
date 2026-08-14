@@ -31,8 +31,36 @@ export function useRevealHighlight(searchId: string | undefined) {
 /** Row shell classes, shared with the few blocks that lay out their own row. */
 export function settingRowClass(flash: boolean) {
   return cn(
-    '-mx-3 flex scroll-mt-6 items-start gap-6 rounded-md px-3 py-3 transition-colors duration-500',
+    'mt-2 flex scroll-mt-6 items-start gap-6 rounded-lg border border-border bg-panel px-4 py-3 transition-colors duration-500',
     flash && 'bg-primary/10 ring-1 ring-primary/50'
+  )
+}
+
+/**
+ * A small group of related choices on one settings page.
+ *
+ * The heading explains the job; the rows inside form one quiet surface so the
+ * right panel scans as a handful of decisions instead of one long spreadsheet.
+ */
+export function SettingsGroup({
+  title,
+  blurb,
+  children,
+}: {
+  title: string
+  blurb?: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="mt-6">
+      <div className="mb-2 px-0.5">
+        <h3 className="text-2xs font-bold uppercase tracking-[.08em] text-sub">{title}</h3>
+        {blurb && <p className="mt-0.5 text-2xs text-muted-foreground">{blurb}</p>}
+      </div>
+      <div className="overflow-hidden rounded-lg border border-border bg-panel [&>[data-settings-row]]:mt-0 [&>[data-settings-row]]:rounded-none [&>[data-settings-row]]:border-x-0 [&>[data-settings-row]]:border-t-0 [&>[data-settings-row]]:border-b [&>[data-settings-row]:last-child]:border-b-0">
+        {children}
+      </div>
+    </section>
   )
 }
 
@@ -51,7 +79,7 @@ export function SettingRow({
   const { ref, flash } = useRevealHighlight(searchId)
 
   return (
-    <div ref={ref} className={settingRowClass(flash)}>
+    <div ref={ref} data-settings-row className={settingRowClass(flash)}>
       <div className="w-52 flex-none">
         <div className="text-xs font-semibold text-foreground">{label}</div>
         {hint && <div className="mt-0.5 text-2xs text-muted-foreground">{hint}</div>}

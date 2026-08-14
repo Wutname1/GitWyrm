@@ -11,6 +11,19 @@ import { HunkBar } from '@/components/domain/diff/HunkBar'
 import { LineSelectionBar } from '@/components/domain/diff/LineSelectionBar'
 import type { DiffLineEntry, SelectedLine } from '@/lib/bindings'
 import { computeWordSpans } from '@/lib/wordDiff'
+import { WrapText } from 'lucide-react'
+import { TooltipButton } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
+
+const WRAP_DIFF_LINES_KEY = 'gitwyrm:wrap-diff-lines'
+
+function savedWrapPreference(): boolean {
+  try {
+    return window.localStorage.getItem(WRAP_DIFF_LINES_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
 
 /** Stable key for a changed line within a file diff. */
 function lineKey(l: DiffLineEntry): string {
@@ -32,6 +45,17 @@ export function DiffView() {
   const diff = useFileDiff(repo?.id ?? null, request?.path ?? null, request?.source ?? null)
   const status = useStatus(repo?.id ?? null)
   const m = useGitMutations(repo?.id ?? null)
+  const [wrapDiffLines, setWrapDiffLines] = useState(savedWrapPreference)
+
+  const toggleWrap = () => {
+    const next = !wrapDiffLines
+    setWrapDiffLines(next)
+    try {
+      window.localStorage.setItem(WRAP_DIFF_LINES_KEY, String(next))
+    } catch {
+      // The visible control still works for this session when storage is unavailable.
+    }
+  }
 
   // Selected changed-line keys, local to this file view.
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -223,7 +247,21 @@ export function DiffView() {
         request={request}
         additions={diff.data?.additions ?? 0}
         deletions={diff.data?.deletions ?? 0}
-      />
+      >
+        <TooltipButton
+          onClick={toggleWrap}
+          tooltip={wrapDiffLines ? 'Stop wrapping long lines' : 'Wrap long lines'}
+          aria-pressed={wrapDiffLines}
+          className={cn(
+            'flex size-6 flex-none items-center justify-center rounded-[5px] border text-xs',
+            wrapDiffLines
+              ? 'border-border bg-soft text-accent-text'
+              : 'border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3'
+          )}
+        >
+          <WrapText size={12} />
+        </TooltipButton>
+      </FileHeader>
       {patchPending && (
         <div className="flex h-7 flex-none items-center gap-2 border-b border-primary/25 bg-soft px-3 text-2xs font-medium text-accent-text" role="status">
           <PendingIndicator />
@@ -269,10 +307,11 @@ export function DiffView() {
                 selected={selected.has(lineKey(line))}
                 contextActive={contextLine === lineKey(line)}
                 onSelect={(shift) => toggleLine(i, shift)}
+                wrap={wrapDiffLines}
               />
             </DiffLineMenu>
           ) : (
-            <DiffLineRow key={i} line={line} wordSpans={wordSpans.get(i)} />
+            <DiffLineRow key={i} line={line} wordSpans={wordSpans.get(i)} wrap={wrapDiffLines} />
           )
         )}
       </div>

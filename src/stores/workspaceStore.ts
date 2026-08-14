@@ -973,6 +973,8 @@ interface WorkspaceState {
   setChangesSplit: (split: number) => void;
   setConflictSideSplit: (split: number) => void;
   setConflictResultSplit: (split: number) => void;
+  /** Put every draggable workspace panel back at its shipped size. */
+  resetWorkspaceLayout: () => void;
   setChangeSizeDisplay: (display: ChangeSizeDisplay) => void;
   setShowChangeIndicator: (enabled: boolean) => void;
   setShowChangeLineCounts: (enabled: boolean) => void;
@@ -1375,6 +1377,16 @@ export const SETTINGS_DEFAULTS = {
   mintAccent: true,
   showRepoIcons: true,
   tabIconOnly: false,
+  tabLayout: "vertical",
+  horizontalTabRow: false,
+  leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
+  rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
+  drawerHeight: DEFAULT_DRAWER_HEIGHT,
+  drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
+  changesSplit: DEFAULT_CHANGES_SPLIT,
+  conflictSideSplit: DEFAULT_CONFLICT_SIDE_SPLIT,
+  conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
+  verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
   changesViewMode: "tree",
   showTabPrCount: false,
   showTabIssueCount: false,
@@ -1388,14 +1400,13 @@ export const SETTINGS_GROUPS = {
   general: [
     "codeFolders",
     "cloneDirectory",
-    "repoPickerCollapsedSections",
-    "gitExecutable",
-    "gpgExecutable",
     "branchSwitchMode",
     "commitButtonMode",
     "defaultEditor",
     "enableWorktrees",
     "worktreesSettingTouched",
+    "tabLayout",
+    "horizontalTabRow",
   ],
   behavior: [
     "restoreTabs",
@@ -2701,6 +2712,19 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setConflictResultSplit: (split) => {
     set({ conflictResultSplit: clampConflictResultSplit(split) });
+    schedulePersist();
+  },
+  resetWorkspaceLayout: () => {
+    set({
+      leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
+      rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
+      drawerHeight: DEFAULT_DRAWER_HEIGHT,
+      drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
+      changesSplit: DEFAULT_CHANGES_SPLIT,
+      conflictSideSplit: DEFAULT_CONFLICT_SIDE_SPLIT,
+      conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
+      verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
+    });
     schedulePersist();
   },
   setChangeSizeDisplay: (display) => {

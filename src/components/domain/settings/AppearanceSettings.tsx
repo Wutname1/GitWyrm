@@ -1,5 +1,6 @@
-import { Minus, Monitor, Moon, Plus, Sun } from 'lucide-react'
-import { SettingRow } from './SettingRow'
+import { List, Minus, Monitor, Moon, Plus, RotateCcw, Sun, Trees } from 'lucide-react'
+import { toast } from 'sonner'
+import { SettingRow, SettingsGroup } from './SettingRow'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import {
@@ -207,81 +208,140 @@ export function AppearanceSettings() {
   const setShowRepoIcons = useWorkspaceStore((s) => s.setShowRepoIcons)
   const tabIconOnly = useWorkspaceStore((s) => s.tabIconOnly)
   const setTabIconOnly = useWorkspaceStore((s) => s.setTabIconOnly)
+  const changesViewMode = useWorkspaceStore((s) => s.changesViewMode)
+  const setChangesViewMode = useWorkspaceStore((s) => s.setChangesViewMode)
+  const resetWorkspaceLayout = useWorkspaceStore((s) => s.resetWorkspaceLayout)
   const resetFonts = useResetFonts()
 
   return (
     <div>
-      <SettingRow label="Mode" searchId="theme-mode" hint="Use light, dark, or match your system setting.">
-        <ModeSetting />
-      </SettingRow>
-      <SettingRow label="Theme" searchId="theme" hint="Pick a color scheme. Auto follows the mode above.">
-        <ThemeSetting />
-      </SettingRow>
-      <SettingRow
-        label="Mint accent"
-        searchId="mint-accent"
-        hint="Keep GitWyrm's mint highlight, or let each theme show its own accent color."
-      >
-        <MintSetting />
-      </SettingRow>
-      <SettingRow
-        label="Font"
-        searchId="font"
-        hint="Choose the font used across GitWyrm. Included fonts always work; you can also pick any font installed on this PC."
-      >
-        <FontFamilySetting />
-      </SettingRow>
-      <SettingRow label="Text size" searchId="text-size" hint="Makes all text bigger or smaller. App zoom still applies on top of this.">
-        <FontSizeSetting />
-      </SettingRow>
-      <SettingRow label="Text weight" searchId="text-weight" hint="Makes text lighter or bolder throughout the app.">
-        <FontWeightSetting />
-      </SettingRow>
-      <SettingRow label="Reset fonts" searchId="reset-fonts" hint="Put the font, size, and weight back to GitWyrm's defaults.">
-        <Button variant="outline" size="sm" onClick={resetFonts}>
-          Reset all font settings
-        </Button>
-      </SettingRow>
-      <SettingRow
-        label="Repository icons"
-        searchId="repo-icons"
-        hint="Shows a favicon or logo beside each repository tab when one is available."
-      >
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
-          <input
-            type="checkbox"
-            checked={showRepoIcons}
-            onChange={(event) => setShowRepoIcons(event.target.checked)}
-            className="size-3.5 accent-[var(--gw-accent)]"
-          />
-          Show icons in repository tabs
-        </label>
-      </SettingRow>
-      <SettingRow
-        label="Icon-only tabs"
-        searchId="icon-only-tabs"
-        hint="Fits more repositories by hiding tab names. Point at a tab to expand its name."
-      >
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
-          <input
-            type="checkbox"
-            checked={tabIconOnly}
-            onChange={(event) => setTabIconOnly(event.target.checked)}
-            className="size-3.5 accent-[var(--gw-accent)]"
-          />
-          Show only icons in repository tabs
-        </label>
-      </SettingRow>
-      <SettingRow
-        label="Commit change size"
-        searchId="change-size"
-        hint="See how large each commit is without opening it."
-      >
-        <ChangeSizeSettings />
-      </SettingRow>
-      <SettingRow label="App zoom" searchId="app-zoom" hint="Makes everything in GitWyrm bigger or smaller. You can also press Ctrl and + or - from anywhere, or Ctrl and 0 to go back to 100%.">
-        <ZoomSetting />
-      </SettingRow>
+      <SettingsGroup title="Color">
+        <SettingRow label="Mode" searchId="theme-mode" hint="Use light, dark, or match your system setting.">
+          <ModeSetting />
+        </SettingRow>
+        <SettingRow label="Theme" searchId="theme" hint="Pick a color scheme. Auto follows the mode above.">
+          <ThemeSetting />
+        </SettingRow>
+        <SettingRow
+          label="Mint accent"
+          searchId="mint-accent"
+          hint="Keep GitWyrm's mint highlight, or let each theme show its own accent color."
+        >
+          <MintSetting />
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Text">
+        <SettingRow
+          label="Font"
+          searchId="font"
+          hint="Choose the font used across GitWyrm. Included fonts always work; you can also pick any font installed on this PC."
+        >
+          <FontFamilySetting />
+        </SettingRow>
+        <SettingRow label="Text size" searchId="text-size" hint="Makes all text bigger or smaller. App zoom still applies on top of this.">
+          <FontSizeSetting />
+        </SettingRow>
+        <SettingRow label="Text weight" searchId="text-weight" hint="Makes text lighter or bolder throughout the app.">
+          <FontWeightSetting />
+        </SettingRow>
+        <SettingRow label="Reset fonts" searchId="reset-fonts" hint="Put the font, size, and weight back to GitWyrm's defaults.">
+          <Button variant="outline" size="sm" onClick={resetFonts}>
+            Reset all font settings
+          </Button>
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Tabs and changes">
+        <SettingRow
+          label="Repository icons"
+          searchId="repo-icons"
+          hint="Shows a favicon or logo beside each repository tab when one is available."
+        >
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={showRepoIcons}
+              onChange={(event) => setShowRepoIcons(event.target.checked)}
+              className="size-3.5 accent-[var(--gw-accent)]"
+            />
+            Show icons in repository tabs
+          </label>
+        </SettingRow>
+        <SettingRow
+          label="Icon-only tabs"
+          searchId="icon-only-tabs"
+          hint="Fits more repositories by hiding tab names. Point at a tab to expand its name."
+        >
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={tabIconOnly}
+              onChange={(event) => setTabIconOnly(event.target.checked)}
+              className="size-3.5 accent-[var(--gw-accent)]"
+            />
+            Show only icons in repository tabs
+          </label>
+        </SettingRow>
+        <SettingRow
+          label="Changed files"
+          searchId="changes-view"
+          hint="Group changed files into folders, or show one simple list. The same choice is available above the Changes panel."
+        >
+          <div className="inline-flex rounded-md border border-border bg-background p-0.5">
+            {([
+              ['tree', 'Group by folder', Trees],
+              ['list', 'One list', List],
+            ] as const).map(([value, label, Icon]) => (
+              <Button
+                key={value}
+                type="button"
+                variant="ghost"
+                size="xs"
+                aria-pressed={changesViewMode === value}
+                onClick={() => setChangesViewMode(value)}
+                className={cn(
+                  'gap-1.5 text-sub',
+                  changesViewMode === value && 'bg-panel3 text-foreground shadow-sm',
+                )}
+              >
+                <Icon size={12} />
+                {label}
+              </Button>
+            ))}
+          </div>
+        </SettingRow>
+        <SettingRow
+          label="Commit change size"
+          searchId="change-size"
+          hint="See how large each commit is without opening it."
+        >
+          <ChangeSizeSettings />
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Size and layout">
+        <SettingRow label="App zoom" searchId="app-zoom" hint="Makes everything in GitWyrm bigger or smaller. You can also press Ctrl and + or - from anywhere, or Ctrl and 0 to go back to 100%.">
+          <ZoomSetting />
+        </SettingRow>
+        <SettingRow
+          label="Panel sizes"
+          searchId="restore-panel-sizes"
+          hint="Put the branches, graph, changes, conflict, and details panels back at their starting sizes."
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              resetWorkspaceLayout()
+              toast.success('Panel sizes were restored')
+            }}
+          >
+            <RotateCcw size={13} />
+            Restore panel sizes
+          </Button>
+        </SettingRow>
+      </SettingsGroup>
       <ResetToDefaults group="appearance" />
     </div>
   )

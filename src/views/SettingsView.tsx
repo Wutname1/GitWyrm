@@ -1,8 +1,23 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { SettingsNav } from '@/components/domain/settings/SettingsNav'
-import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { X } from 'lucide-react'
+import {
+  Bot,
+  CircleHelp,
+  FileText,
+  FolderGit2,
+  Info,
+  NotebookTabs,
+  Palette,
+  Plug,
+  Settings2,
+  ShieldCheck,
+  Tags,
+  Users,
+  X,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
 import type { SettingsSection } from '@/stores/uiStore'
 import { useUiStore } from '@/stores/uiStore'
 
@@ -23,14 +38,35 @@ const TITLES: Record<SettingsSection, string> = {
 }
 
 const SUBTITLES: Partial<Record<SettingsSection, string>> = {
+  general: 'The basics for opening projects, switching branches, and making commits.',
   behavior: 'How GitWyrm acts while you work.',
   repository: 'These settings apply only to the repository open in the active tab.',
   repositoryTags: 'Tag rules for the repository open in the active tab.',
   tags: 'The default tag rules for every repository.',
   profiles: 'Who you commit as, and the key you sign with.',
+  ai: 'Choose the model that helps write commit messages and summaries.',
   integrations: 'Connect GitWyrm to the site your code is hosted on.',
   openspec: 'How GitWyrm works with your openspec/ folder.',
   security: 'Prove your commits came from you, and choose the programs GitWyrm uses.',
+  appearance: 'Make GitWyrm comfortable to read and easy to recognize.',
+  logs: 'Get useful details when something does not work as expected.',
+  about: 'Version, updates, and local app settings.',
+}
+
+const ICONS: Record<SettingsSection, LucideIcon> = {
+  general: Settings2,
+  behavior: Zap,
+  repository: FolderGit2,
+  repositoryTags: Tags,
+  tags: Tags,
+  profiles: Users,
+  ai: Bot,
+  integrations: Plug,
+  openspec: NotebookTabs,
+  security: ShieldCheck,
+  appearance: Palette,
+  logs: FileText,
+  about: Info,
 }
 
 /**
@@ -134,6 +170,7 @@ export function SettingsView() {
   const settled = useSettledOpen(open)
   const SectionBody = SECTION_BODIES[settingsSection]
   const subtitle = SUBTITLES[settingsSection]
+  const SectionIcon = ICONS[settingsSection] ?? CircleHelp
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && showGraph()}>
@@ -162,12 +199,24 @@ export function SettingsView() {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
               <div className="mx-auto max-w-4xl">
-                <h2 className="text-base font-bold text-foreground">{TITLES[settingsSection]}</h2>
-                {subtitle && <p className="mt-0.5 text-2xs text-muted-foreground">{subtitle}</p>}
-                <Separator className="mt-3" />
+                <div className="flex items-start gap-3 border-b border-border pb-5">
+                  <div className="grid size-9 flex-none place-items-center rounded-lg bg-[var(--gw-accent-soft)] text-accent-text">
+                    <SectionIcon size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-semibold text-foreground">{TITLES[settingsSection]}</h2>
+                    {subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}
+                  </div>
+                  <div className="ml-auto flex items-center gap-1.5 pt-1 text-2xs text-muted-foreground">
+                    <span className="size-1.5 rounded-full bg-[var(--gw-accent)]" />
+                    Saved automatically
+                  </div>
+                </div>
                 {settled && (
                   <Suspense fallback={null}>
-                    <SectionBody />
+                    <div className="pb-4">
+                      <SectionBody />
+                    </div>
                   </Suspense>
                 )}
               </div>

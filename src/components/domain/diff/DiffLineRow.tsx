@@ -15,6 +15,8 @@ interface DiffLineRowProps {
   onSelect?: (shift: boolean) => void
   onContextMenu?: (e: React.MouseEvent) => void
   children?: ReactNode
+  /** Break long lines to fit the view instead of requiring sideways scrolling. */
+  wrap?: boolean
 }
 
 export function DiffLineRow({
@@ -26,6 +28,7 @@ export function DiffLineRow({
   onSelect,
   onContextMenu,
   children,
+  wrap = false,
 }: DiffLineRowProps) {
   const isHunk = line.sign === '@'
   return (
@@ -35,7 +38,8 @@ export function DiffLineRow({
       data-selected={selected ? '' : undefined}
       data-context-active={contextActive ? '' : undefined}
       className={cn(
-        'group/line relative flex min-w-max items-baseline outline-offset-[-1px] transition-colors duration-75',
+        'group/line relative flex outline-offset-[-1px] transition-colors duration-75',
+        wrap ? 'w-full min-w-0 items-start' : 'min-w-max items-baseline',
         selectable && 'cursor-pointer',
         // Base tint by line kind (Rest state).
         isHunk
@@ -80,7 +84,7 @@ export function DiffLineRow({
       >
         {line.sign === '-' ? '-' : isHunk ? '' : line.sign}
       </span>
-      <span className="whitespace-pre pr-5">
+      <span className={cn('pr-5', wrap ? 'min-w-0 whitespace-pre-wrap break-words' : 'whitespace-pre')}>
         {wordSpans
           ? wordSpans.map((span, i) =>
               span.changed ? (
