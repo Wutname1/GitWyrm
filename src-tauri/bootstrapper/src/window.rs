@@ -38,9 +38,12 @@ const UPDATE_HEADER_H: i32 = 52;
 /// Bottom of the art panel. The header sits inside this, so the art actually
 /// visible is `UPDATE_ART_H - UPDATE_HEADER_H` tall.
 const UPDATE_ART_H: i32 = 500 + UPDATE_HEADER_H;
-const UPDATE_STRIP_H: i32 = 85; // status line + progress bar below the art
+// Status line + progress bar below the art. Sized so the padding above the
+// caption matches the clearance under the bar -- the strip is only two rows of
+// content, and uneven padding on so few elements reads as a misalignment.
+const UPDATE_STRIP_H: i32 = 76;
 /// Clearance between the progress bar and the bottom edge.
-const UPDATE_BAR_MARGIN: i32 = 5;
+const UPDATE_BAR_MARGIN: i32 = 30;
 const UPDATE_H: i32 = UPDATE_ART_H + UPDATE_STRIP_H;
 
 const TITLEBAR_H: i32 = 56;
@@ -1149,9 +1152,21 @@ mod tests {
             bar_y + 16 <= l.h,
             "the progress bar runs past the bottom of the window"
         );
+        let text_top = bar_y - 30;
         assert!(
-            bar_y - 30 > UPDATE_ART_H,
+            text_top > UPDATE_ART_H,
             "the status line overlaps the art instead of sitting in the strip"
+        );
+
+        // Padding above the caption should match the clearance under the bar.
+        // With only two rows in the strip, a mismatch reads as a misalignment
+        // rather than as deliberate spacing.
+        assert_eq!(
+            text_top - UPDATE_ART_H,
+            UPDATE_BAR_MARGIN,
+            "strip padding is lopsided: {}px above the caption, {}px below the bar",
+            text_top - UPDATE_ART_H,
+            UPDATE_BAR_MARGIN
         );
 
         // Side insets are symmetric, so the strip reads as a padded panel.
