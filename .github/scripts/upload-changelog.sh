@@ -19,7 +19,10 @@ if [ -z "${CHANGELOG_API_KEY:-}" ]; then
   echo "SKIP: CHANGELOG_API_KEY not set" >&2
   exit 0
 fi
-if [ -n "${GITHUB_REF:-}" ] && [[ ! "$GITHUB_REF" =~ ^refs/tags/ ]]; then
+# Betas ship from pushes to main, not tags, so the tag-push guard only applies
+# when BETA_VERSION is unset. Without this exemption a beta upload would exit 0
+# here and silently publish nothing.
+if [ -z "${BETA_VERSION:-}" ] && [ -n "${GITHUB_REF:-}" ] && [[ ! "$GITHUB_REF" =~ ^refs/tags/ ]]; then
   echo "SKIP: not a tag push ($GITHUB_REF)" >&2
   exit 0
 fi
@@ -29,8 +32,12 @@ COUNT="$(jq '.items | length' <<<"$PAYLOAD")"
 VERSION="$(jq -r '.version' <<<"$PAYLOAD")"
 echo "Uploading $COUNT items for version $VERSION" >&2
 
-# Render CHANGELOG.md from the same structured items.
-"$SCRIPT_DIR/render-changelog.sh" CHANGELOG.md <<<"$PAYLOAD" >/dev/null
+# Render CHANGELOG.md from the same structured items. Skipped for betas: the
+# committed changelog is a record of shipped releases, and a beta's entry is
+# deleted again as soon as the release it precedes goes out.
+if [ -z "${BETA_VERSION:-}" ]; then
+  "$SCRIPT_DIR/render-changelog.sh" CHANGELOG.md <<<"$PAYLOAD" >/dev/null
+fi
 
 HTTP_CODE="$(curl -sS -o /tmp/cl-resp.json -w '%{http_code}' \
   --connect-timeout 10 --max-time 30 -X POST "$API_URL" \

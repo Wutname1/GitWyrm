@@ -29,7 +29,26 @@ RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # reachable commits - which is exactly the full-history changelog we want for
 # the initial release. Every later tag has a predecessor and gets a scoped diff.
 THIS_REF="${REF_NAME:-HEAD}"
-PREV_TAG="$(git describe --tags --abbrev=0 "${THIS_REF}^" 2>/dev/null || echo '')"
+
+# Betas are built from untagged commits on main, so there is no tag to describe
+# from and THIS_REF would be a branch name. Their range runs from the newest
+# STABLE tag to HEAD, which is exactly the set of commits the eventual release
+# will also cover -- a beta tester sees the same notes early, and the release
+# entry that replaces them is not missing anything.
+#
+# `--list '[0-9]*'` plus the anchored grep keeps this to real release tags even
+# if beta tags are ever introduced; picking a beta tag as the floor would make
+# the following release's changelog nearly empty.
+if [ -n "${BETA_VERSION:-}" ]; then
+  VERSION="$BETA_VERSION"
+  PREV_TAG="$(git tag --list '[0-9]*.[0-9]*.[0-9]*' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -V | tail -n1 || true)"
+  THIS_REF="HEAD"
+else
+  PREV_TAG="$(git describe --tags --abbrev=0 "${THIS_REF}^" 2>/dev/null || echo '')"
+fi
+
 if [ -n "$PREV_TAG" ]; then
   RANGE="${PREV_TAG}..${THIS_REF}"
 else

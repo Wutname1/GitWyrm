@@ -447,6 +447,20 @@ jobs:
           chmod +x .github/scripts/*.sh
           .github/scripts/upload-changelog.sh
 
+      # Clear the beta entries this release supersedes. Ordered AFTER the upload
+      # so a failed upload never leaves the changelog with no notes at all: the
+      # stable entry covers the same commits (its range starts at the previous
+      # stable tag), so nothing a beta described is lost.
+      - name: Purge superseded beta changelogs
+        if: "!contains(github.ref_name, '-beta.')"
+        env:
+          CHANGELOG_API_KEY: ${{ secrets.CHANGELOG_API_KEY }}
+          CHANGELOG_API_URL: https://gitwyrm.com/api/v1/changelogs
+          PRODUCT: GitWyrm
+        run: |
+          chmod +x .github/scripts/*.sh
+          .github/scripts/purge-beta-changelogs.sh
+
       # Build the release body: generated notes on top, download guidance below.
       # render-changelog.sh regenerates from the same commit range, so the body
       # matches what the website received even when the upload was skipped.

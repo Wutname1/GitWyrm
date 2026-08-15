@@ -281,7 +281,32 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Full history and tags: the changelog range runs from the newest stable
+      # tag to HEAD, and a shallow checkout has neither.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Beta testers get the notes for what they are installing, which they
+      # previously had no way to see -- only stable releases uploaded a
+      # changelog. These entries are deleted again by the next stable release,
+      # whose own entry covers the same commits.
+      #
+      # Runs before the manifest below so the notes are in place by the time the
+      # channel starts offering the build. A failure here must not block the
+      # beta itself, hence continue-on-error: a beta with no notes is worse than
+      # nothing published, but far better than no beta.
+      - name: Publish beta changelog to gitwyrm.com
+        continue-on-error: true
+        env:
+          CHANGELOG_API_KEY: ${{ secrets.CHANGELOG_API_KEY }}
+          CHANGELOG_API_URL: https://gitwyrm.com/api/v1/changelogs
+          PRODUCT: GitWyrm
+          BETA_VERSION: ${{ needs.version.outputs.version }}
+          DOWNLOAD_URL: https://cdn.gitwyrm.com/betas/${{ needs.version.outputs.version }}/GitWyrm-Setup.exe
+        run: |
+          chmod +x .github/scripts/*.sh
+          .github/scripts/upload-changelog.sh
 
       - name: Publish beta channel manifest
         shell: bash

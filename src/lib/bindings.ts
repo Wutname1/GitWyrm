@@ -551,9 +551,9 @@ async installUpdate() : Promise<Result<string | null, string>> {
  * A failure here is not an update failure: the caller shows the update without
  * notes rather than blocking on them.
  */
-async changelogSince(current: string) : Promise<Result<ChangelogEntry[], string>> {
+async changelogSince(current: string, target: string) : Promise<Result<ChangelogEntry[], string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("changelog_since", { current }) };
+    return { status: "ok", data: await TAURI_INVOKE("changelog_since", { current, target }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

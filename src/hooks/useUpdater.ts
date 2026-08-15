@@ -263,7 +263,11 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
     void (async () => {
       try {
         const current = await getVersion();
-        const res = await commands.changelogSince(current);
+        // The target decides whether prerelease notes are relevant: heading to
+        // a stable build supersedes them, heading to another beta does not.
+        // Falls back to the running version, which reads as a same-channel
+        // move and so keeps whatever notes exist.
+        const res = await commands.changelogSince(current, get().version ?? current);
         // A missing changelog must not block the update: the modal shows the
         // version and its buttons regardless, just without notes.
         set({ changelog: res.status === "ok" ? res.data : [] });

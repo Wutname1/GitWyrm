@@ -183,7 +183,10 @@ const CHANGELOG_URL: &str = "https://gitwyrm.com/api/v1/changelogs";
 /// notes rather than blocking on them.
 #[tauri::command]
 #[specta::specta]
-pub async fn changelog_since(current: String) -> Result<Vec<ChangelogEntry>, AppError> {
+pub async fn changelog_since(
+  current: String,
+  target: String,
+) -> Result<Vec<ChangelogEntry>, AppError> {
   let response = reqwest::get(CHANGELOG_URL)
     .await
     .map_err(|e| AppError::Other(format!("could not reach the changelog: {e}")))?;
@@ -200,12 +203,44 @@ pub async fn changelog_since(current: String) -> Result<Vec<ChangelogEntry>, App
     .await
     .map_err(|e| AppError::Other(format!("could not read the changelog: {e}")))?;
 
-  let current = parse_version(&current);
+  // What counts as "newer" depends on which channel the user is coming from.
+  //
+  // A beta reads its own base version as the floor and ignores prerelease
+  // entries. Someone on 0.8.1-beta.3 moving to stable 0.8.1 would otherwise see
+  // nothing at all: 0.8.1 is not greater than 0.8.1-beta.3 once the suffix is
+  // trimmed. Comparing on the base with `>=` gives them the FULL notes for the
+  // release they land on, which is what they want -- the stable entry covers
+  // every commit the betas did, since its range starts at the previous stable
+  // tag. Listing the betas they already ran alongside it would repeat the same
+  // lines under older version numbers.
+  //
+  // Beta-to-beta is the exception: there is no stable entry to fall back on
+  // yet, so a tester moving 0.8.1-beta.1 -> 0.8.1-beta.4 keeps the prerelease
+  // entries and reads them strictly-newer, as normal.
+  let on_beta = is_prerelease(&current);
+  let target_is_beta = is_prerelease(&target);
+  let current_v = parse_version(&current);
 
   let mut entries: Vec<ChangelogEntry> = body
     .entries
     .into_iter()
-    .filter(|e| parse_version(&e.version) > current)
+    .filter(|e| {
+      // Prerelease notes are only ever relevant while heading to another
+      // prerelease; a stable target supersedes them.
+      if is_prerelease(&e.version) && !target_is_beta {
+        return false;
+      }
+
+      // Landing on stable from a beta includes the release matching the beta's
+      // own base version, which strict `>` would exclude.
+      if on_beta && !target_is_beta {
+        parse_version(&e.version) >= current_v
+      } else {
+        // Full ordering, so two betas of the same base compare by their
+        // prerelease number instead of both collapsing to the same triple.
+        parse_version_full(&e.version) > parse_version_full(&current)
+      }
+    })
     .collect();
 
   // Newest first. The API already returns them that way, but sorting here means
@@ -222,6 +257,14 @@ pub async fn changelog_since(current: String) -> Result<Vec<ChangelogEntry>, App
 /// suffix (`0.9.0-beta.1`) is trimmed, which orders it equal to its release --
 /// good enough for "is this newer than what I am running", and the updater
 /// itself is what decides which build is actually offered.
+/// Whether a version string carries a prerelease suffix (`0.8.1-beta.3`).
+///
+/// Matches on the separator rather than the word "beta", so an alpha or rc
+/// build is treated the same way without needing another arm here.
+fn is_prerelease(v: &str) -> bool {
+  v.trim_start_matches('v').contains('-')
+}
+
 fn parse_version(v: &str) -> (u32, u32, u32) {
   let core = v.trim_start_matches('v');
   let core = core.split(['-', '+']).next().unwrap_or(core);
@@ -231,6 +274,31 @@ fn parse_version(v: &str) -> (u32, u32, u32) {
     parts.next().unwrap_or(0),
     parts.next().unwrap_or(0),
   )
+}
+
+/// A version ordered with its prerelease number, for comparing two betas.
+///
+/// `parse_version` deliberately trims the suffix, which makes every beta of a
+/// base version compare equal -- fine for "is this newer than the release I am
+/// on", useless for ordering 0.8.1-beta.1 against 0.8.1-beta.4. The fourth
+/// element carries the prerelease number, with a stable release taking u32::MAX
+/// so it always sorts above every beta of the same base.
+fn parse_version_full(v: &str) -> (u32, u32, u32, u32) {
+  let (major, minor, patch) = parse_version(v);
+  let core = v.trim_start_matches('v');
+
+  let pre = match core.split_once('-') {
+    // "beta.4" -> 4. An unnumbered or unparseable suffix sorts lowest rather
+    // than being promoted above numbered builds of the same base.
+    Some((_, suffix)) => suffix
+      .rsplit('.')
+      .next()
+      .and_then(|n| n.parse::<u32>().ok())
+      .unwrap_or(0),
+    None => u32::MAX,
+  };
+
+  (major, minor, patch, pre)
 }
 
 /// Event name carrying toolset download progress.
@@ -683,6 +751,84 @@ mod tests {
     }
     // The running version itself is not "newer", so it never appears.
     assert!(parse_version("0.3.0") <= current);
+  }
+
+  /// Mirrors the filter inside `changelog_since`, so the rules can be checked
+  /// without a network call. Kept next to it deliberately: if one changes and
+  /// the other does not, these tests stop describing real behaviour.
+  fn visible(current: &str, target: &str, available: &[&str]) -> Vec<String> {
+    let on_beta = is_prerelease(current);
+    let target_is_beta = is_prerelease(target);
+    let current_v = parse_version(current);
+
+    available
+      .iter()
+      .filter(|v| {
+        if is_prerelease(v) && !target_is_beta {
+          return false;
+        }
+        if on_beta && !target_is_beta {
+          parse_version(v) >= current_v
+        } else {
+          parse_version_full(v) > parse_version_full(current)
+        }
+      })
+      .map(|v| v.to_string())
+      .collect()
+  }
+
+  #[test]
+  fn a_beta_landing_on_its_own_stable_sees_the_full_release() {
+    // The case that motivated this: 0.8.1 is NOT > 0.8.1-beta.3 once the
+    // suffix is trimmed, so strict comparison showed the user nothing at all.
+    let seen = visible("0.8.1-beta.3", "0.8.1", &["0.8.1", "0.8.0"]);
+    assert_eq!(seen, vec!["0.8.1"], "the release being installed must appear");
+  }
+
+  #[test]
+  fn a_beta_jumping_past_its_base_sees_every_release_in_between() {
+    let seen = visible("0.8.1-beta.3", "0.9.0", &["0.9.0", "0.8.1", "0.8.0"]);
+    assert_eq!(seen, vec!["0.9.0", "0.8.1"]);
+    assert!(!seen.contains(&"0.8.0".to_string()), "0.8.0 predates the beta");
+  }
+
+  #[test]
+  fn prerelease_notes_are_hidden_when_landing_on_stable() {
+    // The betas already run would otherwise repeat the release's own lines
+    // under older version numbers.
+    let seen = visible("0.8.1-beta.1", "0.8.1", &["0.8.1", "0.8.1-beta.3", "0.8.1-beta.2"]);
+    assert_eq!(seen, vec!["0.8.1"]);
+  }
+
+  #[test]
+  fn beta_to_beta_keeps_the_prerelease_notes() {
+    // No stable entry exists yet, so these are the only notes there are.
+    let seen = visible("0.8.1-beta.1", "0.8.1-beta.4", &["0.8.1-beta.4", "0.8.1-beta.2", "0.8.0"]);
+    assert_eq!(seen, vec!["0.8.1-beta.4", "0.8.1-beta.2"]);
+  }
+
+  #[test]
+  fn a_stable_user_is_unaffected_by_the_beta_rules() {
+    // Strict `>`, and prereleases never shown.
+    let seen = visible("0.8.0", "0.9.0", &["0.9.0", "0.8.1", "0.8.1-beta.2", "0.8.0"]);
+    assert_eq!(seen, vec!["0.9.0", "0.8.1"]);
+  }
+
+  #[test]
+  fn a_stable_release_outranks_every_beta_of_the_same_base() {
+    assert!(parse_version_full("0.8.1") > parse_version_full("0.8.1-beta.9"));
+    assert!(parse_version_full("0.8.1-beta.4") > parse_version_full("0.8.1-beta.3"));
+    // Double digits must not sort as text, where "10" < "9".
+    assert!(parse_version_full("0.8.1-beta.10") > parse_version_full("0.8.1-beta.9"));
+  }
+
+  #[test]
+  fn prerelease_detection_covers_alpha_and_rc() {
+    assert!(is_prerelease("0.8.1-beta.3"));
+    assert!(is_prerelease("0.8.1-alpha.1"));
+    assert!(is_prerelease("v0.8.1-rc.2"));
+    assert!(!is_prerelease("0.8.1"));
+    assert!(!is_prerelease("v0.8.1"));
   }
 
   #[test]
