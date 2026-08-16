@@ -1,0 +1,79 @@
+name: Dependabot auto-merge
+
+# Approves and enables auto-merge on Dependabot PRs.
+#
+# `gh pr merge --auto` does NOT merge immediately: it queues the PR to merge
+# once every required check passes, which is what makes this safe. The gate is
+# branch protection, not this workflow - if `main` has no required checks, a
+# queued PR merges as soon as it is mergeable, checks or not. See the note at
+# the bottom.
+#
+# Dependabot rebases its own PRs automatically when main moves (rebase-strategy
+# defaults to `auto`), so a queued PR that falls behind is updated and re-checked
+# without anyone touching it.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    # pull_request_target runs with write access against the BASE repo, so it
+    # must never run for anything but Dependabot's own branches.
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read the update metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Majors are held back deliberately. This repo's own history is the
+      # argument: TypeScript 5->7, Vite 7->8 and Stripe 17->22 were all offered
+      # at once, and none of them is a change anyone should merge unseen.
+      #
+      # A green typecheck does not prove a major is safe either - it proves the
+      # types still line up, not that behaviour did.
+      - name: Approve
+        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge
+        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # A major still gets a PR, just not an automatic merge. Labelled so it is
+      # obvious at a glance which ones are waiting on a person.
+      - name: Flag majors for review
+        if: steps.meta.outputs.update-type == 'version-update:semver-major'
+        run: |
+          gh pr edit "$PR_URL" --add-label "needs-review" 2>/dev/null || true
+          gh pr comment "$PR_URL" --body \
+            "Held for manual review: this is a major version bump (\`${{ steps.meta.outputs.dependency-names }}\`). Auto-merge covers minor and patch only."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+# ---------------------------------------------------------------------------
+# REQUIRED SETUP, once, in the repo settings:
+#
+#   1. Settings > General > Pull Requests > "Allow auto-merge"
+#      Without this, `gh pr merge --auto` fails outright.
+#
+#   2. Settings > Branches > branch protection for `main`:
+#      require status checks, and select the CI jobs
+#      ("Frontend", "Backend", "Update-cover helper").
+#
+# Step 2 is the part that actually makes this safe. Auto-merge waits for
+# REQUIRED checks; with none configured there is nothing to wait for and every
+# queued PR merges straight away.
+# ---------------------------------------------------------------------------

@@ -20,6 +20,11 @@ updates:
       interval: weekly
       day: monday
       time: "06:00"
+    # Rebase this PR automatically whenever main moves. This is the default,
+    # but stated explicitly because it is half of what makes auto-merge work:
+    # a queued PR that falls behind gets rebased and re-checked without anyone
+    # touching it, rather than sitting there stale.
+    rebase-strategy: auto
     open-pull-requests-limit: 5
     groups:
       tauri:
@@ -43,6 +48,11 @@ updates:
       interval: weekly
       day: monday
       time: "06:00"
+    # Rebase this PR automatically whenever main moves. This is the default,
+    # but stated explicitly because it is half of what makes auto-merge work:
+    # a queued PR that falls behind gets rebased and re-checked without anyone
+    # touching it, rather than sitting there stale.
+    rebase-strategy: auto
     open-pull-requests-limit: 3
     groups:
       bootstrapper-deps:
@@ -59,6 +69,11 @@ updates:
       interval: weekly
       day: monday
       time: "06:00"
+    # Rebase this PR automatically whenever main moves. This is the default,
+    # but stated explicitly because it is half of what makes auto-merge work:
+    # a queued PR that falls behind gets rebased and re-checked without anyone
+    # touching it, rather than sitting there stale.
+    rebase-strategy: auto
     open-pull-requests-limit: 5
     groups:
       # React and its types move together; a split bump leaves the types
@@ -92,6 +107,11 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Rebase this PR automatically whenever main moves. This is the default,
+    # but stated explicitly because it is half of what makes auto-merge work:
+    # a queued PR that falls behind gets rebased and re-checked without anyone
+    # touching it, rather than sitting there stale.
+    rebase-strategy: auto
     open-pull-requests-limit: 3
     groups:
       actions:

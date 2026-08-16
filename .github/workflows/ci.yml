@@ -1,0 +1,104 @@
+name: CI
+
+# Typecheck, test and build every pull request.
+#
+# This exists because auto-merging Dependabot PRs needs something to gate on:
+# without a required check, "merge when green" merges anything that is merely
+# not-red, which for an unchecked repo is everything. The auto-merge workflow
+# waits on these jobs by name.
+#
+# Deliberately not a release build - no Tauri bundle, no signing, no installer.
+# A dependency bump that breaks the app breaks it here first, in a couple of
+# minutes, and release.yml is still the thing that proves a shippable artifact.
+on:
+  pull_request:
+    branches:
+      - main
+  # Also on main so a direct push that breaks the build is caught rather than
+  # waiting for the next PR to surface it.
+  push:
+    branches:
+      - main
+
+concurrency:
+  # A new push supersedes the old run: nobody needs the results of the commit
+  # that was just replaced.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # `tsc -b` rather than a bare `tsc`: this project builds by project
+      # references, and a bare invocation silently checks nothing.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Build
+        run: npx vite build
+
+  rust:
+    name: Backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ci
+
+      # Tauri needs GTK and friends even to typecheck on Linux. Cheaper than a
+      # Windows runner, and a Rust error is almost never platform-specific.
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Test
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+  # The update-cover helper is Windows-only (it is raw Win32), so it cannot be
+  # checked on the Linux runner above.
+  bootstrapper:
+    name: Update-cover helper
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri/bootstrapper
+          key: ci-bootstrapper
+
+      - name: Test
+        run: cargo test --manifest-path src-tauri/bootstrapper/Cargo.toml
