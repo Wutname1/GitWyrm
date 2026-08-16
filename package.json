@@ -74,7 +74,7 @@
   "devDependencies": {
     "@sentry/vite-plugin": "^5.4.0",
     "@tauri-apps/cli": "^2.11.4",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "vitest": "^4.1.10"
