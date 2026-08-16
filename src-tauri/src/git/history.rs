@@ -20,6 +20,7 @@ fn current_branch_name(repo: &git2::Repository) -> Result<String, AppError> {
   }
   head
     .shorthand()
+    .ok()
     .map(str::to_string)
     .ok_or_else(|| AppError::Other("could not read current branch name".into()))
 }

@@ -50,7 +50,7 @@ async fn resolve(
     repo
       .find_remote("origin")
       .ok()
-      .and_then(|r| r.url().map(String::from))
+      .and_then(|r| r.url().ok().map(String::from))
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?;

@@ -224,13 +224,15 @@ fn update_symbolic_aware(
   let target = match repo.find_reference(name) {
     Ok(reference) if reference.kind() == Some(git2::ReferenceType::Symbolic) => reference
       .symbolic_target()
+      .ok()
+      .flatten()
       .map(str::to_owned)
       .unwrap_or_else(|| name.to_owned()),
     // No such reference: HEAD on an unborn branch reports itself this way.
     Err(_) if name == "HEAD" => repo
       .find_reference("HEAD")
       .ok()
-      .and_then(|r| r.symbolic_target().map(str::to_owned))
+      .and_then(|r| r.symbolic_target().ok().flatten().map(str::to_owned))
       .unwrap_or_else(|| name.to_owned()),
     _ => name.to_owned(),
   };
@@ -490,7 +492,7 @@ gpg: signing failed: Input/output error";
     let dir = tempfile::tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     let path = dir.path().to_string_lossy().into_owned();
-    let branch = repo.find_reference("HEAD").unwrap().symbolic_target().unwrap().to_owned();
+    let branch = repo.find_reference("HEAD").unwrap().symbolic_target().unwrap().unwrap().to_owned();
 
     std::fs::write(dir.path().join("a.txt"), "one").unwrap();
     let mut index = repo.index().unwrap();
@@ -511,7 +513,7 @@ gpg: signing failed: Input/output error";
     let dir = tempfile::tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     let path = dir.path().to_string_lossy().into_owned();
-    let branch = repo.find_reference("HEAD").unwrap().symbolic_target().unwrap().to_owned();
+    let branch = repo.find_reference("HEAD").unwrap().symbolic_target().unwrap().unwrap().to_owned();
     let identity = CommitIdentity { author: sig(0), committer: sig(0) };
 
     for (name, body) in [("a.txt", "one"), ("b.txt", "two")] {

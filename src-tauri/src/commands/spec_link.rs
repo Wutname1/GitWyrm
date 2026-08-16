@@ -33,7 +33,7 @@ pub struct BranchSpecLink {
 /// has no shared history to confuse it with.
 fn base_branch(repo: &git2::Repository, branch: &str) -> Option<String> {
   if let Ok(head) = repo.find_reference("refs/remotes/origin/HEAD") {
-    if let Some(target) = head.symbolic_target() {
+    if let Ok(Some(target)) = head.symbolic_target() {
       if let Some(name) = target.strip_prefix("refs/remotes/") {
         if name != branch {
           return Some(name.to_string());

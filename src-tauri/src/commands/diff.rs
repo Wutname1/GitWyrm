@@ -225,8 +225,8 @@ pub async fn get_commit_detail(
     let author = commit.author();
     Ok(CommitDetail {
       sha: oid.to_string(),
-      summary: commit.summary().unwrap_or("").to_string(),
-      body: commit.body().unwrap_or("").to_string(),
+      summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
+      body: commit.body().ok().flatten().unwrap_or("").to_string(),
       author_name: author.name().unwrap_or("unknown").to_string(),
       author_email: author.email().unwrap_or("").to_string(),
       time: commit.time().seconds() as f64,

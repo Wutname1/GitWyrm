@@ -213,7 +213,7 @@ fn head_of(path: &Path) -> (Option<String>, Option<String>) {
     full.chars().take(7).collect::<String>()
   });
   let branch = if head.is_branch() {
-    head.shorthand().map(str::to_string)
+    head.shorthand().ok().map(str::to_string)
   } else {
     None
   };
@@ -335,7 +335,7 @@ pub fn list(repo: &git2::Repository, current_path: Option<&Path>) -> Vec<Worktre
   };
 
   let mut linked: Vec<Worktree> = Vec::new();
-  for name in names.iter().flatten() {
+  for name in names.iter().flatten().flatten() {
     let Ok(wt) = repo.find_worktree(name) else {
       continue;
     };
@@ -508,7 +508,7 @@ pub fn ignored_files_worth_copying(source: &Path) -> Vec<IgnoredFile> {
     if !entry.status().contains(git2::Status::IGNORED) {
       continue;
     }
-    let Some(rel) = entry.path() else { continue };
+    let Ok(rel) = entry.path() else { continue };
     let rel_path = Path::new(rel);
 
     if in_never_copy_dir(rel_path) {
@@ -891,7 +891,7 @@ pub fn prune(repo: &git2::Repository) -> Result<u32, AppError> {
     return Ok(0);
   };
   let mut pruned = 0;
-  for name in names.iter().flatten() {
+  for name in names.iter().flatten().flatten() {
     let Ok(wt) = repo.find_worktree(name) else {
       continue;
     };

@@ -27,11 +27,11 @@ fn collect_refs(repo: &git2::Repository) -> HashMap<Oid, Vec<RefInfo>> {
     .head()
     .ok()
     .filter(|head| head.is_branch())
-    .and_then(|head| head.shorthand().map(str::to_string));
+    .and_then(|head| head.shorthand().ok().map(str::to_string));
 
   if let Ok(references) = repo.references() {
     for reference in references.flatten() {
-      let Some(name) = reference.name() else { continue };
+      let Ok(name) = reference.name() else { continue };
       let Some(oid) = reference.target() else { continue };
 
       let (short, ref_type) = if let Some(short) = name.strip_prefix("refs/heads/") {
@@ -102,7 +102,7 @@ fn collect_log_roots(repo: &git2::Repository) -> Vec<Oid> {
   // Local branches, remote branches, and tags are all visible graph refs.
   if let Ok(references) = repo.references() {
     for reference in references.flatten() {
-      let Some(name) = reference.name() else {
+      let Ok(name) = reference.name() else {
         continue;
       };
       if name == "refs/stash" {
@@ -153,7 +153,7 @@ fn ref_tips_fingerprint(repo: &git2::Repository) -> u64 {
   };
   let mut fingerprint: u64 = 0;
   for reference in references.flatten() {
-    let Some(name) = reference.name() else { continue };
+    let Ok(name) = reference.name() else { continue };
     if !(name.starts_with("refs/heads/") || name.starts_with("refs/remotes/")) {
       continue;
     }
@@ -179,7 +179,7 @@ fn primary_lane_oid(repo: &git2::Repository, head: Oid) -> Oid {
     return head;
   };
   for reference in references.flatten() {
-    let Some(name) = reference.name() else {
+    let Ok(name) = reference.name() else {
       continue;
     };
     if !(name.starts_with("refs/heads/") || name.starts_with("refs/remotes/")) {
@@ -343,7 +343,7 @@ pub async fn get_log(
       commits.push(CommitEntry {
         sha: oid.to_string(),
         short_sha: oid.to_string()[..7].to_string(),
-        summary: commit.summary().unwrap_or("").to_string(),
+        summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
         files_changed: stats.map(|s| s.0),
         additions: stats.map(|s| s.1),
         deletions: stats.map(|s| s.2),

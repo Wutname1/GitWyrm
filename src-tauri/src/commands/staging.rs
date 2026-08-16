@@ -394,7 +394,7 @@ mod tests {
     );
     let statuses = repo.statuses(None).expect("read statuses");
     assert!(statuses.iter().all(|entry| {
-      !entry.path().is_some_and(|path| path.starts_with("target/"))
+      !entry.path().is_ok_and(|path| path.starts_with("target/"))
     }));
     assert!(repo.status_file(Path::new("outside.txt")).expect("outside dirty").contains(git2::Status::WT_MODIFIED));
   }

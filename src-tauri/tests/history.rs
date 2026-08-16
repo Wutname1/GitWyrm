@@ -53,6 +53,7 @@ fn log_summaries(repo: &Repository) -> Vec<String> {
         .unwrap()
         .summary()
         .unwrap()
+        .unwrap()
         .to_string()
     })
     .collect()
@@ -175,7 +176,7 @@ fn span_above_excludes_the_target_and_orders_oldest_first() {
 
   let msgs: Vec<String> = span
     .iter()
-    .map(|c| c.summary().unwrap_or("").to_string())
+    .map(|c| c.summary().ok().flatten().unwrap_or("").to_string())
     .collect();
   assert_eq!(msgs, vec!["add h".to_string(), "add i".to_string()]);
   let _ = fs::remove_dir_all(&dir);

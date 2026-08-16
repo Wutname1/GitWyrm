@@ -281,7 +281,7 @@ pub async fn get_file_history(
       entries.push(FileHistoryEntry {
         sha: oid.to_string(),
         short_sha: oid.to_string()[..7].to_string(),
-        summary: commit.summary().unwrap_or("").to_string(),
+        summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
         author_name: author.name().unwrap_or("unknown").to_string(),
         author_email: author.email().unwrap_or("").to_string(),
         time: commit.time().seconds() as f64,
@@ -365,7 +365,7 @@ pub async fn get_file_blame(
         Ok(commit) => {
           let author = commit.author();
           (
-            commit.summary().unwrap_or("").to_string(),
+            commit.summary().ok().flatten().unwrap_or("").to_string(),
             author.name().unwrap_or("unknown").to_string(),
             author.email().unwrap_or("").to_string(),
             commit.time().seconds() as f64,

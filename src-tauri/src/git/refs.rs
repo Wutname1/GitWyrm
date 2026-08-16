@@ -48,13 +48,13 @@ impl RefRecord {
 pub fn walk_branches(repo: &Repository) -> Result<Vec<RefRecord>, AppError> {
   let head = repo.head().ok();
   let head_oid = head.as_ref().and_then(|h| h.target());
-  let head_name = head.as_ref().and_then(|h| h.shorthand()).map(str::to_string);
+  let head_name = head.as_ref().and_then(|h| h.shorthand().ok()).map(str::to_string);
 
   let mut out = Vec::new();
 
   for (kind, is_remote) in [(BranchType::Local, false), (BranchType::Remote, true)] {
     for (branch, _) in repo.branches(Some(kind))?.flatten() {
-      let Some(name) = branch.name().ok().flatten().map(str::to_string) else { continue };
+      let Ok(Some(name)) = branch.name().map(|n| n.map(str::to_string)) else { continue };
       if is_remote && name.ends_with("/HEAD") {
         continue;
       }

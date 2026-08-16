@@ -339,7 +339,7 @@ mod tests {
 
     // The stand-in remote: real enough that push/pull states render.
     let origin = repo.find_remote("origin").expect("origin should be configured");
-    assert!(origin.url().is_some());
+    assert!(origin.url().is_ok());
     assert!(
       repo.find_reference("refs/remotes/origin/main").is_ok(),
       "origin/main should be recorded so the graph can draw it"

@@ -49,7 +49,7 @@ fn branch_tracking_state(repo: &git2::Repository, branch_name: Option<&str>) -> 
       if !head.is_branch() {
         return none;
       }
-      let Some(name) = head.shorthand().map(str::to_string) else { return none };
+      let Ok(name) = head.shorthand().map(str::to_string) else { return none };
       name
     }
   };
@@ -583,7 +583,7 @@ pub async fn git_pull_branch(
 /// `origin` when there are several.
 fn default_remote(repo: &git2::Repository) -> Result<String, AppError> {
   let remotes = repo.remotes().map_err(AppError::Git)?;
-  let names: Vec<String> = remotes.iter().flatten().map(str::to_string).collect();
+  let names: Vec<String> = remotes.iter().flatten().flatten().map(str::to_string).collect();
   match names.len() {
     0 => Err(AppError::Other("This repository has no remote to push to.".into())),
     1 => Ok(names[0].clone()),
@@ -693,7 +693,7 @@ pub async fn unpushed_tags(
     }
 
     let mut missing = Vec::new();
-    for name in repo.tag_names(None)?.iter().flatten() {
+    for name in repo.tag_names(None)?.iter().flatten().flatten() {
       if on_remote.contains(name) {
         continue;
       }
@@ -835,10 +835,10 @@ pub async fn list_remotes(
     let locals = refs::local_tips(&records);
     let mut remotes = Vec::new();
 
-    for name in repo.remotes()?.iter().flatten() {
+    for name in repo.remotes()?.iter().flatten().flatten() {
       let remote = repo.find_remote(name)?;
       let url = remote.url().unwrap_or("").to_string();
-      let push_url = remote.pushurl().map(str::to_string).filter(|p| *p != url);
+      let push_url = remote.pushurl().ok().flatten().map(str::to_string).filter(|p| *p != url);
 
       let mut branches: Vec<RemoteBranchInfo> = records
         .iter()
@@ -871,7 +871,7 @@ pub async fn list_remotes(
             name: short,
             tip: rec.tip.map(|oid| format!("{:.7}", oid)),
             time: rec.time.map(|t| t as f64),
-            summary: commit.as_ref().and_then(|c| c.summary()).map(str::to_string),
+            summary: commit.as_ref().and_then(|c| c.summary().ok().flatten()).map(str::to_string),
             local_counterpart: counterpart.map(|(n, _)| n),
             tracked_by,
             ahead_of_local,
@@ -1013,6 +1013,7 @@ pub async fn set_upstream(
     }
     let shorthand = head
       .shorthand()
+      .ok()
       .ok_or_else(|| AppError::Other("could not read current branch name".into()))?
       .to_string();
 

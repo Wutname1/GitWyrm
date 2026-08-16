@@ -193,7 +193,7 @@ fn head_state(repo: &git2::Repository) -> Result<HeadState, AppError> {
     Ok(head) => Ok(HeadState {
       oid: head.target(),
       reference: if head.is_branch() {
-        head.name().map(str::to_string)
+        head.name().ok().map(str::to_string)
       } else {
         None
       },
@@ -203,7 +203,7 @@ fn head_state(repo: &git2::Repository) -> Result<HeadState, AppError> {
       let reference = repo
         .find_reference("HEAD")
         .ok()
-        .and_then(|head| head.symbolic_target().map(str::to_string));
+        .and_then(|head| head.symbolic_target().ok().flatten().map(str::to_string));
       Ok(HeadState { oid: None, reference, detached: false })
     }
     Err(error) => Err(error.into()),

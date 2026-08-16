@@ -177,7 +177,7 @@ fn timed_phase<T>(parent: &sentry::TransactionOrSpan, phase: &'static str, path:
 fn head_branch(repo: &git2::Repository) -> Option<String> {
   let head = repo.head().ok()?;
   if head.is_branch() {
-    head.shorthand().map(str::to_string)
+    head.shorthand().ok().map(str::to_string)
   } else {
     None
   }

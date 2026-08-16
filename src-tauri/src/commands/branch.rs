@@ -24,6 +24,7 @@ fn current_branch_name(repo: &git2::Repository) -> Result<String, AppError> {
   }
   head
     .shorthand()
+    .ok()
     .map(str::to_string)
     .ok_or_else(|| AppError::Other("could not read current branch name".into()))
 }
@@ -404,6 +405,7 @@ pub async fn list_tags(
     let names = repo.tag_names(None)?;
     let mut tags: Vec<TagInfo> = names
       .iter()
+      .flatten()
       .flatten()
       .filter_map(|n| {
         // Peel to the commit so annotated and lightweight tags both report the
@@ -799,7 +801,7 @@ fn fast_forward_branch_to(
     let is_head = repo
       .head()
       .ok()
-      .and_then(|h| h.shorthand().map(str::to_string))
+      .and_then(|h| h.shorthand().ok().map(str::to_string))
       .as_deref()
       == Some(branch.trim());
 
@@ -819,7 +821,7 @@ fn fast_forward_branch_to(
       let object = repo.find_object(target_oid, None)?;
       repo.checkout_tree(&object, Some(CheckoutBuilder::new().safe()))?;
       let head_ref = repo.head()?;
-      let name = head_ref.name().map(str::to_string);
+      let name = head_ref.name().ok().map(str::to_string);
       drop(head_ref);
       match name {
         Some(head_ref_name) => {
@@ -840,7 +842,7 @@ fn fast_forward_branch_to(
       // Not checked out: a pure ref move. The working tree and HEAD are
       // untouched, so the user stays on their current branch.
       let refname =
-        branch_ref.get().name().map(str::to_string).ok_or_else(|| {
+        branch_ref.get().name().ok().map(str::to_string).ok_or_else(|| {
           AppError::Other("could not read the branch reference".into())
         })?;
       repo.reference(&refname, target_oid, true, "fast-forward")?;
@@ -1037,7 +1039,7 @@ pub async fn revert_commit(
     let tree = repo.find_tree(tree_oid)?;
     let signature = repo.signature()?;
     let head_commit = repo.head()?.peel_to_commit()?;
-    let summary = commit.summary().unwrap_or("commit");
+    let summary = commit.summary().ok().flatten().unwrap_or("commit");
     let message = format!("Revert \"{summary}\"\n\nThis reverts commit {oid}.");
     // A revert is authored by whoever is reverting, not by the original author.
     let identity = CommitIdentity {
@@ -1229,7 +1231,7 @@ pub async fn commit_web_url(
     let Ok(remote) = repo.find_remote("origin") else {
       return Ok(None);
     };
-    let Some(url) = remote.url() else { return Ok(None) };
+    let Ok(url) = remote.url() else { return Ok(None) };
     let Some(parsed) = remote_url::parse(url) else { return Ok(None) };
 
     // Only link commits that are reachable from a remote-tracking branch;

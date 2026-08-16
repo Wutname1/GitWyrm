@@ -86,10 +86,10 @@ fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, App
     let target = repo.find_object(target_oid, None)?;
     repo.checkout_tree(&target, Some(CheckoutBuilder::new().safe()))?;
     match repo.head()?.name() {
-      Some(head_ref) => {
+      Ok(head_ref) => {
         repo.reference(head_ref, target_oid, true, "fast-forward merge")?;
       }
-      None => repo.set_head_detached(target_oid)?,
+      Err(_) => repo.set_head_detached(target_oid)?,
     }
     // The commits fast-forwarded onto can pin a submodule elsewhere, and
     // `checkout_tree` moves only the parent's pointer -- same follow-up the
@@ -184,7 +184,7 @@ pub async fn merge_directional(
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
 
-    let on_target = repo.head().ok().and_then(|h| h.shorthand().map(str::to_string))
+    let on_target = repo.head().ok().and_then(|h| h.shorthand().ok().map(str::to_string))
       == Some(target.clone());
 
     if !on_target {

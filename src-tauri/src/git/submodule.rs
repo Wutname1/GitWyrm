@@ -161,8 +161,8 @@ pub fn all_submodules(repo: &git2::Repository) -> Vec<SubmoduleStatus> {
 
     out.push(SubmoduleStatus {
       name: sub.name().unwrap_or(&path).to_string(),
-      url: sub.url().map(str::to_string),
-      branch: sub.branch().map(str::to_string),
+      url: sub.url().ok().flatten().map(str::to_string),
+      branch: sub.branch().ok().flatten().map(str::to_string),
       recorded_sha: recorded.to_string(),
       workdir_sha: checked_out.map(|o| o.to_string()),
       ahead,

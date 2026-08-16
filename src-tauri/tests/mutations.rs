@@ -132,6 +132,7 @@ fn tag_and_branch_delete_cycle() {
     .unwrap()
     .iter()
     .flatten()
+    .flatten()
     .map(str::to_string)
     .collect();
   assert!(names.contains(&"v0.1.0".to_string()));
@@ -143,6 +144,7 @@ fn tag_and_branch_delete_cycle() {
     .tag_names(None)
     .unwrap()
     .iter()
+    .flatten()
     .flatten()
     .map(str::to_string)
     .collect();
