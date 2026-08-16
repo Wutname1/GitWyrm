@@ -1,0 +1,101 @@
+version: 2
+
+# Dependency updates for GitWyrm.
+#
+# One ecosystem entry per lockfile, not per manifest: Dependabot resolves
+# against the lock beside the directory it is pointed at, so a crate with its
+# own Cargo.lock is invisible unless it is listed here in its own right.
+#
+# Everything lands on Monday morning so a week's updates arrive as one batch to
+# review, rather than trickling in and interrupting whatever is in progress.
+
+updates:
+  # --- Rust -----------------------------------------------------------------
+  # The app crate. Grouped rather than one PR per crate: a Tauri bump usually
+  # moves several tauri-* crates together, and splitting them produces PRs that
+  # cannot build until their siblings land.
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    groups:
+      tauri:
+        patterns:
+          - "tauri"
+          - "tauri-*"
+      rust-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      # Matches the repo's changelog convention: `improved:` lands these in the
+      # Changes section rather than being dropped as an unrecognised prefix.
+      prefix: "improved"
+
+  # The update-cover helper. A separate crate with its own Cargo.lock, so the
+  # entry above does not see it.
+  - package-ecosystem: cargo
+    directory: /src-tauri/bootstrapper
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 3
+    groups:
+      bootstrapper-deps:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: "improved"
+
+  # --- Frontend -------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    groups:
+      # React and its types move together; a split bump leaves the types
+      # disagreeing with the runtime.
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      tauri-js:
+        patterns:
+          - "@tauri-apps/*"
+      dev-minor-and-patch:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      prod-minor-and-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: "improved"
+
+  # --- CI -------------------------------------------------------------------
+  # Action versions are pinned by major tag, so this mostly catches the
+  # occasional v4 -> v5 that would otherwise sit unnoticed for a year.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "improved"
