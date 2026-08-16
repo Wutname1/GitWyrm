@@ -62,7 +62,7 @@ base64 = "0.22"
 # providers can live behind one `&dyn` list.
 async-trait = "0.1"
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
-sentry = { version = "0.48.5", default-features = false, features = [
+sentry = { version = "0.49.1", default-features = false, features = [
   "backtrace",
   "contexts",
   "panic",
