@@ -1176,6 +1176,42 @@ pub async fn has_worktrees(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Which of `shas` this clone actually has an object for.
+///
+/// Pull request commits come from the host, so the sha is known before the
+/// object is: a pull request that has never been fetched -- or one from a fork
+/// -- names commits this repository cannot open. Asking first lets the UI offer
+/// to fetch rather than opening a commit view that errors.
+///
+/// Batched because a pull request asks about every commit it lists at once, and
+/// one lock and one walk beats a round trip per commit.
+#[tauri::command]
+#[specta::specta]
+pub async fn commits_present(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  shas: Vec<String>,
+) -> Result<Vec<String>, AppError> {
+  let open = manager.get(&repo_id)?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let repo = open.repo.lock().unwrap();
+    Ok(
+      shas
+        .into_iter()
+        .filter(|sha| {
+          // An unparseable sha is simply absent rather than an error: the list
+          // comes from the host, and one odd entry should not fail the batch.
+          Oid::from_str(sha.trim())
+            .ok()
+            .is_some_and(|oid| repo.find_commit(oid).is_ok())
+        })
+        .collect(),
+    )
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// Resolve the origin remote's web URL for a commit, or None when it can't be
 /// built (no origin, unknown host) or the commit isn't on any remote-tracking
 /// branch yet (so the link would 404). Supports GitHub, GitLab, Bitbucket.

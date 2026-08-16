@@ -3,6 +3,7 @@ import {
   commands,
   type BranchSwitchMode,
   type EditorKind,
+  type MergeMethod,
   type RepoInfo,
   type Settings,
 } from "@/lib/bindings";
@@ -568,6 +569,16 @@ interface WorkspaceState {
   /** What to do with uncommitted changes when switching branches (persisted). */
   branchSwitchMode: BranchSwitchMode;
   /**
+   * How the last pull request was merged, reused as the default for the next
+   * one (persisted).
+   *
+   * Deliberately has no Settings control: it is not a decision worth a screen,
+   * it just remembers the choice made in the merge button's dropdown so someone
+   * who always rebase-merges stops re-picking it. Left out of SETTINGS_GROUPS
+   * for the same reason -- nothing visible to reset.
+   */
+  mergeMethod: MergeMethod;
+  /**
    * The default AI provider: what every AI feature uses -- commit messages,
    * commit generation, and Spec Desk runs (persisted).
    *
@@ -826,6 +837,7 @@ interface WorkspaceState {
   setAutoUpdate: (enabled: boolean) => void;
   setAutoRestartAfterDownload: (enabled: boolean) => void;
   setBranchSwitchMode: (mode: BranchSwitchMode) => void;
+  setMergeMethod: (method: MergeMethod) => void;
   setAiSelection: (provider: string | null, model: string | null) => void;
   /** Make a provider the default, restoring the model it was last set to. */
   setDefaultAiProvider: (provider: string | null) => void;
@@ -1026,6 +1038,7 @@ function toSettings(s: WorkspaceState): Settings {
     auto_update: s.autoUpdate,
     auto_restart_after_download: s.autoRestartAfterDownload,
     branch_switch_mode: s.branchSwitchMode,
+    merge_method: s.mergeMethod,
     ai_provider: s.aiProvider,
     // Still written so a downgrade keeps working; ai_models is the source of truth.
     ai_model: s.aiModel,
@@ -1474,6 +1487,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   autoUpdate: true,
   autoRestartAfterDownload: false,
   branchSwitchMode: "auto_stash",
+  mergeMethod: "merge",
   aiProvider: null,
   aiModel: null,
   aiModels: {},
@@ -1836,6 +1850,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setBranchSwitchMode: (mode) => {
     set({ branchSwitchMode: mode });
+    schedulePersist();
+  },
+  setMergeMethod: (method) => {
+    set({ mergeMethod: method });
     schedulePersist();
   },
   setAiSelection: (provider, model) => {
@@ -2786,6 +2804,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         // autoUpdate above, whose default is on.
         autoRestartAfterDownload: settings.auto_restart_after_download === true,
         branchSwitchMode: settings.branch_switch_mode ?? "auto_stash",
+        mergeMethod: settings.merge_method ?? "merge",
         aiProvider: settings.ai_provider ?? null,
         aiModel: settings.ai_model ?? null,
         // Upgrade path: an install from before per-provider models has only the

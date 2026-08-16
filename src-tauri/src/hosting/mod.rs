@@ -219,7 +219,7 @@ pub struct PrCommit {
 /// How a merge should be performed. Hosts support different subsets; each
 /// implementation maps these onto its own vocabulary and errors clearly when
 /// the host cannot honour the choice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum MergeMethod {
   Merge,

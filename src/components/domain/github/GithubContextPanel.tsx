@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeftRight, Check, ChevronDown, ExternalLink } from 'lucide-react'
+import { ArrowLeftRight, Bot, Check, ChevronDown, ExternalLink, RefreshCw } from 'lucide-react'
 import { GithubItemIcon } from '@/lib/githubDisplay'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
@@ -20,10 +20,15 @@ import {
   useGithubPrDetail,
   useGithubSlug,
 } from '@/hooks/useGithub'
+import {
+  DEPENDABOT_COMMANDS,
+  DEPENDABOT_IGNORE_COMMANDS,
+  isDependabot,
+  type DependabotCommand,
+} from '@/lib/dependabot'
 import { useUiStore } from '@/stores/uiStore'
-import { useActiveRepo } from '@/stores/workspaceStore'
-
-type MergeMethod = 'merge' | 'squash' | 'rebase'
+import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
+import type { MergeMethod } from '@/lib/bindings'
 
 const MERGE_METHODS: Record<MergeMethod, { label: string; description: string }> = {
   merge: {
@@ -57,27 +62,145 @@ function suggestBranchName(number: number, title: string): string {
   return slug ? `issue/${number}-${slug}` : `issue/${number}`
 }
 
+/**
+ * The whole right column while a GitHub item is open.
+ *
+ * Takes the full height rather than sitting as a strip above the commit box:
+ * reviewing someone's pull request and composing a commit on your own branch are
+ * separate jobs, and stacking them put the item's actions above a working tree
+ * that has nothing to do with it.
+ *
+ * `footer` is pinned to the bottom so the primary actions stay put no matter how
+ * much detail the body carries.
+ */
 function PanelShell({
   icon,
   title,
   status,
   children,
+  footer,
 }: {
   icon: React.ReactNode
   title: string
   status: string
   children: React.ReactNode
+  footer?: React.ReactNode
 }) {
   return (
-    <div className="grid flex-none gap-2 border-b-2 border-border bg-panel2/60 px-3 py-2.5">
-      <div className="flex items-center gap-2">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-none items-center gap-2 border-b border-border bg-panel2/60 px-3 py-2.5">
         <span className="flex-none">{icon}</span>
         <span className="text-2xs font-bold text-foreground">{title}</span>
         <span className="ml-auto text-2xs uppercase tracking-wide text-muted-foreground">
           {status}
         </span>
       </div>
-      {children}
+      <div className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto px-3 py-2.5">
+        {children}
+      </div>
+      {footer && (
+        <div className="grid flex-none gap-1.5 border-t border-border bg-panel2/60 px-3 py-2.5">
+          {footer}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Dependabot's own controls, shown only on its pull requests.
+ *
+ * Dependabot takes instructions as comments rather than through an API, so each
+ * button posts `@dependabot ...` as an ordinary comment and the bot picks it up
+ * within a minute or so. That delay is why the toast says the request was sent
+ * rather than claiming the work is done.
+ *
+ * Merging is deliberately absent: `@dependabot merge` was removed by GitHub in
+ * January 2026, and the panel's own merge button does the job properly.
+ */
+function DependabotActions({
+  number,
+  onCommand,
+  pendingId,
+}: {
+  number: number
+  onCommand: (cmd: DependabotCommand) => void
+  pendingId: string | null
+}) {
+  const [confirming, setConfirming] = useState<DependabotCommand | null>(null)
+
+  return (
+    <div className="grid gap-1.5 rounded-md border border-border bg-panel2/60 p-2">
+      <div className="flex items-center gap-1.5">
+        <Bot size={12} className="text-muted-foreground" />
+        <span className="text-2xs font-bold text-foreground">Dependabot</span>
+      </div>
+      <p className="text-2xs leading-snug text-sub">
+        This update was opened by a bot. It can redo the update, or stop offering it.
+      </p>
+
+      <div className="grid grid-cols-2 gap-1.5">
+        {DEPENDABOT_COMMANDS.map((cmd) => (
+          <Button
+            key={cmd.id}
+            variant="secondary"
+            size="sm"
+            className="h-7 text-2xs"
+            disabled={pendingId != null}
+            aria-busy={pendingId === cmd.id || undefined}
+            tooltip={cmd.description}
+            onClick={() => onCommand(cmd)}
+          >
+            {pendingId === cmd.id ? <PendingIndicator /> : <RefreshCw size={11} />}
+            {cmd.label}
+          </Button>
+        ))}
+      </div>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 justify-start text-2xs text-sub"
+            disabled={pendingId != null}
+          >
+            <ChevronDown size={12} />
+            Stop offering this update
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-72">
+          {DEPENDABOT_IGNORE_COMMANDS.map((cmd) => (
+            <DropdownMenuItem key={cmd.id} onSelect={() => setConfirming(cmd)}>
+              <div>
+                <div className="text-xs font-semibold">{cmd.label}</div>
+                <div className="text-2xs text-muted-foreground">{cmd.description}</div>
+              </div>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <ConfirmDialog
+        open={confirming != null}
+        onOpenChange={(open) => !open && setConfirming(null)}
+        destructive
+        title={confirming ? `${confirming.label}?` : ''}
+        description={
+          <>
+            {confirming?.description} Pull request{' '}
+            <span className="font-mono text-foreground">#{number}</span> will be closed. You can
+            undo this later by commenting on it on GitHub.
+          </>
+        }
+        confirmLabel={confirming?.label ?? ''}
+        pendingLabel="Sending…"
+        pending={pendingId != null}
+        onConfirm={() => {
+          if (confirming) onCommand(confirming)
+          setConfirming(null)
+        }}
+      />
     </div>
   )
 }
@@ -90,8 +213,27 @@ function PrPanel({ number }: { number: number }) {
   const git = useGitMutations(repo?.id ?? null)
   const branches = useBranches(repo?.id ?? null)
 
-  const [method, setMethod] = useState<MergeMethod>('merge')
   const [confirmMerge, setConfirmMerge] = useState(false)
+  const [dependabotPending, setDependabotPending] = useState<string | null>(null)
+
+  // Remembered across pull requests and restarts: someone who merges one way
+  // merges that way every time, and re-picking it on each pull request is a
+  // step that never changes its answer.
+  const method = useWorkspaceStore((s) => s.mergeMethod)
+  const setMethod = useWorkspaceStore((s) => s.setMergeMethod)
+
+  const runDependabotCommand = (cmd: DependabotCommand) => {
+    setDependabotPending(cmd.id)
+    gh.comment.mutate(
+      {
+        kind: 'pr',
+        number,
+        body: cmd.command,
+        successMessage: 'Asked Dependabot. It usually acts within a minute.',
+      },
+      { onSettled: () => setDependabotPending(null) }
+    )
+  }
 
   if (!pr.data) {
     return (
@@ -129,92 +271,108 @@ function PrPanel({ number }: { number: number }) {
           ? 'Has conflicts that need to be resolved on GitHub.'
           : 'Open and ready for review.'
 
+  const fromDependabot = isDependabot(detail.author)
+
   return (
     <PanelShell
       icon={<GithubItemIcon kind="pr" size={14} />}
       title={`Pull request #${number}`}
       status={merged ? 'Merged' : closed ? 'Closed' : detail.draft ? 'Draft' : 'Open'}
+      footer={
+        <>
+          <div className="flex overflow-hidden rounded-md border border-primary">
+            <Button
+              size="sm"
+              className="h-8 flex-1 rounded-none text-xs font-bold"
+              disabled={!canMerge || gh.mergePr.isPending}
+              aria-busy={gh.mergePr.isPending || undefined}
+              onClick={() => setConfirmMerge(true)}
+            >
+              {gh.mergePr.isPending ? <PendingIndicator /> : null}
+              {merged ? 'Pull request merged' : MERGE_METHODS[method].label}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  className="h-8 w-8 rounded-none border-l border-primary-foreground/25 px-0"
+                  disabled={!canMerge || gh.mergePr.isPending}
+                  aria-label="Choose merge method"
+                >
+                  <ChevronDown size={14} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                {(Object.keys(MERGE_METHODS) as MergeMethod[]).map((key) => (
+                  <DropdownMenuItem key={key} onSelect={() => setMethod(key)}>
+                    <Check
+                      size={13}
+                      className={key === method ? 'text-accent-text' : 'opacity-0'}
+                    />
+                    <div>
+                      <div className="text-xs font-semibold">{MERGE_METHODS[key].label}</div>
+                      <div className="text-2xs text-muted-foreground">
+                        {MERGE_METHODS[key].description}
+                      </div>
+                    </div>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 text-2xs"
+              disabled={merged || closed || gh.approvePr.isPending}
+              aria-busy={gh.approvePr.isPending || undefined}
+              onClick={() => gh.approvePr.mutate(number)}
+            >
+              {gh.approvePr.isPending ? <PendingIndicator /> : <Check size={12} />}
+              Approve
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 text-2xs"
+              disabled={onBranch || git.fetch.isPending || git.checkout.isPending}
+              aria-busy={git.fetch.isPending || git.checkout.isPending || undefined}
+              onClick={useBranch}
+              tooltip={
+                onBranch ? `You are already on ${detail.head_ref}` : `Switch to ${detail.head_ref}`
+              }
+            >
+              {git.fetch.isPending || git.checkout.isPending ? (
+                <PendingIndicator />
+              ) : (
+                <ArrowLeftRight size={12} />
+              )}
+              {onBranch ? 'On this branch' : 'Use branch'}
+            </Button>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-2xs text-sub"
+            onClick={() => void openExternal(detail.html_url)}
+          >
+            <ExternalLink size={12} />
+            Open on GitHub
+          </Button>
+        </>
+      }
     >
       <p className="text-2xs leading-snug text-sub">{note}</p>
 
-      <div className="flex overflow-hidden rounded-md border border-primary">
-        <Button
-          size="sm"
-          className="h-8 flex-1 rounded-none text-xs font-bold"
-          disabled={!canMerge || gh.mergePr.isPending}
-          aria-busy={gh.mergePr.isPending || undefined}
-          onClick={() => setConfirmMerge(true)}
-        >
-          {gh.mergePr.isPending ? <PendingIndicator /> : null}
-          {merged ? 'Pull request merged' : MERGE_METHODS[method].label}
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              className="h-8 w-8 rounded-none border-l border-primary-foreground/25 px-0"
-              disabled={!canMerge || gh.mergePr.isPending}
-              aria-label="Choose merge method"
-            >
-              <ChevronDown size={14} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64">
-            {(Object.keys(MERGE_METHODS) as MergeMethod[]).map((key) => (
-              <DropdownMenuItem key={key} onSelect={() => setMethod(key)}>
-                <Check size={13} className={key === method ? 'text-accent-text' : 'opacity-0'} />
-                <div>
-                  <div className="text-xs font-semibold">{MERGE_METHODS[key].label}</div>
-                  <div className="text-2xs text-muted-foreground">
-                    {MERGE_METHODS[key].description}
-                  </div>
-                </div>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <div className="grid grid-cols-2 gap-1.5">
-        <Button
-          variant="secondary"
-          size="sm"
-          className="h-7 text-2xs"
-          disabled={merged || closed || gh.approvePr.isPending}
-          aria-busy={gh.approvePr.isPending || undefined}
-          onClick={() => gh.approvePr.mutate(number)}
-        >
-          {gh.approvePr.isPending ? <PendingIndicator /> : <Check size={12} />}
-          Approve
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="h-7 text-2xs"
-          disabled={onBranch || git.fetch.isPending || git.checkout.isPending}
-          aria-busy={git.fetch.isPending || git.checkout.isPending || undefined}
-          onClick={useBranch}
-          tooltip={
-            onBranch ? `You are already on ${detail.head_ref}` : `Switch to ${detail.head_ref}`
-          }
-        >
-          {git.fetch.isPending || git.checkout.isPending ? (
-            <PendingIndicator />
-          ) : (
-            <ArrowLeftRight size={12} />
-          )}
-          {onBranch ? 'On this branch' : 'Use branch'}
-        </Button>
-      </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 text-2xs text-sub"
-        onClick={() => void openExternal(detail.html_url)}
-      >
-        <ExternalLink size={12} />
-        Open on GitHub
-      </Button>
+      {fromDependabot && !merged && !closed && (
+        <DependabotActions
+          number={number}
+          onCommand={runDependabotCommand}
+          pendingId={dependabotPending}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmMerge}
@@ -273,6 +431,41 @@ function IssuePanel({ number }: { number: number }) {
       icon={<GithubItemIcon kind="issue" size={14} />}
       title={`Issue #${number}`}
       status={closed ? 'Closed' : 'Open'}
+      footer={
+        <>
+          <Button
+            size="sm"
+            className="h-8 text-xs font-bold"
+            disabled={closed}
+            onClick={() => {
+              setBranchName(suggested)
+              setStartOpen(true)
+            }}
+          >
+            Start work
+          </Button>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 text-2xs"
+              onClick={() => void openExternal(detail.html_url)}
+            >
+              <ExternalLink size={12} />
+              On GitHub
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 text-2xs text-removed hover:text-removed"
+              disabled={closed || gh.closeIssue.isPending}
+              onClick={() => setConfirmClose(true)}
+            >
+              Close issue
+            </Button>
+          </div>
+        </>
+      }
     >
       <p className="text-2xs leading-snug text-sub">
         {closed
@@ -281,38 +474,6 @@ function IssuePanel({ number }: { number: number }) {
             ? `${detail.assignee} is assigned to this issue.`
             : 'No one is assigned to this issue yet.'}
       </p>
-
-      <Button
-        size="sm"
-        className="h-8 text-xs font-bold"
-        disabled={closed}
-        onClick={() => {
-          setBranchName(suggested)
-          setStartOpen(true)
-        }}
-      >
-        Start work
-      </Button>
-      <div className="grid grid-cols-2 gap-1.5">
-        <Button
-          variant="secondary"
-          size="sm"
-          className="h-7 text-2xs"
-          onClick={() => void openExternal(detail.html_url)}
-        >
-          <ExternalLink size={12} />
-          On GitHub
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="h-7 text-2xs text-removed hover:text-removed"
-          disabled={closed || gh.closeIssue.isPending}
-          onClick={() => setConfirmClose(true)}
-        >
-          Close issue
-        </Button>
-      </div>
 
       <FormDialog
         open={startOpen}

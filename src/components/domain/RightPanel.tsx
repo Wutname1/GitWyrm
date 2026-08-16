@@ -10,6 +10,14 @@ import { CommitMessageForm } from "./commit-form/CommitMessageForm";
 export function RightPanel() {
   const changesFocusNonce = useUiStore((s) => s.changesFocusNonce);
   const repo = useActiveRepo();
+  const githubItem = useUiStore((s) => s.githubItem);
+  const centerView = useUiStore((s) => s.centerView);
+
+  // Reading a pull request and composing a commit are different jobs, and the
+  // commit box is for the branch you are on rather than the one you are
+  // reviewing. While a GitHub item is open the panel belongs to it entirely,
+  // instead of stacking its actions on top of an unrelated working tree.
+  const showingGithubItem = githubItem != null && centerView === "github";
 
   const [flash, setFlash] = useState(false);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -34,14 +42,19 @@ export function RightPanel() {
         flash ? "border-primary" : "border-border",
       )}
     >
-      <GithubContextPanel />
-      <SpecCard />
-      <ChangesList />
-      {/* Keyed by repo: the message box holds per-repo state (draft text, the
-          in-flight AI generation). Without the key one instance is reused
-          across tabs, so switching repos mid-generation carries the spinner
-          and drops the message into whichever repo is on screen. */}
-      <CommitMessageForm key={repo?.id ?? "none"} />
+      {showingGithubItem ? (
+        <GithubContextPanel />
+      ) : (
+        <>
+          <SpecCard />
+          <ChangesList />
+          {/* Keyed by repo: the message box holds per-repo state (draft text, the
+              in-flight AI generation). Without the key one instance is reused
+              across tabs, so switching repos mid-generation carries the spinner
+              and drops the message into whichever repo is on screen. */}
+          <CommitMessageForm key={repo?.id ?? "none"} />
+        </>
+      )}
     </div>
   );
 }

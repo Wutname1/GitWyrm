@@ -1557,6 +1557,25 @@ async commitWebUrl(repoId: string, sha: string) : Promise<Result<string | null, 
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Which of `shas` this clone actually has an object for.
+ * 
+ * Pull request commits come from the host, so the sha is known before the
+ * object is: a pull request that has never been fetched -- or one from a fork
+ * -- names commits this repository cannot open. Asking first lets the UI offer
+ * to fetch rather than opening a commit view that errors.
+ * 
+ * Batched because a pull request asks about every commit it lists at once, and
+ * one lock and one walk beats a round trip per commit.
+ */
+async commitsPresent(repoId: string, shas: string[]) : Promise<Result<string[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("commits_present", { repoId, shas }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async stashSave(repoId: string, message: string | null) : Promise<Result<StashOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("stash_save", { repoId, message }) };
@@ -4366,6 +4385,13 @@ auto_update?: boolean;
  * time, and the user is already at the keyboard.
  */
 auto_restart_after_download?: boolean; branch_switch_mode?: BranchSwitchMode; 
+/**
+ * How the last pull request was merged, reused as the default for the next
+ * one. Remembered rather than configured: it has no Settings control, it just
+ * keeps whatever was picked from the merge button's dropdown, because someone
+ * who rebase-merges does it every time.
+ */
+merge_method?: MergeMethod; 
 /**
  * Provider every AI feature uses unless pointed elsewhere: commit messages,
  * commit generation, and Spec Desk runs.

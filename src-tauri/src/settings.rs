@@ -43,6 +43,11 @@ fn default_branch_switch_mode() -> BranchSwitchMode {
   BranchSwitchMode::AutoStash
 }
 
+/// Plain merge: it is what GitHub preselects, and it loses no history.
+fn default_merge_method() -> crate::hosting::MergeMethod {
+  crate::hosting::MergeMethod::Merge
+}
+
 /// Where commit change size appears in the graph.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -173,6 +178,12 @@ pub struct Settings {
   pub auto_restart_after_download: bool,
   #[serde(default = "default_branch_switch_mode")]
   pub branch_switch_mode: BranchSwitchMode,
+  /// How the last pull request was merged, reused as the default for the next
+  /// one. Remembered rather than configured: it has no Settings control, it just
+  /// keeps whatever was picked from the merge button's dropdown, because someone
+  /// who rebase-merges does it every time.
+  #[serde(default = "default_merge_method")]
+  pub merge_method: crate::hosting::MergeMethod,
   /// Provider every AI feature uses unless pointed elsewhere: commit messages,
   /// commit generation, and Spec Desk runs.
   ///
@@ -594,6 +605,7 @@ impl Default for Settings {
       auto_update: default_auto_update(),
       auto_restart_after_download: false,
       branch_switch_mode: default_branch_switch_mode(),
+      merge_method: default_merge_method(),
       ai_provider: None,
       ai_model: None,
       ai_models: None,

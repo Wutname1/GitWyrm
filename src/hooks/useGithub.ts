@@ -279,6 +279,26 @@ export function useGithubPrCommits(
   })
 }
 
+/**
+ * Which of a pull request's commits this clone can actually open.
+ *
+ * The host names commits by sha whether or not the objects are here, so a pull
+ * request that has not been fetched -- or one from a fork -- lists commits whose
+ * diffs cannot be shown locally. The commit list uses this to decide between
+ * opening a commit and offering to fetch it first.
+ */
+export function useLocalCommits(repoId: string | null, shas: string[]) {
+  // Sorted so the key does not change when the same set arrives in a different
+  // order, which would refetch on every render of a reordered list.
+  const key = [...shas].sort().join(',')
+  return useQuery({
+    queryKey: ['local-commits', repoId ?? '', key],
+    enabled: isTauri && repoId != null && shas.length > 0,
+    staleTime: 30 * 1000,
+    queryFn: async () => new Set(unwrap(await commands.commitsPresent(repoId!, shas))),
+  })
+}
+
 export function useGithubIssueDetail(
   slug: GithubRepoRef | null | undefined,
   number: number | null,
@@ -322,7 +342,17 @@ export function useGithubMutations(
   }
 
   const comment = useMutation({
-    mutationFn: async (v: { kind: 'pr' | 'issue'; number: number; body: string }) => {
+    mutationFn: async (v: {
+      kind: 'pr' | 'issue'
+      number: number
+      body: string
+      /**
+       * What to say on success. Bot commands (`@dependabot rebase`) travel as
+       * comments but are not replies, and "Reply posted" describes the mechanism
+       * rather than what the user just did.
+       */
+      successMessage?: string
+    }) => {
       await unwrap(
         await commands.githubComment(id, owner, repo, v.number, v.body, v.kind === 'pr')
       )
@@ -330,7 +360,7 @@ export function useGithubMutations(
     },
     onSuccess: (v) => {
       refreshItem(v.kind, v.number)
-      toast('Reply posted')
+      toast(v.successMessage ?? 'Reply posted')
     },
     onError,
   })

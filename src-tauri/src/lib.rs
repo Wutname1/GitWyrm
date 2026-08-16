@@ -178,6 +178,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::branch::drop_commits,
     commands::branch::has_worktrees,
     commands::branch::commit_web_url,
+    commands::branch::commits_present,
     commands::stash::stash_save,
     commands::stash::stash_folder,
     commands::stash::stash_pop,
