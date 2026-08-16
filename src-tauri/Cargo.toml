@@ -47,7 +47,7 @@ notify = "8"
 # Deleting a file from the changes menu goes to the Recycle Bin / Trash, not
 # straight off disk, so a misclick stays recoverable.
 trash = "5"
-notify-debouncer-full = "0.5"
+notify-debouncer-full = "0.7"
 # Parses .gitignore chains into a fast, lock-free matcher so the file watcher can
 # skip ignored paths without contending with the repo lock that git status holds.
 ignore = "0.4"
