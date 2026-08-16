@@ -265,6 +265,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::github::github_list_prs,
     commands::github::github_list_issues,
     commands::github::github_pr_detail,
+    commands::github::github_pr_files,
+    commands::github::github_pr_commits,
     commands::github::github_issue_detail,
     commands::github::github_comment,
     commands::github::github_approve_pr,

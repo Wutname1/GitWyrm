@@ -2547,6 +2547,36 @@ async githubPrDetail(repoId: string | null, owner: string, repo: string, number:
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * The files a pull request changes, diffs included where the host sends them.
+ * 
+ * Separate from `github_pr_detail` on purpose: this is the expensive half of a
+ * pull request -- one response can run to megabytes of patch text -- while the
+ * conversation is small and read constantly. Splitting them lets the view show
+ * the title and discussion immediately and stream the diffs in behind, and lets
+ * the two be cached on different clocks.
+ * 
+ * Empty on hosts that do not serve this; see `HostCapabilities::pr_contents`.
+ */
+async githubPrFiles(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<PrFile[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_pr_files", { repoId, owner, repo, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The commits on a pull request's branch. Empty on hosts without support.
+ */
+async githubPrCommits(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<PrCommit[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_pr_commits", { repoId, owner, repo, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async githubIssueDetail(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<IssueDetail, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("github_issue_detail", { repoId, owner, repo, number }) };
@@ -3583,7 +3613,13 @@ pr_updated_at: boolean;
 /**
  * Whether PR line counts are available.
  */
-pr_line_counts: boolean }
+pr_line_counts: boolean; 
+/**
+ * Whether the host serves the changed files and commits behind a pull
+ * request. False everywhere but GitHub today; the UI hides those sections
+ * rather than showing two empty panels.
+ */
+pr_contents: boolean }
 export type HostComment = { author: string; author_is_bot: boolean; body: string; created_at: string }
 /**
  * One host as the Integrations screen shows it.
@@ -3770,11 +3806,44 @@ export type PollResult =
  * User has not finished authorizing yet; poll again after `interval`.
  */
 { status: "pending"; interval: number }
+/**
+ * A commit on the pull request's branch.
+ */
+export type PrCommit = { sha: string; 
+/**
+ * First line of the message.
+ */
+summary: string; author: string; 
+/**
+ * When the commit was authored. None when the host omits it.
+ */
+authored_at: string | null; html_url: string }
 export type PrDetail = { number: number; title: string; body: string; author: string; author_is_bot: boolean; state: string; draft: boolean; merged: boolean; mergeable: boolean | null; head_ref: string; base_ref: string; 
 /**
  * None on every host but GitHub; see the module docs.
  */
 additions: number | null; deletions: number | null; changed_files: number | null; comments: HostComment[]; html_url: string; created_at: string; updated_at: string | null }
+/**
+ * One file a pull request touches, with its diff already parsed.
+ * 
+ * `diff` reuses the same [`FileDiff`](crate::git::types::FileDiff) shape a local
+ * diff produces, so the existing viewer renders a PR file with no special case.
+ * It is None when the host sent no patch: binary files, files too large for the
+ * host to inline, and -- on GitHub -- anything past the first 300 files of a
+ * very large pull request. The row still lists the path and its counts, which
+ * is the honest answer for a file whose contents we were not given.
+ */
+export type PrFile = { path: string; 
+/**
+ * Rename source, when the host reports the file as renamed.
+ */
+old_path: string | null; 
+/**
+ * Host's word for what happened: added, removed, modified, renamed, copied,
+ * changed, unchanged. Passed through rather than mapped onto a local enum,
+ * since hosts disagree about which of these they emit.
+ */
+status: string; additions: number; deletions: number; diff: FileDiff | null }
 export type PrSummary = { number: number; title: string; author: string; author_is_bot: boolean; draft: boolean; head_ref: string; base_ref: string; 
 /**
  * When the pull request last changed. None on Azure DevOps, whose API has no

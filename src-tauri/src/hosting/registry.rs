@@ -123,6 +123,16 @@ mod tests {
     }
   }
 
+  /// Only GitHub serves a pull request's files and commits so far. The rest keep
+  /// the trait's empty default, and the flag is what hides those sections.
+  #[test]
+  fn only_github_reports_pr_contents() {
+    for provider in ALL_PROVIDERS {
+      let expected = provider.id() == ProviderId::Github;
+      assert_eq!(provider.capabilities().pr_contents, expected, "{:?}", provider.id());
+    }
+  }
+
   /// Every token-based host must tell the user where to make a token and which
   /// permissions to tick; a missing scope fails later without naming the cause.
   #[test]

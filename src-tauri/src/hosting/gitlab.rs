@@ -134,6 +134,7 @@ impl HostProvider for GitLab {
       choose_merge_method: false,
       pr_updated_at: true,
       pr_line_counts: false,
+      pr_contents: false,
     }
   }
 

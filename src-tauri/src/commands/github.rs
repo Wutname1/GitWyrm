@@ -23,7 +23,8 @@ use crate::hosting::{
 use crate::state::RepoManager;
 
 pub use crate::hosting::{
-  HostComment as GithubComment, IssueDetail, IssueSummary, MergeMethod, PrDetail, PrSummary,
+  HostComment as GithubComment, IssueDetail, IssueSummary, MergeMethod, PrCommit, PrDetail, PrFile,
+  PrSummary,
 };
 
 const PROVIDER_ID: &str = "github";
@@ -451,6 +452,44 @@ pub async fn github_pr_detail(
 ) -> Result<PrDetail, AppError> {
   let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
   provider.pr_detail(&app, &slug, number).await
+}
+
+/// The files a pull request changes, diffs included where the host sends them.
+///
+/// Separate from `github_pr_detail` on purpose: this is the expensive half of a
+/// pull request -- one response can run to megabytes of patch text -- while the
+/// conversation is small and read constantly. Splitting them lets the view show
+/// the title and discussion immediately and stream the diffs in behind, and lets
+/// the two be cached on different clocks.
+///
+/// Empty on hosts that do not serve this; see `HostCapabilities::pr_contents`.
+#[tauri::command]
+#[specta::specta]
+pub async fn github_pr_files(
+  app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
+  owner: String,
+  repo: String,
+  number: u32,
+) -> Result<Vec<PrFile>, AppError> {
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  provider.pr_files(&app, &slug, number).await
+}
+
+/// The commits on a pull request's branch. Empty on hosts without support.
+#[tauri::command]
+#[specta::specta]
+pub async fn github_pr_commits(
+  app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
+  owner: String,
+  repo: String,
+  number: u32,
+) -> Result<Vec<PrCommit>, AppError> {
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  provider.pr_commits(&app, &slug, number).await
 }
 
 #[tauri::command]

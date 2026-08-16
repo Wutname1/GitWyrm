@@ -20,6 +20,10 @@ export const githubKeys = {
   prs: (owner: string, repo: string) => ['github-prs', owner, repo] as const,
   issues: (owner: string, repo: string) => ['github-issues', owner, repo] as const,
   pr: (owner: string, repo: string, number: number) => ['github-pr', owner, repo, number] as const,
+  prFiles: (owner: string, repo: string, number: number) =>
+    ['github-pr-files', owner, repo, number] as const,
+  prCommits: (owner: string, repo: string, number: number) =>
+    ['github-pr-commits', owner, repo, number] as const,
   issue: (owner: string, repo: string, number: number) =>
     ['github-issue', owner, repo, number] as const,
   sshKeys: ['github-ssh-keys'] as const,
@@ -232,6 +236,46 @@ export function useGithubPrDetail(
     staleTime: 30 * 1000,
     queryFn: async () =>
       unwrap(await commands.githubPrDetail(repoId ?? null, slug!.owner, slug!.repo, number!)),
+  })
+}
+
+/**
+ * The files a pull request changes, with diffs.
+ *
+ * Kept apart from the detail query because it is the heavy half: one response
+ * carries every patch in the pull request. The conversation renders as soon as
+ * it arrives and the files fill in behind it, so a large PR never holds up the
+ * title and discussion. `enabled` gates on the caller so the request is not made
+ * until the user actually asks to see the files.
+ */
+export function useGithubPrFiles(
+  slug: GithubRepoRef | null | undefined,
+  number: number | null,
+  repoId?: string | null,
+  enabled = true
+) {
+  return useQuery({
+    queryKey: githubKeys.prFiles(slug?.owner ?? '', slug?.repo ?? '', number ?? 0),
+    enabled: isTauri && slug != null && number != null && enabled,
+    staleTime: 30 * 1000,
+    queryFn: async () =>
+      unwrap(await commands.githubPrFiles(repoId ?? null, slug!.owner, slug!.repo, number!)),
+  })
+}
+
+/** The commits on a pull request's branch. */
+export function useGithubPrCommits(
+  slug: GithubRepoRef | null | undefined,
+  number: number | null,
+  repoId?: string | null,
+  enabled = true
+) {
+  return useQuery({
+    queryKey: githubKeys.prCommits(slug?.owner ?? '', slug?.repo ?? '', number ?? 0),
+    enabled: isTauri && slug != null && number != null && enabled,
+    staleTime: 30 * 1000,
+    queryFn: async () =>
+      unwrap(await commands.githubPrCommits(repoId ?? null, slug!.owner, slug!.repo, number!)),
   })
 }
 

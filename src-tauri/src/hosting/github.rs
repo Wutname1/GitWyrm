@@ -7,10 +7,11 @@ use async_trait::async_trait;
 use serde::Deserialize;
 
 use super::http::{self, TIMEOUT};
+use super::patch::parse_file_patch;
 use super::registry::ProviderId;
 use super::{
   not_connected, AuthKind, HostCapabilities, HostComment, HostProvider, IssueDetail, IssueSummary,
-  MergeMethod, PrDetail, PrSummary, RepoSlug,
+  MergeMethod, PrCommit, PrDetail, PrFile, PrSummary, RepoSlug,
 };
 use crate::error::AppError;
 use crate::git::remote_url::{self, RemoteProvider};
@@ -112,6 +113,7 @@ impl HostProvider for GitHub {
       choose_merge_method: true,
       pr_updated_at: true,
       pr_line_counts: true,
+      pr_contents: true,
     }
   }
 
@@ -256,6 +258,88 @@ impl HostProvider for GitHub {
       created_at: issue.created_at,
       updated_at: Some(issue.updated_at),
     })
+  }
+
+  /// The pull request's changed files, diffs included.
+  ///
+  /// `per_page=100` is GitHub's maximum and the endpoint caps out at 300 files
+  /// regardless of paging, so a very large pull request is necessarily partial.
+  /// One page is fetched rather than three: it covers essentially every real
+  /// review, and the file list says how many it is showing, so a truncated list
+  /// reads as truncated instead of as the whole change.
+  async fn pr_files(
+    &self,
+    app: &tauri::AppHandle,
+    slug: &RepoSlug,
+    number: u32,
+  ) -> Result<Vec<PrFile>, AppError> {
+    let path = format!(
+      "/repos/{}/{}/pulls/{number}/files?per_page=100",
+      slug.owner, slug.repo
+    );
+    let files: Vec<ApiPrFile> =
+      http::send_json(self.request(app, reqwest::Method::GET, &path)?, HOST, ERROR_KEYS).await?;
+    Ok(
+      files
+        .into_iter()
+        .map(|f| PrFile {
+          // GitHub omits `patch` for binary files and for anything it considers
+          // too large to inline. The row still lists the path and counts.
+          diff: f.patch.as_deref().map(|p| {
+            parse_file_patch(
+              &f.filename,
+              f.previous_filename.clone(),
+              p,
+              f.additions,
+              f.deletions,
+            )
+          }),
+          path: f.filename,
+          old_path: f.previous_filename,
+          status: f.status,
+          additions: f.additions,
+          deletions: f.deletions,
+        })
+        .collect(),
+    )
+  }
+
+  async fn pr_commits(
+    &self,
+    app: &tauri::AppHandle,
+    slug: &RepoSlug,
+    number: u32,
+  ) -> Result<Vec<PrCommit>, AppError> {
+    let path = format!(
+      "/repos/{}/{}/pulls/{number}/commits?per_page=100",
+      slug.owner, slug.repo
+    );
+    let commits: Vec<ApiPrCommit> =
+      http::send_json(self.request(app, reqwest::Method::GET, &path)?, HOST, ERROR_KEYS).await?;
+    Ok(
+      commits
+        .into_iter()
+        .map(|c| PrCommit {
+          summary: c
+            .commit
+            .message
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_string(),
+          // `author` is the GitHub account and is null for a commit whose email
+          // matches no user; the commit's own author name is always present, so
+          // it is the fallback rather than showing nobody.
+          author: c
+            .author
+            .map(|a| a.login)
+            .unwrap_or(c.commit.author.name),
+          authored_at: Some(c.commit.author.date),
+          sha: c.sha,
+          html_url: c.html_url,
+        })
+        .collect(),
+    )
   }
 
   async fn comment(
@@ -414,6 +498,44 @@ struct ApiIssue {
   /// Present when an "issue" is really a pull request; used to filter.
   #[serde(default)]
   pull_request: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct ApiPrFile {
+  filename: String,
+  status: String,
+  #[serde(default)]
+  additions: u32,
+  #[serde(default)]
+  deletions: u32,
+  /// Absent for binary and over-large files; see `pr_files`.
+  #[serde(default)]
+  patch: Option<String>,
+  /// Only present when the file was renamed or copied.
+  #[serde(default)]
+  previous_filename: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiCommitAuthor {
+  name: String,
+  date: String,
+}
+
+#[derive(Deserialize)]
+struct ApiCommitBody {
+  message: String,
+  author: ApiCommitAuthor,
+}
+
+#[derive(Deserialize)]
+struct ApiPrCommit {
+  sha: String,
+  commit: ApiCommitBody,
+  /// The GitHub account behind the commit, when one matches the email.
+  #[serde(default)]
+  author: Option<ApiUser>,
+  html_url: String,
 }
 
 #[derive(Deserialize)]

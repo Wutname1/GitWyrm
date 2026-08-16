@@ -176,6 +176,7 @@ impl HostProvider for AzureDevOps {
       choose_merge_method: true,
       pr_updated_at: false,
       pr_line_counts: false,
+      pr_contents: false,
     }
   }
 

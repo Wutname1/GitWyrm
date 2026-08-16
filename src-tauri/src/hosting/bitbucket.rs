@@ -131,6 +131,7 @@ impl HostProvider for Bitbucket {
       choose_merge_method: true,
       pr_updated_at: true,
       pr_line_counts: false,
+      pr_contents: false,
     }
   }
 

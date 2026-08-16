@@ -15,9 +15,13 @@ import {
   githubKeys,
   useGithubIssueDetail,
   useGithubMutations,
+  useGithubPrCommits,
   useGithubPrDetail,
+  useGithubPrFiles,
   useGithubSlug,
 } from '@/hooks/useGithub'
+import { PrCommitList } from '@/components/domain/github/PrCommitList'
+import { PrFileList } from '@/components/domain/github/PrFileList'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
@@ -184,6 +188,65 @@ function StatusPill({ label, tone }: { label: string; tone: 'green' | 'violet' |
   )
 }
 
+type PrTab = 'conversation' | 'files' | 'commits'
+
+/**
+ * Which part of a pull request is showing.
+ *
+ * A pull request is three separate questions -- what is being discussed, what
+ * changed, and how it got there -- and stacking all three makes the discussion
+ * scroll past a thousand lines of diff. Counts sit on the tabs so the sizes are
+ * visible before opening either one.
+ */
+function PrTabs({
+  tab,
+  onChange,
+  fileCount,
+  commitCount,
+  commentCount,
+}: {
+  tab: PrTab
+  onChange: (t: PrTab) => void
+  fileCount?: number
+  commitCount?: number
+  commentCount: number
+}) {
+  const tabs: { id: PrTab; label: string; count?: number }[] = [
+    { id: 'conversation', label: 'Conversation', count: commentCount },
+    { id: 'files', label: 'Files changed', count: fileCount },
+    { id: 'commits', label: 'Commits', count: commitCount },
+  ]
+  return (
+    <div className="mt-4 flex items-center gap-1 border-b border-border">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          onClick={() => onChange(t.id)}
+          className={cn(
+            'relative -mb-px border-b-2 px-3 py-2 text-xs transition-colors',
+            tab === t.id
+              ? 'border-primary font-semibold text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          )}
+        >
+          {t.label}
+          {t.count != null && (
+            <span
+              className={cn(
+                'ml-1.5 rounded-full px-1.5 py-px text-2xs',
+                tab === t.id ? 'bg-primary/15 text-accent-text' : 'bg-panel3 text-muted-foreground'
+              )}
+            >
+              {t.count}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 async function openExternal(url: string) {
   const { openUrl } = await import('@tauri-apps/plugin-opener')
   await openUrl(url)
@@ -204,10 +267,23 @@ export function GithubView() {
   )
   const m = useGithubMutations(slug.data, repo?.id)
 
-  // Jump back to the top when switching between items.
+  const [tab, setTab] = useState<PrTab>('conversation')
+
+  const prNumber = item?.kind === 'pr' ? item.number : null
+  // Both are fetched as soon as a pull request opens rather than on tab click:
+  // the counts belong on the tabs, and paying for them up front means switching
+  // tabs is instant. They are separate queries from the detail, so the
+  // conversation still renders while these are in flight.
+  const files = useGithubPrFiles(slug.data, prNumber, repo?.id)
+  const commits = useGithubPrCommits(slug.data, prNumber, repo?.id)
+
+  // Jump back to the top when switching between items, and start each one on the
+  // conversation -- the tab that was open for the last pull request says nothing
+  // about this one.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
   useEffect(() => {
     scrollEl?.scrollTo({ top: 0 })
+    setTab('conversation')
   }, [item?.kind, item?.number, scrollEl])
 
   if (!item) return null
@@ -219,11 +295,18 @@ export function GithubView() {
 
   const refresh = () => {
     if (!slug.data) return
+    const { owner, repo: name } = slug.data
     qc.invalidateQueries({
       queryKey: isPr
-        ? githubKeys.pr(slug.data.owner, slug.data.repo, item.number)
-        : githubKeys.issue(slug.data.owner, slug.data.repo, item.number),
+        ? githubKeys.pr(owner, name, item.number)
+        : githubKeys.issue(owner, name, item.number),
     })
+    // The files and commits are their own queries, so Refresh has to name them
+    // too or the diffs stay stale while the conversation updates.
+    if (isPr) {
+      qc.invalidateQueries({ queryKey: githubKeys.prFiles(owner, name, item.number) })
+      qc.invalidateQueries({ queryKey: githubKeys.prCommits(owner, name, item.number) })
+    }
   }
 
   const statusPill = !detail ? null : isPr && pr.data ? (
@@ -360,11 +443,21 @@ export function GithubView() {
                   <code className="rounded border border-border bg-panel2 px-1.5 py-0.5 text-foreground">
                     {pr.data.base_ref}
                   </code>
-                  <span className="ml-2">
-                    {pr.data.changed_files} {pr.data.changed_files === 1 ? 'file' : 'files'}
-                  </span>
-                  <span className="text-added">+{pr.data.additions}</span>
-                  <span className="text-removed">−{pr.data.deletions}</span>
+                  {/* The counts are the obvious thing to click when you want to
+                      see what changed, so they open the Files tab rather than
+                      sitting there as a label. */}
+                  <button
+                    type="button"
+                    onClick={() => setTab('files')}
+                    className="ml-2 flex items-center gap-2 rounded px-1.5 py-0.5 hover:bg-panel3 hover:text-foreground"
+                    title="See what changed"
+                  >
+                    <span>
+                      {pr.data.changed_files} {pr.data.changed_files === 1 ? 'file' : 'files'}
+                    </span>
+                    <span className="text-added">+{pr.data.additions}</span>
+                    <span className="text-removed">−{pr.data.deletions}</span>
+                  </button>
                 </div>
               )}
 
@@ -381,33 +474,63 @@ export function GithubView() {
                 </div>
               )}
 
-              <section className="group/card mt-4 overflow-hidden rounded-md border border-border bg-panel2/70">
-                <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5 text-2xs font-bold text-foreground">
-                  <Avatar name={detail.author} />
-                  <span>{detail.author} wrote</span>
-                  <span className="ml-auto font-normal text-muted-foreground">
-                    {ago(detail.created_at)}
-                  </span>
-                  <CopyButton
-                    text={`**${detail.author}** wrote ${ago(detail.created_at)}:\n\n${detail.body.trim()}`}
-                    tooltip="Copy this description as markdown"
-                    successMessage="Description copied as markdown"
-                  />
-                </div>
-                <div className="px-4 py-3.5">
-                  <MarkdownBody text={detail.body} />
-                </div>
-              </section>
+              {isPr && (
+                <PrTabs
+                  tab={tab}
+                  onChange={setTab}
+                  fileCount={files.data?.length}
+                  commitCount={commits.data?.length}
+                  commentCount={detail.comments.length}
+                />
+              )}
 
-              <CommentThread
-                key={`${item.kind}-${item.number}`}
-                comments={detail.comments}
-                replyPlaceholder={isPr ? 'Write a reply…' : 'Ask for more details…'}
-                replying={m.comment.isPending}
-                onReply={(body) =>
-                  m.comment.mutate({ kind: item.kind, number: item.number, body })
-                }
-              />
+              {(!isPr || tab === 'conversation') && (
+                <>
+                  <section className="group/card mt-4 overflow-hidden rounded-md border border-border bg-panel2/70">
+                    <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5 text-2xs font-bold text-foreground">
+                      <Avatar name={detail.author} />
+                      <span>{detail.author} wrote</span>
+                      <span className="ml-auto font-normal text-muted-foreground">
+                        {ago(detail.created_at)}
+                      </span>
+                      <CopyButton
+                        text={`**${detail.author}** wrote ${ago(detail.created_at)}:\n\n${detail.body.trim()}`}
+                        tooltip="Copy this description as markdown"
+                        successMessage="Description copied as markdown"
+                      />
+                    </div>
+                    <div className="px-4 py-3.5">
+                      <MarkdownBody text={detail.body} />
+                    </div>
+                  </section>
+
+                  <CommentThread
+                    key={`${item.kind}-${item.number}`}
+                    comments={detail.comments}
+                    replyPlaceholder={isPr ? 'Write a reply…' : 'Ask for more details…'}
+                    replying={m.comment.isPending}
+                    onReply={(body) =>
+                      m.comment.mutate({ kind: item.kind, number: item.number, body })
+                    }
+                  />
+                </>
+              )}
+
+              {isPr && tab === 'files' && (
+                <PrFileList
+                  files={files.data}
+                  loading={files.isPending}
+                  error={files.isError}
+                />
+              )}
+
+              {isPr && tab === 'commits' && (
+                <PrCommitList
+                  commits={commits.data}
+                  loading={commits.isPending}
+                  error={commits.isError}
+                />
+              )}
             </>
           )}
         </article>

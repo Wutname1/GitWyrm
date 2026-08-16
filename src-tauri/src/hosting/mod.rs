@@ -24,12 +24,21 @@
 //! PR payload; the others need per-file diff parsing (GitLab, Bitbucket) or
 //! cannot produce them at all at reasonable cost (Azure). Showing nothing is
 //! honest and free -- see `docs/hosting-providers.md`.
+//!
+//! The same applies to a pull request's changed files and commits: [`pr_files`]
+//! and [`pr_commits`] default to empty, and only GitHub implements them so far.
+//! A host that returns empty reports `pr_contents: false`, and the UI hides
+//! those sections rather than showing a panel that is permanently blank.
+//!
+//! [`pr_files`]: HostProvider::pr_files
+//! [`pr_commits`]: HostProvider::pr_commits
 
 pub mod azure;
 pub mod bitbucket;
 pub mod github;
 pub mod gitlab;
 pub mod http;
+pub mod patch;
 pub mod registry;
 
 use async_trait::async_trait;
@@ -173,6 +182,40 @@ pub struct IssueDetail {
   pub updated_at: Option<String>,
 }
 
+/// One file a pull request touches, with its diff already parsed.
+///
+/// `diff` reuses the same [`FileDiff`](crate::git::types::FileDiff) shape a local
+/// diff produces, so the existing viewer renders a PR file with no special case.
+/// It is None when the host sent no patch: binary files, files too large for the
+/// host to inline, and -- on GitHub -- anything past the first 300 files of a
+/// very large pull request. The row still lists the path and its counts, which
+/// is the honest answer for a file whose contents we were not given.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct PrFile {
+  pub path: String,
+  /// Rename source, when the host reports the file as renamed.
+  pub old_path: Option<String>,
+  /// Host's word for what happened: added, removed, modified, renamed, copied,
+  /// changed, unchanged. Passed through rather than mapped onto a local enum,
+  /// since hosts disagree about which of these they emit.
+  pub status: String,
+  pub additions: u32,
+  pub deletions: u32,
+  pub diff: Option<crate::git::types::FileDiff>,
+}
+
+/// A commit on the pull request's branch.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct PrCommit {
+  pub sha: String,
+  /// First line of the message.
+  pub summary: String,
+  pub author: String,
+  /// When the commit was authored. None when the host omits it.
+  pub authored_at: Option<String>,
+  pub html_url: String,
+}
+
 /// How a merge should be performed. Hosts support different subsets; each
 /// implementation maps these onto its own vocabulary and errors clearly when
 /// the host cannot honour the choice.
@@ -199,6 +242,10 @@ pub struct HostCapabilities {
   pub pr_updated_at: bool,
   /// Whether PR line counts are available.
   pub pr_line_counts: bool,
+  /// Whether the host serves the changed files and commits behind a pull
+  /// request. False everywhere but GitHub today; the UI hides those sections
+  /// rather than showing two empty panels.
+  pub pr_contents: bool,
 }
 
 /// The credential a provider needs, as entered by the user.
@@ -280,6 +327,30 @@ pub trait HostProvider: Send + Sync {
     slug: &RepoSlug,
     number: u32,
   ) -> Result<IssueDetail, AppError>;
+
+  /// The files a pull request changes, with diffs where the host provides them.
+  ///
+  /// Defaults to empty for hosts that do not serve this, which the UI reads as
+  /// "nothing to show" and hides the section. Report it in
+  /// [`HostCapabilities::pr_contents`] when implementing.
+  async fn pr_files(
+    &self,
+    _app: &tauri::AppHandle,
+    _slug: &RepoSlug,
+    _number: u32,
+  ) -> Result<Vec<PrFile>, AppError> {
+    Ok(Vec::new())
+  }
+
+  /// The commits on a pull request's branch. Empty by default; see [`Self::pr_files`].
+  async fn pr_commits(
+    &self,
+    _app: &tauri::AppHandle,
+    _slug: &RepoSlug,
+    _number: u32,
+  ) -> Result<Vec<PrCommit>, AppError> {
+    Ok(Vec::new())
+  }
 
   async fn comment(
     &self,
