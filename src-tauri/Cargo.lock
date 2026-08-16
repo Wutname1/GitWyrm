@@ -1696,7 +1696,7 @@ name = "gitwyrm"
 version = "0.0.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "fern",
  "git2",
  "github-copilot-sdk",

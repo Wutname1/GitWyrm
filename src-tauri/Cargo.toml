@@ -57,7 +57,7 @@ tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-base64 = "0.22"
+base64 = "0.23"
 # Object-safe async methods on the HostProvider trait, so the code-host
 # providers can live behind one `&dyn` list.
 async-trait = "0.1"
