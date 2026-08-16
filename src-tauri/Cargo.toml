@@ -42,7 +42,7 @@ fern = "0.7"
 # file's name agreeing with the timestamps written inside it.
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 thiserror = "2"
-git2 = "0.20"
+git2 = "0.21"
 notify = "8"
 # Deleting a file from the changes menu goes to the Recycle Bin / Trash, not
 # straight off disk, so a misclick stays recoverable.
