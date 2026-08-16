@@ -3106,7 +3106,7 @@ export type BranchSwitchMode =
  * Refuse to switch while the working tree is dirty.
  */
 "refuse"
-export type BuildInfo = { version: string; build_date: string; git_hash: string; debug: boolean }
+export type BuildInfo = { version: string; build_date: string; git_hash: string; debug: boolean; arch: string }
 /**
  * A repository path paired with the icon GitWyrm already knows about, for
  * screens that list many repositories at once.

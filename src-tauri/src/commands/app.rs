@@ -64,6 +64,7 @@ pub struct BuildInfo {
   pub build_date: String,
   pub git_hash: String,
   pub debug: bool,
+  pub arch: String,
 }
 
 #[tauri::command]
@@ -74,6 +75,7 @@ pub fn build_info() -> BuildInfo {
     build_date: env!("GW_BUILD_DATE").to_string(),
     git_hash: env!("GW_GIT_HASH").to_string(),
     debug: cfg!(debug_assertions),
+    arch: std::env::consts::ARCH.to_string(),
   }
 }
 

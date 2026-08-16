@@ -51,7 +51,9 @@ export function AboutSettings() {
       <SettingsGroup title="Version & updates">
       <SettingRow label="Version" searchId="version" hint="The build installed on this computer.">
         <div className="text-xs text-sub">
-          <span className="font-mono text-foreground">{build ? `v${build.version}` : '—'}</span>
+          <span className="font-mono text-foreground">
+            {build ? `v${build.version}${build.arch === 'aarch64' ? ' (ARM)' : ''}` : '—'}
+          </span>
           {build && (
             <span className="ml-2 text-muted-foreground">
               built {build.build_date} · {build.git_hash}

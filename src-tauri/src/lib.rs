@@ -553,7 +553,7 @@ pub fn run() {
         info.git_hash,
         info.debug,
         std::env::consts::OS,
-        std::env::consts::ARCH,
+        info.arch,
       );
 
       // Tell the tool resolver where git and gpg live before any shell-out
