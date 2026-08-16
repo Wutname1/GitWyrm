@@ -20,6 +20,23 @@ export function useCommitLog(repoId: string | null) {
   })
 }
 
+/**
+ * One commit from the already-loaded log pages, or null.
+ *
+ * Reads the cache the graph is drawn from rather than fetching, so this costs
+ * nothing and never triggers a request. Null means the commit is simply not on
+ * a loaded page -- callers treat that as "no extra detail", not as an error.
+ */
+export function useCommitEntry(repoId: string | null, sha: string | null) {
+  const log = useCommitLog(repoId)
+  if (!sha) return null
+  for (const page of log.data?.pages ?? []) {
+    const hit = page.commits.find((c) => c.sha === sha)
+    if (hit) return hit
+  }
+  return null
+}
+
 export function useStatus(repoId: string | null) {
   return useQuery({
     queryKey: keys.status(repoId ?? 'none'),

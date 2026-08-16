@@ -2,16 +2,18 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { ArchiveRestore, ArrowLeftRight, CloudOff, ExternalLink, Eye, Tag, Trash2, Upload } from 'lucide-react'
 import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
-import { useBranches, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
+import { useBranches, useCommitEntry, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useTagSync } from '@/hooks/useTagSync'
 import {
+  useCommitPr,
   useGithubIssues,
   useGithubPrs,
   useGithubSlug,
   useHostingProviders,
   useRepoHostProvider,
 } from '@/hooks/useGithub'
+import { matchExplanation } from '@/lib/commitPr'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import {
@@ -72,6 +74,13 @@ export function LeftPanel() {
   const issues = useGithubIssues(githubSlug.data, githubConnected, repo?.id)
   const openGithubItem = useUiStore((s) => s.openGithubItem)
   const showSettings = useUiStore((s) => s.showSettings)
+
+  // The pull request the selected commit belongs to, so its row in the list
+  // below can say so. Reuses the same match the commit drawer shows, which is
+  // what keeps the two from ever disagreeing about which one it is.
+  const selectedSha = useUiStore((s) => s.selectedSha)
+  const selectedCommit = useCommitEntry(repo?.id ?? null, selectedSha)
+  const commitPr = useCommitPr(repo?.id ?? null, selectedCommit)
 
   const [toDelete, setToDelete] = useState<{ kind: 'branch' | 'tag'; name: string } | null>(null)
   /** Tag pending a remote-only delete; the local copy is untouched. */
@@ -178,6 +187,9 @@ export function LeftPanel() {
                   metaTitle: `#${p.number} by ${p.author}${p.draft ? ' · draft' : ''}`,
                   id: p.number,
                   webUrl: p.html_url,
+                  ...(commitPr?.number === p.number
+                    ? { linked: true, linkedTitle: matchExplanation(commitPr) }
+                    : {}),
                 }))
               : [{ name: `Connect ${hostName}` }],
           },

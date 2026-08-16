@@ -105,6 +105,10 @@ export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(fu
       aria-busy={pending || undefined}
       className={cn(
         'group/row flex cursor-pointer items-center gap-2 py-1 pl-6 pr-3 transition-colors hover:bg-panel2',
+        // Tied to the selected commit. A left rule rather than a fill, so it
+        // stays legible underneath the stronger `isCurrent` background when the
+        // same row is both linked and open.
+        item.linked && 'shadow-[inset_2px_0_0_var(--gw-accent)]',
         isCurrent && 'bg-soft',
         disabled && !pending && 'cursor-wait opacity-40',
         pending && 'cursor-wait bg-soft text-accent-text',
@@ -117,9 +121,13 @@ export const SectionItemRow = forwardRef<HTMLDivElement, SectionItemRowProps>(fu
         <RowMarker section={section} item={item} isCurrent={isCurrent} />
       )}
       <span
+        title={!pending && item.linked ? item.linkedTitle : undefined}
         className={cn(
           'overflow-hidden text-ellipsis whitespace-nowrap text-xs',
           isCurrent ? 'font-semibold text-foreground' : 'text-sub',
+          // Lifted out of the muted list colour so the tie to the selected
+          // commit is visible without having to hover for the reason.
+          !isCurrent && item.linked && 'text-accent-text',
           pending && 'font-semibold text-accent-text'
         )}
       >

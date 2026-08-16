@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   commands,
@@ -7,6 +7,7 @@ import {
   type PrSummary,
   type ProviderId,
 } from '@/lib/bindings'
+import { matchCommitToPr, type CommitPrMatch, type MatchableCommit } from '@/lib/commitPr'
 import { isTauri } from '@/lib/env'
 import { unwrap } from '@/lib/queryKeys'
 import { classifyError } from '@/lib/errorClass'
@@ -297,6 +298,73 @@ export function useLocalCommits(repoId: string | null, shas: string[]) {
     staleTime: 30 * 1000,
     queryFn: async () => new Set(unwrap(await commands.commitsPresent(repoId!, shas))),
   })
+}
+
+/**
+ * The pull request a commit belongs to, or null.
+ *
+ * Answers in two passes so the common case costs nothing. The message and
+ * branch-tip routes are pure local reads against the pull request list the
+ * sidebar already loads, so a merge or squash commit is identified the instant
+ * it is selected. Only when those come up empty does this fetch the commit lists
+ * of the open pull requests to look the sha up -- that is what catches an
+ * ordinary commit in the middle of a branch, and it is why the fetch is gated on
+ * a commit actually being selected rather than running on every repo open.
+ *
+ * The commit lists are the same queries the pull request view uses, so opening a
+ * pull request after selecting one of its commits reuses the cached list.
+ */
+export function useCommitPr(
+  repoId: string | null,
+  commit: MatchableCommit | null
+): CommitPrMatch | null {
+  const auth = useGithubAuth()
+  const slug = useGithubSlug(repoId)
+  const prs = useGithubPrs(slug.data, auth.data != null, repoId)
+  const list = useMemo(() => prs.data ?? [], [prs.data])
+
+  // The cheap routes first. When one of them answers there is no reason to ask
+  // the host for anything.
+  const local = useMemo(
+    () => (commit ? matchCommitToPr(commit, list) : null),
+    [commit, list]
+  )
+
+  // One query per open pull request, run only when the cheap routes came up
+  // empty and there is a commit to explain. react-query dedupes these against
+  // the pull request view's own commit queries.
+  const needsShaLookup = commit != null && local == null && slug.data != null
+  const commitQueries = useQueries({
+    queries: (needsShaLookup ? list : []).map((pr) => ({
+      queryKey: githubKeys.prCommits(slug.data!.owner, slug.data!.repo, pr.number),
+      staleTime: 60 * 1000,
+      retry: false,
+      queryFn: async () =>
+        unwrap(
+          await commands.githubPrCommits(repoId ?? null, slug.data!.owner, slug.data!.repo, pr.number)
+        ),
+    })),
+  })
+
+  // Rebuilt from the resolved data rather than kept in a ref, so a refetch that
+  // drops a commit from a pull request drops the mapping with it.
+  const shaToPr = useMemo(() => {
+    const map = new Map<string, number>()
+    commitQueries.forEach((q, i) => {
+      const number = list[i]?.number
+      if (number == null) return
+      for (const c of q.data ?? []) map.set(c.sha, number)
+    })
+    return map
+    // The query objects are new each render; their data is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, commitQueries.map((q) => q.dataUpdatedAt).join(',')])
+
+  return useMemo(() => {
+    if (!commit) return null
+    if (local) return local
+    return matchCommitToPr(commit, list, shaToPr)
+  }, [commit, list, local, shaToPr])
 }
 
 export function useGithubIssueDetail(

@@ -25,6 +25,14 @@ export interface SectionItem {
   webUrl?: string
   /** Stash commit sha, for stash rows. Stable where messages can repeat. */
   sha?: string
+  /**
+   * Marks the row as tied to whatever is selected elsewhere -- today, the pull
+   * request the selected commit belongs to. Drawn as a quieter emphasis than
+   * `isCurrent`, which means "this is the thing you have open".
+   */
+  linked?: boolean
+  /** Why this row is linked, in plain language. Tooltip for the marker. */
+  linkedTitle?: string
 }
 
 export interface SidebarSectionData {

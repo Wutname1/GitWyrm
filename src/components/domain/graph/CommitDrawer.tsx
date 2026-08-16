@@ -5,7 +5,11 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { TooltipButton, TooltipHint } from '@/components/ui/tooltip'
 import { authorColor, formatCommitTime, shortSha } from '@/lib/gitDisplay'
-import { useCommitDetail } from '@/hooks/useGitQueries'
+import { useCommitDetail, useCommitEntry } from '@/hooks/useGitQueries'
+import { useCommitPr } from '@/hooks/useGithub'
+import { matchExplanation, type CommitPrMatch } from '@/lib/commitPr'
+import { cn } from '@/lib/utils'
+import { GithubItemIcon } from '@/lib/githubDisplay'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { RewordDialog } from '@/components/modals/RewordDialog'
@@ -19,7 +23,51 @@ function initials(name: string): string {
   return name.slice(0, 2).toUpperCase()
 }
 
+/**
+ * The pull request a commit belongs to, shown beside its message.
+ *
+ * Clicking opens the pull request in the center view. A pull request that has
+ * already been merged is no longer in the open list, so there is nothing to
+ * open -- the chip still names the number, because that is a true and useful
+ * thing to say about the commit, but it renders as plain text rather than a
+ * button that would go nowhere.
+ */
+function PrChip({ match, onOpen }: { match: CommitPrMatch; onOpen: () => void }) {
+  const label = `#${match.number}${match.draft ? ' · draft' : ''}`
+  const body = (
+    <>
+      <GithubItemIcon kind="pr" size={11} />
+      <span className="font-mono">{label}</span>
+      <span className="max-w-[14ch] overflow-hidden text-ellipsis whitespace-nowrap">
+        {match.title}
+      </span>
+    </>
+  )
+  const className =
+    'flex flex-none items-center gap-1 rounded-[5px] border border-primary/30 bg-soft px-2 py-[3px] text-2xs text-accent-text'
+
+  if (match.webUrl === '') {
+    return (
+      <TooltipHint label={`${matchExplanation(match)} It is no longer open, so there is nothing to show.`}>
+        <span className={cn(className, 'cursor-default opacity-80')}>{body}</span>
+      </TooltipHint>
+    )
+  }
+  return (
+    <TooltipHint label={`${matchExplanation(match)} Click to open it.`}>
+      <button
+        type="button"
+        onClick={onOpen}
+        className={cn(className, 'hover:border-primary/60 hover:bg-panel3')}
+      >
+        {body}
+      </button>
+    </TooltipHint>
+  )
+}
+
 export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
+  const openGithubItem = useUiStore((s) => s.openGithubItem)
   const selectCommit = useUiStore((s) => s.selectCommit)
   const revealShaInGraph = useUiStore((s) => s.revealShaInGraph)
   const openDiff = useUiStore((s) => s.openDiff)
@@ -27,6 +75,19 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
   const detail = useCommitDetail(repoId, sha)
   const m = useGitMutations(repoId)
   const [rewordOpen, setRewordOpen] = useState(false)
+
+  // The graph row carries the refs a `CommitDetail` does not, so the branch-tip
+  // route works here too. Falls back to the detail alone when the commit is not
+  // on a loaded log page.
+  const graphCommit = useCommitEntry(repoId, sha)
+  const matchable = detail.data
+    ? {
+        sha: detail.data.sha,
+        summary: detail.data.summary,
+        refs: graphCommit?.refs ?? [],
+      }
+    : null
+  const pr = useCommitPr(repoId, matchable)
 
   // Highlight the row whose diff is on screen, but only when that diff came
   // from this commit -- otherwise a same-named file from the pending changes
@@ -70,8 +131,11 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
           </span>
         </AuthorHoverCard>
         <div className="min-w-0 flex-1">
-          <div className="select-text break-words text-[0.78125rem] font-semibold text-foreground">
-            {d.summary}
+          <div className="flex min-w-0 items-start gap-2">
+            <div className="min-w-0 flex-1 select-text break-words text-[0.78125rem] font-semibold text-foreground">
+              {d.summary}
+            </div>
+            {pr && <PrChip match={pr} onOpen={() => openGithubItem('pr', pr.number)} />}
           </div>
           <div className="select-text text-2xs text-muted-foreground">
             <AuthorHoverCard
