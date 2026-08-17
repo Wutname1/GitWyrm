@@ -946,7 +946,7 @@ pub async fn reword_commit(
     let target = repo.find_commit(target_oid)?;
     if target.parent_count() != 1 {
       return Err(AppError::Other(
-        "only commits with a single parent can be edited right now".into(),
+        "this is a merge commit, and its message can't be edited yet".into(),
       ));
     }
     let parent = target.parent(0)?;
