@@ -180,12 +180,12 @@ const SSH_KEYGEN_BUNDLED_REL: &str = "gpg/ssh-keygen.exe";
 /// The bundled tier does not exist off Windows, but `resolve` and `cached` still
 /// take the parameter. Empty strings keep those signatures uniform rather than
 /// cfg-ing every call site.
+/// ssh-keygen has no placeholder: its resolver drops the bundled arm entirely
+/// off Windows, so nothing there refers to the constant.
 #[cfg(not(windows))]
 const GIT_BUNDLED_REL: &str = "";
 #[cfg(not(windows))]
 const GPG_BUNDLED_REL: &str = "";
-#[cfg(not(windows))]
-const SSH_KEYGEN_BUNDLED_REL: &str = "";
 
 /// Resolve a tool, reusing the cached answer when one exists.
 fn cached(
@@ -257,6 +257,10 @@ pub fn resolve_ssh_keygen() -> Resolved {
     }
   }
 
+  // The bundled arm is Windows-only, like the one in `resolve`: ssh-keygen is
+  // carved out of the portable Git for Windows tree. Every Linux distribution
+  // that ships openssh-client has it on PATH, so the System arm above answers.
+  #[cfg(windows)]
   let resolved = if responds_to_help("ssh-keygen") {
     Resolved {
       program: "ssh-keygen".to_owned(),
@@ -266,6 +270,16 @@ pub fn resolve_ssh_keygen() -> Resolved {
     Resolved {
       program: path,
       source: ToolSource::Bundled,
+    }
+  } else {
+    Resolved::missing("ssh-keygen")
+  };
+
+  #[cfg(not(windows))]
+  let resolved = if responds_to_help("ssh-keygen") {
+    Resolved {
+      program: "ssh-keygen".to_owned(),
+      source: ToolSource::System,
     }
   } else {
     Resolved::missing("ssh-keygen")

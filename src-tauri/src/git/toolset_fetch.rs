@@ -71,6 +71,9 @@ pub struct ToolsetManifest {
 
 impl ToolsetManifest {
   /// Whether this component is one the app can install itself.
+  ///
+  /// Only the Windows manifest fetch asks; Linux never downloads a toolset.
+  #[cfg(windows)]
   fn is_archive(&self) -> bool {
     matches!(self.kind.as_str(), "" | "archive" | "tar.xz")
   }
@@ -80,7 +83,8 @@ fn default_component_name() -> String {
   "toolset".to_owned()
 }
 
-/// The component list, as published.
+/// The component list, as published. Read only by the Windows manifest fetch.
+#[cfg(windows)]
 #[derive(Debug, Clone, serde::Deserialize)]
 struct ComponentsDocument {
   components: Vec<ToolsetManifest>,
@@ -335,6 +339,11 @@ mod tests {
     assert_eq!(hex(&[0x00, 0x0f, 0xff]), "000fff");
   }
 
+  // The manifest tests below describe the published Git for Windows toolset, and
+  // the code they exercise is Windows-only - Linux resolves git and gpg from
+  // PATH and never fetches a manifest. Gated as a block rather than per test so
+  // the reason is stated once.
+  #[cfg(windows)]
   #[test]
   fn the_manifest_url_is_https_and_names_the_arch() {
     let url = manifest_url();
@@ -345,6 +354,7 @@ mod tests {
     );
   }
 
+  #[cfg(windows)]
   #[test]
   fn the_manifest_url_carries_no_version() {
     // Latest-only on the CDN: a version in the path would mean history to prune.
@@ -355,6 +365,7 @@ mod tests {
     );
   }
 
+  #[cfg(windows)]
   #[test]
   fn the_app_and_the_bootstrapper_read_the_same_manifest() {
     // Two lists describing the same tools would drift, and then a fresh install
@@ -367,6 +378,7 @@ mod tests {
 
   /// Byte-for-byte the output of `.github/scripts/publish-toolset.sh`, so a
   /// change to that script's shape fails here rather than at release time.
+  #[cfg(windows)]
   #[test]
   fn the_manifest_ci_actually_publishes_parses() {
     let raw = r#"{
@@ -389,6 +401,7 @@ mod tests {
     assert!(first.url.ends_with(".tar.xz"));
   }
 
+  #[cfg(windows)]
   #[test]
   fn an_installer_component_is_left_to_the_bootstrapper() {
     // Running a vendor installer from a background update check would put a UAC
@@ -406,6 +419,7 @@ mod tests {
     assert_eq!(chosen.name, "toolset");
   }
 
+  #[cfg(windows)]
   #[test]
   fn name_and_url_alone_are_enough() {
     // The minimum useful manifest: a list of tools and where to get them.
@@ -419,6 +433,7 @@ mod tests {
     assert_eq!(first.size, 0);
   }
 
+  #[cfg(windows)]
   #[test]
   fn unknown_fields_do_not_break_an_older_client() {
     // Adding a component or a field must not require shipping a new client.

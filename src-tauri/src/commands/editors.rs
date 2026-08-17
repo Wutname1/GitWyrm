@@ -6,7 +6,10 @@
 //! Studio is different: it opens a `.sln` file rather than a folder, so it is
 //! detected separately and offered per-solution alongside the chosen editor.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+// Only the Visual Studio lookups below build a PathBuf, and those are Windows-only.
+#[cfg(windows)]
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
