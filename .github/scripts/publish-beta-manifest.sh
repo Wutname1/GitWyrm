@@ -43,6 +43,7 @@ for key in "${!PLATFORMS[@]}"; do
     exit 1
   fi
 
+
   # The signature is the whole trust story: the updater verifies the downloaded
   # installer against it with the public key compiled into the app, so a beta
   # without one would simply be rejected on every client.
@@ -60,6 +61,31 @@ for key in "${!PLATFORMS[@]}"; do
     --arg url "${CDN_BASE}/${exe_key}" \
     '. + {($key): {signature: $sig, url: $url}}' <<<"$platforms_json")
 done
+
+# Linux is optional, unlike the Windows arches above. The AppImage is the only
+# Linux artifact the updater can install in place, so it is the one named here.
+# A missing one is a warning rather than an error on purpose: Linux is the newest
+# leg, and a failure there must not hold back the beta for everyone on Windows.
+linux_key="betas/${VERSION}/GitWyrm-x86_64.AppImage"
+if aws s3 ls "s3://${BUCKET}/${linux_key}" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
+  if aws s3 cp "s3://${BUCKET}/${linux_key}.sig" "$workdir/sig-linux" \
+       --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
+    linux_sig=$(tr -d '\r\n' < "$workdir/sig-linux")
+  else
+    linux_sig=""
+  fi
+
+  if [ -n "$linux_sig" ]; then
+    platforms_json=$(jq -c \
+      --arg sig "$linux_sig" \
+      --arg url "${CDN_BASE}/${linux_key}" \
+      '. + {"linux-x86_64": {signature: $sig, url: $url}}' <<<"$platforms_json")
+  else
+    echo "::warning::No signature for ${linux_key} - leaving Linux out of the beta manifest."
+  fi
+else
+  echo "::warning::No ${linux_key} - Linux clients will not be offered this beta."
+fi
 
 jq -n \
   --arg version "$VERSION" \

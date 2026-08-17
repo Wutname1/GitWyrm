@@ -66,16 +66,28 @@ jobs:
       matrix:
         include:
           - arch: x86_64
+            os: windows-latest
             rust_target: x86_64-pc-windows-msvc
             tauri_args: ""
             bundle_base: src-tauri/target/release/bundle
             portable_suffix: ""
           - arch: aarch64
+            os: windows-latest
             rust_target: aarch64-pc-windows-msvc
             tauri_args: "--target aarch64-pc-windows-msvc"
             bundle_base: src-tauri/target/aarch64-pc-windows-msvc/release/bundle
             portable_suffix: "-arm64"
-    runs-on: windows-latest
+          # Linux ships the AppImage, deb and rpm. The bundle targets come from
+          # a separate config because the Tauri CLI filters --bundles by host:
+          # naming deb/rpm/appimage in the shared tauri.conf.json risks the
+          # Windows legs above rejecting them.
+          - arch: x86_64-linux
+            os: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            tauri_args: "--config src-tauri/tauri.linux.conf.json"
+            bundle_base: src-tauri/target/release/bundle
+            portable_suffix: ""
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
 
@@ -113,6 +125,7 @@ jobs:
       # from the tag. Without this the release for tag 1.2.3 ships files named
       # after whatever version happens to be committed.
       - name: Sync version to tag
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}"
@@ -148,8 +161,51 @@ jobs:
 
           npm version $version --no-git-tag-version --allow-same-version
 
+      # The same four edits as the pwsh step above, for the Linux runner. Kept
+      # as a separate step rather than porting both to bash: the Windows legs
+      # are the shipping path today and are not worth re-proving for this.
+      - name: Sync version to tag (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ github.ref_name }}"
+          echo "Setting version to $version"
+
+          # jq rather than sed: the version key must not be matched inside any
+          # other string in the config.
+          tmp=$(mktemp)
+          jq --arg v "$version" '.version = $v' src-tauri/tauri.conf.json > "$tmp"
+          mv "$tmp" src-tauri/tauri.conf.json
+
+          # Only the first version= line, which is the [package] one. The
+          # dependency versions further down must not be touched.
+          awk -v v="$version" '
+            !done && /^version[[:space:]]*=/ { print "version = \"" v "\""; done=1; next }
+            { print }
+          ' src-tauri/Cargo.toml > "$tmp"
+          mv "$tmp" src-tauri/Cargo.toml
+
+          # Cargo.lock records the package's own version too. Left stale it
+          # contradicts Cargo.toml, which fails any --locked/--frozen build.
+          if ! grep -qz 'name = "gitwyrm"\nversion = "[^"]*"' src-tauri/Cargo.lock; then
+            echo "::error::gitwyrm package entry not found in Cargo.lock"
+            exit 1
+          fi
+          perl -0pi -e 's/(name = "gitwyrm"\nversion = )"[^"]*"/$1"'"$version"'"/' \
+            src-tauri/Cargo.lock
+
+          npm version "$version" --no-git-tag-version --allow-same-version
+
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
 
       # The same binary the website's download button serves, bundled into the
       # app as well. Run with --updating it draws the "Updating GitWyrm" window
@@ -160,7 +216,11 @@ jobs:
       # exactly when the network is least trustworthy, and a helper fetched at
       # update time would add a download that can fail to the very moment it is
       # meant to be covering. See spawn_update_cover in commands/updates.rs.
+      # Windows only: the helper is raw Win32, and the gap it covers is an NSIS
+      # quiet install. An AppImage rewrites itself in place, and a deb install
+      # shows its own pkexec dialog, so neither has a blank screen to cover.
       - name: Build the update cover helper
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           cargo build --release --target ${{ matrix.rust_target }} \
@@ -180,7 +240,10 @@ jobs:
       # file on every app update - 408 files, 103 MB, for tools that change about
       # once a month. They are published to the CDN below and fetched by the
       # installer instead.
+      # Windows only: this is Git for Windows. Linux declares git and gpg as
+      # package dependencies instead, so nothing is bundled or published there.
       - name: Fetch git and gpg
+        if: runner.os == 'Windows'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -193,7 +256,7 @@ jobs:
       # this is what catches an incomplete list, before it reaches a user.
       # Skipped when cross-compiling, where the fetched binaries cannot run.
       - name: Verify the toolset can sign a commit
-        if: matrix.arch == 'x86_64'
+        if: runner.os == 'Windows' && matrix.arch == 'x86_64'
         shell: pwsh
         run: .github/scripts/smoke-test-bundled-tools.ps1 toolset-staging
 
@@ -201,7 +264,7 @@ jobs:
       # rather than just that git.exe starts. Cheap, and catches an upstream
       # layout change that would otherwise ship broken.
       - name: Check the toolset contents
-        if: matrix.arch == 'x86_64'
+        if: runner.os == 'Windows' && matrix.arch == 'x86_64'
         env:
           GITWYRM_TOOLSET_DIR: toolset-staging
         run: cargo test --manifest-path src-tauri/Cargo.toml --test bundled_tools -- --ignored
@@ -211,6 +274,7 @@ jobs:
       # costs nothing and leaves the hash clients cached alone. A new Git for
       # Windows release is therefore picked up by the next GitWyrm release.
       - name: Publish the toolset to the CDN
+        if: runner.os == 'Windows'
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -250,6 +314,7 @@ jobs:
       # and CDN copy -- symbolicates consistently. Revisit stripping for size at
       # beta, when it'd have to happen before the NSIS bundle is signed.
       - name: Upload Rust debug symbols to Sentry
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -268,6 +333,7 @@ jobs:
           npx @sentry/cli debug-files upload --include-sources "$dir"
 
       - name: Attach portable exe
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -278,12 +344,56 @@ jobs:
           }
           gh release upload ${{ github.ref_name }} gitwyrm-portable${{ matrix.portable_suffix }}.exe --clobber
 
+      # Same purpose as the pwsh step above: readable Rust stack traces. The
+      # symbols are DWARF inside the unstripped ELF rather than a separate PDB
+      # (Cargo sets strip = false), so the binary itself is what gets uploaded.
+      - name: Upload Rust debug symbols to Sentry (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: nyxservices
+          SENTRY_PROJECT: gitwyrm-backend
+        run: npx @sentry/cli debug-files upload --include-sources src-tauri/target/release/gitwyrm
+
+      # Version-pinned copies of the Linux artifacts, matching what the Windows
+      # step above does for the NSIS installer. The AppImage is the one the
+      # updater serves, so it must be fetchable at a stable per-version path.
+      - name: Upload versioned Linux packages to CDN
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          pip install awscli
+
+          upload() {
+            local src="$1" dest="$2"
+            if [ ! -f "$src" ]; then
+              echo "::error::expected $src to exist"
+              exit 1
+            fi
+            echo "Publishing $src -> $dest"
+            aws s3 cp "$src" "s3://gitwyrm-cdn/releases/${{ github.ref_name }}/$dest" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --cache-control "public, max-age=31536000, immutable"
+          }
+
+          base="${{ matrix.bundle_base }}"
+          upload "$(find "$base/appimage" -name '*.AppImage' -type f | head -1)" "GitWyrm-x86_64.AppImage"
+          upload "$(find "$base/deb" -name '*.deb' -type f | head -1)" "GitWyrm-amd64.deb"
+          upload "$(find "$base/rpm" -name '*.rpm' -type f | head -1)" "GitWyrm-x86_64.rpm"
+
       # Only the version-pinned copy is written here. The "latest" path a user
       # actually downloads from is published by the promote-cdn-latest job, which
       # waits for every arch: these legs run independently with fail-fast disabled,
       # so a leg that succeeds while another fails would otherwise leave the two
       # architectures on different versions.
       - name: Upload versioned installer to CDN
+        if: runner.os == 'Windows'
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -317,8 +427,16 @@ jobs:
   # other failed, leaving x64 and ARM64 users on different versions. Promotes by
   # copying the immutable per-version objects each leg already uploaded, so the
   # bytes served are provably the ones from this tag's build.
+  #
+  # `always()` plus an explicit result check rather than a bare `needs: release`:
+  # the matrix now includes Linux, and a plain dependency would let a failed
+  # Linux leg block the Windows pointers - which are what every existing user
+  # downloads from. The guard below re-asserts what this job actually needs,
+  # which is the two Windows objects, and those are verified to exist before
+  # anything moves.
   promote-cdn-latest:
     needs: release
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     # Pure R2 work under its own credentials, and no checkout, so the GitHub
     # token needs nothing at all.
@@ -376,6 +494,10 @@ jobs:
   # not live to users, and updates are not offered, until this job runs.
   publish:
     needs: [release, promote-cdn-latest]
+    # Same reasoning as promote-cdn-latest: a failed Linux leg must not hold back
+    # the Windows release. What actually has to be present is asserted by the
+    # asset check below, not by the dependency edge.
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -411,6 +533,16 @@ jobs:
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
+
+          # Linux is reported but not required yet. Promote these to the list
+          # above once a few releases have shipped with the Linux leg green:
+          # making them required on day one means one bad Linux build takes down
+          # the whole release for the Windows users who are already on it.
+          for optional in .AppImage .deb .rpm; do
+            if ! echo "$assets" | grep -q -- "$optional"; then
+              echo "::warning::No $optional asset on $TAG - Linux users will not be offered this build."
+            fi
+          done
 
       # tauri-action points the manifest at api.github.com asset URLs, which serve
       # JSON metadata rather than the installer to an unauthenticated client. The
