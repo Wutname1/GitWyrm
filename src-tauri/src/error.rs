@@ -32,9 +32,28 @@ const EXPECTED: &[&str] = &[
   "as it is the current head of a linked repository",
   "cannot delete branch",
   "you are not currently on a branch",
+  // The remote moved on since the last fetch, so a plain push was refused.
+  // Everyday collaboration, not a fault: the answer is to pull and retry, which
+  // the UI now says outright. 124 reports in 19 days told us nothing to fix.
+  //
+  // `(fetch first)` keeps its parentheses because that is how git prints it on
+  // the rejection line; the bare words appear in unrelated failures such as
+  // "failed to fetch first 8 bytes of pack".
+  "[rejected]",
+  "[remote rejected]",
+  "non-fast-forward",
+  "(fetch first)",
   // The network being unavailable is not an application error.
   "could not resolve host",
   "failed to connect",
+  // The host declining a request on its own rules. The user is told, and the
+  // answer is always theirs or their admin's -- there is nothing here we could
+  // change. "merge conflicts" alone accounted for 522 reports in 20 days.
+  "merge conflicts",
+  "sign-in is no longer valid",
+  "rate limit reached",
+  "review is required",
+  "not mergeable",
 ];
 
 fn is_expected(message: &str) -> bool {
@@ -84,6 +103,22 @@ mod tests {
     ));
   }
 
+  /// A push refused because the remote moved on is everyday collaboration.
+  /// `failure_detail` now surfaces the rejection line rather than git's
+  /// trailing hint, so these are the shapes that reach us.
+  #[test]
+  fn a_refused_push_is_expected() {
+    assert!(is_expected(
+      "git push failed: ! [rejected]        main -> main (fetch first)"
+    ));
+    assert!(is_expected(
+      "git push failed: ! [rejected]        main -> main (non-fast-forward)"
+    ));
+    assert!(is_expected(
+      "git push failed: ! [remote rejected] main -> main (pre-receive hook declined)"
+    ));
+  }
+
   #[test]
   fn matching_ignores_case() {
     assert!(is_expected("AUTHENTICATION FAILED"));
@@ -104,5 +139,9 @@ mod tests {
     assert!(!is_expected("bare repositories are not supported"));
     // Corruption must never read as routine just because it mentions a branch.
     assert!(!is_expected("git error: branch data is corrupt"));
+    // The push needles are short. A real fault that merely talks about
+    // fetching or rejection must still be reported.
+    assert!(!is_expected("git error: could not read from remote repository"));
+    assert!(!is_expected("io error: failed to fetch first 8 bytes of pack"));
   }
 }

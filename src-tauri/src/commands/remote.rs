@@ -120,15 +120,37 @@ fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
   // Lines git or the server explicitly tag are the real cause when present. The
   // `remote:` prefix is stripped first so server-side errors count too, and the
   // rejection markers git prints for a refused ref are treated the same way.
-  let tagged = stderr_lines.iter().rev().find(|l| {
-    let low = strip_remote(l).to_lowercase();
-    low.starts_with("error:")
-      || low.starts_with("fatal:")
-      || low.starts_with("hint:")
-      || low.contains("[rejected]")
-      || low.contains("[remote rejected]")
-  });
-  if let Some(line) = tagged {
+  //
+  // Rank rather than take-the-last. Git ends a refused push with several
+  // `hint:` lines, so scanning backwards for any tagged line returns
+  // "See the 'Note about fast-forwards' in 'git push --help' for details."
+  // and throws away the `! [rejected] main -> main (fetch first)` line that
+  // actually says why. That cost us both halves of the reporting: the user got
+  // told to read git's man page, and the message carried none of the words the
+  // classifier matches on, so an ordinary rejection was reported as a crash.
+  //
+  // A hint is the weakest evidence and only stands in when nothing better was
+  // printed; a rejection marker is the strongest because it names the ref.
+  fn tag_rank(line: &str) -> Option<u8> {
+    let low = line.to_lowercase();
+    if low.contains("[rejected]") || low.contains("[remote rejected]") {
+      Some(3)
+    } else if low.starts_with("error:") || low.starts_with("fatal:") {
+      Some(2)
+    } else if low.starts_with("hint:") {
+      Some(1)
+    } else {
+      None
+    }
+  }
+
+  // `max_by_key` keeps the last line of the best rank, matching the previous
+  // reverse scan for everything except the hint-shadowing case above.
+  let tagged = stderr_lines
+    .iter()
+    .filter_map(|l| tag_rank(strip_remote(l)).map(|rank| (rank, l)))
+    .max_by_key(|(rank, _)| *rank);
+  if let Some((_, line)) = tagged {
     return strip_remote(line).to_string();
   }
 
@@ -1215,6 +1237,61 @@ mod tests {
   use super::*;
   use git2::{Repository, Signature};
   use std::fs;
+
+  fn lines(raw: &[&str]) -> Vec<String> {
+    raw.iter().map(|l| (*l).to_string()).collect()
+  }
+
+  /// Git's real stderr for a push refused because the remote moved on. The
+  /// rejection line comes first and four `hint:` lines follow it.
+  fn non_fast_forward_stderr() -> Vec<String> {
+    lines(&[
+      "To https://github.com/example/repo.git",
+      " ! [rejected]        main -> main (fetch first)",
+      "error: failed to push some refs to 'https://github.com/example/repo.git'",
+      "hint: Updates were rejected because the remote contains work that you do",
+      "hint: not have locally. This is usually caused by another repository pushing",
+      "hint: to the same ref. If you want to integrate the remote changes, use",
+      "hint: 'git pull' before pushing again.",
+      "hint: See the 'Note about fast-forwards' in 'git push --help' for details.",
+    ])
+  }
+
+  /// The whole reporting chain hangs off this line. Returning git's trailing
+  /// hint told the user to read a man page and stripped the message of every
+  /// word the classifier matches on, so a routine rejection was filed as a bug.
+  #[test]
+  fn a_rejection_beats_the_hints_that_follow_it() {
+    let detail = failure_detail(&non_fast_forward_stderr(), "");
+    assert!(
+      detail.contains("[rejected]"),
+      "the rejection line names the ref and the reason; got: {detail}"
+    );
+    assert!(
+      !detail.contains("git push --help"),
+      "git's type-this-command advice must never be what we surface; got: {detail}"
+    );
+  }
+
+  /// A hint is still better than nothing when it is all git printed.
+  #[test]
+  fn a_lone_hint_is_still_reported() {
+    let detail = failure_detail(&lines(&["hint: you may want to fetch first"]), "");
+    assert_eq!(detail, "hint: you may want to fetch first");
+  }
+
+  /// Server-side refusals arrive `remote:`-prefixed and outrank a local hint.
+  #[test]
+  fn a_server_refusal_outranks_a_hint() {
+    let detail = failure_detail(
+      &lines(&[
+        "remote: error: GH006: Protected branch update failed for refs/heads/main.",
+        "hint: See the 'Note about fast-forwards' in 'git push --help' for details.",
+      ]),
+      "",
+    );
+    assert!(detail.contains("GH006"), "got: {detail}");
+  }
 
   fn commit_all(repo: &Repository, message: &str) {
     let mut index = repo.index().expect("index");
