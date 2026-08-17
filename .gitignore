@@ -63,3 +63,7 @@ src/components/_ds_barrel.ts
 src-tauri/resources/*
 !src-tauri/resources/README.md
 /docs/
+
+# Linux packages built locally for VM testing. Rebuild with
+# `npx tauri build --config src-tauri/tauri.linux.conf.json`.
+linux-artifacts/
