@@ -67,8 +67,8 @@ describe('recencyBucket', () => {
   })
 
   it('collapses day seven and everything older into one heading', () => {
-    expect(recencyBucket(at(2026, 7, 10), NOW).label).toBe('Over a Week or Older')
-    expect(recencyBucket(at(2025, 0, 1), NOW).label).toBe('Over a Week or Older')
+    expect(recencyBucket(at(2026, 7, 10), NOW).label).toBe('Older')
+    expect(recencyBucket(at(2025, 0, 1), NOW).label).toBe('Older')
   })
 
   it('treats a missing or junk stamp as oldest', () => {
@@ -183,7 +183,7 @@ describe('bucketByRecency', () => {
     expect(sections.map((section) => section.bucket.label)).toEqual([
       'Today',
       'Yesterday',
-      'Over a Week or Older',
+      'Older',
     ])
     // Both of today's tabs share the one heading.
     expect(sections[0]!.items).toHaveLength(2)
@@ -226,7 +226,7 @@ describe('bucketByRecency', () => {
 
     // Oldest first, and Today is still one section rather than two runs.
     expect(sections.map((section) => section.bucket.label)).toEqual([
-      'Over a Week or Older',
+      'Older',
       'Today',
     ])
     expect(sections[1]!.items).toHaveLength(2)
@@ -238,6 +238,6 @@ describe('bucketByRecency', () => {
       lastUsedAt: {},
       now: NOW,
     })
-    expect(sections[0]!.bucket.label).toBe('Over a Week or Older')
+    expect(sections[0]!.bucket.label).toBe('Older')
   })
 })

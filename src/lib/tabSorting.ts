@@ -82,7 +82,9 @@ const DAY_MS = 86_400_000
  * how people actually talk about it.
  *
  * Days 2-6 get their own dated heading. Day 7 and beyond collapse into one
- * bucket, so the strip never grows an unbounded run of headings.
+ * bucket, so the strip never grows an unbounded run of headings. That last one
+ * is just "Older" -- the dated headings above it already set the timeline, so
+ * spelling out the week again only makes the label longer.
  */
 export function recencyBucket(
   lastUsed: number | undefined,
@@ -91,7 +93,7 @@ export function recencyBucket(
   // No stamp means the tab has not been opened since we started keeping track,
   // which is indistinguishable from long-ago -- so it files with the oldest.
   if (lastUsed == null || !Number.isFinite(lastUsed) || lastUsed <= 0)
-    return { id: 'older', label: 'Over a Week or Older' }
+    return { id: 'older', label: 'Older' }
 
   const today = startOfDay(now)
   // A stamp in the future (clock change, edited settings) is still "now" to the
@@ -100,7 +102,7 @@ export function recencyBucket(
 
   if (daysAgo === 0) return { id: 'today', label: 'Today' }
   if (daysAgo === 1) return { id: 'yesterday', label: 'Yesterday' }
-  if (daysAgo >= 7) return { id: 'older', label: 'Over a Week or Older' }
+  if (daysAgo >= 7) return { id: 'older', label: 'Older' }
 
   const date = new Date(lastUsed)
   return {
