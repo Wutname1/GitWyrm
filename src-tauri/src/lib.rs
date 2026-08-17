@@ -306,7 +306,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
   .typ::<airun::RunEventKind>()
 }
 
-const SENTRY_DSN: &str = "https://5cb301777a6d45efd4ddba81136bc6c9@o4511760444686336.ingest.us.sentry.io/4511760446717952";
+const SENTRY_DSN: &str = "https://543d8fb8597dad94c5d0bef310ad046f@o4511760230907904.ingest.us.sentry.io/4511924397735936";
 
 /// Starts crash reporting and observability. The returned guard flushes pending
 /// events on drop, so it has to stay alive for the whole process. Debug builds

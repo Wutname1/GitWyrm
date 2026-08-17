@@ -40,7 +40,7 @@ export function initSentry(enabled: boolean, usageTelemetry: boolean) {
   if (!enabled) return
 
   Sentry.init({
-    dsn: 'https://a2cb101567f5cec264a9a0b43e6f8c24@o4511760444686336.ingest.us.sentry.io/4511769575948288',
+    dsn: 'https://a2cb101567f5cec264a9a0b43e6f8c24@o4511760230907904.ingest.us.sentry.io/4511769575948288',
     release: __APP_VERSION__,
     environment: 'alpha',
     sendDefaultPii: false,

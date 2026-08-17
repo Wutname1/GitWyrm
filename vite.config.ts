@@ -23,7 +23,7 @@ export default defineConfig({
     ...(sentryToken
       ? [
           sentryVitePlugin({
-            org: 'gitwyrm',
+            org: 'nyxservices',
             project: 'gitwyrm-frontend',
             authToken: sentryToken,
             release: { name: pkg.version },

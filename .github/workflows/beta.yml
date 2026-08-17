@@ -224,7 +224,7 @@ jobs:
         shell: pwsh
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: gitwyrm
+          SENTRY_ORG: nyxservices
           SENTRY_PROJECT: gitwyrm-backend
         run: |
           $dir = "src-tauri/target/${{ matrix.rust_target }}/release"
