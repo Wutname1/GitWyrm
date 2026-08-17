@@ -409,6 +409,16 @@ pub struct Settings {
   /// Manual ignores it.
   #[serde(default)]
   pub tab_sort_direction: Option<String>,
+  /// When each tab was last switched to, epoch milliseconds keyed by lowercased
+  /// repository path. Feeds the "recently used" sort and the date headings above
+  /// it, which is why it survives a restart rather than living in memory.
+  ///
+  /// f64 rather than i64 because these cross to JavaScript, whose numbers are
+  /// f64 anyway -- and specta refuses to export BigInt types over a bridge it
+  /// cannot prove handles them. Millisecond stamps are exact well past year
+  /// 275760, so nothing is lost.
+  #[serde(default)]
+  pub tab_last_used_at: HashMap<String, f64>,
   /// Repository paths kept at the front of the tab strip, in pin order.
   #[serde(default)]
   pub pinned_tab_paths: Vec<String>,
@@ -657,6 +667,7 @@ impl Default for Settings {
       tab_order: Vec::new(),
       tab_sort: None,
       tab_sort_direction: None,
+      tab_last_used_at: HashMap::new(),
       pinned_tab_paths: Vec::new(),
       saved_tab_groups: Vec::new(),
       pinned_repo_paths: Vec::new(),
@@ -1375,6 +1386,9 @@ mod tests {
       "c:\\code\\gitwyrm|unstaged".to_string(),
       vec!["src".to_string(), "src/components".to_string()],
     );
+    settings
+      .tab_last_used_at
+      .insert("c:\\code\\gitwyrm".to_string(), 1_770_000_000_000.0);
 
     let json = serde_json::to_string(&settings).expect("settings should serialize");
     let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
@@ -1383,6 +1397,10 @@ mod tests {
     assert_eq!(restored.tab_order, settings.tab_order);
     assert_eq!(restored.tab_sort.as_deref(), Some("changes"));
     assert_eq!(restored.tab_sort_direction.as_deref(), Some("reverse"));
+    assert_eq!(
+      restored.tab_last_used_at.get("c:\\code\\gitwyrm"),
+      Some(&1_770_000_000_000.0)
+    );
     assert_eq!(restored.pinned_tab_paths, vec!["C:\\code\\GitWyrm"]);
     assert_eq!(restored.tab_groups[0].name, "Work");
     assert!(restored.tab_groups[0].collapsed);

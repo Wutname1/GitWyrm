@@ -97,7 +97,7 @@ export type TabDropPlacement = "before" | "after";
  * built; the other two are computed views that leave that order untouched, so
  * switching back to Manual restores exactly what they had.
  */
-export type TabSort = "manual" | "name" | "changes";
+export type TabSort = "manual" | "name" | "changes" | "recent";
 
 /**
  * Which way a sort runs. 'forward' is the natural reading of each rule -- A to Z
@@ -106,7 +106,7 @@ export type TabSort = "manual" | "name" | "changes";
  */
 export type TabSortDirection = "forward" | "reverse";
 
-const TAB_SORTS = new Set<TabSort>(["manual", "name", "changes"]);
+const TAB_SORTS = new Set<TabSort>(["manual", "name", "changes", "recent"]);
 
 export function normalizeTabSort(sort: string | null | undefined): TabSort {
   return TAB_SORTS.has(sort as TabSort) ? (sort as TabSort) : "manual";
@@ -786,6 +786,13 @@ interface WorkspaceState {
   tabSort: TabSort;
   /** Which way the current sort runs. Ignored by 'manual' (persisted). */
   tabSortDirection: TabSortDirection;
+  /**
+   * When each tab was last switched to, as epoch milliseconds keyed by
+   * lowercased repo path (persisted). Drives the 'recent' sort and the date
+   * headings above it. Persisted because a tab strip that forgets every restart
+   * would put every tab under one heading and the sort would say nothing.
+   */
+  tabLastUsedAt: Record<string, number>;
   /** Repo paths kept at the front of the tab strip, in pin order (persisted). */
   pinnedTabPaths: string[];
   /** Reusable group snapshots available from the repository picker (persisted). */
@@ -1106,6 +1113,7 @@ function toSettings(s: WorkspaceState): Settings {
     tab_order: serializeTabOrder(s.tabOrder),
     tab_sort: s.tabSort,
     tab_sort_direction: s.tabSortDirection,
+    tab_last_used_at: s.tabLastUsedAt,
     pinned_tab_paths: s.pinnedTabPaths,
     saved_tab_groups: s.savedTabGroups.map((group) => ({
       id: group.id,
@@ -1243,6 +1251,24 @@ function normalizeExpandedChangeFolders(
   const out: Record<string, string[]> = {};
   for (const [key, value] of Object.entries(folders ?? {})) {
     if (value && value.length > 0) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Validate stored last-used stamps. Keys are re-normalized because a path
+ * saved on an earlier run may not match how we key paths now, and non-finite
+ * or negative stamps are dropped rather than sorted as if they were real -- a
+ * junk timestamp would strand a tab under the wrong heading forever.
+ */
+function normalizeTabLastUsedAt(
+  stamps: Partial<Record<string, number>> | undefined,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(stamps ?? {})) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+      continue;
+    out[pathKey(key)] = value;
   }
   return out;
 }
@@ -1549,6 +1575,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   tabOrder: [],
   tabSort: "manual",
   tabSortDirection: "forward",
+  tabLastUsedAt: {},
   pinnedTabPaths: [],
   savedTabGroups: [],
   pinnedRepoPaths: [],
@@ -1580,7 +1607,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
             { name: repo.name, path: repo.path },
             ...s.recents.filter((r) => !samePath(r.path, repo.path)),
           ].slice(0, 10);
-      return { openRepos, activeRepoId: repo.id, recents, tabOrder };
+      return {
+        openRepos,
+        activeRepoId: repo.id,
+        recents,
+        tabOrder,
+        // Opening a repo selects it, and this path skips setActiveRepo, so
+        // stamp it here or a freshly opened tab would sort as never-used.
+        tabLastUsedAt: { ...s.tabLastUsedAt, [pathKey(repo.path)]: Date.now() },
+      };
     });
     schedulePersist();
   },
@@ -1768,7 +1803,17 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set((s) => ({ commitDrafts: clearDraft(s.commitDrafts, repoId) }));
   },
   setActiveRepo: (id) => {
-    set({ activeRepoId: id });
+    set((s) => {
+      // Switching to a tab is what "used" means, so stamp it here -- the one
+      // choke point every tab click goes through.
+      const repo = s.openRepos.find((candidate) => candidate.id === id);
+      return {
+        activeRepoId: id,
+        tabLastUsedAt: repo
+          ? { ...s.tabLastUsedAt, [pathKey(repo.path)]: Date.now() }
+          : s.tabLastUsedAt,
+      };
+    });
     // Selecting a repo tab means "show me that repo", so step out of the
     // app-level picker view if it was covering the center. The picker's own tab
     // stays open, so coming back to it keeps whatever was typed there.
@@ -2926,6 +2971,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         tabSortDirection: normalizeTabSortDirection(
           settings.tab_sort_direction,
         ),
+        tabLastUsedAt: normalizeTabLastUsedAt(settings.tab_last_used_at),
         pinnedTabPaths: (settings.pinned_tab_paths ?? []).map(normalizePath),
         savedTabGroups,
         pinnedRepoPaths: settings.pinned_repo_paths ?? [],

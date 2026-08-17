@@ -4691,6 +4691,17 @@ tab_sort?: string | null;
  */
 tab_sort_direction?: string | null; 
 /**
+ * When each tab was last switched to, epoch milliseconds keyed by lowercased
+ * repository path. Feeds the "recently used" sort and the date headings above
+ * it, which is why it survives a restart rather than living in memory.
+ * 
+ * f64 rather than i64 because these cross to JavaScript, whose numbers are
+ * f64 anyway -- and specta refuses to export BigInt types over a bridge it
+ * cannot prove handles them. Millisecond stamps are exact well past year
+ * 275760, so nothing is lost.
+ */
+tab_last_used_at?: Partial<{ [key in string]: number }>; 
+/**
  * Repository paths kept at the front of the tab strip, in pin order.
  */
 pinned_tab_paths?: string[]; 

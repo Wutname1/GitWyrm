@@ -11,6 +11,7 @@ import {
   Columns3,
   FolderOpen,
   GripVertical,
+  History,
   Loader2,
   PanelLeft,
   Plus,
@@ -199,6 +200,14 @@ const TAB_SORT_OPTIONS: {
     icon: <ArrowDown10 size={13} strokeWidth={2} />,
     reverseIcon: <ArrowUp01 size={13} strokeWidth={2} />,
   },
+  {
+    value: "recent",
+    label: "Recently used",
+    hint: "The tab you opened last stays on top",
+    reverseHint: "The tab you have not touched longest comes first",
+    icon: <Clock size={13} strokeWidth={2} />,
+    reverseIcon: <History size={13} strokeWidth={2} />,
+  },
 ];
 
 /**
@@ -236,16 +245,20 @@ function TabSortPicker() {
                   return;
                 }
                 const flipped = direction === "reverse";
-                toast.success(
-                  `Tabs sorted by ${option.label.toLowerCase()}, ${
-                    option.value === "name"
+                const which =
+                  option.value === "name"
+                    ? flipped
+                      ? "Z to A"
+                      : "A to Z"
+                    : option.value === "recent"
                       ? flipped
-                        ? "Z to A"
-                        : "A to Z"
+                        ? "longest untouched first"
+                        : "newest first"
                       : flipped
                         ? "quietest first"
-                        : "busiest first"
-                  }`,
+                        : "busiest first";
+                toast.success(
+                  `Tabs sorted by ${option.label.toLowerCase()}, ${which}`,
                 );
               }}
               aria-pressed={selected}

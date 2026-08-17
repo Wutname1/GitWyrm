@@ -46,7 +46,7 @@ import {
   type TabGroup,
   type TabOrderItem,
 } from "@/stores/workspaceStore";
-import { arrangeTabs } from "@/lib/tabSorting";
+import { arrangeTabs, bucketByRecency } from "@/lib/tabSorting";
 import { useTabStatusStore } from "@/stores/tabStatusStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useBranches, useRepoTabStatus } from "@/hooks/useGitQueries";
@@ -201,6 +201,32 @@ function DropGap({
       {active ? label : ""}
     </div>
   );
+}
+
+/**
+ * "Now" for the date headings, refreshed when the day rolls over. A window left
+ * open past midnight would otherwise keep yesterday's work labelled "Today".
+ * Only runs while the headings are actually on screen.
+ */
+function useTodayStamp(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!enabled) return;
+    // Re-check on the hour rather than sleeping until midnight: a laptop that
+    // suspends through the boundary never fires a long timer, and waking to a
+    // stale "Today" is exactly the bug this guards against.
+    const id = window.setInterval(() => setNow(Date.now()), 60 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [enabled]);
+
+  // Only the calendar day matters, so the value changes at most once a day and
+  // the bucket memo does not churn every hour.
+  return useMemo(() => {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return start.getTime();
+  }, [now]);
 }
 
 function useScrollEdges(enabled: boolean) {
@@ -844,6 +870,7 @@ export function RepositoryTabs({
   const tabSort = useWorkspaceStore((state) => state.tabSort);
   const tabSortDirection = useWorkspaceStore((state) => state.tabSortDirection);
   const pinnedTabPaths = useWorkspaceStore((state) => state.pinnedTabPaths);
+  const tabLastUsedAt = useWorkspaceStore((state) => state.tabLastUsedAt);
   const changeCounts = useTabStatusStore((state) => state.changeCounts);
   const savedTabGroups = useWorkspaceStore((state) => state.savedTabGroups);
   const repoPickerOpen = useUiStore((state) => state.repoPickerOpen);
@@ -879,6 +906,7 @@ export function RepositoryTabs({
           openRepos.map((repo) => [pathKey(repo.path), repo.name]),
         ),
         changeCounts,
+        lastUsedAt: tabLastUsedAt,
       }),
     [
       tabOrder,
@@ -889,6 +917,7 @@ export function RepositoryTabs({
       tabAliases,
       openRepos,
       changeCounts,
+      tabLastUsedAt,
     ],
   );
   // Counts outlive their tabs on purpose (see ChangeCountReporter), so closing a
@@ -903,6 +932,22 @@ export function RepositoryTabs({
   // positions in tabOrder, so gaps only appear in the sortable remainder.
   const displayOrder = arrangement.rest;
   const pinnedOrder = arrangement.pinned;
+
+  // Date headings only make sense stacked vertically, and only while the strip
+  // is actually sorted by recency.
+  const showRecencyHeadings = orientation === "vertical" && tabSort === "recent";
+  const today = useTodayStamp(showRecencyHeadings);
+  const recencySections = useMemo(
+    () =>
+      showRecencyHeadings
+        ? bucketByRecency(displayOrder, {
+            groups: tabGroups,
+            lastUsedAt: tabLastUsedAt,
+            now: today,
+          })
+        : null,
+    [showRecencyHeadings, displayOrder, tabGroups, tabLastUsedAt, today],
+  );
   const verticalIconOnly =
     orientation === "vertical" && verticalTabWidth <= VERTICAL_ICON_ONLY_WIDTH;
   const effectiveIconOnly = tabIconOnly || verticalIconOnly;
@@ -2062,6 +2107,33 @@ export function RepositoryTabs({
     );
   };
 
+  /**
+   * One entry of the sortable remainder, with its drop gap. Shared so the
+   * plain list and the date-headed sections render tabs identically.
+   */
+  const renderOrderedItem = (item: TabOrderItem) => (
+    <Fragment
+      key={
+        item.type === "group"
+          ? `group-${item.id}`
+          : `repo-${pathKey(item.path)}`
+      }
+    >
+      {renderOrderGap(orderIndexOf(item), item)}
+      {item.type === "group"
+        ? (() => {
+            const group = tabGroups.find(
+              (candidate) => candidate.id === item.id,
+            );
+            return group ? renderGroup(group) : null;
+          })()
+        : (() => {
+            const repo = findRepo(openRepos, item.path);
+            return repo ? renderRepoTab(repo, null) : null;
+          })()}
+    </Fragment>
+  );
+
   return (
     <>
       {openRepos.map((repo) => (
@@ -2111,28 +2183,26 @@ export function RepositoryTabs({
             )}
           </div>
         )}
-        {displayOrder.map((item) => (
-          <Fragment
-            key={
-              item.type === "group"
-                ? `group-${item.id}`
-                : `repo-${pathKey(item.path)}`
-            }
-          >
-            {renderOrderGap(orderIndexOf(item), item)}
-            {item.type === "group"
-              ? (() => {
-                  const group = tabGroups.find(
-                    (candidate) => candidate.id === item.id,
-                  );
-                  return group ? renderGroup(group) : null;
-                })()
-              : (() => {
-                  const repo = findRepo(openRepos, item.path);
-                  return repo ? renderRepoTab(repo, null) : null;
-                })()}
-          </Fragment>
-        ))}
+        {recencySections
+          ? recencySections.map((section) => (
+              <Fragment key={`bucket-${section.bucket.id}`}>
+                <div
+                  data-recency-heading={section.bucket.id}
+                  // Sticky so you can always see which day you are looking at
+                  // while scrolling a long strip.
+                  className="sticky top-0 z-10 flex flex-none items-baseline gap-1.5 bg-background px-1 pb-1 pt-2"
+                >
+                  <span className="text-2xs font-bold uppercase tracking-[.09em] text-sub">
+                    {section.bucket.label}
+                  </span>
+                  <span className="font-mono text-2xs text-muted-foreground">
+                    {section.items.length}
+                  </span>
+                </div>
+                {section.items.map(renderOrderedItem)}
+              </Fragment>
+            ))
+          : displayOrder.map(renderOrderedItem)}
         {renderOrderGap(tabOrder.length, null)}
         <AddRepoTab
           orientation={orientation}
