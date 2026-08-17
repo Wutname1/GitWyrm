@@ -332,29 +332,22 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
   }
   // Read once: this touches the disk, and the value decides two options below.
   let usage_telemetry = settings::usage_telemetry_enabled();
-  Some(sentry::init((
-    SENTRY_DSN,
-    sentry::ClientOptions {
-      release: Some(env!("CARGO_PKG_VERSION").into()),
-      environment: Some("alpha".into()),
+  // 0.49 made ClientOptions non-exhaustive, so these are builder setters
+  // rather than a struct literal.
+  let options = sentry::ClientOptions::new()
+      .release(env!("CARGO_PKG_VERSION"))
+      .environment("alpha")
       // Repo paths and branch names reach Sentry through panic messages, so
       // keep the extra user identifiers off.
-      send_default_pii: false,
+      .send_default_pii(false)
       // Report every panic as a Sentry event, not just the process-fatal ones.
-      attach_stacktrace: true,
-      // Performance tracing is usage telemetry, not crash reporting: 0.0 means
-      // no transaction is recorded or sent, while panics and errors still go
-      // out under `crash_reports`.
-      //
-      // ALPHA: when on, trace 100% of transactions. Drop toward 0.1-0.2 before
-      // launch, or the free-plan performance quota burns out fast.
-      traces_sample_rate: if usage_telemetry { 1.0 } else { 0.0 },
-      max_breadcrumbs: 100,
+      .attach_stacktrace(true)
+      .max_breadcrumbs(100)
       // `send_default_pii: false` does not touch payloads: a panic message or a
       // logged error still carries whatever text built it. Every log::error!
       // becomes a Sentry event via SentryLogger, and those messages embed repo
       // paths, author emails, and provider error bodies. Scrub on the way out.
-      before_send: Some(std::sync::Arc::new(|mut event: sentry::protocol::Event| {
+      .before_send(|mut event: sentry::protocol::Event| {
         if let Some(message) = event.message.take() {
           event.message = Some(scrub::scrub_text(&message));
         }
@@ -367,18 +360,29 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
           entry.message = scrub::scrub_text(&entry.message);
         }
         Some(event)
-      })),
-      before_breadcrumb: Some(std::sync::Arc::new(
-        |mut crumb: sentry::protocol::Breadcrumb| {
-          if let Some(message) = crumb.message.take() {
-            crumb.message = Some(scrub::scrub_text(&message));
-          }
-          Some(crumb)
-        },
-      )),
-      ..Default::default()
-    },
-  )))
+      })
+      .before_breadcrumb(|mut crumb: sentry::protocol::Breadcrumb| {
+        if let Some(message) = crumb.message.take() {
+          crumb.message = Some(scrub::scrub_text(&message));
+        }
+        Some(crumb)
+      });
+
+  // Performance tracing is usage telemetry, not crash reporting, so it is only
+  // configured when that is on -- panics and errors still go out under
+  // `crash_reports` either way. Left unset, the strategy defaults to
+  // `Disabled`, which is a stronger off switch than a 0.0 fixed rate: a fixed
+  // rate still honors an inherited sampling decision from an upstream trace.
+  //
+  // ALPHA: when on, trace 100% of transactions. Drop toward 0.1-0.2 before
+  // launch, or the free-plan performance quota burns out fast.
+  let options = if usage_telemetry {
+    options.traces_sample_rate(1.0)
+  } else {
+    options
+  };
+
+  Some(sentry::init((SENTRY_DSN, options)))
 }
 
 /// Shared configuration for the log plugin: level, timestamps, and stdout.

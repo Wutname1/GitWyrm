@@ -47,7 +47,7 @@ notify = "8"
 # Deleting a file from the changes menu goes to the Recycle Bin / Trash, not
 # straight off disk, so a misclick stays recoverable.
 trash = "5"
-notify-debouncer-full = "0.5"
+notify-debouncer-full = "0.7"
 # Parses .gitignore chains into a fast, lock-free matcher so the file watcher can
 # skip ignored paths without contending with the repo lock that git status holds.
 ignore = "0.4"
@@ -56,13 +56,16 @@ specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-base64 = "0.22"
+# 0.13 moved `form` (and `query`) behind opt-in features, and renamed the TLS
+# feature `rustls-tls` -> `rustls`. The device-flow calls in ai/copilot.rs post
+# form bodies, so `form` is required.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form"] }
+base64 = "0.23"
 # Object-safe async methods on the HostProvider trait, so the code-host
 # providers can live behind one `&dyn` list.
 async-trait = "0.1"
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
-sentry = { version = "0.48.5", default-features = false, features = [
+sentry = { version = "0.49.1", default-features = false, features = [
   "backtrace",
   "contexts",
   "panic",
@@ -71,7 +74,7 @@ sentry = { version = "0.48.5", default-features = false, features = [
 ] }
 # Bridges `log::error!`/`warn!` into Sentry events. Without this the backend
 # only ever reports panics, so command failures stayed local to gitwyrm.log.
-sentry-log = "0.48.5"
+sentry-log = "0.49.1"
 # Reopens the folder in the running app when Explorer's "Open with GitWyrm"
 # launches a second process, instead of starting a duplicate window.
 tauri-plugin-single-instance = "2"
@@ -85,7 +88,7 @@ tauri-plugin-single-instance = "2"
 # copy it fails with BinaryNotFound unless COPILOT_CLI_PATH is set. The cost is
 # real -- it takes the release binary from 20.3 MB to 114.5 MB -- but turning it
 # off produces a build that cannot run.
-github-copilot-sdk = "1.0.8"
+github-copilot-sdk = "1.0.11"
 liblzma = { version = "0.4.8", features = ["static"] }
 tar = "0.4.46"
 sha2 = "0.11.0"
@@ -93,7 +96,7 @@ sha2 = "0.11.0"
 # Explorer's right-click entry is a set of HKCU registry verbs, so the app can
 # add and remove it without elevation.
 [target.'cfg(windows)'.dependencies]
-winreg = "0.52"
+winreg = "0.56"
 
 [dev-dependencies]
 tempfile = "3"
