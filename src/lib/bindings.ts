@@ -545,7 +545,7 @@ async checkForUpdate() : Promise<Result<string | null, string>> {
  * stable manifest -- a beta user would check beta, find a version, then
  * install whatever stable happened to be.
  */
-async installUpdate() : Promise<Result<string | null, string>> {
+async installUpdate() : Promise<Result<InstallOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("install_update") };
 } catch (e) {
@@ -3721,6 +3721,30 @@ export type IgnoredFile = {
  * Path relative to the source checkout.
  */
 path: string; size_bytes: number }
+/**
+ * What happened when an install was attempted.
+ * 
+ * A plain error is the wrong shape for the Linux package case. Installing a
+ * .deb or .rpm needs root, which the updater asks for via pkexec, then a
+ * graphical sudo, then a terminal sudo. When all three are unavailable or the
+ * user dismisses the prompt, nothing is broken and nothing is wrong with the
+ * download - the app simply cannot install itself, and the honest answer is to
+ * point at the download page rather than show the user a dpkg error.
+ */
+export type InstallOutcome = 
+/**
+ * No update was on offer.
+ */
+{ kind: "up_to_date" } | 
+/**
+ * The install is underway; on most platforms the process exits inside it.
+ */
+{ kind: "installing"; version: string } | 
+/**
+ * A newer version exists but this install cannot apply it itself. The user
+ * has to download it. Not an error: there is nothing for them to retry.
+ */
+{ kind: "manual_required"; version: string; url: string }
 /**
  * One installed editor, as offered to the frontend.
  */

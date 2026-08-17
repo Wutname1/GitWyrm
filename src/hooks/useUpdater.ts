@@ -1,7 +1,11 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { getVersion } from "@tauri-apps/api/app";
-import { commands, type ChangelogEntry } from "@/lib/bindings";
+import {
+  commands,
+  type ChangelogEntry,
+  type InstallOutcome,
+} from "@/lib/bindings";
 import { clearSplashBar, setSplashBar } from "@/lib/splash";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 
@@ -15,6 +19,13 @@ export type UpdateState =
   | "downloaded"
   | "ready"
   | "none"
+  /**
+   * An update exists but this install cannot apply it: a Linux .deb or .rpm
+   * needs root, and every escalation path was refused or unavailable. Terminal
+   * on purpose - the auto-check skips it, because re-offering an update the
+   * user cannot install would nag them every couple of hours forever.
+   */
+  | "manual"
   | "error";
 
 /** How far a download has got, for the modal's bar. */
@@ -34,6 +45,12 @@ interface UpdaterStore {
   currentVersion: string | null;
   /** Live download progress, or null when nothing is downloading. */
   progress: DownloadProgress | null;
+  /**
+   * Where to get the update by hand, set only in the "manual" state. Nothing
+   * else populates this, so its presence is what tells the UI to offer a link
+   * rather than a retry button.
+   */
+  manualUrl: string | null;
   /** Release notes for every version newer than the running one. */
   changelog: ChangelogEntry[];
   /** True while the changelog request is in flight. */
@@ -118,10 +135,22 @@ async function runInstall(
     (message) => toast.loading(message, { id: toastId }),
     () => {},
   );
+  let outcome: InstallOutcome;
   try {
-    await installUpdate();
+    outcome = await installUpdate();
   } finally {
     unlisten();
+  }
+
+  // Installing a Linux package needs root, and the user can refuse. Nothing is
+  // broken when they do, so say what to do next instead of showing an error.
+  if (outcome.kind === "manual_required") {
+    set({ state: "manual", version: outcome.version, manualUrl: outcome.url });
+    toast.info(`Update ${outcome.version} has to be installed by hand`, {
+      id: toastId,
+      description: "GitWyrm could not get permission to install it for you.",
+    });
+    return;
   }
 
   set({ state: "ready" });
@@ -144,9 +173,10 @@ async function fetchUpdate(): Promise<string | null> {
   return res.data;
 }
 
-async function installUpdate(): Promise<void> {
+async function installUpdate(): Promise<InstallOutcome> {
   const res = await commands.installUpdate();
   if (res.status === "error") throw new Error(res.error);
+  return res.data;
 }
 
 /** Event name the backend emits download progress on. Matches updates.rs. */
@@ -238,6 +268,7 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
   version: null,
   currentVersion: null,
   progress: null,
+  manualUrl: null,
   changelog: [],
   changelogLoading: false,
   modalOpen: false,
@@ -396,6 +427,7 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
       onStatus(`Downloading update ${version}`);
 
       const unlisten = await watchDownload(onStatus, setSplashBar);
+      let outcome: InstallOutcome;
       try {
         // Deliberately not wrapped in withTimeout: downloading an installer over
         // a slow link legitimately takes longer than the check budget, and
@@ -405,10 +437,22 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
         // to ShellExecute and then calls std::process::exit(0). The lines below
         // are for platforms whose install path does return -- and as a safety
         // net if that ever changes.
-        await installUpdate();
+        outcome = await installUpdate();
       } finally {
         unlisten();
         clearSplashBar();
+      }
+
+      // The user declined the root prompt, or there was no way to ask. Carry on
+      // into the app rather than holding the splash: they can install it later,
+      // and nothing about the running version is broken.
+      if (outcome.kind === "manual_required") {
+        set({
+          state: "manual",
+          version: outcome.version,
+          manualUrl: outcome.url,
+        });
+        return;
       }
 
       set({ state: "ready" });
@@ -429,7 +473,11 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
         state === "checking" ||
         state === "downloading" ||
         state === "ready" ||
-        state === "available"
+        state === "available" ||
+        // Terminal: the update cannot be installed from inside the app, so
+        // re-finding it every couple of hours would only nag someone who
+        // already knows and can do nothing about it from here.
+        state === "manual"
       ) {
         return;
       }

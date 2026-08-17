@@ -38,6 +38,26 @@ pub struct UpdateProgress {
   pub total: Option<u64>,
 }
 
+/// What happened when an install was attempted.
+///
+/// A plain error is the wrong shape for the Linux package case. Installing a
+/// .deb or .rpm needs root, which the updater asks for via pkexec, then a
+/// graphical sudo, then a terminal sudo. When all three are unavailable or the
+/// user dismisses the prompt, nothing is broken and nothing is wrong with the
+/// download - the app simply cannot install itself, and the honest answer is to
+/// point at the download page rather than show the user a dpkg error.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InstallOutcome {
+  /// No update was on offer.
+  UpToDate,
+  /// The install is underway; on most platforms the process exits inside it.
+  Installing { version: String },
+  /// A newer version exists but this install cannot apply it itself. The user
+  /// has to download it. Not an error: there is nothing for them to retry.
+  ManualRequired { version: String, url: String },
+}
+
 /// Manifest URL per channel.
 ///
 /// Stable keeps the GitHub URL it has always had. Builds already in the wild
@@ -633,12 +653,12 @@ pub async fn install_downloaded_update(app: tauri::AppHandle) -> Result<(), AppE
 /// install whatever stable happened to be.
 #[tauri::command]
 #[specta::specta]
-pub async fn install_update(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
+pub async fn install_update(app: tauri::AppHandle) -> Result<InstallOutcome, AppError> {
   let updater = updater_for_channel(&app).await?;
 
   let update = match updater.check().await {
     Ok(Some(update)) => update,
-    Ok(None) => return Ok(None),
+    Ok(None) => return Ok(InstallOutcome::UpToDate),
     Err(e) => return Err(AppError::Other(e.to_string())),
   };
 
@@ -684,13 +704,45 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<Option<String>, App
     let _ = progress_app.emit(UPDATE_PROGRESS_EVENT, UpdateProgress { downloaded, total });
   };
 
-  update
-    .download_and_install(on_chunk, || {})
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?;
+  if let Err(e) = update.download_and_install(on_chunk, || {}).await {
+    // On Linux a package install needs root. The updater tries pkexec, then a
+    // graphical sudo, then a terminal sudo; when every one is missing or the
+    // user dismisses the prompt, this is not a failure they can act on by
+    // retrying. Hand back the download page instead of the raw dpkg text.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if is_privilege_failure(&e) {
+      log::info!("cannot self-install on this Linux package: {e}");
+      return Ok(InstallOutcome::ManualRequired {
+        version,
+        url: RELEASES_PAGE.to_owned(),
+      });
+    }
+
+    return Err(AppError::Other(e.to_string()));
+  }
 
   // Only reached if the platform's install path returns rather than exiting.
-  Ok(Some(version))
+  Ok(InstallOutcome::Installing { version })
+}
+
+/// Where someone is sent when the app cannot install its own update.
+#[cfg(all(unix, not(target_os = "macos")))]
+const RELEASES_PAGE: &str = "https://github.com/Wutname1/GitWyrm/releases/latest";
+
+/// Whether this failure is "we could not become root", rather than a broken
+/// download or a bad signature - which the user does need to hear about.
+///
+/// Matched on the message because the plugin's error enum is not exhaustive for
+/// our purposes and these variants carry no data. The strings come from
+/// tauri-plugin-updater 2.10.1: `AuthenticationFailed` ("Authentication failed
+/// or was cancelled") and the per-format install failures raised once every
+/// escalation path has been exhausted.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn is_privilege_failure(e: &tauri_plugin_updater::Error) -> bool {
+  let text = e.to_string().to_lowercase();
+  text.contains("authentication failed")
+    || text.contains("failed to install .deb")
+    || text.contains("failed to install .rpm")
 }
 
 #[cfg(test)]

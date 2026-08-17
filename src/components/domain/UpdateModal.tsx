@@ -172,6 +172,7 @@ export function UpdateModal() {
   const version = useUpdater((s) => s.version)
   const currentVersion = useUpdater((s) => s.currentVersion)
   const progress = useUpdater((s) => s.progress)
+  const manualUrl = useUpdater((s) => s.manualUrl)
   const changelog = useUpdater((s) => s.changelog)
   const loading = useUpdater((s) => s.changelogLoading)
   const download = useUpdater((s) => s.download)
@@ -188,6 +189,7 @@ export function UpdateModal() {
       version={version}
       currentVersion={currentVersion}
       progress={progress}
+      manualUrl={manualUrl}
       changelog={changelog}
       loading={loading}
       autoRestart={autoRestart}
@@ -205,6 +207,8 @@ export interface UpdateModalViewProps {
   version: string | null
   currentVersion: string | null
   progress: DownloadProgress | null
+  /** Where to download by hand, when the app cannot install the update itself. */
+  manualUrl: string | null
   changelog: ChangelogEntry[]
   loading: boolean
   autoRestart: boolean
@@ -228,6 +232,7 @@ export function UpdateModalView({
   version,
   currentVersion,
   progress,
+  manualUrl,
   changelog,
   loading,
   autoRestart,
@@ -238,6 +243,10 @@ export function UpdateModalView({
   const downloading = state === 'downloading'
   const downloaded = state === 'downloaded'
   const restarting = state === 'ready'
+  // The update exists but GitWyrm could not get permission to install it -- a
+  // Linux .deb or .rpm needs root. Nothing to retry, so the button becomes a
+  // link to the download rather than another attempt that will fail the same way.
+  const manual = state === 'manual'
 
   const fraction =
     progress && progress.total && progress.total > 0
@@ -339,17 +348,31 @@ export function UpdateModalView({
               GitHub
             </a>
 
-            <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-2xs text-sub">
-              <input
-                type="checkbox"
-                checked={autoRestart}
-                onChange={(e) => onAutoRestartChange(e.target.checked)}
-                className="size-3.5 accent-[var(--gw-accent)]"
-              />
-              Restart automatically
-            </label>
+            {manual ? (
+              <p className="ml-auto max-w-[22rem] text-right text-2xs text-sub">
+                GitWyrm needs your password to install this, and did not get it.
+                Download it and open the file to finish.
+              </p>
+            ) : (
+              <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-2xs text-sub">
+                <input
+                  type="checkbox"
+                  checked={autoRestart}
+                  onChange={(e) => onAutoRestartChange(e.target.checked)}
+                  className="size-3.5 accent-[var(--gw-accent)]"
+                />
+                Restart automatically
+              </label>
+            )}
 
-            {downloaded || restarting ? (
+            {manual ? (
+              <Button size="sm" asChild>
+                <a href={manualUrl ?? GITHUB_RELEASES} target="_blank" rel="noreferrer">
+                  <ExternalLink className="size-3.5" />
+                  Get the update
+                </a>
+              </Button>
+            ) : downloaded || restarting ? (
               <Button size="sm" onClick={onRestart} disabled={restarting}>
                 {restarting ? (
                   <>
