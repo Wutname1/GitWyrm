@@ -90,6 +90,7 @@ pub fn set_bundle_root(root: Option<PathBuf>) {
 
 /// Path to a toolset executable, if the toolset exists and the file is present.
 /// A missing file is normal before the first download and must not be an error.
+#[cfg(windows)]
 fn bundled_path(relative: &str) -> Option<String> {
   let guard = BUNDLE_ROOT.read().ok()?;
   let candidate = guard.as_ref()?.join(relative);
@@ -121,7 +122,11 @@ fn responds_to_version(program: &str) -> bool {
 ///
 /// `configured` is the user's Settings value, `on_path` the bare name to try
 /// against PATH, and `bundled_rel` the tool's location inside the bundle.
-fn resolve(configured: Option<&str>, on_path: &str, bundled_rel: &str) -> Resolved {
+fn resolve(
+  configured: Option<&str>,
+  on_path: &str,
+  #[cfg_attr(not(windows), allow(unused_variables))] bundled_rel: &str,
+) -> Resolved {
   // 1. The user's explicit choice. Taken at face value even if it does not
   //    respond: silently falling through to a different tool would hide a
   //    typo, and Settings shows a live check for exactly this reason.
@@ -141,7 +146,10 @@ fn resolve(configured: Option<&str>, on_path: &str, bundled_rel: &str) -> Resolv
     };
   }
 
-  // 3. Our copy, the reason a clean machine works at all.
+  // 3. Our copy, the reason a clean machine works at all. Windows only: the
+  //    published toolset is Git for Windows, and on Linux git and gpg are
+  //    package dependencies, so there is no third tier to fall back to.
+  #[cfg(windows)]
   if let Some(path) = bundled_path(bundled_rel) {
     if responds_to_version(&path) {
       return Resolved {
@@ -157,12 +165,27 @@ fn resolve(configured: Option<&str>, on_path: &str, bundled_rel: &str) -> Resolv
 
 /// Relative locations inside the bundle. These mirror the layout the CI fetch
 /// step unpacks; changing one means changing the other.
+///
+/// Windows-only, along with the bundled tier itself.
+#[cfg(windows)]
 const GIT_BUNDLED_REL: &str = "git/cmd/git.exe";
+#[cfg(windows)]
 const GPG_BUNDLED_REL: &str = "gpg/gpg.exe";
 /// Beside gpg rather than under git/: MinGit ships ssh, ssh-add and ssh-agent
 /// but not ssh-keygen, so this one is carved out of the portable tree with the
 /// GnuPG files.
+#[cfg(windows)]
 const SSH_KEYGEN_BUNDLED_REL: &str = "gpg/ssh-keygen.exe";
+
+/// The bundled tier does not exist off Windows, but `resolve` and `cached` still
+/// take the parameter. Empty strings keep those signatures uniform rather than
+/// cfg-ing every call site.
+#[cfg(not(windows))]
+const GIT_BUNDLED_REL: &str = "";
+#[cfg(not(windows))]
+const GPG_BUNDLED_REL: &str = "";
+#[cfg(not(windows))]
+const SSH_KEYGEN_BUNDLED_REL: &str = "";
 
 /// Resolve a tool, reusing the cached answer when one exists.
 fn cached(

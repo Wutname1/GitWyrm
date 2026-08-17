@@ -82,6 +82,13 @@ pub fn run_gpg(args: &[&str]) -> Result<String, AppError> {
 /// Only set when we are running the bundled gpg. A system gpg must keep using
 /// the user's real `~/.gnupg` - redirecting it would hide the keys they
 /// already have.
+///
+/// This and everything it reaches (`to_cygdrive`, `managed_gnupg_home`,
+/// `ensure_bundled_gpg_configured`) are effectively Windows-only: there is no
+/// bundled tier off Windows, so `gpg_source()` never returns `Bundled` there and
+/// Linux always takes the system-gpg path to `~/.gnupg`. The guard below is what
+/// enforces that, so the MSYS-specific helpers stay unreachable rather than
+/// needing to be cfg'd out.
 fn apply_gpg_env(cmd: &mut Command) {
   if gpg_source() != ToolSource::Bundled {
     return;

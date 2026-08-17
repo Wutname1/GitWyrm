@@ -62,10 +62,21 @@ pub fn installed_version() -> Option<String> {
 ///
 /// Checks for git itself rather than just the directory, so a half-written tree
 /// is not mistaken for a working one.
+///
+/// Always false off Windows: the published toolset is Git for Windows, and Linux
+/// uses the system git and gpg instead.
 pub fn is_installed() -> bool {
-  toolset_dir()
-    .map(|dir| dir.join("git/cmd/git.exe").is_file())
-    .unwrap_or(false)
+  #[cfg(not(windows))]
+  {
+    false
+  }
+
+  #[cfg(windows)]
+  {
+    toolset_dir()
+      .map(|dir| dir.join("git/cmd/git.exe").is_file())
+      .unwrap_or(false)
+  }
 }
 
 #[cfg(test)]

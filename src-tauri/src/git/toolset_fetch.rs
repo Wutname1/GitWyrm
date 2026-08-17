@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 ///
 /// Latest-only by design: there is no version in the path, so a new toolset
 /// replaces the old one and nothing accumulates on the CDN.
+#[cfg(windows)]
 fn manifest_url() -> String {
   let arch = if cfg!(target_arch = "aarch64") {
     "aarch64"
@@ -89,6 +90,7 @@ struct ComponentsDocument {
 ///
 /// Returns the first component. Today one archive carries both git and gpg;
 /// should that ever split, this is the place that grows to install each in turn.
+#[cfg(windows)]
 pub async fn fetch_manifest() -> Result<ToolsetManifest, AppError> {
   let url = manifest_url();
   let response = reqwest::get(&url)
@@ -123,7 +125,25 @@ pub async fn fetch_manifest() -> Result<ToolsetManifest, AppError> {
 /// `None` means the toolset on disk is already current. A present tree whose
 /// version file does not match is treated as needing an update, and a missing
 /// tree needs a first install.
+///
+/// Always `None` off Windows. The published toolset is Git for Windows, and the
+/// manifest path carries no OS, so a Linux build asking this question would
+/// download and unpack Windows `.exe` files. Linux uses the system git and gpg,
+/// declared as package dependencies, and never consults the CDN.
 pub async fn needs_update() -> Result<Option<ToolsetManifest>, AppError> {
+  #[cfg(not(windows))]
+  {
+    return Ok(None);
+  }
+
+  #[cfg(windows)]
+  {
+    needs_update_inner().await
+  }
+}
+
+#[cfg(windows)]
+async fn needs_update_inner() -> Result<Option<ToolsetManifest>, AppError> {
   let manifest = fetch_manifest().await?;
 
   if !toolset::is_installed() {
