@@ -184,6 +184,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::stash::stash_pop,
     commands::stash::stash_apply,
     commands::stash::stash_drop,
+    commands::stash::rename_stash,
     commands::submodule::list_submodules,
     commands::submodule::list_moved_submodules,
     commands::submodule::update_submodule,

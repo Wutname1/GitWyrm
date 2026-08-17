@@ -5,7 +5,7 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { TooltipButton, TooltipHint } from '@/components/ui/tooltip'
 import { authorColor, formatCommitTime, shortSha } from '@/lib/gitDisplay'
-import { useCommitDetail, useCommitEntry } from '@/hooks/useGitQueries'
+import { useCommitDetail, useCommitEntry, useStashes } from '@/hooks/useGitQueries'
 import { useCommitPr } from '@/hooks/useGithub'
 import { matchExplanation, type CommitPrMatch } from '@/lib/commitPr'
 import { cn } from '@/lib/utils'
@@ -75,6 +75,13 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
   const detail = useCommitDetail(repoId, sha)
   const m = useGitMutations(repoId)
   const [rewordOpen, setRewordOpen] = useState(false)
+
+  // A stash is a commit, so it opens in this drawer like any other -- but it
+  // has several parents, which the reword path can't rebuild. Renaming one goes
+  // through the stash's own right-click menu instead, so hide the pencil here
+  // rather than offer a button that always fails.
+  const stashes = useStashes(repoId)
+  const isStash = stashes.data?.some((s) => s.sha === sha) ?? false
 
   // The graph row carries the refs a `CommitDetail` does not, so the branch-tip
   // route works here too. Falls back to the detail alone when the commit is not
@@ -193,13 +200,15 @@ export function CommitDrawer({ repoId, sha }: { repoId: string; sha: string }) {
         >
           Copy message
         </Button>
-        <TooltipButton
-          onClick={() => setRewordOpen(true)}
-          tooltip="Edit this message"
-          className="mt-0.5 flex size-6 flex-none items-center justify-center rounded-[5px] border border-border bg-panel2 text-xs text-sub hover:border-muted-foreground hover:bg-panel3"
-        >
-          <Pencil size={12} />
-        </TooltipButton>
+        {!isStash && (
+          <TooltipButton
+            onClick={() => setRewordOpen(true)}
+            tooltip="Edit this message"
+            className="mt-0.5 flex size-6 flex-none items-center justify-center rounded-[5px] border border-border bg-panel2 text-xs text-sub hover:border-muted-foreground hover:bg-panel3"
+          >
+            <Pencil size={12} />
+          </TooltipButton>
+        )}
         <TooltipButton
           onClick={() => selectCommit(null)}
           tooltip="Close"

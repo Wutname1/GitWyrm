@@ -127,6 +127,78 @@ pub async fn stash_drop(
   .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Rename a stash by giving it a new message, keeping its saved changes exactly
+/// as they are.
+///
+/// A stash entry's message lives in the `refs/stash` reflog, not in the stash
+/// commit, so there is nothing to amend: the entry is re-stored under the new
+/// message and the old entry dropped. `stash store` is used rather than
+/// rebuilding the commit so the stash keeps its original sha, which is what the
+/// graph anchors its row to.
+///
+/// Order matters for safety. Storing first means the stashed changes are
+/// referenced twice for a moment; if the drop then fails the user has a
+/// duplicate, which is recoverable. Dropping first would leave a window where a
+/// failed store loses the changes outright.
+#[tauri::command]
+#[specta::specta]
+pub async fn rename_stash(
+  manager: State<'_, RepoManager>,
+  repo_id: String,
+  index: u32,
+  message: String,
+) -> Result<(), AppError> {
+  let open = manager.get(&repo_id)?;
+  let path = open.path.to_string_lossy().into_owned();
+  tauri::async_runtime::spawn_blocking(move || {
+    let message = message.trim().to_string();
+    if message.is_empty() {
+      return Err(AppError::Other("a stash name is required".into()));
+    }
+
+    // Resolve the entry to its sha up front. The index shifts as soon as
+    // anything is added to or removed from the stash list, so every step after
+    // this one addresses the stash by sha instead.
+    let sha = {
+      let mut repo = open.repo.lock().unwrap();
+      let mut found = None;
+      repo.stash_foreach(|i, _, oid| {
+        if i as u32 == index {
+          found = Some(*oid);
+        }
+        true
+      })?;
+      found.ok_or_else(|| AppError::Other("that stash no longer exists".into()))?
+    };
+    let sha = sha.to_string();
+
+    // Store re-points refs/stash at the same commit under the new message,
+    // pushing it to the top of the list. The old entry is now one deeper than
+    // it was, so re-resolve its position by sha rather than reusing `index`.
+    crate::git::shell::run_git(
+      Some(&path),
+      &["stash", "store", "-m", &message, &sha],
+    )?;
+
+    let mut repo = open.repo.lock().unwrap();
+    let mut stale = None;
+    repo.stash_foreach(|i, _, oid| {
+      // Skip the entry just written at the top; the match below it is the
+      // original. Both point at the same sha.
+      if i > 0 && oid.to_string() == sha && stale.is_none() {
+        stale = Some(i);
+      }
+      true
+    })?;
+    if let Some(i) = stale {
+      repo.stash_drop(i)?;
+    }
+    Ok(())
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// Split a raw stash message into (branch, summary). Git formats stash
 /// messages as "WIP on <branch>: <sha> <subject>" for the default message and
 /// "On <branch>: <message>" for custom ones. Detached-HEAD stashes use

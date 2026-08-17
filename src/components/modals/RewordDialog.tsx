@@ -15,6 +15,10 @@ interface RewordDialogProps {
   title?: string
   submitLabel?: string
   pendingLabel?: string
+  /** Label above the one-line field. A stash calls this its name, not a summary. */
+  summaryLabel?: string
+  /** Hide the optional description. Stash names are a single line. */
+  hideBody?: boolean
 }
 
 /** Edit a commit's message. Summary on one line, an optional body below; they
@@ -29,6 +33,8 @@ export function RewordDialog({
   title = 'Edit commit message',
   submitLabel = 'Save message',
   pendingLabel = 'Saving…',
+  summaryLabel = 'Summary',
+  hideBody = false,
 }: RewordDialogProps) {
   const [summary, setSummary] = useState(initialSummary)
   const [body, setBody] = useState(initialBody)
@@ -45,7 +51,8 @@ export function RewordDialog({
 
   const submit = () => {
     if (!ready) return
-    const message = body.trim() ? `${trimmed}\n\n${body.trim()}` : trimmed
+    const extra = hideBody ? '' : body.trim()
+    const message = extra ? `${trimmed}\n\n${extra}` : trimmed
     onConfirm(message)
   }
 
@@ -62,7 +69,7 @@ export function RewordDialog({
       onSubmit={submit}
     >
       <div className="grid gap-1.5">
-        <label className="text-2xs font-semibold text-sub">Summary</label>
+        <label className="text-2xs font-semibold text-sub">{summaryLabel}</label>
         <Input
           value={summary}
           onChange={(e) => setSummary(e.target.value)}

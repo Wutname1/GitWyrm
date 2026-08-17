@@ -919,6 +919,18 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  const renameStash = useMutation({
+    mutationFn: async ({ index, message }: { index: number; message: string }) =>
+      unwrap(await commands.renameStash(id, index, message)),
+    onSuccess: () => {
+      invalidate(qc, id, ['stashes', 'log'])
+      // Git has no way to rewrite a stash's name in place, so the renamed stash
+      // moves to the top of the list. Say so, or the reorder looks like a bug.
+      toast('Renamed stash -- it moved to the top of your stash list')
+    },
+    onError,
+  })
+
   const fetch = useMutation({
     mutationKey: syncKey(id, 'fetch'),
     mutationFn: async () => unwrap(await commands.gitFetch(id)),
@@ -1553,6 +1565,7 @@ export function useGitMutations(repoId: string | null) {
     stashPop,
     stashApply,
     stashDrop,
+    renameStash,
     fetch: scopeToRepo(fetch, running.fetch),
     pull: scopeToRepo(pull, running.pull),
     push: scopeToRepo(push, running.push),

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ArchiveRestore, Trash2 } from 'lucide-react'
+import { ArchiveRestore, Pencil, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { StashInfo } from '@/lib/bindings'
 import { formatCommitTime } from '@/lib/gitDisplay'
@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/context-menu'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { RewordDialog } from '@/components/modals/RewordDialog'
 import { ChangeSizeIndicator } from './ChangeSizeIndicator'
 
 /**
@@ -27,7 +28,9 @@ export function StashContextMenu({ stash, children }: { stash: StashInfo; childr
   const repo = useActiveRepo()
   const m = useGitMutations(repo?.id ?? null)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const busy = m.stashPop.isPending || m.stashApply.isPending || m.stashDrop.isPending
+  const [renameOpen, setRenameOpen] = useState(false)
+  const busy =
+    m.stashPop.isPending || m.stashApply.isPending || m.stashDrop.isPending || m.renameStash.isPending
 
   return (
     <>
@@ -56,6 +59,11 @@ export function StashContextMenu({ stash, children }: { stash: StashInfo; childr
             onRun={() => m.stashPop.mutate(stash.index)}
           />
           <ContextMenuSeparator />
+          <ContextMenuItem disabled={busy} onSelect={() => setRenameOpen(true)}>
+            <Pencil />
+            Rename stash
+          </ContextMenuItem>
+          <ContextMenuSeparator />
           <ContextMenuItem variant="destructive" disabled={busy} onSelect={() => setConfirmDelete(true)}>
             <Trash2 />
             Delete stash
@@ -77,6 +85,25 @@ export function StashContextMenu({ stash, children }: { stash: StashInfo; childr
         }
         confirmLabel="Delete stash"
         onConfirm={() => m.stashDrop.mutate(stash.index)}
+      />
+
+      <RewordDialog
+        open={renameOpen}
+        onOpenChange={setRenameOpen}
+        title="Rename stash"
+        submitLabel="Save name"
+        pendingLabel="Renaming…"
+        summaryLabel="Stash name"
+        hideBody
+        initialSummary={stash.summary}
+        initialBody=""
+        pending={m.renameStash.isPending}
+        onConfirm={(message) =>
+          m.renameStash.mutate(
+            { index: stash.index, message },
+            { onSuccess: () => setRenameOpen(false) }
+          )
+        }
       />
     </>
   )

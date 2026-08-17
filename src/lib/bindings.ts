@@ -1628,6 +1628,29 @@ async stashDrop(repoId: string, index: number) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Rename a stash by giving it a new message, keeping its saved changes exactly
+ * as they are.
+ * 
+ * A stash entry's message lives in the `refs/stash` reflog, not in the stash
+ * commit, so there is nothing to amend: the entry is re-stored under the new
+ * message and the old entry dropped. `stash store` is used rather than
+ * rebuilding the commit so the stash keeps its original sha, which is what the
+ * graph anchors its row to.
+ * 
+ * Order matters for safety. Storing first means the stashed changes are
+ * referenced twice for a moment; if the drop then fails the user has a
+ * duplicate, which is recoverable. Dropping first would leave a window where a
+ * failed store loses the changes outright.
+ */
+async renameStash(repoId: string, index: number, message: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rename_stash", { repoId, index, message }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Every submodule in the repo, in sync or not. The list view's source.
  */
 async listSubmodules(repoId: string) : Promise<Result<SubmoduleStatus[], string>> {
