@@ -1,0 +1,22 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "targets": ["deb", "rpm", "appimage"],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1",
+          "librsvg2-2",
+          "libdbus-1-3",
+          "git",
+          "gpg"
+        ]
+      },
+      "rpm": {
+        "depends": ["webkit2gtk4.1", "gtk3", "librsvg2", "dbus-libs", "git", "gnupg2"]
+      }
+    }
+  }
+}

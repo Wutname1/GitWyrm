@@ -83,6 +83,56 @@ jobs:
       - name: Test
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
+  # Proves the Linux bundle actually packages, not just that the Rust compiles.
+  # The dev machine is Windows, so without this a Linux packaging break would
+  # only surface at release time. Builds the AppImage because it is the format
+  # that carries its own webkit and so runs on any Mint/Ubuntu version.
+  linux-bundle:
+    name: Linux bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ci-linux-bundle
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install
+        run: npm ci
+
+      # The Linux bundle targets live in a separate config: the Tauri CLI
+      # filters --bundles by host, so listing deb/rpm/appimage in the shared
+      # tauri.conf.json would make the Windows release leg reject them.
+      - name: Build AppImage
+        run: npx tauri build --config src-tauri/tauri.linux.conf.json --bundles appimage
+
+      # A missing runtime .so shows up here rather than on a user's machine.
+      - name: Check linked libraries
+        run: ldd src-tauri/target/release/gitwyrm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gitwyrm-appimage
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
   # The update-cover helper is Windows-only (it is raw Win32), so it cannot be
   # checked on the Linux runner above.
   bootstrapper:

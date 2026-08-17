@@ -7,4 +7,8 @@ components = ["rustfmt", "clippy"]
 # Targets are per-toolchain: pinning a fresh channel drops any target that was
 # added to the old stable by hand. The ARM64 release build needs its target
 # declared here or every new machine/CI runner fails at `tauri build` time.
-targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]
+targets = [
+	"x86_64-pc-windows-msvc",
+	"aarch64-pc-windows-msvc",
+	"x86_64-unknown-linux-gnu",
+]
