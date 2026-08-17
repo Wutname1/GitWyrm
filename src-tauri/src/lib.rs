@@ -57,6 +57,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::app::list_logs,
     commands::app::read_log_file,
     commands::app::read_log_tail,
+    commands::app::read_screenshot,
     commands::app::clear_log,
     commands::app::open_logs_folder,
     commands::external::reveal_in_file_manager,

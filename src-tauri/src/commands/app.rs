@@ -4,6 +4,7 @@
 use std::fs;
 use std::sync::Mutex;
 
+use base64::Engine;
 use serde::Serialize;
 use specta::Type;
 use tauri_plugin_opener::OpenerExt;
@@ -182,6 +183,52 @@ pub async fn read_log_tail(app: tauri::AppHandle) -> Result<String, AppError> {
   tauri::async_runtime::spawn_blocking(move || Ok(logs::recent_text(&dir, REPORT_LOG_BYTES)))
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Largest screenshot a report will carry. Sentry rejects envelopes past 20 MB,
+/// and base64 inflates by a third, so this leaves room for the log beside it.
+const MAX_SCREENSHOT_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Reads a user-picked screenshot into a data URL for a bug report.
+///
+/// The file picker hands back a path, and the webview has no filesystem access
+/// to follow it, so the bytes have to come through here. Returns a data URL
+/// rather than raw bytes so the same string both previews in an `<img>` and
+/// rides along as the attachment.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_screenshot(path: String) -> Result<String, AppError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let path = std::path::Path::new(&path);
+    let mime = match path
+      .extension()
+      .and_then(|e| e.to_str())
+      .unwrap_or_default()
+      .to_ascii_lowercase()
+      .as_str()
+    {
+      "png" => "image/png",
+      "jpg" | "jpeg" => "image/jpeg",
+      "webp" => "image/webp",
+      "gif" => "image/gif",
+      _ => return Err(AppError::Other("Choose a PNG, JPG, WebP, or GIF image.".into())),
+    };
+
+    let metadata = fs::metadata(path)?;
+    if !metadata.is_file() {
+      return Err(AppError::Other("That is not a file.".into()));
+    }
+    if metadata.len() > MAX_SCREENSHOT_BYTES {
+      return Err(AppError::Other(
+        "That image is too large. Choose one under 8 MB.".into(),
+      ));
+    }
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(fs::read(path)?);
+    Ok(format!("data:{mime};base64,{encoded}"))
+  })
+  .await
+  .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Empties the log folder: the file being written is truncated in place so the

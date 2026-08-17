@@ -19,6 +19,23 @@ import { log, describeError } from '@/lib/log'
 import { perfMarksText } from '@/lib/perfTrail'
 import { Sentry } from '@/lib/sentry'
 
+/**
+ * What the user is here to say.
+ *
+ * The two differ in what they need attached, not just in wording: a bug is
+ * unactionable without the log, while an idea is a message that happens to come
+ * from inside the app and carries no reason to ship a log with it.
+ */
+export type ReportKind = 'bug' | 'feedback'
+
+/** A screenshot the user chose to attach, held as a data URL. */
+export interface Screenshot {
+  /** `data:image/png;base64,...` -- previewed in an `<img>` and sent as-is. */
+  dataUrl: string
+  /** Shown next to the thumbnail so the user knows which image this is. */
+  name: string
+}
+
 /** Everything a report carries besides the user's own description. */
 export interface Diagnostics {
   version: string
@@ -79,6 +96,59 @@ export async function collectDiagnostics(): Promise<Diagnostics> {
   return base
 }
 
+/** Image types both the picker and the paste path accept. */
+const SCREENSHOT_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif']
+
+/**
+ * Ask for a screenshot with the system file picker.
+ *
+ * Resolves to null when the user cancels, which is not an error and should not
+ * be reported as one. Throws only when a chosen file could not be read.
+ */
+export async function pickScreenshot(): Promise<Screenshot | null> {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({
+    title: 'Choose a screenshot',
+    multiple: false,
+    directory: false,
+    filters: [{ name: 'Images', extensions: SCREENSHOT_EXTENSIONS }],
+  })
+  if (typeof selected !== 'string') return null
+
+  // The webview has no filesystem access, so the bytes come back through Rust.
+  const dataUrl = unwrap(await commands.readScreenshot(selected))
+  const name = selected.split(/[\\/]/).pop() || 'screenshot'
+  return { dataUrl, name }
+}
+
+/**
+ * Pull an image out of a paste or drop, if there is one.
+ *
+ * This is the path that matters most on Windows: Win+Shift+S puts the capture
+ * straight on the clipboard, so requiring a saved file first would add a step
+ * to the common case for no reason.
+ */
+export async function screenshotFromTransfer(
+  data: DataTransfer | null
+): Promise<Screenshot | null> {
+  const file = Array.from(data?.files ?? []).find((f) => f.type.startsWith('image/'))
+  if (!file) return null
+  if (file.size > MAX_SCREENSHOT_BYTES) {
+    throw new Error('That image is too large. Choose one under 8 MB.')
+  }
+
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('That image could not be read.'))
+    reader.readAsDataURL(file)
+  })
+  return { dataUrl, name: file.name || 'pasted image' }
+}
+
+/** Mirrors the Rust-side cap so a paste is rejected before it is decoded. */
+const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
+
 /** The environment block, shared by the Sentry context and the markdown body. */
 function environmentLines(d: Diagnostics): string[] {
   return [
@@ -99,10 +169,11 @@ function environmentLines(d: Diagnostics): string[] {
 export function bugReportMarkdown(
   description: string,
   d: Diagnostics,
-  includeLog: boolean
+  includeLog: boolean,
+  kind: ReportKind = 'bug'
 ): string {
   const parts = [
-    '## What happened',
+    kind === 'bug' ? '## What happened' : '## Feedback',
     '',
     description.trim() || '_(no description given)_',
     '',
@@ -111,6 +182,10 @@ export function bugReportMarkdown(
     ...environmentLines(d),
     '',
   ]
+
+  // A feedback note is a message, not a diagnosis: the log and timings below
+  // describe the machine and have nothing to say about an idea.
+  if (kind === 'feedback') return parts.join('\n')
 
   // Ahead of the log: it is a handful of lines and it is the part that answers
   // "why was it slow", which the log tail buries.
@@ -134,25 +209,80 @@ export function bugReportMarkdown(
   return parts.join('\n')
 }
 
+/** Split a data URL into its mime type and decoded bytes. */
+function decodeDataUrl(dataUrl: string): { bytes: Uint8Array; contentType: string } | null {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(dataUrl)
+  if (!match) return null
+  try {
+    const binary = atob(match[2])
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+    return { bytes, contentType: match[1] }
+  } catch {
+    return null
+  }
+}
+
+type Attachment = {
+  filename: string
+  data: string | Uint8Array
+  contentType: string
+}
+
 /**
- * Files to attach to a report: the log tail, and the recent timings.
+ * Files to attach to a report: the log tail, the recent timings, and any
+ * screenshot the user picked.
  *
- * Both ride as attachments rather than inside the message -- the log is far
+ * They ride as attachments rather than inside the message -- the log is far
  * past Sentry's message size limit, and as files they stay readable on the
  * issue instead of being truncated away. Returns undefined rather than an
  * empty array when there is nothing to attach.
+ *
+ * Nothing here passes through Sentry's `beforeSend`, which only sees the event
+ * envelope: every string attached below must already be scrubbed by the time it
+ * reaches this function. `logTail` is scrubbed in `collectDiagnostics`, and the
+ * timings are built from labels and numbers that never carry user text.
  */
 export function attachmentsFor(
-  d: Diagnostics
-): { filename: string; data: string; contentType: string }[] | undefined {
-  const files: { filename: string; data: string; contentType: string }[] = []
-  if (d.logTail) {
+  d: Diagnostics,
+  opts: { includeLog: boolean; screenshot?: Screenshot | null } = { includeLog: true }
+): Attachment[] | undefined {
+  const files: Attachment[] = []
+  // The log and the timings are one decision, not two: both describe the
+  // machine rather than the message, so opting out has to drop both or the
+  // opt-out is a half-truth.
+  if (opts.includeLog && d.logTail) {
     files.push({ filename: 'gitwyrm.log', data: d.logTail, contentType: 'text/plain' })
   }
-  if (d.perfTrail) {
+  if (opts.includeLog && d.perfTrail) {
     files.push({ filename: 'timings.txt', data: d.perfTrail, contentType: 'text/plain' })
   }
+  if (opts.screenshot) {
+    const decoded = decodeDataUrl(opts.screenshot.dataUrl)
+    // Sent as bytes rather than the data URL string: Sentry stores an
+    // attachment verbatim, so a base64 payload would download as unviewable
+    // text instead of an image.
+    if (decoded) {
+      files.push({
+        filename: screenshotFilename(opts.screenshot.name, decoded.contentType),
+        data: decoded.bytes,
+        contentType: decoded.contentType,
+      })
+    }
+  }
   return files.length > 0 ? files : undefined
+}
+
+/**
+ * A safe filename for the attached screenshot.
+ *
+ * The user's own filename is discarded rather than sanitised -- it is chosen
+ * from their disk and can name a project, a client, or a person, none of which
+ * the report needs.
+ */
+function screenshotFilename(_name: string, contentType: string): string {
+  const ext = contentType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png'
+  return `screenshot.${ext}`
 }
 
 export type SubmitResult =
@@ -169,8 +299,15 @@ export type SubmitResult =
 export async function submitFeedback(
   description: string,
   email: string,
-  d: Diagnostics
+  d: Diagnostics,
+  opts: {
+    kind?: ReportKind
+    includeLog?: boolean
+    screenshot?: Screenshot | null
+  } = {}
 ): Promise<SubmitResult> {
+  const kind = opts.kind ?? 'bug'
+  const includeLog = opts.includeLog ?? kind === 'bug'
   // No client means nothing can be sent: either this is a dev build, or the
   // user turned crash reports off. Say which, rather than reporting a success
   // that never left the machine -- someone who opted out and later files a bug
@@ -198,11 +335,18 @@ export async function submitFeedback(
         platform: d.platform,
       })
       scope.setTag('report', 'user-feedback')
-      if (d.logError) scope.setContext('log', { error: d.logError })
+      // Ideas and bug reports land in the same Sentry project but want
+      // different queues, so the kind has to be filterable rather than only
+      // readable in the message body.
+      scope.setTag('report_kind', kind)
+      scope.setTag('has_screenshot', opts.screenshot ? 'yes' : 'no')
+      if (includeLog && d.logError) scope.setContext('log', { error: d.logError })
       // On the event itself, not only the attachment: a context block is
       // visible on the issue page without downloading anything, which is what
       // makes a "this is slow" report triageable at a glance.
-      if (d.perfTrail) scope.setContext('recent_timings', { trail: d.perfTrail })
+      if (includeLog && d.perfTrail) {
+        scope.setContext('recent_timings', { trail: d.perfTrail })
+      }
 
       return Sentry.captureFeedback(
         {
@@ -211,7 +355,7 @@ export async function submitFeedback(
           message: scrubText(description.trim() || '(no description given)'),
         },
         {
-          attachments: attachmentsFor(d),
+          attachments: attachmentsFor(d, { includeLog, screenshot: opts.screenshot }),
         },
         scope
       )
@@ -235,13 +379,19 @@ export async function submitFeedback(
 }
 
 /** Prefilled GitHub issue URL, trimmed to what GitHub will accept. */
-export function githubIssueUrl(description: string, d: Diagnostics): string {
-  const body = bugReportMarkdown(description, d, false)
+export function githubIssueUrl(
+  description: string,
+  d: Diagnostics,
+  kind: ReportKind = 'bug'
+): string {
+  const body = bugReportMarkdown(description, d, false, kind)
   const trimmed =
     body.length > 6000
       ? `${body.slice(0, 6000)}\n\n_(truncated -- use "Copy report" in GitWyrm for the full details)_`
       : body
-  const title = description.trim().split('\n')[0]?.slice(0, 80) || 'Bug report'
+  const title =
+    description.trim().split('\n')[0]?.slice(0, 80) ||
+    (kind === 'bug' ? 'Bug report' : 'Feedback')
   return (
     'https://github.com/Wutname1/GitWyrm/issues/new' +
     `?title=${encodeURIComponent(title)}` +

@@ -59,6 +59,22 @@ async readLogTail() : Promise<Result<string, string>> {
 }
 },
 /**
+ * Reads a user-picked screenshot into a data URL for a bug report.
+ * 
+ * The file picker hands back a path, and the webview has no filesystem access
+ * to follow it, so the bytes have to come through here. Returns a data URL
+ * rather than raw bytes so the same string both previews in an `<img>` and
+ * rides along as the attachment.
+ */
+async readScreenshot(path: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_screenshot", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Empties the log folder: the file being written is truncated in place so the
  * logger's open handle stays valid, and every other log file is deleted.
  */
