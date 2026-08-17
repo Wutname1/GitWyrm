@@ -65,8 +65,29 @@ const FIXTURE: ChangelogEntry[] = [
   },
 ]
 
+/**
+ * A release long enough to overflow the dialog.
+ *
+ * The short fixture above cannot reproduce layout bugs that only appear once
+ * the notes are taller than the viewport, which is the case that matters --
+ * a real 0.9.0 release ran to ~30 items. Reached with `?long=1`.
+ */
+const LONG_FIXTURE: ChangelogEntry[] = [
+  {
+    version: '0.9.0',
+    released_at: '2026-08-16T09:00:00Z',
+    items: Array.from({ length: 30 }, (_, i) => ({
+      section: (['feature', 'fix', 'change'] as const)[i % 3],
+      text: `Changelog line ${i + 1} of a release with a great many entries in it`,
+      tags: i % 2 === 0 ? ['updater'] : [],
+    })),
+  },
+  ...FIXTURE,
+]
+
 export function UpdateModalPreview() {
   const params = new URLSearchParams(window.location.search)
+  const long = params.get('long') === '1'
   const state = (params.get('state') ?? 'available') as
     | 'available'
     | 'downloading'
@@ -87,7 +108,7 @@ export function UpdateModalPreview() {
       progress={
         state === 'downloading' ? { downloaded: 42_300_000, total: 96_100_000 } : null
       }
-      changelog={empty ? [] : FIXTURE}
+      changelog={empty ? [] : long ? LONG_FIXTURE : FIXTURE}
       loading={loading}
       autoRestart={false}
       onAutoRestartChange={() => {}}

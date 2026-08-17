@@ -11,12 +11,20 @@ function ScrollArea({
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
-      className={cn("relative", className)}
+      // A flex column, so the viewport below is a flex item this root can
+      // constrain. As a plain block the root has no intrinsic height of its
+      // own -- when it is sized by an ancestor's `flex-1`, a percentage height
+      // on the viewport resolves against CONTENT instead of the root's box, so
+      // the viewport grew past it and the overflow was clipped by the dialog
+      // with no scrollbar. min-h-0 lets this root shrink below its content.
+      className={cn("relative flex min-h-0 flex-col overflow-hidden", className)}
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+        // min-h-0 + flex-1 rather than a percentage height: the viewport now
+        // takes the root's real box at any height and scrolls its own content.
+        className="w-full min-h-0 flex-1 rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
