@@ -6,7 +6,9 @@
 //! four lines everywhere. Doing it once means a new provider inherits sane
 //! error messages instead of reinventing them.
 
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
 
@@ -146,16 +148,102 @@ fn extract_message(body: &str, keys: &[&str]) -> Option<String> {
   None
 }
 
+/// How long a host stays on the bench after telling us we may not ask.
+///
+/// An org that has turned off third-party access, or a token that no longer
+/// carries the right scopes, is not a condition that clears on its own within a
+/// session -- it clears when an admin changes a setting or the user reconnects.
+/// Retrying every 60s in the meantime produces nothing but log noise and
+/// rate-limit pressure, so the answer is remembered for an hour and, because
+/// the cache lives in memory, forgotten on relaunch.
+const PERMISSION_COOLDOWN: Duration = Duration::from_secs(60 * 60);
+
+/// Remembered permission refusals, keyed by host name.
+///
+/// Deliberately not a `OnceLock`: reconnecting an account is exactly what a
+/// user does after reading the refusal, and a permanent cache would keep
+/// refusing until they restarted the app. [`clear_cooldown`] handles that case
+/// directly; the TTL is the backstop for an admin-side fix we never see.
+static PERMISSION_COOLDOWNS: Mutex<Option<HashMap<String, (Instant, String)>>> = Mutex::new(None);
+
+/// True when the host refused us for a reason no retry can change.
+///
+/// Narrow on purpose. A timeout, a 500, or a rate limit are all worth trying
+/// again shortly; only an authorization decision earns an hour of silence.
+fn is_permission_refusal(message: &str) -> bool {
+  let low = message.to_lowercase();
+  // Rate limits recover on their own and must not be benched for an hour.
+  if low.contains("rate limit") {
+    return false;
+  }
+  low.contains("oauth app access restrictions")
+    || low.contains("sign-in is no longer valid")
+    || low.contains("refused:")
+}
+
+/// The remembered refusal for `host`, if one is still within its cooldown.
+fn cooled_down(host: &str) -> Option<String> {
+  PERMISSION_COOLDOWNS
+    .lock()
+    .unwrap_or_else(|e| e.into_inner())
+    .as_ref()?
+    .get(host)
+    .filter(|(at, _)| at.elapsed() < PERMISSION_COOLDOWN)
+    .map(|(_, message)| message.clone())
+}
+
+fn remember_refusal(host: &str, message: &str) {
+  log::warn!(
+    "{host} refused on permissions; not asking again for an hour: {message}"
+  );
+  PERMISSION_COOLDOWNS
+    .lock()
+    .unwrap_or_else(|e| e.into_inner())
+    .get_or_insert_with(HashMap::new)
+    .insert(host.to_string(), (Instant::now(), message.to_string()));
+}
+
+/// Drops a host's cooldown so the next call goes out for real.
+///
+/// Called when the user connects or signs out of an account: they have just
+/// acted on the refusal, so making them wait out the rest of the hour would be
+/// the app ignoring what they did.
+///
+/// Takes the display name rather than a [`ProviderId`] because that is the key
+/// `send` stores under -- `ProviderId::as_str` is the `auth.json` key
+/// ("github"), which would silently match nothing here ("GitHub").
+pub fn clear_cooldown(host: &str) {
+  if let Some(map) = PERMISSION_COOLDOWNS
+    .lock()
+    .unwrap_or_else(|e| e.into_inner())
+    .as_mut()
+  {
+    map.remove(host);
+  }
+}
+
 pub async fn send(
   builder: reqwest::RequestBuilder,
   host: &str,
   message_keys: &[&str],
 ) -> Result<reqwest::Response, AppError> {
+  // A host that already told us no is not asked again until the cooldown ends.
+  // Repo tabs, PR lists and issue counts all fan out to the same host, so
+  // without this one refusal became dozens of identical failing requests.
+  if let Some(remembered) = cooled_down(host) {
+    return Err(AppError::Other(remembered));
+  }
   let res = builder
     .send()
     .await
     .map_err(|e| AppError::Other(format!("could not reach {host}: {e}")))?;
-  check(res, host, message_keys).await
+  let checked = check(res, host, message_keys).await;
+  if let Err(AppError::Other(message)) = &checked {
+    if is_permission_refusal(message) {
+      remember_refusal(host, message);
+    }
+  }
+  checked
 }
 
 /// Send and deserialize, with the host named in any parse failure.
@@ -192,6 +280,50 @@ pub fn encode_segment(value: &str) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// The refusals worth an hour of silence: an admin or the user has to act,
+  /// and until they do the answer cannot change.
+  #[test]
+  fn permission_refusals_earn_a_cooldown() {
+    assert!(is_permission_refusal(
+      "GitHub refused: Although you appear to have the correct authorization credentials, the `some-org` organization has enabled OAuth App access restrictions."
+    ));
+    assert!(is_permission_refusal(
+      "GitHub said: Although you appear to have the correct authorization credentials, the `some-org` organization has enabled OAuth App access restrictions."
+    ));
+    assert!(is_permission_refusal("GitHub sign-in is no longer valid; connect GitHub again"));
+  }
+
+  /// Anything that recovers on its own must keep being retried. Benching a
+  /// rate limit for an hour would turn a few minutes' wait into a dead session.
+  #[test]
+  fn transient_failures_are_not_benched() {
+    assert!(!is_permission_refusal("GitHub rate limit reached; try again in a few minutes"));
+    assert!(!is_permission_refusal("could not reach GitHub: timed out"));
+    assert!(!is_permission_refusal("bad response from GitHub: expected value"));
+    assert!(!is_permission_refusal(
+      "GitHub could not find that. It may be private, renamed, or your token may not cover it."
+    ));
+    // A merge conflict is the host declining an action, not our access to it.
+    assert!(!is_permission_refusal("GitHub said: Pull Request has merge conflicts"));
+  }
+
+  /// Remembering must be per-host: one org's restriction cannot silence a
+  /// different host the user is legitimately connected to.
+  #[test]
+  fn a_cooldown_is_scoped_to_its_host_and_cleared_on_reconnect() {
+    // Names unique to this test: the cache is process-global.
+    let host = "CooldownTestHost";
+    let other = "CooldownOtherHost";
+    assert!(cooled_down(host).is_none(), "starts clean");
+
+    remember_refusal(host, "TestHost refused: no access");
+    assert_eq!(cooled_down(host).as_deref(), Some("TestHost refused: no access"));
+    assert!(cooled_down(other).is_none(), "a refusal must not spread to other hosts");
+
+    clear_cooldown(host);
+    assert!(cooled_down(host).is_none(), "reconnecting must lift the bench immediately");
+  }
 
   #[test]
   fn encodes_slashes_for_gitlab_paths() {

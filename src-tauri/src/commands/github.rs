@@ -136,6 +136,10 @@ pub async fn host_connect_token(
     credential.base_url.as_deref(),
   );
   auth::set(&app, provider.as_str(), auth::AuthInfo::Api { key: packed })?;
+  // Before the verify below, not after: that call goes through `send`, so a
+  // cooldown left from the old credential would refuse the new one without
+  // asking the host, and the user could not reconnect until it aged out.
+  host_http::clear_cooldown(host.display_name());
 
   match host.auth_status(&app).await {
     Ok(Some(login)) => Ok(login),
@@ -164,6 +168,11 @@ pub async fn github_sign_out(app: tauri::AppHandle) -> Result<(), AppError> {
 #[tauri::command]
 #[specta::specta]
 pub async fn host_sign_out(app: tauri::AppHandle, provider: ProviderId) -> Result<(), AppError> {
+  // Signing out clears the bench too, so connecting a different account is not
+  // met with the previous one's refusal.
+  if let Ok(host) = by_id(provider) {
+    host_http::clear_cooldown(host.display_name());
+  }
   tauri::async_runtime::spawn_blocking(move || auth::remove(&app, provider.as_str()))
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
