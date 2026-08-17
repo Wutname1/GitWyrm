@@ -48,6 +48,12 @@ struct CachedIcon {
     /// with a favicon in its files stays on the plain tab marker.
     #[serde(default)]
     hidden: bool,
+    /// Discovery ran and found nothing. Distinct from having no entry at all,
+    /// which means "never looked". Without this a repository with no icon --
+    /// the common case -- pays the full worktree walk on every single open,
+    /// forever, because there was no way to tell the two states apart.
+    #[serde(default)]
+    searched: bool,
 }
 
 /// A repository path paired with the icon GitWyrm already knows about, for
@@ -92,6 +98,8 @@ fn remember_icon(app: &tauri::AppHandle, repo_path: &str, icon: Option<&RepoIcon
                 icon_path: icon.source_path.clone(),
                 custom: icon.custom,
                 hidden: false,
+                // Finding an icon is itself a completed search.
+                searched: true,
             };
             match index.get(&key) {
                 Some(current)
@@ -128,6 +136,7 @@ fn remember_hidden_icon(app: &tauri::AppHandle, repo_path: &str) {
             icon_path: String::new(),
             custom: false,
             hidden: true,
+            searched: true,
         },
     );
     write_icon_index(app, &index);
@@ -442,16 +451,73 @@ fn get_repo_icon_sync(
         remember_icon(app, &repo_path, Some(&icon));
         return Ok(Some(icon));
     }
+    // Answer from the index before considering a scan. `collect_icon_paths`
+    // walks the worktree to depth 5 without consulting .gitignore, and this
+    // command runs per tab on every mount -- so an unread cache meant that walk
+    // was paid again on every open of every repository, which is a large part
+    // of why opening a repository the first time felt slow.
+    if let Some(remembered) = cached_discovered_icon(app, &repo_path) {
+        return Ok(remembered);
+    }
+
     let root = PathBuf::from(&repo_path);
     let Some(path) = collect_icon_paths(&root)?.into_iter().next() else {
-        // A repository with no icon is remembered as such by dropping any stale
-        // entry, so the open-a-repository screen shows its folder glyph.
-        remember_icon(app, &repo_path, None);
+        // Record the *absence* rather than dropping the entry: a missing entry
+        // reads as "never looked" and would re-walk on the next open.
+        remember_no_icon(app, &repo_path);
         return Ok(None);
     };
     let icon = file_data_url(&path, false, MAX_DISCOVERED_BYTES)?;
     remember_icon(app, &repo_path, Some(&icon));
     Ok(Some(icon))
+}
+
+/// The remembered result of an earlier discovery, when there is one.
+///
+/// `Some(None)` means "we looked and there is no icon" -- a real answer that
+/// skips the walk. `None` means nothing is remembered and the caller must scan.
+/// An icon file that has since been deleted returns `None` so it is rediscovered
+/// rather than leaving the repository permanently iconless.
+fn cached_discovered_icon(
+    app: &tauri::AppHandle,
+    repo_path: &str,
+) -> Option<Option<RepoIcon>> {
+    let index = read_icon_index(app);
+    let entry = index.get(&repo_key(repo_path))?;
+    // Custom icons are served earlier by `existing_custom_icon`; this path is
+    // only about discovered ones.
+    if entry.custom || entry.hidden {
+        return None;
+    }
+    if entry.icon_path.is_empty() {
+        return entry.searched.then_some(None);
+    }
+    let path = PathBuf::from(&entry.icon_path);
+    if !path.is_file() {
+        return None;
+    }
+    file_data_url(&path, false, MAX_DISCOVERED_BYTES).ok().map(Some)
+}
+
+/// Remember that discovery ran and found nothing, so it is not repeated.
+fn remember_no_icon(app: &tauri::AppHandle, repo_path: &str) {
+    let mut index = read_icon_index(app);
+    let key = repo_key(repo_path);
+    if index.get(&key).is_some_and(|entry| {
+        entry.searched && entry.icon_path.is_empty() && !entry.custom && !entry.hidden
+    }) {
+        return;
+    }
+    index.insert(
+        key,
+        CachedIcon {
+            icon_path: String::new(),
+            custom: false,
+            hidden: false,
+            searched: true,
+        },
+    );
+    write_icon_index(app, &index);
 }
 
 #[tauri::command]
@@ -484,6 +550,12 @@ fn get_cached_repo_icons_sync(
             continue;
         };
         if entry.hidden {
+            continue;
+        }
+        // "Searched and found nothing" is a real remembered answer with no file
+        // behind it. Falling through would fail the read and delete the entry,
+        // throwing away the very result that stops the next open re-walking.
+        if entry.icon_path.is_empty() {
             continue;
         }
         let max_bytes = if entry.custom {
@@ -661,6 +733,7 @@ mod tests {
                 icon_path: String::new(),
                 custom: false,
                 hidden: true,
+                searched: true,
             },
         );
         let json = serde_json::to_string(&index).unwrap();
@@ -676,6 +749,33 @@ mod tests {
             serde_json::from_str(r#"{"icon_path":"C:\\code\\app\\favicon.png"}"#).unwrap();
         assert!(!entry.hidden);
         assert!(!entry.custom);
+    }
+
+    /// An index written before the negative cache existed must not be read as
+    /// "already searched and found nothing" -- that would hide icons that were
+    /// discovered fine, on every repository, permanently.
+    #[test]
+    fn an_older_index_entry_has_not_been_searched() {
+        let entry: CachedIcon =
+            serde_json::from_str(r#"{"icon_path":"C:\\code\\app\\favicon.png"}"#).unwrap();
+        assert!(!entry.searched);
+    }
+
+    /// "We looked and there is no icon" has to survive the round trip, because
+    /// it is the record that stops the worktree walk repeating on every open.
+    #[test]
+    fn a_searched_but_iconless_entry_survives_a_reread() {
+        let entry = CachedIcon {
+            icon_path: String::new(),
+            custom: false,
+            hidden: false,
+            searched: true,
+        };
+        let restored: CachedIcon =
+            serde_json::from_str(&serde_json::to_string(&entry).unwrap()).unwrap();
+        assert!(restored.searched);
+        assert!(!restored.hidden, "not the same thing as the user hiding it");
+        assert!(restored.icon_path.is_empty());
     }
 
     #[test]
