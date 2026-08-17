@@ -980,7 +980,11 @@ export function useGitMutations(repoId: string | null) {
       return remoteBranch
     },
     onSuccess: (remoteBranch) => {
-      invalidate(qc, id, ['branches'])
+      // REMOTE_REFS, not just branches: the "linked to this branch" label reads
+      // `tracked_by`, which the *remotes* query supplies. Refreshing branches
+      // alone left the sidebar still saying the branch was unlinked, so a
+      // successful link looked exactly like a failed one and the user retried.
+      invalidate(qc, id, REMOTE_REFS)
       toast(`Now tracking ${remoteBranch}`)
     },
     onError,
@@ -1068,7 +1072,9 @@ export function useGitMutations(repoId: string | null) {
       return unwrap(await commands.setBranchUpstream(id, branch, remote ?? null))
     },
     onSuccess: (upstream) => {
-      invalidate(qc, id, ['branches'])
+      // See `setUpstream`: the label this link updates comes from the remotes
+      // query, so refreshing branches alone leaves it reading "not linked".
+      invalidate(qc, id, REMOTE_REFS)
       toast(`Now linked to ${upstream}`)
     },
     onError,
