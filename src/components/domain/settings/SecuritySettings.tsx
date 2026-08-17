@@ -15,6 +15,7 @@ import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { commands, type SigningKey, type SigningStatus } from '@/lib/bindings'
+import { executableName } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { useGitIdentity } from '@/lib/useGitIdentity'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
@@ -752,7 +753,7 @@ function ToolsSection() {
           onCommit={setGitExecutable}
           onBrowse={() => browse('Select the git program', setGitExecutable)}
           status={gitStatus}
-          browseLabel="Browse for git.exe"
+          browseLabel={`Browse for ${executableName('git')}`}
         />
       </SettingRow>
 
@@ -766,7 +767,7 @@ function ToolsSection() {
           onCommit={setGpgExecutable}
           onBrowse={() => browse('Select the gpg program', setGpgExecutable)}
           status={gpgStatus}
-          browseLabel="Browse for gpg.exe"
+          browseLabel={`Browse for ${executableName('gpg')}`}
         />
       </SettingRow>
     </Section>

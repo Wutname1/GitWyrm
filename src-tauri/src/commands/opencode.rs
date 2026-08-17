@@ -215,16 +215,47 @@ pub fn launch(opencode: &str, path: &str, prompt: &str) -> Result<(), AppError> 
 
   #[cfg(all(unix, not(target_os = "macos")))]
   {
-    // `-e` takes the command as argv on every terminal below, so the prompt
-    // stays a single argument and never reaches a shell.
-    let candidates = [
-      "x-terminal-emulator",
-      "gnome-terminal",
-      "konsole",
-      "xterm",
+    // The separator that introduces the command differs, and getting it wrong
+    // is silent: `gnome-terminal -e` has been deprecated since GNOME 3.24 and
+    // takes a single string, so passing argv after it drops every argument but
+    // the first - the terminal opens and opencode never sees the prompt. It
+    // wants `--` instead. Ordered with the modern terminals first so a desktop
+    // that has both does not fall into the legacy path.
+    let candidates: [(&str, &str); 9] = [
+      ("gnome-terminal", "--"),
+      ("ptyxis", "--"),
+      ("kgx", "--"),
+      ("konsole", "-e"),
+      ("xfce4-terminal", "-x"),
+      ("alacritty", "-e"),
+      ("kitty", "-e"),
+      ("wezterm", "-e"),
+      ("xterm", "-e"),
     ];
-    for term in candidates {
+
+    for (term, separator) in candidates {
+      // Resolve first: `spawn` succeeds the moment the binary exists, so a
+      // terminal that starts and then fails would still look like success and
+      // stop the search. `which` keeps the fallback chain honest.
+      if resolve_on_path(term).is_none() {
+        continue;
+      }
       let spawned = Command::new(term)
+        .arg(separator)
+        .args([opencode, path, "--prompt", prompt])
+        .current_dir(path)
+        .spawn();
+      match spawned {
+        Ok(_) => return Ok(()),
+        Err(e) => log::warn!("{term} did not start: {e}"),
+      }
+    }
+
+    // x-terminal-emulator is the Debian alternatives symlink. Last rather than
+    // first: it points at whatever is installed, so its argument convention is
+    // unknowable, and `-e` is the only form every legacy terminal accepts.
+    if resolve_on_path("x-terminal-emulator").is_some() {
+      let spawned = Command::new("x-terminal-emulator")
         .arg("-e")
         .args([opencode, path, "--prompt", prompt])
         .current_dir(path)
@@ -233,6 +264,7 @@ pub fn launch(opencode: &str, path: &str, prompt: &str) -> Result<(), AppError> 
         return Ok(());
       }
     }
+
     return Err(AppError::Other(
       "No terminal emulator found to run opencode in.".into(),
     ));

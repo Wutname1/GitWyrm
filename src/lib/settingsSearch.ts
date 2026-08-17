@@ -1,4 +1,5 @@
 import type { SettingsSection } from '@/stores/uiStore'
+import { isWindows } from '@/lib/platform'
 
 /**
  * One searchable setting. `id` is passed to SettingRow's `searchId` so picking
@@ -15,6 +16,11 @@ export interface SettingsIndexEntry {
    * mode"), and rarely for the label we chose.
    */
   keywords?: string[]
+  /**
+   * Settings whose row only renders on Windows. Search skips these elsewhere,
+   * so a result can never scroll to a row that is not on the page.
+   */
+  windowsOnly?: boolean
 }
 
 /** Page names shown beside search results. Keep these in sync with Settings navigation. */
@@ -171,6 +177,7 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     label: 'Right-click menu',
     hint: 'Add GitWyrm to the Windows folder right-click menu.',
     keywords: ['explorer', 'windows', 'shell', 'open with', 'integration'],
+    windowsOnly: true,
   },
   {
     id: 'discard-submodules',
@@ -375,14 +382,14 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     section: 'security',
     label: 'Git',
     hint: 'The git program used to fetch, pull, push, and clone.',
-    keywords: ['git.exe', 'executable', 'program', 'path', 'bundled'],
+    keywords: ['git.exe', 'git', 'executable', 'program', 'path', 'bundled'],
   },
   {
     id: 'gpg-executable',
     section: 'security',
     label: 'GPG',
     hint: 'The gpg program used to sign commits.',
-    keywords: ['gpg.exe', 'executable', 'program', 'path', 'bundled', 'signing'],
+    keywords: ['gpg.exe', 'gpg', 'executable', 'program', 'path', 'bundled', 'signing'],
   },
 
   // ------------------------------------------------------------ appearance
@@ -653,6 +660,10 @@ export function searchSettings(query: string): SettingsSearchResult[] {
   const results: SettingsSearchResult[] = []
 
   for (const entry of SETTINGS_INDEX) {
+    // Skip rows that do not render on this platform: a result that jumps to
+    // nothing is worse than no result at all.
+    if (entry.windowsOnly && !isWindows()) continue
+
     const label = entry.label.toLowerCase()
     const hint = entry.hint.toLowerCase()
     const keywords = (entry.keywords ?? []).join(' ').toLowerCase()

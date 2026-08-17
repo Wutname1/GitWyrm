@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { commands } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
+import { isWindows } from '@/lib/platform'
 import { SettingRow } from './SettingRow'
 
 /**
@@ -11,12 +12,19 @@ import { SettingRow } from './SettingRow'
  * these keys and the uninstaller removes them, so a value cached in our own
  * settings would drift the first time someone reinstalls. This reads the live
  * state on mount and writes straight through.
+ *
+ * Windows only. The backend command errors off Windows, and the read returns
+ * false there, so without this gate a Linux user would see a switch that
+ * reports itself off and then fails with an error toast when clicked. Linux
+ * file managers each want their own action file rather than a registry key.
  */
 export function ContextMenuSetting() {
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
+    // Nothing to read off Windows, and the row does not render there anyway.
+    if (!isWindows()) return
     let active = true
     void (async () => {
       try {
@@ -58,6 +66,10 @@ export function ContextMenuSetting() {
       setBusy(false)
     }
   }
+
+  // After the hooks, never before: an early return above them would change the
+  // hook order between platforms.
+  if (!isWindows()) return null
 
   return (
     <SettingRow
