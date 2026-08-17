@@ -62,30 +62,49 @@ for key in "${!PLATFORMS[@]}"; do
     '. + {($key): {signature: $sig, url: $url}}' <<<"$platforms_json")
 done
 
-# Linux is optional, unlike the Windows arches above. The AppImage is the only
-# Linux artifact the updater can install in place, so it is the one named here.
-# A missing one is a warning rather than an error on purpose: Linux is the newest
-# leg, and a failure there must not hold back the beta for everyone on Windows.
-linux_key="betas/${VERSION}/GitWyrm-x86_64.AppImage"
-if aws s3 ls "s3://${BUCKET}/${linux_key}" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
-  if aws s3 cp "s3://${BUCKET}/${linux_key}.sig" "$workdir/sig-linux" \
-       --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
-    linux_sig=$(tr -d '\r\n' < "$workdir/sig-linux")
-  else
-    linux_sig=""
+# Linux is optional, unlike the Windows arches above: it is the newest leg, and a
+# failure there must not hold back the beta for everyone on Windows.
+#
+# Three keys, one per package format. The updater asks for
+# `{os}-{arch}-{installer}` and only then falls back to `{os}-{arch}`, so a lone
+# linux-x86_64 entry would hand the AppImage to someone running the .deb - and
+# its install path shells out to dpkg, which cannot read an AppImage. The plain
+# key is published too, as the fallback for any installer not named here.
+#
+# Filenames match the release workflow's "Upload versioned Linux packages" step.
+declare -A LINUX_ARTIFACTS=(
+  ["linux-x86_64-deb"]="GitWyrm-amd64.deb"
+  ["linux-x86_64-rpm"]="GitWyrm-x86_64.rpm"
+  ["linux-x86_64-appimage"]="GitWyrm-x86_64.AppImage"
+  ["linux-x86_64"]="GitWyrm-x86_64.AppImage"
+)
+
+for key in "${!LINUX_ARTIFACTS[@]}"; do
+  artifact="betas/${VERSION}/${LINUX_ARTIFACTS[$key]}"
+
+  if ! aws s3 ls "s3://${BUCKET}/${artifact}" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
+    echo "::warning::No ${artifact} - Linux ${key} clients will not be offered this beta."
+    continue
   fi
 
-  if [ -n "$linux_sig" ]; then
-    platforms_json=$(jq -c \
-      --arg sig "$linux_sig" \
-      --arg url "${CDN_BASE}/${linux_key}" \
-      '. + {"linux-x86_64": {signature: $sig, url: $url}}' <<<"$platforms_json")
-  else
-    echo "::warning::No signature for ${linux_key} - leaving Linux out of the beta manifest."
+  if ! aws s3 cp "s3://${BUCKET}/${artifact}.sig" "$workdir/sig-${key}" \
+       --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
+    echo "::warning::No signature for ${artifact} - leaving ${key} out of the beta manifest."
+    continue
   fi
-else
-  echo "::warning::No ${linux_key} - Linux clients will not be offered this beta."
-fi
+
+  linux_sig=$(tr -d '\r\n' < "$workdir/sig-${key}")
+  if [ -z "$linux_sig" ]; then
+    echo "::warning::Empty signature for ${artifact} - leaving ${key} out of the beta manifest."
+    continue
+  fi
+
+  platforms_json=$(jq -c \
+    --arg key "$key" \
+    --arg sig "$linux_sig" \
+    --arg url "${CDN_BASE}/${artifact}" \
+    '. + {($key): {signature: $sig, url: $url}}' <<<"$platforms_json")
+done
 
 jq -n \
   --arg version "$VERSION" \

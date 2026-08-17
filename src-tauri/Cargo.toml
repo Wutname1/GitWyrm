@@ -2,7 +2,8 @@
 name = "gitwyrm"
 # Placeholder. The release workflow overwrites this from the git tag.
 version = "0.0.0"
-description = "GitWyrm - a targeted Git client for Windows"
+# Shown to users: this is the description apt and rpm display for the package.
+description = "GitWyrm - a targeted Git client"
 authors = ["Jeremy"]
 edition = "2021"
 # The app binary. Without this, the export_bindings bin makes a bare
