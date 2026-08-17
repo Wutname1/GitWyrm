@@ -24,6 +24,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
 import { remoteUrlKind, swapRemoteUrl } from '@/lib/remoteUrlSwap'
+import { normalizeRemoteUrl, remoteNameError, suggestRemoteName } from '@/lib/remoteAdd'
 
 /**
  * One-click toggle between a remote's HTTPS and SSH address. Hidden entirely
@@ -54,6 +55,20 @@ function SwapUrlButton({
       <ArrowLeftRight size={11} />
       {target}
     </TooltipButton>
+  )
+}
+
+/**
+ * Shown when the address the user pasted is not quite the one git needs -- a
+ * branch page, a pull request, a missing `https://`. The form fixes it on save,
+ * so it says up front what it will save (Rule #1: no silent rewrites).
+ */
+function UrlCleanupHint({ typed, cleaned }: { typed: string; cleaned: string }) {
+  if (cleaned === '' || cleaned === typed.trim()) return null
+  return (
+    <p className="text-2xs leading-tight text-sub">
+      We'll save this as <span className="font-mono text-foreground">{cleaned}</span>
+    </p>
   )
 }
 
@@ -330,18 +345,38 @@ export function RemotesModal() {
     [remotes.data]
   )
 
-  const canAdd =
-    newName.trim() !== '' &&
-    newUrl.trim() !== '' &&
-    !existingNames.has(newName.trim()) &&
-    !m.addRemote.isPending
+  // A pasted web address becomes the clone address, and the name box falls back
+  // to a suggestion, so the common case is "paste, press Add".
+  const newUrlCleaned = useMemo(() => normalizeRemoteUrl(newUrl), [newUrl])
+  const suggestedName = useMemo(
+    () => suggestRemoteName(newUrlCleaned, existingNames),
+    [newUrlCleaned, existingNames]
+  )
+  const newNameError = remoteNameError(newName, existingNames)
+  const addName = newName.trim() || suggestedName
+
+  const canAdd = newUrlCleaned !== '' && !newNameError && !m.addRemote.isPending
   const editPending = m.renameRemote.isPending || m.setRemoteUrl.isPending
   const upstreamTarget = m.setUpstream.isPending ? m.setUpstream.variables : undefined
+
+  // Everything except the remote being edited, so keeping its own name is fine.
+  const otherNames = useMemo(
+    () => new Set([...existingNames].filter((n) => n !== editing?.original)),
+    [existingNames, editing?.original]
+  )
+  const editUrlCleaned = normalizeRemoteUrl(editing?.url ?? '')
+  const editNameError = remoteNameError(editing?.name ?? '', otherNames)
+  const canSaveEdit =
+    editing !== null &&
+    editing.name.trim() !== '' &&
+    editUrlCleaned !== '' &&
+    !editNameError &&
+    !editPending
 
   const submitAdd = () => {
     if (!canAdd) return
     m.addRemote.mutate(
-      { name: newName.trim(), url: newUrl.trim() },
+      { name: addName, url: newUrlCleaned },
       {
         onSuccess: () => {
           setAdding(false)
@@ -353,10 +388,9 @@ export function RemotesModal() {
   }
 
   const submitEdit = () => {
-    if (!editing) return
+    if (!editing || !canSaveEdit) return
     const name = editing.name.trim()
-    const url = editing.url.trim()
-    if (name === '' || url === '') return
+    const url = editUrlCleaned
     // Rename first if the name changed, then update the URL.
     const afterRename = () => {
       m.setRemoteUrl.mutate({ name, url }, { onSuccess: () => setEditing(null) })
@@ -398,6 +432,7 @@ export function RemotesModal() {
                       autoFocus
                       disabled={editPending}
                     />
+                    {editNameError && <p className="text-2xs text-removed">{editNameError}</p>}
                   </div>
                   <div className="grid gap-1.5">
                     <label className="text-2xs font-semibold text-sub">URL</label>
@@ -410,17 +445,18 @@ export function RemotesModal() {
                         disabled={editPending}
                       />
                       <SwapUrlButton
-                        url={editing.url}
+                        url={editUrlCleaned}
                         onSwap={(url) => setEditing({ ...editing, url })}
                         disabled={editPending}
                       />
                     </div>
+                    <UrlCleanupHint typed={editing.url} cleaned={editUrlCleaned} />
                   </div>
                   <div className="flex justify-end gap-2 pt-1">
                     <Button variant="secondary" size="sm" disabled={editPending} onClick={() => setEditing(null)}>
                       Cancel
                     </Button>
-                    <Button size="sm" disabled={editPending} aria-busy={editPending || undefined} onClick={submitEdit}>
+                    <Button size="sm" disabled={!canSaveEdit} aria-busy={editPending || undefined} onClick={submitEdit}>
                       {editPending && <PendingIndicator />}
                       {editPending ? 'Saving…' : 'Save'}
                     </Button>
@@ -446,13 +482,18 @@ export function RemotesModal() {
                   <Input
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
-                    placeholder="origin"
+                    onKeyDown={(e) => e.key === 'Enter' && submitAdd()}
+                    placeholder={suggestedName}
                     className="h-auto bg-background py-1.5 font-mono text-xs"
-                    autoFocus
                     disabled={m.addRemote.isPending}
                   />
-                  {existingNames.has(newName.trim()) && newName.trim() !== '' && (
-                    <p className="text-2xs text-removed">That name is already used.</p>
+                  {newNameError ? (
+                    <p className="text-2xs text-removed">{newNameError}</p>
+                  ) : (
+                    <p className="text-2xs leading-tight text-muted-foreground">
+                      Leave this blank and we'll call it{' '}
+                      <span className="font-mono text-foreground">{suggestedName}</span>.
+                    </p>
                   )}
                 </div>
                 <div className="grid gap-1.5">
@@ -462,16 +503,22 @@ export function RemotesModal() {
                       value={newUrl}
                       onChange={(e) => setNewUrl(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && submitAdd()}
-                      placeholder="https://github.com/you/repo.git"
+                      placeholder="https://github.com/you/repo"
                       className="h-auto min-w-0 flex-1 bg-background py-1.5 font-mono text-xs"
+                      autoFocus
                       disabled={m.addRemote.isPending}
                     />
                     <SwapUrlButton
-                      url={newUrl}
+                      url={newUrlCleaned}
                       onSwap={setNewUrl}
                       disabled={m.addRemote.isPending}
                     />
                   </div>
+                  <UrlCleanupHint typed={newUrl} cleaned={newUrlCleaned} />
+                  <p className="text-2xs leading-tight text-muted-foreground">
+                    Paste the web address of the project. A branch or pull request page
+                    works too.
+                  </p>
                 </div>
                 <div className="flex justify-end gap-2 pt-1">
                   <Button variant="secondary" size="sm" disabled={m.addRemote.isPending} onClick={() => setAdding(false)}>
