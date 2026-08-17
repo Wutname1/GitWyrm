@@ -229,3 +229,20 @@ export function remoteNameError(name: string, taken: Iterable<string> = []): str
   if (value.startsWith('-') || value.startsWith('.')) return "Names can't start with a dash or dot."
   return null
 }
+
+/**
+ * The `<remote>/<branch>` ref used by "Set target (upstream)", or null when the
+ * remote has no branches to point at.
+ *
+ * A remote that was just added has no remote-tracking branches until the first
+ * fetch, so `branches[0]` is undefined for as long as that window lasts. The
+ * menu item is disabled in that state, but it still renders its own label, so
+ * the lookup has to be safe during render and not only inside the click.
+ */
+export function firstBranchUpstream(remote: {
+  name: string
+  branches: { name: string }[]
+}): string | null {
+  const first = remote.branches[0]
+  return first ? `${remote.name}/${first.name}` : null
+}

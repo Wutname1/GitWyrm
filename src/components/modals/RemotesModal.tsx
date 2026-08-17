@@ -24,7 +24,12 @@ import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
 import { remoteUrlKind, swapRemoteUrl } from '@/lib/remoteUrlSwap'
-import { normalizeRemoteUrl, remoteNameError, suggestRemoteName } from '@/lib/remoteAdd'
+import {
+  firstBranchUpstream,
+  normalizeRemoteUrl,
+  remoteNameError,
+  suggestRemoteName,
+} from '@/lib/remoteAdd'
 
 /**
  * One-click toggle between a remote's HTTPS and SSH address. Hidden entirely
@@ -191,6 +196,8 @@ function RemoteRow({
   )
   const provider = detectProvider(remote)
   const webTarget = remoteWebTarget(remote)
+  const firstBranchTarget = firstBranchUpstream(remote)
+  const settingFirstBranch = firstBranchTarget !== null && upstreamTarget === firstBranchTarget
 
   return (
     <div className="rounded-md border border-border bg-background">
@@ -254,14 +261,14 @@ function RemoteRow({
             Edit
           </ContextMenuItem>
           <ContextMenuItem
-            disabled={remote.branches.length === 0 || upstreamPending}
+            disabled={firstBranchTarget === null || upstreamPending}
             onSelect={(e) => {
               e.preventDefault()
-              onSetUpstream(`${remote.name}/${remote.branches[0].name}`)
+              if (firstBranchTarget) onSetUpstream(firstBranchTarget)
             }}
           >
-            {upstreamTarget === `${remote.name}/${remote.branches[0].name}` ? <PendingIndicator /> : <Target />}
-            {upstreamTarget === `${remote.name}/${remote.branches[0].name}` ? 'Setting target…' : 'Set target (upstream)'}
+            {settingFirstBranch ? <PendingIndicator /> : <Target />}
+            {settingFirstBranch ? 'Setting target…' : 'Set target (upstream)'}
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem disabled={upstreamPending} variant="destructive" onSelect={onDelete}>

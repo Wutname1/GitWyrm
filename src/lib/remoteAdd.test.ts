@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeRemoteUrl, remoteNameError, suggestRemoteName } from './remoteAdd'
+import {
+  firstBranchUpstream,
+  normalizeRemoteUrl,
+  remoteNameError,
+  suggestRemoteName,
+} from './remoteAdd'
 
 describe('normalizeRemoteUrl', () => {
   it('accepts a repository page copied out of the address bar', () => {
@@ -155,5 +160,25 @@ describe('remoteNameError', () => {
       'Use letters, numbers, dashes, dots, or underscores.'
     )
     expect(remoteNameError('-fork', [])).toBe("Names can't start with a dash or dot.")
+  })
+})
+
+describe('firstBranchUpstream', () => {
+  it('points at the first branch when the remote has been fetched', () => {
+    expect(
+      firstBranchUpstream({ name: 'origin', branches: [{ name: 'main' }, { name: 'dev' }] })
+    ).toBe('origin/main')
+  })
+
+  it('keeps slashes in the branch name intact', () => {
+    expect(firstBranchUpstream({ name: 'upstream', branches: [{ name: 'claude/foo' }] })).toBe(
+      'upstream/claude/foo'
+    )
+  })
+
+  // The crash case: a remote added but not yet fetched has no branches, and the
+  // menu label reads this during render, where a disabled prop cannot help.
+  it('returns null for a freshly added remote with no branches', () => {
+    expect(firstBranchUpstream({ name: 'origin', branches: [] })).toBeNull()
   })
 })

@@ -21,6 +21,7 @@ import { useActiveRepo } from '@/stores/workspaceStore'
 import { BranchMenu } from '@/components/domain/branch/BranchMenu'
 import { TooltipButton, TooltipHint } from '@/components/ui/tooltip'
 import { openWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
+import { firstBranchUpstream } from '@/lib/remoteAdd'
 import { RemoteBranchMenuItems } from '@/components/domain/branch/RemoteBranchMenuItems'
 
 /** Plain-language summary of what a remote branch means for the user. */
@@ -251,8 +252,11 @@ function RemoteNode({ remote }: { remote: RemoteInfo }) {
             label="Set target (upstream)"
             pendingLabel="Setting target…"
             pending={m.setUpstream.isPending}
-            disabled={remote.branches.length === 0 || m.setUpstream.isPending}
-            onRun={() => m.setUpstream.mutate(`${remote.name}/${remote.branches[0].name}`)}
+            disabled={firstBranchUpstream(remote) === null || m.setUpstream.isPending}
+            onRun={() => {
+              const target = firstBranchUpstream(remote)
+              if (target) m.setUpstream.mutate(target)
+            }}
           />
           <ContextMenuSeparator />
           <ContextMenuItem variant="destructive" onSelect={() => deleteRemotePrompt(remote.name)}>
