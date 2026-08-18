@@ -1,3 +1,4 @@
+import type { TelemetryLevel } from '@/lib/bindings'
 import * as Sentry from '@sentry/react'
 import { scrubDeep, scrubText } from '@/lib/scrub'
 
@@ -8,15 +9,16 @@ import { scrubDeep, scrubText } from '@/lib/scrub'
  * backend's, and keeps PII off because repo paths and branch names travel
  * through error messages.
  *
- * Two independent opt-outs feed this, and they gate different things:
- * - `crashReports` covers errors and unhandled rejections. Off means no client
- *   is created at all, so nothing is sent.
- * - `usageTelemetry` covers performance tracing, profiling, and forwarded
- *   logs. Off drops those integrations and zeroes the sample rates, leaving
- *   crash reporting working on its own.
+ * One ordered setting feeds this, and each level gates more than the last:
+ * - `off` creates no client at all, so nothing is sent or even buffered.
+ * - `reports` covers errors and unhandled rejections.
+ * - `full` adds performance tracing, profiling, and forwarded logs on top.
  *
- * The split exists so reporting the crash that would otherwise go unfixed does
+ * The scale exists so reporting the crash that would otherwise go unfixed does
  * not also mean being measured. The Rust `init_sentry` makes the same split.
+ *
+ * The daily install count is not part of this: it is sent from Rust
+ * (`telemetry::install`) and never travels through Sentry.
  *
  * During the alpha, telemetry -- when on -- runs at full sampling, including
  * the features that would cost money on a paid plan. The free plan's quota is
@@ -35,9 +37,12 @@ import { scrubDeep, scrubText } from '@/lib/scrub'
  *
  * Call once, before the app renders. Safe to call in dev -- it no-ops there.
  */
-export function initSentry(enabled: boolean, usageTelemetry: boolean) {
+export function initSentry(level: TelemetryLevel) {
   if (import.meta.env.DEV) return
-  if (!enabled) return
+  if (level === 'off') return
+  // Everything below `full` is error reporting only: the install count is sent
+  // by the Rust side, not through Sentry.
+  const diagnostics = level === 'full'
 
   Sentry.init({
     dsn: 'https://a2cb101567f5cec264a9a0b43e6f8c24@o4511760230907904.ingest.us.sentry.io/4511769575948288',
@@ -48,9 +53,9 @@ export function initSentry(enabled: boolean, usageTelemetry: boolean) {
     // ALPHA: forward console logs and `log.*` calls to Sentry's Logs product.
     // Usage telemetry, not crash reporting: these are the running commentary of
     // a working session, not a failure, so they follow the telemetry opt-out.
-    enableLogs: usageTelemetry,
+    enableLogs: diagnostics,
 
-    integrations: usageTelemetry
+    integrations: diagnostics
       ? [
           // Performance tracing across fetch/navigation, plus browser vitals.
           Sentry.browserTracingIntegration(),
@@ -65,9 +70,9 @@ export function initSentry(enabled: boolean, usageTelemetry: boolean) {
     // ALPHA: trace 100% of transactions when telemetry is on. Drop toward
     // 0.1-0.2 before any real launch, or the free-plan performance quota burns
     // out fast. 0.0 leaves every transaction unsampled, so none is sent.
-    tracesSampleRate: usageTelemetry ? 1.0 : 0.0,
+    tracesSampleRate: diagnostics ? 1.0 : 0.0,
     // ALPHA: profile 100% of the traces we sample (multiplies tracesSampleRate).
-    profilesSampleRate: usageTelemetry ? 1.0 : 0.0,
+    profilesSampleRate: diagnostics ? 1.0 : 0.0,
 
     // Keep a rolling window of the user's recent actions on every event.
     maxBreadcrumbs: 100,

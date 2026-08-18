@@ -6,6 +6,7 @@ import {
   type MergeMethod,
   type RepoInfo,
   type Settings,
+  type TelemetryLevel,
 } from "@/lib/bindings";
 import {
   addFolder,
@@ -710,30 +711,26 @@ interface WorkspaceState {
    */
   showTips: boolean;
   /**
-   * Send anonymous crash reports and error diagnostics (persisted). Read at
-   * startup before the reporters initialize, so a change here takes effect on
-   * the next launch rather than immediately.
-   */
-  crashReports: boolean;
-  /**
-   * Send anonymous usage telemetry: performance traces, profiling, and
-   * forwarded logs (persisted). Separate from `crashReports` so reporting a
-   * crash does not also mean being measured.
+   * How much GitWyrm reports about itself (persisted): `off`, `reports`
+   * (errors and the install count), or `full` (those plus diagnostics).
    *
    * `null` means the user has never chosen, and the effective answer then
-   * depends on the build -- on before 1.0 and on beta channels, off for stable
-   * releases. That rule lives in Rust; `usageTelemetryEffective` below holds
-   * the answer it gave. Kept as a tri-state rather than collapsed to a boolean
-   * so a pre-1.0 install that never touched the toggle still flips to opt-in at
-   * 1.0 instead of having today's default frozen into its settings file.
+   * depends on the build -- `full` before 1.0 and on beta channels, `reports`
+   * for stable releases. That rule lives in Rust; `telemetryLevelEffective`
+   * below holds the answer it gave. Kept as a tri-state rather than collapsed
+   * so a pre-1.0 install that never touched the setting narrows to `reports` at
+   * 1.0 instead of freezing today's default into its settings file.
+   *
+   * Read at startup before the reporters initialize, so a change here takes
+   * effect on the next launch rather than immediately.
    */
-  usageTelemetry: boolean | null;
+  telemetryLevel: TelemetryLevel | null;
   /**
-   * What usage telemetry actually resolved to for this build, answered by the
-   * backend at startup. This is what the checkbox shows, so an un-chosen
-   * install displays the state it is really in rather than an empty box.
+   * What the telemetry level actually resolved to for this build, answered by
+   * the backend at startup. This is what the control shows, so an un-chosen
+   * install displays the state it is really in rather than nothing.
    */
-  usageTelemetryEffective: boolean;
+  telemetryLevelEffective: TelemetryLevel;
   /**
    * Whether the welcome tour has run. App lifecycle state, not a preference:
    * deliberately absent from every reset group, since "reset my preferences"
@@ -884,8 +881,7 @@ interface WorkspaceState {
   setRestoreTabs: (enabled: boolean) => void;
   setAutoFetch: (enabled: boolean) => void;
   setShowTips: (enabled: boolean) => void;
-  setCrashReports: (enabled: boolean) => void;
-  setUsageTelemetry: (enabled: boolean) => void;
+  setTelemetryLevel: (level: TelemetryLevel) => void;
   markOnboardingSeen: () => void;
   markSigningKeyPublished: (fingerprint: string) => void;
   setTabLayout: (layout: TabLayout) => void;
@@ -1083,8 +1079,7 @@ function toSettings(s: WorkspaceState): Settings {
     restore_tabs: s.restoreTabs,
     show_tips: s.showTips,
     auto_fetch: s.autoFetch,
-    crash_reports: s.crashReports,
-    usage_telemetry: s.usageTelemetry,
+    telemetry_level: s.telemetryLevel,
     onboarding_seen: s.onboardingSeen,
     signing_keys_published: s.signingKeysPublished,
     ui_scale: s.uiScale,
@@ -1401,13 +1396,13 @@ export const SETTINGS_DEFAULTS = {
   autoFetch: true,
   showTips: true,
   // Deliberately outside the per-screen "behavior" group below: a privacy
-  // opt-out must not switch itself back on because the user reset an unrelated
-  // page of preferences. Only the global "Reset all" restores it.
-  crashReports: true,
+  // choice must not change because the user reset an unrelated page of
+  // preferences. Only the global "Reset all" restores it.
+  //
   // null is the real default: no choice recorded, so the build decides. A
-  // "Reset all" puts it back to un-chosen rather than to on.
-  usageTelemetry: null,
-  usageTelemetryEffective: true,
+  // "Reset all" puts it back to un-chosen rather than to a fixed level.
+  telemetryLevel: null,
+  telemetryLevelEffective: "full",
   onboardingSeen: false,
   signingKeysPublished: [],
   tagPushDefault: "ask",
@@ -1548,11 +1543,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   restoreTabs: true,
   autoFetch: true,
   showTips: true,
-  crashReports: true,
-  usageTelemetry: null,
+  telemetryLevel: null,
   // Optimistic until the backend answers at startup; corrected by hydration
   // before the settings screen can be opened.
-  usageTelemetryEffective: true,
+  telemetryLevelEffective: "full",
   onboardingSeen: false,
   signingKeysPublished: [],
   uiScale: DEFAULT_UI_SCALE,
@@ -2064,16 +2058,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ restoreTabs: enabled });
     schedulePersist();
   },
-  setCrashReports: (enabled) => {
-    set({ crashReports: enabled });
-    schedulePersist();
-  },
-  setUsageTelemetry: (enabled) => {
+  setTelemetryLevel: (level) => {
     // Records an explicit choice, which from here on outranks the build's
-    // default. `usageTelemetryEffective` is updated alongside so the checkbox
+    // default. `telemetryLevelEffective` is updated alongside so the control
     // reflects the choice immediately, even though the reporters only pick it
     // up at the next start.
-    set({ usageTelemetry: enabled, usageTelemetryEffective: enabled });
+    set({ telemetryLevel: level, telemetryLevelEffective: level });
     schedulePersist();
   },
   setAutoFetch: (enabled) => {
@@ -2823,12 +2813,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   hydrate: async () => {
     const settings = unwrap(await commands.getSettings());
     // Resolved by the backend rather than derived here, because "unset" only
-    // becomes on or off once the version and update channel are known. Failing
-    // this read must not read as consent, so it falls back to off.
-    const usageTelemetryEffective = await commands
-      .getUsageTelemetryEnabled()
-      .then((r) => (r.status === "ok" ? r.data : false))
-      .catch(() => false);
+    // becomes a level once the version and update channel are known. Failing
+    // this read must not read as consent to the widest level, so it falls back
+    // to the narrowest one that is still a default.
+    const telemetryLevelEffective = await commands
+      .getTelemetryLevel()
+      .then((r) => (r.status === "ok" ? r.data : "reports"))
+      .catch(() => "reports" as const);
     if (!get().hydrated) {
       const tabGroups = deserializeTabGroups(settings.tab_groups);
       const savedTabGroups = deserializeSavedTabGroups(
@@ -2927,15 +2918,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         // belongs to someone who has been seeing the tips all along, so hiding
         // them on upgrade would look like the sidebar lost content.
         showTips: settings.show_tips ?? true,
-        // Absent means on: a settings file written before this flag existed
-        // belongs to a user who was never asked, and the default is to report.
-        crashReports: settings.crash_reports !== false,
         // Absent stays absent: `null` is a meaningful state here ("never
-        // chosen"), so it must not be coerced to a boolean. Doing so would
-        // freeze today's default into the settings file on the next save and
-        // break the flip to opt-in at 1.0.
-        usageTelemetry: settings.usage_telemetry ?? null,
-        usageTelemetryEffective,
+        // chosen"), so it must not be coerced to a level. Doing so would freeze
+        // today's default into the settings file on the next save and break the
+        // narrowing to `reports` at 1.0.
+        telemetryLevel: settings.telemetry_level ?? null,
+        telemetryLevelEffective,
         onboardingSeen: settings.onboarding_seen ?? false,
         signingKeysPublished: settings.signing_keys_published ?? [],
         uiScale:

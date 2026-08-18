@@ -25,6 +25,52 @@ pub enum UpdateChannel {
   Beta,
 }
 
+/// How much GitWyrm reports about itself. One choice covering every kind of
+/// outgoing diagnostic, ordered so that each level is a superset of the one
+/// before it.
+///
+/// This replaced a pair of independent booleans (`crash_reports` and
+/// `usage_telemetry`). Two switches meant "on" was ambiguous -- it depended on
+/// the build's version and channel which of them covered what -- and the
+/// version-dependent default meant install counts would silently stop arriving
+/// at 1.0, exactly when they start mattering. One ordered choice is legible to
+/// the person making it: they can see what they are picking rather than
+/// inferring it from their version number.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryLevel {
+  /// Nothing leaves the machine. No reporter is built, so nothing is even
+  /// buffered.
+  Off,
+  /// Errors, panics, and the once-a-day install ping. The default: an
+  /// unreported crash is a crash nobody fixes, and a platform with no install
+  /// count is a platform whose bugs look like nobody's problem.
+  Reports,
+  /// Everything in `Reports`, plus performance traces, profiling, and forwarded
+  /// logs. The volume that is worth sampling during development and worth
+  /// asking for explicitly afterwards.
+  Full,
+}
+
+impl TelemetryLevel {
+  /// Whether errors and panics are reported.
+  pub fn reports_errors(self) -> bool {
+    self >= TelemetryLevel::Reports
+  }
+
+  /// Whether the install ping is sent. Same level as error reporting: both are
+  /// low-volume, carry no repository data, and answer "does this build work for
+  /// anyone".
+  pub fn reports_installs(self) -> bool {
+    self >= TelemetryLevel::Reports
+  }
+
+  /// Whether traces, profiling, and forwarded logs are sent.
+  pub fn reports_diagnostics(self) -> bool {
+    self >= TelemetryLevel::Full
+  }
+}
+
 /// What to do with uncommitted changes when switching branches.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -307,25 +353,30 @@ pub struct Settings {
   /// and the plain empty-state labels, which is what a returning user wants.
   #[serde(default = "default_show_tips")]
   pub show_tips: bool,
-  /// Send anonymous crash reports and error diagnostics. On by default; turning
-  /// it off stops both the frontend and backend reporters at their next start.
+  /// How much GitWyrm reports about itself: nothing, errors and install counts,
+  /// or those plus diagnostics. See `TelemetryLevel`.
   ///
-  /// Read straight off disk during startup by `crash_reports_enabled`, before
-  /// the Tauri app handle exists, so the reporters can honour it from the very
+  /// `None` means the user has never chosen, so the build's default applies
+  /// (see `telemetry_level_default`). Storing the un-chosen state rather than a
+  /// resolved level is what lets the default shift between a pre-release and a
+  /// stable build without overwriting anybody's explicit choice.
+  ///
+  /// Read straight off disk during startup by `telemetry_level`, before the
+  /// Tauri app handle exists, so the reporters can honour it from the very
   /// first line rather than after settings finish loading.
-  #[serde(default = "default_crash_reports")]
-  pub crash_reports: bool,
-  /// Send anonymous usage telemetry: performance traces, profiling, and
-  /// forwarded logs. Separate from `crash_reports` so someone can report the
-  /// crashes that would otherwise go unfixed without also being measured.
-  ///
-  /// `None` means the user has never chosen, so the default applies -- and that
-  /// default is not fixed, it depends on the build (see
-  /// `usage_telemetry_default`). Storing the un-chosen state rather than a
-  /// resolved bool is what lets a pre-1.0 install become opt-in at 1.0 without a
-  /// migration: nobody's explicit choice is ever overwritten, and everyone who
-  /// never expressed one follows the new default.
   #[serde(default)]
+  pub telemetry_level: Option<TelemetryLevel>,
+  /// Superseded by `telemetry_level`; read only to carry an existing choice
+  /// forward. See `migrate_telemetry`.
+  ///
+  /// Kept as a field rather than dropped because serde would otherwise discard
+  /// it on the first write, and someone who had turned crash reports off would
+  /// silently get them back on.
+  #[serde(default, skip_serializing)]
+  pub crash_reports: Option<bool>,
+  /// Superseded by `telemetry_level`; read only to carry an existing choice
+  /// forward. See `migrate_telemetry`.
+  #[serde(default, skip_serializing)]
   pub usage_telemetry: Option<bool>,
   /// Whether the welcome tour has been shown. Without this the tour reopens on
   /// every launch that starts with no repository, which is the normal state for
@@ -514,32 +565,32 @@ fn default_show_tips() -> bool {
   true
 }
 
-fn default_crash_reports() -> bool {
-  true
-}
 
 fn default_discard_resets_submodules() -> bool {
   true
 }
 
-/// Whether usage telemetry is on for someone who has never chosen, for the
-/// build identified by `version` on `channel`.
+/// The telemetry level for someone who has never chosen, for the build
+/// identified by `version` on `channel`.
 ///
-/// Three cases, in order:
-/// - Before 1.0.0 every build is a pre-release, so this is on. Tuning the app
-///   during alpha is the whole reason the traces exist.
-/// - From 1.0.0, a stable release is opt-in: shipped software should not
-///   measure people who did not ask to be measured.
-/// - Beta builds stay opt-out at any version. Running a beta is itself a
-///   choice to help test, and the perf data is the point of the channel.
+/// Never `Off`: the un-chosen default always includes errors and the install
+/// ping, at every version and on every channel. An unreported crash is a crash
+/// nobody fixes, and a platform nobody appears to run is a platform whose bugs
+/// never get prioritised -- which is the whole reason the count exists now that
+/// Linux packages make download numbers meaningless.
 ///
-/// Crash reporting is deliberately not part of this and stays on by default at
-/// every version -- an unreported crash is a crash nobody fixes.
-fn usage_telemetry_default(version: &str, channel: &UpdateChannel) -> bool {
-  if matches!(channel, UpdateChannel::Beta) {
-    return true;
+/// What shifts at 1.0 is the *scope*, not the switch:
+/// - Before 1.0.0, and on Beta at any version, `Full`. Running a pre-release or
+///   a beta is itself a choice to help test, and the traces are the point.
+/// - From 1.0.0 on Stable, `Reports`. Shipped software should not profile
+///   people who did not ask to be profiled -- but counting deployed builds and
+///   hearing about crashes is the minimum needed to keep it working.
+fn telemetry_level_default(version: &str, channel: &UpdateChannel) -> TelemetryLevel {
+  if matches!(channel, UpdateChannel::Beta) || is_pre_1_0(version) {
+    TelemetryLevel::Full
+  } else {
+    TelemetryLevel::Reports
   }
-  is_pre_1_0(version)
 }
 
 /// Whether a semver-ish version string is below 1.0.0. Only the major component
@@ -559,13 +610,35 @@ fn is_pre_1_0(version: &str) -> bool {
   }
 }
 
-/// Whether usage telemetry should run, resolving the un-chosen state against
-/// this build. Used by both the startup gate and the settings command so the
-/// UI and the reporters never disagree about what "default" means.
-pub fn usage_telemetry_enabled_for(settings: &Settings, version: &str) -> bool {
+/// The level implied by the two booleans this setting replaced, or `None` if
+/// neither was ever explicitly set.
+///
+/// The old pair could express a state the new scale cannot: traces on, crash
+/// reports off. That resolves to `Reports` rather than `Full` -- the scale is
+/// ordered, so diagnostics cannot outrank errors, and quietly re-enabling the
+/// error reports someone had switched off would be the worse of the two
+/// mistakes.
+fn migrate_telemetry(crash_reports: Option<bool>, usage_telemetry: Option<bool>) -> Option<TelemetryLevel> {
+  match (crash_reports, usage_telemetry) {
+    (None, None) => None,
+    // Errors off means off, whatever the other switch said.
+    (Some(false), _) => Some(TelemetryLevel::Off),
+    (_, Some(true)) => Some(TelemetryLevel::Full),
+    (Some(true), _) => Some(TelemetryLevel::Reports),
+    (None, Some(false)) => Some(TelemetryLevel::Reports),
+  }
+}
+
+/// The telemetry level in force, resolving the un-chosen state against this
+/// build and carrying forward a choice made under the old two-boolean scheme.
+///
+/// Used by the startup gates and the settings command alike so the UI and the
+/// reporters never disagree about what "default" means.
+pub fn telemetry_level_for(settings: &Settings, version: &str) -> TelemetryLevel {
   settings
-    .usage_telemetry
-    .unwrap_or_else(|| usage_telemetry_default(version, &settings.update_channel))
+    .telemetry_level
+    .or_else(|| migrate_telemetry(settings.crash_reports, settings.usage_telemetry))
+    .unwrap_or_else(|| telemetry_level_default(version, &settings.update_channel))
 }
 
 fn default_vertical_tab_width() -> f64 {
@@ -643,8 +716,9 @@ impl Default for Settings {
       restore_tabs: true,
       auto_fetch: true,
       show_tips: true,
-      crash_reports: true,
-      // No stored choice; resolved per build by `usage_telemetry_enabled_for`.
+      // No stored choice; resolved per build by `telemetry_level_for`.
+      telemetry_level: None,
+      crash_reports: None,
       usage_telemetry: None,
       onboarding_seen: false,
       profiles: Vec::new(),
@@ -783,36 +857,22 @@ pub fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
   Ok(dir)
 }
 
-/// Whether the user has left crash reporting on, read directly from disk.
+/// The telemetry level, read directly from disk during startup.
 ///
-/// Crash reporting has to start before anything else does, which is earlier
-/// than the Tauri app handle exists -- so this cannot go through
-/// `app_data_dir`. It resolves the same directory Tauri would (the identifier
-/// from tauri.conf.json under the platform's app-data root) and reads the file
-/// itself.
+/// The reporters have to start before anything else does, which is earlier than
+/// the Tauri app handle exists -- so this cannot go through `app_data_dir`. It
+/// resolves the same directory Tauri would (the identifier from tauri.conf.json
+/// under the platform's app-data root) and reads the file itself.
 ///
-/// Defaults to `true` on any failure. A missing or unreadable settings file is
-/// a first launch or a corrupt file, not an opt-out, and the opt-out is only
-/// ever recorded by the user explicitly turning the setting off.
-pub fn crash_reports_enabled() -> bool {
-  let Some(dir) = app_data_dir_unmanaged() else {
-    return true;
-  };
-  read_settings_in(&dir).crash_reports
-}
-
-/// Whether the user has usage telemetry on, read directly from disk during
-/// startup. Same early-startup constraint as `crash_reports_enabled`.
-///
-/// On a failure to locate the settings directory this falls back to the
-/// build's default rather than to `true`: a first launch should follow the
-/// release/beta rule, not opt everyone in.
-pub fn usage_telemetry_enabled() -> bool {
+/// Falls back to the build's default rather than to `Off` on failure: a missing
+/// or unreadable settings file is a first launch or a corrupt file, not an
+/// opt-out, and the opt-out is only ever recorded by the user choosing it.
+pub fn telemetry_level() -> TelemetryLevel {
   let version = env!("CARGO_PKG_VERSION");
   let Some(dir) = app_data_dir_unmanaged() else {
-    return usage_telemetry_default(version, &UpdateChannel::Stable);
+    return telemetry_level_default(version, &UpdateChannel::Stable);
   };
-  usage_telemetry_enabled_for(&read_settings_in(&dir), version)
+  telemetry_level_for(&read_settings_in(&dir), version)
 }
 
 /// The app data directory, resolved without a Tauri handle. Mirrors what
@@ -857,6 +917,18 @@ pub fn keep_backend_owned_fields(incoming: &mut Settings, stored: &Settings) {
   incoming.profiles = stored.profiles.clone();
   incoming.active_profile_id = stored.active_profile_id.clone();
   incoming.profiles_seeded = stored.profiles_seeded;
+  // The legacy telemetry booleans never reach the frontend (they are
+  // `skip_serializing`), so an incoming object always has them as `None`. Carry
+  // them across, or the first unrelated settings write would drop the only
+  // record of a choice made before `telemetry_level` existed -- turning someone
+  // who had switched reporting off back on.
+  //
+  // Once `telemetry_level` is set the old pair stops mattering, because the
+  // resolver reads it first.
+  if incoming.telemetry_level.is_none() {
+    incoming.crash_reports = stored.crash_reports;
+    incoming.usage_telemetry = stored.usage_telemetry;
+  }
 }
 
 /// Write settings to `dir` exactly as given.
@@ -883,19 +955,19 @@ pub async fn get_settings(app: tauri::AppHandle) -> Result<Settings, AppError> {
     .map_err(|e| AppError::Other(e.to_string()))?
 }
 
-/// Whether usage telemetry is on for this build, with the un-chosen state
+/// The telemetry level in force for this build, with the un-chosen state
 /// already resolved against the version and update channel.
 ///
 /// The frontend needs the effective answer both to configure its reporter and
-/// to render the toggle, and the rule that resolves it is deliberately not
-/// duplicated there -- one copy means the checkbox and the reporters can never
+/// to render the setting, and the rule that resolves it is deliberately not
+/// duplicated there -- one copy means the control and the reporters can never
 /// disagree about what the default is.
 #[tauri::command]
 #[specta::specta]
-pub async fn get_usage_telemetry_enabled(app: tauri::AppHandle) -> Result<bool, AppError> {
+pub async fn get_telemetry_level(app: tauri::AppHandle) -> Result<TelemetryLevel, AppError> {
   tauri::async_runtime::spawn_blocking(move || {
     let settings = read_settings(&app)?;
-    Ok(usage_telemetry_enabled_for(&settings, env!("CARGO_PKG_VERSION")))
+    Ok(telemetry_level_for(&settings, env!("CARGO_PKG_VERSION")))
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
@@ -1110,10 +1182,12 @@ mod tests {
     // Tips read as on for a settings file written before the switch existed --
     // that is what those users were already seeing, so nothing moves for them.
     assert!(settings.show_tips);
-    // Crash reporting is opt-out, so a settings file written before the switch
-    // existed reads as on -- that user was reporting already and nothing
-    // changes for them. Only an explicit `false` turns it off.
-    assert!(settings.crash_reports);
+    // Reporting is opt-out, so a settings file written before the switch
+    // existed reads as un-chosen and resolves to the build default -- that user
+    // was reporting already and nothing changes for them. Only an explicit
+    // choice turns it off.
+    assert_eq!(settings.telemetry_level, None);
+    assert!(telemetry_level_for(&settings, "1.0.0").reports_errors());
     // An existing user's settings file has no onboarding flag, so it reads as
     // false. They see the tour once, which is the intended one-time cost of
     // adding the identity step to it.
@@ -1141,23 +1215,28 @@ mod tests {
     }
   }
 
-  /// The crash-reporting opt-out is read back off disk at the very start of the
-  /// next launch, before any Tauri machinery exists, so it has to survive the
-  /// real write-then-read path -- not just a serde round trip. If this breaks,
-  /// a user who opted out silently starts reporting again on restart.
+  /// The reporting opt-out is read back off disk at the very start of the next
+  /// launch, before any Tauri machinery exists, so it has to survive the real
+  /// write-then-read path -- not just a serde round trip. If this breaks, a user
+  /// who opted out silently starts reporting again on restart.
   #[test]
-  fn the_crash_report_switch_round_trips_through_settings_file() {
-    for enabled in [false, true] {
+  fn the_telemetry_level_round_trips_through_settings_file() {
+    for level in [
+      TelemetryLevel::Off,
+      TelemetryLevel::Reports,
+      TelemetryLevel::Full,
+    ] {
       let dir = tempfile::tempdir().expect("temp dir");
       let settings = Settings {
-        crash_reports: enabled,
+        telemetry_level: Some(level),
         ..Default::default()
       };
       write_settings_in(dir.path(), &settings).expect("write");
       let back = read_settings_in(dir.path());
       assert_eq!(
-        back.crash_reports, enabled,
-        "crash_reports should survive a write and read"
+        back.telemetry_level,
+        Some(level),
+        "telemetry_level should survive a write and read"
       );
     }
   }
@@ -1491,26 +1570,60 @@ mod tests {
   }
 
   #[test]
-  fn usage_telemetry_defaults_on_before_1_0() {
-    assert!(usage_telemetry_default("0.0.0", &UpdateChannel::Stable));
-    assert!(usage_telemetry_default("0.9.12", &UpdateChannel::Stable));
+  fn the_default_is_full_before_1_0() {
+    assert_eq!(
+      telemetry_level_default("0.0.0", &UpdateChannel::Stable),
+      TelemetryLevel::Full
+    );
+    assert_eq!(
+      telemetry_level_default("0.9.12", &UpdateChannel::Stable),
+      TelemetryLevel::Full
+    );
+  }
+
+  /// The point of the whole three-state rework: reaching 1.0 narrows what is
+  /// collected, but it never stops the install count. If this flips to `Off`,
+  /// stable installs go dark exactly when the numbers start to matter.
+  #[test]
+  fn stable_releases_default_to_reports_not_off() {
+    for version in ["1.0.0", "2.4.1"] {
+      let level = telemetry_level_default(version, &UpdateChannel::Stable);
+      assert_eq!(level, TelemetryLevel::Reports, "at {version}");
+      assert!(level.reports_installs(), "install count must survive {version}");
+      assert!(level.reports_errors(), "crashes must still report at {version}");
+      assert!(
+        !level.reports_diagnostics(),
+        "traces must become opt-in at {version}"
+      );
+    }
   }
 
   #[test]
-  fn usage_telemetry_defaults_off_for_stable_releases() {
-    assert!(!usage_telemetry_default("1.0.0", &UpdateChannel::Stable));
-    assert!(!usage_telemetry_default("2.4.1", &UpdateChannel::Stable));
+  fn beta_defaults_to_full_at_any_version() {
+    for version in ["0.4.0", "1.0.0", "3.2.0"] {
+      assert_eq!(
+        telemetry_level_default(version, &UpdateChannel::Beta),
+        TelemetryLevel::Full,
+        "at {version}"
+      );
+    }
   }
 
   #[test]
-  fn usage_telemetry_defaults_on_for_beta_at_any_version() {
-    assert!(usage_telemetry_default("0.4.0", &UpdateChannel::Beta));
-    assert!(usage_telemetry_default("1.0.0", &UpdateChannel::Beta));
-    assert!(usage_telemetry_default("3.2.0", &UpdateChannel::Beta));
+  fn the_default_is_never_off() {
+    for channel in [UpdateChannel::Stable, UpdateChannel::Beta] {
+      for version in ["0.1.0", "1.0.0", "9.9.9"] {
+        assert_ne!(
+          telemetry_level_default(version, &channel),
+          TelemetryLevel::Off,
+          "opting out is a choice the user makes, never a default ({version})"
+        );
+      }
+    }
   }
 
   #[test]
-  fn usage_telemetry_reads_major_past_suffixes() {
+  fn version_parsing_reads_major_past_suffixes() {
     assert!(is_pre_1_0("0.1.0-rc1"));
     assert!(!is_pre_1_0("1.0.0-rc1"));
     assert!(!is_pre_1_0("v1.2.3"));
@@ -1520,50 +1633,95 @@ mod tests {
   }
 
   #[test]
-  fn stored_usage_telemetry_choice_beats_the_default() {
-    // A 1.0 stable release defaults off, but an explicit yes is honoured...
+  fn a_stored_choice_beats_the_default() {
+    // A 1.0 stable release defaults to Reports, but an explicit Full is kept...
     let mut settings = Settings {
-      usage_telemetry: Some(true),
+      telemetry_level: Some(TelemetryLevel::Full),
       update_channel: UpdateChannel::Stable,
       ..Settings::default()
     };
-    assert!(usage_telemetry_enabled_for(&settings, "1.0.0"));
+    assert_eq!(telemetry_level_for(&settings, "1.0.0"), TelemetryLevel::Full);
 
-    // ...and an explicit no survives a beta build, which would default on.
-    settings.usage_telemetry = Some(false);
+    // ...and an explicit Off survives a beta build, which would default to Full.
+    settings.telemetry_level = Some(TelemetryLevel::Off);
     settings.update_channel = UpdateChannel::Beta;
-    assert!(!usage_telemetry_enabled_for(&settings, "0.4.0"));
+    assert_eq!(telemetry_level_for(&settings, "0.4.0"), TelemetryLevel::Off);
   }
 
   #[test]
-  fn unset_usage_telemetry_follows_the_build() {
+  fn an_unset_level_follows_the_build() {
     let settings = Settings {
-      usage_telemetry: None,
+      telemetry_level: None,
       update_channel: UpdateChannel::Stable,
       ..Settings::default()
     };
-    assert!(usage_telemetry_enabled_for(&settings, "0.4.0"));
-    // The same install, unchanged, flips to opt-in once it reaches 1.0.
-    assert!(!usage_telemetry_enabled_for(&settings, "1.0.0"));
+    assert_eq!(telemetry_level_for(&settings, "0.4.0"), TelemetryLevel::Full);
+    // The same install, unchanged, narrows to Reports once it reaches 1.0.
+    assert_eq!(
+      telemetry_level_for(&settings, "1.0.0"),
+      TelemetryLevel::Reports
+    );
   }
 
+  /// Someone who turned crash reports off under the old two-boolean scheme must
+  /// stay off. Getting this wrong would silently re-enable reporting for the
+  /// people who most explicitly declined it.
   #[test]
-  fn usage_telemetry_survives_a_settings_roundtrip() {
-    let dir = tempfile::tempdir().unwrap();
+  fn a_legacy_crash_report_opt_out_migrates_to_off() {
     let settings = Settings {
-      usage_telemetry: Some(false),
+      telemetry_level: None,
+      crash_reports: Some(false),
+      usage_telemetry: Some(true),
       ..Settings::default()
     };
-    write_settings_in(dir.path(), &settings).unwrap();
-    assert_eq!(read_settings_in(dir.path()).usage_telemetry, Some(false));
+    assert_eq!(telemetry_level_for(&settings, "0.4.0"), TelemetryLevel::Off);
   }
 
   #[test]
-  fn missing_usage_telemetry_key_reads_as_unchosen() {
+  fn legacy_booleans_map_onto_the_scale() {
+    assert_eq!(migrate_telemetry(None, None), None);
+    assert_eq!(
+      migrate_telemetry(Some(true), Some(true)),
+      Some(TelemetryLevel::Full)
+    );
+    assert_eq!(
+      migrate_telemetry(Some(true), Some(false)),
+      Some(TelemetryLevel::Reports)
+    );
+    assert_eq!(
+      migrate_telemetry(Some(true), None),
+      Some(TelemetryLevel::Reports)
+    );
+    // Errors off outranks traces on: the scale is ordered, and re-enabling the
+    // reports someone switched off is the worse mistake.
+    assert_eq!(
+      migrate_telemetry(Some(false), Some(true)),
+      Some(TelemetryLevel::Off)
+    );
+  }
+
+  /// The legacy pair is `skip_serializing`, so the only thing keeping a
+  /// pre-rework choice alive across the first settings write is the carry in
+  /// `keep_backend_owned_fields`.
+  #[test]
+  fn a_legacy_choice_survives_a_frontend_settings_write() {
+    let stored = Settings {
+      telemetry_level: None,
+      crash_reports: Some(false),
+      ..Settings::default()
+    };
+    // What the frontend sends back: it has never seen the legacy fields.
+    let mut incoming = Settings::default();
+    keep_backend_owned_fields(&mut incoming, &stored);
+    assert_eq!(telemetry_level_for(&incoming, "0.4.0"), TelemetryLevel::Off);
+  }
+
+  #[test]
+  fn a_missing_level_key_reads_as_unchosen() {
     // Settings written by a build that predates the field must not read as an
     // opt-out; they have to stay un-chosen so the default still applies.
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("settings.json"), "{}").unwrap();
-    assert_eq!(read_settings_in(dir.path()).usage_telemetry, None);
+    assert_eq!(read_settings_in(dir.path()).telemetry_level, None);
   }
 }

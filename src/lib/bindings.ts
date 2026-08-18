@@ -489,17 +489,17 @@ async getSettings() : Promise<Result<Settings, string>> {
 }
 },
 /**
- * Whether usage telemetry is on for this build, with the un-chosen state
+ * The telemetry level in force for this build, with the un-chosen state
  * already resolved against the version and update channel.
  * 
  * The frontend needs the effective answer both to configure its reporter and
- * to render the toggle, and the rule that resolves it is deliberately not
- * duplicated there -- one copy means the checkbox and the reporters can never
+ * to render the setting, and the rule that resolves it is deliberately not
+ * duplicated there -- one copy means the control and the reporters can never
  * disagree about what the default is.
  */
-async getUsageTelemetryEnabled() : Promise<Result<boolean, string>> {
+async getTelemetryLevel() : Promise<Result<TelemetryLevel, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("get_usage_telemetry_enabled") };
+    return { status: "ok", data: await TAURI_INVOKE("get_telemetry_level") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -4606,27 +4606,19 @@ auto_fetch?: boolean;
  */
 show_tips?: boolean; 
 /**
- * Send anonymous crash reports and error diagnostics. On by default; turning
- * it off stops both the frontend and backend reporters at their next start.
+ * How much GitWyrm reports about itself: nothing, errors and install counts,
+ * or those plus diagnostics. See `TelemetryLevel`.
  * 
- * Read straight off disk during startup by `crash_reports_enabled`, before
- * the Tauri app handle exists, so the reporters can honour it from the very
+ * `None` means the user has never chosen, so the build's default applies
+ * (see `telemetry_level_default`). Storing the un-chosen state rather than a
+ * resolved level is what lets the default shift between a pre-release and a
+ * stable build without overwriting anybody's explicit choice.
+ * 
+ * Read straight off disk during startup by `telemetry_level`, before the
+ * Tauri app handle exists, so the reporters can honour it from the very
  * first line rather than after settings finish loading.
  */
-crash_reports?: boolean; 
-/**
- * Send anonymous usage telemetry: performance traces, profiling, and
- * forwarded logs. Separate from `crash_reports` so someone can report the
- * crashes that would otherwise go unfixed without also being measured.
- * 
- * `None` means the user has never chosen, so the default applies -- and that
- * default is not fixed, it depends on the build (see
- * `usage_telemetry_default`). Storing the un-chosen state rather than a
- * resolved bool is what lets a pre-1.0 install become opt-in at 1.0 without a
- * migration: nobody's explicit choice is ever overwritten, and everyone who
- * never expressed one follows the new default.
- */
-usage_telemetry?: boolean | null; 
+telemetry_level?: TelemetryLevel | null; 
 /**
  * Whether the welcome tour has been shown. Without this the tour reopens on
  * every launch that starts with no repository, which is the normal state for
@@ -5299,6 +5291,37 @@ push_on_create?: boolean | null;
  * None follows the app default.
  */
 delete_on_remote?: boolean | null }
+/**
+ * How much GitWyrm reports about itself. One choice covering every kind of
+ * outgoing diagnostic, ordered so that each level is a superset of the one
+ * before it.
+ * 
+ * This replaced a pair of independent booleans (`crash_reports` and
+ * `usage_telemetry`). Two switches meant "on" was ambiguous -- it depended on
+ * the build's version and channel which of them covered what -- and the
+ * version-dependent default meant install counts would silently stop arriving
+ * at 1.0, exactly when they start mattering. One ordered choice is legible to
+ * the person making it: they can see what they are picking rather than
+ * inferring it from their version number.
+ */
+export type TelemetryLevel = 
+/**
+ * Nothing leaves the machine. No reporter is built, so nothing is even
+ * buffered.
+ */
+"off" | 
+/**
+ * Errors, panics, and the once-a-day install ping. The default: an
+ * unreported crash is a crash nobody fixes, and a platform with no install
+ * count is a platform whose bugs look like nobody's problem.
+ */
+"reports" | 
+/**
+ * Everything in `Reports`, plus performance traces, profiling, and forwarded
+ * logs. The volume that is worth sampling during development and worth
+ * asking for explicitly afterwards.
+ */
+"full"
 /**
  * Result of asking to toggle a task.
  */

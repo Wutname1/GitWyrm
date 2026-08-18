@@ -31,6 +31,9 @@ tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Random install ids for the deployed-build count (see telemetry::install).
+# v4 only: the id must carry nothing derived from the machine or the clock.
+uuid = { version = "1", features = ["v4"] }
 # Already in the tree via Tauri; named directly because the AI agent engine
 # drives a child process over pipes and needs these features explicitly.
 tokio = { version = "1", features = ["process", "io-util", "sync", "time", "rt", "macros"] }

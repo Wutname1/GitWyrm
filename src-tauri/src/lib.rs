@@ -11,6 +11,7 @@ mod perf;
 mod scrub;
 mod settings;
 mod state;
+mod telemetry;
 mod watcher;
 
 pub use error::AppError;
@@ -88,7 +89,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     commands::file::get_file_blame,
     commands::file::get_file_content,
     settings::get_settings,
-    settings::get_usage_telemetry_enabled,
+    settings::get_telemetry_level,
     settings::save_settings,
     commands::updates::check_for_update,
     commands::updates::install_update,
@@ -314,12 +315,11 @@ const SENTRY_DSN: &str = "https://543d8fb8597dad94c5d0bef310ad046f@o451176023090
 /// events on drop, so it has to stay alive for the whole process. Debug builds
 /// are skipped so local crashes stay local.
 ///
-/// Two independent opt-outs feed this, and they gate different things:
-/// - Crash reports (errors and panics) are what `crash_reports` controls. Off
-///   means no client at all, so nothing is sent.
-/// - Usage telemetry (performance traces) is what `usage_telemetry` controls.
-///   Off zeroes the sample rate, which keeps crash reporting working while no
-///   transaction is ever recorded or sent.
+/// One ordered setting feeds this, and each level gates more than the last:
+/// - `Off` means no client at all, so nothing is sent or even buffered.
+/// - `Reports` builds the client for errors and panics, with tracing left
+///   unconfigured.
+/// - `Full` adds performance traces on top.
 ///
 /// Mirrors the frontend `initSentry`, which makes the same split.
 fn init_sentry() -> Option<sentry::ClientInitGuard> {
@@ -329,11 +329,11 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
   // Opting out has to mean nothing is sent, so this is checked before the
   // client is built rather than filtered in `before_send` -- an initialized
   // client still opens a connection and buffers events.
-  if !settings::crash_reports_enabled() {
+  // Read once: this touches the disk, and the value decides two things below.
+  let level = settings::telemetry_level();
+  if !level.reports_errors() {
     return None;
   }
-  // Read once: this touches the disk, and the value decides two options below.
-  let usage_telemetry = settings::usage_telemetry_enabled();
   // 0.49 made ClientOptions non-exhaustive, so these are builder setters
   // rather than a struct literal.
   let options = sentry::ClientOptions::new()
@@ -370,15 +370,15 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
         Some(crumb)
       });
 
-  // Performance tracing is usage telemetry, not crash reporting, so it is only
-  // configured when that is on -- panics and errors still go out under
-  // `crash_reports` either way. Left unset, the strategy defaults to
+  // Performance tracing is diagnostics, not error reporting, so it is only
+  // configured at `Full` -- panics and errors still go out at `Reports`
+  // either way. Left unset, the strategy defaults to
   // `Disabled`, which is a stronger off switch than a 0.0 fixed rate: a fixed
   // rate still honors an inherited sampling decision from an upstream trace.
   //
   // ALPHA: when on, trace 100% of transactions. Drop toward 0.1-0.2 before
   // launch, or the free-plan performance quota burns out fast.
-  let options = if usage_telemetry {
+  let options = if level.reports_diagnostics() {
     options.traces_sample_rate(1.0)
   } else {
     options
@@ -562,6 +562,11 @@ pub fn run() {
         std::env::consts::OS,
         info.arch,
       );
+
+      // Count this launch, if the user has left that on. Fire-and-forget: it
+      // spawns and returns, so a slow or unreachable endpoint cannot delay
+      // startup by even a frame.
+      telemetry::install::ping_on_launch(app.handle());
 
       // Tell the tool resolver where git and gpg live before any shell-out
       // happens. They are downloaded rather than installed with the app, and
