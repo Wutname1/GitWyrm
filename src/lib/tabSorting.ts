@@ -46,6 +46,11 @@ export interface ArrangeOptions {
   changeCounts: TabChangeCounts
   /** Last-used stamps keyed by lowercased path, for the Recently used sort. */
   lastUsedAt?: TabLastUsedAt
+  /**
+   * Reference "now" for bucketing the Recently used sort into calendar days.
+   * Defaults to the current time; tests pass a fixed stamp.
+   */
+  now?: number
 }
 
 /**
@@ -74,6 +79,20 @@ function startOfDay(time: number): number {
 }
 
 const DAY_MS = 86_400_000
+
+/**
+ * How many buckets down a stamp sits: 0 for today, 1 for yesterday, and so on,
+ * with everything a week or older sharing the last rank. Sorting on this rather
+ * than the raw stamp is what keeps a day's tabs still -- clicking a repo you
+ * already used today does not lift it above its neighbours, and a relaunch
+ * lands on the same order it left.
+ */
+function recencyRank(lastUsed: number | undefined, now: number): number {
+  if (lastUsed == null || !Number.isFinite(lastUsed) || lastUsed <= 0)
+    return Number.MAX_SAFE_INTEGER
+  const daysAgo = Math.max(0, Math.round((startOfDay(now) - startOfDay(lastUsed)) / DAY_MS))
+  return daysAgo >= 7 ? 7 : daysAgo
+}
 
 /**
  * The heading a tab belongs under, given when it was last used and when "now"
@@ -204,13 +223,18 @@ export function arrangeTabs(options: ArrangeOptions): {
   if (sort === 'name') {
     sorted.sort((left, right) => flip * nameFor(left).localeCompare(nameFor(right)))
   } else if (sort === 'recent') {
-    // Recently used: the tab you touched last sits at the top and everything
-    // else sinks as it goes untouched. A group takes its most recently used
+    // Recently used: tabs sort by which day they were last used -- today's at
+    // the top, then yesterday's, and so on -- and stay alphabetical inside each
+    // day. Ranking by day rather than by the exact moment is deliberate: a day's
+    // worth of tabs holds still while you click between them, and reopening the
+    // app lands on the same order you left. A group takes its most recently used
     // member, so opening one repo inside a project floats the whole project.
     // Tabs never opened on this machine have no stamp and fall to the bottom,
     // where the strip labels them together.
+    const now = options.now ?? Date.now()
+    const rankFor = (item: TabOrderItem) => recencyRank(lastUsedFor(item) || undefined, now)
     sorted.sort((left, right) => {
-      const delta = lastUsedFor(right) - lastUsedFor(left)
+      const delta = rankFor(left) - rankFor(right)
       return flip * (delta !== 0 ? delta : nameFor(left).localeCompare(nameFor(right)))
     })
   } else {

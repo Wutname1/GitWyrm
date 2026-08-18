@@ -37,6 +37,7 @@ function arrangeRecent(
     names: {},
     changeCounts: {},
     lastUsedAt,
+    now: NOW,
   })
 }
 
@@ -142,6 +143,39 @@ describe('arrangeTabs, recently used', () => {
     expect(rest[0]).toEqual({ type: 'group', id: 'work' })
   })
 
+  it('holds one day still, ordering same-day tabs by name', () => {
+    // Clicking a repo you already used today restamps it to this instant. The
+    // strip must not react: within a day the order is alphabetical, full stop.
+    const before = arrangeRecent(
+      [repo('C:/code/beta'), repo('C:/code/alpha')],
+      stamps({
+        'C:/code/alpha': at(2026, 7, 17, 9, 0),
+        'C:/code/beta': at(2026, 7, 17, 11, 0),
+      }),
+    )
+    const afterClickingAlpha = arrangeRecent(
+      [repo('C:/code/beta'), repo('C:/code/alpha')],
+      stamps({
+        'C:/code/alpha': NOW,
+        'C:/code/beta': at(2026, 7, 17, 11, 0),
+      }),
+    )
+    expect(pathsOf(before.rest)).toEqual(['C:/code/alpha', 'C:/code/beta'])
+    expect(pathsOf(afterClickingAlpha.rest)).toEqual(pathsOf(before.rest))
+  })
+
+  it('still ranks a later day above an earlier one', () => {
+    const { rest } = arrangeRecent(
+      [repo('C:/code/zulu'), repo('C:/code/alpha')],
+      stamps({
+        // Alphabetically last, but used today -- the day wins over the name.
+        'C:/code/zulu': at(2026, 7, 17, 8, 0),
+        'C:/code/alpha': at(2026, 7, 16, 23, 0),
+      }),
+    )
+    expect(pathsOf(rest)).toEqual(['C:/code/zulu', 'C:/code/alpha'])
+  })
+
   it('leaves pinned tabs out of the recency order', () => {
     const { pinned, rest } = arrangeTabs({
       order: [repo('C:/code/pinned'), repo('C:/code/fresh')],
@@ -155,6 +189,7 @@ describe('arrangeTabs, recently used', () => {
         'C:/code/pinned': at(2025, 0, 1),
         'C:/code/fresh': NOW,
       }),
+      now: NOW,
     })
     expect(pathsOf(pinned)[0]).toBe('C:/code/pinned')
     expect(rest).toHaveLength(1)

@@ -893,6 +893,11 @@ export function RepositoryTabs({
   const isPinned = (path: string) =>
     pinnedTabPaths.some((candidate) => samePath(candidate, path));
 
+  // Date headings only make sense stacked vertically, but the recency sort
+  // itself buckets by day too, so the stamp has to be live for either.
+  const showRecencyHeadings = orientation === "vertical" && tabSort === "recent";
+  const today = useTodayStamp(tabSort === "recent");
+
   const arrangement = useMemo(
     () =>
       arrangeTabs({
@@ -907,6 +912,7 @@ export function RepositoryTabs({
         ),
         changeCounts,
         lastUsedAt: tabLastUsedAt,
+        now: today,
       }),
     [
       tabOrder,
@@ -918,6 +924,7 @@ export function RepositoryTabs({
       openRepos,
       changeCounts,
       tabLastUsedAt,
+      today,
     ],
   );
   // Counts outlive their tabs on purpose (see ChangeCountReporter), so closing a
@@ -933,10 +940,6 @@ export function RepositoryTabs({
   const displayOrder = arrangement.rest;
   const pinnedOrder = arrangement.pinned;
 
-  // Date headings only make sense stacked vertically, and only while the strip
-  // is actually sorted by recency.
-  const showRecencyHeadings = orientation === "vertical" && tabSort === "recent";
-  const today = useTodayStamp(showRecencyHeadings);
   const recencySections = useMemo(
     () =>
       showRecencyHeadings
