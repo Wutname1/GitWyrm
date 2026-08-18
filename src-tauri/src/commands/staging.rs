@@ -212,19 +212,13 @@ pub async fn discard_file(
   let open = manager.get(&repo_id)?;
   tauri::async_runtime::spawn_blocking(move || {
     let repo = open.repo.lock().unwrap();
-    // A submodule pointer can't be reset by checking out the parent's tree --
-    // that leaves the nested checkout untouched and the "change" persists. Snap
-    // the submodule back to its recorded commit instead, which is what discard
-    // means for it.
-    if is_submodule(&repo, &path) {
-      let mut sub = repo.find_submodule(&path)?;
-      sub.update(false, None)?;
-      return Ok(());
-    }
-    let mut builder = git2::build::CheckoutBuilder::new();
-    builder.path(&path).force().remove_untracked(true);
-    repo.checkout_head(Some(&mut builder))?;
-    Ok(())
+    // Same path as discarding several files. Checking out HEAD on its own only
+    // rewrites the working tree, so a change that lives purely in the index --
+    // a staged mode change, or an edit staged and then undone on disk -- would
+    // survive the discard and keep showing as modified with nothing in its
+    // diff. `discard_paths` resets the index entry first, and restores the
+    // other half of a rename.
+    discard_paths(&repo, std::slice::from_ref(&path)).map_err(AppError::Git)
   })
   .await
   .map_err(|e| AppError::Other(e.to_string()))?
