@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { applyTokens, resolveTokens } from '@/lib/themes'
+import { applyTokens, readSystemScheme, resolveTokens } from '@/lib/themes'
 
 /**
  * Applies the active color theme to :root, reacting to the theme/mode/mint
@@ -16,16 +16,24 @@ export function useTheme() {
   const mintAccent = useWorkspaceStore((s) => s.mintAccent)
 
   useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    // Both queries are watched: a desktop that gains a preference mid-session
+    // (someone flips GNOME to dark) changes the dark query, while one that goes
+    // from a preference back to none only changes the light one.
+    const dark = window.matchMedia('(prefers-color-scheme: dark)')
+    const light = window.matchMedia('(prefers-color-scheme: light)')
 
     const apply = () => {
-      applyTokens(resolveTokens(theme, themeMode, mintAccent, media.matches))
+      applyTokens(resolveTokens(theme, themeMode, mintAccent, readSystemScheme()))
     }
     apply()
 
     // Only the 'system' mode depends on the OS preference; still safe to listen
-    // always -- apply() re-reads media.matches and is a no-op for fixed modes.
-    media.addEventListener('change', apply)
-    return () => media.removeEventListener('change', apply)
+    // always -- apply() re-reads the queries and is a no-op for fixed modes.
+    dark.addEventListener('change', apply)
+    light.addEventListener('change', apply)
+    return () => {
+      dark.removeEventListener('change', apply)
+      light.removeEventListener('change', apply)
+    }
   }, [theme, themeMode, mintAccent])
 }

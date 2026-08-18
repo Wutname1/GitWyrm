@@ -314,9 +314,41 @@ export function getTheme(id: Exclude<ThemeId, 'auto'>): ThemeDef {
 
 // --- resolution ------------------------------------------------------------
 
-/** Resolve ThemeMode + OS preference into a concrete light/dark mode. */
-export function resolveMode(mode: ThemeMode, systemPrefersDark: boolean): Mode {
-  if (mode === 'system') return systemPrefersDark ? 'dark' : 'light'
+/**
+ * What the operating system says about light and dark.
+ *
+ * Three states, not two. `prefers-color-scheme` has a `no-preference` value, and
+ * on Linux it is reached often: GNOME's `color-scheme` sits at `default` until
+ * someone changes it, and a desktop with no XDG appearance portal at all
+ * (older Cinnamon, XFCE, most tiling WMs) never answers.
+ */
+export type SystemScheme = 'dark' | 'light' | 'unknown'
+
+/**
+ * Read the OS light/dark preference, distinguishing "light" from "did not say".
+ *
+ * Querying both media features is what separates them: a system with a real
+ * preference matches exactly one, and a silent one matches neither. Testing
+ * only `(prefers-color-scheme: dark)` collapses the two, which is how a silent
+ * OS ends up looking like a deliberate choice of light.
+ */
+export function readSystemScheme(): SystemScheme {
+  if (typeof window === 'undefined' || !window.matchMedia) return 'unknown'
+  if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'
+  if (window.matchMedia('(prefers-color-scheme: light)').matches) return 'light'
+  return 'unknown'
+}
+
+/**
+ * Resolve ThemeMode + OS preference into a concrete light/dark mode.
+ *
+ * An OS that expressed no preference resolves to dark. GitWyrm is a dark app by
+ * default - its window background is set to #121212 before any JavaScript runs -
+ * so falling to light would contradict the frame the window is already painted
+ * in, and would do it on exactly the platforms least likely to answer.
+ */
+export function resolveMode(mode: ThemeMode, system: SystemScheme): Mode {
+  if (mode === 'system') return system === 'light' ? 'light' : 'dark'
   return mode
 }
 
@@ -339,9 +371,9 @@ export function resolveTokens(
   theme: ThemeId,
   mode: ThemeMode,
   mintAccent: boolean,
-  systemPrefersDark: boolean,
+  system: SystemScheme,
 ): ResolvedTokens {
-  const m = resolveMode(mode, systemPrefersDark)
+  const m = resolveMode(mode, system)
   const def = getTheme(resolveThemeId(theme, m))
   const entry = def[m]
   const accent = mintAccent ? deriveAccent(DEEP_MINT, m) : entry.accent

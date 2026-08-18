@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { FolderGit2, GitMerge, Hand, Loader2, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
+import { FolderGit2, GitMerge, Hand, Loader2, Palette, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { useTutorialStore } from '@/stores/tutorialStore'
 import { TUTORIAL_ENABLED } from '@/lib/tutorialEnabled'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { readSystemScheme, type ThemeMode } from '@/lib/themes'
 
 interface Slide {
   icon: ReactNode
@@ -19,20 +20,77 @@ interface Slide {
   body: ReactNode
 }
 
+/**
+ * Light or dark, asked once on the first run.
+ *
+ * Asked rather than inferred because the OS answer is not always there to read.
+ * `prefers-color-scheme` has a no-preference state, and Linux reaches it often -
+ * GNOME reports `default` until someone changes it, and a desktop with no XDG
+ * appearance portal never answers at all. GitWyrm falls back to dark in that
+ * case, which is the right default for a dark app but is still a guess; this
+ * turns it into a choice.
+ */
+function AppearanceChoice() {
+  const themeMode = useWorkspaceStore((s) => s.themeMode)
+  const setThemeMode = useWorkspaceStore((s) => s.setThemeMode)
+  const system = readSystemScheme()
+
+  const options: { id: ThemeMode; label: string; hint: string }[] = [
+    { id: 'dark', label: 'Dark', hint: 'Easier on the eyes at night' },
+    { id: 'light', label: 'Light', hint: 'Better in a bright room' },
+    // Offered last, and only when it means something: with no OS preference to
+    // follow it would behave identically to Dark while sounding like it does
+    // something cleverer.
+    ...(system === 'unknown'
+      ? []
+      : [
+          {
+            id: 'system' as ThemeMode,
+            label: 'Match my system',
+            hint: `Currently ${system}`,
+          },
+        ]),
+  ]
+
+  return (
+    <span className="mt-1 flex flex-col gap-1.5">
+      {options.map((opt) => (
+        <button
+          key={opt.id}
+          onClick={() => setThemeMode(opt.id)}
+          className={cn(
+            'flex items-baseline gap-2 rounded-md border px-3 py-2 text-left transition-colors',
+            themeMode === opt.id
+              ? 'border-accent-text bg-soft text-foreground'
+              : 'border-border hover:bg-panel3'
+          )}
+        >
+          <span className="text-[0.8125rem] font-medium">{opt.label}</span>
+          <span className="text-[0.6875rem] text-sub">{opt.hint}</span>
+        </button>
+      ))}
+    </span>
+  )
+}
+
 const TOUR_SLIDES: Slide[] = [
   {
     icon: <Sparkles size={22} strokeWidth={1.8} />,
     title: 'Welcome to GitWyrm',
-    body: 'A fast, focused Git client for Windows. This quick tour shows the essentials — it takes about fifteen seconds.',
+    body: 'A fast, focused Git client. This quick tour shows the essentials — it takes about fifteen seconds.',
+  },
+  {
+    icon: <Palette size={22} strokeWidth={1.8} />,
+    title: 'Pick how it looks',
+    body: <AppearanceChoice />,
   },
   {
     icon: <FolderGit2 size={22} strokeWidth={1.8} />,
     title: 'Open your repositories',
     body: (
       <>
-        Open a single repo, or point GitWyrm at the folders your code lives in (like{' '}
-        <span className="font-mono text-foreground">C:\code</span>) to quick-launch everything
-        inside them. Clone straight from a URL, too.
+        Open a single repo, or point GitWyrm at the folders your code lives in to quick-launch
+        everything inside them. Clone straight from a URL, too.
       </>
     ),
   },

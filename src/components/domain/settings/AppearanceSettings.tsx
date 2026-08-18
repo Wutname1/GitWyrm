@@ -12,6 +12,7 @@ import {
 } from '@/stores/workspaceStore'
 import {
   THEMES,
+  readSystemScheme,
   resolveMode,
   type ThemeId,
   type ThemeMode,
@@ -64,10 +65,7 @@ function ThemeSetting() {
 
   // Preview each theme in the mode the app is actually showing, so the swatches
   // match what the user sees.
-  const systemPrefersDark =
-    typeof window !== 'undefined' &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches
-  const activeMode = resolveMode(themeMode, systemPrefersDark)
+  const activeMode = resolveMode(themeMode, readSystemScheme())
 
   const options: { id: ThemeId; name: string; note: string }[] = [
     {
