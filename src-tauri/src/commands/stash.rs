@@ -140,6 +140,13 @@ pub async fn stash_drop(
 /// referenced twice for a moment; if the drop then fails the user has a
 /// duplicate, which is recoverable. Dropping first would leave a window where a
 /// failed store loses the changes outright.
+///
+/// The topmost entry is the exception. `git stash store` refuses to write a
+/// reflog entry for a sha that `refs/stash` already points at -- and it reports
+/// success while doing nothing, so the rename silently did not happen. That
+/// entry has to be dropped before it can be re-stored. Dropping is safe here
+/// because the sha was resolved first and the commit outlives the ref, so the
+/// changes are still reachable even if the store that follows fails.
 #[tauri::command]
 #[specta::specta]
 pub async fn rename_stash(
@@ -171,6 +178,17 @@ pub async fn rename_stash(
       found.ok_or_else(|| AppError::Other("that stash no longer exists".into()))?
     };
     let sha = sha.to_string();
+
+    // Renaming the top entry means dropping it first -- see the note above on
+    // why `stash store` alone cannot rename it. Everything deeper keeps the
+    // safer store-then-drop order.
+    if index == 0 {
+      let mut repo = open.repo.lock().unwrap();
+      repo.stash_drop(0)?;
+      drop(repo);
+      crate::git::shell::run_git(Some(&path), &["stash", "store", "-m", &message, &sha])?;
+      return Ok(());
+    }
 
     // Store re-points refs/stash at the same commit under the new message,
     // pushing it to the top of the list. The old entry is now one deeper than
