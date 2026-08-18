@@ -54,6 +54,15 @@ const EXPECTED: &[&str] = &[
   "rate limit reached",
   "review is required",
   "not mergeable",
+  // The host has no such repo, or the token cannot see it. Private, renamed,
+  // deleted, or a token missing a scope -- all the user's to sort out, and
+  // indistinguishable from each other because the host deliberately answers
+  // 404 rather than admitting the thing exists.
+  "could not find that. it may be private",
+  // No build for the running platform in the update manifest. Raised by the
+  // updater plugin on a flavor we do not publish (a dev or WSL/Linux run
+  // against a Windows-only manifest); nothing is wrong with the app.
+  "were found in the response `platforms` object",
 ];
 
 fn is_expected(message: &str) -> bool {
@@ -119,6 +128,17 @@ mod tests {
     ));
   }
 
+  /// Both taken verbatim from Sentry issues that were filed as faults.
+  #[test]
+  fn host_404_and_missing_update_platform_are_expected() {
+    assert!(is_expected(
+      "GitHub could not find that. It may be private, renamed, or your token may not cover it."
+    ));
+    assert!(is_expected(
+      "None of the fallback platforms `[\"linux-x86_64-deb\", \"linux-x86_64\"]` were found in the response `platforms` object"
+    ));
+  }
+
   #[test]
   fn matching_ignores_case() {
     assert!(is_expected("AUTHENTICATION FAILED"));
@@ -143,5 +163,8 @@ mod tests {
     // fetching or rejection must still be reported.
     assert!(!is_expected("git error: could not read from remote repository"));
     assert!(!is_expected("io error: failed to fetch first 8 bytes of pack"));
+    // The updater needle names the manifest key. A real failure to read the
+    // manifest, or to parse it, is still a fault worth reporting.
+    assert!(!is_expected("updater: failed to parse the response `platforms` object"));
   }
 }
