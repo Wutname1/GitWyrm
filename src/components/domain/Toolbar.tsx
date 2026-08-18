@@ -320,7 +320,7 @@ export function Toolbar() {
       <ToolbarButton
         icon={<ArrowDownToLine size={16} strokeWidth={1.9} />}
         label={m.fetch.isPending ? "Fetching…" : "Fetch"}
-        onClick={() => m.fetch.mutate()}
+        onClick={() => m.fetch.mutate(undefined)}
         disabled={noRepo || syncPending}
         reason={noRepoReason}
         pending={m.fetch.isPending}

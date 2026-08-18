@@ -474,6 +474,25 @@ impl HostProvider for AzureDevOps {
     Ok(())
   }
 
+  async fn close_pr(
+    &self,
+    app: &tauri::AppHandle,
+    slug: &RepoSlug,
+    number: u32,
+  ) -> Result<(), AppError> {
+    let coord = self.coordinate(slug)?;
+    let url = self.git_url(app, &coord, &format!("/pullrequests/{number}"));
+    http::send(
+      self
+        .request(app, reqwest::Method::PATCH, url)?
+        .json(&serde_json::json!({ "status": "abandoned" })),
+      HOST,
+      ERROR_KEYS,
+    )
+    .await?;
+    Ok(())
+  }
+
   async fn close_issue(
     &self,
     _app: &tauri::AppHandle,

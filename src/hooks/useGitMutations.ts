@@ -933,13 +933,16 @@ export function useGitMutations(repoId: string | null) {
 
   const fetch = useMutation({
     mutationKey: syncKey(id, 'fetch'),
-    mutationFn: async () => unwrap(await commands.gitFetch(id)),
-    onSuccess: () => {
+    mutationFn: async (options: { silent?: boolean } | undefined) => {
+      await unwrap(await commands.gitFetch(id))
+      return options
+    },
+    onSuccess: (options) => {
       invalidate(qc, id, ['log', 'branches', 'remotes'])
       // Resets the auto-fetch clock: a background timer firing seconds after
       // the user fetched by hand is pure duplicated network work.
       noteManualFetch(id)
-      toast('Fetched all remotes')
+      if (!options?.silent) toast('Fetched all remotes')
     },
     onError,
   })

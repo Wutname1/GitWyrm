@@ -457,6 +457,18 @@ export function useGithubMutations(
     onError,
   })
 
+  const closePr = useMutation({
+    mutationFn: async (number: number) => {
+      await unwrap(await commands.githubClosePr(id, owner, repo, number))
+      return number
+    },
+    onSuccess: (number) => {
+      refreshItem('pr', number)
+      toast(`Pull request #${number} closed`)
+    },
+    onError,
+  })
+
   const closeIssue = useMutation({
     mutationFn: async (number: number) => {
       await unwrap(await commands.githubCloseIssue(id, owner, repo, number))
@@ -482,7 +494,7 @@ export function useGithubMutations(
     onError,
   })
 
-  return { comment, approvePr, mergePr, closeIssue, signOut }
+  return { comment, approvePr, mergePr, closePr, closeIssue, signOut }
 }
 
 /**

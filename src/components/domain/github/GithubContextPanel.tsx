@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowLeftRight, Bot, Check, ChevronDown, ExternalLink, RefreshCw } from 'lucide-react'
 import { GithubItemIcon } from '@/lib/githubDisplay'
 import { Button } from '@/components/ui/button'
@@ -214,7 +214,16 @@ function PrPanel({ number }: { number: number }) {
   const branches = useBranches(repo?.id ?? null)
 
   const [confirmMerge, setConfirmMerge] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
   const [dependabotPending, setDependabotPending] = useState<string | null>(null)
+  const branchRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (branchRefreshTimer.current) clearTimeout(branchRefreshTimer.current)
+    },
+    []
+  )
 
   // Remembered across pull requests and restarts: someone who merges one way
   // merges that way every time, and re-picking it on each pull request is a
@@ -233,6 +242,14 @@ function PrPanel({ number }: { number: number }) {
       },
       { onSettled: () => setDependabotPending(null) }
     )
+  }
+
+  const refreshRemoteBranchesSoon = () => {
+    if (branchRefreshTimer.current) clearTimeout(branchRefreshTimer.current)
+    branchRefreshTimer.current = setTimeout(() => {
+      branchRefreshTimer.current = null
+      git.fetch.mutate({ silent: true })
+    }, PR_BRANCH_REFRESH_DELAY_MS)
   }
 
   if (!pr.data) {
@@ -352,15 +369,28 @@ function PrPanel({ number }: { number: number }) {
               {onBranch ? 'On this branch' : 'Use branch'}
             </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-2xs text-sub"
-            onClick={() => void openExternal(detail.html_url)}
-          >
-            <ExternalLink size={12} />
-            Open on GitHub
-          </Button>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 text-2xs text-removed hover:text-removed"
+              disabled={merged || closed || gh.closePr.isPending}
+              aria-busy={gh.closePr.isPending || undefined}
+              onClick={() => setConfirmClose(true)}
+            >
+              {gh.closePr.isPending ? <PendingIndicator /> : null}
+              Close pull request
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 text-2xs text-sub"
+              onClick={() => void openExternal(detail.html_url)}
+            >
+              <ExternalLink size={12} />
+              Open on GitHub
+            </Button>
+          </div>
         </>
       }
     >
@@ -391,12 +421,47 @@ function PrPanel({ number }: { number: number }) {
         pending={gh.mergePr.isPending}
         keepOpenOnConfirm
         onConfirm={() =>
-          gh.mergePr.mutate({ number, method }, { onSettled: () => setConfirmMerge(false) })
+          gh.mergePr.mutate(
+            { number, method },
+            {
+              onSuccess: refreshRemoteBranchesSoon,
+              onSettled: () => setConfirmMerge(false),
+            }
+          )
+        }
+      />
+
+      <ConfirmDialog
+        open={confirmClose}
+        onOpenChange={setConfirmClose}
+        destructive
+        title={`Close pull request #${number}?`}
+        description={
+          <>
+            This will close <span className="text-foreground">{detail.title}</span> without
+            adding it to <span className="font-mono text-foreground">{detail.base_ref}</span>.
+            People can still read it and reopen it later.
+          </>
+        }
+        confirmLabel="Close pull request"
+        pendingLabel="Closing pull request…"
+        pending={gh.closePr.isPending}
+        keepOpenOnConfirm
+        onConfirm={() =>
+          gh.closePr.mutate(number, {
+            onSuccess: refreshRemoteBranchesSoon,
+            onSettled: () => setConfirmClose(false),
+          })
         }
       />
     </PanelShell>
   )
 }
+
+// Hosts commonly delete the merged or closed head branch a moment after they
+// accept the PR action. Fetch after that handoff so the remote-branch list does
+// not keep a branch that is already gone, without adding a second success toast.
+const PR_BRANCH_REFRESH_DELAY_MS = 5_000
 
 function IssuePanel({ number }: { number: number }) {
   const repo = useActiveRepo()

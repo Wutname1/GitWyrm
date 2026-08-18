@@ -346,6 +346,24 @@ impl HostProvider for Bitbucket {
     Ok(())
   }
 
+  async fn close_pr(
+    &self,
+    app: &tauri::AppHandle,
+    slug: &RepoSlug,
+    number: u32,
+  ) -> Result<(), AppError> {
+    let path = format!("{}/pullrequests/{number}", self.repo_path(slug));
+    http::send(
+      self
+        .request(app, reqwest::Method::PUT, &path)?
+        .json(&serde_json::json!({ "state": "DECLINED" })),
+      HOST,
+      ERROR_KEYS,
+    )
+    .await?;
+    Ok(())
+  }
+
   async fn close_issue(
     &self,
     app: &tauri::AppHandle,

@@ -169,7 +169,7 @@ export function RemoteBranchMenuItems({
         pendingLabel="Checking…"
         pending={m.fetch.isPending}
         disabled={opInProgress || m.fetch.isPending}
-        onRun={() => m.fetch.mutate()}
+        onRun={() => m.fetch.mutate(undefined)}
       />
       <ContextMenuSeparator />
 

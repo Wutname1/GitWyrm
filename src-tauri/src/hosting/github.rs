@@ -411,6 +411,27 @@ impl HostProvider for GitHub {
     Ok(())
   }
 
+  async fn close_pr(
+    &self,
+    app: &tauri::AppHandle,
+    slug: &RepoSlug,
+    number: u32,
+  ) -> Result<(), AppError> {
+    // GitHub models a pull request as an issue for state changes, but this is
+    // still a separate host operation so the other providers close their PRs
+    // through their own endpoints.
+    let path = format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo);
+    http::send(
+      self
+        .request(app, reqwest::Method::PATCH, &path)?
+        .json(&serde_json::json!({ "state": "closed" })),
+      HOST,
+      ERROR_KEYS,
+    )
+    .await?;
+    Ok(())
+  }
+
   async fn close_issue(
     &self,
     app: &tauri::AppHandle,

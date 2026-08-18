@@ -334,6 +334,24 @@ impl HostProvider for GitLab {
     Ok(())
   }
 
+  async fn close_pr(
+    &self,
+    app: &tauri::AppHandle,
+    slug: &RepoSlug,
+    number: u32,
+  ) -> Result<(), AppError> {
+    let path = format!("/projects/{}/merge_requests/{number}", self.project(slug));
+    http::send(
+      self
+        .request(app, reqwest::Method::PUT, &path)?
+        .json(&serde_json::json!({ "state_event": "close" })),
+      HOST,
+      ERROR_KEYS,
+    )
+    .await?;
+    Ok(())
+  }
+
   async fn close_issue(
     &self,
     app: &tauri::AppHandle,

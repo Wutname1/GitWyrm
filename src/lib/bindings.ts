@@ -2670,6 +2670,14 @@ async githubMergePr(repoId: string | null, owner: string, repo: string, number: 
     else return { status: "error", error: e  as any };
 }
 },
+async githubClosePr(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_close_pr", { repoId, owner, repo, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async githubCloseIssue(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("github_close_issue", { repoId, owner, repo, number }) };

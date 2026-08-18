@@ -569,6 +569,20 @@ pub async fn github_merge_pr(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn github_close_pr(
+  app: tauri::AppHandle,
+  manager: State<'_, RepoManager>,
+  repo_id: Option<String>,
+  owner: String,
+  repo: String,
+  number: u32,
+) -> Result<(), AppError> {
+  let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
+  provider.close_pr(&app, &slug, number).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn github_close_issue(
   app: tauri::AppHandle,
   manager: State<'_, RepoManager>,

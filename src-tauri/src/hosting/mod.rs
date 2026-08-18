@@ -376,6 +376,14 @@ pub trait HostProvider: Send + Sync {
     method: MergeMethod,
   ) -> Result<(), AppError>;
 
+  /// Closes a pull request without merging it.
+  async fn close_pr(
+    &self,
+    app: &tauri::AppHandle,
+    slug: &RepoSlug,
+    number: u32,
+  ) -> Result<(), AppError>;
+
   async fn close_issue(
     &self,
     app: &tauri::AppHandle,
