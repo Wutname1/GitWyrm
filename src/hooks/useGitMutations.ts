@@ -1029,7 +1029,10 @@ export function useGitMutations(repoId: string | null) {
     mutationKey: syncKey(id, 'push'),
     mutationFn: async () => unwrap(await commands.gitPush(id)),
     onSuccess: (result) => {
-      invalidate(qc, id, REFS)
+      // REMOTE_REFS, not REFS: a first push publishes the branch, so the
+      // sidebar's Remotes section has a new remote branch to show. That list
+      // comes from the remotes query, which plain REFS does not refresh.
+      invalidate(qc, id, REMOTE_REFS)
       toast(describePush(result, hostOf(result.upstream)))
       void handleTagsAfterPush()
     },
@@ -1042,7 +1045,9 @@ export function useGitMutations(repoId: string | null) {
     mutationKey: syncKey(id, 'pushBranch'),
     mutationFn: async (branch: string) => unwrap(await commands.gitPushBranch(id, branch)),
     onSuccess: (result) => {
-      invalidate(qc, id, REFS)
+      // See `push`: publishing a branch adds a remote branch the sidebar reads
+      // from the remotes query.
+      invalidate(qc, id, REMOTE_REFS)
       toast(describePush(result, hostOf(result.upstream)))
       void handleTagsAfterPush()
     },
@@ -1096,7 +1101,8 @@ export function useGitMutations(repoId: string | null) {
     mutationKey: syncKey(id, 'pushForce'),
     mutationFn: async () => unwrap(await commands.gitPushForce(id)),
     onSuccess: (result) => {
-      invalidate(qc, id, REFS)
+      // See `push`: a force-push moves the remote branch tip the sidebar shows.
+      invalidate(qc, id, REMOTE_REFS)
       const host = hostOf(result.upstream)
       toast(
         result.pushed === 0
