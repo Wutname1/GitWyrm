@@ -20,174 +20,195 @@ use std::process::Command;
 /// bundle. Relative paths resolve against the repo root (the manifest's
 /// parent), since that is where the workflow's working directory sits.
 fn bundle() -> Option<PathBuf> {
-  let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-  let root = match std::env::var_os("GITWYRM_TOOLSET_DIR") {
-    Some(dir) => {
-      let dir = PathBuf::from(dir);
-      if dir.is_absolute() {
-        dir
-      } else {
-        manifest.parent().unwrap_or(manifest).join(dir)
-      }
-    }
-    None => manifest.join("resources"),
-  };
-  root.join("git/cmd/git.exe").is_file().then_some(root)
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = match std::env::var_os("GITWYRM_TOOLSET_DIR") {
+        Some(dir) => {
+            let dir = PathBuf::from(dir);
+            if dir.is_absolute() {
+                dir
+            } else {
+                manifest.parent().unwrap_or(manifest).join(dir)
+            }
+        }
+        None => manifest.join("resources"),
+    };
+    root.join("git/cmd/git.exe").is_file().then_some(root)
 }
 
 fn run(program: &Path, args: &[&str]) -> (bool, String) {
-  let out = Command::new(program)
-    .args(args)
-    .output()
-    .unwrap_or_else(|e| panic!("failed to run {}: {e}", program.display()));
-  let text = format!(
-    "{}{}",
-    String::from_utf8_lossy(&out.stdout),
-    String::from_utf8_lossy(&out.stderr)
-  );
-  (out.status.success(), text)
+    let out = Command::new(program)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run {}: {e}", program.display()));
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    (out.status.success(), text)
 }
 
 #[test]
 #[ignore]
 fn bundled_git_runs() {
-  let Some(root) = bundle() else {
-    eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
-    return;
-  };
-  let (ok, out) = run(&root.join("git/cmd/git.exe"), &["--version"]);
-  assert!(ok, "bundled git failed: {out}");
-  assert!(out.contains("git version"), "unexpected output: {out}");
+    let Some(root) = bundle() else {
+        eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
+        return;
+    };
+    let (ok, out) = run(&root.join("git/cmd/git.exe"), &["--version"]);
+    assert!(ok, "bundled git failed: {out}");
+    assert!(out.contains("git version"), "unexpected output: {out}");
 }
 
 #[test]
 #[ignore]
 fn bundled_gpg_runs_with_the_pinned_dll_set() {
-  // The fetch script copies only the MSYS libraries GnuPG links against rather
-  // than all 73 in usr/bin. A missing one shows up here and nowhere earlier.
-  let Some(root) = bundle() else {
-    eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
-    return;
-  };
-  let (ok, out) = run(&root.join("gpg/gpg.exe"), &["--version"]);
-  assert!(ok, "bundled gpg failed to start: {out}");
-  assert!(out.contains("gpg (GnuPG)"), "unexpected output: {out}");
+    // The fetch script copies only the MSYS libraries GnuPG links against rather
+    // than all 73 in usr/bin. A missing one shows up here and nowhere earlier.
+    let Some(root) = bundle() else {
+        eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
+        return;
+    };
+    let (ok, out) = run(&root.join("gpg/gpg.exe"), &["--version"]);
+    assert!(ok, "bundled gpg failed to start: {out}");
+    assert!(out.contains("gpg (GnuPG)"), "unexpected output: {out}");
 }
 
 #[test]
 #[ignore]
 fn bundled_gpg_ships_its_agent_and_pinentry() {
-  // gpg without its agent cannot generate a key or sign anything, and without
-  // pinentry it cannot ask for a passphrase. Both are easy to leave behind.
-  let Some(root) = bundle() else {
-    eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
-    return;
-  };
-  for required in ["gpg/gpg-agent.exe", "gpg/gpgconf.exe", "gpg/pinentry-w32.exe"] {
-    assert!(
-      root.join(required).is_file(),
-      "{required} missing from the bundle"
-    );
-  }
+    // gpg without its agent cannot generate a key or sign anything, and without
+    // pinentry it cannot ask for a passphrase. Both are easy to leave behind.
+    let Some(root) = bundle() else {
+        eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
+        return;
+    };
+    for required in [
+        "gpg/gpg-agent.exe",
+        "gpg/gpgconf.exe",
+        "gpg/pinentry-w32.exe",
+    ] {
+        assert!(
+            root.join(required).is_file(),
+            "{required} missing from the bundle"
+        );
+    }
 }
 
 #[test]
 #[ignore]
 fn bundled_git_carries_credential_manager() {
-  // MinGit includes Git Credential Manager, which is what lets HTTPS push and
-  // pull work on a machine with no git installed. Losing it would break auth
-  // for exactly the users the bundle exists to serve.
-  let Some(root) = bundle() else {
-    eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
-    return;
-  };
-  assert!(
-    root.join("git/mingw64/bin/git-credential-manager.exe").is_file(),
-    "git-credential-manager.exe missing; bundled HTTPS auth would break"
-  );
+    // MinGit includes Git Credential Manager, which is what lets HTTPS push and
+    // pull work on a machine with no git installed. Losing it would break auth
+    // for exactly the users the bundle exists to serve.
+    let Some(root) = bundle() else {
+        eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
+        return;
+    };
+    assert!(
+        root.join("git/mingw64/bin/git-credential-manager.exe")
+            .is_file(),
+        "git-credential-manager.exe missing; bundled HTTPS auth would break"
+    );
 }
 
 #[test]
 #[ignore]
 fn a_relocated_gpg_can_generate_a_key_and_sign() {
-  // The end-to-end proof that the bundle is usable: gpg needs an explicit
-  // agent-program (its compiled-in /usr/bin/gpg-agent does not exist once
-  // relocated) and a /cygdrive-style GNUPGHOME. Both are what the app does in
-  // git::signing; this checks the combination actually works.
-  let Some(root) = bundle() else {
-    eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
-    return;
-  };
+    // The end-to-end proof that the bundle is usable: gpg needs an explicit
+    // agent-program (its compiled-in /usr/bin/gpg-agent does not exist once
+    // relocated) and a /cygdrive-style GNUPGHOME. Both are what the app does in
+    // git::signing; this checks the combination actually works.
+    let Some(root) = bundle() else {
+        eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
+        return;
+    };
 
-  // Short path: gpg-agent refuses to start when its socket path grows too long.
-  let home = PathBuf::from(r"C:\gwtest-gnupg");
-  let _ = std::fs::remove_dir_all(&home);
-  std::fs::create_dir_all(&home).unwrap();
+    // Short path: gpg-agent refuses to start when its socket path grows too long.
+    let home = PathBuf::from(r"C:\gwtest-gnupg");
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
 
-  let gpg = root.join("gpg/gpg.exe");
-  let agent = root
-    .join("gpg/gpg-agent.exe")
-    .to_string_lossy()
-    .replace('\\', "/");
-  std::fs::write(home.join("gpg.conf"), format!("agent-program {agent}\n")).unwrap();
+    let gpg = root.join("gpg/gpg.exe");
+    let agent = root
+        .join("gpg/gpg-agent.exe")
+        .to_string_lossy()
+        .replace('\\', "/");
+    std::fs::write(home.join("gpg.conf"), format!("agent-program {agent}\n")).unwrap();
 
-  let cyg = "/cygdrive/c/gwtest-gnupg";
-  let out = Command::new(&gpg)
-    .env("GNUPGHOME", cyg)
-    .args([
-      "--batch", "--passphrase", "", "--quick-generate-key",
-      "Bundle Test <bundle@gitwyrm.invalid>", "ed25519", "sign", "never",
-    ])
-    .output()
-    .expect("run gpg");
-  let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    let cyg = "/cygdrive/c/gwtest-gnupg";
+    let out = Command::new(&gpg)
+        .env("GNUPGHOME", cyg)
+        .args([
+            "--batch",
+            "--passphrase",
+            "",
+            "--quick-generate-key",
+            "Bundle Test <bundle@gitwyrm.invalid>",
+            "ed25519",
+            "sign",
+            "never",
+        ])
+        .output()
+        .expect("run gpg");
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
 
-  // Stop the agent before asserting, so a failure does not leave it holding
-  // the directory open for the next run.
-  let _ = Command::new(root.join("gpg/gpgconf.exe"))
-    .env("GNUPGHOME", cyg)
-    .arg("--kill")
-    .arg("all")
-    .output();
+    // Stop the agent before asserting, so a failure does not leave it holding
+    // the directory open for the next run.
+    let _ = Command::new(root.join("gpg/gpgconf.exe"))
+        .env("GNUPGHOME", cyg)
+        .arg("--kill")
+        .arg("all")
+        .output();
 
-  assert!(out.status.success(), "key generation failed: {text}");
-  let _ = std::fs::remove_dir_all(&home);
+    assert!(out.status.success(), "key generation failed: {text}");
+    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 #[ignore]
 fn bundled_ssh_keygen_can_make_a_signing_key() {
-  // SSH signing is the second backend, and ssh-keygen is the one ssh tool
-  // MinGit leaves out - so this checks the copy carved from the portable tree
-  // is actually present and works.
-  let Some(root) = bundle() else {
-    eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
-    return;
-  };
+    // SSH signing is the second backend, and ssh-keygen is the one ssh tool
+    // MinGit leaves out - so this checks the copy carved from the portable tree
+    // is actually present and works.
+    let Some(root) = bundle() else {
+        eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
+        return;
+    };
 
-  let keygen = root.join("gpg/ssh-keygen.exe");
-  assert!(keygen.is_file(), "ssh-keygen.exe missing from the bundle");
+    let keygen = root.join("gpg/ssh-keygen.exe");
+    assert!(keygen.is_file(), "ssh-keygen.exe missing from the bundle");
 
-  let dir = std::env::temp_dir().join("gwsshtest");
-  let _ = std::fs::remove_dir_all(&dir);
-  std::fs::create_dir_all(&dir).unwrap();
-  let target = dir.join("id_test").to_string_lossy().replace('\\', "/");
+    let dir = std::env::temp_dir().join("gwsshtest");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("id_test").to_string_lossy().replace('\\', "/");
 
-  let (ok, out) = run(
-    &keygen,
-    &["-t", "ed25519", "-C", "test@gitwyrm.invalid", "-f", &target, "-N", "", "-q"],
-  );
-  assert!(ok, "ssh-keygen could not generate a key: {out}");
-  assert!(
-    PathBuf::from(format!("{target}.pub")).is_file(),
-    "no public key was written"
-  );
+    let (ok, out) = run(
+        &keygen,
+        &[
+            "-t",
+            "ed25519",
+            "-C",
+            "test@gitwyrm.invalid",
+            "-f",
+            &target,
+            "-N",
+            "",
+            "-q",
+        ],
+    );
+    assert!(ok, "ssh-keygen could not generate a key: {out}");
+    assert!(
+        PathBuf::from(format!("{target}.pub")).is_file(),
+        "no public key was written"
+    );
 
-  // And that the fingerprint reads back, which is what the key list depends on.
-  let (ok, listed) = run(&keygen, &["-lf", &format!("{target}.pub")]);
-  assert!(ok, "ssh-keygen could not read the key back: {listed}");
-  assert!(listed.contains("SHA256:"), "unexpected output: {listed}");
-  assert!(listed.contains("ED25519"), "unexpected key type: {listed}");
+    // And that the fingerprint reads back, which is what the key list depends on.
+    let (ok, listed) = run(&keygen, &["-lf", &format!("{target}.pub")]);
+    assert!(ok, "ssh-keygen could not read the key back: {listed}");
+    assert!(listed.contains("SHA256:"), "unexpected output: {listed}");
+    assert!(listed.contains("ED25519"), "unexpected key type: {listed}");
 
-  let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -23,27 +23,27 @@ use crate::error::AppError;
 /// content would make "review before write" a promise the UI could not keep.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct DraftedArtifact {
-  /// Path relative to the change folder, e.g. `proposal.md` or
-  /// `specs/openspec-core/spec.md`.
-  pub path: String,
-  /// Full file body.
-  pub content: String,
+    /// Path relative to the change folder, e.g. `proposal.md` or
+    /// `specs/openspec-core/spec.md`.
+    pub path: String,
+    /// Full file body.
+    pub content: String,
 }
 
 /// A whole change, drafted and awaiting review. Nothing is on disk yet.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct DraftedChange {
-  /// The folder name the change would get. Already uniqued against existing
-  /// changes, so the UI can show the user what they will actually end up with.
-  pub id: String,
-  /// True when `id` differs from what the user asked for because that name was
-  /// taken. The UI says so rather than silently renaming.
-  pub renamed: bool,
-  pub proposal: DraftedArtifact,
-  pub tasks: DraftedArtifact,
-  /// Spec deltas. May be empty: a change that only refactors adds no
-  /// requirements, and inventing one would be worse than none.
-  pub deltas: Vec<DraftedArtifact>,
+    /// The folder name the change would get. Already uniqued against existing
+    /// changes, so the UI can show the user what they will actually end up with.
+    pub id: String,
+    /// True when `id` differs from what the user asked for because that name was
+    /// taken. The UI says so rather than silently renaming.
+    pub renamed: bool,
+    pub proposal: DraftedArtifact,
+    pub tasks: DraftedArtifact,
+    /// Spec deltas. May be empty: a change that only refactors adds no
+    /// requirements, and inventing one would be worse than none.
+    pub deltas: Vec<DraftedArtifact>,
 }
 
 /// What the model is asked to return. Kept separate from [`DraftedChange`] so a
@@ -51,18 +51,18 @@ pub struct DraftedChange {
 /// the UI renders.
 #[derive(Debug, Deserialize)]
 struct DraftResponse {
-  proposal: String,
-  tasks: String,
-  #[serde(default)]
-  deltas: Vec<DraftResponseDelta>,
+    proposal: String,
+    tasks: String,
+    #[serde(default)]
+    deltas: Vec<DraftResponseDelta>,
 }
 
 #[derive(Debug, Deserialize)]
 struct DraftResponseDelta {
-  /// The capability this delta belongs to, e.g. `openspec-core`. Becomes
-  /// `specs/<capability>/spec.md`.
-  capability: String,
-  content: String,
+    /// The capability this delta belongs to, e.g. `openspec-core`. Becomes
+    /// `specs/<capability>/spec.md`.
+    capability: String,
+    content: String,
 }
 
 /// House style for OpenSpec artifacts, so drafts match what the CLI validates
@@ -152,30 +152,35 @@ Plain language, no jargon, no em dashes.";
 
 /// Build the user half of the fix prompt from the change's own documents.
 pub fn fix_user_prompt(change_id: &str, proposal: &str, validator_output: &str) -> String {
-  format!(
-    "Change id: {}\n\nIts proposal:\n{}\n\nThe spec check said:\n{}",
-    change_id,
-    proposal.trim(),
-    validator_output.trim()
-  )
+    format!(
+        "Change id: {}\n\nIts proposal:\n{}\n\nThe spec check said:\n{}",
+        change_id,
+        proposal.trim(),
+        validator_output.trim()
+    )
 }
 
 /// Parse a single drafted delta.
 pub fn parse_fix(response: &str) -> Result<DraftedArtifact, AppError> {
-  let json = extract_json(response)
-    .ok_or_else(|| AppError::Other("The AI did not return a delta. Try again.".into()))?;
-  let parsed: DraftResponseDelta = serde_json::from_str(json)
-    .map_err(|e| AppError::Other(format!("The AI's delta could not be read ({e}). Try again.")))?;
-  if parsed.content.trim().is_empty() {
-    return Err(AppError::Other("The AI returned an empty delta. Try again.".into()));
-  }
-  let capability = sanitize_capability(&parsed.capability).ok_or_else(|| {
-    AppError::Other("The AI did not say which capability this belongs to. Try again.".into())
-  })?;
-  Ok(DraftedArtifact {
-    path: format!("specs/{capability}/spec.md"),
-    content: ensure_trailing_newline(&parsed.content),
-  })
+    let json = extract_json(response)
+        .ok_or_else(|| AppError::Other("The AI did not return a delta. Try again.".into()))?;
+    let parsed: DraftResponseDelta = serde_json::from_str(json).map_err(|e| {
+        AppError::Other(format!(
+            "The AI's delta could not be read ({e}). Try again."
+        ))
+    })?;
+    if parsed.content.trim().is_empty() {
+        return Err(AppError::Other(
+            "The AI returned an empty delta. Try again.".into(),
+        ));
+    }
+    let capability = sanitize_capability(&parsed.capability).ok_or_else(|| {
+        AppError::Other("The AI did not say which capability this belongs to. Try again.".into())
+    })?;
+    Ok(DraftedArtifact {
+        path: format!("specs/{capability}/spec.md"),
+        content: ensure_trailing_newline(&parsed.content),
+    })
 }
 
 /// Build the user half of the drafting prompt.
@@ -183,20 +188,24 @@ pub fn parse_fix(response: &str) -> Result<DraftedArtifact, AppError> {
 /// Everything the AI reads is assembled here so the UI can show the user the
 /// same list ("what the AI reads"): their description, the existing capability
 /// names, and recent commit subjects for house style.
-pub fn draft_user_prompt(description: &str, capabilities: &[String], recent_commits: &str) -> String {
-  let caps = if capabilities.is_empty() {
-    "(none yet)".to_string()
-  } else {
-    capabilities.join(", ")
-  };
-  format!(
-    "Draft a change for this request:\n{}\n\n\
+pub fn draft_user_prompt(
+    description: &str,
+    capabilities: &[String],
+    recent_commits: &str,
+) -> String {
+    let caps = if capabilities.is_empty() {
+        "(none yet)".to_string()
+    } else {
+        capabilities.join(", ")
+    };
+    format!(
+        "Draft a change for this request:\n{}\n\n\
 Existing capabilities in this project's specs library:\n{}\n\n\
 Recent commit subjects, for house style:\n{}",
-    description.trim(),
-    caps,
-    recent_commits.trim()
-  )
+        description.trim(),
+        caps,
+        recent_commits.trim()
+    )
 }
 
 /// Parse the model's reply into artifacts.
@@ -205,70 +214,72 @@ Recent commit subjects, for house style:\n{}",
 /// would fail drafts that are otherwise perfectly good, so the outermost JSON
 /// object is extracted before parsing.
 pub fn parse_draft(response: &str, id: &str, renamed: bool) -> Result<DraftedChange, AppError> {
-  let json = extract_json(response)
-    .ok_or_else(|| AppError::Other("The AI did not return a draft. Try again.".into()))?;
-  let parsed: DraftResponse = serde_json::from_str(json).map_err(|e| {
-    AppError::Other(format!("The AI's draft could not be read ({e}). Try again."))
-  })?;
+    let json = extract_json(response)
+        .ok_or_else(|| AppError::Other("The AI did not return a draft. Try again.".into()))?;
+    let parsed: DraftResponse = serde_json::from_str(json).map_err(|e| {
+        AppError::Other(format!(
+            "The AI's draft could not be read ({e}). Try again."
+        ))
+    })?;
 
-  if parsed.proposal.trim().is_empty() || parsed.tasks.trim().is_empty() {
-    return Err(AppError::Other(
-      "The AI's draft was missing a proposal or tasks. Try again.".into(),
-    ));
-  }
+    if parsed.proposal.trim().is_empty() || parsed.tasks.trim().is_empty() {
+        return Err(AppError::Other(
+            "The AI's draft was missing a proposal or tasks. Try again.".into(),
+        ));
+    }
 
-  let deltas = parsed
-    .deltas
-    .into_iter()
-    .filter(|d| !d.content.trim().is_empty())
-    .filter_map(|d| {
-      // A delta whose capability name cannot be a folder is unusable, and
-      // dropping it beats writing `specs//spec.md`.
-      let capability = sanitize_capability(&d.capability)?;
-      Some(DraftedArtifact {
-        path: format!("specs/{capability}/spec.md"),
-        content: ensure_trailing_newline(&d.content),
-      })
+    let deltas = parsed
+        .deltas
+        .into_iter()
+        .filter(|d| !d.content.trim().is_empty())
+        .filter_map(|d| {
+            // A delta whose capability name cannot be a folder is unusable, and
+            // dropping it beats writing `specs//spec.md`.
+            let capability = sanitize_capability(&d.capability)?;
+            Some(DraftedArtifact {
+                path: format!("specs/{capability}/spec.md"),
+                content: ensure_trailing_newline(&d.content),
+            })
+        })
+        .collect();
+
+    Ok(DraftedChange {
+        id: id.to_string(),
+        renamed,
+        proposal: DraftedArtifact {
+            path: "proposal.md".to_string(),
+            content: ensure_trailing_newline(&parsed.proposal),
+        },
+        tasks: DraftedArtifact {
+            path: "tasks.md".to_string(),
+            content: ensure_trailing_newline(&parsed.tasks),
+        },
+        deltas,
     })
-    .collect();
-
-  Ok(DraftedChange {
-    id: id.to_string(),
-    renamed,
-    proposal: DraftedArtifact {
-      path: "proposal.md".to_string(),
-      content: ensure_trailing_newline(&parsed.proposal),
-    },
-    tasks: DraftedArtifact {
-      path: "tasks.md".to_string(),
-      content: ensure_trailing_newline(&parsed.tasks),
-    },
-    deltas,
-  })
 }
 
 /// Keep a capability name to what can safely be a folder: lowercase letters,
 /// digits, and single hyphens.
 fn sanitize_capability(raw: &str) -> Option<String> {
-  let mut out = String::new();
-  let mut last_dash = true; // leading dashes are dropped
-  for ch in raw.trim().chars() {
-    if ch.is_ascii_alphanumeric() {
-      out.push(ch.to_ascii_lowercase());
-      last_dash = false;
-    } else if !last_dash {
-      out.push('-');
-      last_dash = true;
+    let mut out = String::new();
+    let mut last_dash = true; // leading dashes are dropped
+    for ch in raw.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
     }
-  }
-  let trimmed = out.trim_end_matches('-').to_string();
-  (!trimmed.is_empty()).then_some(trimmed)
+    let trimmed = out.trim_end_matches('-').to_string();
+    (!trimmed.is_empty()).then_some(trimmed)
 }
 
 /// Files end with exactly one newline, the way every other file we write does.
 fn ensure_trailing_newline(body: &str) -> String {
-  let trimmed = body.trim_end();
-  format!("{trimmed}\n")
+    let trimmed = body.trim_end();
+    format!("{trimmed}\n")
 }
 
 /// The outermost `{...}` span in `text`, so fenced or chatty replies still parse.
@@ -277,35 +288,35 @@ fn ensure_trailing_newline(body: &str) -> String {
 /// bodies contain them) would otherwise unbalance the count and truncate the
 /// object.
 fn extract_json(text: &str) -> Option<&str> {
-  let start = text.find('{')?;
-  let bytes = text.as_bytes();
-  let mut depth = 0usize;
-  let mut in_string = false;
-  let mut escaped = false;
-  for (offset, &byte) in bytes.iter().enumerate().skip(start) {
-    if in_string {
-      if escaped {
-        escaped = false;
-      } else if byte == b'\\' {
-        escaped = true;
-      } else if byte == b'"' {
-        in_string = false;
-      }
-      continue;
-    }
-    match byte {
-      b'"' => in_string = true,
-      b'{' => depth += 1,
-      b'}' => {
-        depth -= 1;
-        if depth == 0 {
-          return Some(&text[start..=offset]);
+    let start = text.find('{')?;
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, &byte) in bytes.iter().enumerate().skip(start) {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
         }
-      }
-      _ => {}
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&text[start..=offset]);
+                }
+            }
+            _ => {}
+        }
     }
-  }
-  None
+    None
 }
 
 /// A folder name for `desired` that no existing change already uses.
@@ -314,164 +325,176 @@ fn extract_json(text: &str) -> Option<&str> {
 /// user picked a name that made sense to them, and the flow should continue with
 /// something recognisable instead of sending them back to the field.
 pub fn unique_change_id(desired: &str, existing: &[String]) -> (String, bool) {
-  let taken = |candidate: &str| existing.iter().any(|e| e.eq_ignore_ascii_case(candidate));
-  if !taken(desired) {
-    return (desired.to_string(), false);
-  }
-  for n in 2..1000 {
-    let candidate = format!("{desired}-{n}");
-    if !taken(&candidate) {
-      return (candidate, true);
+    let taken = |candidate: &str| existing.iter().any(|e| e.eq_ignore_ascii_case(candidate));
+    if !taken(desired) {
+        return (desired.to_string(), false);
     }
-  }
-  // Practically unreachable; better than looping forever.
-  (format!("{desired}-new"), true)
+    for n in 2..1000 {
+        let candidate = format!("{desired}-{n}");
+        if !taken(&candidate) {
+            return (candidate, true);
+        }
+    }
+    // Practically unreachable; better than looping forever.
+    (format!("{desired}-new"), true)
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  const GOOD: &str = r##"{"proposal":"# Change: Add a thing\n\n## Why\n\nBecause.","tasks":"# Tasks\n\n## 1. Build\n\n- [ ] 1.1 Do it","deltas":[{"capability":"openspec-core","content":"# openspec-core Spec Delta"}]}"##;
+    const GOOD: &str = r##"{"proposal":"# Change: Add a thing\n\n## Why\n\nBecause.","tasks":"# Tasks\n\n## 1. Build\n\n- [ ] 1.1 Do it","deltas":[{"capability":"openspec-core","content":"# openspec-core Spec Delta"}]}"##;
 
-  #[test]
-  fn parses_a_well_formed_draft() {
-    let draft = parse_draft(GOOD, "add-a-thing", false).expect("parses");
-    assert_eq!(draft.id, "add-a-thing");
-    assert!(!draft.renamed);
-    assert_eq!(draft.proposal.path, "proposal.md");
-    assert_eq!(draft.tasks.path, "tasks.md");
-    assert_eq!(draft.deltas.len(), 1);
-    assert_eq!(draft.deltas[0].path, "specs/openspec-core/spec.md");
-  }
-
-  #[test]
-  fn survives_a_fenced_or_chatty_reply() {
-    let wrapped = format!("Sure! Here you go:\n```json\n{GOOD}\n```\nHope that helps.");
-    let draft = parse_draft(&wrapped, "add-a-thing", false).expect("parses");
-    assert_eq!(draft.deltas.len(), 1);
-  }
-
-  /// Markdown bodies are full of braces. A naive brace count would stop at the
-  /// first `}` inside a string and truncate the JSON.
-  #[test]
-  fn braces_inside_content_do_not_truncate_the_object() {
-    let tricky = r##"{"proposal":"use {this} and \"that\"","tasks":"# Tasks\n\n- [ ] 1.1 x","deltas":[]}"##;
-    let draft = parse_draft(tricky, "add-a-thing", false).expect("parses");
-    assert!(draft.proposal.content.contains("{this}"));
-    assert!(draft.proposal.content.contains(r#""that""#));
-  }
-
-  #[test]
-  fn a_change_with_no_deltas_is_allowed() {
-    let no_deltas = r##"{"proposal":"# Change: x\n\nWhy.","tasks":"# Tasks\n\n- [ ] 1.1 x"}"##;
-    let draft = parse_draft(no_deltas, "add-x", false).expect("parses");
-    assert!(draft.deltas.is_empty(), "no deltas is a valid draft, not an error");
-  }
-
-  #[test]
-  fn a_missing_proposal_is_an_error_not_an_empty_file() {
-    let bad = r##"{"proposal":"   ","tasks":"# Tasks"}"##;
-    assert!(parse_draft(bad, "add-x", false).is_err());
-  }
-
-  #[test]
-  fn junk_is_an_error_rather_than_a_panic() {
-    assert!(parse_draft("I cannot help with that.", "add-x", false).is_err());
-    assert!(parse_draft("", "add-x", false).is_err());
-  }
-
-  #[test]
-  fn every_artifact_ends_with_exactly_one_newline() {
-    let draft = parse_draft(GOOD, "add-a-thing", false).expect("parses");
-    for body in [&draft.proposal.content, &draft.tasks.content] {
-      assert!(body.ends_with('\n'));
-      assert!(!body.ends_with("\n\n"));
+    #[test]
+    fn parses_a_well_formed_draft() {
+        let draft = parse_draft(GOOD, "add-a-thing", false).expect("parses");
+        assert_eq!(draft.id, "add-a-thing");
+        assert!(!draft.renamed);
+        assert_eq!(draft.proposal.path, "proposal.md");
+        assert_eq!(draft.tasks.path, "tasks.md");
+        assert_eq!(draft.deltas.len(), 1);
+        assert_eq!(draft.deltas[0].path, "specs/openspec-core/spec.md");
     }
-  }
 
-  #[test]
-  fn capability_names_become_safe_folder_names() {
-    assert_eq!(sanitize_capability("openspec-core").as_deref(), Some("openspec-core"));
-    assert_eq!(sanitize_capability("Spec Desk Actions").as_deref(), Some("spec-desk-actions"));
-    assert_eq!(sanitize_capability("  --weird__name-- ").as_deref(), Some("weird-name"));
-    assert_eq!(sanitize_capability("///"), None);
-    assert_eq!(sanitize_capability(""), None);
-  }
+    #[test]
+    fn survives_a_fenced_or_chatty_reply() {
+        let wrapped = format!("Sure! Here you go:\n```json\n{GOOD}\n```\nHope that helps.");
+        let draft = parse_draft(&wrapped, "add-a-thing", false).expect("parses");
+        assert_eq!(draft.deltas.len(), 1);
+    }
 
-  /// A delta naming a capability that cannot be a folder is dropped rather than
-  /// writing `specs//spec.md`, which would escape the change folder.
-  #[test]
-  fn a_delta_with_an_unusable_capability_is_dropped() {
-    let bad = r##"{"proposal":"# x\n\nWhy.","tasks":"# Tasks","deltas":[{"capability":"///","content":"# x"}]}"##;
-    let draft = parse_draft(bad, "add-x", false).expect("parses");
-    assert!(draft.deltas.is_empty());
-  }
+    /// Markdown bodies are full of braces. A naive brace count would stop at the
+    /// first `}` inside a string and truncate the JSON.
+    #[test]
+    fn braces_inside_content_do_not_truncate_the_object() {
+        let tricky = r##"{"proposal":"use {this} and \"that\"","tasks":"# Tasks\n\n- [ ] 1.1 x","deltas":[]}"##;
+        let draft = parse_draft(tricky, "add-a-thing", false).expect("parses");
+        assert!(draft.proposal.content.contains("{this}"));
+        assert!(draft.proposal.content.contains(r#""that""#));
+    }
 
-  #[test]
-  fn a_free_name_is_used_as_is() {
-    let (id, renamed) = unique_change_id("add-thing", &["other".into()]);
-    assert_eq!(id, "add-thing");
-    assert!(!renamed);
-  }
+    #[test]
+    fn a_change_with_no_deltas_is_allowed() {
+        let no_deltas = r##"{"proposal":"# Change: x\n\nWhy.","tasks":"# Tasks\n\n- [ ] 1.1 x"}"##;
+        let draft = parse_draft(no_deltas, "add-x", false).expect("parses");
+        assert!(
+            draft.deltas.is_empty(),
+            "no deltas is a valid draft, not an error"
+        );
+    }
 
-  #[test]
-  fn a_taken_name_gets_a_visible_suffix() {
-    let existing = vec!["add-thing".to_string(), "add-thing-2".to_string()];
-    let (id, renamed) = unique_change_id("add-thing", &existing);
-    assert_eq!(id, "add-thing-3");
-    assert!(renamed, "the user must be told the name changed");
-  }
+    #[test]
+    fn a_missing_proposal_is_an_error_not_an_empty_file() {
+        let bad = r##"{"proposal":"   ","tasks":"# Tasks"}"##;
+        assert!(parse_draft(bad, "add-x", false).is_err());
+    }
 
-  /// Folder names are case-insensitive on Windows, so `Add-Thing` colliding with
-  /// `add-thing` has to be caught here rather than failing at create time.
-  #[test]
-  fn collision_check_ignores_case() {
-    let (id, renamed) = unique_change_id("add-thing", &["ADD-THING".to_string()]);
-    assert_eq!(id, "add-thing-2");
-    assert!(renamed);
-  }
+    #[test]
+    fn junk_is_an_error_rather_than_a_panic() {
+        assert!(parse_draft("I cannot help with that.", "add-x", false).is_err());
+        assert!(parse_draft("", "add-x", false).is_err());
+    }
 
-  #[test]
-  fn parses_a_drafted_fix_delta() {
-    let reply = r##"{"capability":"spec-desk","content":"# spec-desk Spec Delta\n\n## ADDED Requirements"}"##;
-    let delta = parse_fix(reply).expect("parses");
-    assert_eq!(delta.path, "specs/spec-desk/spec.md");
-    assert!(delta.content.ends_with('\n'));
-  }
+    #[test]
+    fn every_artifact_ends_with_exactly_one_newline() {
+        let draft = parse_draft(GOOD, "add-a-thing", false).expect("parses");
+        for body in [&draft.proposal.content, &draft.tasks.content] {
+            assert!(body.ends_with('\n'));
+            assert!(!body.ends_with("\n\n"));
+        }
+    }
 
-  #[test]
-  fn a_fix_without_a_usable_capability_is_an_error() {
-    // Better to fail loudly than to write `specs//spec.md` next to the change.
-    let reply = r##"{"capability":"","content":"# x"}"##;
-    assert!(parse_fix(reply).is_err());
-  }
+    #[test]
+    fn capability_names_become_safe_folder_names() {
+        assert_eq!(
+            sanitize_capability("openspec-core").as_deref(),
+            Some("openspec-core")
+        );
+        assert_eq!(
+            sanitize_capability("Spec Desk Actions").as_deref(),
+            Some("spec-desk-actions")
+        );
+        assert_eq!(
+            sanitize_capability("  --weird__name-- ").as_deref(),
+            Some("weird-name")
+        );
+        assert_eq!(sanitize_capability("///"), None);
+        assert_eq!(sanitize_capability(""), None);
+    }
 
-  #[test]
-  fn an_empty_fix_is_an_error_not_an_empty_file() {
-    let reply = r##"{"capability":"core","content":"   "}"##;
-    assert!(parse_fix(reply).is_err());
-  }
+    /// A delta naming a capability that cannot be a folder is dropped rather than
+    /// writing `specs//spec.md`, which would escape the change folder.
+    #[test]
+    fn a_delta_with_an_unusable_capability_is_dropped() {
+        let bad = r##"{"proposal":"# x\n\nWhy.","tasks":"# Tasks","deltas":[{"capability":"///","content":"# x"}]}"##;
+        let draft = parse_draft(bad, "add-x", false).expect("parses");
+        assert!(draft.deltas.is_empty());
+    }
 
-  #[test]
-  fn the_fix_prompt_carries_the_proposal_and_the_validator_output() {
-    let prompt = fix_user_prompt("add-thing", "## Why\n\nBecause.", "Missing requirement");
-    assert!(prompt.contains("add-thing"));
-    assert!(prompt.contains("Because."));
-    assert!(prompt.contains("Missing requirement"));
-  }
+    #[test]
+    fn a_free_name_is_used_as_is() {
+        let (id, renamed) = unique_change_id("add-thing", &["other".into()]);
+        assert_eq!(id, "add-thing");
+        assert!(!renamed);
+    }
 
-  #[test]
-  fn the_prompt_names_what_the_ai_reads() {
-    let prompt = draft_user_prompt("do a thing", &["core".into()], "fixes: a bug");
-    assert!(prompt.contains("do a thing"));
-    assert!(prompt.contains("core"));
-    assert!(prompt.contains("fixes: a bug"));
-  }
+    #[test]
+    fn a_taken_name_gets_a_visible_suffix() {
+        let existing = vec!["add-thing".to_string(), "add-thing-2".to_string()];
+        let (id, renamed) = unique_change_id("add-thing", &existing);
+        assert_eq!(id, "add-thing-3");
+        assert!(renamed, "the user must be told the name changed");
+    }
 
-  #[test]
-  fn the_prompt_is_honest_about_an_empty_library() {
-    let prompt = draft_user_prompt("do a thing", &[], "");
-    assert!(prompt.contains("(none yet)"));
-  }
+    /// Folder names are case-insensitive on Windows, so `Add-Thing` colliding with
+    /// `add-thing` has to be caught here rather than failing at create time.
+    #[test]
+    fn collision_check_ignores_case() {
+        let (id, renamed) = unique_change_id("add-thing", &["ADD-THING".to_string()]);
+        assert_eq!(id, "add-thing-2");
+        assert!(renamed);
+    }
+
+    #[test]
+    fn parses_a_drafted_fix_delta() {
+        let reply = r##"{"capability":"spec-desk","content":"# spec-desk Spec Delta\n\n## ADDED Requirements"}"##;
+        let delta = parse_fix(reply).expect("parses");
+        assert_eq!(delta.path, "specs/spec-desk/spec.md");
+        assert!(delta.content.ends_with('\n'));
+    }
+
+    #[test]
+    fn a_fix_without_a_usable_capability_is_an_error() {
+        // Better to fail loudly than to write `specs//spec.md` next to the change.
+        let reply = r##"{"capability":"","content":"# x"}"##;
+        assert!(parse_fix(reply).is_err());
+    }
+
+    #[test]
+    fn an_empty_fix_is_an_error_not_an_empty_file() {
+        let reply = r##"{"capability":"core","content":"   "}"##;
+        assert!(parse_fix(reply).is_err());
+    }
+
+    #[test]
+    fn the_fix_prompt_carries_the_proposal_and_the_validator_output() {
+        let prompt = fix_user_prompt("add-thing", "## Why\n\nBecause.", "Missing requirement");
+        assert!(prompt.contains("add-thing"));
+        assert!(prompt.contains("Because."));
+        assert!(prompt.contains("Missing requirement"));
+    }
+
+    #[test]
+    fn the_prompt_names_what_the_ai_reads() {
+        let prompt = draft_user_prompt("do a thing", &["core".into()], "fixes: a bug");
+        assert!(prompt.contains("do a thing"));
+        assert!(prompt.contains("core"));
+        assert!(prompt.contains("fixes: a bug"));
+    }
+
+    #[test]
+    fn the_prompt_is_honest_about_an_empty_library() {
+        let prompt = draft_user_prompt("do a thing", &[], "");
+        assert!(prompt.contains("(none yet)"));
+    }
 }

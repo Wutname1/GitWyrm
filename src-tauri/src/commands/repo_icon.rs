@@ -236,7 +236,11 @@ fn repo_key(repo_path: &str) -> String {
     let normalized = repo_path.replace('/', "\\");
     let trimmed = normalized.trim_end_matches('\\');
     // Keep a bare drive root ("C:\") addressable rather than collapsing to "C:".
-    let trimmed = if trimmed.is_empty() { &normalized } else { trimmed };
+    let trimmed = if trimmed.is_empty() {
+        &normalized
+    } else {
+        trimmed
+    };
 
     let mut hash = 0xcbf29ce484222325u64;
     for byte in trimmed.to_ascii_lowercase().bytes() {
@@ -478,10 +482,7 @@ fn get_repo_icon_sync(
 /// skips the walk. `None` means nothing is remembered and the caller must scan.
 /// An icon file that has since been deleted returns `None` so it is rediscovered
 /// rather than leaving the repository permanently iconless.
-fn cached_discovered_icon(
-    app: &tauri::AppHandle,
-    repo_path: &str,
-) -> Option<Option<RepoIcon>> {
+fn cached_discovered_icon(app: &tauri::AppHandle, repo_path: &str) -> Option<Option<RepoIcon>> {
     let index = read_icon_index(app);
     let entry = index.get(&repo_key(repo_path))?;
     // Custom icons are served earlier by `existing_custom_icon`; this path is
@@ -496,7 +497,9 @@ fn cached_discovered_icon(
     if !path.is_file() {
         return None;
     }
-    file_data_url(&path, false, MAX_DISCOVERED_BYTES).ok().map(Some)
+    file_data_url(&path, false, MAX_DISCOVERED_BYTES)
+        .ok()
+        .map(Some)
 }
 
 /// Remember that discovery ran and found nothing, so it is not repeated.

@@ -11,73 +11,74 @@ use crate::error::AppError;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct ChatRequest<'a> {
-  pub provider: &'a CatalogProvider,
-  pub bearer: &'a str,
-  pub model: &'a str,
-  pub system: &'a str,
-  pub user: &'a str,
-  pub max_tokens: u32,
-  pub timeout: Duration,
+    pub provider: &'a CatalogProvider,
+    pub bearer: &'a str,
+    pub model: &'a str,
+    pub system: &'a str,
+    pub user: &'a str,
+    pub max_tokens: u32,
+    pub timeout: Duration,
 }
 
 /// Extra headers some providers require beyond the bearer token.
 pub fn extra_headers(provider_id: &str, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-  match provider_id {
-    "github-copilot" => req
-      .header("Copilot-Integration-Id", "vscode-chat")
-      .header("Editor-Version", "GitWyrm/0.1")
-      .header("X-GitHub-Api-Version", "2025-04-01")
-      .header("User-Agent", "GitWyrm"),
-    _ => req.header("User-Agent", "GitWyrm"),
-  }
+    match provider_id {
+        "github-copilot" => req
+            .header("Copilot-Integration-Id", "vscode-chat")
+            .header("Editor-Version", "GitWyrm/0.1")
+            .header("X-GitHub-Api-Version", "2025-04-01")
+            .header("User-Agent", "GitWyrm"),
+        _ => req.header("User-Agent", "GitWyrm"),
+    }
 }
 
 pub async fn chat(req: ChatRequest<'_>) -> Result<String, AppError> {
-  let client = reqwest::Client::new();
-  let base = req.provider.base_url.trim_end_matches('/');
-  let input_chars = req.system.chars().count() + req.user.chars().count();
-  let started = Instant::now();
+    let client = reqwest::Client::new();
+    let base = req.provider.base_url.trim_end_matches('/');
+    let input_chars = req.system.chars().count() + req.user.chars().count();
+    let started = Instant::now();
 
-  log::info!(
-    "AI request started: provider={}, model={}, input_chars={}, max_tokens={}, timeout_secs={}",
-    req.provider.id,
-    req.model,
-    input_chars,
-    req.max_tokens,
-    req.timeout.as_secs()
-  );
+    log::info!(
+        "AI request started: provider={}, model={}, input_chars={}, max_tokens={}, timeout_secs={}",
+        req.provider.id,
+        req.model,
+        input_chars,
+        req.max_tokens,
+        req.timeout.as_secs()
+    );
 
-  let (url, builder, body): (String, reqwest::RequestBuilder, Value) = match req.provider.dialect {
-    Dialect::Anthropic => {
-      let url = format!("{base}/v1/messages");
-      let builder = client
-        .post(&url)
-        .header("x-api-key", req.bearer)
-        .header("anthropic-version", "2023-06-01");
-      let body = json!({
-        "model": req.model,
-        "max_tokens": req.max_tokens,
-        "system": req.system,
-        "messages": [{ "role": "user", "content": req.user }],
-      });
-      (url, builder, body)
-    }
-    Dialect::OpenAi => {
-      let url = format!("{base}/chat/completions");
-      let builder = client.post(&url).bearer_auth(req.bearer);
-      let body = json!({
-        "model": req.model,
-        "max_tokens": req.max_tokens,
-        "messages": [
-          { "role": "system", "content": req.system },
-          { "role": "user", "content": req.user },
-        ],
-      });
-      (url, builder, body)
-    }
-  };
+    let (url, builder, body): (String, reqwest::RequestBuilder, Value) = match req.provider.dialect
+    {
+        Dialect::Anthropic => {
+            let url = format!("{base}/v1/messages");
+            let builder = client
+                .post(&url)
+                .header("x-api-key", req.bearer)
+                .header("anthropic-version", "2023-06-01");
+            let body = json!({
+              "model": req.model,
+              "max_tokens": req.max_tokens,
+              "system": req.system,
+              "messages": [{ "role": "user", "content": req.user }],
+            });
+            (url, builder, body)
+        }
+        Dialect::OpenAi => {
+            let url = format!("{base}/chat/completions");
+            let builder = client.post(&url).bearer_auth(req.bearer);
+            let body = json!({
+              "model": req.model,
+              "max_tokens": req.max_tokens,
+              "messages": [
+                { "role": "system", "content": req.system },
+                { "role": "user", "content": req.user },
+              ],
+            });
+            (url, builder, body)
+        }
+    };
 
-  let res = extra_headers(&req.provider.id, builder)
+    let res = extra_headers(&req.provider.id, builder)
     .timeout(req.timeout)
     .json(&body)
     .send()
@@ -104,54 +105,54 @@ pub async fn chat(req: ChatRequest<'_>) -> Result<String, AppError> {
       }
     })?;
 
-  let status = res.status();
-  let text = res
-    .text()
-    .await
-    .map_err(|e| AppError::Other(format!("AI response read failed: {e}")))?;
+    let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| AppError::Other(format!("AI response read failed: {e}")))?;
 
-  log::info!(
-    "AI response received: provider={}, model={}, status={}, response_chars={}, elapsed_ms={}",
-    req.provider.id,
-    req.model,
-    status,
-    text.chars().count(),
-    started.elapsed().as_millis()
-  );
-
-  if !status.is_success() {
-    log::error!(
-      "AI provider rejected request: provider={}, model={}, status={}, response={}",
-      req.provider.id,
-      req.model,
-      status,
-      snippet(&text)
+    log::info!(
+        "AI response received: provider={}, model={}, status={}, response_chars={}, elapsed_ms={}",
+        req.provider.id,
+        req.model,
+        status,
+        text.chars().count(),
+        started.elapsed().as_millis()
     );
-    return Err(AppError::Other(format!(
-      "AI request to {url} failed ({status}): {}",
-      snippet(&text)
-    )));
-  }
 
-  let parsed: Value =
-    serde_json::from_str(&text).map_err(|e| AppError::Other(format!("bad AI response: {e}")))?;
+    if !status.is_success() {
+        log::error!(
+            "AI provider rejected request: provider={}, model={}, status={}, response={}",
+            req.provider.id,
+            req.model,
+            status,
+            snippet(&text)
+        );
+        return Err(AppError::Other(format!(
+            "AI request to {url} failed ({status}): {}",
+            snippet(&text)
+        )));
+    }
 
-  let content = match req.provider.dialect {
-    Dialect::Anthropic => parsed["content"]
-      .as_array()
-      .and_then(|parts| {
-        parts
-          .iter()
-          .find(|p| p["type"] == "text")
-          .and_then(|p| p["text"].as_str())
-      })
-      .map(str::to_string),
-    Dialect::OpenAi => parsed["choices"][0]["message"]["content"]
-      .as_str()
-      .map(str::to_string),
-  };
+    let parsed: Value = serde_json::from_str(&text)
+        .map_err(|e| AppError::Other(format!("bad AI response: {e}")))?;
 
-  content.ok_or_else(|| {
+    let content = match req.provider.dialect {
+        Dialect::Anthropic => parsed["content"]
+            .as_array()
+            .and_then(|parts| {
+                parts
+                    .iter()
+                    .find(|p| p["type"] == "text")
+                    .and_then(|p| p["text"].as_str())
+            })
+            .map(str::to_string),
+        Dialect::OpenAi => parsed["choices"][0]["message"]["content"]
+            .as_str()
+            .map(str::to_string),
+    };
+
+    content.ok_or_else(|| {
     let completion_tokens = parsed["usage"]["completion_tokens"].as_u64();
     let finish_reason = parsed["choices"][0]["finish_reason"].as_str().unwrap_or("missing");
     let choices = parsed["choices"].as_array().map(Vec::len).unwrap_or_default();
@@ -177,26 +178,26 @@ pub async fn chat(req: ChatRequest<'_>) -> Result<String, AppError> {
 }
 
 fn snippet(text: &str) -> String {
-  text.chars().take(300).collect()
+    text.chars().take(300).collect()
 }
 
 fn duration_label(duration: Duration) -> String {
-  let seconds = duration.as_secs();
-  if seconds >= 60 && seconds % 60 == 0 {
-    let minutes = seconds / 60;
-    format!("{minutes} minute{}", if minutes == 1 { "" } else { "s" })
-  } else {
-    format!("{seconds} second{}", if seconds == 1 { "" } else { "s" })
-  }
+    let seconds = duration.as_secs();
+    if seconds >= 60 && seconds % 60 == 0 {
+        let minutes = seconds / 60;
+        format!("{minutes} minute{}", if minutes == 1 { "" } else { "s" })
+    } else {
+        format!("{seconds} second{}", if seconds == 1 { "" } else { "s" })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  #[test]
-  fn timeout_labels_are_plain_language() {
-    assert_eq!(duration_label(Duration::from_secs(300)), "5 minutes");
-    assert_eq!(duration_label(Duration::from_secs(45)), "45 seconds");
-  }
+    #[test]
+    fn timeout_labels_are_plain_language() {
+        assert_eq!(duration_label(Duration::from_secs(300)), "5 minutes");
+        assert_eq!(duration_label(Duration::from_secs(45)), "45 seconds");
+    }
 }

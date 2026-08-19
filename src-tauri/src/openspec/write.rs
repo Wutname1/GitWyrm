@@ -19,64 +19,65 @@ use crate::openspec::draft::DraftedArtifact;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum ToggleOutcome {
-  /// The checkbox was flipped and the file written.
-  Toggled,
-  /// The task was already in the requested state, so nothing was written.
-  AlreadyThatWay,
-  /// The line no longer holds a checkbox -- the file changed underneath us.
-  /// The caller re-reads rather than guessing.
-  LineMoved,
+    /// The checkbox was flipped and the file written.
+    Toggled,
+    /// The task was already in the requested state, so nothing was written.
+    AlreadyThatWay,
+    /// The line no longer holds a checkbox -- the file changed underneath us.
+    /// The caller re-reads rather than guessing.
+    LineMoved,
 }
 
 /// Replaces the checkbox marker on one line, preserving everything else.
 /// Returns None when the line has no `[ ]`/`[x]` to change.
 fn flip_line(line: &str, done: bool) -> Option<String> {
-  // Find the first bracket pair; anything before it is bullet + indentation and
-  // is copied verbatim.
-  let open = line.find('[')?;
-  let rest = &line[open..];
-  let marker_len = if rest.starts_with("[ ]") || rest.starts_with("[x]") || rest.starts_with("[X]") {
-    3
-  } else {
-    return None;
-  };
-  let marker = if done { "[x]" } else { "[ ]" };
-  let mut out = String::with_capacity(line.len());
-  out.push_str(&line[..open]);
-  out.push_str(marker);
-  out.push_str(&line[open + marker_len..]);
-  Some(out)
+    // Find the first bracket pair; anything before it is bullet + indentation and
+    // is copied verbatim.
+    let open = line.find('[')?;
+    let rest = &line[open..];
+    let marker_len =
+        if rest.starts_with("[ ]") || rest.starts_with("[x]") || rest.starts_with("[X]") {
+            3
+        } else {
+            return None;
+        };
+    let marker = if done { "[x]" } else { "[ ]" };
+    let mut out = String::with_capacity(line.len());
+    out.push_str(&line[..open]);
+    out.push_str(marker);
+    out.push_str(&line[open + marker_len..]);
+    Some(out)
 }
 
 /// True when the line already carries the requested state.
 fn line_is_done(line: &str) -> Option<bool> {
-  let open = line.find('[')?;
-  let rest = &line[open..];
-  if rest.starts_with("[ ]") {
-    Some(false)
-  } else if rest.starts_with("[x]") || rest.starts_with("[X]") {
-    Some(true)
-  } else {
-    None
-  }
+    let open = line.find('[')?;
+    let rest = &line[open..];
+    if rest.starts_with("[ ]") {
+        Some(false)
+    } else if rest.starts_with("[x]") || rest.starts_with("[X]") {
+        Some(true)
+    } else {
+        None
+    }
 }
 
 /// Splits text into lines *with* their original terminators, so a file mixing
 /// CRLF and LF (or missing a trailing newline) round-trips byte-for-byte.
 fn split_keep_endings(text: &str) -> Vec<&str> {
-  let mut out = Vec::new();
-  let bytes = text.as_bytes();
-  let mut start = 0;
-  for (i, b) in bytes.iter().enumerate() {
-    if *b == b'\n' {
-      out.push(&text[start..=i]);
-      start = i + 1;
+    let mut out = Vec::new();
+    let bytes = text.as_bytes();
+    let mut start = 0;
+    for (i, b) in bytes.iter().enumerate() {
+        if *b == b'\n' {
+            out.push(&text[start..=i]);
+            start = i + 1;
+        }
     }
-  }
-  if start < text.len() {
-    out.push(&text[start..]);
-  }
-  out
+    if start < text.len() {
+        out.push(&text[start..]);
+    }
+    out
 }
 
 /// Toggles the checkbox on `line_number` (1-based) of `tasks_path` to `done`.
@@ -87,82 +88,83 @@ fn split_keep_endings(text: &str) -> Vec<&str> {
 /// (an agent inserted tasks, say) this reports `LineMoved` instead of writing to
 /// the wrong place.
 pub fn toggle_task_line(
-  tasks_path: &Path,
-  line_number: u32,
-  done: bool,
+    tasks_path: &Path,
+    line_number: u32,
+    done: bool,
 ) -> Result<ToggleOutcome, AppError> {
-  let text = std::fs::read_to_string(tasks_path)?;
-  let lines = split_keep_endings(&text);
-  let idx = line_number.checked_sub(1).ok_or_else(|| {
-    AppError::Other("task line numbers start at 1".to_string())
-  })? as usize;
-  let Some(line) = lines.get(idx) else {
-    return Ok(ToggleOutcome::LineMoved);
-  };
+    let text = std::fs::read_to_string(tasks_path)?;
+    let lines = split_keep_endings(&text);
+    let idx = line_number
+        .checked_sub(1)
+        .ok_or_else(|| AppError::Other("task line numbers start at 1".to_string()))?
+        as usize;
+    let Some(line) = lines.get(idx) else {
+        return Ok(ToggleOutcome::LineMoved);
+    };
 
-  // Separate the terminator so the rewrite cannot change CRLF into LF.
-  let (content, ending) = match line.find('\n') {
-    Some(pos) => (&line[..pos], &line[pos..]),
-    None => (*line, ""),
-  };
-  let content_trimmed_cr = content.strip_suffix('\r').unwrap_or(content);
-  let cr = if content.ends_with('\r') { "\r" } else { "" };
+    // Separate the terminator so the rewrite cannot change CRLF into LF.
+    let (content, ending) = match line.find('\n') {
+        Some(pos) => (&line[..pos], &line[pos..]),
+        None => (*line, ""),
+    };
+    let content_trimmed_cr = content.strip_suffix('\r').unwrap_or(content);
+    let cr = if content.ends_with('\r') { "\r" } else { "" };
 
-  match line_is_done(content_trimmed_cr) {
-    None => return Ok(ToggleOutcome::LineMoved),
-    Some(current) if current == done => return Ok(ToggleOutcome::AlreadyThatWay),
-    Some(_) => {}
-  }
-
-  let Some(flipped) = flip_line(content_trimmed_cr, done) else {
-    return Ok(ToggleOutcome::LineMoved);
-  };
-
-  let mut out = String::with_capacity(text.len() + 1);
-  for (i, l) in lines.iter().enumerate() {
-    if i == idx {
-      out.push_str(&flipped);
-      out.push_str(cr);
-      out.push_str(ending);
-    } else {
-      out.push_str(l);
+    match line_is_done(content_trimmed_cr) {
+        None => return Ok(ToggleOutcome::LineMoved),
+        Some(current) if current == done => return Ok(ToggleOutcome::AlreadyThatWay),
+        Some(_) => {}
     }
-  }
-  std::fs::write(tasks_path, out)?;
-  Ok(ToggleOutcome::Toggled)
+
+    let Some(flipped) = flip_line(content_trimmed_cr, done) else {
+        return Ok(ToggleOutcome::LineMoved);
+    };
+
+    let mut out = String::with_capacity(text.len() + 1);
+    for (i, l) in lines.iter().enumerate() {
+        if i == idx {
+            out.push_str(&flipped);
+            out.push_str(cr);
+            out.push_str(ending);
+        } else {
+            out.push_str(l);
+        }
+    }
+    std::fs::write(tasks_path, out)?;
+    Ok(ToggleOutcome::Toggled)
 }
 
 /// A folder name safe to create and to show in a graph chip: lowercase,
 /// alphanumeric plus single dashes. Returns None for a name that reduces to
 /// nothing, so the caller can ask the user for a better one.
 pub fn sanitize_change_id(raw: &str) -> Option<String> {
-  let mut out = String::with_capacity(raw.len());
-  let mut last_dash = true; // suppresses a leading dash
-  for ch in raw.trim().chars() {
-    let c = ch.to_ascii_lowercase();
-    if c.is_ascii_alphanumeric() {
-      out.push(c);
-      last_dash = false;
-    } else if !last_dash {
-      out.push('-');
-      last_dash = true;
+    let mut out = String::with_capacity(raw.len());
+    let mut last_dash = true; // suppresses a leading dash
+    for ch in raw.trim().chars() {
+        let c = ch.to_ascii_lowercase();
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
     }
-  }
-  let trimmed = out.trim_end_matches('-').to_string();
-  if trimmed.is_empty() {
-    None
-  } else {
-    Some(trimmed)
-  }
+    let trimmed = out.trim_end_matches('-').to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 /// What a scaffold call produced.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct ScaffoldResult {
-  /// The id actually used (sanitized).
-  pub id: String,
-  /// Repo-relative paths written, in creation order.
-  pub files: Vec<String>,
+    /// The id actually used (sanitized).
+    pub id: String,
+    /// Repo-relative paths written, in creation order.
+    pub files: Vec<String>,
 }
 
 /// Write a reviewed draft to disk, creating only the artifacts passed in.
@@ -176,50 +178,55 @@ pub struct ScaffoldResult {
 /// change would show up in the sidebar as a real one, and the user would have no
 /// way to tell which files the AI actually produced.
 pub fn create_drafted_change(
-  openspec_dir: &Path,
-  id: &str,
-  artifacts: &[DraftedArtifact],
+    openspec_dir: &Path,
+    id: &str,
+    artifacts: &[DraftedArtifact],
 ) -> Result<Vec<String>, AppError> {
-  if artifacts.is_empty() {
-    return Err(AppError::Other(
-      "Nothing was kept, so there is nothing to create.".into(),
-    ));
-  }
-  let id = sanitize_change_id(id)
-    .ok_or_else(|| AppError::Other("that name has no letters or numbers in it".to_string()))?;
-  let dir = openspec_dir.join("changes").join(&id);
-  if dir.exists() {
-    return Err(AppError::Other(format!("a change named {id} already exists")));
-  }
+    if artifacts.is_empty() {
+        return Err(AppError::Other(
+            "Nothing was kept, so there is nothing to create.".into(),
+        ));
+    }
+    let id = sanitize_change_id(id)
+        .ok_or_else(|| AppError::Other("that name has no letters or numbers in it".to_string()))?;
+    let dir = openspec_dir.join("changes").join(&id);
+    if dir.exists() {
+        return Err(AppError::Other(format!(
+            "a change named {id} already exists"
+        )));
+    }
 
-  let written = write_artifacts(&dir, &id, artifacts);
-  if written.is_err() {
-    // Best effort: the folder was ours to begin with, created moments ago.
-    let _ = std::fs::remove_dir_all(&dir);
-  }
-  written
+    let written = write_artifacts(&dir, &id, artifacts);
+    if written.is_err() {
+        // Best effort: the folder was ours to begin with, created moments ago.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    written
 }
 
 /// The write half of `create_drafted_change`, split out so the caller can clean
 /// up after any failure without repeating the error path at every `?`.
 fn write_artifacts(
-  dir: &Path,
-  id: &str,
-  artifacts: &[DraftedArtifact],
+    dir: &Path,
+    id: &str,
+    artifacts: &[DraftedArtifact],
 ) -> Result<Vec<String>, AppError> {
-  std::fs::create_dir_all(dir)?;
-  let mut files = Vec::with_capacity(artifacts.len());
-  for artifact in artifacts {
-    let target = safe_join(dir, &artifact.path).ok_or_else(|| {
-      AppError::Other(format!("{} is not a valid place for a file", artifact.path))
-    })?;
-    if let Some(parent) = target.parent() {
-      std::fs::create_dir_all(parent)?;
+    std::fs::create_dir_all(dir)?;
+    let mut files = Vec::with_capacity(artifacts.len());
+    for artifact in artifacts {
+        let target = safe_join(dir, &artifact.path).ok_or_else(|| {
+            AppError::Other(format!("{} is not a valid place for a file", artifact.path))
+        })?;
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&target, &artifact.content)?;
+        files.push(format!(
+            "openspec/changes/{id}/{}",
+            artifact.path.replace('\\', "/")
+        ));
     }
-    std::fs::write(&target, &artifact.content)?;
-    files.push(format!("openspec/changes/{id}/{}", artifact.path.replace('\\', "/")));
-  }
-  Ok(files)
+    Ok(files)
 }
 
 /// Resolve `relative` inside `base`, refusing anything that escapes it.
@@ -228,19 +235,19 @@ fn write_artifacts(
 /// possibility rather than a theoretical one. Checked component by component
 /// because the target does not exist yet, which rules out canonicalising it.
 fn safe_join(base: &Path, relative: &str) -> Option<std::path::PathBuf> {
-  let mut out = base.to_path_buf();
-  let mut depth = 0usize;
-  for component in Path::new(relative).components() {
-    match component {
-      std::path::Component::Normal(part) => {
-        out.push(part);
-        depth += 1;
-      }
-      // Anything else -- `..`, a root, a drive prefix -- could leave the folder.
-      _ => return None,
+    let mut out = base.to_path_buf();
+    let mut depth = 0usize;
+    for component in Path::new(relative).components() {
+        match component {
+            std::path::Component::Normal(part) => {
+                out.push(part);
+                depth += 1;
+            }
+            // Anything else -- `..`, a root, a drive prefix -- could leave the folder.
+            _ => return None,
+        }
     }
-  }
-  (depth > 0).then_some(out)
+    (depth > 0).then_some(out)
 }
 
 /// Add one delta file to an existing change, for the validate-fix loop.
@@ -249,30 +256,33 @@ fn safe_join(base: &Path, relative: &str) -> Option<std::path::PathBuf> {
 /// requirement, and silently replacing a spec file they had already written
 /// would be the worst possible reading of that request.
 pub fn add_delta(
-  openspec_dir: &Path,
-  change_id: &str,
-  delta: &DraftedArtifact,
+    openspec_dir: &Path,
+    change_id: &str,
+    delta: &DraftedArtifact,
 ) -> Result<String, AppError> {
-  let dir = openspec_dir.join("changes").join(change_id);
-  if !dir.exists() {
-    return Err(AppError::Other(format!("{change_id} is not a change here.")));
-  }
-  let target = safe_join(&dir, &delta.path)
-    .ok_or_else(|| AppError::Other(format!("{} is not a valid place for a file", delta.path)))?;
-  if target.exists() {
-    return Err(AppError::Other(format!(
-      "{} already exists. Edit it instead of adding another.",
-      delta.path
-    )));
-  }
-  if let Some(parent) = target.parent() {
-    std::fs::create_dir_all(parent)?;
-  }
-  std::fs::write(&target, &delta.content)?;
-  Ok(format!(
-    "openspec/changes/{change_id}/{}",
-    delta.path.replace('\\', "/")
-  ))
+    let dir = openspec_dir.join("changes").join(change_id);
+    if !dir.exists() {
+        return Err(AppError::Other(format!(
+            "{change_id} is not a change here."
+        )));
+    }
+    let target = safe_join(&dir, &delta.path).ok_or_else(|| {
+        AppError::Other(format!("{} is not a valid place for a file", delta.path))
+    })?;
+    if target.exists() {
+        return Err(AppError::Other(format!(
+            "{} already exists. Edit it instead of adding another.",
+            delta.path
+        )));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&target, &delta.content)?;
+    Ok(format!(
+        "openspec/changes/{change_id}/{}",
+        delta.path.replace('\\', "/")
+    ))
 }
 
 /// Creates `openspec/changes/<id>/` with template proposal.md and tasks.md.
@@ -281,49 +291,56 @@ pub fn add_delta(
 /// that as "pick another name" while the name field is still editable, so the
 /// user is never stuck holding a draft with nowhere to put it.
 pub fn scaffold_change(
-  openspec_dir: &Path,
-  raw_id: &str,
-  description: &str,
+    openspec_dir: &Path,
+    raw_id: &str,
+    description: &str,
 ) -> Result<ScaffoldResult, AppError> {
-  let id = sanitize_change_id(raw_id)
-    .ok_or_else(|| AppError::Other("that name has no letters or numbers in it".to_string()))?;
-  let dir = openspec_dir.join("changes").join(&id);
-  if dir.exists() {
-    return Err(AppError::Other(format!(
-      "a change named {id} already exists"
-    )));
-  }
-  std::fs::create_dir_all(&dir)?;
+    let id = sanitize_change_id(raw_id)
+        .ok_or_else(|| AppError::Other("that name has no letters or numbers in it".to_string()))?;
+    let dir = openspec_dir.join("changes").join(&id);
+    if dir.exists() {
+        return Err(AppError::Other(format!(
+            "a change named {id} already exists"
+        )));
+    }
+    std::fs::create_dir_all(&dir)?;
 
-  let desc = description.trim();
-  let why = if desc.is_empty() { "Describe the problem this solves." } else { desc };
-  let proposal = format!(
+    let desc = description.trim();
+    let why = if desc.is_empty() {
+        "Describe the problem this solves."
+    } else {
+        desc
+    };
+    let proposal = format!(
     "# Change: {id}\n\n## Why\n\n{why}\n\n## What Changes\n\n- \n\n## Impact\n\n- Affected specs: \n- Affected code: \n"
   );
-  // The task template carries headings but no checkboxes. An empty `- [ ] 1.1`
-  // line would parse as a real task, so a brand-new change would read "0 of 2
-  // done" instead of the draft it actually is.
-  let tasks =
+    // The task template carries headings but no checkboxes. An empty `- [ ] 1.1`
+    // line would parse as a real task, so a brand-new change would read "0 of 2
+    // done" instead of the draft it actually is.
+    let tasks =
     "# Tasks\n\n## 1. Build\n\n<!-- Add tasks as checkboxes: - [ ] 1.1 Do the thing -->\n\n## 2. Verify\n\n"
       .to_string();
 
-  let proposal_path = dir.join("proposal.md");
-  let tasks_path = dir.join("tasks.md");
-  std::fs::write(&proposal_path, proposal)?;
-  std::fs::write(&tasks_path, tasks)?;
+    let proposal_path = dir.join("proposal.md");
+    let tasks_path = dir.join("tasks.md");
+    std::fs::write(&proposal_path, proposal)?;
+    std::fs::write(&tasks_path, tasks)?;
 
-  Ok(ScaffoldResult {
-    id: id.clone(),
-    files: vec![
-      format!("openspec/changes/{id}/proposal.md"),
-      format!("openspec/changes/{id}/tasks.md"),
-    ],
-  })
+    Ok(ScaffoldResult {
+        id: id.clone(),
+        files: vec![
+            format!("openspec/changes/{id}/proposal.md"),
+            format!("openspec/changes/{id}/tasks.md"),
+        ],
+    })
 }
 
 /// Path to a change's tasks.md, without checking that it exists.
 pub fn tasks_path(openspec_dir: &Path, change_id: &str) -> PathBuf {
-  openspec_dir.join("changes").join(change_id).join("tasks.md")
+    openspec_dir
+        .join("changes")
+        .join(change_id)
+        .join("tasks.md")
 }
 
 /// Resolve a file inside a change package, for editing.
@@ -338,20 +355,20 @@ pub fn tasks_path(openspec_dir: &Path, change_id: &str) -> PathBuf {
 /// The parent is canonicalized rather than the file because the file may not
 /// exist yet -- a first save of design.md is a legitimate write.
 fn editable_path(change_dir: &Path, file: &str) -> Result<PathBuf, AppError> {
-  let outside = || AppError::Other(format!("{file} is not a file in this change."));
+    let outside = || AppError::Other(format!("{file} is not a file in this change."));
 
-  let target = safe_join(change_dir, file).ok_or_else(outside)?;
-  let base = change_dir.canonicalize().map_err(|_| outside())?;
-  let parent = target.parent().ok_or_else(outside)?;
-  // A parent that does not exist cannot be a symlink out, and creating it is the
-  // caller's business. Only an existing parent needs resolving.
-  if parent.exists() {
-    let resolved = parent.canonicalize().map_err(|_| outside())?;
-    if !resolved.starts_with(&base) {
-      return Err(outside());
+    let target = safe_join(change_dir, file).ok_or_else(outside)?;
+    let base = change_dir.canonicalize().map_err(|_| outside())?;
+    let parent = target.parent().ok_or_else(outside)?;
+    // A parent that does not exist cannot be a symlink out, and creating it is the
+    // caller's business. Only an existing parent needs resolving.
+    if parent.exists() {
+        let resolved = parent.canonicalize().map_err(|_| outside())?;
+        if !resolved.starts_with(&base) {
+            return Err(outside());
+        }
     }
-  }
-  Ok(target)
+    Ok(target)
 }
 
 /// Resolve a change folder for deletion.
@@ -362,29 +379,29 @@ fn editable_path(change_dir: &Path, file: &str) -> Result<PathBuf, AppError> {
 /// is then canonicalized and re-checked against the canonical changes directory,
 /// which catches a symlinked change folder pointing somewhere else on disk.
 fn deletable_change_dir(openspec_dir: &Path, change_id: &str) -> Result<PathBuf, AppError> {
-  let not_a_change = || AppError::Other(format!("{change_id} is not a change here."));
+    let not_a_change = || AppError::Other(format!("{change_id} is not a change here."));
 
-  let mut components = Path::new(change_id).components();
-  let Some(std::path::Component::Normal(name)) = components.next() else {
-    return Err(not_a_change());
-  };
-  if components.next().is_some() {
-    return Err(not_a_change());
-  }
+    let mut components = Path::new(change_id).components();
+    let Some(std::path::Component::Normal(name)) = components.next() else {
+        return Err(not_a_change());
+    };
+    if components.next().is_some() {
+        return Err(not_a_change());
+    }
 
-  let changes = openspec_dir.join("changes");
-  let dir = changes.join(name);
-  if !dir.is_dir() {
-    return Err(not_a_change());
-  }
+    let changes = openspec_dir.join("changes");
+    let dir = changes.join(name);
+    if !dir.is_dir() {
+        return Err(not_a_change());
+    }
 
-  // A symlinked change folder would put remove_dir_all outside openspec/.
-  let base = changes.canonicalize().map_err(|_| not_a_change())?;
-  let resolved = dir.canonicalize().map_err(|_| not_a_change())?;
-  if !resolved.starts_with(&base) || resolved == base {
-    return Err(not_a_change());
-  }
-  Ok(resolved)
+    // A symlinked change folder would put remove_dir_all outside openspec/.
+    let base = changes.canonicalize().map_err(|_| not_a_change())?;
+    let resolved = dir.canonicalize().map_err(|_| not_a_change())?;
+    if !resolved.starts_with(&base) || resolved == base {
+        return Err(not_a_change());
+    }
+    Ok(resolved)
 }
 
 /// Delete one change's folder and everything in it.
@@ -393,10 +410,10 @@ fn deletable_change_dir(openspec_dir: &Path, change_id: &str) -> Result<PathBuf,
 /// removes the working-tree folder only -- git history is untouched, so a change
 /// that was ever committed can still be recovered from it.
 pub fn delete_change(openspec_dir: &Path, change_id: &str) -> Result<String, AppError> {
-  let dir = deletable_change_dir(openspec_dir, change_id)?;
-  std::fs::remove_dir_all(&dir)
-    .map_err(|e| AppError::Other(format!("{change_id} could not be deleted: {e}")))?;
-  Ok(format!("openspec/changes/{change_id}"))
+    let dir = deletable_change_dir(openspec_dir, change_id)?;
+    std::fs::remove_dir_all(&dir)
+        .map_err(|e| AppError::Other(format!("{change_id} could not be deleted: {e}")))?;
+    Ok(format!("openspec/changes/{change_id}"))
 }
 
 /// Read one file of a change package for the editor.
@@ -405,20 +422,22 @@ pub fn delete_change(openspec_dir: &Path, change_id: &str) -> Result<String, App
 /// should open a blank editor to write one, not an error about a file the user is
 /// trying to create.
 pub fn read_change_file(
-  openspec_dir: &Path,
-  change_id: &str,
-  file: &str,
+    openspec_dir: &Path,
+    change_id: &str,
+    file: &str,
 ) -> Result<String, AppError> {
-  let dir = openspec_dir.join("changes").join(change_id);
-  if !dir.exists() {
-    return Err(AppError::Other(format!("{change_id} is not a change here.")));
-  }
-  let path = editable_path(&dir, file)?;
-  match std::fs::read_to_string(&path) {
-    Ok(body) => Ok(body),
-    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-    Err(e) => Err(AppError::Other(format!("{file} could not be read: {e}"))),
-  }
+    let dir = openspec_dir.join("changes").join(change_id);
+    if !dir.exists() {
+        return Err(AppError::Other(format!(
+            "{change_id} is not a change here."
+        )));
+    }
+    let path = editable_path(&dir, file)?;
+    match std::fs::read_to_string(&path) {
+        Ok(body) => Ok(body),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(AppError::Other(format!("{file} could not be read: {e}"))),
+    }
 }
 
 /// Write one file of a change package from the editor.
@@ -428,435 +447,486 @@ pub fn read_change_file(
 /// outside editors, so an unasked-for byte here is a spurious diff in someone's
 /// commit.
 pub fn write_change_file(
-  openspec_dir: &Path,
-  change_id: &str,
-  file: &str,
-  body: &str,
+    openspec_dir: &Path,
+    change_id: &str,
+    file: &str,
+    body: &str,
 ) -> Result<String, AppError> {
-  let dir = openspec_dir.join("changes").join(change_id);
-  if !dir.exists() {
-    return Err(AppError::Other(format!("{change_id} is not a change here.")));
-  }
-  let path = editable_path(&dir, file)?;
-  if let Some(parent) = path.parent() {
-    std::fs::create_dir_all(parent)
-      .map_err(|e| AppError::Other(format!("{file} could not be saved: {e}")))?;
-  }
-  std::fs::write(&path, body)
-    .map_err(|e| AppError::Other(format!("{file} could not be saved: {e}")))?;
-  Ok(format!(
-    "openspec/changes/{change_id}/{}",
-    file.replace('\\', "/")
-  ))
+    let dir = openspec_dir.join("changes").join(change_id);
+    if !dir.exists() {
+        return Err(AppError::Other(format!(
+            "{change_id} is not a change here."
+        )));
+    }
+    let path = editable_path(&dir, file)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::Other(format!("{file} could not be saved: {e}")))?;
+    }
+    std::fs::write(&path, body)
+        .map_err(|e| AppError::Other(format!("{file} could not be saved: {e}")))?;
+    Ok(format!(
+        "openspec/changes/{change_id}/{}",
+        file.replace('\\', "/")
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  fn write_temp(name: &str, content: &str) -> (tempfile::TempDir, PathBuf) {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join(name);
-    std::fs::write(&path, content).unwrap();
-    (dir, path)
-  }
+    fn write_temp(name: &str, content: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(name);
+        std::fs::write(&path, content).unwrap();
+        (dir, path)
+    }
 
-  #[test]
-  fn toggle_changes_only_the_one_checkbox() {
-    let original = "# Tasks\n\n## 1. Build\n\n- [ ] 1.1 First thing   \n- [ ] 1.2 Second thing\n";
-    let (_dir, path) = write_temp("tasks.md", original);
+    #[test]
+    fn toggle_changes_only_the_one_checkbox() {
+        let original =
+            "# Tasks\n\n## 1. Build\n\n- [ ] 1.1 First thing   \n- [ ] 1.2 Second thing\n";
+        let (_dir, path) = write_temp("tasks.md", original);
 
-    let outcome = toggle_task_line(&path, 5, true).unwrap();
-    assert_eq!(outcome, ToggleOutcome::Toggled);
+        let outcome = toggle_task_line(&path, 5, true).unwrap();
+        assert_eq!(outcome, ToggleOutcome::Toggled);
 
-    let after = std::fs::read_to_string(&path).unwrap();
-    let expected = "# Tasks\n\n## 1. Build\n\n- [x] 1.1 First thing   \n- [ ] 1.2 Second thing\n";
-    assert_eq!(after, expected);
-    // Byte-for-byte apart from the single marker: same length, one difference.
-    assert_eq!(after.len(), original.len());
-    let diffs = original
-      .bytes()
-      .zip(after.bytes())
-      .filter(|(a, b)| a != b)
-      .count();
-    assert_eq!(diffs, 1, "exactly one byte should change");
-  }
+        let after = std::fs::read_to_string(&path).unwrap();
+        let expected =
+            "# Tasks\n\n## 1. Build\n\n- [x] 1.1 First thing   \n- [ ] 1.2 Second thing\n";
+        assert_eq!(after, expected);
+        // Byte-for-byte apart from the single marker: same length, one difference.
+        assert_eq!(after.len(), original.len());
+        let diffs = original
+            .bytes()
+            .zip(after.bytes())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(diffs, 1, "exactly one byte should change");
+    }
 
-  #[test]
-  fn preserves_crlf_and_missing_final_newline() {
-    let original = "## 1. Build\r\n- [ ] one\r\n- [ ] two";
-    let (_dir, path) = write_temp("tasks.md", original);
+    #[test]
+    fn preserves_crlf_and_missing_final_newline() {
+        let original = "## 1. Build\r\n- [ ] one\r\n- [ ] two";
+        let (_dir, path) = write_temp("tasks.md", original);
 
-    toggle_task_line(&path, 2, true).unwrap();
-    let after = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(after, "## 1. Build\r\n- [x] one\r\n- [ ] two");
-    // No newline was appended to the last line.
-    assert!(!after.ends_with('\n'));
+        toggle_task_line(&path, 2, true).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(after, "## 1. Build\r\n- [x] one\r\n- [ ] two");
+        // No newline was appended to the last line.
+        assert!(!after.ends_with('\n'));
 
-    // And the last line, which has no terminator at all, can be toggled.
-    toggle_task_line(&path, 3, true).unwrap();
-    let after = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(after, "## 1. Build\r\n- [x] one\r\n- [x] two");
-  }
+        // And the last line, which has no terminator at all, can be toggled.
+        toggle_task_line(&path, 3, true).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(after, "## 1. Build\r\n- [x] one\r\n- [x] two");
+    }
 
-  #[test]
-  fn preserves_unusual_indentation_and_bullets() {
-    let original = "   * [ ] indented star\n\t+ [ ] tabbed plus\n";
-    let (_dir, path) = write_temp("tasks.md", original);
-    toggle_task_line(&path, 1, true).unwrap();
-    toggle_task_line(&path, 2, true).unwrap();
-    let after = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(after, "   * [x] indented star\n\t+ [x] tabbed plus\n");
-  }
+    #[test]
+    fn preserves_unusual_indentation_and_bullets() {
+        let original = "   * [ ] indented star\n\t+ [ ] tabbed plus\n";
+        let (_dir, path) = write_temp("tasks.md", original);
+        toggle_task_line(&path, 1, true).unwrap();
+        toggle_task_line(&path, 2, true).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(after, "   * [x] indented star\n\t+ [x] tabbed plus\n");
+    }
 
-  #[test]
-  fn untick_works_and_accepts_capital_x() {
-    let (_dir, path) = write_temp("tasks.md", "- [X] done thing\n");
-    assert_eq!(toggle_task_line(&path, 1, false).unwrap(), ToggleOutcome::Toggled);
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "- [ ] done thing\n");
-  }
+    #[test]
+    fn untick_works_and_accepts_capital_x() {
+        let (_dir, path) = write_temp("tasks.md", "- [X] done thing\n");
+        assert_eq!(
+            toggle_task_line(&path, 1, false).unwrap(),
+            ToggleOutcome::Toggled
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "- [ ] done thing\n"
+        );
+    }
 
-  #[test]
-  fn no_write_when_already_in_that_state() {
-    let original = "- [x] already done\n";
-    let (_dir, path) = write_temp("tasks.md", original);
-    let before = std::fs::metadata(&path).unwrap().modified().unwrap();
-    assert_eq!(
-      toggle_task_line(&path, 1, true).unwrap(),
-      ToggleOutcome::AlreadyThatWay
-    );
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
-    // Untouched: same mtime, so no editor sees a phantom save.
-    assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
-  }
+    #[test]
+    fn no_write_when_already_in_that_state() {
+        let original = "- [x] already done\n";
+        let (_dir, path) = write_temp("tasks.md", original);
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(
+            toggle_task_line(&path, 1, true).unwrap(),
+            ToggleOutcome::AlreadyThatWay
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        // Untouched: same mtime, so no editor sees a phantom save.
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before
+        );
+    }
 
-  #[test]
-  fn reports_line_moved_instead_of_writing_wrong_line() {
-    let original = "# Tasks\n\nprose, not a checkbox\n";
-    let (_dir, path) = write_temp("tasks.md", original);
-    assert_eq!(toggle_task_line(&path, 3, true).unwrap(), ToggleOutcome::LineMoved);
-    // Past the end of the file.
-    assert_eq!(toggle_task_line(&path, 99, true).unwrap(), ToggleOutcome::LineMoved);
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
-  }
+    #[test]
+    fn reports_line_moved_instead_of_writing_wrong_line() {
+        let original = "# Tasks\n\nprose, not a checkbox\n";
+        let (_dir, path) = write_temp("tasks.md", original);
+        assert_eq!(
+            toggle_task_line(&path, 3, true).unwrap(),
+            ToggleOutcome::LineMoved
+        );
+        // Past the end of the file.
+        assert_eq!(
+            toggle_task_line(&path, 99, true).unwrap(),
+            ToggleOutcome::LineMoved
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
 
-  #[test]
-  fn sanitizes_change_ids() {
-    assert_eq!(sanitize_change_id("Warn Before Delete").unwrap(), "warn-before-delete");
-    assert_eq!(sanitize_change_id("  add__openspec  foundation ").unwrap(), "add-openspec-foundation");
-    assert_eq!(sanitize_change_id("Fix: the thing!").unwrap(), "fix-the-thing");
-    assert_eq!(sanitize_change_id("already-fine").unwrap(), "already-fine");
-    assert!(sanitize_change_id("   ").is_none());
-    assert!(sanitize_change_id("!!!").is_none());
-  }
+    #[test]
+    fn sanitizes_change_ids() {
+        assert_eq!(
+            sanitize_change_id("Warn Before Delete").unwrap(),
+            "warn-before-delete"
+        );
+        assert_eq!(
+            sanitize_change_id("  add__openspec  foundation ").unwrap(),
+            "add-openspec-foundation"
+        );
+        assert_eq!(
+            sanitize_change_id("Fix: the thing!").unwrap(),
+            "fix-the-thing"
+        );
+        assert_eq!(sanitize_change_id("already-fine").unwrap(), "already-fine");
+        assert!(sanitize_change_id("   ").is_none());
+        assert!(sanitize_change_id("!!!").is_none());
+    }
 
-  #[test]
-  fn scaffolds_a_change_and_refuses_duplicates() {
-    let dir = tempfile::tempdir().unwrap();
-    let result = scaffold_change(dir.path(), "Warn Before Delete", "Ask before losing work.").unwrap();
-    assert_eq!(result.id, "warn-before-delete");
-    assert_eq!(result.files.len(), 2);
+    #[test]
+    fn scaffolds_a_change_and_refuses_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let result =
+            scaffold_change(dir.path(), "Warn Before Delete", "Ask before losing work.").unwrap();
+        assert_eq!(result.id, "warn-before-delete");
+        assert_eq!(result.files.len(), 2);
 
-    let proposal = std::fs::read_to_string(
-      dir.path().join("changes").join("warn-before-delete").join("proposal.md"),
-    )
-    .unwrap();
-    assert!(proposal.contains("Ask before losing work."));
-    assert!(proposal.contains("## Why"));
-
-    // The scaffold is immediately parseable by our own parser.
-    let parsed = super::super::parse::parse_change_dir(
-      &dir.path().join("changes").join("warn-before-delete"),
-    )
-    .unwrap();
-    assert_eq!(parsed.id, "warn-before-delete");
-    // A fresh scaffold is a draft, not "0 of N done" -- the template ships
-    // headings only, so nothing counts as a task until the user writes one.
-    assert_eq!(parsed.progress.total, 0);
-    assert!(parsed.progress.is_draft);
-    assert_eq!(parsed.status, super::super::parse::ChangeStatus::Draft);
-
-    assert!(scaffold_change(dir.path(), "warn-before-delete", "").is_err());
-  }
-
-  fn artifact(path: &str, content: &str) -> DraftedArtifact {
-    DraftedArtifact { path: path.into(), content: content.into() }
-  }
-
-  #[test]
-  fn creates_only_the_artifacts_it_is_given() {
-    let dir = tempfile::tempdir().unwrap();
-    let change = dir.path().join("changes").join("add-thing");
-
-    // The user kept the proposal and the delta but skipped tasks.
-    let files = create_drafted_change(
-      dir.path(),
-      "add-thing",
-      &[
-        artifact("proposal.md", "# Change: Add a thing\n"),
-        artifact("specs/core/spec.md", "# core Spec Delta\n"),
-      ],
-    )
-    .unwrap();
-
-    assert_eq!(files.len(), 2);
-    assert!(change.join("proposal.md").exists());
-    assert!(change.join("specs").join("core").join("spec.md").exists());
-    assert!(
-      !change.join("tasks.md").exists(),
-      "a skipped artifact must not be written"
-    );
-  }
-
-  #[test]
-  fn refuses_to_overwrite_an_existing_change() {
-    let dir = tempfile::tempdir().unwrap();
-    create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# a\n")]).unwrap();
-    assert!(
-      create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# b\n")]).is_err()
-    );
-    // The original survived the refused second call.
-    let body =
-      std::fs::read_to_string(dir.path().join("changes").join("add-thing").join("proposal.md"))
+        let proposal = std::fs::read_to_string(
+            dir.path()
+                .join("changes")
+                .join("warn-before-delete")
+                .join("proposal.md"),
+        )
         .unwrap();
-    assert_eq!(body, "# a\n");
-  }
+        assert!(proposal.contains("Ask before losing work."));
+        assert!(proposal.contains("## Why"));
 
-  #[test]
-  fn nothing_is_left_behind_when_an_artifact_path_is_unusable() {
-    let dir = tempfile::tempdir().unwrap();
-    let result = create_drafted_change(
-      dir.path(),
-      "add-thing",
-      &[
-        artifact("proposal.md", "# ok\n"),
-        // Escaping the change folder must fail the whole create.
-        artifact("../../escape.md", "nope\n"),
-      ],
-    );
-    assert!(result.is_err(), "a path outside the change folder must be refused");
-    assert!(
-      !dir.path().join("changes").join("add-thing").exists(),
-      "a failed create must not leave a partial change behind"
-    );
-    assert!(!dir.path().join("escape.md").exists());
-  }
+        // The scaffold is immediately parseable by our own parser.
+        let parsed = super::super::parse::parse_change_dir(
+            &dir.path().join("changes").join("warn-before-delete"),
+        )
+        .unwrap();
+        assert_eq!(parsed.id, "warn-before-delete");
+        // A fresh scaffold is a draft, not "0 of N done" -- the template ships
+        // headings only, so nothing counts as a task until the user writes one.
+        assert_eq!(parsed.progress.total, 0);
+        assert!(parsed.progress.is_draft);
+        assert_eq!(parsed.status, super::super::parse::ChangeStatus::Draft);
 
-  #[test]
-  fn adds_a_delta_to_an_existing_change() {
-    let dir = tempfile::tempdir().unwrap();
-    create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# a\n")]).unwrap();
+        assert!(scaffold_change(dir.path(), "warn-before-delete", "").is_err());
+    }
 
-    let written = add_delta(
-      dir.path(),
-      "add-thing",
-      &artifact("specs/core/spec.md", "# core Spec Delta\n"),
-    )
-    .unwrap();
+    fn artifact(path: &str, content: &str) -> DraftedArtifact {
+        DraftedArtifact {
+            path: path.into(),
+            content: content.into(),
+        }
+    }
 
-    assert_eq!(written, "openspec/changes/add-thing/specs/core/spec.md");
-    assert!(dir
-      .path()
-      .join("changes/add-thing/specs/core/spec.md")
-      .exists());
-  }
+    #[test]
+    fn creates_only_the_artifacts_it_is_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let change = dir.path().join("changes").join("add-thing");
 
-  /// The fix loop adds a *missing* requirement. Replacing a spec the user
-  /// already wrote would destroy work they never offered up.
-  #[test]
-  fn adding_a_delta_never_overwrites_one() {
-    let dir = tempfile::tempdir().unwrap();
-    create_drafted_change(
-      dir.path(),
-      "add-thing",
-      &[
-        artifact("proposal.md", "# a\n"),
-        artifact("specs/core/spec.md", "# mine\n"),
-      ],
-    )
-    .unwrap();
+        // The user kept the proposal and the delta but skipped tasks.
+        let files = create_drafted_change(
+            dir.path(),
+            "add-thing",
+            &[
+                artifact("proposal.md", "# Change: Add a thing\n"),
+                artifact("specs/core/spec.md", "# core Spec Delta\n"),
+            ],
+        )
+        .unwrap();
 
-    assert!(add_delta(
-      dir.path(),
-      "add-thing",
-      &artifact("specs/core/spec.md", "# theirs\n")
-    )
-    .is_err());
+        assert_eq!(files.len(), 2);
+        assert!(change.join("proposal.md").exists());
+        assert!(change.join("specs").join("core").join("spec.md").exists());
+        assert!(
+            !change.join("tasks.md").exists(),
+            "a skipped artifact must not be written"
+        );
+    }
 
-    let body =
-      std::fs::read_to_string(dir.path().join("changes/add-thing/specs/core/spec.md")).unwrap();
-    assert_eq!(body, "# mine\n", "the user's own delta must survive");
-  }
+    #[test]
+    fn refuses_to_overwrite_an_existing_change() {
+        let dir = tempfile::tempdir().unwrap();
+        create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# a\n")])
+            .unwrap();
+        assert!(create_drafted_change(
+            dir.path(),
+            "add-thing",
+            &[artifact("proposal.md", "# b\n")]
+        )
+        .is_err());
+        // The original survived the refused second call.
+        let body = std::fs::read_to_string(
+            dir.path()
+                .join("changes")
+                .join("add-thing")
+                .join("proposal.md"),
+        )
+        .unwrap();
+        assert_eq!(body, "# a\n");
+    }
 
-  #[test]
-  fn adding_a_delta_to_a_missing_change_is_an_error() {
-    let dir = tempfile::tempdir().unwrap();
-    assert!(add_delta(dir.path(), "nope", &artifact("specs/core/spec.md", "# x\n")).is_err());
-  }
+    #[test]
+    fn nothing_is_left_behind_when_an_artifact_path_is_unusable() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = create_drafted_change(
+            dir.path(),
+            "add-thing",
+            &[
+                artifact("proposal.md", "# ok\n"),
+                // Escaping the change folder must fail the whole create.
+                artifact("../../escape.md", "nope\n"),
+            ],
+        );
+        assert!(
+            result.is_err(),
+            "a path outside the change folder must be refused"
+        );
+        assert!(
+            !dir.path().join("changes").join("add-thing").exists(),
+            "a failed create must not leave a partial change behind"
+        );
+        assert!(!dir.path().join("escape.md").exists());
+    }
 
-  #[test]
-  fn a_delta_cannot_escape_its_change_folder() {
-    let dir = tempfile::tempdir().unwrap();
-    create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# a\n")]).unwrap();
-    assert!(add_delta(dir.path(), "add-thing", &artifact("../../escape.md", "x\n")).is_err());
-    assert!(!dir.path().join("escape.md").exists());
-  }
+    #[test]
+    fn adds_a_delta_to_an_existing_change() {
+        let dir = tempfile::tempdir().unwrap();
+        create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# a\n")])
+            .unwrap();
 
-  #[test]
-  fn an_empty_artifact_list_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    // "Create" with everything skipped writes nothing at all, so it should not
-    // produce an empty folder either.
-    assert!(create_drafted_change(dir.path(), "add-thing", &[]).is_err());
-    assert!(!dir.path().join("changes").join("add-thing").exists());
-  }
+        let written = add_delta(
+            dir.path(),
+            "add-thing",
+            &artifact("specs/core/spec.md", "# core Spec Delta\n"),
+        )
+        .unwrap();
 
-  /// An openspec dir holding one change with a proposal, for the editing tests.
-  fn change_fixture() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    create_drafted_change(
-      dir.path(),
-      "add-thing",
-      &[artifact("proposal.md", "# Change\n\n## Why\n\nBecause.\n")],
-    )
-    .unwrap();
-    dir
-  }
+        assert_eq!(written, "openspec/changes/add-thing/specs/core/spec.md");
+        assert!(dir
+            .path()
+            .join("changes/add-thing/specs/core/spec.md")
+            .exists());
+    }
 
-  #[test]
-  fn a_file_round_trips_through_read_and_write() {
-    let dir = change_fixture();
-    let body = "# Change\n\n## Why\n\nA better reason.\n";
-    write_change_file(dir.path(), "add-thing", "proposal.md", body).unwrap();
-    let back = read_change_file(dir.path(), "add-thing", "proposal.md").unwrap();
-    assert_eq!(back, body);
-  }
+    /// The fix loop adds a *missing* requirement. Replacing a spec the user
+    /// already wrote would destroy work they never offered up.
+    #[test]
+    fn adding_a_delta_never_overwrites_one() {
+        let dir = tempfile::tempdir().unwrap();
+        create_drafted_change(
+            dir.path(),
+            "add-thing",
+            &[
+                artifact("proposal.md", "# a\n"),
+                artifact("specs/core/spec.md", "# mine\n"),
+            ],
+        )
+        .unwrap();
 
-  #[test]
-  fn a_write_stores_the_body_byte_for_byte() {
-    let dir = change_fixture();
-    // No trailing newline, CRLF inside, trailing spaces: all of it must survive.
-    let body = "# Change\r\n\r\ntrailing spaces   \nno final newline";
-    write_change_file(dir.path(), "add-thing", "proposal.md", body).unwrap();
-    let back = read_change_file(dir.path(), "add-thing", "proposal.md").unwrap();
-    assert_eq!(back, body);
-  }
+        assert!(add_delta(
+            dir.path(),
+            "add-thing",
+            &artifact("specs/core/spec.md", "# theirs\n")
+        )
+        .is_err());
 
-  #[test]
-  fn a_missing_file_reads_as_empty() {
-    let dir = change_fixture();
-    // design.md is optional; opening the editor to write one must not error.
-    assert_eq!(read_change_file(dir.path(), "add-thing", "design.md").unwrap(), "");
-  }
+        let body = std::fs::read_to_string(dir.path().join("changes/add-thing/specs/core/spec.md"))
+            .unwrap();
+        assert_eq!(body, "# mine\n", "the user's own delta must survive");
+    }
 
-  #[test]
-  fn a_first_save_creates_nested_parents() {
-    let dir = change_fixture();
-    write_change_file(dir.path(), "add-thing", "specs/core/spec.md", "# d\n").unwrap();
-    assert_eq!(
-      read_change_file(dir.path(), "add-thing", "specs/core/spec.md").unwrap(),
-      "# d\n"
-    );
-  }
+    #[test]
+    fn adding_a_delta_to_a_missing_change_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(add_delta(dir.path(), "nope", &artifact("specs/core/spec.md", "# x\n")).is_err());
+    }
 
-  #[test]
-  fn a_relative_escape_is_refused() {
-    let dir = change_fixture();
-    assert!(write_change_file(dir.path(), "add-thing", "../../escape.md", "x").is_err());
-    assert!(read_change_file(dir.path(), "add-thing", "../../escape.md").is_err());
-    assert!(!dir.path().join("escape.md").exists());
-  }
+    #[test]
+    fn a_delta_cannot_escape_its_change_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        create_drafted_change(dir.path(), "add-thing", &[artifact("proposal.md", "# a\n")])
+            .unwrap();
+        assert!(add_delta(dir.path(), "add-thing", &artifact("../../escape.md", "x\n")).is_err());
+        assert!(!dir.path().join("escape.md").exists());
+    }
 
-  #[test]
-  fn an_absolute_path_is_refused() {
-    let dir = change_fixture();
-    let outside = dir.path().join("outside.md");
-    let absolute = outside.to_string_lossy().to_string();
-    assert!(write_change_file(dir.path(), "add-thing", &absolute, "x").is_err());
-    assert!(!outside.exists());
-  }
+    #[test]
+    fn an_empty_artifact_list_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        // "Create" with everything skipped writes nothing at all, so it should not
+        // produce an empty folder either.
+        assert!(create_drafted_change(dir.path(), "add-thing", &[]).is_err());
+        assert!(!dir.path().join("changes").join("add-thing").exists());
+    }
 
-  #[test]
-  fn an_unknown_change_is_refused() {
-    let dir = change_fixture();
-    assert!(read_change_file(dir.path(), "not-a-change", "proposal.md").is_err());
-    assert!(write_change_file(dir.path(), "not-a-change", "proposal.md", "x").is_err());
-  }
+    /// An openspec dir holding one change with a proposal, for the editing tests.
+    fn change_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        create_drafted_change(
+            dir.path(),
+            "add-thing",
+            &[artifact("proposal.md", "# Change\n\n## Why\n\nBecause.\n")],
+        )
+        .unwrap();
+        dir
+    }
 
-  /// The escape `safe_join` cannot see: every component is `Normal`, so the
-  /// lexical check passes, and only canonicalizing reveals it leaves the folder.
-  #[cfg(unix)]
-  #[test]
-  fn a_symlink_out_of_the_change_is_refused() {
-    let dir = change_fixture();
-    let secrets = dir.path().join("secrets");
-    std::fs::create_dir_all(&secrets).unwrap();
-    std::fs::write(secrets.join("keys.md"), "private\n").unwrap();
+    #[test]
+    fn a_file_round_trips_through_read_and_write() {
+        let dir = change_fixture();
+        let body = "# Change\n\n## Why\n\nA better reason.\n";
+        write_change_file(dir.path(), "add-thing", "proposal.md", body).unwrap();
+        let back = read_change_file(dir.path(), "add-thing", "proposal.md").unwrap();
+        assert_eq!(back, body);
+    }
 
-    let change = dir.path().join("changes").join("add-thing");
-    std::os::unix::fs::symlink(&secrets, change.join("link")).unwrap();
+    #[test]
+    fn a_write_stores_the_body_byte_for_byte() {
+        let dir = change_fixture();
+        // No trailing newline, CRLF inside, trailing spaces: all of it must survive.
+        let body = "# Change\r\n\r\ntrailing spaces   \nno final newline";
+        write_change_file(dir.path(), "add-thing", "proposal.md", body).unwrap();
+        let back = read_change_file(dir.path(), "add-thing", "proposal.md").unwrap();
+        assert_eq!(back, body);
+    }
 
-    assert!(read_change_file(dir.path(), "add-thing", "link/keys.md").is_err());
-    assert!(write_change_file(dir.path(), "add-thing", "link/keys.md", "owned").is_err());
-    // The file behind the symlink is untouched.
-    assert_eq!(
-      std::fs::read_to_string(secrets.join("keys.md")).unwrap(),
-      "private\n"
-    );
-  }
+    #[test]
+    fn a_missing_file_reads_as_empty() {
+        let dir = change_fixture();
+        // design.md is optional; opening the editor to write one must not error.
+        assert_eq!(
+            read_change_file(dir.path(), "add-thing", "design.md").unwrap(),
+            ""
+        );
+    }
 
-  #[test]
-  fn deleting_removes_the_whole_change_folder() {
-    let dir = change_fixture();
-    write_change_file(dir.path(), "add-thing", "specs/core/spec.md", "# d\n").unwrap();
+    #[test]
+    fn a_first_save_creates_nested_parents() {
+        let dir = change_fixture();
+        write_change_file(dir.path(), "add-thing", "specs/core/spec.md", "# d\n").unwrap();
+        assert_eq!(
+            read_change_file(dir.path(), "add-thing", "specs/core/spec.md").unwrap(),
+            "# d\n"
+        );
+    }
 
-    let path = delete_change(dir.path(), "add-thing").unwrap();
-    assert_eq!(path, "openspec/changes/add-thing");
-    assert!(!dir.path().join("changes").join("add-thing").exists());
-    // Its neighbours -- here, the changes folder itself -- survive.
-    assert!(dir.path().join("changes").is_dir());
-  }
+    #[test]
+    fn a_relative_escape_is_refused() {
+        let dir = change_fixture();
+        assert!(write_change_file(dir.path(), "add-thing", "../../escape.md", "x").is_err());
+        assert!(read_change_file(dir.path(), "add-thing", "../../escape.md").is_err());
+        assert!(!dir.path().join("escape.md").exists());
+    }
 
-  #[test]
-  fn deleting_an_unknown_change_is_refused() {
-    let dir = change_fixture();
-    assert!(delete_change(dir.path(), "not-a-change").is_err());
-    // The real change is still there.
-    assert!(dir.path().join("changes").join("add-thing").is_dir());
-  }
+    #[test]
+    fn an_absolute_path_is_refused() {
+        let dir = change_fixture();
+        let outside = dir.path().join("outside.md");
+        let absolute = outside.to_string_lossy().to_string();
+        assert!(write_change_file(dir.path(), "add-thing", &absolute, "x").is_err());
+        assert!(!outside.exists());
+    }
 
-  #[test]
-  fn a_delete_cannot_escape_the_changes_folder() {
-    let dir = change_fixture();
-    let outside = dir.path().join("keep-me");
-    std::fs::create_dir_all(&outside).unwrap();
-    std::fs::write(outside.join("file.md"), "keep\n").unwrap();
+    #[test]
+    fn an_unknown_change_is_refused() {
+        let dir = change_fixture();
+        assert!(read_change_file(dir.path(), "not-a-change", "proposal.md").is_err());
+        assert!(write_change_file(dir.path(), "not-a-change", "proposal.md", "x").is_err());
+    }
 
-    // A traversing id, a nested id, and the changes folder itself.
-    assert!(delete_change(dir.path(), "../keep-me").is_err());
-    assert!(delete_change(dir.path(), "add-thing/specs").is_err());
-    assert!(delete_change(dir.path(), ".").is_err());
-    assert!(delete_change(dir.path(), "").is_err());
-    let absolute = outside.to_string_lossy().to_string();
-    assert!(delete_change(dir.path(), &absolute).is_err());
+    /// The escape `safe_join` cannot see: every component is `Normal`, so the
+    /// lexical check passes, and only canonicalizing reveals it leaves the folder.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_out_of_the_change_is_refused() {
+        let dir = change_fixture();
+        let secrets = dir.path().join("secrets");
+        std::fs::create_dir_all(&secrets).unwrap();
+        std::fs::write(secrets.join("keys.md"), "private\n").unwrap();
 
-    assert!(outside.join("file.md").exists());
-    assert!(dir.path().join("changes").join("add-thing").is_dir());
-  }
+        let change = dir.path().join("changes").join("add-thing");
+        std::os::unix::fs::symlink(&secrets, change.join("link")).unwrap();
 
-  /// A symlinked change folder: every component is `Normal`, so only
-  /// canonicalizing reveals that removing it would delete something else.
-  #[cfg(unix)]
-  #[test]
-  fn deleting_a_symlinked_change_is_refused() {
-    let dir = change_fixture();
-    let secrets = dir.path().join("secrets");
-    std::fs::create_dir_all(&secrets).unwrap();
-    std::fs::write(secrets.join("keys.md"), "private\n").unwrap();
+        assert!(read_change_file(dir.path(), "add-thing", "link/keys.md").is_err());
+        assert!(write_change_file(dir.path(), "add-thing", "link/keys.md", "owned").is_err());
+        // The file behind the symlink is untouched.
+        assert_eq!(
+            std::fs::read_to_string(secrets.join("keys.md")).unwrap(),
+            "private\n"
+        );
+    }
 
-    std::os::unix::fs::symlink(&secrets, dir.path().join("changes").join("linked")).unwrap();
+    #[test]
+    fn deleting_removes_the_whole_change_folder() {
+        let dir = change_fixture();
+        write_change_file(dir.path(), "add-thing", "specs/core/spec.md", "# d\n").unwrap();
 
-    assert!(delete_change(dir.path(), "linked").is_err());
-    assert!(secrets.join("keys.md").exists());
-  }
+        let path = delete_change(dir.path(), "add-thing").unwrap();
+        assert_eq!(path, "openspec/changes/add-thing");
+        assert!(!dir.path().join("changes").join("add-thing").exists());
+        // Its neighbours -- here, the changes folder itself -- survive.
+        assert!(dir.path().join("changes").is_dir());
+    }
+
+    #[test]
+    fn deleting_an_unknown_change_is_refused() {
+        let dir = change_fixture();
+        assert!(delete_change(dir.path(), "not-a-change").is_err());
+        // The real change is still there.
+        assert!(dir.path().join("changes").join("add-thing").is_dir());
+    }
+
+    #[test]
+    fn a_delete_cannot_escape_the_changes_folder() {
+        let dir = change_fixture();
+        let outside = dir.path().join("keep-me");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("file.md"), "keep\n").unwrap();
+
+        // A traversing id, a nested id, and the changes folder itself.
+        assert!(delete_change(dir.path(), "../keep-me").is_err());
+        assert!(delete_change(dir.path(), "add-thing/specs").is_err());
+        assert!(delete_change(dir.path(), ".").is_err());
+        assert!(delete_change(dir.path(), "").is_err());
+        let absolute = outside.to_string_lossy().to_string();
+        assert!(delete_change(dir.path(), &absolute).is_err());
+
+        assert!(outside.join("file.md").exists());
+        assert!(dir.path().join("changes").join("add-thing").is_dir());
+    }
+
+    /// A symlinked change folder: every component is `Normal`, so only
+    /// canonicalizing reveals that removing it would delete something else.
+    #[cfg(unix)]
+    #[test]
+    fn deleting_a_symlinked_change_is_refused() {
+        let dir = change_fixture();
+        let secrets = dir.path().join("secrets");
+        std::fs::create_dir_all(&secrets).unwrap();
+        std::fs::write(secrets.join("keys.md"), "private\n").unwrap();
+
+        std::os::unix::fs::symlink(&secrets, dir.path().join("changes").join("linked")).unwrap();
+
+        assert!(delete_change(dir.path(), "linked").is_err());
+        assert!(secrets.join("keys.md").exists());
+    }
 }

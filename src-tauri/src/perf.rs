@@ -28,30 +28,30 @@ use std::time::Instant;
 /// The slow-command warning below is separate: it goes to the local log, which
 /// is on the user's disk and is only ever uploaded if they file a report.
 pub struct CommandTiming {
-  name: &'static str,
-  started: Instant,
-  tx: sentry::TransactionOrSpan,
+    name: &'static str,
+    started: Instant,
+    tx: sentry::TransactionOrSpan,
 }
 
 impl CommandTiming {
-  pub fn start(name: &'static str, op: &'static str) -> Self {
-    let tx = sentry::start_transaction(sentry::TransactionContext::new(name, op));
-    Self {
-      name,
-      started: Instant::now(),
-      tx: tx.into(),
+    pub fn start(name: &'static str, op: &'static str) -> Self {
+        let tx = sentry::start_transaction(sentry::TransactionContext::new(name, op));
+        Self {
+            name,
+            started: Instant::now(),
+            tx: tx.into(),
+        }
     }
-  }
 }
 
 impl Drop for CommandTiming {
-  fn drop(&mut self) {
-    let ms = self.started.elapsed().as_millis();
-    // 250ms is roughly where an interaction stops feeling immediate. Below
-    // that the log would be pure noise, since these run on every screen.
-    if ms >= 250 {
-      log::warn!("{}: slow, took {ms}ms", self.name);
+    fn drop(&mut self) {
+        let ms = self.started.elapsed().as_millis();
+        // 250ms is roughly where an interaction stops feeling immediate. Below
+        // that the log would be pure noise, since these run on every screen.
+        if ms >= 250 {
+            log::warn!("{}: slow, took {ms}ms", self.name);
+        }
+        self.tx.clone().finish();
     }
-    self.tx.clone().finish();
-  }
 }

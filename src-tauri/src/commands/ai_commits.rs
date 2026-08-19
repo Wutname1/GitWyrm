@@ -36,728 +36,765 @@ use crate::git::shell::CREATE_NO_WINDOW;
 
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct AiCreatedCommit {
-  pub sha: String,
-  pub summary: String,
-  pub description: String,
-  pub files: Vec<String>,
+    pub sha: String,
+    pub summary: String,
+    pub description: String,
+    pub files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct AiCommitProgressPayload {
-  repo_id: String,
-  kind: String,
-  message: String,
-  detail: String,
+    repo_id: String,
+    kind: String,
+    message: String,
+    detail: String,
 }
 
 fn emit_progress(
-  app: &tauri::AppHandle,
-  repo_id: &str,
-  kind: &str,
-  message: impl Into<String>,
-  detail: impl Into<String>,
+    app: &tauri::AppHandle,
+    repo_id: &str,
+    kind: &str,
+    message: impl Into<String>,
+    detail: impl Into<String>,
 ) {
-  let _ = app.emit(
-    "ai-commit-progress",
-    AiCommitProgressPayload {
-      repo_id: repo_id.to_string(),
-      kind: kind.to_string(),
-      message: message.into(),
-      detail: detail.into(),
-    },
-  );
+    let _ = app.emit(
+        "ai-commit-progress",
+        AiCommitProgressPayload {
+            repo_id: repo_id.to_string(),
+            kind: kind.to_string(),
+            message: message.into(),
+            detail: detail.into(),
+        },
+    );
 }
 
 #[derive(Debug, Deserialize)]
 struct PlannedCommit {
-  summary: String,
-  #[serde(default)]
-  description: String,
-  units: Vec<String>,
+    summary: String,
+    #[serde(default)]
+    description: String,
+    units: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CommitPlan {
-  commits: Vec<PlannedCommit>,
+    commits: Vec<PlannedCommit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct HeadState {
-  oid: Option<Oid>,
-  reference: Option<String>,
-  detached: bool,
+    oid: Option<Oid>,
+    reference: Option<String>,
+    detached: bool,
 }
 
 #[derive(Debug, Clone)]
 struct ChangeUnit {
-  id: String,
-  path: String,
-  block_index: usize,
-  selection: Option<Vec<SelectedLine>>,
-  preview: String,
+    id: String,
+    path: String,
+    block_index: usize,
+    selection: Option<Vec<SelectedLine>>,
+    preview: String,
 }
 
 #[derive(Debug, Clone)]
 struct DiffBlock {
-  raw: String,
-  has_hunks: bool,
+    raw: String,
+    has_hunks: bool,
 }
 
 struct Snapshot {
-  head: HeadState,
-  tree: Oid,
-  blocks: Vec<DiffBlock>,
-  units: Vec<ChangeUnit>,
+    head: HeadState,
+    tree: Oid,
+    blocks: Vec<DiffBlock>,
+    units: Vec<ChangeUnit>,
 }
 
 struct TempIndex(PathBuf);
 
 impl TempIndex {
-  fn new() -> Self {
-    let stamp = SystemTime::now()
-      .duration_since(UNIX_EPOCH)
-      .map(|duration| duration.as_nanos())
-      .unwrap_or_default();
-    let sequence = TEMP_INDEX_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    Self(std::env::temp_dir().join(format!(
-      "gitwyrm-ai-{}-{stamp}-{sequence}.index",
-      std::process::id()
-    )))
-  }
+    fn new() -> Self {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let sequence = TEMP_INDEX_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        Self(std::env::temp_dir().join(format!(
+            "gitwyrm-ai-{}-{stamp}-{sequence}.index",
+            std::process::id()
+        )))
+    }
 }
 
 impl Drop for TempIndex {
-  fn drop(&mut self) {
-    let _ = std::fs::remove_file(&self.0);
-    let lock = PathBuf::from(format!("{}.lock", self.0.to_string_lossy()));
-    let _ = std::fs::remove_file(lock);
-  }
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+        let lock = PathBuf::from(format!("{}.lock", self.0.to_string_lossy()));
+        let _ = std::fs::remove_file(lock);
+    }
 }
 
 fn run_with_index(
-  repo_path: &str,
-  index: &Path,
-  args: &[&str],
-  stdin: Option<&[u8]>,
+    repo_path: &str,
+    index: &Path,
+    args: &[&str],
+    stdin: Option<&[u8]>,
 ) -> Result<String, AppError> {
-  let mut command = Command::new(crate::git::shell::git_program_name());
-  command
-    .arg("-C")
-    .arg(repo_path)
-    .args(args)
-    .env("GIT_INDEX_FILE", index);
+    let mut command = Command::new(crate::git::shell::git_program_name());
+    command
+        .arg("-C")
+        .arg(repo_path)
+        .args(args)
+        .env("GIT_INDEX_FILE", index);
 
-  if stdin.is_some() {
-    command.stdin(Stdio::piped());
-  }
-  command.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-  #[cfg(windows)]
-  {
-    use std::os::windows::process::CommandExt;
-    command.creation_flags(CREATE_NO_WINDOW);
-  }
-
-  let mut child = command.spawn().map_err(|error| {
-    if error.kind() == std::io::ErrorKind::NotFound {
-      AppError::Other("git executable not found on PATH".into())
-    } else {
-      AppError::Io(error)
+    if stdin.is_some() {
+        command.stdin(Stdio::piped());
     }
-  })?;
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-  if let Some(bytes) = stdin {
-    child
-      .stdin
-      .take()
-      .ok_or_else(|| AppError::Other("failed to open git input".into()))?
-      .write_all(bytes)?;
-  }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 
-  let output = child.wait_with_output()?;
-  let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-  let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-  if !output.status.success() {
-    let detail = if stderr.trim().is_empty() { stdout } else { stderr };
-    return Err(AppError::Other(format!(
-      "git {} failed: {}",
-      args.first().copied().unwrap_or("command"),
-      detail.trim()
-    )));
-  }
-  Ok(stdout)
+    let mut child = command.spawn().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            AppError::Other("git executable not found on PATH".into())
+        } else {
+            AppError::Io(error)
+        }
+    })?;
+
+    if let Some(bytes) = stdin {
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::Other("failed to open git input".into()))?
+            .write_all(bytes)?;
+    }
+
+    let output = child.wait_with_output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !output.status.success() {
+        let detail = if stderr.trim().is_empty() {
+            stdout
+        } else {
+            stderr
+        };
+        return Err(AppError::Other(format!(
+            "git {} failed: {}",
+            args.first().copied().unwrap_or("command"),
+            detail.trim()
+        )));
+    }
+    Ok(stdout)
 }
 
 fn head_state(repo: &git2::Repository) -> Result<HeadState, AppError> {
-  match repo.head() {
-    Ok(head) => Ok(HeadState {
-      oid: head.target(),
-      reference: if head.is_branch() {
-        head.name().ok().map(str::to_string)
-      } else {
-        None
-      },
-      detached: repo.head_detached()?,
-    }),
-    Err(error) if matches!(error.code(), ErrorCode::UnbornBranch | ErrorCode::NotFound) => {
-      let reference = repo
-        .find_reference("HEAD")
-        .ok()
-        .and_then(|head| head.symbolic_target().ok().flatten().map(str::to_string));
-      Ok(HeadState { oid: None, reference, detached: false })
+    match repo.head() {
+        Ok(head) => Ok(HeadState {
+            oid: head.target(),
+            reference: if head.is_branch() {
+                head.name().ok().map(str::to_string)
+            } else {
+                None
+            },
+            detached: repo.head_detached()?,
+        }),
+        Err(error) if matches!(error.code(), ErrorCode::UnbornBranch | ErrorCode::NotFound) => {
+            let reference = repo
+                .find_reference("HEAD")
+                .ok()
+                .and_then(|head| head.symbolic_target().ok().flatten().map(str::to_string));
+            Ok(HeadState {
+                oid: None,
+                reference,
+                detached: false,
+            })
+        }
+        Err(error) => Err(error.into()),
     }
-    Err(error) => Err(error.into()),
-  }
 }
 
 fn init_index(repo_path: &str, index: &Path, head: Option<Oid>) -> Result<(), AppError> {
-  match head {
-    Some(oid) => {
-      let oid = oid.to_string();
-      run_with_index(repo_path, index, &["read-tree", &oid], None)?;
+    match head {
+        Some(oid) => {
+            let oid = oid.to_string();
+            run_with_index(repo_path, index, &["read-tree", &oid], None)?;
+        }
+        None => {
+            run_with_index(repo_path, index, &["read-tree", "--empty"], None)?;
+        }
     }
-    None => {
-      run_with_index(repo_path, index, &["read-tree", "--empty"], None)?;
-    }
-  }
-  Ok(())
+    Ok(())
 }
 
 fn diff_args(head: Option<Oid>, names_only: bool) -> Vec<String> {
-  let mut args = vec![
-    "-c".into(),
-    "diff.indentHeuristic=false".into(),
-    "-c".into(),
-    "diff.algorithm=myers".into(),
-    "diff".into(),
-    "--cached".into(),
-    "--no-color".into(),
-    "--no-ext-diff".into(),
-    "--diff-algorithm=myers".into(),
-    "--find-renames".into(),
-  ];
-  if names_only {
-    args.extend(["--name-only".into(), "-z".into()]);
-  } else {
-    args.extend(["--full-index".into(), "--binary".into(), "-U3".into()]);
-  }
-  if let Some(oid) = head {
-    args.push(oid.to_string());
-  }
-  args.push("--".into());
-  args
+    let mut args = vec![
+        "-c".into(),
+        "diff.indentHeuristic=false".into(),
+        "-c".into(),
+        "diff.algorithm=myers".into(),
+        "diff".into(),
+        "--cached".into(),
+        "--no-color".into(),
+        "--no-ext-diff".into(),
+        "--diff-algorithm=myers".into(),
+        "--find-renames".into(),
+    ];
+    if names_only {
+        args.extend(["--name-only".into(), "-z".into()]);
+    } else {
+        args.extend(["--full-index".into(), "--binary".into(), "-U3".into()]);
+    }
+    if let Some(oid) = head {
+        args.push(oid.to_string());
+    }
+    args.push("--".into());
+    args
 }
 
 fn split_diff_blocks(raw: &str) -> Result<Vec<String>, AppError> {
-  let starts: Vec<usize> = raw
-    .match_indices("diff --git ")
-    .filter_map(|(index, _)| {
-      (index == 0 || raw.as_bytes().get(index.wrapping_sub(1)) == Some(&b'\n')).then_some(index)
-    })
-    .collect();
-  if starts.is_empty() {
-    return Err(AppError::Other("no changes found to organize".into()));
-  }
+    let starts: Vec<usize> = raw
+        .match_indices("diff --git ")
+        .filter_map(|(index, _)| {
+            (index == 0 || raw.as_bytes().get(index.wrapping_sub(1)) == Some(&b'\n'))
+                .then_some(index)
+        })
+        .collect();
+    if starts.is_empty() {
+        return Err(AppError::Other("no changes found to organize".into()));
+    }
 
-  Ok(
-    starts
-      .iter()
-      .enumerate()
-      .map(|(index, start)| {
-        let end = starts.get(index + 1).copied().unwrap_or(raw.len());
-        raw[*start..end].to_string()
-      })
-      .collect(),
-  )
+    Ok(starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(raw.len());
+            raw[*start..end].to_string()
+        })
+        .collect())
 }
 
 fn fallback_path(block: &str, index: usize) -> String {
-  block
-    .lines()
-    .find_map(|line| line.strip_prefix("+++ b/"))
-    .or_else(|| block.lines().find_map(|line| line.strip_prefix("--- a/")))
-    .map(|path| path.trim_matches('"').to_string())
-    .unwrap_or_else(|| format!("changed file {}", index + 1))
+    block
+        .lines()
+        .find_map(|line| line.strip_prefix("+++ b/"))
+        .or_else(|| block.lines().find_map(|line| line.strip_prefix("--- a/")))
+        .map(|path| path.trim_matches('"').to_string())
+        .unwrap_or_else(|| format!("changed file {}", index + 1))
 }
 
-fn parse_snapshot(head: HeadState, tree: Oid, diff: String, paths: Vec<String>) -> Result<Snapshot, AppError> {
-  let raw_blocks = split_diff_blocks(&diff)?;
-  let mut blocks = Vec::with_capacity(raw_blocks.len());
-  let mut units = Vec::new();
+fn parse_snapshot(
+    head: HeadState,
+    tree: Oid,
+    diff: String,
+    paths: Vec<String>,
+) -> Result<Snapshot, AppError> {
+    let raw_blocks = split_diff_blocks(&diff)?;
+    let mut blocks = Vec::with_capacity(raw_blocks.len());
+    let mut units = Vec::new();
 
-  for (block_index, raw) in raw_blocks.into_iter().enumerate() {
-    let path = paths
-      .get(block_index)
-      .filter(|path| !path.is_empty())
-      .cloned()
-      .unwrap_or_else(|| fallback_path(&raw, block_index));
-    let logical = patch::logical_patch_units(&raw)?;
-    let has_hunks = !logical.is_empty();
+    for (block_index, raw) in raw_blocks.into_iter().enumerate() {
+        let path = paths
+            .get(block_index)
+            .filter(|path| !path.is_empty())
+            .cloned()
+            .unwrap_or_else(|| fallback_path(&raw, block_index));
+        let logical = patch::logical_patch_units(&raw)?;
+        let has_hunks = !logical.is_empty();
 
-    if has_hunks {
-      for unit in logical {
-        units.push(ChangeUnit {
-          id: format!("u{}", units.len() + 1),
-          path: path.clone(),
-          block_index,
-          selection: Some(unit.selection),
-          preview: unit.preview,
-        });
-      }
-    } else {
-      units.push(ChangeUnit {
-        id: format!("u{}", units.len() + 1),
-        path,
-        block_index,
-        selection: None,
-        preview: raw.chars().take(4_000).collect(),
-      });
+        if has_hunks {
+            for unit in logical {
+                units.push(ChangeUnit {
+                    id: format!("u{}", units.len() + 1),
+                    path: path.clone(),
+                    block_index,
+                    selection: Some(unit.selection),
+                    preview: unit.preview,
+                });
+            }
+        } else {
+            units.push(ChangeUnit {
+                id: format!("u{}", units.len() + 1),
+                path,
+                block_index,
+                selection: None,
+                preview: raw.chars().take(4_000).collect(),
+            });
+        }
+        blocks.push(DiffBlock { raw, has_hunks });
     }
-    blocks.push(DiffBlock { raw, has_hunks });
-  }
 
-  Ok(Snapshot { head, tree, blocks, units })
+    Ok(Snapshot {
+        head,
+        tree,
+        blocks,
+        units,
+    })
 }
 
 fn capture_snapshot(repo_path: &str, repo: &git2::Repository) -> Result<Snapshot, AppError> {
-  let unmerged = crate::git::shell::run_git(Some(repo_path), &["ls-files", "-u"])?.stdout;
-  if !unmerged.trim().is_empty() {
-    return Err(AppError::Other(
-      "Finish resolving conflicted files before generating commits".into(),
-    ));
-  }
+    let unmerged = crate::git::shell::run_git(Some(repo_path), &["ls-files", "-u"])?.stdout;
+    if !unmerged.trim().is_empty() {
+        return Err(AppError::Other(
+            "Finish resolving conflicted files before generating commits".into(),
+        ));
+    }
 
-  let head = head_state(repo)?;
-  let temp = TempIndex::new();
-  init_index(repo_path, &temp.0, head.oid)?;
-  run_with_index(repo_path, &temp.0, &["add", "-A", "--", "."], None)?;
+    let head = head_state(repo)?;
+    let temp = TempIndex::new();
+    init_index(repo_path, &temp.0, head.oid)?;
+    run_with_index(repo_path, &temp.0, &["add", "-A", "--", "."], None)?;
 
-  let tree_text = run_with_index(repo_path, &temp.0, &["write-tree"], None)?;
-  let tree = Oid::from_str(tree_text.trim())?;
+    let tree_text = run_with_index(repo_path, &temp.0, &["write-tree"], None)?;
+    let tree = Oid::from_str(tree_text.trim())?;
 
-  let raw_args = diff_args(head.oid, false);
-  let raw_refs: Vec<&str> = raw_args.iter().map(String::as_str).collect();
-  let diff = run_with_index(repo_path, &temp.0, &raw_refs, None)?;
+    let raw_args = diff_args(head.oid, false);
+    let raw_refs: Vec<&str> = raw_args.iter().map(String::as_str).collect();
+    let diff = run_with_index(repo_path, &temp.0, &raw_refs, None)?;
 
-  let name_args = diff_args(head.oid, true);
-  let name_refs: Vec<&str> = name_args.iter().map(String::as_str).collect();
-  let names = run_with_index(repo_path, &temp.0, &name_refs, None)?;
-  let paths = names
-    .split('\0')
-    .filter(|path| !path.is_empty())
-    .map(str::to_string)
-    .collect();
+    let name_args = diff_args(head.oid, true);
+    let name_refs: Vec<&str> = name_args.iter().map(String::as_str).collect();
+    let names = run_with_index(repo_path, &temp.0, &name_refs, None)?;
+    let paths = names
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect();
 
-  parse_snapshot(head, tree, diff, paths)
+    parse_snapshot(head, tree, diff, paths)
 }
 
 fn present_units(units: &[ChangeUnit]) -> String {
-  // Leave room for each unit's heading, shortening marker, and trailing newline.
-  // The old 300-character minimum made a large run exceed the advertised cap.
-  let fixed_overhead: usize = units
-    .iter()
-    .map(|unit| unit.id.chars().count() + unit.path.chars().count() + 48)
-    .sum();
-  let preview_budget = MAX_PLAN_PROMPT_CHARS.saturating_sub(fixed_overhead);
-  let per_unit = preview_budget / units.len().max(1);
-  let mut output = String::new();
+    // Leave room for each unit's heading, shortening marker, and trailing newline.
+    // The old 300-character minimum made a large run exceed the advertised cap.
+    let fixed_overhead: usize = units
+        .iter()
+        .map(|unit| unit.id.chars().count() + unit.path.chars().count() + 48)
+        .sum();
+    let preview_budget = MAX_PLAN_PROMPT_CHARS.saturating_sub(fixed_overhead);
+    let per_unit = preview_budget / units.len().max(1);
+    let mut output = String::new();
 
-  for unit in units {
-    output.push_str(&format!("\n--- {} | {} ---\n", unit.id, unit.path));
-    let mut preview: String = unit.preview.chars().take(per_unit).collect();
-    if unit.preview.chars().count() > per_unit {
-      preview.push_str("\n[change preview shortened]\n");
+    for unit in units {
+        output.push_str(&format!("\n--- {} | {} ---\n", unit.id, unit.path));
+        let mut preview: String = unit.preview.chars().take(per_unit).collect();
+        if unit.preview.chars().count() > per_unit {
+            preview.push_str("\n[change preview shortened]\n");
+        }
+        output.push_str(&preview);
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
     }
-    output.push_str(&preview);
-    if !output.ends_with('\n') {
-      output.push('\n');
-    }
-  }
-  output
+    output
 }
 
 fn parse_plan(text: &str) -> Result<CommitPlan, AppError> {
-  let trimmed = text.trim();
-  let json = match (trimmed.find('{'), trimmed.rfind('}')) {
-    (Some(start), Some(end)) if start <= end => &trimmed[start..=end],
-    _ => trimmed,
-  };
-  serde_json::from_str(json)
-    .map_err(|error| AppError::Other(format!("AI returned a plan GitWyrm could not read: {error}")))
+    let trimmed = text.trim();
+    let json = match (trimmed.find('{'), trimmed.rfind('}')) {
+        (Some(start), Some(end)) if start <= end => &trimmed[start..=end],
+        _ => trimmed,
+    };
+    serde_json::from_str(json).map_err(|error| {
+        AppError::Other(format!(
+            "AI returned a plan GitWyrm could not read: {error}"
+        ))
+    })
 }
 
 fn is_message_tag(word: &str) -> bool {
-  (word.starts_with('#') && word.len() > 1)
-    || (word.starts_with('[') && word.ends_with(']') && word.len() > 2)
+    (word.starts_with('#') && word.len() > 1)
+        || (word.starts_with('[') && word.ends_with(']') && word.len() > 2)
 }
 
 fn shorten_at_word(text: &str, max_chars: usize) -> String {
-  if text.chars().count() <= max_chars {
-    return text.to_string();
-  }
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
 
-  let candidate = text.chars().take(max_chars).collect::<String>();
-  let cut = candidate
-    .rfind(char::is_whitespace)
-    .filter(|index| candidate[..*index].chars().count() >= max_chars / 2)
-    .unwrap_or(candidate.len());
-  candidate[..cut]
-    .trim_end_matches(|character: char| {
-      character.is_whitespace() || matches!(character, ',' | ';' | ':' | '-')
-    })
-    .to_string()
+    let candidate = text.chars().take(max_chars).collect::<String>();
+    let cut = candidate
+        .rfind(char::is_whitespace)
+        .filter(|index| candidate[..*index].chars().count() >= max_chars / 2)
+        .unwrap_or(candidate.len());
+    candidate[..cut]
+        .trim_end_matches(|character: char| {
+            character.is_whitespace() || matches!(character, ',' | ';' | ':' | '-')
+        })
+        .to_string()
 }
 
 fn normalize_summary(summary: &str) -> String {
-  let collapsed = summary.split_whitespace().collect::<Vec<_>>().join(" ");
-  if collapsed.chars().count() <= MAX_SUMMARY_CHARS {
-    return collapsed;
-  }
+    let collapsed = summary.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= MAX_SUMMARY_CHARS {
+        return collapsed;
+    }
 
-  // Preserve explicit changelog tags at the end when shortening the words in
-  // front of them. A long AI sentence should not silently discard #graph.
-  let words = collapsed.split_whitespace().collect::<Vec<_>>();
-  let tag_start = words
-    .iter()
-    .rposition(|word| !is_message_tag(word))
-    .map(|index| index + 1)
-    .unwrap_or(0);
-  let tags = words[tag_start..].join(" ");
-  let core = words[..tag_start].join(" ");
+    // Preserve explicit changelog tags at the end when shortening the words in
+    // front of them. A long AI sentence should not silently discard #graph.
+    let words = collapsed.split_whitespace().collect::<Vec<_>>();
+    let tag_start = words
+        .iter()
+        .rposition(|word| !is_message_tag(word))
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let tags = words[tag_start..].join(" ");
+    let core = words[..tag_start].join(" ");
 
-  if !tags.is_empty() && tags.chars().count() + 2 < MAX_SUMMARY_CHARS {
-    let shortened = shorten_at_word(&core, MAX_SUMMARY_CHARS - tags.chars().count() - 1);
-    return format!("{shortened} {tags}");
-  }
+    if !tags.is_empty() && tags.chars().count() + 2 < MAX_SUMMARY_CHARS {
+        let shortened = shorten_at_word(&core, MAX_SUMMARY_CHARS - tags.chars().count() - 1);
+        return format!("{shortened} {tags}");
+    }
 
-  shorten_at_word(&collapsed, MAX_SUMMARY_CHARS)
+    shorten_at_word(&collapsed, MAX_SUMMARY_CHARS)
 }
 
 fn normalize_plan(plan: &mut CommitPlan) {
-  for (index, commit) in plan.commits.iter_mut().enumerate() {
-    let original_chars = commit.summary.trim().chars().count();
-    let normalized = normalize_summary(&commit.summary);
-    if normalized != commit.summary.trim() {
-      log::warn!(
-        "Normalized AI commit summary {}: original_chars={}, normalized_chars={}",
-        index + 1,
-        original_chars,
-        normalized.chars().count()
-      );
+    for (index, commit) in plan.commits.iter_mut().enumerate() {
+        let original_chars = commit.summary.trim().chars().count();
+        let normalized = normalize_summary(&commit.summary);
+        if normalized != commit.summary.trim() {
+            log::warn!(
+                "Normalized AI commit summary {}: original_chars={}, normalized_chars={}",
+                index + 1,
+                original_chars,
+                normalized.chars().count()
+            );
+        }
+        commit.summary = normalized;
     }
-    commit.summary = normalized;
-  }
 }
 
-fn validate_plan(plan: &CommitPlan, requested: usize, units: &[ChangeUnit]) -> Result<(), AppError> {
-  if plan.commits.len() != requested {
-    return Err(AppError::Other(format!(
+fn validate_plan(
+    plan: &CommitPlan,
+    requested: usize,
+    units: &[ChangeUnit],
+) -> Result<(), AppError> {
+    if plan.commits.len() != requested {
+        return Err(AppError::Other(format!(
       "AI planned {} commits instead of the {requested} requested. Try again or adjust the instructions.",
       plan.commits.len()
     )));
-  }
+    }
 
-  let known: HashSet<&str> = units.iter().map(|unit| unit.id.as_str()).collect();
-  let mut assigned = HashSet::new();
-  for (index, commit) in plan.commits.iter().enumerate() {
-    if commit.summary.trim().is_empty() {
-      return Err(AppError::Other(format!("Commit {} has no message", index + 1)));
+    let known: HashSet<&str> = units.iter().map(|unit| unit.id.as_str()).collect();
+    let mut assigned = HashSet::new();
+    for (index, commit) in plan.commits.iter().enumerate() {
+        if commit.summary.trim().is_empty() {
+            return Err(AppError::Other(format!(
+                "Commit {} has no message",
+                index + 1
+            )));
+        }
+        if commit.units.is_empty() {
+            return Err(AppError::Other(format!(
+                "Commit {} has no changes",
+                index + 1
+            )));
+        }
+        for unit in &commit.units {
+            if !known.contains(unit.as_str()) {
+                return Err(AppError::Other(format!(
+                    "AI used an unknown change label: {unit}"
+                )));
+            }
+            if !assigned.insert(unit.as_str()) {
+                return Err(AppError::Other(format!(
+                    "AI placed {unit} in more than one commit"
+                )));
+            }
+        }
     }
-    if commit.units.is_empty() {
-      return Err(AppError::Other(format!("Commit {} has no changes", index + 1)));
-    }
-    for unit in &commit.units {
-      if !known.contains(unit.as_str()) {
-        return Err(AppError::Other(format!("AI used an unknown change label: {unit}")));
-      }
-      if !assigned.insert(unit.as_str()) {
-        return Err(AppError::Other(format!("AI placed {unit} in more than one commit")));
-      }
-    }
-  }
 
-  if assigned.len() != units.len() {
-    return Err(AppError::Other(
-      "AI left some changes out of the plan. No commits were created; try again.".into(),
-    ));
-  }
-  Ok(())
+    if assigned.len() != units.len() {
+        return Err(AppError::Other(
+            "AI left some changes out of the plan. No commits were created; try again.".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn patch_for_units(snapshot: &Snapshot, selected: &HashSet<String>) -> Result<String, AppError> {
-  let mut by_block: HashMap<usize, Vec<SelectedLine>> = HashMap::new();
-  let mut whole_blocks = HashSet::new();
+    let mut by_block: HashMap<usize, Vec<SelectedLine>> = HashMap::new();
+    let mut whole_blocks = HashSet::new();
 
-  for unit in &snapshot.units {
-    if !selected.contains(unit.id.as_str()) {
-      continue;
+    for unit in &snapshot.units {
+        if !selected.contains(unit.id.as_str()) {
+            continue;
+        }
+        match &unit.selection {
+            Some(lines) => by_block
+                .entry(unit.block_index)
+                .or_default()
+                .extend(lines.clone()),
+            None => {
+                whole_blocks.insert(unit.block_index);
+            }
+        }
     }
-    match &unit.selection {
-      Some(lines) => by_block.entry(unit.block_index).or_default().extend(lines.clone()),
-      None => {
-        whole_blocks.insert(unit.block_index);
-      }
-    }
-  }
 
-  let mut output = String::new();
-  for (index, block) in snapshot.blocks.iter().enumerate() {
-    if whole_blocks.contains(&index) {
-      output.push_str(&block.raw);
-    } else if block.has_hunks {
-      if let Some(selection) = by_block.get(&index) {
-        output.push_str(&patch::build_patch_from_raw(&block.raw, selection, false)?);
-      }
+    let mut output = String::new();
+    for (index, block) in snapshot.blocks.iter().enumerate() {
+        if whole_blocks.contains(&index) {
+            output.push_str(&block.raw);
+        } else if block.has_hunks {
+            if let Some(selection) = by_block.get(&index) {
+                output.push_str(&patch::build_patch_from_raw(&block.raw, selection, false)?);
+            }
+        }
     }
-  }
-  Ok(output)
+    Ok(output)
 }
 
 fn tree_for_units(
-  repo_path: &str,
-  snapshot: &Snapshot,
-  selected: &HashSet<String>,
+    repo_path: &str,
+    snapshot: &Snapshot,
+    selected: &HashSet<String>,
 ) -> Result<Oid, AppError> {
-  let temp = TempIndex::new();
-  init_index(repo_path, &temp.0, snapshot.head.oid)?;
-  let patch = patch_for_units(snapshot, selected)?;
-  if patch.trim().is_empty() {
-    return Err(AppError::Other("a planned commit had no applicable changes".into()));
-  }
-  run_with_index(
-    repo_path,
-    &temp.0,
-    &["apply", "--cached", "--binary", "--whitespace=nowarn", "-"],
-    Some(patch.as_bytes()),
-  )?;
-  let tree = run_with_index(repo_path, &temp.0, &["write-tree"], None)?;
-  Ok(Oid::from_str(tree.trim())?)
+    let temp = TempIndex::new();
+    init_index(repo_path, &temp.0, snapshot.head.oid)?;
+    let patch = patch_for_units(snapshot, selected)?;
+    if patch.trim().is_empty() {
+        return Err(AppError::Other(
+            "a planned commit had no applicable changes".into(),
+        ));
+    }
+    run_with_index(
+        repo_path,
+        &temp.0,
+        &["apply", "--cached", "--binary", "--whitespace=nowarn", "-"],
+        Some(patch.as_bytes()),
+    )?;
+    let tree = run_with_index(repo_path, &temp.0, &["write-tree"], None)?;
+    Ok(Oid::from_str(tree.trim())?)
 }
 
 fn create_commit_chain(
-  repo_path: &str,
-  repo: &git2::Repository,
-  snapshot: &Snapshot,
-  plan: CommitPlan,
-  progress: Option<(&tauri::AppHandle, &str)>,
+    repo_path: &str,
+    repo: &git2::Repository,
+    snapshot: &Snapshot,
+    plan: CommitPlan,
+    progress: Option<(&tauri::AppHandle, &str)>,
 ) -> Result<Vec<AiCreatedCommit>, AppError> {
-  if let Some((app, repo_id)) = progress {
-    emit_progress(
-      app,
-      repo_id,
-      "check",
-      "Checking your branch",
-      "New file edits will stay uncommitted while this snapshot is committed.",
-    );
-  }
-  if head_state(repo)? != snapshot.head {
-    return Err(AppError::Other(
-      "The current branch changed while AI was working. No commits were created.".into(),
-    ));
-  }
-
-  let signature = repo.signature().map_err(|_| {
-    AppError::Other("Set your name and email in Git before creating commits".into())
-  })?;
-  let unit_by_id: HashMap<&str, &ChangeUnit> =
-    snapshot.units.iter().map(|unit| (unit.id.as_str(), unit)).collect();
-  let mut selected = HashSet::new();
-  let mut parent_oid = snapshot.head.oid;
-  let mut created = Vec::with_capacity(plan.commits.len());
-  let total_commits = plan.commits.len();
-
-  for (index, planned) in plan.commits.into_iter().enumerate() {
-    let mut files: Vec<String> = planned
-      .units
-      .iter()
-      .filter_map(|id| unit_by_id.get(id.as_str()).map(|unit| unit.path.clone()))
-      .collect();
-    files.sort();
-    files.dedup();
     if let Some((app, repo_id)) = progress {
-      emit_progress(
-        app,
-        repo_id,
-        "stage",
-        format!(
-          "Staging {} for commit {} of {total_commits}",
-          file_count_label(files.len()),
-          index + 1
-        ),
-        planned.summary.trim(),
-      );
+        emit_progress(
+            app,
+            repo_id,
+            "check",
+            "Checking your branch",
+            "New file edits will stay uncommitted while this snapshot is committed.",
+        );
     }
-    for unit in &planned.units {
-      selected.insert(unit.clone());
+    if head_state(repo)? != snapshot.head {
+        return Err(AppError::Other(
+            "The current branch changed while AI was working. No commits were created.".into(),
+        ));
     }
-    let tree_oid = tree_for_units(repo_path, snapshot, &selected)?;
-    let tree = repo.find_tree(tree_oid)?;
-    let parent = parent_oid.map(|oid| repo.find_commit(oid)).transpose()?;
-    let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
-    let summary = planned.summary.trim().to_string();
-    let description = planned.description.trim().to_string();
-    let message = if description.is_empty() {
-      summary.clone()
+
+    let signature = repo.signature().map_err(|_| {
+        AppError::Other("Set your name and email in Git before creating commits".into())
+    })?;
+    let unit_by_id: HashMap<&str, &ChangeUnit> = snapshot
+        .units
+        .iter()
+        .map(|unit| (unit.id.as_str(), unit))
+        .collect();
+    let mut selected = HashSet::new();
+    let mut parent_oid = snapshot.head.oid;
+    let mut created = Vec::with_capacity(plan.commits.len());
+    let total_commits = plan.commits.len();
+
+    for (index, planned) in plan.commits.into_iter().enumerate() {
+        let mut files: Vec<String> = planned
+            .units
+            .iter()
+            .filter_map(|id| unit_by_id.get(id.as_str()).map(|unit| unit.path.clone()))
+            .collect();
+        files.sort();
+        files.dedup();
+        if let Some((app, repo_id)) = progress {
+            emit_progress(
+                app,
+                repo_id,
+                "stage",
+                format!(
+                    "Staging {} for commit {} of {total_commits}",
+                    file_count_label(files.len()),
+                    index + 1
+                ),
+                planned.summary.trim(),
+            );
+        }
+        for unit in &planned.units {
+            selected.insert(unit.clone());
+        }
+        let tree_oid = tree_for_units(repo_path, snapshot, &selected)?;
+        let tree = repo.find_tree(tree_oid)?;
+        let parent = parent_oid.map(|oid| repo.find_commit(oid)).transpose()?;
+        let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
+        let summary = planned.summary.trim().to_string();
+        let description = planned.description.trim().to_string();
+        let message = if description.is_empty() {
+            summary.clone()
+        } else {
+            format!("{summary}\n\n{description}")
+        };
+        // Signs when the repository is configured to, same as a hand-made commit.
+        // No ref moves here: the chain is built detached and the branch is only
+        // advanced once every commit has been verified below.
+        let identity = crate::git::commit_write::CommitIdentity {
+            author: signature.clone(),
+            committer: signature.clone(),
+        };
+        let oid = crate::git::commit_write::create(
+            repo, repo_path, None, &identity, &message, &tree, &parents,
+        )?;
+
+        created.push(AiCreatedCommit {
+            sha: oid.to_string(),
+            summary: summary.clone(),
+            description,
+            files,
+        });
+        if let Some((app, repo_id)) = progress {
+            emit_progress(
+                app,
+                repo_id,
+                "commit",
+                format!("Created commit {} of {total_commits}", index + 1),
+                summary,
+            );
+        }
+        parent_oid = Some(oid);
+    }
+
+    if let Some((app, repo_id)) = progress {
+        emit_progress(
+            app,
+            repo_id,
+            "check",
+            "Checking the finished commit set",
+            "Confirming that every change is included before updating your branch.",
+        );
+    }
+    let final_oid = parent_oid.ok_or_else(|| AppError::Other("AI made no commits".into()))?;
+    let final_commit = repo.find_commit(final_oid)?;
+    if final_commit.tree_id() != snapshot.tree {
+        return Err(AppError::Other(
+            "The generated commits did not include every change. No branch was changed.".into(),
+        ));
+    }
+
+    if snapshot.head.oid.is_some() {
+        repo.reset(final_commit.as_object(), ResetType::Mixed, None)?;
     } else {
-      format!("{summary}\n\n{description}")
-    };
-    // Signs when the repository is configured to, same as a hand-made commit.
-    // No ref moves here: the chain is built detached and the branch is only
-    // advanced once every commit has been verified below.
-    let identity = crate::git::commit_write::CommitIdentity {
-      author: signature.clone(),
-      committer: signature.clone(),
-    };
-    let oid = crate::git::commit_write::create(
-      repo,
-      repo_path,
-      None,
-      &identity,
-      &message,
-      &tree,
-      &parents,
-    )?;
-
-    created.push(AiCreatedCommit {
-      sha: oid.to_string(),
-      summary: summary.clone(),
-      description,
-      files,
-    });
-    if let Some((app, repo_id)) = progress {
-      emit_progress(
-        app,
-        repo_id,
-        "commit",
-        format!("Created commit {} of {total_commits}", index + 1),
-        summary,
-      );
+        let reference =
+            snapshot.head.reference.as_deref().ok_or_else(|| {
+                AppError::Other("GitWyrm could not find the current branch".into())
+            })?;
+        repo.reference(reference, final_oid, true, "commit: AI generated commits")?;
+        let tree = final_commit.tree()?;
+        let mut index = repo.index()?;
+        index.read_tree(&tree)?;
+        index.write()?;
     }
-    parent_oid = Some(oid);
-  }
 
-  if let Some((app, repo_id)) = progress {
-    emit_progress(
-      app,
-      repo_id,
-      "check",
-      "Checking the finished commit set",
-      "Confirming that every change is included before updating your branch.",
-    );
-  }
-  let final_oid = parent_oid.ok_or_else(|| AppError::Other("AI made no commits".into()))?;
-  let final_commit = repo.find_commit(final_oid)?;
-  if final_commit.tree_id() != snapshot.tree {
-    return Err(AppError::Other(
-      "The generated commits did not include every change. No branch was changed.".into(),
-    ));
-  }
-
-  if snapshot.head.oid.is_some() {
-    repo.reset(final_commit.as_object(), ResetType::Mixed, None)?;
-  } else {
-    let reference = snapshot
-      .head
-      .reference
-      .as_deref()
-      .ok_or_else(|| AppError::Other("GitWyrm could not find the current branch".into()))?;
-    repo.reference(reference, final_oid, true, "commit: AI generated commits")?;
-    let tree = final_commit.tree()?;
-    let mut index = repo.index()?;
-    index.read_tree(&tree)?;
-    index.write()?;
-  }
-
-  Ok(created)
+    Ok(created)
 }
 
 fn file_count_label(count: usize) -> String {
-  format!("{count} file{}", if count == 1 { "" } else { "s" })
+    format!("{count} file{}", if count == 1 { "" } else { "s" })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn generate_commits(
-  app: tauri::AppHandle,
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  provider: String,
-  model: String,
-  commit_count: u8,
-  special_instructions: String,
+    app: tauri::AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    provider: String,
+    model: String,
+    commit_count: u8,
+    special_instructions: String,
 ) -> Result<Vec<AiCreatedCommit>, AppError> {
-  let requested = commit_count as usize;
-  if !(2..=MAX_COMMITS).contains(&requested) {
-    return Err(AppError::Other(format!("Choose between 2 and {MAX_COMMITS} commits")));
-  }
-  if special_instructions.chars().count() > MAX_SPECIAL_INSTRUCTION_CHARS {
-    return Err(AppError::Other("Special instructions are too long".into()));
-  }
-
-  let open = manager.get(&repo_id)?;
-  let repo_path = open.path.to_string_lossy().into_owned();
-  emit_progress(
-    &app,
-    &repo_id,
-    "scan",
-    "Reading your changes",
-    "Finding the parts that can safely go into separate commits.",
-  );
-  let snapshot = tauri::async_runtime::spawn_blocking({
-    let open = open.clone();
-    let repo_path = repo_path.clone();
-    move || {
-      let repo = open.repo.lock().unwrap();
-      capture_snapshot(&repo_path, &repo)
+    let requested = commit_count as usize;
+    if !(2..=MAX_COMMITS).contains(&requested) {
+        return Err(AppError::Other(format!(
+            "Choose between 2 and {MAX_COMMITS} commits"
+        )));
     }
-  })
-  .await
-  .map_err(|error| AppError::Other(error.to_string()))??;
+    if special_instructions.chars().count() > MAX_SPECIAL_INSTRUCTION_CHARS {
+        return Err(AppError::Other("Special instructions are too long".into()));
+    }
 
-  let changed_files = snapshot
-    .units
-    .iter()
-    .map(|unit| unit.path.as_str())
-    .collect::<HashSet<_>>()
-    .len();
-  emit_progress(
-    &app,
-    &repo_id,
-    "scan",
-    format!("Found {}", file_count_label(changed_files)),
-    format!(
-      "Split them into {} safe change group{} for planning.",
-      snapshot.units.len(),
-      if snapshot.units.len() == 1 { "" } else { "s" }
-    ),
-  );
+    let open = manager.get(&repo_id)?;
+    let repo_path = open.path.to_string_lossy().into_owned();
+    emit_progress(
+        &app,
+        &repo_id,
+        "scan",
+        "Reading your changes",
+        "Finding the parts that can safely go into separate commits.",
+    );
+    let snapshot = tauri::async_runtime::spawn_blocking({
+        let open = open.clone();
+        let repo_path = repo_path.clone();
+        move || {
+            let repo = open.repo.lock().unwrap();
+            capture_snapshot(&repo_path, &repo)
+        }
+    })
+    .await
+    .map_err(|error| AppError::Other(error.to_string()))??;
 
-  if snapshot.units.len() < requested {
-    return Err(AppError::Other(format!(
-      "These changes have only {} safe groups. Choose {} or fewer commits.",
-      snapshot.units.len(),
-      snapshot.units.len()
-    )));
-  }
+    let changed_files = snapshot
+        .units
+        .iter()
+        .map(|unit| unit.path.as_str())
+        .collect::<HashSet<_>>()
+        .len();
+    emit_progress(
+        &app,
+        &repo_id,
+        "scan",
+        format!("Found {}", file_count_label(changed_files)),
+        format!(
+            "Split them into {} safe change group{} for planning.",
+            snapshot.units.len(),
+            if snapshot.units.len() == 1 { "" } else { "s" }
+        ),
+    );
 
-  // Fail before building a large prompt if the provider is not connected.
-  // ai::complete checks this too, but only once it is about to send.
-  auth::get(&app, &provider)?
-    .ok_or_else(|| AppError::Other("Connect the selected AI provider first".into()))?;
-  let saved_instruction = settings::read_settings(&app)?
-    .ai_instruction
-    .unwrap_or_default();
-  let message_guidance = if saved_instruction.trim().is_empty() {
-    prompt::DEFAULT_INSTRUCTION
-  } else {
-    saved_instruction.trim()
-  };
-  let special = if special_instructions.trim().is_empty() {
-    "(none)"
-  } else {
-    special_instructions.trim()
-  };
-  let system = format!(
+    if snapshot.units.len() < requested {
+        return Err(AppError::Other(format!(
+            "These changes have only {} safe groups. Choose {} or fewer commits.",
+            snapshot.units.len(),
+            snapshot.units.len()
+        )));
+    }
+
+    // Fail before building a large prompt if the provider is not connected.
+    // ai::complete checks this too, but only once it is about to send.
+    auth::get(&app, &provider)?
+        .ok_or_else(|| AppError::Other("Connect the selected AI provider first".into()))?;
+    let saved_instruction = settings::read_settings(&app)?
+        .ai_instruction
+        .unwrap_or_default();
+    let message_guidance = if saved_instruction.trim().is_empty() {
+        prompt::DEFAULT_INSTRUCTION
+    } else {
+        saved_instruction.trim()
+    };
+    let special = if special_instructions.trim().is_empty() {
+        "(none)"
+    } else {
+        special_instructions.trim()
+    };
+    let system = format!(
     "You organize a working tree into exactly {requested} small, logical git commits. \
 Each labeled change unit is indivisible, but units from the same file may go into different commits. \
 Every unit must appear exactly once. Order commits so foundations come before the work that uses them. \
@@ -766,7 +803,8 @@ Commit message guidance:\n{message_guidance}\n\n\
 Return JSON only, with this exact shape:\n\
 {{\"commits\":[{{\"summary\":\"under 72 characters\",\"description\":\"1-3 plain sentences\",\"units\":[\"u1\"]}}]}}"
   );
-  let user = format!(
+    let user =
+        format!(
     "Create exactly {requested} commits.\n\nSpecial instructions from the user:\n{special}\n\n\
 Recent commit subjects:\n{}\n\nChange units:{}",
     crate::git::shell::run_git(Some(&repo_path), &["log", "--oneline", "--no-decorate", "-10"])
@@ -776,285 +814,329 @@ Recent commit subjects:\n{}\n\nChange units:{}",
     present_units(&snapshot.units)
   );
 
-  emit_progress(
-    &app,
-    &repo_id,
-    "plan",
-    format!("Planning {requested} commits"),
-    "AI is deciding which changes belong together and writing clear messages.",
-  );
-  // Provider routing (including Copilot's CLI detour) lives in ai::complete, so
-  // this and the spec drafter cannot drift apart.
-  let response = crate::ai::complete::complete_with(
-    &app,
-    &provider,
-    &model,
-    &system,
-    &user,
-    PLAN_MAX_TOKENS,
-    PLAN_TIMEOUT,
-  )
-  .await?;
-  emit_progress(
-    &app,
-    &repo_id,
-    "check",
-    "Checking the AI plan",
-    "Making sure every change appears once and no change is left out.",
-  );
-  let mut plan = parse_plan(&response)?;
-  normalize_plan(&mut plan);
-  validate_plan(&plan, requested, &snapshot.units)?;
-  emit_progress(
-    &app,
-    &repo_id,
-    "plan",
-    format!("Plan ready for {requested} commits"),
-    format!("All {} change groups are included.", snapshot.units.len()),
-  );
-
-  let progress_app = app.clone();
-  let progress_repo_id = repo_id.clone();
-  let created_result = tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    create_commit_chain(
-      &repo_path,
-      &repo,
-      &snapshot,
-      plan,
-      Some((&progress_app, &progress_repo_id)),
-    )
-  })
-  .await
-  .map_err(|error| AppError::Other(error.to_string()))?;
-  let created = match created_result {
-    Ok(created) => created,
-    Err(error) => {
-      emit_progress(
+    emit_progress(
         &app,
         &repo_id,
-        "error",
-        "Commit generation stopped",
-        error.to_string(),
-      );
-      return Err(error);
-    }
-  };
-  emit_progress(
-    &app,
-    &repo_id,
-    "done",
-    format!("Finished all {requested} commits"),
-    "Your branch is ready. Nothing was pushed.",
-  );
-  Ok(created)
+        "plan",
+        format!("Planning {requested} commits"),
+        "AI is deciding which changes belong together and writing clear messages.",
+    );
+    // Provider routing (including Copilot's CLI detour) lives in ai::complete, so
+    // this and the spec drafter cannot drift apart.
+    let response = crate::ai::complete::complete_with(
+        &app,
+        &provider,
+        &model,
+        &system,
+        &user,
+        PLAN_MAX_TOKENS,
+        PLAN_TIMEOUT,
+    )
+    .await?;
+    emit_progress(
+        &app,
+        &repo_id,
+        "check",
+        "Checking the AI plan",
+        "Making sure every change appears once and no change is left out.",
+    );
+    let mut plan = parse_plan(&response)?;
+    normalize_plan(&mut plan);
+    validate_plan(&plan, requested, &snapshot.units)?;
+    emit_progress(
+        &app,
+        &repo_id,
+        "plan",
+        format!("Plan ready for {requested} commits"),
+        format!("All {} change groups are included.", snapshot.units.len()),
+    );
+
+    let progress_app = app.clone();
+    let progress_repo_id = repo_id.clone();
+    let created_result = tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        create_commit_chain(
+            &repo_path,
+            &repo,
+            &snapshot,
+            plan,
+            Some((&progress_app, &progress_repo_id)),
+        )
+    })
+    .await
+    .map_err(|error| AppError::Other(error.to_string()))?;
+    let created = match created_result {
+        Ok(created) => created,
+        Err(error) => {
+            emit_progress(
+                &app,
+                &repo_id,
+                "error",
+                "Commit generation stopped",
+                error.to_string(),
+            );
+            return Err(error);
+        }
+    };
+    emit_progress(
+        &app,
+        &repo_id,
+        "done",
+        format!("Finished all {requested} commits"),
+        "Your branch is ready. Nothing was pushed.",
+    );
+    Ok(created)
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-  use std::fs;
+    use super::*;
+    use std::fs;
 
-  fn units() -> Vec<ChangeUnit> {
-    ["u1", "u2", "u3"]
-      .into_iter()
-      .enumerate()
-      .map(|(index, id)| ChangeUnit {
-        id: id.into(),
-        path: format!("file-{index}"),
-        block_index: index,
-        selection: None,
-        preview: String::new(),
-      })
-      .collect()
-  }
-
-  #[test]
-  fn reads_json_even_when_wrapped_in_a_code_fence() {
-    let plan = parse_plan(
-      "```json\n{\"commits\":[{\"summary\":\"First\",\"units\":[\"u1\"]}]}\n```",
-    )
-    .unwrap();
-    assert_eq!(plan.commits[0].summary, "First");
-  }
-
-  #[test]
-  fn normalizes_overlong_summaries_without_dropping_tags() {
-    let summary = "improved: Make the generated commit plan keep working when the model writes a subject that is much too long #ai";
-    let normalized = normalize_summary(summary);
-
-    assert!(normalized.chars().count() <= MAX_SUMMARY_CHARS);
-    assert!(normalized.starts_with("improved:"));
-    assert!(normalized.ends_with("#ai"));
-  }
-
-  #[test]
-  fn normalizes_accidental_summary_line_breaks() {
-    assert_eq!(
-      normalize_summary("fixes: Keep the first line\nwith the rest"),
-      "fixes: Keep the first line with the rest"
-    );
-  }
-
-  #[test]
-  fn rejects_duplicate_or_missing_units() {
-    let plan = CommitPlan {
-      commits: vec![
-        PlannedCommit { summary: "One".into(), description: String::new(), units: vec!["u1".into(), "u2".into()] },
-        PlannedCommit { summary: "Two".into(), description: String::new(), units: vec!["u2".into()] },
-      ],
-    };
-    assert!(validate_plan(&plan, 2, &units()).is_err());
-  }
-
-  #[test]
-  fn accepts_a_complete_exact_plan() {
-    let plan = CommitPlan {
-      commits: vec![
-        PlannedCommit { summary: "One".into(), description: String::new(), units: vec!["u1".into()] },
-        PlannedCommit { summary: "Two".into(), description: String::new(), units: vec!["u2".into(), "u3".into()] },
-      ],
-    };
-    assert!(validate_plan(&plan, 2, &units()).is_ok());
-  }
-
-  #[test]
-  fn large_change_sets_stay_inside_the_planning_budget() {
-    let units = (1..=463)
-      .map(|index| ChangeUnit {
-        id: format!("u{index}"),
-        path: format!("src/feature-{index}/long-component-name.tsx"),
-        block_index: index - 1,
-        selection: None,
-        preview: "changed line with enough context to repeat\n".repeat(80),
-      })
-      .collect::<Vec<_>>();
-
-    let presented = present_units(&units);
-    assert!(presented.chars().count() <= MAX_PLAN_PROMPT_CHARS);
-    assert!(presented.contains("--- u1 |"));
-    assert!(presented.contains("--- u463 |"));
-  }
-
-  #[test]
-  fn creates_a_verified_commit_chain_without_rewriting_files() {
-    let temp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(temp.path()).unwrap();
-    {
-      let mut config = repo.config().unwrap();
-      config.set_str("user.name", "Test Wyrm").unwrap();
-      config.set_str("user.email", "test@gitwyrm.dev").unwrap();
-    }
-    let original = (1..=8).map(|line| format!("line {line}\n")).collect::<String>();
-    fs::write(temp.path().join("story.txt"), &original).unwrap();
-    let base = {
-      let mut index = repo.index().unwrap();
-      index.add_path(Path::new("story.txt")).unwrap();
-      index.write().unwrap();
-      let tree_oid = index.write_tree().unwrap();
-      let tree = repo.find_tree(tree_oid).unwrap();
-      let signature = repo.signature().unwrap();
-      repo.commit(Some("HEAD"), &signature, &signature, "base", &tree, &[]).unwrap()
-    };
-
-    let changed = original
-      .replace("line 2\n", "line two changed\n")
-      .replace("line 6\n", "line six changed\n");
-    fs::write(temp.path().join("story.txt"), &changed).unwrap();
-    let repo_path = temp.path().to_string_lossy().into_owned();
-    let snapshot = capture_snapshot(&repo_path, &repo).unwrap();
-    assert_eq!(
-      snapshot.units.len(),
-      2,
-      "separate change blocks in one hunk should be separate AI units"
-    );
-
-    let plan = CommitPlan {
-      commits: vec![
-        PlannedCommit {
-          summary: "Change the opening".into(),
-          description: "Updates the first part.".into(),
-          units: vec![snapshot.units[0].id.clone()],
-        },
-        PlannedCommit {
-          summary: "Change the ending".into(),
-          description: "Updates the last part.".into(),
-          units: vec![snapshot.units[1].id.clone()],
-        },
-      ],
-    };
-    let made = create_commit_chain(&repo_path, &repo, &snapshot, plan, None).unwrap();
-
-    assert_eq!(made.len(), 2);
-    assert_eq!(fs::read_to_string(temp.path().join("story.txt")).unwrap(), changed);
-    assert_eq!(repo.statuses(None).unwrap().len(), 0, "the final tree should be clean");
-    let mut walk = repo.revwalk().unwrap();
-    walk.push_head().unwrap();
-    walk.hide(base).unwrap();
-    assert_eq!(walk.count(), 2);
-  }
-
-  #[test]
-  fn keeps_edits_made_after_the_snapshot_out_of_generated_commits() {
-    let temp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(temp.path()).unwrap();
-    {
-      let mut config = repo.config().unwrap();
-      config.set_str("user.name", "Test Wyrm").unwrap();
-      config.set_str("user.email", "test@gitwyrm.dev").unwrap();
-    }
-    let original = (1..=8).map(|line| format!("line {line}\n")).collect::<String>();
-    fs::write(temp.path().join("story.txt"), &original).unwrap();
-    {
-      let mut index = repo.index().unwrap();
-      index.add_path(Path::new("story.txt")).unwrap();
-      index.write().unwrap();
-      let tree_oid = index.write_tree().unwrap();
-      let tree = repo.find_tree(tree_oid).unwrap();
-      let signature = repo.signature().unwrap();
-      repo.commit(Some("HEAD"), &signature, &signature, "base", &tree, &[]).unwrap();
+    fn units() -> Vec<ChangeUnit> {
+        ["u1", "u2", "u3"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, id)| ChangeUnit {
+                id: id.into(),
+                path: format!("file-{index}"),
+                block_index: index,
+                selection: None,
+                preview: String::new(),
+            })
+            .collect()
     }
 
-    let snapshotted = original
-      .replace("line 2\n", "line two changed\n")
-      .replace("line 6\n", "line six changed\n");
-    fs::write(temp.path().join("story.txt"), &snapshotted).unwrap();
-    let repo_path = temp.path().to_string_lossy().into_owned();
-    let snapshot = capture_snapshot(&repo_path, &repo).unwrap();
+    #[test]
+    fn reads_json_even_when_wrapped_in_a_code_fence() {
+        let plan =
+            parse_plan("```json\n{\"commits\":[{\"summary\":\"First\",\"units\":[\"u1\"]}]}\n```")
+                .unwrap();
+        assert_eq!(plan.commits[0].summary, "First");
+    }
 
-    // Simulate continued work while the model plans, including another edit to
-    // a line that belongs to the captured snapshot and a brand-new file.
-    let continued = snapshotted.replace("line two changed\n", "line two changed again\n");
-    fs::write(temp.path().join("story.txt"), &continued).unwrap();
-    fs::write(temp.path().join("notes.txt"), "work started during planning\n").unwrap();
+    #[test]
+    fn normalizes_overlong_summaries_without_dropping_tags() {
+        let summary = "improved: Make the generated commit plan keep working when the model writes a subject that is much too long #ai";
+        let normalized = normalize_summary(summary);
 
-    let plan = CommitPlan {
-      commits: vec![
-        PlannedCommit {
-          summary: "Change the opening".into(),
-          description: String::new(),
-          units: vec![snapshot.units[0].id.clone()],
-        },
-        PlannedCommit {
-          summary: "Change the ending".into(),
-          description: String::new(),
-          units: vec![snapshot.units[1].id.clone()],
-        },
-      ],
-    };
-    create_commit_chain(&repo_path, &repo, &snapshot, plan, None).unwrap();
+        assert!(normalized.chars().count() <= MAX_SUMMARY_CHARS);
+        assert!(normalized.starts_with("improved:"));
+        assert!(normalized.ends_with("#ai"));
+    }
 
-    let head = repo.head().unwrap().peel_to_commit().unwrap();
-    let tree = head.tree().unwrap();
-    let entry = tree.get_path(Path::new("story.txt")).unwrap();
-    let committed = repo.find_blob(entry.id()).unwrap();
-    assert_eq!(std::str::from_utf8(committed.content()).unwrap(), snapshotted);
-    assert_eq!(fs::read_to_string(temp.path().join("story.txt")).unwrap(), continued);
+    #[test]
+    fn normalizes_accidental_summary_line_breaks() {
+        assert_eq!(
+            normalize_summary("fixes: Keep the first line\nwith the rest"),
+            "fixes: Keep the first line with the rest"
+        );
+    }
 
-    let status = crate::git::shell::run_git(Some(&repo_path), &["status", "--short"])
-      .unwrap()
-      .stdout;
-    assert!(status.contains("story.txt"), "same-line follow-up edit must remain");
-    assert!(status.contains("notes.txt"), "new file must remain uncommitted");
-  }
+    #[test]
+    fn rejects_duplicate_or_missing_units() {
+        let plan = CommitPlan {
+            commits: vec![
+                PlannedCommit {
+                    summary: "One".into(),
+                    description: String::new(),
+                    units: vec!["u1".into(), "u2".into()],
+                },
+                PlannedCommit {
+                    summary: "Two".into(),
+                    description: String::new(),
+                    units: vec!["u2".into()],
+                },
+            ],
+        };
+        assert!(validate_plan(&plan, 2, &units()).is_err());
+    }
+
+    #[test]
+    fn accepts_a_complete_exact_plan() {
+        let plan = CommitPlan {
+            commits: vec![
+                PlannedCommit {
+                    summary: "One".into(),
+                    description: String::new(),
+                    units: vec!["u1".into()],
+                },
+                PlannedCommit {
+                    summary: "Two".into(),
+                    description: String::new(),
+                    units: vec!["u2".into(), "u3".into()],
+                },
+            ],
+        };
+        assert!(validate_plan(&plan, 2, &units()).is_ok());
+    }
+
+    #[test]
+    fn large_change_sets_stay_inside_the_planning_budget() {
+        let units = (1..=463)
+            .map(|index| ChangeUnit {
+                id: format!("u{index}"),
+                path: format!("src/feature-{index}/long-component-name.tsx"),
+                block_index: index - 1,
+                selection: None,
+                preview: "changed line with enough context to repeat\n".repeat(80),
+            })
+            .collect::<Vec<_>>();
+
+        let presented = present_units(&units);
+        assert!(presented.chars().count() <= MAX_PLAN_PROMPT_CHARS);
+        assert!(presented.contains("--- u1 |"));
+        assert!(presented.contains("--- u463 |"));
+    }
+
+    #[test]
+    fn creates_a_verified_commit_chain_without_rewriting_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(temp.path()).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Test Wyrm").unwrap();
+            config.set_str("user.email", "test@gitwyrm.dev").unwrap();
+        }
+        let original = (1..=8)
+            .map(|line| format!("line {line}\n"))
+            .collect::<String>();
+        fs::write(temp.path().join("story.txt"), &original).unwrap();
+        let base = {
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("story.txt")).unwrap();
+            index.write().unwrap();
+            let tree_oid = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            let signature = repo.signature().unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "base", &tree, &[])
+                .unwrap()
+        };
+
+        let changed = original
+            .replace("line 2\n", "line two changed\n")
+            .replace("line 6\n", "line six changed\n");
+        fs::write(temp.path().join("story.txt"), &changed).unwrap();
+        let repo_path = temp.path().to_string_lossy().into_owned();
+        let snapshot = capture_snapshot(&repo_path, &repo).unwrap();
+        assert_eq!(
+            snapshot.units.len(),
+            2,
+            "separate change blocks in one hunk should be separate AI units"
+        );
+
+        let plan = CommitPlan {
+            commits: vec![
+                PlannedCommit {
+                    summary: "Change the opening".into(),
+                    description: "Updates the first part.".into(),
+                    units: vec![snapshot.units[0].id.clone()],
+                },
+                PlannedCommit {
+                    summary: "Change the ending".into(),
+                    description: "Updates the last part.".into(),
+                    units: vec![snapshot.units[1].id.clone()],
+                },
+            ],
+        };
+        let made = create_commit_chain(&repo_path, &repo, &snapshot, plan, None).unwrap();
+
+        assert_eq!(made.len(), 2);
+        assert_eq!(
+            fs::read_to_string(temp.path().join("story.txt")).unwrap(),
+            changed
+        );
+        assert_eq!(
+            repo.statuses(None).unwrap().len(),
+            0,
+            "the final tree should be clean"
+        );
+        let mut walk = repo.revwalk().unwrap();
+        walk.push_head().unwrap();
+        walk.hide(base).unwrap();
+        assert_eq!(walk.count(), 2);
+    }
+
+    #[test]
+    fn keeps_edits_made_after_the_snapshot_out_of_generated_commits() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(temp.path()).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Test Wyrm").unwrap();
+            config.set_str("user.email", "test@gitwyrm.dev").unwrap();
+        }
+        let original = (1..=8)
+            .map(|line| format!("line {line}\n"))
+            .collect::<String>();
+        fs::write(temp.path().join("story.txt"), &original).unwrap();
+        {
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("story.txt")).unwrap();
+            index.write().unwrap();
+            let tree_oid = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            let signature = repo.signature().unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "base", &tree, &[])
+                .unwrap();
+        }
+
+        let snapshotted = original
+            .replace("line 2\n", "line two changed\n")
+            .replace("line 6\n", "line six changed\n");
+        fs::write(temp.path().join("story.txt"), &snapshotted).unwrap();
+        let repo_path = temp.path().to_string_lossy().into_owned();
+        let snapshot = capture_snapshot(&repo_path, &repo).unwrap();
+
+        // Simulate continued work while the model plans, including another edit to
+        // a line that belongs to the captured snapshot and a brand-new file.
+        let continued = snapshotted.replace("line two changed\n", "line two changed again\n");
+        fs::write(temp.path().join("story.txt"), &continued).unwrap();
+        fs::write(
+            temp.path().join("notes.txt"),
+            "work started during planning\n",
+        )
+        .unwrap();
+
+        let plan = CommitPlan {
+            commits: vec![
+                PlannedCommit {
+                    summary: "Change the opening".into(),
+                    description: String::new(),
+                    units: vec![snapshot.units[0].id.clone()],
+                },
+                PlannedCommit {
+                    summary: "Change the ending".into(),
+                    description: String::new(),
+                    units: vec![snapshot.units[1].id.clone()],
+                },
+            ],
+        };
+        create_commit_chain(&repo_path, &repo, &snapshot, plan, None).unwrap();
+
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let tree = head.tree().unwrap();
+        let entry = tree.get_path(Path::new("story.txt")).unwrap();
+        let committed = repo.find_blob(entry.id()).unwrap();
+        assert_eq!(
+            std::str::from_utf8(committed.content()).unwrap(),
+            snapshotted
+        );
+        assert_eq!(
+            fs::read_to_string(temp.path().join("story.txt")).unwrap(),
+            continued
+        );
+
+        let status = crate::git::shell::run_git(Some(&repo_path), &["status", "--short"])
+            .unwrap()
+            .stdout;
+        assert!(
+            status.contains("story.txt"),
+            "same-line follow-up edit must remain"
+        );
+        assert!(
+            status.contains("notes.txt"),
+            "new file must remain uncommitted"
+        );
+    }
 }

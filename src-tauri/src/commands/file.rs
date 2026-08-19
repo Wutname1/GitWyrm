@@ -18,60 +18,60 @@ use crate::state::RepoManager;
 /// One commit that touched a given file, plus how the file changed in it.
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct FileHistoryEntry {
-  pub sha: String,
-  pub short_sha: String,
-  pub summary: String,
-  pub author_name: String,
-  pub author_email: String,
-  pub time: f64,
-  pub additions: u32,
-  pub deletions: u32,
-  /// Path this file had in this commit, when the commit renamed it.
-  pub old_path: Option<String>,
+    pub sha: String,
+    pub short_sha: String,
+    pub summary: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub time: f64,
+    pub additions: u32,
+    pub deletions: u32,
+    /// Path this file had in this commit, when the commit renamed it.
+    pub old_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct FileHistory {
-  pub path: String,
-  pub entries: Vec<FileHistoryEntry>,
-  /// True when the walk stopped at `limit` and older commits remain.
-  pub has_more: bool,
+    pub path: String,
+    pub entries: Vec<FileHistoryEntry>,
+    /// True when the walk stopped at `limit` and older commits remain.
+    pub has_more: bool,
 }
 
 /// One line of a file, tagged with the commit that last changed it.
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct BlameLine {
-  pub line_no: u32,
-  pub text: String,
-  pub sha: String,
-  pub short_sha: String,
-  pub summary: String,
-  pub author_name: String,
-  pub author_email: String,
-  pub time: f64,
+    pub line_no: u32,
+    pub text: String,
+    pub sha: String,
+    pub short_sha: String,
+    pub summary: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub time: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct FileBlame {
-  pub path: String,
-  pub lines: Vec<BlameLine>,
-  /// Set instead of `lines` when the file can't be blamed line-by-line.
-  pub binary: bool,
+    pub path: String,
+    pub lines: Vec<BlameLine>,
+    /// Set instead of `lines` when the file can't be blamed line-by-line.
+    pub binary: bool,
 }
 
 /// A whole file's text at one point in time, for the read-only Raw view.
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct FileContent {
-  pub path: String,
-  /// Empty when `binary` or `too_large` is set.
-  pub text: String,
-  pub line_count: u32,
-  /// Size of the file on disk or in the object database, in bytes.
-  pub size: f64,
-  /// The file holds bytes that aren't text, so there is nothing to show.
-  pub binary: bool,
-  /// The file is past `MAX_RAW_BYTES`, so it isn't loaded into the editor.
-  pub too_large: bool,
+    pub path: String,
+    /// Empty when `binary` or `too_large` is set.
+    pub text: String,
+    pub line_count: u32,
+    /// Size of the file on disk or in the object database, in bytes.
+    pub size: f64,
+    /// The file holds bytes that aren't text, so there is nothing to show.
+    pub binary: bool,
+    /// The file is past `MAX_RAW_BYTES`, so it isn't loaded into the editor.
+    pub too_large: bool,
 }
 
 /// Ceiling on what the Raw view will load. Past a few megabytes CodeMirror
@@ -83,27 +83,27 @@ const MAX_RAW_BYTES: u64 = 5 * 1024 * 1024;
 /// anything that escapes the repo. The path comes from the UI, but a crafted
 /// `..` segment must never let a delete land outside the project.
 pub(crate) fn resolve_in_repo(workdir: &Path, rel: &str) -> Result<PathBuf, AppError> {
-  let rel_path = Path::new(rel);
-  // `is_absolute` is not enough on Windows: a leading "/" has no drive prefix
-  // there, so it reads as relative while `join` still resolves it from the
-  // drive root. Reject any RootDir component explicitly.
-  if rel_path.is_absolute()
-    || rel_path.components().any(|c| {
-      matches!(
-        c,
-        Component::ParentDir | Component::Prefix(_) | Component::RootDir
-      )
-    })
-  {
-    return Err(AppError::Other(format!("Unsafe file path: {rel}")));
-  }
-  Ok(workdir.join(rel_path))
+    let rel_path = Path::new(rel);
+    // `is_absolute` is not enough on Windows: a leading "/" has no drive prefix
+    // there, so it reads as relative while `join` still resolves it from the
+    // drive root. Reject any RootDir component explicitly.
+    if rel_path.is_absolute()
+        || rel_path.components().any(|c| {
+            matches!(
+                c,
+                Component::ParentDir | Component::Prefix(_) | Component::RootDir
+            )
+        })
+    {
+        return Err(AppError::Other(format!("Unsafe file path: {rel}")));
+    }
+    Ok(workdir.join(rel_path))
 }
 
 /// Working directory of an open repo.
 fn workdir(manager: &RepoManager, repo_id: &str) -> Result<PathBuf, AppError> {
-  let open = manager.get(repo_id)?;
-  Ok(open.path.clone())
+    let open = manager.get(repo_id)?;
+    Ok(open.path.clone())
 }
 
 /// Open a single file in the given editor. Mirrors `external::open_in_editor`,
@@ -111,37 +111,36 @@ fn workdir(manager: &RepoManager, repo_id: &str) -> Result<PathBuf, AppError> {
 #[tauri::command]
 #[specta::specta]
 pub async fn open_file_in_editor(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  path: String,
-  editor: EditorKind,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
+    editor: EditorKind,
 ) -> Result<(), AppError> {
-  let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    crate::commands::editors::open_path_in(editor, &full.to_string_lossy())
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::commands::editors::open_path_in(editor, &full.to_string_lossy())
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Show a single file in the OS file manager, selected in its folder.
 #[tauri::command]
 #[specta::specta]
 pub async fn reveal_file_in_file_manager(
-  app: AppHandle,
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  path: String,
+    app: AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
 ) -> Result<(), AppError> {
-  let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    app
-      .opener()
-      .reveal_item_in_dir(&full)
-      .map_err(|e| AppError::Other(e.to_string()))
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.opener()
+            .reveal_item_in_dir(&full)
+            .map_err(|e| AppError::Other(e.to_string()))
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Open a folder inside the repo in the OS file manager. Unlike
@@ -150,23 +149,22 @@ pub async fn reveal_file_in_file_manager(
 #[tauri::command]
 #[specta::specta]
 pub async fn open_folder_in_file_manager(
-  app: AppHandle,
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  path: String,
+    app: AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
 ) -> Result<(), AppError> {
-  let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    if !full.is_dir() {
-      return Err(AppError::Other(format!("{path} is not a folder")));
-    }
-    app
-      .opener()
-      .open_path(full.to_string_lossy(), None::<&str>)
-      .map_err(|e| AppError::Other(e.to_string()))
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if !full.is_dir() {
+            return Err(AppError::Other(format!("{path} is not a folder")));
+        }
+        app.opener()
+            .open_path(full.to_string_lossy(), None::<&str>)
+            .map_err(|e| AppError::Other(e.to_string()))
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Send a file to the OS Recycle Bin / Trash. Recoverable on purpose: the
@@ -175,21 +173,21 @@ pub async fn open_folder_in_file_manager(
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_file(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  path: String,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
 ) -> Result<(), AppError> {
-  let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    if !full.exists() {
-      return Err(AppError::Other(format!("{path} is already gone")));
-    }
-    // Sending to the Recycle Bin goes through a shell API that can block on a
-    // slow or network volume.
-    trash::delete(&full).map_err(|e| AppError::Other(e.to_string()))
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    let full = resolve_in_repo(&workdir(&manager, &repo_id)?, &path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if !full.exists() {
+            return Err(AppError::Other(format!("{path} is already gone")));
+        }
+        // Sending to the Recycle Bin goes through a shell API that can block on a
+        // slow or network volume.
+        trash::delete(&full).map_err(|e| AppError::Other(e.to_string()))
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Put a file back to its committed contents, undoing edits and un-deleting it
@@ -198,32 +196,34 @@ pub async fn delete_file(
 #[tauri::command]
 #[specta::specta]
 pub async fn restore_file(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  path: String,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
 ) -> Result<(), AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    let head = repo
-      .head()
-      .and_then(|h| h.peel_to_tree())
-      .map_err(|_| AppError::Other(format!("{path} has never been committed, so there is nothing to restore it to")))?;
-    // Confirm the file exists in HEAD before checkout: a pathspec that matches
-    // nothing makes `checkout_tree` a silent no-op, which would look like the
-    // restore worked.
-    head
-      .get_path(Path::new(&path))
-      .map_err(|_| AppError::Other(format!("{path} is not in the last commit, so there is nothing to restore it to")))?;
+    let open = manager.get(&repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        let head = repo.head().and_then(|h| h.peel_to_tree()).map_err(|_| {
+            AppError::Other(format!(
+                "{path} has never been committed, so there is nothing to restore it to"
+            ))
+        })?;
+        // Confirm the file exists in HEAD before checkout: a pathspec that matches
+        // nothing makes `checkout_tree` a silent no-op, which would look like the
+        // restore worked.
+        head.get_path(Path::new(&path)).map_err(|_| {
+            AppError::Other(format!(
+                "{path} is not in the last commit, so there is nothing to restore it to"
+            ))
+        })?;
 
-    let mut checkout = git2::build::CheckoutBuilder::new();
-    checkout.force().path(&path);
-    repo
-      .checkout_tree(head.as_object(), Some(&mut checkout))
-      .map_err(AppError::Git)
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.force().path(&path);
+        repo.checkout_tree(head.as_object(), Some(&mut checkout))
+            .map_err(AppError::Git)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Commits that touched one file, newest first. Follows the file backwards
@@ -231,79 +231,80 @@ pub async fn restore_file(
 #[tauri::command]
 #[specta::specta]
 pub async fn get_file_history(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  path: String,
-  limit: u32,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
+    limit: u32,
 ) -> Result<FileHistory, AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
+    let open = manager.get(&repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
 
-    let mut walk = repo.revwalk()?;
-    walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    walk.push_head()?;
+        let mut walk = repo.revwalk()?;
+        walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+        walk.push_head()?;
 
-    let mut entries = Vec::new();
-    let mut has_more = false;
-    // The path we are tracking, which moves backwards through renames.
-    let mut tracked = path.clone();
+        let mut entries = Vec::new();
+        let mut has_more = false;
+        // The path we are tracking, which moves backwards through renames.
+        let mut tracked = path.clone();
 
-    for oid in walk.flatten() {
-      if entries.len() >= limit as usize {
-        has_more = true;
-        break;
-      }
-      let commit = repo.find_commit(oid)?;
-      let tree = commit.tree()?;
-      let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+        for oid in walk.flatten() {
+            if entries.len() >= limit as usize {
+                has_more = true;
+                break;
+            }
+            let commit = repo.find_commit(oid)?;
+            let tree = commit.tree()?;
+            let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
 
-      let mut opts = DiffOptions::new();
-      opts.pathspec(&tracked);
-      let mut diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
-      crate::git::rename_detect::find_renames(&mut diff)?;
+            let mut opts = DiffOptions::new();
+            opts.pathspec(&tracked);
+            let mut diff =
+                repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
+            crate::git::rename_detect::find_renames(&mut diff)?;
 
-      if diff.deltas().len() == 0 {
-        continue;
-      }
+            if diff.deltas().len() == 0 {
+                continue;
+            }
 
-      let stats = diff.stats()?;
-      let old_path = diff.deltas().find_map(|d| {
-        if d.status() != git2::Delta::Renamed {
-          return None;
+            let stats = diff.stats()?;
+            let old_path = diff.deltas().find_map(|d| {
+                if d.status() != git2::Delta::Renamed {
+                    return None;
+                }
+                d.old_file()
+                    .path()
+                    .map(|p| p.to_string_lossy().into_owned())
+            });
+
+            let author = commit.author();
+            entries.push(FileHistoryEntry {
+                sha: oid.to_string(),
+                short_sha: oid.to_string()[..7].to_string(),
+                summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
+                author_name: author.name().unwrap_or("unknown").to_string(),
+                author_email: author.email().unwrap_or("").to_string(),
+                time: commit.time().seconds() as f64,
+                additions: stats.insertions().min(u32::MAX as usize) as u32,
+                deletions: stats.deletions().min(u32::MAX as usize) as u32,
+                old_path: old_path.clone(),
+            });
+
+            // Keep following the file under its previous name.
+            if let Some(old) = old_path {
+                tracked = old;
+            }
         }
-        d.old_file()
-          .path()
-          .map(|p| p.to_string_lossy().into_owned())
-      });
 
-      let author = commit.author();
-      entries.push(FileHistoryEntry {
-        sha: oid.to_string(),
-        short_sha: oid.to_string()[..7].to_string(),
-        summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
-        author_name: author.name().unwrap_or("unknown").to_string(),
-        author_email: author.email().unwrap_or("").to_string(),
-        time: commit.time().seconds() as f64,
-        additions: stats.insertions().min(u32::MAX as usize) as u32,
-        deletions: stats.deletions().min(u32::MAX as usize) as u32,
-        old_path: old_path.clone(),
-      });
-
-      // Keep following the file under its previous name.
-      if let Some(old) = old_path {
-        tracked = old;
-      }
-    }
-
-    Ok(FileHistory {
-      path,
-      entries,
-      has_more,
+        Ok(FileHistory {
+            path,
+            entries,
+            has_more,
+        })
     })
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Line-by-line authorship for a file. `sha` blames the file as of that commit;
@@ -311,88 +312,88 @@ pub async fn get_file_history(
 #[tauri::command]
 #[specta::specta]
 pub async fn get_file_blame(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  path: String,
-  sha: Option<String>,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
+    sha: Option<String>,
 ) -> Result<FileBlame, AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    let file_path = Path::new(&path);
+    let open = manager.get(&repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        let file_path = Path::new(&path);
 
-    let mut opts = BlameOptions::new();
-    if let Some(sha) = &sha {
-      opts.newest_commit(Oid::from_str(sha)?);
-    }
-    let blame = repo.blame_file(file_path, Some(&mut opts))?;
-
-    // Blame reports commits per line range; the text comes from the blob at
-    // that revision (or the working copy when blaming HEAD).
-    let contents: Vec<u8> = match &sha {
-      Some(sha) => {
-        let commit = repo.find_commit(Oid::from_str(sha)?)?;
-        let entry = commit.tree()?.get_path(file_path)?;
-        repo.find_blob(entry.id())?.content().to_vec()
-      }
-      None => {
-        let workdir = repo
-          .workdir()
-          .ok_or_else(|| AppError::Other("This repository has no working folder".into()))?;
-        std::fs::read(workdir.join(file_path)).map_err(AppError::Io)?
-      }
-    };
-
-    if contents.contains(&0) {
-      return Ok(FileBlame {
-        path,
-        lines: Vec::new(),
-        binary: true,
-      });
-    }
-
-    let text = String::from_utf8_lossy(&contents);
-    let mut lines = Vec::new();
-    for (i, line) in text.lines().enumerate() {
-      let line_no = (i + 1) as u32;
-      let Some(hunk) = blame.get_line(line_no as usize) else {
-        continue;
-      };
-      let oid = hunk.final_commit_id();
-      // Boundary hunks can point at a commit outside the walk; fall back to
-      // showing the sha alone rather than failing the whole blame.
-      let (summary, author_name, author_email, time) = match repo.find_commit(oid) {
-        Ok(commit) => {
-          let author = commit.author();
-          (
-            commit.summary().ok().flatten().unwrap_or("").to_string(),
-            author.name().unwrap_or("unknown").to_string(),
-            author.email().unwrap_or("").to_string(),
-            commit.time().seconds() as f64,
-          )
+        let mut opts = BlameOptions::new();
+        if let Some(sha) = &sha {
+            opts.newest_commit(Oid::from_str(sha)?);
         }
-        Err(_) => (String::new(), "unknown".into(), String::new(), 0.0),
-      };
-      lines.push(BlameLine {
-        line_no,
-        text: line.to_string(),
-        sha: oid.to_string(),
-        short_sha: oid.to_string()[..7].to_string(),
-        summary,
-        author_name,
-        author_email,
-        time,
-      });
-    }
+        let blame = repo.blame_file(file_path, Some(&mut opts))?;
 
-    Ok(FileBlame {
-      path,
-      lines,
-      binary: false,
+        // Blame reports commits per line range; the text comes from the blob at
+        // that revision (or the working copy when blaming HEAD).
+        let contents: Vec<u8> = match &sha {
+            Some(sha) => {
+                let commit = repo.find_commit(Oid::from_str(sha)?)?;
+                let entry = commit.tree()?.get_path(file_path)?;
+                repo.find_blob(entry.id())?.content().to_vec()
+            }
+            None => {
+                let workdir = repo.workdir().ok_or_else(|| {
+                    AppError::Other("This repository has no working folder".into())
+                })?;
+                std::fs::read(workdir.join(file_path)).map_err(AppError::Io)?
+            }
+        };
+
+        if contents.contains(&0) {
+            return Ok(FileBlame {
+                path,
+                lines: Vec::new(),
+                binary: true,
+            });
+        }
+
+        let text = String::from_utf8_lossy(&contents);
+        let mut lines = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            let line_no = (i + 1) as u32;
+            let Some(hunk) = blame.get_line(line_no as usize) else {
+                continue;
+            };
+            let oid = hunk.final_commit_id();
+            // Boundary hunks can point at a commit outside the walk; fall back to
+            // showing the sha alone rather than failing the whole blame.
+            let (summary, author_name, author_email, time) = match repo.find_commit(oid) {
+                Ok(commit) => {
+                    let author = commit.author();
+                    (
+                        commit.summary().ok().flatten().unwrap_or("").to_string(),
+                        author.name().unwrap_or("unknown").to_string(),
+                        author.email().unwrap_or("").to_string(),
+                        commit.time().seconds() as f64,
+                    )
+                }
+                Err(_) => (String::new(), "unknown".into(), String::new(), 0.0),
+            };
+            lines.push(BlameLine {
+                line_no,
+                text: line.to_string(),
+                sha: oid.to_string(),
+                short_sha: oid.to_string()[..7].to_string(),
+                summary,
+                author_name,
+                author_email,
+                time,
+            });
+        }
+
+        Ok(FileBlame {
+            path,
+            lines,
+            binary: false,
+        })
     })
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// The full text of a file. `sha` reads it as of that commit; omit it to read
@@ -400,97 +401,97 @@ pub async fn get_file_blame(
 #[tauri::command]
 #[specta::specta]
 pub async fn get_file_content(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  path: String,
-  sha: Option<String>,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
+    sha: Option<String>,
 ) -> Result<FileContent, AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    let file_path = Path::new(&path);
+    let open = manager.get(&repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        let file_path = Path::new(&path);
 
-    let contents: Vec<u8> = match &sha {
-      Some(sha) => {
-        let commit = repo.find_commit(Oid::from_str(sha)?)?;
-        let entry = commit.tree()?.get_path(file_path)?;
-        let blob = repo.find_blob(entry.id())?;
-        if blob.size() as u64 > MAX_RAW_BYTES {
-          return Ok(FileContent {
-            path,
-            text: String::new(),
-            line_count: 0,
-            size: blob.size() as f64,
-            binary: false,
-            too_large: true,
-          });
+        let contents: Vec<u8> = match &sha {
+            Some(sha) => {
+                let commit = repo.find_commit(Oid::from_str(sha)?)?;
+                let entry = commit.tree()?.get_path(file_path)?;
+                let blob = repo.find_blob(entry.id())?;
+                if blob.size() as u64 > MAX_RAW_BYTES {
+                    return Ok(FileContent {
+                        path,
+                        text: String::new(),
+                        line_count: 0,
+                        size: blob.size() as f64,
+                        binary: false,
+                        too_large: true,
+                    });
+                }
+                blob.content().to_vec()
+            }
+            None => {
+                let workdir = repo.workdir().ok_or_else(|| {
+                    AppError::Other("This repository has no working folder".into())
+                })?;
+                // The path comes from the UI, so it goes through the same guard as
+                // delete and restore before anything is read off disk.
+                let full = resolve_in_repo(workdir, &path)?;
+                let size = std::fs::metadata(&full).map_err(AppError::Io)?.len();
+                if size > MAX_RAW_BYTES {
+                    return Ok(FileContent {
+                        path,
+                        text: String::new(),
+                        line_count: 0,
+                        size: size as f64,
+                        binary: false,
+                        too_large: true,
+                    });
+                }
+                std::fs::read(&full).map_err(AppError::Io)?
+            }
+        };
+
+        let size = contents.len() as f64;
+        if contents.contains(&0) {
+            return Ok(FileContent {
+                path,
+                text: String::new(),
+                line_count: 0,
+                size,
+                binary: true,
+                too_large: false,
+            });
         }
-        blob.content().to_vec()
-      }
-      None => {
-        let workdir = repo
-          .workdir()
-          .ok_or_else(|| AppError::Other("This repository has no working folder".into()))?;
-        // The path comes from the UI, so it goes through the same guard as
-        // delete and restore before anything is read off disk.
-        let full = resolve_in_repo(workdir, &path)?;
-        let size = std::fs::metadata(&full).map_err(AppError::Io)?.len();
-        if size > MAX_RAW_BYTES {
-          return Ok(FileContent {
+
+        let text = String::from_utf8_lossy(&contents).into_owned();
+        let line_count = if text.is_empty() {
+            0
+        } else {
+            text.lines().count() as u32
+        };
+
+        Ok(FileContent {
             path,
-            text: String::new(),
-            line_count: 0,
-            size: size as f64,
+            text,
+            line_count,
+            size,
             binary: false,
-            too_large: true,
-          });
-        }
-        std::fs::read(&full).map_err(AppError::Io)?
-      }
-    };
-
-    let size = contents.len() as f64;
-    if contents.contains(&0) {
-      return Ok(FileContent {
-        path,
-        text: String::new(),
-        line_count: 0,
-        size,
-        binary: true,
-        too_large: false,
-      });
-    }
-
-    let text = String::from_utf8_lossy(&contents).into_owned();
-    let line_count = if text.is_empty() {
-      0
-    } else {
-      text.lines().count() as u32
-    };
-
-    Ok(FileContent {
-      path,
-      text,
-      line_count,
-      size,
-      binary: false,
-      too_large: false,
+            too_large: false,
+        })
     })
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  #[test]
-  fn rejects_paths_that_escape_the_repo() {
-    let root = Path::new("/repo");
-    assert!(resolve_in_repo(root, "../secrets.txt").is_err());
-    assert!(resolve_in_repo(root, "src/../../etc/passwd").is_err());
-    assert!(resolve_in_repo(root, "/etc/passwd").is_err());
-    assert!(resolve_in_repo(root, "src/main.rs").is_ok());
-  }
+    #[test]
+    fn rejects_paths_that_escape_the_repo() {
+        let root = Path::new("/repo");
+        assert!(resolve_in_repo(root, "../secrets.txt").is_err());
+        assert!(resolve_in_repo(root, "src/../../etc/passwd").is_err());
+        assert!(resolve_in_repo(root, "/etc/passwd").is_err());
+        assert!(resolve_in_repo(root, "src/main.rs").is_ok());
+    }
 }

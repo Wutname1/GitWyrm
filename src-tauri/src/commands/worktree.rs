@@ -11,9 +11,7 @@ use std::path::{Path, PathBuf};
 use tauri::State;
 
 use crate::error::AppError;
-use crate::git::worktree::{
-  self, DirtyChoice, DirtyCount, IgnoredFile, RemoveOutcome, Worktree,
-};
+use crate::git::worktree::{self, DirtyChoice, DirtyCount, IgnoredFile, RemoveOutcome, Worktree};
 use crate::state::{repo_id_for, RepoManager};
 use crate::watcher::WatcherRegistry;
 
@@ -24,9 +22,9 @@ use crate::watcher::WatcherRegistry;
 /// an editor or dev server in the folder is the user's to close -- but the app
 /// blocking its own delete is not something to leave to chance.
 fn release_hold(manager: &RepoManager, watchers: &WatcherRegistry, path: &Path) {
-  let id = repo_id_for(path);
-  watchers.unwatch(&id);
-  manager.close(&id);
+    let id = repo_id_for(path);
+    watchers.unwatch(&id);
+    manager.close(&id);
 }
 
 /// Every checkout of this repository: the main one first, then linked
@@ -34,17 +32,17 @@ fn release_hold(manager: &RepoManager, watchers: &WatcherRegistry, path: &Path) 
 #[tauri::command]
 #[specta::specta]
 pub async fn list_worktrees(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
 ) -> Result<Vec<Worktree>, AppError> {
-  let open = manager.get(&repo_id)?;
-  let current = open.path.clone();
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    Ok(worktree::list(&repo, Some(&current)))
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    let open = manager.get(&repo_id)?;
+    let current = open.path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        Ok(worktree::list(&repo, Some(&current)))
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Modified and untracked counts for a worktree that is not the open one.
@@ -52,9 +50,9 @@ pub async fn list_worktrees(
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_dirty_count(path: String) -> Result<DirtyCount, AppError> {
-  tauri::async_runtime::spawn_blocking(move || worktree::dirty_count(Path::new(&path)))
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?
+    tauri::async_runtime::spawn_blocking(move || worktree::dirty_count(Path::new(&path)))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// The suggested folder for a new worktree on `branch`: a sibling of the
@@ -65,19 +63,19 @@ pub async fn worktree_dirty_count(path: String) -> Result<DirtyCount, AppError> 
 #[tauri::command]
 #[specta::specta]
 pub async fn suggest_worktree_path(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  branch: String,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    branch: String,
 ) -> Result<String, AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    let main = worktree::main_workdir(&repo)
-      .ok_or_else(|| AppError::Other("this project has no working folder".into()))?;
-    Ok(worktree::suggest_path(&main, &branch))
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    let open = manager.get(&repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        let main = worktree::main_workdir(&repo)
+            .ok_or_else(|| AppError::Other("this project has no working folder".into()))?;
+        Ok(worktree::suggest_path(&main, &branch))
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Why the chosen folder will not work, in plain words. None when it is fine.
@@ -86,19 +84,19 @@ pub async fn suggest_worktree_path(
 #[tauri::command]
 #[specta::specta]
 pub async fn check_worktree_path(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  path: String,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
 ) -> Result<Option<String>, AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    let main = worktree::main_workdir(&repo)
-      .ok_or_else(|| AppError::Other("this project has no working folder".into()))?;
-    Ok(worktree::path_problem(&main, Path::new(path.trim())))
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    let open = manager.get(&repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        let main = worktree::main_workdir(&repo)
+            .ok_or_else(|| AppError::Other("this project has no working folder".into()))?;
+        Ok(worktree::path_problem(&main, Path::new(path.trim())))
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// The worktree holding `branch`, if any.
@@ -108,17 +106,17 @@ pub async fn check_worktree_path(
 #[tauri::command]
 #[specta::specta]
 pub async fn branch_holder(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  branch: String,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    branch: String,
 ) -> Result<Option<Worktree>, AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    Ok(worktree::holder_of_branch(&repo, &branch))
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    let open = manager.get(&repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        Ok(worktree::holder_of_branch(&repo, &branch))
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Ignored files the new worktree would not get, offered for copying.
@@ -129,14 +127,14 @@ pub async fn branch_holder(
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_copyable_files(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
 ) -> Result<Vec<IgnoredFile>, AppError> {
-  let open = manager.get(&repo_id)?;
-  let path = open.path.clone();
-  tauri::async_runtime::spawn_blocking(move || Ok(worktree::ignored_files_worth_copying(&path)))
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?
+    let open = manager.get(&repo_id)?;
+    let path = open.path.clone();
+    tauri::async_runtime::spawn_blocking(move || Ok(worktree::ignored_files_worth_copying(&path)))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Create a worktree.
@@ -148,17 +146,17 @@ pub async fn worktree_copyable_files(
 #[specta::specta]
 #[allow(clippy::too_many_arguments)]
 pub async fn add_worktree(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  path: String,
-  branch: String,
-  new_branch: bool,
-  start_point: Option<String>,
-  copy_files: Vec<String>,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
+    branch: String,
+    new_branch: bool,
+    start_point: Option<String>,
+    copy_files: Vec<String>,
 ) -> Result<String, AppError> {
-  let open = manager.get(&repo_id)?;
-  let source = open.path.clone();
-  tauri::async_runtime::spawn_blocking(move || {
+    let open = manager.get(&repo_id)?;
+    let source = open.path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
     let target = PathBuf::from(path.trim());
     let (main_path, holder) = {
       let repo = open.repo.lock().unwrap();
@@ -215,43 +213,43 @@ pub async fn add_worktree(
 #[tauri::command]
 #[specta::specta]
 pub async fn remove_worktree(
-  manager: State<'_, RepoManager>,
-  watchers: State<'_, WatcherRegistry>,
-  repo_id: String,
-  path: String,
-  choice: DirtyChoice,
+    manager: State<'_, RepoManager>,
+    watchers: State<'_, WatcherRegistry>,
+    repo_id: String,
+    path: String,
+    choice: DirtyChoice,
 ) -> Result<RemoveOutcome, AppError> {
-  let open = manager.get(&repo_id)?;
+    let open = manager.get(&repo_id)?;
 
-  // Refuse the folder the caller is looking at before releasing anything --
-  // removing the checkout out from under the open window is never the intent.
-  if worktree::paths_equal(&open.path, Path::new(path.trim())) {
-    return Err(AppError::Other(
-      "That is the folder you have open. Switch to another tab first, then remove it.".into(),
-    ));
-  }
-
-  release_hold(&manager, &watchers, Path::new(path.trim()));
-
-  let repo_path = worktree::main_workdir(&open.repo.lock().unwrap())
-    .map(|p| p.to_string_lossy().into_owned())
-    .unwrap_or_else(|| open.path.to_string_lossy().into_owned());
-
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    let outcome = worktree::remove(&repo, &repo_path, path.trim(), choice)?;
-
-    // A lock right after releasing our own hold may be a handle that was on its
-    // way out. One retry costs nothing and turns a spurious failure into a
-    // success; a real holder (an editor, a dev server) still reports the lock.
-    if let RemoveOutcome::RefusedLocked { .. } = outcome {
-      std::thread::sleep(std::time::Duration::from_millis(250));
-      return worktree::remove(&repo, &repo_path, path.trim(), choice);
+    // Refuse the folder the caller is looking at before releasing anything --
+    // removing the checkout out from under the open window is never the intent.
+    if worktree::paths_equal(&open.path, Path::new(path.trim())) {
+        return Err(AppError::Other(
+            "That is the folder you have open. Switch to another tab first, then remove it.".into(),
+        ));
     }
-    Ok(outcome)
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+
+    release_hold(&manager, &watchers, Path::new(path.trim()));
+
+    let repo_path = worktree::main_workdir(&open.repo.lock().unwrap())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| open.path.to_string_lossy().into_owned());
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        let outcome = worktree::remove(&repo, &repo_path, path.trim(), choice)?;
+
+        // A lock right after releasing our own hold may be a handle that was on its
+        // way out. One retry costs nothing and turns a spurious failure into a
+        // success; a real holder (an editor, a dev server) still reports the lock.
+        if let RemoveOutcome::RefusedLocked { .. } = outcome {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            return worktree::remove(&repo, &repo_path, path.trim(), choice);
+        }
+        Ok(outcome)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Drop admin entries for worktrees whose folders are gone. Returns how many
@@ -259,16 +257,16 @@ pub async fn remove_worktree(
 #[tauri::command]
 #[specta::specta]
 pub async fn prune_worktrees(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
 ) -> Result<u32, AppError> {
-  let open = manager.get(&repo_id)?;
-  tauri::async_runtime::spawn_blocking(move || {
-    let repo = open.repo.lock().unwrap();
-    worktree::prune(&repo)
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    let open = manager.get(&repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        worktree::prune(&repo)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// Point git at a worktree that moved. `new_path` is where the folder went;
@@ -277,17 +275,15 @@ pub async fn prune_worktrees(
 #[tauri::command]
 #[specta::specta]
 pub async fn repair_worktree(
-  manager: State<'_, RepoManager>,
-  repo_id: String,
-  new_path: Option<String>,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    new_path: Option<String>,
 ) -> Result<(), AppError> {
-  let open = manager.get(&repo_id)?;
-  let repo_path = worktree::main_workdir(&open.repo.lock().unwrap())
-    .map(|p| p.to_string_lossy().into_owned())
-    .unwrap_or_else(|| open.path.to_string_lossy().into_owned());
-  tauri::async_runtime::spawn_blocking(move || {
-    worktree::repair(&repo_path, new_path.as_deref())
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+    let open = manager.get(&repo_id)?;
+    let repo_path = worktree::main_workdir(&open.repo.lock().unwrap())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| open.path.to_string_lossy().into_owned());
+    tauri::async_runtime::spawn_blocking(move || worktree::repair(&repo_path, new_path.as_deref()))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
 }

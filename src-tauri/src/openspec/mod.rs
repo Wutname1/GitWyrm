@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 
 /// The `openspec/` directory for a repository, if it has one.
 pub fn openspec_dir(repo_root: &Path) -> Option<PathBuf> {
-  let dir = repo_root.join("openspec");
-  dir.is_dir().then_some(dir)
+    let dir = repo_root.join("openspec");
+    dir.is_dir().then_some(dir)
 }
 
 // Note: there is deliberately no `openspec/`-specific watcher here. The repo
@@ -30,13 +30,13 @@ pub fn openspec_dir(repo_root: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  #[test]
-  fn finds_the_folder_only_when_present() {
-    let dir = tempfile::tempdir().unwrap();
-    assert!(openspec_dir(dir.path()).is_none());
-    std::fs::create_dir(dir.path().join("openspec")).unwrap();
-    assert!(openspec_dir(dir.path()).is_some());
-  }
+    #[test]
+    fn finds_the_folder_only_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(openspec_dir(dir.path()).is_none());
+        std::fs::create_dir(dir.path().join("openspec")).unwrap();
+        assert!(openspec_dir(dir.path()).is_some());
+    }
 }

@@ -19,130 +19,129 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct DeviceCodeInfo {
-  pub device_code: String,
-  pub user_code: String,
-  pub verification_uri: String,
-  /// Minimum seconds between polls.
-  pub interval: u32,
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    /// Minimum seconds between polls.
+    pub interval: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum PollResult {
-  /// Token acquired and saved; sign-in is complete.
-  Complete,
-  /// User has not finished authorizing yet; poll again after `interval`.
-  Pending { interval: u32 },
+    /// Token acquired and saved; sign-in is complete.
+    Complete,
+    /// User has not finished authorizing yet; poll again after `interval`.
+    Pending { interval: u32 },
 }
 
 fn client() -> reqwest::Client {
-  reqwest::Client::new()
+    reqwest::Client::new()
 }
 
 /// Starts a device-code sign-in asking for `scope`. Copilot uses `read:user`;
 /// the GitHub integration asks for `repo` so it can read and act on PRs/issues.
 pub async fn device_start(scope: &str) -> Result<DeviceCodeInfo, AppError> {
-  let res = client()
-    .post(DEVICE_CODE_URL)
-    .header("Accept", "application/json")
-    .header("User-Agent", "GitWyrm")
-    .form(&[("client_id", CLIENT_ID), ("scope", scope)])
-    .timeout(TIMEOUT)
-    .send()
-    .await
-    .and_then(reqwest::Response::error_for_status)
-    .map_err(|e| AppError::Other(format!("GitHub device authorization failed: {e}")))?;
+    let res = client()
+        .post(DEVICE_CODE_URL)
+        .header("Accept", "application/json")
+        .header("User-Agent", "GitWyrm")
+        .form(&[("client_id", CLIENT_ID), ("scope", scope)])
+        .timeout(TIMEOUT)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|e| AppError::Other(format!("GitHub device authorization failed: {e}")))?;
 
-  res
-    .json::<DeviceCodeInfo>()
-    .await
-    .map_err(|e| AppError::Other(format!("bad device code response: {e}")))
+    res.json::<DeviceCodeInfo>()
+        .await
+        .map_err(|e| AppError::Other(format!("bad device code response: {e}")))
 }
 
 #[derive(Deserialize)]
 struct TokenResponse {
-  access_token: Option<String>,
-  error: Option<String>,
-  interval: Option<u32>,
+    access_token: Option<String>,
+    error: Option<String>,
+    interval: Option<u32>,
 }
 
 /// One poll of the token endpoint. Returns the token when authorized,
 /// Pending (with the interval to wait) while the user is still signing in,
 /// and an error for terminal states (denied, expired).
 pub async fn device_poll(device_code: &str, interval: u32) -> Result<PollOutcome, AppError> {
-  let res = client()
-    .post(ACCESS_TOKEN_URL)
-    .header("Accept", "application/json")
-    .header("User-Agent", "GitWyrm")
-    .form(&[
-      ("client_id", CLIENT_ID),
-      ("device_code", device_code),
-      ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-    ])
-    .timeout(TIMEOUT)
-    .send()
-    .await
-    .and_then(reqwest::Response::error_for_status)
-    .map_err(|e| AppError::Other(format!("GitHub token poll failed: {e}")))?;
+    let res = client()
+        .post(ACCESS_TOKEN_URL)
+        .header("Accept", "application/json")
+        .header("User-Agent", "GitWyrm")
+        .form(&[
+            ("client_id", CLIENT_ID),
+            ("device_code", device_code),
+            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+        ])
+        .timeout(TIMEOUT)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|e| AppError::Other(format!("GitHub token poll failed: {e}")))?;
 
-  let body: TokenResponse = res
-    .json()
-    .await
-    .map_err(|e| AppError::Other(format!("bad token response: {e}")))?;
+    let body: TokenResponse = res
+        .json()
+        .await
+        .map_err(|e| AppError::Other(format!("bad token response: {e}")))?;
 
-  if let Some(token) = body.access_token {
-    return Ok(PollOutcome::Token(token));
-  }
+    if let Some(token) = body.access_token {
+        return Ok(PollOutcome::Token(token));
+    }
 
-  match body.error.as_deref() {
-    Some("authorization_pending") => Ok(PollOutcome::Pending { interval }),
-    // RFC 8628: on slow_down add 5s to the interval (GitHub may also send one).
-    Some("slow_down") => Ok(PollOutcome::Pending {
-      interval: body.interval.unwrap_or(interval.saturating_add(5)),
-    }),
-    Some("expired_token") => Err(AppError::Other(
-      "sign-in code expired, start over to get a new code".into(),
-    )),
-    Some("access_denied") => Err(AppError::Other("sign-in was cancelled on GitHub".into())),
-    Some(other) => Err(AppError::Other(format!("GitHub sign-in failed: {other}"))),
-    None => Ok(PollOutcome::Pending { interval }),
-  }
+    match body.error.as_deref() {
+        Some("authorization_pending") => Ok(PollOutcome::Pending { interval }),
+        // RFC 8628: on slow_down add 5s to the interval (GitHub may also send one).
+        Some("slow_down") => Ok(PollOutcome::Pending {
+            interval: body.interval.unwrap_or(interval.saturating_add(5)),
+        }),
+        Some("expired_token") => Err(AppError::Other(
+            "sign-in code expired, start over to get a new code".into(),
+        )),
+        Some("access_denied") => Err(AppError::Other("sign-in was cancelled on GitHub".into())),
+        Some(other) => Err(AppError::Other(format!("GitHub sign-in failed: {other}"))),
+        None => Ok(PollOutcome::Pending { interval }),
+    }
 }
 
 pub enum PollOutcome {
-  Token(String),
-  Pending { interval: u32 },
+    Token(String),
+    Pending { interval: u32 },
 }
 
 /// The GitHub login for a token. Returns None when GitHub rejects the token
 /// (revoked, expired) so callers can treat it as "not connected" rather than
 /// as an error the user has to read.
 pub async fn account(token: &str) -> Result<Option<String>, AppError> {
-  #[derive(Deserialize)]
-  struct User {
-    login: String,
-  }
+    #[derive(Deserialize)]
+    struct User {
+        login: String,
+    }
 
-  let res = client()
-    .get("https://api.github.com/user")
-    .header("Accept", "application/vnd.github+json")
-    .header("User-Agent", "GitWyrm")
-    .bearer_auth(token)
-    .timeout(TIMEOUT)
-    .send()
-    .await
-    .map_err(|e| AppError::Other(format!("could not reach GitHub: {e}")))?;
+    let res = client()
+        .get("https://api.github.com/user")
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "GitWyrm")
+        .bearer_auth(token)
+        .timeout(TIMEOUT)
+        .send()
+        .await
+        .map_err(|e| AppError::Other(format!("could not reach GitHub: {e}")))?;
 
-  if res.status().as_u16() == 401 || res.status().as_u16() == 403 {
-    return Ok(None);
-  }
-  let res = res
-    .error_for_status()
-    .map_err(|e| AppError::Other(format!("GitHub rejected the request: {e}")))?;
+    if res.status().as_u16() == 401 || res.status().as_u16() == 403 {
+        return Ok(None);
+    }
+    let res = res
+        .error_for_status()
+        .map_err(|e| AppError::Other(format!("GitHub rejected the request: {e}")))?;
 
-  let user: User = res
-    .json()
-    .await
-    .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
-  Ok(Some(user.login))
+    let user: User = res
+        .json()
+        .await
+        .map_err(|e| AppError::Other(format!("bad response from GitHub: {e}")))?;
+    Ok(Some(user.login))
 }

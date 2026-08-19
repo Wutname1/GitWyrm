@@ -19,11 +19,11 @@ const SLOW_PHASE: u128 = 2_000;
 #[derive(Debug, Clone, Copy, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum RepositoryStarter {
-  Blank,
-  Node,
-  Rust,
-  Csharp,
-  AllInOne,
+    Blank,
+    Node,
+    Rust,
+    Csharp,
+    AllInOne,
 }
 
 const NODE_GITIGNORE: &str = "\
@@ -144,115 +144,119 @@ vendor/
 ";
 
 fn starter_gitignore(starter: RepositoryStarter) -> Option<&'static str> {
-  match starter {
-    RepositoryStarter::Blank => None,
-    RepositoryStarter::Node => Some(NODE_GITIGNORE),
-    RepositoryStarter::Rust => Some(RUST_GITIGNORE),
-    RepositoryStarter::Csharp => Some(CSHARP_GITIGNORE),
-    RepositoryStarter::AllInOne => Some(ALL_IN_ONE_GITIGNORE),
-  }
+    match starter {
+        RepositoryStarter::Blank => None,
+        RepositoryStarter::Node => Some(NODE_GITIGNORE),
+        RepositoryStarter::Rust => Some(RUST_GITIGNORE),
+        RepositoryStarter::Csharp => Some(CSHARP_GITIGNORE),
+        RepositoryStarter::AllInOne => Some(ALL_IN_ONE_GITIGNORE),
+    }
 }
 
 fn log_phase(phase: &str, path: &str, elapsed_ms: u128) {
-  if elapsed_ms >= SLOW_PHASE {
-    log::warn!("open_repo: {phase} took {elapsed_ms}ms (slow) for {path}");
-  } else {
-    log::info!("open_repo: {phase} took {elapsed_ms}ms for {path}");
-  }
+    if elapsed_ms >= SLOW_PHASE {
+        log::warn!("open_repo: {phase} took {elapsed_ms}ms (slow) for {path}");
+    } else {
+        log::info!("open_repo: {phase} took {elapsed_ms}ms for {path}");
+    }
 }
 
 /// Times one phase of opening a repo: logs it (with the slow-warning threshold)
 /// and records it as a Sentry child span so the phase breakdown shows up in the
 /// performance dashboard, not just the app log. The span is a no-op when Sentry
 /// is disabled (dev builds), so this is safe to call unconditionally.
-fn timed_phase<T>(parent: &sentry::TransactionOrSpan, phase: &'static str, path: &str, f: impl FnOnce() -> T) -> T {
-  let span = parent.start_child(phase, phase);
-  let start = Instant::now();
-  let result = f();
-  log_phase(phase, path, start.elapsed().as_millis());
-  span.finish();
-  result
+fn timed_phase<T>(
+    parent: &sentry::TransactionOrSpan,
+    phase: &'static str,
+    path: &str,
+    f: impl FnOnce() -> T,
+) -> T {
+    let span = parent.start_child(phase, phase);
+    let start = Instant::now();
+    let result = f();
+    log_phase(phase, path, start.elapsed().as_millis());
+    span.finish();
+    result
 }
 
 fn head_branch(repo: &git2::Repository) -> Option<String> {
-  let head = repo.head().ok()?;
-  if head.is_branch() {
-    head.shorthand().ok().map(str::to_string)
-  } else {
-    None
-  }
+    let head = repo.head().ok()?;
+    if head.is_branch() {
+        head.shorthand().ok().map(str::to_string)
+    } else {
+        None
+    }
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn open_repo(
-  app: AppHandle,
-  manager: State<'_, RepoManager>,
-  path: String,
+    app: AppHandle,
+    manager: State<'_, RepoManager>,
+    path: String,
 ) -> Result<RepoInfo, AppError> {
-  log::info!("open_repo: start for {path}");
-  let started = Instant::now();
+    log::info!("open_repo: start for {path}");
+    let started = Instant::now();
 
-  let tx = sentry::start_transaction(sentry::TransactionContext::new("open_repo", "git.open"));
-  let parent: sentry::TransactionOrSpan = tx.clone().into();
+    let tx = sentry::start_transaction(sentry::TransactionContext::new("open_repo", "git.open"));
+    let parent: sentry::TransactionOrSpan = tx.clone().into();
 
-  let (id, open, reused) =
-    timed_phase(&parent, "discover", &path, || manager.open(&path))?;
+    let (id, open, reused) = timed_phase(&parent, "discover", &path, || manager.open(&path))?;
 
-  // "Slow the first time" is the shape of the complaint, so the measurement has
-  // to tell a cold open from a repeat: a warm reopen skips nearly all the work
-  // and would otherwise sit in the same average, hiding the case being reported.
-  tx.set_data("cold_open", (!reused).into());
+    // "Slow the first time" is the shape of the complaint, so the measurement has
+    // to tell a cold open from a repeat: a warm reopen skips nearly all the work
+    // and would otherwise sit in the same average, hiding the case being reported.
+    tx.set_data("cold_open", (!reused).into());
 
-  // Registering a recursive watch walks the whole working tree, so a repo with
-  // a large node_modules/target directory could spend seconds here. It is not
-  // needed before we return, so arm it in the background and let the open
-  // finish now -- external-change events just start flowing a beat later.
-  WatcherRegistry::watch_deferred(app, id.clone(), open.path.clone());
+    // Registering a recursive watch walks the whole working tree, so a repo with
+    // a large node_modules/target directory could spend seconds here. It is not
+    // needed before we return, so arm it in the background and let the open
+    // finish now -- external-change events just start flowing a beat later.
+    WatcherRegistry::watch_deferred(app, id.clone(), open.path.clone());
 
-  let (name, head_branch) = timed_phase(&parent, "head", &path, || {
-    let repo = open.repo.lock().unwrap();
-    let name = open
-      .path
-      .file_name()
-      .map(|n| n.to_string_lossy().into_owned())
-      .unwrap_or_else(|| "repository".into());
-    (name, head_branch(&repo))
-  });
+    let (name, head_branch) = timed_phase(&parent, "head", &path, || {
+        let repo = open.repo.lock().unwrap();
+        let name = open
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "repository".into());
+        (name, head_branch(&repo))
+    });
 
-  log::info!(
-    "open_repo: done in {}ms (id {id}, branch {}) for {path}",
-    started.elapsed().as_millis(),
-    head_branch.as_deref().unwrap_or("<detached>")
-  );
+    log::info!(
+        "open_repo: done in {}ms (id {id}, branch {}) for {path}",
+        started.elapsed().as_millis(),
+        head_branch.as_deref().unwrap_or("<detached>")
+    );
 
-  tx.finish();
+    tx.finish();
 
-  Ok(RepoInfo {
-    id,
-    name,
-    path: open.path.to_string_lossy().into_owned(),
-    head_branch,
-  })
+    Ok(RepoInfo {
+        id,
+        name,
+        path: open.path.to_string_lossy().into_owned(),
+        head_branch,
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn close_repo(
-  manager: State<'_, RepoManager>,
-  watchers: State<'_, WatcherRegistry>,
-  repo_id: String,
+    manager: State<'_, RepoManager>,
+    watchers: State<'_, WatcherRegistry>,
+    repo_id: String,
 ) -> Result<(), AppError> {
-  log::info!("close_repo: {repo_id}");
-  watchers.unwatch(&repo_id);
-  manager.close(&repo_id);
-  Ok(())
+    log::info!("close_repo: {repo_id}");
+    watchers.unwatch(&repo_id);
+    manager.close(&repo_id);
+    Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn git_available() -> Result<bool, AppError> {
-  Ok(crate::git::shell::git_available())
+    Ok(crate::git::shell::git_available())
 }
 
 /// Create a brand-new git repository and its requested starter files. The
@@ -261,93 +265,94 @@ pub async fn git_available() -> Result<bool, AppError> {
 #[tauri::command]
 #[specta::specta]
 pub async fn git_init(
-  path: String,
-  starter: RepositoryStarter,
-  add_readme: bool,
-  create_initial_commit: bool,
+    path: String,
+    starter: RepositoryStarter,
+    add_readme: bool,
+    create_initial_commit: bool,
 ) -> Result<String, AppError> {
-  tauri::async_runtime::spawn_blocking(move || {
-    let dir = std::path::Path::new(&path);
-    if git2::Repository::open(dir).is_ok() {
-      return Err(AppError::Other(
-        "A git repository already exists in that folder".into(),
-      ));
-    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = std::path::Path::new(&path);
+        if git2::Repository::open(dir).is_ok() {
+            return Err(AppError::Other(
+                "A git repository already exists in that folder".into(),
+            ));
+        }
 
-    if dir.exists() {
-      let has_files = std::fs::read_dir(dir)
-        .map_err(|e| AppError::Other(e.to_string()))?
-        .next()
-        .is_some();
-      if has_files {
-        return Err(AppError::Other(
-          "That folder already has files. Choose an empty folder or a new project name".into(),
-        ));
-      }
-    }
+        if dir.exists() {
+            let has_files = std::fs::read_dir(dir)
+                .map_err(|e| AppError::Other(e.to_string()))?
+                .next()
+                .is_some();
+            if has_files {
+                return Err(AppError::Other(
+                    "That folder already has files. Choose an empty folder or a new project name"
+                        .into(),
+                ));
+            }
+        }
 
-    let signature = if create_initial_commit {
-      let config = git2::Config::open_default()?;
-      let name = config.get_string("user.name").map_err(|_| {
-        AppError::Other(
+        let signature = if create_initial_commit {
+            let config = git2::Config::open_default()?;
+            let name = config.get_string("user.name").map_err(|_| {
+                AppError::Other(
           "Git does not know your name yet. Add it in Settings > General, then try again.".into(),
         )
-      })?;
-      let email = config.get_string("user.email").map_err(|_| {
-        AppError::Other(
+            })?;
+            let email = config.get_string("user.email").map_err(|_| {
+                AppError::Other(
           "Git does not know your email yet. Add it in Settings > General, then try again.".into(),
         )
-      })?;
-      Some(git2::Signature::now(&name, &email)?)
-    } else {
-      None
-    };
+            })?;
+            Some(git2::Signature::now(&name, &email)?)
+        } else {
+            None
+        };
 
-    std::fs::create_dir_all(dir).map_err(|e| AppError::Other(e.to_string()))?;
+        std::fs::create_dir_all(dir).map_err(|e| AppError::Other(e.to_string()))?;
 
-    let mut options = git2::RepositoryInitOptions::new();
-    options.initial_head("main");
-    let repo = git2::Repository::init_opts(dir, &options)?;
+        let mut options = git2::RepositoryInitOptions::new();
+        options.initial_head("main");
+        let repo = git2::Repository::init_opts(dir, &options)?;
 
-    if let Some(contents) = starter_gitignore(starter) {
-      std::fs::write(dir.join(".gitignore"), contents)
-        .map_err(|e| AppError::Other(e.to_string()))?;
-    }
-    if add_readme {
-      let project_name = dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("New project");
-      std::fs::write(dir.join("README.md"), format!("# {project_name}\n"))
-        .map_err(|e| AppError::Other(e.to_string()))?;
-    }
+        if let Some(contents) = starter_gitignore(starter) {
+            std::fs::write(dir.join(".gitignore"), contents)
+                .map_err(|e| AppError::Other(e.to_string()))?;
+        }
+        if add_readme {
+            let project_name = dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("New project");
+            std::fs::write(dir.join("README.md"), format!("# {project_name}\n"))
+                .map_err(|e| AppError::Other(e.to_string()))?;
+        }
 
-    if let Some(signature) = signature {
-      let mut index = repo.index()?;
-      index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
-      index.write()?;
-      let tree_oid = index.write_tree()?;
-      let tree = repo.find_tree(tree_oid)?;
-      // A brand-new repository has no local config yet, but a global
-      // `commit.gpgsign` still applies -- someone who signs everything expects
-      // their first commit signed too.
-      let identity = crate::git::commit_write::CommitIdentity {
-        author: signature.clone(),
-        committer: signature,
-      };
-      crate::git::commit_write::create(
-        &repo,
-        &dir.to_string_lossy(),
-        Some("HEAD"),
-        &identity,
-        "Start project",
-        &tree,
-        &[],
-      )?;
-    }
+        if let Some(signature) = signature {
+            let mut index = repo.index()?;
+            index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
+            index.write()?;
+            let tree_oid = index.write_tree()?;
+            let tree = repo.find_tree(tree_oid)?;
+            // A brand-new repository has no local config yet, but a global
+            // `commit.gpgsign` still applies -- someone who signs everything expects
+            // their first commit signed too.
+            let identity = crate::git::commit_write::CommitIdentity {
+                author: signature.clone(),
+                committer: signature,
+            };
+            crate::git::commit_write::create(
+                &repo,
+                &dir.to_string_lossy(),
+                Some("HEAD"),
+                &identity,
+                "Start project",
+                &tree,
+                &[],
+            )?;
+        }
 
-    Ok(path)
-  })
-  .await
-  .map_err(|e| AppError::Other(e.to_string()))?
+        Ok(path)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }

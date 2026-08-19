@@ -26,50 +26,59 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// The credential to send, whichever kind is stored.
 fn bearer_for(info: &auth::AuthInfo) -> &str {
-  match info {
-    auth::AuthInfo::Api { key } => key,
-    auth::AuthInfo::Oauth { refresh, .. } => refresh,
-  }
+    match info {
+        auth::AuthInfo::Api { key } => key,
+        auth::AuthInfo::Oauth { refresh, .. } => refresh,
+    }
 }
 
 /// Send `system` + `user` to `provider`/`model` and return the reply text.
 pub async fn complete(
-  app: &tauri::AppHandle,
-  provider: &str,
-  model: &str,
-  system: &str,
-  user: &str,
+    app: &tauri::AppHandle,
+    provider: &str,
+    model: &str,
+    system: &str,
+    user: &str,
 ) -> Result<String, AppError> {
-  complete_with(app, provider, model, system, user, DEFAULT_MAX_TOKENS, DEFAULT_TIMEOUT).await
+    complete_with(
+        app,
+        provider,
+        model,
+        system,
+        user,
+        DEFAULT_MAX_TOKENS,
+        DEFAULT_TIMEOUT,
+    )
+    .await
 }
 
 /// `complete`, with explicit limits for callers whose replies are small enough
 /// to want a shorter leash.
 pub async fn complete_with(
-  app: &tauri::AppHandle,
-  provider: &str,
-  model: &str,
-  system: &str,
-  user: &str,
-  max_tokens: u32,
-  timeout: Duration,
+    app: &tauri::AppHandle,
+    provider: &str,
+    model: &str,
+    system: &str,
+    user: &str,
+    max_tokens: u32,
+    timeout: Duration,
 ) -> Result<String, AppError> {
-  let info = auth::get(app, provider)?
-    .ok_or_else(|| AppError::Other("Connect the selected AI provider first".into()))?;
+    let info = auth::get(app, provider)?
+        .ok_or_else(|| AppError::Other("Connect the selected AI provider first".into()))?;
 
-  if provider == copilot_sdk::PROVIDER_ID {
-    return copilot_sdk::complete(bearer_for(&info), model, system, user).await;
-  }
+    if provider == copilot_sdk::PROVIDER_ID {
+        return copilot_sdk::complete(bearer_for(&info), model, system, user).await;
+    }
 
-  let provider_config = catalog::find(app, provider).await?;
-  client::chat(client::ChatRequest {
-    provider: &provider_config,
-    bearer: bearer_for(&info),
-    model,
-    system,
-    user,
-    max_tokens,
-    timeout,
-  })
-  .await
+    let provider_config = catalog::find(app, provider).await?;
+    client::chat(client::ChatRequest {
+        provider: &provider_config,
+        bearer: bearer_for(&info),
+        model,
+        system,
+        user,
+        max_tokens,
+        timeout,
+    })
+    .await
 }

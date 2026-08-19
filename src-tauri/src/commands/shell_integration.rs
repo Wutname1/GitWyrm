@@ -35,16 +35,16 @@ const LABEL: &str = "Open with GitWyrm";
 /// placeholder Explorer expands for that target.
 #[cfg(windows)]
 const TARGETS: [(&str, &str); 2] = [
-  (r"Software\Classes\Directory\shell", "%1"),
-  (r"Software\Classes\Directory\Background\shell", "%V"),
+    (r"Software\Classes\Directory\shell", "%1"),
+    (r"Software\Classes\Directory\Background\shell", "%V"),
 ];
 
 /// Absolute path to the running executable, quoted for a registry command
 /// string.
 #[cfg(windows)]
 fn exe_path() -> Result<String, AppError> {
-  let exe = std::env::current_exe()?;
-  Ok(exe.to_string_lossy().into_owned())
+    let exe = std::env::current_exe()?;
+    Ok(exe.to_string_lossy().into_owned())
 }
 
 /// Whether the right-click entry is currently registered.
@@ -56,33 +56,33 @@ fn exe_path() -> Result<String, AppError> {
 #[tauri::command]
 #[specta::specta]
 pub async fn context_menu_registered() -> Result<bool, AppError> {
-  tauri::async_runtime::spawn_blocking(read_context_menu_registered)
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?
+    tauri::async_runtime::spawn_blocking(read_context_menu_registered)
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 fn read_context_menu_registered() -> Result<bool, AppError> {
-  #[cfg(windows)]
-  {
-    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
-    use winreg::RegKey;
+    #[cfg(windows)]
+    {
+        use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
+        use winreg::RegKey;
 
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    for (parent, _) in TARGETS {
-      let path = format!(r"{parent}\{VERB}\command");
-      let Ok(key) = hkcu.open_subkey_with_flags(&path, KEY_READ) else {
-        return Ok(false);
-      };
-      // A key with an empty command launches nothing. Treat that as absent.
-      let command: String = key.get_value("").unwrap_or_default();
-      if command.trim().is_empty() {
-        return Ok(false);
-      }
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        for (parent, _) in TARGETS {
+            let path = format!(r"{parent}\{VERB}\command");
+            let Ok(key) = hkcu.open_subkey_with_flags(&path, KEY_READ) else {
+                return Ok(false);
+            };
+            // A key with an empty command launches nothing. Treat that as absent.
+            let command: String = key.get_value("").unwrap_or_default();
+            if command.trim().is_empty() {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
-    Ok(true)
-  }
-  #[cfg(not(windows))]
-  Ok(false)
+    #[cfg(not(windows))]
+    Ok(false)
 }
 
 /// Add or remove Explorer's "Open with GitWyrm" entry.
@@ -93,85 +93,85 @@ fn read_context_menu_registered() -> Result<bool, AppError> {
 #[tauri::command]
 #[specta::specta]
 pub async fn set_context_menu_registered(enabled: bool) -> Result<(), AppError> {
-  tauri::async_runtime::spawn_blocking(move || write_context_menu_registered(enabled))
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?
+    tauri::async_runtime::spawn_blocking(move || write_context_menu_registered(enabled))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 fn write_context_menu_registered(enabled: bool) -> Result<(), AppError> {
-  #[cfg(windows)]
-  {
-    use winreg::enums::HKEY_CURRENT_USER;
-    use winreg::RegKey;
+    #[cfg(windows)]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
 
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
-    if !enabled {
-      for (parent, _) in TARGETS {
-        // Removing an entry that was never there is a success, not an error.
-        match hkcu.delete_subkey_all(format!(r"{parent}\{VERB}")) {
-          Ok(()) => {}
-          Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-          Err(e) => return Err(e.into()),
+        if !enabled {
+            for (parent, _) in TARGETS {
+                // Removing an entry that was never there is a success, not an error.
+                match hkcu.delete_subkey_all(format!(r"{parent}\{VERB}")) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            log::info!("Removed the Explorer right-click entry");
+            return Ok(());
         }
-      }
-      log::info!("Removed the Explorer right-click entry");
-      return Ok(());
-    }
 
-    let exe = exe_path()?;
-    for (parent, arg) in TARGETS {
-      let (key, _) = hkcu.create_subkey(format!(r"{parent}\{VERB}"))?;
-      key.set_value("", &LABEL)?;
-      // Windows 11 appears to need an icon before it will lift a verb into the
-      // top-level menu -- both entries confirmed to land there set one.
-      key.set_value("Icon", &exe)?;
+        let exe = exe_path()?;
+        for (parent, arg) in TARGETS {
+            let (key, _) = hkcu.create_subkey(format!(r"{parent}\{VERB}"))?;
+            key.set_value("", &LABEL)?;
+            // Windows 11 appears to need an icon before it will lift a verb into the
+            // top-level menu -- both entries confirmed to land there set one.
+            key.set_value("Icon", &exe)?;
 
-      let (command, _) = hkcu.create_subkey(format!(r"{parent}\{VERB}\command"))?;
-      command.set_value("", &format!("\"{exe}\" \"{arg}\""))?;
+            let (command, _) = hkcu.create_subkey(format!(r"{parent}\{VERB}\command"))?;
+            command.set_value("", &format!("\"{exe}\" \"{arg}\""))?;
+        }
+        log::info!("Registered the Explorer right-click entry for {exe}");
+        Ok(())
     }
-    log::info!("Registered the Explorer right-click entry for {exe}");
-    Ok(())
-  }
-  #[cfg(not(windows))]
-  {
-    let _ = enabled;
-    Err(AppError::Other(
-      "The right-click entry is only available on Windows".into(),
-    ))
-  }
+    #[cfg(not(windows))]
+    {
+        let _ = enabled;
+        Err(AppError::Other(
+            "The right-click entry is only available on Windows".into(),
+        ))
+    }
 }
 
 #[cfg(all(test, windows))]
 mod tests {
-  use super::*;
+    use super::*;
 
-  /// Both targets must be registered under HKCU (no elevation) and must use the
-  /// placeholder Explorer actually expands for that target. `%1` is empty when
-  /// right-clicking folder background, so using it there would silently launch
-  /// the app with no folder.
-  #[test]
-  fn targets_use_the_right_placeholder() {
-    assert_eq!(TARGETS.len(), 2);
-    for (parent, arg) in TARGETS {
-      assert!(parent.starts_with(r"Software\Classes\"), "{parent} must be HKCU-relative");
-      if parent.contains("Background") {
-        assert_eq!(arg, "%V", "folder background expands %V, not %1");
-      } else {
-        assert_eq!(arg, "%1");
-      }
+    /// Both targets must be registered under HKCU (no elevation) and must use the
+    /// placeholder Explorer actually expands for that target. `%1` is empty when
+    /// right-clicking folder background, so using it there would silently launch
+    /// the app with no folder.
+    #[test]
+    fn targets_use_the_right_placeholder() {
+        assert_eq!(TARGETS.len(), 2);
+        for (parent, arg) in TARGETS {
+            assert!(
+                parent.starts_with(r"Software\Classes\"),
+                "{parent} must be HKCU-relative"
+            );
+            if parent.contains("Background") {
+                assert_eq!(arg, "%V", "folder background expands %V, not %1");
+            } else {
+                assert_eq!(arg, "%1");
+            }
+        }
     }
-  }
 
-  /// The command string has to survive a path with spaces ("C:\Program Files\"),
-  /// which means both the exe and the placeholder need their own quotes.
-  #[test]
-  fn command_string_quotes_both_parts() {
-    let exe = r"C:\Program Files\GitWyrm\GitWyrm.exe";
-    let command = format!("\"{exe}\" \"{}\"", "%1");
-    assert_eq!(
-      command,
-      r#""C:\Program Files\GitWyrm\GitWyrm.exe" "%1""#
-    );
-  }
+    /// The command string has to survive a path with spaces ("C:\Program Files\"),
+    /// which means both the exe and the placeholder need their own quotes.
+    #[test]
+    fn command_string_quotes_both_parts() {
+        let exe = r"C:\Program Files\GitWyrm\GitWyrm.exe";
+        let command = format!("\"{exe}\" \"{}\"", "%1");
+        assert_eq!(command, r#""C:\Program Files\GitWyrm\GitWyrm.exe" "%1""#);
+    }
 }

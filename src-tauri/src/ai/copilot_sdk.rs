@@ -39,7 +39,7 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(90);
 /// Starts the bundled CLI. Each call spawns a subprocess, so callers should
 /// reuse the returned client for the whole operation and stop it afterwards.
 async fn start() -> Result<Client, AppError> {
-  Client::start(ClientOptions::default()).await.map_err(|e| {
+    Client::start(ClientOptions::default()).await.map_err(|e| {
     log::error!("copilot sdk: could not start the Copilot CLI: {e}");
     AppError::Other(format!(
       "Could not start GitHub Copilot. Make sure you are signed in to Copilot, then try again. ({e})"
@@ -52,38 +52,38 @@ async fn start() -> Result<Client, AppError> {
 /// `list()` without a token returns only the `auto` pseudo-model; the real
 /// per-user entitlements need the GitHub token passed explicitly.
 pub async fn list_models(github_token: &str) -> Result<Vec<CatalogModel>, AppError> {
-  let client = start().await?;
-  let result = client
-    .rpc()
-    .models()
-    .list_with_params(ModelsListRequest {
-      git_hub_token: Some(github_token.to_string()),
-    })
-    .await;
-  client.stop().await.ok();
+    let client = start().await?;
+    let result = client
+        .rpc()
+        .models()
+        .list_with_params(ModelsListRequest {
+            git_hub_token: Some(github_token.to_string()),
+        })
+        .await;
+    client.stop().await.ok();
 
-  let list = result.map_err(|e| {
-    log::error!("copilot sdk: model list failed: {e}");
-    AppError::Other(format!("Could not read your Copilot models: {e}"))
-  })?;
+    let list = result.map_err(|e| {
+        log::error!("copilot sdk: model list failed: {e}");
+        AppError::Other(format!("Could not read your Copilot models: {e}"))
+    })?;
 
-  let models: Vec<CatalogModel> = list
-    .models
-    .into_iter()
-    // `auto` lets Copilot choose, which is a reasonable default but reads as a
-    // model name in a picker. Keep it -- it is genuinely selectable -- but it
-    // sorts first below so it reads as the default rather than an odd entry.
-    .map(|m| CatalogModel {
-      // Everything this endpoint returns is already entitled, unlike the raw
-      // HTTP list where entries come back disabled.
-      enabled: true,
-      id: m.id,
-      name: m.name,
-    })
-    .collect();
+    let models: Vec<CatalogModel> = list
+        .models
+        .into_iter()
+        // `auto` lets Copilot choose, which is a reasonable default but reads as a
+        // model name in a picker. Keep it -- it is genuinely selectable -- but it
+        // sorts first below so it reads as the default rather than an odd entry.
+        .map(|m| CatalogModel {
+            // Everything this endpoint returns is already entitled, unlike the raw
+            // HTTP list where entries come back disabled.
+            enabled: true,
+            id: m.id,
+            name: m.name,
+        })
+        .collect();
 
-  log::info!("copilot sdk: {} models available", models.len());
-  Ok(models)
+    log::info!("copilot sdk: {} models available", models.len());
+    Ok(models)
 }
 
 /// One-shot prompt. Returns the assistant's text.
@@ -91,111 +91,118 @@ pub async fn list_models(github_token: &str) -> Result<Vec<CatalogModel>, AppErr
 /// The permission handler rejects everything: generating a commit message is a
 /// pure text transform and the agent has no business reading or writing files.
 pub async fn complete(
-  github_token: &str,
-  model: &str,
-  system: &str,
-  user: &str,
+    github_token: &str,
+    model: &str,
+    system: &str,
+    user: &str,
 ) -> Result<String, AppError> {
-  let client = start().await?;
+    let client = start().await?;
 
-  let mut config = SessionConfig::default()
-    .with_permission_handler(Arc::new(DenyAllHandler))
-    .with_github_token(github_token);
-  // `auto` means "let Copilot decide", which is what omitting the model does.
-  if !model.is_empty() && model != "auto" {
-    config = config.with_model(model);
-  }
-
-  let session = match client.create_session(config).await {
-    Ok(session) => session,
-    Err(e) => {
-      client.stop().await.ok();
-      log::error!("copilot sdk: could not create a session: {e}");
-      return Err(AppError::Other(format!("Could not start a Copilot session: {e}")));
+    let mut config = SessionConfig::default()
+        .with_permission_handler(Arc::new(DenyAllHandler))
+        .with_github_token(github_token);
+    // `auto` means "let Copilot decide", which is what omitting the model does.
+    if !model.is_empty() && model != "auto" {
+        config = config.with_model(model);
     }
-  };
 
-  // The SDK has no separate system-prompt slot, so the instruction is folded
-  // into the message ahead of the payload.
-  let prompt = format!("{system}\n\n{user}");
-  let result = session
-    .send_and_wait(MessageOptions::new(prompt).with_wait_timeout(SEND_TIMEOUT))
-    .await;
+    let session = match client.create_session(config).await {
+        Ok(session) => session,
+        Err(e) => {
+            client.stop().await.ok();
+            log::error!("copilot sdk: could not create a session: {e}");
+            return Err(AppError::Other(format!(
+                "Could not start a Copilot session: {e}"
+            )));
+        }
+    };
 
-  session.disconnect().await.ok();
-  client.stop().await.ok();
+    // The SDK has no separate system-prompt slot, so the instruction is folded
+    // into the message ahead of the payload.
+    let prompt = format!("{system}\n\n{user}");
+    let result = session
+        .send_and_wait(MessageOptions::new(prompt).with_wait_timeout(SEND_TIMEOUT))
+        .await;
 
-  let event = result
-    .map_err(|e| {
-      log::error!("copilot sdk: request failed: {e}");
-      AppError::Other(format!("Copilot could not answer: {e}"))
-    })?
-    .ok_or_else(|| {
-      log::error!("copilot sdk: request finished with no reply");
-      AppError::Other(
-        "Copilot finished without replying. No changes were made -- try again.".into(),
-      )
-    })?;
+    session.disconnect().await.ok();
+    client.stop().await.ok();
 
-  let text = event
-    .data
-    .get("content")
-    .and_then(|c| c.as_str())
-    .unwrap_or_default()
-    .trim()
-    .to_string();
+    let event = result
+        .map_err(|e| {
+            log::error!("copilot sdk: request failed: {e}");
+            AppError::Other(format!("Copilot could not answer: {e}"))
+        })?
+        .ok_or_else(|| {
+            log::error!("copilot sdk: request finished with no reply");
+            AppError::Other(
+                "Copilot finished without replying. No changes were made -- try again.".into(),
+            )
+        })?;
 
-  if text.is_empty() {
-    log::error!(
-      "copilot sdk: reply had no text (event_type={})",
-      event.event_type
-    );
-    return Err(AppError::Other(
-      "Copilot replied with nothing. No changes were made -- try again.".into(),
-    ));
-  }
-  Ok(text)
+    let text = event
+        .data
+        .get("content")
+        .and_then(|c| c.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    if text.is_empty() {
+        log::error!(
+            "copilot sdk: reply had no text (event_type={})",
+            event.event_type
+        );
+        return Err(AppError::Other(
+            "Copilot replied with nothing. No changes were made -- try again.".into(),
+        ));
+    }
+    Ok(text)
 }
 
 #[cfg(test)]
 mod tests {
-  /// Live check against the signed-in Copilot account. Ignored by default so
-  /// CI and offline machines are not gated on a network round-trip; run with
-  /// `cargo test --lib copilot_sdk -- --ignored --nocapture`.
-  #[test]
-  #[ignore]
-  fn lists_models_and_answers_a_prompt() {
-    tauri::async_runtime::block_on(run());
-  }
-
-  async fn run() {
-    let raw = std::fs::read_to_string(
-      dirs_next_home().join("AppData/Roaming/dev.gitwyrm.app/auth.json"),
-    )
-    .expect("auth.json");
-    let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    let token = v["github-copilot"]["refresh"].as_str().expect("copilot token");
-
-    let models = super::list_models(token).await.expect("model list");
-    println!("models = {}", models.len());
-    for m in &models {
-      println!("  {} | {}", m.id, m.name);
+    /// Live check against the signed-in Copilot account. Ignored by default so
+    /// CI and offline machines are not gated on a network round-trip; run with
+    /// `cargo test --lib copilot_sdk -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn lists_models_and_answers_a_prompt() {
+        tauri::async_runtime::block_on(run());
     }
-    assert!(models.len() > 1, "expected more than the `auto` pseudo-model");
 
-    let text = super::complete(
-      token,
-      "claude-haiku-4.5",
-      "Reply with exactly one word.",
-      "Say PONG.",
-    )
-    .await
-    .expect("completion");
-    println!("reply = {text:?}");
-    assert!(!text.is_empty());
-  }
+    async fn run() {
+        let raw = std::fs::read_to_string(
+            dirs_next_home().join("AppData/Roaming/dev.gitwyrm.app/auth.json"),
+        )
+        .expect("auth.json");
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let token = v["github-copilot"]["refresh"]
+            .as_str()
+            .expect("copilot token");
 
-  fn dirs_next_home() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var("USERPROFILE").expect("USERPROFILE"))
-  }
+        let models = super::list_models(token).await.expect("model list");
+        println!("models = {}", models.len());
+        for m in &models {
+            println!("  {} | {}", m.id, m.name);
+        }
+        assert!(
+            models.len() > 1,
+            "expected more than the `auto` pseudo-model"
+        );
+
+        let text = super::complete(
+            token,
+            "claude-haiku-4.5",
+            "Reply with exactly one word.",
+            "Say PONG.",
+        )
+        .await
+        .expect("completion");
+        println!("reply = {text:?}");
+        assert!(!text.is_empty());
+    }
+
+    fn dirs_next_home() -> std::path::PathBuf {
+        std::path::PathBuf::from(std::env::var("USERPROFILE").expect("USERPROFILE"))
+    }
 }

@@ -25,17 +25,17 @@ Do not use markdown, code fences, bullet lists, or any commentary outside the co
 itself.";
 
 pub fn default_instruction() -> String {
-  DEFAULT_INSTRUCTION.to_string()
+    DEFAULT_INSTRUCTION.to_string()
 }
 
 /// Combines the user's instruction (or the default when blank) with the fixed
 /// format contract into the full system prompt.
 pub fn build_system(user_instruction: &str) -> String {
-  let instruction = user_instruction.trim();
-  let instruction = if instruction.is_empty() {
-    DEFAULT_INSTRUCTION
-  } else {
-    instruction
-  };
-  format!("{instruction}\n\n{FORMAT_CONTRACT}")
+    let instruction = user_instruction.trim();
+    let instruction = if instruction.is_empty() {
+        DEFAULT_INSTRUCTION
+    } else {
+        instruction
+    };
+    format!("{instruction}\n\n{FORMAT_CONTRACT}")
 }

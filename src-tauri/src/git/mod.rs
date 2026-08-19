@@ -1,8 +1,8 @@
 pub mod bundled;
 pub mod commit_write;
 pub mod graph;
-pub mod identity;
 pub mod history;
+pub mod identity;
 pub mod merge_ops;
 pub mod profiles;
 pub mod refs;
