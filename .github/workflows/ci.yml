@@ -1,27 +1,49 @@
-name: CI
+name: PR
 
-# Typecheck, test and build every pull request.
+# Everything that runs on a pull request: typecheck, test, build every package,
+# and decide whether a Dependabot bump may merge unseen.
 #
-# This exists because auto-merging Dependabot PRs needs something to gate on:
-# without a required check, "merge when green" merges anything that is merely
-# not-red, which for an unchecked repo is everything. The auto-merge workflow
-# waits on these jobs by name.
+# The build jobs exist because auto-merging Dependabot PRs needs something to
+# gate on: without a required check, "merge when green" merges anything that is
+# merely not-red, which for an unchecked repo is everything. Auto-merge waits on
+# these jobs by name, so they live in the same file as the thing that waits.
 #
 # CI does not sign or publish. It does build all three Linux package formats so
 # every PR has installable artifacts for the desktop test matrix.
+#
+# ---------------------------------------------------------------------------
+# TWO TRIGGERS, ON PURPOSE. Do not collapse them.
+#
+# `pull_request` runs PR-authored code (npm ci, build scripts, cargo test) and
+# therefore gets a read-only token and no secrets. `pull_request_target` runs
+# against the BASE repo with a write-capable token, which is the only way to
+# approve and queue a merge - and is why the job using it never checks out the
+# PR. Giving the build jobs pull_request_target, or checking out PR code in
+# auto-merge, turns any pull request into repo write access.
+#
+# Every job below therefore pins its own `if:` to the event it is safe under.
+# ---------------------------------------------------------------------------
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+# Least privilege by default. The auto-merge job opts up; nothing else may.
+permissions:
+  contents: read
 
 concurrency:
   # A new push supersedes the old run: nobody needs the results of the commit
-  # that was just replaced.
-  group: ci-${{ github.ref }}
+  # that was just replaced. Keyed by event too, so the pull_request and
+  # pull_request_target runs of one PR never cancel each other.
+  group: pr-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   frontend:
     name: Frontend
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -49,6 +71,7 @@ jobs:
 
   rust:
     name: Backend
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -81,6 +104,7 @@ jobs:
   # matrix: AppImage, deb and rpm all come from the exact commit under review.
   linux-bundle:
     name: Linux bundle
+    if: github.event_name == 'pull_request'
     # Match production's oldest supported build host. Building on a newer glibc
     # can produce packages that will not start on Mint 21 / Ubuntu 22.04.
     runs-on: ubuntu-22.04
@@ -140,6 +164,7 @@ jobs:
   # checked on the Linux runner above.
   bootstrapper:
     name: Update-cover helper
+    if: github.event_name == 'pull_request'
     runs-on: windows-latest
     permissions:
       contents: read
@@ -155,3 +180,120 @@ jobs:
 
       - name: Test
         run: cargo test --manifest-path src-tauri/bootstrapper/Cargo.toml
+
+  # Approves and enables auto-merge on Dependabot PRs.
+  #
+  # `gh pr merge --auto` does NOT merge immediately: it queues the PR to merge
+  # once every required check passes, which is what makes this safe. The gate is
+  # branch protection, not this job - if `main` has no required checks, a queued
+  # PR merges as soon as it is mergeable, checks or not. See the note at the
+  # bottom.
+  #
+  # Dependabot rebases its own PRs automatically when main moves (rebase-strategy
+  # defaults to `auto`), so a queued PR that falls behind is updated and
+  # re-checked without anyone touching it.
+  auto-merge:
+    name: Dependabot auto-merge
+    # pull_request_target runs with write access against the BASE repo, so it
+    # must never run for anything but Dependabot's own branches - and must never
+    # check out or execute the PR's code. It does neither: every step below acts
+    # on PR metadata through the API only.
+    if: github.event_name == 'pull_request_target' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Read the update metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Decide whether this bump is safe to merge unseen.
+      #
+      # `update-type` alone is not enough. Under semver, 0.10 -> 0.11 is a
+      # semver-MINOR bump, but for a 0.x crate that is exactly where breaking
+      # changes are allowed to live - and this repo has the scar: sha2
+      # 0.10 -> 0.11 auto-merged, dropped the LowerHex impl the hashing code
+      # relied on, and broke the build. winreg, windows, png and sysinfo landed
+      # the same way in the same hour.
+      #
+      # So a bump is held whenever it is a real major OR the leading version
+      # component is 0 and that component or the minor changed.
+      - name: Decide if this can merge unseen
+        id: gate
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          PREV: ${{ steps.meta.outputs.previous-version }}
+          NEW: ${{ steps.meta.outputs.new-version }}
+        run: |
+          set -euo pipefail
+          hold=false
+
+          if [ "$UPDATE_TYPE" = "version-update:semver-major" ]; then
+            hold=true
+            reason="a major version bump"
+          else
+            # Compare major.minor. A 0.x crate that changes either is treated as
+            # breaking regardless of what semver calls it.
+            prev_major="${PREV%%.*}"
+            new_major="${NEW%%.*}"
+            prev_minor="$(printf '%s' "$PREV" | cut -d. -f2)"
+            new_minor="$(printf '%s' "$NEW" | cut -d. -f2)"
+            if [ "$prev_major" = "0" ] && [ "$new_major" = "0" ]                && [ "$prev_minor" != "$new_minor" ]; then
+              hold=true
+              reason="a 0.x minor bump ($PREV -> $NEW), where breaking changes are allowed"
+            fi
+          fi
+
+          echo "hold=$hold" >> "$GITHUB_OUTPUT"
+          echo "reason=${reason:-}" >> "$GITHUB_OUTPUT"
+          echo "hold=$hold ${reason:-(safe)}"
+
+      # Majors are held back deliberately. This repo's own history is the
+      # argument: TypeScript 5->7, Vite 7->8 and Stripe 17->22 were all offered
+      # at once, and none of them is a change anyone should merge unseen.
+      #
+      # A green typecheck does not prove a major is safe either - it proves the
+      # types still line up, not that behaviour did.
+      - name: Approve
+        if: steps.gate.outputs.hold != 'true'
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge
+        if: steps.gate.outputs.hold != 'true'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # A major still gets a PR, just not an automatic merge. Labelled so it is
+      # obvious at a glance which ones are waiting on a person.
+      - name: Flag majors for review
+        if: steps.gate.outputs.hold == 'true'
+        run: |
+          gh pr edit "$PR_URL" --add-label "needs-review" 2>/dev/null || true
+          gh pr comment "$PR_URL" --body \
+            "Held for manual review: this is ${{ steps.gate.outputs.reason }} (\`${{ steps.meta.outputs.dependency-names }}\`). Auto-merge covers patch bumps, and minor bumps on 1.0+ packages."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# ---------------------------------------------------------------------------
+# REQUIRED SETUP, once, in the repo settings:
+#
+#   1. Settings > General > Pull Requests > "Allow auto-merge"
+#      Without this, `gh pr merge --auto` fails outright.
+#
+#   2. Settings > Branches > branch protection for `main`:
+#      require status checks, and select the build jobs
+#      ("Frontend", "Backend", "Linux bundle", "Update-cover helper").
+#
+# Step 2 is the part that actually makes this safe. Auto-merge waits for
+# REQUIRED checks; with none configured there is nothing to wait for and every
+# queued PR merges straight away.
+# ---------------------------------------------------------------------------
