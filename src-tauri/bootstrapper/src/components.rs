@@ -349,14 +349,10 @@ pub fn install(
         let exe = std::env::temp_dir().join(format!("gitwyrm-{}-{}.exe", component.name, std::process::id()));
         std::fs::write(&exe, &bytes).map_err(|e| format!("cannot write installer: {e}"))?;
 
-        log(&format!(
-            "Running {} {}",
-            exe.display(),
-            component.args.join(" ")
-        ));
-        let status = std::process::Command::new(&exe)
-            .args(&component.args)
-            .status()
+        // Shares the app installer's retry: a component installer is written
+        // to disk and run just as immediately, so antivirus can hold it open
+        // for the same second or two.
+        let status = crate::run_installer(&exe, &component.args)
             .map_err(|e| format!("could not run {}: {e}", component.name))?;
         let _ = std::fs::remove_file(&exe);
 

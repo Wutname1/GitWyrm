@@ -265,8 +265,7 @@ fn run_silent(rx: mpsc::Receiver<DownloadMsg>, opts: &Options) -> i32 {
         return EXIT_INSTALLER_FAILED;
     }
 
-    log(&format!("Running installer: {} /S", installer.display()));
-    let status = std::process::Command::new(&installer).arg("/S").status();
+    let status = run_installer(&installer, &["/S"]);
     let _ = std::fs::remove_file(&installer);
 
     match status {
@@ -282,6 +281,64 @@ fn run_silent(rx: mpsc::Receiver<DownloadMsg>, opts: &Options) -> i32 {
         Err(e) => {
             log(&format!("ERROR: Failed to run installer: {}", e));
             EXIT_INSTALLER_FAILED
+        }
+    }
+}
+
+/// True when Windows refused to touch a file because something else has it
+/// open: `ERROR_SHARING_VIOLATION`, or the `ERROR_ACCESS_DENIED` a scanner
+/// holding the same file reports instead.
+pub fn is_file_locked(e: &std::io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(32) | Some(5))
+}
+
+/// Start an installer, waiting out the moment where the file it was just
+/// downloaded into still counts as in use.
+///
+/// A freshly written .exe is locked twice over. Windows will not start an
+/// executable while any writable handle to it is open, and antivirus opens
+/// every new .exe to scan it the instant it lands - and the second one is
+/// nobody's handle to close. Both report the same "the process cannot access
+/// the file because it is being used by another process", and both clear on
+/// their own within a second or two, so setup waits rather than telling the
+/// user it failed.
+pub fn run_installer<S: AsRef<std::ffi::OsStr>>(
+    path: &std::path::Path,
+    args: &[S],
+) -> std::io::Result<std::process::ExitStatus> {
+    /// Roughly eight seconds of waiting in total, which covers an on-access
+    /// scan of an installer-sized file. Past that the lock is something setup
+    /// cannot wait out, and saying so beats hanging on the progress bar.
+    const ATTEMPTS: u32 = 8;
+    const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+    let shown = args
+        .iter()
+        .map(|a| a.as_ref().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    log(&format!("Running installer: {} {}", path.display(), shown));
+
+    let mut attempt = 1;
+    let mut wait = std::time::Duration::from_millis(150);
+
+    loop {
+        match std::process::Command::new(path).args(args).status() {
+            Ok(status) => return Ok(status),
+            Err(e) if attempt < ATTEMPTS && is_file_locked(&e) => {
+                log(&format!(
+                    "{} is still in use ({}); retrying in {} ms (attempt {} of {})",
+                    path.display(),
+                    e,
+                    wait.as_millis(),
+                    attempt,
+                    ATTEMPTS,
+                ));
+                std::thread::sleep(wait);
+                wait = (wait * 2).min(MAX_WAIT);
+                attempt += 1;
+            }
+            Err(e) => return Err(e),
         }
     }
 }
@@ -413,6 +470,58 @@ fn download_installer(tx: mpsc::Sender<DownloadMsg>) {
         }
     }
 
+    // Closed here rather than left to the end of this function: the window
+    // starts the installer the moment it sees `Done`, and Windows refuses to
+    // start an executable while a writable handle to it is still open. Leaving
+    // the drop implicit made that a race the download usually lost.
+    if let Err(e) = file.flush() {
+        let _ = tx.send(DownloadMsg::Error(format!("Write error: {}", e)));
+        return;
+    }
+    drop(file);
+
     let _ = tx.send(DownloadMsg::Progress(downloaded, total_size));
     let _ = tx.send(DownloadMsg::Done(dest));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_still_in_use_is_worth_waiting_out() {
+        // 32 is ERROR_SHARING_VIOLATION, the one the download handle and an
+        // antivirus scan both produce; 5 is the ERROR_ACCESS_DENIED some
+        // scanners report for the same file instead.
+        let sharing = std::io::Error::from_raw_os_error(32);
+        let denied = std::io::Error::from_raw_os_error(5);
+        assert!(is_file_locked(&sharing));
+        assert!(is_file_locked(&denied));
+    }
+
+    #[test]
+    fn a_real_failure_is_not_mistaken_for_a_lock() {
+        // 2 is ERROR_FILE_NOT_FOUND and 216 is a bad image format. Waiting does
+        // not fix either, so neither may spend the retry budget.
+        assert!(!is_file_locked(&std::io::Error::from_raw_os_error(2)));
+        assert!(!is_file_locked(&std::io::Error::from_raw_os_error(216)));
+    }
+
+    #[test]
+    fn a_missing_installer_fails_without_retrying() {
+        // The retry exists for a lock that clears itself. Anything else must
+        // surface at once rather than leaving the progress bar sitting there.
+        let missing = std::env::temp_dir().join("gitwyrm-no-such-installer.exe");
+        let _ = std::fs::remove_file(&missing);
+
+        let started = std::time::Instant::now();
+        let result = run_installer(&missing, &["/S"]);
+
+        assert!(result.is_err(), "a missing installer cannot have run");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "took {:?}, so it retried something it should not have",
+            started.elapsed()
+        );
+    }
 }

@@ -541,8 +541,7 @@ fn run_silent_install(path: std::path::PathBuf, tx: Sender<DownloadMsg>, dry_run
             return;
         }
 
-        crate::log(&format!("Running installer: {} /S", path.display()));
-        match std::process::Command::new(&path).arg("/S").status() {
+        match crate::run_installer(&path, &["/S"]) {
             Ok(status) => {
                 crate::log(&format!("Installer exited with code: {:?}", status.code()));
                 let _ = std::fs::remove_file(&path);
@@ -556,8 +555,15 @@ fn run_silent_install(path: std::path::PathBuf, tx: Sender<DownloadMsg>, dry_run
                 }
             }
             Err(e) => {
-                let msg = format!("Failed to run installer: {}", e);
-                crate::log(&format!("ERROR: {}", msg));
+                crate::log(&format!("ERROR: Failed to run installer: {}", e));
+                // The lock has already been waited out and is still there, so
+                // the raw Windows wording would only name a process the user
+                // cannot see. Say what to do about it instead.
+                let msg = if crate::is_file_locked(&e) {
+                    "Another program on this PC is holding the setup file open, so it could not start. Antivirus software is the usual reason. Wait a moment and run setup again.".to_string()
+                } else {
+                    format!("Setup could not start the installer: {}", e)
+                };
                 let _ = tx.send(DownloadMsg::Error(msg));
             }
         }
