@@ -1,6 +1,9 @@
 use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
+use std::panic::Location;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, LockResult, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use git2::{Oid, Repository};
 
@@ -9,11 +12,133 @@ use crate::error::AppError;
 /// Files changed, insertions, deletions for one commit.
 pub type ChangeStats = (u32, u32, u32);
 
+/// A wait for the repository lock longer than this gets a log line. Brief
+/// queueing behind a status scan is normal; a wait past this means some caller
+/// is visibly stalled behind whatever holds the lock.
+const LOCK_WAIT_WARN: Duration = Duration::from_secs(1);
+
+/// A *hold* of the repository lock longer than this gets a log line naming the
+/// call site. Sentry showed episodes where reads across every tab queued for
+/// minutes with near-identical durations -- the queueing signature -- but
+/// nothing recorded what was holding the lock. This is that record.
+const LOCK_HOLD_WARN: Duration = Duration::from_secs(5);
+
+/// The repository mutex, instrumented so stalls name their culprit.
+///
+/// `lock()` behaves exactly like `Mutex<Repository>::lock()` -- same
+/// `LockResult`, a guard that derefs to [`Repository`] -- so the many call
+/// sites did not change. What it adds: the wait for the lock is timed, a long
+/// wait is logged together with the call site it waited *behind*, and a long
+/// hold is logged by the holder when it releases. `#[track_caller]` supplies
+/// the call sites, so nothing threads names around by hand.
+pub struct RepoLock {
+    inner: Mutex<Repository>,
+    /// Call site and acquisition time of the current holder; None when free.
+    /// Only ever locked briefly, and never while waiting on `inner`.
+    holder: Mutex<Option<(&'static Location<'static>, Instant)>>,
+}
+
+impl RepoLock {
+    pub fn new(repo: Repository) -> Self {
+        Self {
+            inner: Mutex::new(repo),
+            holder: Mutex::new(None),
+        }
+    }
+
+    #[track_caller]
+    pub fn lock(&self) -> LockResult<RepoGuard<'_>> {
+        self.lock_at(Location::caller())
+    }
+
+    /// The lock body, attributed to `caller` rather than to this file --
+    /// [`OpenRepo::coalesced_read`] forwards its own caller through here so a
+    /// stall inside a coalesced read still names the command that asked.
+    fn lock_at(&self, caller: &'static Location<'static>) -> LockResult<RepoGuard<'_>> {
+        // Snapshot who holds the lock as the wait begins. If the wait turns out
+        // long, this is the operation the time was spent behind.
+        let behind = *self.holder.lock().unwrap_or_else(|e| e.into_inner());
+        let wait_started = Instant::now();
+        let result = self.inner.lock();
+        let waited = wait_started.elapsed();
+        if waited >= LOCK_WAIT_WARN {
+            match behind {
+                Some((held_by, since)) => log::warn!(
+                    "{caller}: waited {}ms for the repository lock, behind {held_by} (which had held it for {}ms already)",
+                    waited.as_millis(),
+                    wait_started.saturating_duration_since(since).as_millis(),
+                ),
+                None => log::warn!(
+                    "{caller}: waited {}ms for the repository lock",
+                    waited.as_millis()
+                ),
+            }
+        }
+
+        match result {
+            Ok(guard) => Ok(self.wrap(caller, guard)),
+            Err(poisoned) => Err(PoisonError::new(self.wrap(caller, poisoned.into_inner()))),
+        }
+    }
+
+    /// Record `caller` as the holder and hand back the timing guard.
+    fn wrap<'a>(
+        &'a self,
+        caller: &'static Location<'static>,
+        guard: MutexGuard<'a, Repository>,
+    ) -> RepoGuard<'a> {
+        *self.holder.lock().unwrap_or_else(|e| e.into_inner()) = Some((caller, Instant::now()));
+        RepoGuard {
+            lock: self,
+            caller,
+            acquired: Instant::now(),
+            guard,
+        }
+    }
+}
+
+/// Guard for [`RepoLock`]; derefs to [`Repository`] so call sites read the
+/// same as with a plain `MutexGuard`.
+pub struct RepoGuard<'a> {
+    lock: &'a RepoLock,
+    caller: &'static Location<'static>,
+    acquired: Instant,
+    guard: MutexGuard<'a, Repository>,
+}
+
+impl Deref for RepoGuard<'_> {
+    type Target = Repository;
+    fn deref(&self) -> &Repository {
+        &self.guard
+    }
+}
+
+impl DerefMut for RepoGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Repository {
+        &mut self.guard
+    }
+}
+
+impl Drop for RepoGuard<'_> {
+    fn drop(&mut self) {
+        let held = self.acquired.elapsed();
+        if held >= LOCK_HOLD_WARN {
+            log::warn!(
+                "{}: held the repository lock for {}ms",
+                self.caller,
+                held.as_millis()
+            );
+        }
+        *self.lock.holder.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        // `guard` drops after this body, releasing the mutex itself.
+    }
+}
+
 /// One open repository. git2::Repository is !Sync, so all access goes through
 /// the mutex and runs inside spawn_blocking.
 pub struct OpenRepo {
     pub path: PathBuf,
-    pub repo: Mutex<Repository>,
+    pub repo: RepoLock,
     /// Memoized per-commit diff stats, keyed by commit id.
     ///
     /// Computing them is the dominant cost of building a log page: every commit
@@ -56,7 +181,7 @@ impl OpenRepo {
     pub fn for_test(repo: Repository) -> Self {
         Self {
             path: repo.workdir().expect("workdir").to_path_buf(),
-            repo: Mutex::new(repo),
+            repo: RepoLock::new(repo),
             commit_stats: Mutex::new(HashMap::new()),
             status_read: Mutex::new(None),
             counts_read: Mutex::new(None),
@@ -103,6 +228,7 @@ impl OpenRepo {
     /// Only for pure reads. Anything that mutates the repository must take the
     /// lock directly, since a caller here may receive a result computed slightly
     /// before it asked.
+    #[track_caller]
     pub fn coalesced_read<T, E>(
         &self,
         slot: &Mutex<Option<Arc<SharedRead<T, E>>>>,
@@ -112,6 +238,11 @@ impl OpenRepo {
         T: Clone,
         E: Clone,
     {
+        // The command's call site, not this file's: a stall in here should be
+        // logged as the read that asked (status, counts), which is what the
+        // lock instrumentation reports.
+        let caller = Location::caller();
+
         // Join the in-flight read if there is one, otherwise become it.
         let (shared, leader) = {
             let mut guard = slot.lock().unwrap();
@@ -126,12 +257,21 @@ impl OpenRepo {
         };
 
         if !leader {
+            let wait_started = Instant::now();
+            let published = shared.wait();
+            let waited = wait_started.elapsed();
+            if waited >= LOCK_WAIT_WARN {
+                log::warn!(
+                    "{caller}: waited {}ms for a shared repository read",
+                    waited.as_millis()
+                );
+            }
             // `None` means the leader gave up; fall through and read directly rather
             // than reporting a failure the repository never actually had.
-            if let Some(value) = shared.wait() {
+            if let Some(value) = published {
                 return value;
             }
-            let repo = self.repo.lock().unwrap_or_else(|e| e.into_inner());
+            let repo = self.repo.lock_at(caller).unwrap_or_else(|e| e.into_inner());
             return f(&repo);
         }
 
@@ -144,7 +284,7 @@ impl OpenRepo {
         };
 
         let result = {
-            let repo = self.repo.lock().unwrap_or_else(|e| e.into_inner());
+            let repo = self.repo.lock_at(caller).unwrap_or_else(|e| e.into_inner());
             f(&repo)
         };
         // Clear the slot before publishing so the next caller starts a fresh read
@@ -252,7 +392,7 @@ impl RepoManager {
 
         let open = Arc::new(OpenRepo {
             path: workdir,
-            repo: Mutex::new(repo),
+            repo: RepoLock::new(repo),
             commit_stats: Mutex::new(HashMap::new()),
             status_read: Mutex::new(None),
             counts_read: Mutex::new(None),
@@ -307,6 +447,34 @@ mod tests {
         let repo = Repository::init(dir.path()).expect("repo");
         let open = OpenRepo::for_test(repo);
         (dir, open)
+    }
+
+    /// The instrumented lock must behave exactly like the plain mutex it
+    /// replaced: deref to the repository, and hand back a usable guard through
+    /// `into_inner` after a holder panicked.
+    #[test]
+    fn repo_lock_derefs_and_recovers_from_poison() {
+        let (_dir, open) = temp_repo();
+
+        {
+            let repo = open.repo.lock().unwrap();
+            assert!(repo.workdir().is_some(), "guard derefs to the repository");
+        }
+
+        // Poison it: panic while holding the guard.
+        let poisoned = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let _repo = open.repo.lock().unwrap();
+                    panic!("holder blew up");
+                })
+                .join()
+        });
+        assert!(poisoned.is_err(), "the holder should have panicked");
+
+        // The recovery path every internal caller uses still works.
+        let repo = open.repo.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(repo.workdir().is_some(), "poison recovery yields the guard");
     }
 
     /// The point of coalescing: tabs asking at the same time share one scan
