@@ -62,9 +62,6 @@ for key in "${!PLATFORMS[@]}"; do
     '. + {($key): {signature: $sig, url: $url}}' <<<"$platforms_json")
 done
 
-# Linux is optional, unlike the Windows arches above: it is the newest leg, and a
-# failure there must not hold back the beta for everyone on Windows.
-#
 # Three keys, one per package format. The updater asks for
 # `{os}-{arch}-{installer}` and only then falls back to `{os}-{arch}`, so a lone
 # linux-x86_64 entry would hand the AppImage to someone running the .deb - and
@@ -83,20 +80,20 @@ for key in "${!LINUX_ARTIFACTS[@]}"; do
   artifact="betas/${VERSION}/${LINUX_ARTIFACTS[$key]}"
 
   if ! aws s3 ls "s3://${BUCKET}/${artifact}" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
-    echo "::warning::No ${artifact} - Linux ${key} clients will not be offered this beta."
-    continue
+    echo "::error::Missing ${artifact} - refusing to move the beta pointer."
+    exit 1
   fi
 
   if ! aws s3 cp "s3://${BUCKET}/${artifact}.sig" "$workdir/sig-${key}" \
        --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
-    echo "::warning::No signature for ${artifact} - leaving ${key} out of the beta manifest."
-    continue
+    echo "::error::Missing signature for ${artifact} - refusing to move the beta pointer."
+    exit 1
   fi
 
   linux_sig=$(tr -d '\r\n' < "$workdir/sig-${key}")
   if [ -z "$linux_sig" ]; then
-    echo "::warning::Empty signature for ${artifact} - leaving ${key} out of the beta manifest."
-    continue
+    echo "::error::Empty signature for ${artifact}"
+    exit 1
   fi
 
   platforms_json=$(jq -c \
@@ -131,6 +128,14 @@ for suffix in "" "-ARM64"; do
   aws s3 cp \
     "s3://${BUCKET}/betas/${VERSION}/GitWyrm-Setup${suffix}.exe" \
     "s3://${BUCKET}/betas/GitWyrm-Setup-Beta${suffix}.exe" \
+    --endpoint-url "$R2_ENDPOINT" \
+    --cache-control "no-cache, no-store"
+done
+
+for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb GitWyrm-x86_64.rpm; do
+  aws s3 cp \
+    "s3://${BUCKET}/betas/${VERSION}/${file}" \
+    "s3://${BUCKET}/betas/${file}" \
     --endpoint-url "$R2_ENDPOINT" \
     --cache-control "no-cache, no-store"
 done

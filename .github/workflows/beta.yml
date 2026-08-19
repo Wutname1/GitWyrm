@@ -8,18 +8,19 @@ name: Auto Beta
 # and the signed manifest the updater reads -- lives on the CDN, so the repo
 # stays clean and cleanup is a single prefix delete.
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-    # Pushes that cannot change what a user runs do not deserve a 20-minute
-    # two-arch Windows build. paths-ignore is a negative filter: a push that
+    # Pushes that cannot change what a user runs do not deserve a full
+    # production-target build. Workflow and release-script changes are not
+    # ignored: they need to exercise this pipeline before the next release.
+    # paths-ignore is a negative filter: a push that
     # touches ANY file outside this list still builds.
     paths-ignore:
       - "docs/**"
       - "openspec/**"
       - "**/*.md"
-      - ".github/workflows/**"
-      - ".github/scripts/**"
 
 concurrency:
   # Serialised, not cancelled: two pushes in quick succession must not race to
@@ -99,16 +100,24 @@ jobs:
       matrix:
         include:
           - arch: x86_64
+            os: windows-latest
             rust_target: x86_64-pc-windows-msvc
             tauri_args: ""
             bundle_base: src-tauri/target/release/bundle
             cdn_suffix: ""
           - arch: aarch64
+            os: windows-latest
             rust_target: aarch64-pc-windows-msvc
             tauri_args: "--target aarch64-pc-windows-msvc"
             bundle_base: src-tauri/target/aarch64-pc-windows-msvc/release/bundle
             cdn_suffix: "-ARM64"
-    runs-on: windows-latest
+          - arch: x86_64-linux
+            os: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            tauri_args: "--config src-tauri/tauri.linux.conf.json"
+            bundle_base: src-tauri/target/release/bundle
+            cdn_suffix: ""
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v7
@@ -132,6 +141,7 @@ jobs:
       # forever. Mirrors the release workflow's step; there is no tag to read
       # the version from here, so it comes from the version job.
       - name: Sync version
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           VERSION: ${{ needs.version.outputs.version }}
@@ -164,14 +174,50 @@ jobs:
 
           npm version $version --no-git-tag-version --allow-same-version
 
+      - name: Sync version (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          version="$VERSION"
+          tmp=$(mktemp)
+
+          jq --arg v "$version" '.version = $v' src-tauri/tauri.conf.json > "$tmp"
+          mv "$tmp" src-tauri/tauri.conf.json
+
+          awk -v v="$version" '
+            !done && /^version[[:space:]]*=/ { print "version = \"" v "\""; done=1; next }
+            { print }
+          ' src-tauri/Cargo.toml > "$tmp"
+          mv "$tmp" src-tauri/Cargo.toml
+
+          if ! grep -qz 'name = "gitwyrm"\nversion = "[^"]*"' src-tauri/Cargo.lock; then
+            echo "::error::gitwyrm package entry not found in Cargo.lock"
+            exit 1
+          fi
+          perl -0pi -e 's/(name = "gitwyrm"\nversion = )"[^"]*"/$1"'"$version"'"/' \
+            src-tauri/Cargo.lock
+
+          npm version "$version" --no-git-tag-version --allow-same-version
+
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
 
       # The window that covers the gap between the old app exiting and the new
       # one starting. Betas update far more often than releases, so this is the
       # channel where its absence would be most obvious -- and where it gets
       # tested before a release depends on it.
       - name: Build the update cover helper
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           cargo build --release --target ${{ matrix.rust_target }} \
@@ -185,6 +231,7 @@ jobs:
       # re-extracts every file on every app update. The tools are published to
       # the CDN below and fetched by the bootstrapper instead.
       - name: Fetch git and gpg
+        if: runner.os == 'Windows'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -198,6 +245,7 @@ jobs:
       # tester on a clean machine would have no git at all -- the manifest the
       # app and bootstrapper both read would be missing or stale.
       - name: Publish the toolset to the CDN
+        if: runner.os == 'Windows'
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -211,7 +259,7 @@ jobs:
       # bundle but creates no GitHub release, which is the whole point here.
       # TAURI_SIGNING_PRIVATE_KEY still applies, so the .sig files a beta needs
       # are produced exactly as they are for a release.
-      - name: Build (NSIS + signatures)
+      - name: Build signed packages
         uses: tauri-apps/tauri-action@v1
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -221,6 +269,7 @@ jobs:
           args: ${{ matrix.tauri_args }}
 
       - name: Upload Rust debug symbols to Sentry
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -233,10 +282,20 @@ jobs:
           }
           npx @sentry/cli debug-files upload --include-sources "$dir"
 
+      - name: Upload Rust debug symbols to Sentry (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: nyxservices
+          SENTRY_PROJECT: gitwyrm-backend
+        run: npx @sentry/cli debug-files upload --include-sources src-tauri/target/release/gitwyrm
+
       # Installer plus its detached signature. The signature is what the updater
       # verifies before running anything, so it has to travel with the binary --
       # publish-beta-manifest.sh reads it back out to build beta.json.
       - name: Upload installer to CDN
+        if: runner.os == 'Windows'
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -269,10 +328,45 @@ jobs:
 
           echo "Uploaded GitWyrm-Setup${SUFFIX}.exe for ${VERSION}"
 
-  # Moves the beta channel pointer. Gated on the whole matrix so a leg that
-  # succeeds while the other fails cannot publish a manifest promising an
-  # installer that was never uploaded -- an ARM64 user would then update into a
-  # 404 and be left with nothing running.
+      - name: Upload Linux packages to CDN
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          pip install --quiet awscli
+
+          upload_signed() {
+            local pattern="$1" dest="$2" src
+            src=$(find "${{ matrix.bundle_base }}" -type f -name "$pattern" | head -1)
+            if [ -z "$src" ] || [ ! -f "$src" ]; then
+              echo "::error::No Linux package matching $pattern"
+              exit 1
+            fi
+            if [ ! -f "${src}.sig" ]; then
+              echo "::error::No signature beside $src; the updater would reject this build."
+              exit 1
+            fi
+            for file in "$src" "${src}.sig"; do
+              suffix=""
+              [ "$file" = "${src}.sig" ] && suffix=".sig"
+              aws s3 cp "$file" \
+                "s3://gitwyrm-cdn/betas/${VERSION}/${dest}${suffix}" \
+                --endpoint-url "$R2_ENDPOINT" \
+                --cache-control "public, max-age=31536000, immutable"
+            done
+          }
+
+          upload_signed '*.AppImage' 'GitWyrm-x86_64.AppImage'
+          upload_signed '*.deb' 'GitWyrm-amd64.deb'
+          upload_signed '*.rpm' 'GitWyrm-x86_64.rpm'
+
+  # Moves the beta channel pointer only after every production target is signed
+  # and uploaded. A partial beta is not published.
   publish:
     needs: [version, build]
     runs-on: ubuntu-latest
@@ -331,4 +425,6 @@ jobs:
             echo "Testers on the Beta channel get it at their next update check."
             echo
             echo "Fresh install: <https://cdn.gitwyrm.com/betas/GitWyrm-Setup-Beta.exe>"
+            echo
+            echo "Linux: <https://cdn.gitwyrm.com/betas/GitWyrm-x86_64.AppImage>"
           } >> "$GITHUB_STEP_SUMMARY"

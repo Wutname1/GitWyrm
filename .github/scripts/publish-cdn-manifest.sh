@@ -59,22 +59,30 @@ with open(path, encoding="utf-8") as fh:
 # newer ones prefer the qualified one, so both have to be rewritten -- dropping
 # either would leave half the clients pointed at a GitHub asset URL.
 #
-# The arch is therefore matched as a prefix, with the bundle suffix allowed to
-# follow. An unrecognised platform is still a hard error rather than a
+# Windows keys are matched with an optional installer suffix; Linux keys map
+# each package type explicitly. An unrecognised platform is still a hard error rather than a
 # pass-through, because a key silently left on its GitHub URL is the 0.0.3 bug
 # all over again.
-SUFFIX = {"windows-x86_64": "", "windows-aarch64": "-ARM64"}
+ARTIFACTS = {
+    "windows-x86_64": "GitWyrm-Setup.exe",
+    "windows-aarch64": "GitWyrm-Setup-ARM64.exe",
+    "linux-x86_64-appimage": "GitWyrm-x86_64.AppImage",
+    "linux-x86_64-deb": "GitWyrm-amd64.deb",
+    "linux-x86_64-rpm": "GitWyrm-x86_64.rpm",
+    # Older updater clients and unqualified Linux installs use the AppImage.
+    "linux-x86_64": "GitWyrm-x86_64.AppImage",
+}
 # Bundle types tauri may append. Anything else is unknown and must not be
 # guessed at: a new bundle type could well need a different installer name.
 BUNDLES = ("nsis", "msi")
 
 
 def arch_of(key):
-    """The SUFFIX entry for a platform key, or None if it names something else."""
-    if key in SUFFIX:
+    """The artifact mapping key for this updater platform, if supported."""
+    if key in ARTIFACTS:
         return key
     base, _, bundle = key.rpartition("-")
-    if bundle in BUNDLES and base in SUFFIX:
+    if bundle in BUNDLES and base in ARTIFACTS:
         return base
     return None
 
@@ -86,8 +94,8 @@ if not platforms:
 for key in platforms:
     arch = arch_of(key)
     if arch is None:
-        sys.exit(f"::error::unmapped platform '{key}' - add it to SUFFIX")
-    url = f"{cdn_base}/releases/{tag}/GitWyrm-Setup{SUFFIX[arch]}.exe"
+        sys.exit(f"::error::unmapped platform '{key}' - add it to ARTIFACTS")
+    url = f"{cdn_base}/releases/{tag}/{ARTIFACTS[arch]}"
     platforms[key]["url"] = url
     if not platforms[key].get("signature"):
         sys.exit(f"::error::platform '{key}' has no signature")
@@ -96,7 +104,14 @@ for key in platforms:
 # entirely would publish and quietly strand that architecture on the old
 # version, which no per-key check above can catch.
 covered = {arch_of(k) for k in platforms}
-missing = sorted(set(SUFFIX) - covered)
+required = {
+    "windows-x86_64",
+    "windows-aarch64",
+    "linux-x86_64-appimage",
+    "linux-x86_64-deb",
+    "linux-x86_64-rpm",
+}
+missing = sorted(required - covered)
 if missing:
     sys.exit(f"::error::manifest is missing {', '.join(missing)}")
 

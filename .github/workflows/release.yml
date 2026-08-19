@@ -303,10 +303,10 @@ jobs:
           # generated changelog before the release goes public, so whatever a
           # matrix leg writes here is never what users end up reading.
           releaseBody: "Release notes are generated when this release is published."
-          # Stays a draft here on purpose: both matrix legs share one release,
+          # Stays a draft here on purpose: every matrix leg shares one release,
           # and publishing from a leg would make it public before the other
-          # arch's installer is attached. The publish job below flips it once
-          # every leg has succeeded.
+          # platforms' packages are attached. The publish job below flips it
+          # only after every leg succeeds.
           releaseDraft: true
           prerelease: ${{ steps.channel.outputs.is_beta }}
           args: ${{ matrix.tauri_args }}
@@ -392,7 +392,7 @@ jobs:
 
       # Only the version-pinned copy is written here. The "latest" path a user
       # actually downloads from is published by the promote-cdn-latest job, which
-      # waits for every arch: these legs run independently with fail-fast disabled,
+      # waits for every platform: these legs run independently with fail-fast disabled,
       # so a leg that succeeds while another fails would otherwise leave the two
       # architectures on different versions.
       - name: Upload versioned installer to CDN
@@ -431,15 +431,10 @@ jobs:
   # copying the immutable per-version objects each leg already uploaded, so the
   # bytes served are provably the ones from this tag's build.
   #
-  # `always()` plus an explicit result check rather than a bare `needs: release`:
-  # the matrix now includes Linux, and a plain dependency would let a failed
-  # Linux leg block the Windows pointers - which are what every existing user
-  # downloads from. The guard below re-asserts what this job actually needs,
-  # which is the two Windows objects, and those are verified to exist before
-  # anything moves.
+  # Linux is a production target. A failed matrix leg blocks every latest
+  # pointer so no platform can move to a version the others did not ship.
   promote-cdn-latest:
     needs: release
-    if: always() && !cancelled()
     runs-on: ubuntu-latest
     # Pure R2 work under its own credentials, and no checkout, so the GitHub
     # token needs nothing at all.
@@ -471,12 +466,18 @@ jobs:
 
           SRC="s3://gitwyrm-cdn/releases/${TAG}"
 
-          # Both arches must exist before either pointer moves. Promoting one
-          # without the other is the split-version state this job exists to avoid.
+          # Every production artifact must exist before any pointer moves.
           for suffix in "" "-ARM64"; do
             if ! aws s3 ls "${SRC}/GitWyrm-Setup${suffix}.exe" \
                  --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
               echo "::error::Missing ${SRC}/GitWyrm-Setup${suffix}.exe - refusing to move the latest pointers."
+              exit 1
+            fi
+          done
+
+          for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb GitWyrm-x86_64.rpm; do
+            if ! aws s3 ls "${SRC}/${file}" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
+              echo "::error::Missing ${SRC}/${file} - refusing to move the latest pointers."
               exit 1
             fi
           done
@@ -491,16 +492,21 @@ jobs:
             echo "Promoted GitWyrm-Setup${suffix}.exe from ${TAG}"
           done
 
-  # Both build legs share one release, so publishing is a separate job that runs
-  # only after every arch has finished and attached its assets. The updater
+
+          for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb GitWyrm-x86_64.rpm; do
+            aws s3 cp "${SRC}/${file}" \
+              "s3://gitwyrm-cdn/installers/latest/${file}" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --cache-control "no-cache, no-store"
+            echo "Promoted ${file} from ${TAG}"
+          done
+
+  # All build legs share one release, so publishing is a separate job that runs
+  # only after every platform has finished and attached its assets. The updater
   # endpoint resolves /releases/latest, which ignores drafts - so the release is
   # not live to users, and updates are not offered, until this job runs.
   publish:
     needs: [release, promote-cdn-latest]
-    # Same reasoning as promote-cdn-latest: a failed Linux leg must not hold back
-    # the Windows release. What actually has to be present is asserted by the
-    # asset check below, not by the dependency edge.
-    if: always() && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -527,7 +533,7 @@ jobs:
           # Refuse to publish a half-built release. latest.json is what the
           # in-app updater reads; without it clients silently stop updating.
           missing=0
-          for required in latest.json x64-setup.exe arm64-setup.exe; do
+          for required in latest.json x64-setup.exe arm64-setup.exe .AppImage .deb .rpm; do
             if ! echo "$assets" | grep -q -- "$required"; then
               echo "::error::Missing required asset matching '$required'"
               missing=1
@@ -536,16 +542,6 @@ jobs:
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
-
-          # Linux is reported but not required yet. Promote these to the list
-          # above once a few releases have shipped with the Linux leg green:
-          # making them required on day one means one bad Linux build takes down
-          # the whole release for the Windows users who are already on it.
-          for optional in .AppImage .deb .rpm; do
-            if ! echo "$assets" | grep -q -- "$optional"; then
-              echo "::warning::No $optional asset on $TAG - Linux users will not be offered this build."
-            fi
-          done
 
       # tauri-action points the manifest at api.github.com asset URLs, which serve
       # JSON metadata rather than the installer to an unauthenticated client. The
@@ -622,6 +618,10 @@ jobs:
 
           **Most people want [GitWyrm-Setup.exe](https://cdn.gitwyrm.com/GitWyrm-Setup.exe)** - it always
           installs the newest version and keeps itself up to date.
+
+          **Linux:** [AppImage](https://cdn.gitwyrm.com/installers/latest/GitWyrm-x86_64.AppImage) ·
+          [Ubuntu / Debian / Mint](https://cdn.gitwyrm.com/installers/latest/GitWyrm-amd64.deb) ·
+          [Fedora / openSUSE](https://cdn.gitwyrm.com/installers/latest/GitWyrm-x86_64.rpm)
 
           The installers attached below are pinned to this specific version. `gitwyrm-portable.exe`
           needs no install but does not auto-update.

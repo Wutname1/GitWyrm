@@ -7,9 +7,8 @@ name: CI
 # not-red, which for an unchecked repo is everything. The auto-merge workflow
 # waits on these jobs by name.
 #
-# Deliberately not a release build - no Tauri bundle, no signing, no installer.
-# A dependency bump that breaks the app breaks it here first, in a couple of
-# minutes, and release.yml is still the thing that proves a shippable artifact.
+# CI does not sign or publish. It does build all three Linux package formats so
+# every PR has installable artifacts for the desktop test matrix.
 on:
   pull_request:
     branches:
@@ -83,13 +82,14 @@ jobs:
       - name: Test
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
-  # Proves the Linux bundle actually packages, not just that the Rust compiles.
-  # The dev machine is Windows, so without this a Linux packaging break would
-  # only surface at release time. Builds the AppImage because it is the format
-  # that carries its own webkit and so runs on any Mint/Ubuntu version.
+  # Proves every Linux package actually packages, not just that Rust compiles.
+  # The retained artifact is the quickest path from a PR to the three-VM test
+  # matrix: AppImage, deb and rpm all come from the exact commit under review.
   linux-bundle:
     name: Linux bundle
-    runs-on: ubuntu-latest
+    # Match production's oldest supported build host. Building on a newer glibc
+    # can produce packages that will not start on Mint 21 / Ubuntu 22.04.
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
     steps:
@@ -122,8 +122,8 @@ jobs:
       # The Linux bundle targets live in a separate config: the Tauri CLI
       # filters --bundles by host, so listing deb/rpm/appimage in the shared
       # tauri.conf.json would make the Windows release leg reject them.
-      - name: Build AppImage
-        run: npx tauri build --config src-tauri/tauri.linux.conf.json --bundles appimage
+      - name: Build Linux packages
+        run: npx tauri build --config src-tauri/tauri.linux.conf.json
 
       # A missing runtime .so shows up here rather than on a user's machine.
       - name: Check linked libraries
@@ -131,8 +131,11 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: gitwyrm-appimage
-          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          name: gitwyrm-linux-x86_64
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
           if-no-files-found: error
           retention-days: 7
 
