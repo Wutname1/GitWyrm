@@ -140,11 +140,17 @@ jobs:
       # The Linux bundle targets live in a separate config: the Tauri CLI
       # filters --bundles by host, so listing deb/rpm/appimage in the shared
       # tauri.conf.json would make the Windows release leg reject them.
-      # tauri.linux.conf.json also turns createUpdaterArtifacts off: signing the
+      # createUpdaterArtifacts is turned off HERE and nowhere else: signing the
       # AppImage needs TAURI_SIGNING_PRIVATE_KEY, which PR-triggered runs cannot
-      # read. Release builds keep the shared config and do sign.
+      # read. It must not live in tauri.linux.conf.json -- beta.yml and
+      # release.yml pass that same file, so disabling it there silently strips
+      # the AppImage signature from every shipping build and the updater
+      # rejects it. Two --config flags merge left to right.
       - name: Build Linux packages
-        run: npx tauri build --config src-tauri/tauri.linux.conf.json
+        run: |
+          npx tauri build \
+            --config src-tauri/tauri.linux.conf.json \
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       # A missing runtime .so shows up here rather than on a user's machine.
       - name: Check linked libraries

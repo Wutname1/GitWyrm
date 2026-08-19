@@ -1,7 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
-    "createUpdaterArtifacts": false,
     "targets": ["deb", "rpm", "appimage"],
     "linux": {
       "deb": {
@@ -15,7 +14,8 @@
         ]
       },
       "rpm": {
-        "depends": ["webkit2gtk4.1", "gtk3", "librsvg2", "dbus-libs", "git", "gnupg2"]
+        "depends": ["webkit2gtk4.1", "gtk3", "librsvg2", "dbus-libs", "git", "gnupg2"],
+        "compression": { "type": "zstd", "level": 3 }
       }
     }
   }

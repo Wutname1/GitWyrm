@@ -118,6 +118,10 @@ jobs:
             bundle_base: src-tauri/target/release/bundle
             cdn_suffix: ""
     runs-on: ${{ matrix.os }}
+    # A healthy leg is well under 30 minutes. Without a cap, a wedged bundler
+    # runs to the 6-hour default: one such Linux leg burned 2h41m before the
+    # step after it failed anyway.
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v7
