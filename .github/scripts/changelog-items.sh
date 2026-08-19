@@ -4,10 +4,16 @@
 #
 # Each commit subject in the release range becomes one item. The section is
 # derived from the commit-prefix convention (new:/fixes:/improved:). Tags carry
-# ONLY what the author wrote explicitly as trailing [tag] / #tag markers - all
+# ONLY what the author wrote explicitly as [tag] / #tag markers - all
 # content-based auto-tagging is done server-side on the website so the rules
-# live in one place. The verb prefix and the trailing tag markers are stripped
-# from the displayed text.
+# live in one place. Markers are read from BOTH the subject and the body, so a
+# user-facing subject can stay clean while the body carries the tags. The verb
+# prefix and any trailing subject markers are stripped from the displayed text.
+#
+# Platform tags (windows/linux/macos and their aliases) are normalized to a
+# canonical slug and kept in the same tags array - they are what lets a reader
+# tell an OS-specific change from a shared one. render-changelog.sh reads them
+# back out to group each section into Windows / Linux / macOS / All platforms.
 #
 # Env:
 #   PRODUCT          product key stored on the website (default GitWyrm)
@@ -89,25 +95,57 @@ clean_subject() {
   printf '%s' "$m" | sed -E 's/^(.)/\U\1/'
 }
 
+# --- platform: canonical slug for an OS tag, empty for anything else ----------
+# Authors write whichever spelling is natural (#win, #macOS, #linux); the
+# changelog needs one slug per OS so readers can tell an OS-specific change from
+# a shared one, and so render-changelog.sh can group by it.
+canonical_platform() {
+  case "$1" in
+    windows | win | win32 | win64 | msi | nsis) echo windows ;;
+    linux | deb | rpm | appimage | apt | flatpak) echo linux ;;
+    macos | mac | osx | darwin | dmg) echo macos ;;
+    *) echo '' ;;
+  esac
+}
+
 # --- tags: EXPLICIT markers only ([tag] / #tag); one slug per line -------------
 # Content-based tagging is the website's job. Here we only pass through what the
-# author deliberately marked.
-# A marker must contain at least one letter, so issue refs and prose numbers
-# ("Rule #2", "closes #481") never become tags.
+# author deliberately marked, in either the subject or the body.
+#
+# Body markers exist so the subject can stay clean user-facing prose while the
+# commit still carries its tags - that is the documented convention in AGENTS.md.
+# A whole line of nothing but tags is the normal way to write them, so lines are
+# never filtered wholesale; the marker pattern itself does the work:
+#   - a marker must contain a letter, so issue refs and prose numbers
+#     ("Rule #2", "closes #481") never become tags
+#   - a `#tag` must start a word, so `#[cfg(...)]` and mid-word hashes are out
+#   - lines opening a comment are skipped, so a pasted `// #foo`, `-- #foo` or
+#     `# note #foo` snippet does not mint a tag. A line that STARTS with a tag
+#     (`#linux`, no space after the hash) is not a comment and is kept - that
+#     is the normal way to write a tag-only line.
 extract_tags() {
-  local m="$1"
+  local m="$1" raw plat
   printf '%s\n' "$m" \
-    | grep -oE '(\[[a-zA-Z0-9_/-]*[a-zA-Z][a-zA-Z0-9_/-]*\]|#[a-zA-Z0-9_/-]*[a-zA-Z][a-zA-Z0-9_/-]*)' \
+    | grep -vE '^[[:space:]]*(//|--|#[[:space:]]|#$)' \
+    | grep -oE '(\[[a-zA-Z0-9_/-]*[a-zA-Z][a-zA-Z0-9_/-]*\]|(^|[[:space:]])#[a-zA-Z0-9_/-]*[a-zA-Z][a-zA-Z0-9_/-]*)' \
     | tr -d '[]#' \
     | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
+    | while IFS= read -r raw; do
+        [ -z "$raw" ] && continue
+        plat="$(canonical_platform "$raw")"
+        printf '%s\n' "${plat:-$raw}"
+      done \
     | sort -u | grep -v '^$' || true
 }
 
 # --- build the items JSON array -----------------------------------------------
 ITEMS='[]'
-# `|| [ -n "$subject" ]` keeps the final line even if it arrives unterminated,
-# so a future change back to a `format:`-style pretty can't silently re-drop it.
-while IFS= read -r subject || [ -n "$subject" ]; do
+# Each commit is read as a NUL-terminated record of "subject\nbody", so a body
+# containing blank lines cannot be mistaken for a record boundary. Tags are
+# scanned over the whole record; only the subject becomes display text.
+while IFS= read -r -d '' record; do
+  subject="${record%%$'\n'*}"
   [ -z "$subject" ] && continue
   section="$(categorize "$subject")"
   # Only commits that match a known prefix/verb get a changelog entry. Anything
@@ -116,18 +154,16 @@ while IFS= read -r subject || [ -n "$subject" ]; do
   [ "$section" = other ] && continue
   text="$(clean_subject "$subject")"
   [ -z "$text" ] && continue
-  tags_json="$(extract_tags "$subject" | jq -R . | jq -sc .)"
+  tags_json="$(extract_tags "$record" | jq -R . | jq -sc .)"
   ITEMS="$(jq -c \
     --arg section "$section" --arg text "$text" --argjson tags "$tags_json" \
     '. += [{section:$section, text:$text, tags:$tags}]' <<<"$ITEMS")"
-# NOTE: --pretty='%s', NOT --pretty=format:'%s'. The `format:` variant omits the
-# trailing newline on the last line, and `read` returns non-zero on an
-# unterminated final line - so bash silently drops the OLDEST commit of every
-# range. With a single-commit release that means zero items, which the API
-# rejects ("Missing required fields: ... items[]"); with more it just quietly
-# lost one entry per release. `tformat:` (the --pretty= default) terminates
-# every line.
-done < <(git log "$RANGE" --no-merges --pretty='%s')
+# NOTE: -z makes git NUL-terminate every record including the last, so no commit
+# is dropped. (The earlier newline-delimited form had to avoid `--pretty=format:`
+# for the same reason: it omits the final terminator and `read` then returns
+# non-zero, silently losing the OLDEST commit of every range - which on a
+# single-commit release meant zero items and an API rejection.)
+done < <(git log "$RANGE" --no-merges -z --pretty='%s%n%b')
 
 jq -n \
   --arg product "$PRODUCT" \

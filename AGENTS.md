@@ -72,8 +72,9 @@ for the shared house style across all of these repos.
 
 Commit **subjects are end-user-facing**: an automated changelog walks
 `git log` between release tags, categorizes each subject by its prefix, strips
-the prefix, and publishes it. Write the first line for a user ("what changed for
-me?"), plain language, ~6th-grade reading level. Put technical detail in the body.
+the prefix, and publishes it. Tags are read from the subject *and the body*.
+Write the first line for a user ("what changed for me?"), plain language,
+~6th-grade reading level. Put technical detail - and the tags - in the body.
 
 ### Prefix -> changelog section
 
@@ -95,33 +96,71 @@ silently dropped from the changelog.** So a real user-facing change must carry a
 prefix, and pure noise (dependency bumps, CI tweaks) can be left prefix-less on
 purpose to keep it out - or tagged `chore:`/`improved:` if it should show as a change.
 
-### Explicit tags: `[tag]` / `#tag`
+### Explicit tags: `#tag` / `[tag]`
 
-To tag a changelog line, add a trailing marker to the subject: `[tag]` or
-`#tag`. Multiple are allowed. They are stripped from the displayed text and
-lower-cased into tag slugs. Content-based auto-tagging is done server-side on the
-website - here you only pass through what you deliberately mark.
+Tags are read from the **whole commit message** - subject and body. Put them in
+the **body**, on their own line, so the subject stays clean user-facing prose.
+Markers are stripped from the displayed text and lower-cased into tag slugs.
+Content-based auto-tagging is done server-side on the website; here you only pass
+through what you deliberately mark.
 
 ```
-fixes: Diff view no longer jumps to the top after staging a hunk #diff
-new: Stage individual lines from the gutter [staging] #diff
-improved: Commit graph draws a WIP node for uncommitted changes #graph
+fixes: Diff view no longer jumps to the top after staging a hunk
+
+The scroll position is captured before the re-render and restored after.
+Files: src/components/domain/DiffView.tsx
+#diff #staging
 ```
+
+A trailing marker on the subject still works and is not wrong, but the body is
+the convention - a subject reads better without them.
+
+What never becomes a tag: prose numbers and issue refs (`Rule #2`,
+`closes #481` - a marker must contain a letter), and lines that open a comment
+(`// #foo`, `# note #foo`). A line that *starts* with a tag (`#linux`, no space
+after the hash) is a tag line, not a comment.
+
+### Platform tags: `#windows` / `#linux` / `#macos`
+
+Tag every OS-specific change. The changelog groups each section by platform, so
+an untagged change is published as affecting **all platforms** - which is wrong
+and misleading if it only shipped on one.
+
+Aliases normalize to the canonical slug, so write whichever is natural:
+
+| Slug | Also accepted |
+| --- | --- |
+| `windows` | `win`, `win32`, `win64`, `msi`, `nsis` |
+| `linux` | `deb`, `rpm`, `appimage`, `apt`, `flatpak` |
+| `macos` | `mac`, `osx`, `darwin`, `dmg` |
+
+```
+fixes: Dragging a maximized window restores it first
+
+Only the GTK shell reported the pre-maximize geometry late.
+#linux
+```
+
+Shared changes need no platform tag. Platform sub-headings are only printed when
+a release actually mixes platforms, so an all-shared release still reads as a
+plain list.
 
 ### Writing style
 
 - **Summary (first line):** plain user language - "what changed for me?"
-- **Body (optional):** technical detail, file changes, API references, the *why*.
+- **Body (optional):** technical detail, file changes, API references, the *why*,
+  and the `#tags` (including a platform tag if the change is OS-specific).
 - **No em dashes.** Use hyphens or rewrite.
 - **Reserve `new:`** for genuinely new features, not tweaks to existing ones.
 
 ### Example
 
 ```
-fixes: WIP node click now flashes the Changes panel #graph
+fixes: WIP node click now flashes the Changes panel
 
 Selecting the synthetic WIP row bumps a focus nonce that RightPanel
 watches; it scrolls the CHANGES header into view and flashes its border
 so the action has a visible result (Rule #1).
 Files: src/views/GraphView.tsx, src/stores/uiStore.ts, src/components/domain/RightPanel.tsx
+#graph
 ```
