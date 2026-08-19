@@ -6,10 +6,7 @@
 //! Studio is different: it opens a `.sln` file rather than a folder, so it is
 //! detected separately and offered per-solution alongside the chosen editor.
 
-use std::path::Path;
-// Only the Visual Studio lookups below build a PathBuf, and those are Windows-only.
-#[cfg(windows)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -123,31 +120,86 @@ fn launcher(program: &str, args: &[&str]) -> Command {
     }
 }
 
-/// Whether a launcher command can be resolved. Uses the platform's own lookup
-/// (`where` / `which`) rather than walking PATH by hand, so it honours
-/// PATHEXT on Windows and shell aliases elsewhere.
+/// Whether a launcher command can be resolved on PATH.
+///
+/// Resolved in-process, by checking the filesystem for each PATH directory,
+/// rather than by spawning `where` / `which`. Detection tries twelve candidate
+/// names and most of them are misses, so at one process spawn per candidate the
+/// whole scan cost seconds -- Sentry had it at 2.6s median, 8s p90 -- while the
+/// file checks cost microseconds. The lookup applies the same rules `cmd` uses
+/// to start a program (a bare name needs a PATHEXT extension), so anything
+/// found here is something [`launcher`] can actually launch.
 fn command_exists(program: &str) -> bool {
-    #[cfg(windows)]
-    let mut probe = {
-        use std::os::windows::process::CommandExt;
-        let mut c = Command::new("where");
-        c.arg(program);
-        c.creation_flags(CREATE_NO_WINDOW);
-        c
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
     };
-    #[cfg(not(windows))]
-    let mut probe = {
-        let mut c = Command::new("which");
-        c.arg(program);
-        c
-    };
+    let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+    resolve_in(&dirs, &pathext(), program).is_some()
+}
 
-    probe
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
+/// The extensions a bare command name may carry on this platform, from PATHEXT.
+/// Empty on non-Windows, where names resolve as-is.
+#[cfg(windows)]
+fn pathext() -> Vec<String> {
+    std::env::var("PATHEXT")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string())
+        .split(';')
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn pathext() -> Vec<String> {
+    Vec::new()
+}
+
+/// Find `program` in `dirs`, the way the platform's launcher would.
+///
+/// With extensions (Windows): a name that already has one may match as-is;
+/// otherwise each PATHEXT extension is tried in order, per directory.
+/// Without extensions (Unix): the bare name, if it is an executable file.
+fn resolve_in(dirs: &[PathBuf], exts: &[String], program: &str) -> Option<PathBuf> {
+    for dir in dirs {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        if exts.is_empty() {
+            let candidate = dir.join(program);
+            if is_executable(&candidate) {
+                return Some(candidate);
+            }
+        } else {
+            if Path::new(program).extension().is_some() {
+                let candidate = dir.join(program);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+            for ext in exts {
+                let candidate = dir.join(format!("{program}{ext}"));
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
 }
 
 /// The launcher for `kind`, if that editor is installed.
@@ -157,10 +209,9 @@ fn find_launcher(kind: EditorKind) -> Option<&'static str> {
 
 /// How long a detection result stays good for.
 ///
-/// Detection is expensive: every candidate launcher costs a `where`/`which`
-/// process, and a *miss* is the slow case because the whole PATH gets scanned.
-/// With 12 candidates plus vswhere that is ~13 process spawns, which is far too
-/// much to repeat on each call -- the toolbar asks on every repo open.
+/// Launcher lookup is now in-process filesystem checks, so the editor probe is
+/// cheap -- but the Visual Studio probe still spawns vswhere, and the toolbar
+/// asks for detection on every repo open.
 ///
 /// Deliberately a TTL rather than a permanent cache. Someone who installs an
 /// editor while GitWyrm is running should see it appear without restarting, so
@@ -201,8 +252,8 @@ fn cached<T: Clone>(cache: &Mutex<Option<(Instant, T)>>) -> Option<T> {
 /// on that lock rather than starting their own probe, then re-check the cache
 /// the winner just filled and return it without probing at all. Startup opens
 /// several repos at once and every one asks for this, so without the gate the
-/// cache only started paying off from the *fourth* caller onward -- the first
-/// three each ran a full ~13-process detection concurrently.
+/// first few callers each ran a full detection concurrently -- which matters
+/// most for the vswhere spawn, the one probe that still costs a process.
 fn detect_once<T: Clone>(
     cache: &Mutex<Option<(Instant, T)>>,
     flight: &Mutex<()>,
@@ -561,16 +612,11 @@ mod tests {
         );
     }
 
-    /// The second call must not re-probe. Detection costs a process per
-    /// candidate launcher, and a *miss* is the expensive case because the whole
-    /// PATH gets scanned -- so an uncached call on a machine with no editors
-    /// installed is the worst case, not the cheapest. This ran on every repo
-    /// open and was a large part of a multi-second startup stall.
+    /// The second call must not re-probe, and a cache hit must be effectively
+    /// free -- the toolbar asks for this on every repo open.
     #[test]
     fn editor_detection_is_cached() {
-        let first = Instant::now();
         let a = detect_editors();
-        let cold = first.elapsed();
 
         let second = Instant::now();
         let b = detect_editors();
@@ -579,17 +625,71 @@ mod tests {
         // Same answer both times.
         assert_eq!(a.len(), b.len());
 
-        // A cache hit clones a small Vec; the cold path spawns processes. Asserting
-        // against the cold time rather than a fixed number keeps this meaningful on
-        // a fast machine and honest on a slow one.
-        assert!(
-            warm <= cold,
-            "second detect_editors() should not re-probe: cold {cold:?}, warm {warm:?}"
-        );
         assert!(
             warm < Duration::from_millis(50),
             "a cache hit should be effectively free, took {warm:?}"
         );
+    }
+
+    /// The resolver applies launch rules, not just existence: on Windows a bare
+    /// name only counts with a PATHEXT extension (that is what `cmd` can start),
+    /// and a name that already has an extension matches as-is.
+    #[test]
+    fn resolver_matches_what_the_shell_can_launch() {
+        let temp = std::env::temp_dir().join(format!("gitwyrm-resolve-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(temp.join("code.cmd"), "").unwrap();
+        std::fs::write(temp.join("rider"), "").unwrap();
+
+        let dirs = vec![temp.clone()];
+        let exts = vec![".COM".to_string(), ".EXE".to_string(), ".CMD".to_string()];
+
+        // The filesystem decides matches (NTFS is case-insensitive), so compare
+        // resolved paths ignoring case rather than byte-for-byte.
+        let matches = |found: Option<PathBuf>, expected: &Path| {
+            found.is_some_and(|f| {
+                f.to_string_lossy()
+                    .eq_ignore_ascii_case(&expected.to_string_lossy())
+            })
+        };
+
+        // Bare name resolves through PATHEXT.
+        assert!(matches(
+            resolve_in(&dirs, &exts, "code"),
+            &temp.join("code.cmd")
+        ));
+        // An extensionless file is not launchable by cmd, so it is not a match.
+        assert_eq!(resolve_in(&dirs, &exts, "rider"), None);
+        // A name that already carries its extension matches directly.
+        assert!(matches(
+            resolve_in(&dirs, &exts, "code.cmd"),
+            &temp.join("code.cmd")
+        ));
+        // Misses stay misses.
+        assert_eq!(resolve_in(&dirs, &exts, "zed"), None);
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// Without extensions (Unix rules) the bare name must be an executable file.
+    #[cfg(unix)]
+    #[test]
+    fn resolver_requires_the_execute_bit_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = std::env::temp_dir().join(format!("gitwyrm-resolve-x-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(temp.join("code"), "").unwrap();
+        std::fs::write(temp.join("zed"), "").unwrap();
+        std::fs::set_permissions(temp.join("zed"), std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let dirs = vec![temp.clone()];
+        assert_eq!(resolve_in(&dirs, &[], "code"), None, "not executable");
+        assert_eq!(resolve_in(&dirs, &[], "zed"), Some(temp.join("zed")));
+
+        let _ = std::fs::remove_dir_all(&temp);
     }
 
     /// Detection has to survive the real vswhere on a real machine, where the

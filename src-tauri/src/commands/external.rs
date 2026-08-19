@@ -62,10 +62,10 @@ pub async fn open_in_editor(
 /// Which editors are installed, whether Visual Studio is available, and the
 /// solutions in this repo. Drives the toolbar's open button and the editor
 /// picker in Settings.
-/// Detection spawns a process per candidate launcher and walks the repo for
-/// solutions, so it must not run on the IPC thread: everything else the
-/// frontend asks for queues behind whatever is running there. The repo path is
-/// resolved up front because `State` cannot cross into the blocking pool.
+/// Detection spawns vswhere and walks the repo for solutions, so it must not
+/// run on the IPC thread: everything else the frontend asks for queues behind
+/// whatever is running there. The repo path is resolved up front because
+/// `State` cannot cross into the blocking pool.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_editor_availability(
