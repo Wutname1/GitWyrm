@@ -397,8 +397,24 @@ jobs:
               --cache-control "public, max-age=31536000, immutable"
           }
 
+          # The AppImage is what the updater downloads and verifies, so it is
+          # only worth shipping if it was signed. A build with signing
+          # misconfigured still produces a perfectly good-looking .AppImage --
+          # tauri-action just omits the Linux entry from latest.json, and the
+          # asset-name check in the publish job cannot tell the difference.
+          # Catch it here, while the file itself is in hand.
+          require_signed() {
+            local src="$1"
+            if [ ! -f "${src}.sig" ]; then
+              echo "::error::No signature beside $src; the updater would reject this build."
+              exit 1
+            fi
+          }
+
           base="${{ matrix.bundle_base }}"
-          upload "$(find "$base/appimage" -name '*.AppImage' -type f | head -1)" "GitWyrm-x86_64.AppImage"
+          appimage=$(find "$base/appimage" -name '*.AppImage' -type f | head -1)
+          require_signed "$appimage"
+          upload "$appimage" "GitWyrm-x86_64.AppImage"
           upload "$(find "$base/deb" -name '*.deb' -type f | head -1)" "GitWyrm-amd64.deb"
           upload "$(find "$base/rpm" -name '*.rpm' -type f | head -1)" "GitWyrm-x86_64.rpm"
 

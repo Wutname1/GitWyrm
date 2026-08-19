@@ -78,6 +78,21 @@ platforms = manifest.get("platforms") or {}
 if not platforms:
     sys.exit("::error::Manifest has no platforms to verify.")
 
+# A platform missing entirely is the quiet failure: if a build leg produces no
+# updater artifact -- signing turned off, a bundler that did not run -- tauri-action
+# simply leaves that key out. The installer still uploads and every name-based
+# asset check passes, so the release ships with those users pinned to their
+# current version forever, with nothing in the logs saying so.
+EXPECTED = ["windows-x86_64", "windows-aarch64", "linux-x86_64"]
+absent = [key for key in EXPECTED if key not in platforms]
+if absent:
+    sys.exit(
+        "::error::Updater manifest is missing platform(s): "
+        + ", ".join(absent)
+        + ". Present: "
+        + ", ".join(sorted(platforms))
+    )
+
 print("Verifying download URLs:")
 failed = False
 for name, entry in sorted(platforms.items()):
