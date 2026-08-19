@@ -2,6 +2,7 @@ import { Star } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CatalogProvider } from '@/lib/bindings'
 import { useAiModels } from '@/hooks/useAi'
+import { ProviderGlyph } from '@/lib/brandLogos'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { settingRowClass } from './SettingRow'
 
@@ -102,6 +103,7 @@ export function AiDefaultProviders({
                   Make default
                 </button>
               )}
+              <ProviderGlyph id={p.id} size={14} />
               <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
                 {p.name}
               </span>

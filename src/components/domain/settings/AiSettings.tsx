@@ -19,6 +19,8 @@ import {
   useCopilotSignIn,
 } from '@/hooks/useAi'
 import { nextDefaultProvider } from '@/hooks/useAiSelection'
+import { cn } from '@/lib/utils'
+import { ProviderGlyph } from '@/lib/brandLogos'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 const selectClass =
@@ -160,8 +162,13 @@ export function AiSettings() {
           </div>
         </div>
         <div className="min-w-0 flex-1 space-y-2">
-          <select
-            className={selectClass}
+          {/* The logo sits beside the picker rather than inside it: a native
+              <option> cannot render an image, and swapping this for a custom
+              listbox would rebuild keyboard nav and filtering for decoration. */}
+          <div className="flex items-center gap-2">
+            <ProviderGlyph id={aiProvider ?? ''} size={16} />
+            <select
+            className={cn(selectClass, 'min-w-0 flex-1')}
             value={aiProvider ?? ''}
             onChange={(e) => {
               // Leave the model unset: the effect above fills it once the live
@@ -187,7 +194,8 @@ export function AiSettings() {
                 </option>
               ))}
             </optgroup>
-          </select>
+            </select>
+          </div>
 
           {provider && (
             <>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { avatarUrl } from "@/lib/avatarSource";
-import { GithubIcon } from "@/components/domain/github/GithubIcon";
+import { botIdentity } from "@/lib/brandLogos";
 
 interface AvatarProps {
   initials: string;
@@ -17,10 +17,10 @@ interface AvatarProps {
 }
 
 /**
- * Dependabot commits are authored by GitHub itself, not a person, so the
- * two-letter initials ("DE") read as a stranger on the team. Show the GitHub
- * mark instead. Its address is always the bot's no-reply one, in either the
- * numeric-id form or the older bare-login form.
+ * Whether a commit was authored by Dependabot.
+ *
+ * Kept as its own export because callers ask this specific question; the
+ * general "which bot is this?" lookup lives in `brandLogos`.
  */
 export function isDependabot(email: string): boolean {
   return /^(?:\d+\+)?dependabot(?:\[bot\])?@users\.noreply\.github\.com$/i.test(
@@ -36,11 +36,18 @@ export function Avatar({
   reloadKey = 0,
 }: AvatarProps) {
   const px = size === "sm" ? 19 : 26;
-  const bot = !!email && isDependabot(email);
+  // A bot commit shows the tool's own mark: two-letter initials ("DE") read as
+  // a stranger on the team, and these accounts have no Gravatar to find.
+  const bot = email ? botIdentity(email) : null;
   const [src, setSrc] = useState<string | null>(null);
 
+  // `botIdentity` returns a fresh object each render, so the effect depends on
+  // whether there is a bot rather than on the object itself - otherwise the
+  // lookup would re-run on every render.
+  const isBot = !!bot;
+
   useEffect(() => {
-    if (!email || bot) return;
+    if (!email || isBot) return;
     let cancelled = false;
     void avatarUrl(email, px * 2).then((url) => {
       if (cancelled) return;
@@ -49,18 +56,25 @@ export function Avatar({
     return () => {
       cancelled = true;
     };
-  }, [email, px, bot, reloadKey]);
+  }, [email, px, isBot, reloadKey]);
 
   if (bot) {
     return (
       <span
+        title={bot.name}
         className={cn(
-          "flex flex-none items-center justify-center rounded-full text-foreground",
+          "flex flex-none items-center justify-center overflow-hidden rounded-full text-foreground",
           size === "sm" ? "size-[19px]" : "size-[26px]",
         )}
         style={{ background: color + "2b" }}
       >
-        <GithubIcon size={size === "sm" ? 12 : 16} />
+        <img
+          src={bot.logo}
+          alt=""
+          aria-hidden
+          width={size === "sm" ? 12 : 16}
+          height={size === "sm" ? 12 : 16}
+        />
       </span>
     );
   }

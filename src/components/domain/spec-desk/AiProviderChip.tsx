@@ -6,6 +6,7 @@ import { useAiCatalog } from '@/hooks/useAi'
 import { useSpecAi } from '@/hooks/useSpecAi'
 import { isActive, useAiRun } from '@/hooks/useAiRun'
 import { openAiSettings } from '@/lib/openAiSettings'
+import { ProviderGlyph } from '@/lib/brandLogos'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import {
   DropdownMenu,
@@ -163,6 +164,7 @@ function ProviderItems() {
             }}
           >
             {current ? <Check /> : <span className="size-4 flex-none" aria-hidden />}
+            <ProviderGlyph id={p.id} size={14} />
             <span className="min-w-0 flex-1 truncate">{p.name}</span>
             {p.model && (
               <span className="ml-auto max-w-[120px] flex-none truncate text-2xs text-muted-foreground">
