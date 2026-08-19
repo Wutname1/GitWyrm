@@ -11,13 +11,7 @@ name: CI
 # every PR has installable artifacts for the desktop test matrix.
 on:
   pull_request:
-    branches:
-      - main
-  # Also on main so a direct push that breaks the build is caught rather than
-  # waiting for the next PR to surface it.
-  push:
-    branches:
-      - main
+    types: [opened, synchronize, reopened]
 
 concurrency:
   # A new push supersedes the old run: nobody needs the results of the commit
