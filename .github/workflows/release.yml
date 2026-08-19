@@ -552,10 +552,32 @@ jobs:
             "$deb" \
             --endpoint-url "$R2_ENDPOINT"
 
-          package=$(dpkg-deb --field "$deb" Package)
+          # Tauri derives the deb Package: field by kebab-casing productName
+          # ("GitWyrm" -> "git-wyrm") and exposes no override for it. The APT
+          # repo is published as "gitwyrm" - matching the crate, the pool path
+          # and the keyring - so relabel the control field here. Renaming a
+          # published package would strand `apt upgrade`, so this must stay
+          # pinned to whatever the repo has already shipped.
           architecture=$(dpkg-deb --field "$deb" Architecture)
-          if [ "$package" != "gitwyrm" ] || [ "$architecture" != "amd64" ]; then
-            echo "::error::Expected package gitwyrm/amd64, got ${package}/${architecture}"
+          if [ "$architecture" != "amd64" ]; then
+            echo "::error::Expected an amd64 package, got ${architecture}"
+            exit 1
+          fi
+
+          package=$(dpkg-deb --field "$deb" Package)
+          if [ "$package" != "gitwyrm" ]; then
+            echo "Relabelling deb Package: ${package} -> gitwyrm"
+            rebuild=$(mktemp -d)
+            dpkg-deb -R "$deb" "$rebuild/pkg"
+            sed -i 's/^Package: .*/Package: gitwyrm/' "$rebuild/pkg/DEBIAN/control"
+            rm -f "$deb"
+            dpkg-deb -b "$rebuild/pkg" "$deb"
+            rm -rf "$rebuild"
+          fi
+
+          package=$(dpkg-deb --field "$deb" Package)
+          if [ "$package" != "gitwyrm" ]; then
+            echo "::error::Relabelling failed, deb still declares ${package}"
             exit 1
           fi
 
