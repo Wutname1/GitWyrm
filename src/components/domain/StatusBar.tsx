@@ -1,4 +1,5 @@
-import { Download, FolderGit2, Loader2, Minus, Plus, RotateCcw, Search } from 'lucide-react'
+import { useState } from 'react'
+import { Download, FolderGit2, Loader2, MessageSquare, Minus, Plus, RotateCcw, Search } from 'lucide-react'
 import { useBranches, useStatus, useWorktrees } from '@/hooks/useGitQueries'
 import { useOpenspecStatus } from '@/hooks/useOpenspec'
 import { isActive, stateGlyph, stateLabel, useAiRun } from '@/hooks/useAiRun'
@@ -13,6 +14,7 @@ import {
   useWorkspaceStore,
 } from '@/stores/workspaceStore'
 import { Button } from '@/components/ui/button'
+import { ReportProblemModal } from '@/components/modals/ReportProblemModal'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '@/components/ui/tooltip'
@@ -222,6 +224,29 @@ function UpdateButton() {
   )
 }
 
+function FeedbackButton() {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="titlebar-no-drag flex items-center gap-1 rounded px-1 text-sub hover:text-text"
+          >
+            <MessageSquare className="size-3" />
+            <span>Send feedback</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">Tell us about an idea or a problem</TooltipContent>
+      </Tooltip>
+      <ReportProblemModal open={open} onClose={() => setOpen(false)} initialKind="feedback" />
+    </>
+  )
+}
+
 export function StatusBar() {
   const repo = useActiveRepo()
   const status = useStatus(repo?.id ?? null)
@@ -267,6 +292,7 @@ export function StatusBar() {
       )}
       {repo && <span className="text-muted-foreground">{repo.path}</span>}
       <ZoomControl />
+      <FeedbackButton />
     </div>
   )
 }
