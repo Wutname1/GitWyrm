@@ -84,6 +84,7 @@ fn discard_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::
     // one, or the file appears to vanish.
     let paths = rename_counterparts(repo, paths);
     let head = repo.head()?.peel(git2::ObjectType::Commit)?;
+    let head_tree = head.peel_to_tree()?;
 
     // Reset the selected index entries too, so "all changes in this folder"
     // includes files that are already staged.
@@ -92,10 +93,19 @@ fn discard_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::
     let mut builder = git2::build::CheckoutBuilder::new();
     builder.force().remove_untracked(true);
     let mut has_regular_file = false;
+    // A brand-new file has nothing in HEAD to check out, so discarding it means
+    // deleting it. `remove_untracked` does not cover this: it only clears
+    // untracked files inside the checkout's path scope, and a path-scoped
+    // checkout resolves its pathspec against the tree -- where an untracked file
+    // by definition does not appear. Left alone, the file stayed on disk and
+    // came straight back as a pending change.
+    let mut to_delete: Vec<&String> = Vec::new();
     for path in &paths {
         if is_submodule(repo, path) {
             let mut sub = repo.find_submodule(path)?;
             sub.update(false, None)?;
+        } else if head_tree.get_path(Path::new(path)).is_err() {
+            to_delete.push(path);
         } else {
             builder.path(path);
             has_regular_file = true;
@@ -103,6 +113,13 @@ fn discard_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::
     }
     if has_regular_file {
         repo.checkout_head(Some(&mut builder))?;
+    }
+    if let Some(workdir) = repo.workdir() {
+        for path in to_delete {
+            // Best effort: a file already gone is the state we wanted anyway, and
+            // one we cannot remove must not abort the rest of the discard.
+            let _ = std::fs::remove_file(workdir.join(path));
+        }
     }
     Ok(())
 }
@@ -376,6 +393,53 @@ mod tests {
         assert!(
             !dir.path().join(new).exists(),
             "renamed file should be gone"
+        );
+    }
+
+    /// A brand-new file that was never staged has no HEAD entry and no index
+    /// entry, so neither the reset nor the checkout can act on it. Discarding it
+    /// has to delete it -- otherwise it stays on disk and immediately shows up
+    /// as pending again, which is what a user sees as "discard did nothing".
+    #[test]
+    fn discarding_an_untracked_file_deletes_it() {
+        let (dir, repo) = committed_repo();
+        let untracked = ".gitignore".to_string();
+        fs::write(dir.path().join(&untracked), "node_modules\n").expect("create untracked file");
+        assert!(repo
+            .status_file(Path::new(&untracked))
+            .expect("status")
+            .contains(git2::Status::WT_NEW));
+
+        discard_paths(&repo, &[untracked.clone()]).expect("discard untracked file");
+
+        assert!(
+            !dir.path().join(&untracked).exists(),
+            "an untracked file should be gone after discarding it"
+        );
+        let statuses = repo.statuses(None).expect("read statuses");
+        assert!(
+            statuses
+                .iter()
+                .all(|e| e.path() != Ok(untracked.as_str())),
+            "the discarded file should not still be reported as a change"
+        );
+    }
+
+    /// Discarding one new file must not touch another one beside it.
+    #[test]
+    fn discarding_an_untracked_file_leaves_other_new_files_alone() {
+        let (dir, repo) = committed_repo();
+        fs::write(dir.path().join("one.txt"), "one\n").expect("create one");
+        fs::write(dir.path().join("two.txt"), "two\n").expect("create two");
+
+        discard_paths(&repo, &["one.txt".to_string()]).expect("discard one");
+
+        assert!(!dir.path().join("one.txt").exists());
+        assert_eq!(
+            fs::read_to_string(dir.path().join("two.txt"))
+                .expect("read two")
+                .trim_end(),
+            "two"
         );
     }
 
