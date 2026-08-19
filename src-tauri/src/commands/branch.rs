@@ -998,14 +998,12 @@ pub async fn reword_commit(
             return Ok(new_oid.to_string());
         }
 
-        // Older commit: rebuild it with the new message and replay the commits
-        // above it. This needs a clean tree, the same as dropping a commit.
-        if refs::tracked_changes_present(&repo)? {
-            return Err(AppError::Other(
-                "working tree has changes; commit or stash before editing an older message".into(),
-            ));
-        }
-
+        // Older commit: rebuild it with the new message and rebuild every commit
+        // above it on top. Only messages change, so every tree is reused exactly
+        // as it was -- no conflict is possible and the working tree and index are
+        // never touched, which means pending changes are fine. The new commits
+        // are built first and the branch ref moves last (a soft reset), so a
+        // failure partway leaves the branch untouched.
         let target = repo.find_commit(target_oid)?;
         if target.parent_count() != 1 {
             return Err(AppError::Other(
@@ -1013,7 +1011,6 @@ pub async fn reword_commit(
             ));
         }
         let parent = target.parent(0)?;
-        let previous_sha = head.id().to_string();
 
         let to_replay = history::collect_span_above(
             &repo,
@@ -1039,23 +1036,21 @@ pub async fn reword_commit(
         )?;
         let reworded_sha = new_target_oid.to_string();
 
-        let new_tip = history::replay_onto(
-            &repo,
-            &to_replay,
-            repo.find_commit(new_target_oid)?,
-            &signature,
-            &previous_sha,
-            "editing this message causes conflicts in a later commit; nothing was changed",
-        )?;
+        // Nothing above the target means it was the branch tip's parent chain
+        // end -- the rebuilt commit is itself the new tip.
+        let new_tip = if to_replay.is_empty() {
+            repo.find_commit(new_target_oid)?
+        } else {
+            history::rechain_keeping_trees(
+                &repo,
+                &to_replay,
+                Some(repo.find_commit(new_target_oid)?),
+                &signature,
+                |_| None,
+            )?
+        };
 
-        // Point the branch at the rebuilt tip and sync the working tree, including
-        // any submodule a replayed commit pins somewhere else.
-        repo.reset(
-            new_tip.as_object(),
-            ResetType::Hard,
-            Some(CheckoutBuilder::new().force()),
-        )?;
-        submodule::sync_submodule_workdirs(&repo);
+        repo.reset(new_tip.as_object(), ResetType::Soft, None)?;
 
         Ok(reworded_sha)
     })

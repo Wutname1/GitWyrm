@@ -174,6 +174,47 @@ fn replay_steps<'r>(
     Ok(new_tip)
 }
 
+/// Rebuild `commits` (oldest-first) on top of `new_tip`, reusing each commit's
+/// own tree. Only valid when nothing about the content changes: a message-only
+/// rewrite of a linear span leaves every tree exactly as it was, so there is
+/// nothing to cherry-pick and no conflict is possible. `message_for` returns a
+/// replacement message for a commit, or None to keep its original one.
+/// `base` is the commit the chain is built on, or None to rebuild the first
+/// commit as a root commit (one with no parent).
+pub fn rechain_keeping_trees<'r>(
+    repo: &'r git2::Repository,
+    commits: &[git2::Commit<'r>],
+    base: Option<git2::Commit<'r>>,
+    signature: &git2::Signature<'_>,
+    message_for: impl Fn(&git2::Commit<'r>) -> Option<String>,
+) -> Result<git2::Commit<'r>, AppError> {
+    let mut new_tip = base;
+    for commit in commits {
+        let replacement = message_for(commit);
+        let message = replacement
+            .as_deref()
+            .unwrap_or_else(|| commit.message().unwrap_or(""));
+        // A rebuilt commit keeps its original author and takes the rewriter as
+        // committer, the same as every other history rewrite here.
+        let identity = CommitIdentity {
+            author: commit.author().to_owned(),
+            committer: signature.to_owned(),
+        };
+        let parents: Vec<&git2::Commit<'r>> = new_tip.iter().collect();
+        let new_oid = commit_write::create(
+            repo,
+            &commit_write::workdir_of(repo),
+            None,
+            &identity,
+            message,
+            &commit.tree()?,
+            &parents,
+        )?;
+        new_tip = Some(repo.find_commit(new_oid)?);
+    }
+    new_tip.ok_or_else(|| AppError::Other("nothing to rewrite".into()))
+}
+
 /// Shared guards for the multi-commit rewrites: a real branch checked out, a
 /// clean tree, and the selected shas parsed. Returns (branch, previous head
 /// sha, target oid set).
@@ -331,3 +372,4 @@ pub fn drop_commits(repo: &git2::Repository, shas: &[String]) -> Result<RefMove,
         submodules: Vec::new(),
     })
 }
+
