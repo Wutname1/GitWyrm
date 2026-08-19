@@ -1437,6 +1437,18 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Message-only rewrite: trees are untouched, so the undo is a soft reset and
+  // pending changes survive both the rewrite and the undo.
+  const prefixCommits = useMutation({
+    mutationFn: async (args: { shas: string[]; prefix: string }) => ({
+      count: args.shas.length,
+      move: unwrap(await commands.prefixCommits(id, args.shas, args.prefix)),
+    }),
+    onSuccess: ({ count, move }) =>
+      afterRefMove(move.previous_sha, `Updated ${commitCount(count)} — was at`, 'Soft'),
+    onError,
+  })
+
   const rebaseContinue = useMutation({
     mutationFn: async () => unwrap(await commands.rebaseContinue(id)),
     onSuccess: (result) => {
@@ -1606,6 +1618,7 @@ export function useGitMutations(repoId: string | null) {
     revertMany,
     squashCommits,
     dropCommits,
+    prefixCommits,
     abortMerge,
     rebaseContinue,
     rebaseAbort,

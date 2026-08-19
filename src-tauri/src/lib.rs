@@ -181,6 +181,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::branch::drop_commit,
             commands::branch::squash_commits,
             commands::branch::drop_commits,
+            commands::branch::prefix_commits,
             commands::branch::has_worktrees,
             commands::branch::commit_web_url,
             commands::branch::commits_present,

@@ -215,6 +215,56 @@ pub fn rechain_keeping_trees<'r>(
     new_tip.ok_or_else(|| AppError::Other("nothing to rewrite".into()))
 }
 
+/// Add `prefix` to the front of several commits' messages in one rewrite.
+///
+/// Messages are the only thing that changes, so every tree is reused as-is and
+/// the working tree and index are never touched -- pending changes are fine.
+/// Only the branch ref moves (a soft reset). The new commits are built first
+/// and the ref moves last, so a failure partway leaves the branch untouched.
+pub fn prefix_commits(
+    repo: &git2::Repository,
+    shas: &[String],
+    prefix: &str,
+) -> Result<RefMove, AppError> {
+    if shas.is_empty() {
+        return Err(AppError::Other("select at least one commit".into()));
+    }
+    if prefix.trim().is_empty() {
+        return Err(AppError::Other("a prefix is required".into()));
+    }
+
+    let branch = current_branch_name(repo)?;
+    let mut targets = HashSet::new();
+    for sha in shas {
+        targets.insert(Oid::from_str(sha.trim()).map_err(AppError::Git)?);
+    }
+    let previous_sha = repo.head()?.peel_to_commit()?.id().to_string();
+
+    let span = collect_linear_span(repo, &targets)?;
+    // The repository's very first commit has no parent, and unlike squash or
+    // drop that is fine here: nothing is rebased onto anything, so it is simply
+    // rebuilt as a root commit again.
+    let base = match span[0].parent_count() {
+        0 => None,
+        _ => Some(span[0].parent(0)?),
+    };
+    let signature = repo.signature()?;
+
+    let new_tip = rechain_keeping_trees(repo, &span, base, &signature, |c| {
+        targets
+            .contains(&c.id())
+            .then(|| format!("{prefix}{}", c.message().unwrap_or("")))
+    })?;
+
+    repo.reset(new_tip.as_object(), ResetType::Soft, None)?;
+    Ok(RefMove {
+        branch,
+        previous_sha,
+        stashed: false,
+        submodules: Vec::new(),
+    })
+}
+
 /// Shared guards for the multi-commit rewrites: a real branch checked out, a
 /// clean tree, and the selected shas parsed. Returns (branch, previous head
 /// sha, target oid set).
@@ -373,3 +423,147 @@ pub fn drop_commits(repo: &git2::Repository, shas: &[String]) -> Result<RefMove,
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sig() -> git2::Signature<'static> {
+        git2::Signature::new("Tester", "t@example.com", &git2::Time::new(0, 0)).unwrap()
+    }
+
+    /// A repo with three commits on the current branch, each adding one file.
+    /// Returns the directory, the repo, and their shas oldest-first.
+    fn repo_with_three() -> (tempfile::TempDir, git2::Repository, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let mut shas = Vec::new();
+        for name in ["a", "b", "c"] {
+            std::fs::write(dir.path().join(format!("{name}.txt")), name).unwrap();
+            let mut index = repo.index().unwrap();
+            index
+                .add_path(std::path::Path::new(&format!("{name}.txt")))
+                .unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let parents: Vec<_> = repo
+                .head()
+                .ok()
+                .and_then(|h| h.peel_to_commit().ok())
+                .into_iter()
+                .collect();
+            let parent_refs: Vec<_> = parents.iter().collect();
+            let oid = repo
+                .commit(Some("HEAD"), &sig(), &sig(), name, &tree, &parent_refs)
+                .unwrap();
+            shas.push(oid.to_string());
+        }
+        (dir, repo, shas)
+    }
+
+    /// Messages oldest-first on the current branch.
+    fn messages(repo: &git2::Repository) -> Vec<String> {
+        let mut walk = repo.revwalk().unwrap();
+        walk.push_head().unwrap();
+        let mut out: Vec<String> = walk
+            .map(|o| {
+                repo.find_commit(o.unwrap())
+                    .unwrap()
+                    .message()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        out.reverse();
+        out
+    }
+
+    #[test]
+    fn a_prefix_is_added_only_to_the_selected_commits() {
+        let (_dir, repo, shas) = repo_with_three();
+
+        prefix_commits(&repo, &[shas[0].clone(), shas[1].clone()], "fixes: ").unwrap();
+
+        assert_eq!(messages(&repo), vec!["fixes: a", "fixes: b", "c"]);
+    }
+
+    /// The whole point of the message-only rewrite: it never touches the tree,
+    /// so uncommitted work survives it. The old cherry-pick path refused here.
+    #[test]
+    fn pending_changes_survive_a_prefix_rewrite() {
+        let (dir, repo, shas) = repo_with_three();
+        let pending = dir.path().join("scratch.txt");
+        std::fs::write(&pending, "work in progress").unwrap();
+        // A modification to a tracked file too, which a hard reset would revert.
+        std::fs::write(dir.path().join("a.txt"), "edited").unwrap();
+
+        prefix_commits(&repo, &[shas[0].clone()], "fixes: ").unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&pending).unwrap(),
+            "work in progress"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "edited"
+        );
+        assert_eq!(messages(&repo), vec!["fixes: a", "b", "c"]);
+    }
+
+    /// Every commit above a rewritten one keeps its own tree, so the files the
+    /// later commits added are all still present at the new tip.
+    #[test]
+    fn commits_above_keep_their_content() {
+        let (_dir, repo, shas) = repo_with_three();
+
+        prefix_commits(&repo, &[shas[0].clone()], "fixes: ").unwrap();
+
+        let tip_tree = repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .tree()
+            .unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            assert!(
+                tip_tree.get_path(std::path::Path::new(name)).is_ok(),
+                "{name} should still be in the tip tree"
+            );
+        }
+    }
+
+    /// The repository's very first commit has no parent. A message-only rewrite
+    /// can still handle it -- it is rebuilt as a root commit -- unlike squash or
+    /// drop, which need something to rebase onto.
+    #[test]
+    fn the_first_commit_in_the_repository_can_be_prefixed() {
+        let (_dir, repo, shas) = repo_with_three();
+
+        prefix_commits(&repo, &[shas[0].clone()], "fixes: ").unwrap();
+
+        assert_eq!(messages(&repo), vec!["fixes: a", "b", "c"]);
+        let mut walk = repo.revwalk().unwrap();
+        walk.push_head().unwrap();
+        let root = repo.find_commit(walk.last().unwrap().unwrap()).unwrap();
+        assert_eq!(root.parent_count(), 0);
+    }
+
+    #[test]
+    fn an_empty_prefix_is_refused() {
+        let (_dir, repo, shas) = repo_with_three();
+        assert!(prefix_commits(&repo, &[shas[0].clone()], "   ").is_err());
+        assert!(prefix_commits(&repo, &[], "fixes: ").is_err());
+    }
+
+    /// A sha that isn't on the branch must fail before anything moves.
+    #[test]
+    fn a_commit_off_the_branch_is_refused_and_nothing_moves() {
+        let (_dir, repo, _shas) = repo_with_three();
+        let before = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        let stranger = "0123456789abcdef0123456789abcdef01234567".to_string();
+        assert!(prefix_commits(&repo, &[stranger], "fixes: ").is_err());
+
+        assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id(), before);
+    }
+}

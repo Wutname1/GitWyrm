@@ -1552,6 +1552,19 @@ async dropCommits(repoId: string, shas: string[]) : Promise<Result<RefMove, stri
 }
 },
 /**
+ * Add a prefix to the front of several commits' messages in one rewrite. See
+ * `git::history::prefix_commits` for the algorithm; message-only, so it is
+ * safe over pending changes.
+ */
+async prefixCommits(repoId: string, shas: string[], prefix: string) : Promise<Result<RefMove, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("prefix_commits", { repoId, shas, prefix }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * True when the repo has at least one linked worktree. Backs the auto-enable
  * of the worktree feature so users who already work with worktrees see the UI.
  */

@@ -1240,6 +1240,26 @@ pub async fn drop_commits(
     .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Add a prefix to the front of several commits' messages in one rewrite. See
+/// `git::history::prefix_commits` for the algorithm; message-only, so it is
+/// safe over pending changes.
+#[tauri::command]
+#[specta::specta]
+pub async fn prefix_commits(
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    shas: Vec<String>,
+    prefix: String,
+) -> Result<RefMove, AppError> {
+    let open = manager.get(&repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        crate::git::history::prefix_commits(&repo, &shas, &prefix)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 /// True when the repo has at least one linked worktree. Backs the auto-enable
 /// of the worktree feature so users who already work with worktrees see the UI.
 #[tauri::command]
