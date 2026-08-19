@@ -65,9 +65,6 @@ export function RenameBranchDialog({
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit()
-          }}
           placeholder={currentName}
           className="h-auto bg-background py-1.5 font-mono text-xs"
           autoFocus

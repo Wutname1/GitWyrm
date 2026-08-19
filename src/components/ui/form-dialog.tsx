@@ -66,7 +66,9 @@ export function FormDialog({
   const submitRef = useRef<HTMLButtonElement>(null)
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.isDefaultPrevented()) return
+    // `repeat` guards against a held key firing the action many times before
+    // the pending state has a chance to re-render and disable it.
+    if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.repeat || e.isDefaultPrevented()) return
 
     const target = e.target as HTMLElement | null
     if (!target) return

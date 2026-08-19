@@ -370,9 +370,6 @@ export function NewChangeModal({ repoId }: { repoId?: string }) {
         <Input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') create()
-          }}
           placeholder="Add dark mode to the diff view"
           className="h-auto bg-background py-1.5 text-xs"
           autoFocus

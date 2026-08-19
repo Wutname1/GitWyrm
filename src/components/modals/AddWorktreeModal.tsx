@@ -202,9 +202,6 @@ export function AddWorktreeModal() {
         <Input
           value={branch}
           onChange={(e) => setBranch(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit()
-          }}
           list="worktree-branches"
           placeholder="feature/login"
           className="h-auto bg-background py-1.5 font-mono text-xs"
@@ -247,9 +244,6 @@ export function AddWorktreeModal() {
             onChange={(e) => {
               setPathTouched(true)
               setPath(e.target.value)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit()
             }}
             placeholder="C:/code/project-feature"
             className="h-auto flex-1 bg-background py-1.5 font-mono text-xs"

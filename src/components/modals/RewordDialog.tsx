@@ -73,9 +73,6 @@ export function RewordDialog({
         <Input
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit()
-          }}
           placeholder="Short summary"
           className="h-auto bg-background py-1.5 text-xs"
           autoFocus

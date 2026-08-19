@@ -94,9 +94,6 @@ export function AddSubmoduleModal() {
         <Input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit()
-          }}
           placeholder="https://github.com/someone/their-project.git"
           className="h-auto bg-background py-1.5 font-mono text-xs"
           autoFocus
@@ -114,9 +111,6 @@ export function AddSubmoduleModal() {
             setPathTouched(true)
             setPath(e.target.value)
           }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit()
-          }}
           placeholder="packages/their-project"
           className="h-auto bg-background py-1.5 font-mono text-xs"
         />
@@ -133,9 +127,6 @@ export function AddSubmoduleModal() {
         <Input
           value={branch}
           onChange={(e) => setBranch(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit()
-          }}
           placeholder="main"
           className="h-auto bg-background py-1.5 font-mono text-xs"
         />

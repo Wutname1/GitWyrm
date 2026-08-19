@@ -198,9 +198,6 @@ export function NewTagModal() {
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') create()
-          }}
           placeholder="v1.0.0"
           className="h-auto bg-background py-1.5 font-mono text-xs"
           autoFocus
@@ -251,9 +248,6 @@ export function NewTagModal() {
         <Input
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') create()
-          }}
           placeholder="What this release is"
           className="h-auto bg-background py-1.5 text-xs"
         />

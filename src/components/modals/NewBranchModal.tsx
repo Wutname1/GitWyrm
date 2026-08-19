@@ -64,9 +64,6 @@ export function NewBranchModal() {
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') create()
-          }}
           placeholder="my-feature"
           className="h-auto bg-background py-1.5 font-mono text-xs"
           autoFocus
