@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils'
 import claudeIcon from '@/assets/icons/claude.svg'
 import copilotIcon from '@/assets/icons/githubcopilot.svg'
 import deepseekIcon from '@/assets/icons/deepseek-color.svg'
@@ -9,6 +10,21 @@ import openaiIcon from '@/assets/icons/openai.svg'
 import openrouterIcon from '@/assets/icons/openrouter.svg'
 import renovateIcon from '@/assets/icons/renovate.svg'
 import snykIcon from '@/assets/icons/snyk.svg'
+
+/**
+ * The marks that carry no color of their own -- their SVG paints with
+ * `currentColor`, so the file is effectively solid black.
+ *
+ * Listed explicitly rather than sniffed from the file: an <img> cannot inherit
+ * our text color (it is its own document), so these must be repainted, and a
+ * rule that inspected the bundled asset would depend on Vite's inline-vs-URL
+ * threshold and change silently when a file crosses 4KB.
+ *
+ * To check this list after adding an icon:
+ *   grep -L currentColor src/assets/icons/*.svg   # colored art, not here
+ *   grep -l currentColor src/assets/icons/*.svg   # belongs here
+ */
+const MONO_ICONS = [githubIcon, copilotIcon, openaiIcon, grokIcon, renovateIcon]
 
 /**
  * Logos for the third parties that show up inside a repository.
@@ -54,10 +70,27 @@ export function providerLogo(id: string): string | null {
   return providerLogos[id.trim().toLowerCase()] ?? null
 }
 
-/** An AI provider's logo, or nothing at all when we have no mark for it. */
+/**
+ * Whether a mark must be repainted white to read on a dark surface.
+ *
+ * On a light surface these render correctly as-is, so inversion is opt-in at
+ * the call site rather than applied here.
+ */
+export function isMono(src: string): boolean {
+  return MONO_ICONS.includes(src)
+}
+
+/**
+ * An AI provider's logo, or nothing at all when we have no mark for it.
+ *
+ * A silhouette mark is drawn as a CSS mask rather than an <img>, so it takes
+ * the surrounding text color and is legible in either theme with nothing to
+ * pass in. Brand-colored art stays an <img> and keeps its own colors.
+ */
 export function ProviderGlyph({ id, size = 14 }: { id: string; size?: number }) {
   const src = providerLogo(id)
   if (!src) return null
+  if (isMono(src)) return <MonoMark src={src} size={size} />
   return (
     <img
       src={src}
@@ -67,6 +100,43 @@ export function ProviderGlyph({ id, size = 14 }: { id: string; size?: number }) 
       height={size}
       className="flex-none"
       style={{ width: size, height: size }}
+    />
+  )
+}
+
+/**
+ * A silhouette mark painted in `currentColor`.
+ *
+ * An <img> is its own document, so the `currentColor` inside the SVG never sees
+ * ours and the mark renders solid black -- invisible on a dark surface. A mask
+ * uses the SVG only as a stencil and fills it with the element's own color, so
+ * one element is correct in both themes.
+ */
+export function MonoMark({
+  src,
+  size = 14,
+  className,
+}: {
+  src: string
+  size?: number
+  className?: string
+}) {
+  return (
+    <span
+      aria-hidden
+      className={cn('flex-none bg-current', className)}
+      style={{
+        width: size,
+        height: size,
+        maskImage: `url("${src}")`,
+        WebkitMaskImage: `url("${src}")`,
+        maskSize: 'contain',
+        WebkitMaskSize: 'contain',
+        maskRepeat: 'no-repeat',
+        WebkitMaskRepeat: 'no-repeat',
+        maskPosition: 'center',
+        WebkitMaskPosition: 'center',
+      }}
     />
   )
 }
@@ -92,15 +162,33 @@ interface BotSource {
 const bots: BotSource[] = [
   // Dependabot is GitHub's own, and has no mark of its own to use.
   { githubLogins: ['dependabot'], logo: githubIcon, name: 'Dependabot' },
-  { githubLogins: ['copilot', 'copilot-swe-agent'], logo: copilotIcon, name: 'GitHub Copilot' },
+  {
+    githubLogins: ['copilot', 'copilot-swe-agent'],
+    logo: copilotIcon,
+    name: 'GitHub Copilot',
+  },
   { githubLogins: ['claude'], logo: claudeIcon, name: 'Claude' },
   { emails: ['noreply@anthropic.com'], logo: claudeIcon, name: 'Claude' },
-  { githubLogins: ['snyk-bot'], emails: ['snyk-bot@snyk.io'], logo: snykIcon, name: 'Snyk' },
+  {
+    githubLogins: ['snyk-bot'],
+    emails: ['snyk-bot@snyk.io'],
+    logo: snykIcon,
+    name: 'Snyk',
+  },
   { githubLogins: ['chatgpt-codex-connector'], logo: openaiIcon, name: 'Codex' },
-  { githubLogins: ['renovate'], emails: ['bot@renovateapp.com'], logo: renovateIcon, name: 'Renovate' },
+  {
+    githubLogins: ['renovate'],
+    emails: ['bot@renovateapp.com'],
+    logo: renovateIcon,
+    name: 'Renovate',
+  },
   // No mark of their own, so they carry GitHub's rather than showing initials.
   { githubLogins: ['github-actions'], logo: githubIcon, name: 'GitHub Actions' },
-  { githubLogins: ['semantic-release-bot'], logo: githubIcon, name: 'semantic-release' },
+  {
+    githubLogins: ['semantic-release-bot'],
+    logo: githubIcon,
+    name: 'semantic-release',
+  },
 ]
 
 /** The login inside a GitHub no-reply address, lowercased, with `[bot]` dropped. */
@@ -113,6 +201,12 @@ function noReplyLogin(email: string): string | null {
 export interface BotIdentity {
   logo: string
   name: string
+  /**
+   * True when the mark must be painted white to read on the disc. Derived from
+   * the icon itself rather than hand-set, so it cannot drift out of step with
+   * how the same file is drawn elsewhere.
+   */
+  mono: boolean
 }
 
 /**
@@ -129,7 +223,7 @@ export function botIdentity(email: string): BotIdentity | null {
   for (const bot of bots) {
     const byEmail = bot.emails?.includes(key)
     const byLogin = !!login && !!bot.githubLogins?.includes(login)
-    if (byEmail || byLogin) return { logo: bot.logo, name: bot.name }
+    if (byEmail || byLogin) return { logo: bot.logo, name: bot.name, mono: isMono(bot.logo) }
   }
   return null
 }

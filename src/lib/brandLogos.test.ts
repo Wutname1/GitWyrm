@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { botIdentity, providerLogo } from './brandLogos'
+import { botIdentity, isMono, providerLogo } from './brandLogos'
 
 describe('providerLogo', () => {
   it('knows the providers we ship art for', () => {
@@ -114,6 +114,46 @@ describe('botIdentity', () => {
       // Never a row with an empty image and nothing to show.
       expect(bot!.logo, address).toBeTruthy()
       expect(bot!.name.length).toBeGreaterThan(0)
+    }
+  })
+})
+
+/**
+ * The silhouette marks carry no color of their own, so they must be drawn as a
+ * mask that takes the surrounding text color. Getting this wrong is invisible
+ * in one theme and illegible in the other, so the classification is pinned.
+ */
+describe('isMono', () => {
+  const monoProviders = ['github-copilot', 'openai', 'xai']
+  const colorProviders = ['anthropic', 'google', 'openrouter', 'deepseek', 'mistral']
+
+  it('flags the silhouette marks', () => {
+    for (const id of monoProviders) {
+      expect(isMono(providerLogo(id)!), id).toBe(true)
+    }
+  })
+
+  it('leaves brand-colored art alone, so its colors survive', () => {
+    for (const id of colorProviders) {
+      expect(isMono(providerLogo(id)!), id).toBe(false)
+    }
+  })
+
+  it('agrees with what the bot rows are told to draw', () => {
+    const cases: [string, boolean][] = [
+      ['49699333+dependabot[bot]@users.noreply.github.com', true],
+      ['198982749+Copilot@users.noreply.github.com', true],
+      ['29139614+renovate[bot]@users.noreply.github.com', true],
+      ['1234+chatgpt-codex-connector@users.noreply.github.com', true],
+      // Full-color art: inverting these would wash the logo out.
+      ['1234+claude[bot]@users.noreply.github.com', false],
+      ['snyk-bot@snyk.io', false],
+    ]
+    for (const [email, mono] of cases) {
+      const bot = botIdentity(email)
+      expect(bot, email).not.toBeNull()
+      expect(bot!.mono, email).toBe(mono)
+      expect(isMono(bot!.logo), email).toBe(mono)
     }
   })
 })

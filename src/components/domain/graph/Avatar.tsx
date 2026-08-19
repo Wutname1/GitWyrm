@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { avatarUrl } from "@/lib/avatarSource";
-import { botIdentity } from "@/lib/brandLogos";
+import { MonoMark, botIdentity } from "@/lib/brandLogos";
 
 interface AvatarProps {
   initials: string;
@@ -63,18 +63,24 @@ export function Avatar({
       <span
         title={bot.name}
         className={cn(
-          "flex flex-none items-center justify-center overflow-hidden rounded-full text-foreground",
+          "flex flex-none items-center justify-center overflow-hidden rounded-full bg-black",
           size === "sm" ? "size-[19px]" : "size-[26px]",
         )}
-        style={{ background: color + "2b" }}
       >
-        <img
-          src={bot.logo}
-          alt=""
-          aria-hidden
-          width={size === "sm" ? 12 : 16}
-          height={size === "sm" ? 12 : 16}
-        />
+        {bot.mono ? (
+          // A silhouette mark has no color of its own, so it is drawn as a mask
+          // that takes the disc's text color rather than an <img>, which would
+          // render solid black on the black disc.
+          <MonoMark src={bot.logo} size={size === "sm" ? 12 : 16} className="text-white" />
+        ) : (
+          <img
+            src={bot.logo}
+            alt=""
+            aria-hidden
+            width={size === "sm" ? 12 : 16}
+            height={size === "sm" ? 12 : 16}
+          />
+        )}
       </span>
     );
   }
