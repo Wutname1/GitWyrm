@@ -72,12 +72,47 @@ export function useOpenspecDefaultArchiveTemplate() {
   })
 }
 
-/** Ids of archived changes, newest first. Only fetched when asked for. */
+/** Archived changes, newest first. Only fetched when asked for. */
 export function useOpenspecArchived(repoId: string | null, enabled = false) {
   return useQuery({
     queryKey: keys.openspecArchived(repoId ?? 'none'),
     enabled: repoId != null && enabled,
-    queryFn: async () => unwrap(await commands.openspecArchivedIds(repoId!)),
+    queryFn: async () => unwrap(await commands.openspecArchivedChanges(repoId!)),
+  })
+}
+
+/**
+ * One archived change in full, for reading.
+ *
+ * Archived changes never change again -- the folder is finished work -- so this
+ * holds its result rather than refetching every time the archive is reopened.
+ */
+export function useOpenspecArchivedChange(repoId: string | null, changeId: string | null) {
+  return useQuery({
+    queryKey: keys.openspecArchivedChange(repoId ?? 'none', changeId ?? 'none'),
+    enabled: repoId != null && changeId != null,
+    staleTime: Infinity,
+    queryFn: async () => unwrap(await commands.openspecGetArchivedChange(repoId!, changeId!)),
+  })
+}
+
+/**
+ * One file of an archived change, as text.
+ *
+ * Used for design.md, whose body the parsed change does not carry -- it records
+ * only whether the file exists. Held forever once read, like the change itself.
+ */
+export function useOpenspecArchivedFile(
+  repoId: string | null,
+  changeId: string | null,
+  file: string,
+  enabled = true
+) {
+  return useQuery({
+    queryKey: [...keys.openspecArchivedChange(repoId ?? 'none', changeId ?? 'none'), file],
+    enabled: repoId != null && changeId != null && enabled,
+    staleTime: Infinity,
+    queryFn: async () => unwrap(await commands.openspecReadArchivedFile(repoId!, changeId!, file)),
   })
 }
 

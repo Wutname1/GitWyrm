@@ -554,6 +554,71 @@ pub fn parse_changes_dir(openspec_dir: &Path) -> Vec<SpecChange> {
     changes
 }
 
+/// One archived change, summarised for the archive list.
+///
+/// Cheaper than a full parse: only proposal.md and tasks.md are read, because
+/// the list needs a readable title and a "12 tasks" line, not the deltas. The
+/// full parse happens when one is opened.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ArchivedChange {
+    /// Folder name under `openspec/changes/archive/`.
+    pub id: String,
+    /// First `# ` heading of proposal.md, falling back to the id.
+    pub title: String,
+    /// Task counts as they stood when the change was archived.
+    pub done: u32,
+    pub total: u32,
+    /// Folder mtime as a unix timestamp in seconds -- roughly "when this was
+    /// archived", and what the list is sorted by.
+    pub updated: f64,
+}
+
+/// Every archived change, newest first, with enough detail to read the list.
+pub fn archived_summaries(openspec_dir: &Path) -> Vec<ArchivedChange> {
+    let archive = openspec_dir.join("changes").join("archive");
+    let Ok(entries) = std::fs::read_dir(&archive) else {
+        return Vec::new();
+    };
+    let mut out: Vec<ArchivedChange> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .map(|dir| {
+            let id = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let title = read(&dir.join("proposal.md"))
+                .as_deref()
+                .and_then(first_title)
+                .unwrap_or_else(|| id.clone());
+            let tasks = parse_tasks(read(&dir.join("tasks.md")).as_deref().unwrap_or_default());
+            let progress = progress_of(&tasks);
+            let updated = dir
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0);
+            ArchivedChange {
+                id,
+                title,
+                done: progress.done,
+                total: progress.total,
+                updated,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.updated
+            .partial_cmp(&a.updated)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    out
+}
+
 /// Ids of archived changes, newest first. Cheap: no file parsing.
 pub fn archived_ids(openspec_dir: &Path) -> Vec<String> {
     let archive = openspec_dir.join("changes").join("archive");
@@ -814,6 +879,36 @@ mod tests {
         let all = parse_changes_dir(dir.path());
         assert_eq!(all.len(), 1);
         assert_eq!(archived_ids(dir.path()), vec!["old".to_string()]);
+    }
+
+    #[test]
+    fn archived_changes_summarise_without_a_full_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("changes").join("archive");
+        let shipped = archive.join("ship-it");
+        std::fs::create_dir_all(&shipped).unwrap();
+        std::fs::write(shipped.join("proposal.md"), "# Change: Ship it
+").unwrap();
+        std::fs::write(shipped.join("tasks.md"), "- [x] one
+- [x] two
+- [ ] three
+").unwrap();
+        // A folder with nothing in it still lists, titled by its id.
+        std::fs::create_dir_all(archive.join("bare")).unwrap();
+
+        let summaries = archived_summaries(dir.path());
+        assert_eq!(summaries.len(), 2);
+        let shipped = summaries.iter().find(|c| c.id == "ship-it").unwrap();
+        assert_eq!(shipped.title, "Ship it");
+        assert_eq!((shipped.done, shipped.total), (2, 3));
+        let bare = summaries.iter().find(|c| c.id == "bare").unwrap();
+        assert_eq!(bare.title, "bare");
+        assert_eq!((bare.done, bare.total), (0, 0));
+
+        // An archived change parses in full through the same path as an active one.
+        let full = parse_change_dir(&archive.join("ship-it")).unwrap();
+        assert_eq!(full.title, "Ship it");
+        assert_eq!(full.tasks.len(), 3);
     }
 
     #[test]

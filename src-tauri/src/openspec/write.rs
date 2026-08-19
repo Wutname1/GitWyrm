@@ -440,6 +440,39 @@ pub fn read_change_file(
     }
 }
 
+/// Read one file of an *archived* change, for the archive viewer.
+///
+/// Separate from `read_change_file` rather than a flag on it, because the two
+/// have different rules: an archived change is read-only, and its id must be a
+/// single path component so `archive/..` cannot walk back out into the active
+/// changes. There is deliberately no archived counterpart to
+/// `write_change_file` -- finished work is not edited in place.
+pub fn read_archived_file(
+    openspec_dir: &Path,
+    change_id: &str,
+    file: &str,
+) -> Result<String, AppError> {
+    let not_archived = || AppError::Other(format!("{change_id} is not an archived change here."));
+
+    let mut components = Path::new(change_id).components();
+    let Some(std::path::Component::Normal(name)) = components.next() else {
+        return Err(not_archived());
+    };
+    if components.next().is_some() {
+        return Err(not_archived());
+    }
+    let dir = openspec_dir.join("changes").join("archive").join(name);
+    if !dir.is_dir() {
+        return Err(not_archived());
+    }
+    let path = editable_path(&dir, file)?;
+    match std::fs::read_to_string(&path) {
+        Ok(body) => Ok(body),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(AppError::Other(format!("{file} could not be read: {e}"))),
+    }
+}
+
 /// Write one file of a change package from the editor.
 ///
 /// The body is written exactly as given. No trailing-newline fixups or
@@ -480,6 +513,35 @@ mod tests {
         let path = dir.path().join(name);
         std::fs::write(&path, content).unwrap();
         (dir, path)
+    }
+
+    #[test]
+    fn archived_reads_stay_inside_the_archive_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let openspec = dir.path();
+        let archived = openspec.join("changes").join("archive").join("shipped");
+        std::fs::create_dir_all(&archived).unwrap();
+        std::fs::write(archived.join("design.md"), "# Design
+").unwrap();
+        // An active change the archive reader must not be able to reach.
+        let active = openspec.join("changes").join("live");
+        std::fs::create_dir_all(&active).unwrap();
+        std::fs::write(active.join("design.md"), "secret
+").unwrap();
+
+        assert_eq!(
+            read_archived_file(openspec, "shipped", "design.md").unwrap(),
+            "# Design
+"
+        );
+        // A file the change never had reads as empty, not an error.
+        assert_eq!(read_archived_file(openspec, "shipped", "tasks.md").unwrap(), "");
+        // A multi-component id cannot walk back out to an active change.
+        assert!(read_archived_file(openspec, "../live", "design.md").is_err());
+        assert!(read_archived_file(openspec, "..", "design.md").is_err());
+        assert!(read_archived_file(openspec, "nope", "design.md").is_err());
+        // And the file half is still bounded by the change folder.
+        assert!(read_archived_file(openspec, "shipped", "../../live/design.md").is_err());
     }
 
     #[test]

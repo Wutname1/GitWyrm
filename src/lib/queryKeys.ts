@@ -26,6 +26,8 @@ export const keys = {
   openspecStatus: (repoId: string) => ['openspecStatus', repoId] as const,
   openspecChanges: (repoId: string) => ['openspecChanges', repoId] as const,
   openspecArchived: (repoId: string) => ['openspecArchived', repoId] as const,
+  openspecArchivedChange: (repoId: string, changeId: string) =>
+    ['openspecArchived', repoId, changeId] as const,
   openspecHistory: (repoId: string, changeId: string) =>
     ['openspecHistory', repoId, changeId] as const,
   /** Prefix: every change's history for one repo. */

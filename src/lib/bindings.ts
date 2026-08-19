@@ -2860,11 +2860,42 @@ async openspecGetChange(repoId: string, changeId: string) : Promise<Result<SpecC
 }
 },
 /**
- * Ids of archived changes, newest first.
+ * Archived changes, newest first, summarised for the archive list.
  */
-async openspecArchivedIds(repoId: string) : Promise<Result<string[], string>> {
+async openspecArchivedChanges(repoId: string) : Promise<Result<ArchivedChange[], string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("openspec_archived_ids", { repoId }) };
+    return { status: "ok", data: await TAURI_INVOKE("openspec_archived_changes", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * One archived change in full, or None when the folder is not there.
+ * 
+ * The same parse as an active change, pointed at `changes/archive/`. What comes
+ * back is read-only by construction: nothing that writes to a change takes an
+ * archived id, because an archived change has already been folded into the
+ * specs library and editing it would change history rather than the specs.
+ */
+async openspecGetArchivedChange(repoId: string, changeId: string) : Promise<Result<SpecChange | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_get_archived_change", { repoId, changeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Read one file of an archived change, for the archive viewer.
+ * 
+ * Read-only by design: there is no archived counterpart to
+ * `openspec_write_file`, because a change in the archive has already been
+ * folded into the specs library.
+ */
+async openspecReadArchivedFile(repoId: string, changeId: string, file: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_read_archived_file", { repoId, changeId, file }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -3111,6 +3142,31 @@ export type ArchiveProblem =
  * tool's own words and no false promise of a fix.
  */
 { kind: "unrecognised" }
+/**
+ * One archived change, summarised for the archive list.
+ * 
+ * Cheaper than a full parse: only proposal.md and tasks.md are read, because
+ * the list needs a readable title and a "12 tasks" line, not the deltas. The
+ * full parse happens when one is opened.
+ */
+export type ArchivedChange = { 
+/**
+ * Folder name under `openspec/changes/archive/`.
+ */
+id: string; 
+/**
+ * First `# ` heading of proposal.md, falling back to the id.
+ */
+title: string; 
+/**
+ * Task counts as they stood when the change was archived.
+ */
+done: number; total: number; 
+/**
+ * Folder mtime as a unix timestamp in seconds -- roughly "when this was
+ * archived", and what the list is sorted by.
+ */
+updated: number }
 /**
  * One answer from an ask session.
  */

@@ -129,18 +129,40 @@ pub async fn openspec_get_change(
     .map_err(|e| AppError::Other(e.to_string()))
 }
 
-/// Ids of archived changes, newest first.
+/// Archived changes, newest first, summarised for the archive list.
 #[tauri::command]
 #[specta::specta]
-pub async fn openspec_archived_ids(
+pub async fn openspec_archived_changes(
     manager: State<'_, RepoManager>,
     repo_id: String,
-) -> Result<Vec<String>, AppError> {
+) -> Result<Vec<parse::ArchivedChange>, AppError> {
     let root = repo_root(&manager, &repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         openspec::openspec_dir(&root)
-            .map(|dir| parse::archived_ids(&dir))
+            .map(|dir| parse::archived_summaries(&dir))
             .unwrap_or_default()
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// One archived change in full, or None when the folder is not there.
+///
+/// The same parse as an active change, pointed at `changes/archive/`. What comes
+/// back is read-only by construction: nothing that writes to a change takes an
+/// archived id, because an archived change has already been folded into the
+/// specs library and editing it would change history rather than the specs.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_get_archived_change(
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    change_id: String,
+) -> Result<Option<parse::SpecChange>, AppError> {
+    let root = repo_root(&manager, &repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = openspec::openspec_dir(&root)?;
+        parse::parse_change_dir(&dir.join("changes").join("archive").join(&change_id))
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))
@@ -497,6 +519,29 @@ pub async fn openspec_read_file(
         let dir = openspec::openspec_dir(&root)
             .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
         write::read_change_file(&dir, &change_id, &file)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Read one file of an archived change, for the archive viewer.
+///
+/// Read-only by design: there is no archived counterpart to
+/// `openspec_write_file`, because a change in the archive has already been
+/// folded into the specs library.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_read_archived_file(
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    change_id: String,
+    file: String,
+) -> Result<String, AppError> {
+    let root = repo_root(&manager, &repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = openspec::openspec_dir(&root)
+            .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
+        write::read_archived_file(&dir, &change_id, &file)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
