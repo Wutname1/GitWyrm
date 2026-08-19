@@ -2,7 +2,7 @@ import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { toast } from 'sonner'
 import { commands, type RepoInfo, type ScannedRepo } from '@/lib/bindings'
-import { normalizePath, pathKey } from '@/lib/paths'
+import { normalizePath, pathKey, pathName } from '@/lib/paths'
 import { unwrap } from '@/lib/queryKeys'
 import { timed } from '@/lib/perfTrail'
 import { Sentry } from '@/lib/sentry'
@@ -155,7 +155,7 @@ export function useOpenRepo() {
   return useMutation({
     mutationFn: async (rawPath: string) => {
       const path = normalizePath(rawPath)
-      const name = path.split('\\').pop() ?? path
+      const name = pathName(path)
       const toastId = toast.loading(`Opening ${name}…`)
       try {
         // Spans the whole IPC round-trip so the felt open latency (dominated by
@@ -201,7 +201,7 @@ export function useOpenSubmoduleRepo() {
   return useMutation({
     mutationFn: async ({ path: rawPath }: { path: string; parentPath: string }) => {
       const path = normalizePath(rawPath)
-      const name = path.split('\\').pop() ?? path
+      const name = pathName(path)
       const toastId = toast.loading(`Opening ${name}…`)
       try {
         // Also recorded to the in-memory perf trail, so a bug report about a
@@ -254,7 +254,7 @@ export function useOpenRepos() {
             void noteRepoAvailability(path, true)
           } catch {
             void noteRepoAvailability(path, false)
-            failed.push(path.split('\\').pop() ?? path)
+            failed.push(pathName(path))
           }
         }
         return { opened, failed }

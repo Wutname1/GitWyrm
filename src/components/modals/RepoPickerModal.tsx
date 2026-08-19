@@ -53,7 +53,7 @@ import {
   type RepositoryStarter,
 } from "@/lib/bindings";
 import { isTauri } from "@/lib/env";
-import { joinPath, normalizePath } from "@/lib/paths";
+import { joinPath, normalizePath, pathKey, pathName } from "@/lib/paths";
 import { unwrap } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/uiStore";
@@ -161,15 +161,6 @@ const STARTERS: {
     included: "Broad .gitignore for common tools and languages",
   },
 ];
-
-function pathKey(path: string): string {
-  return normalizePath(path).toLowerCase();
-}
-
-function pathName(path: string): string {
-  const parts = normalizePath(path).split("\\");
-  return parts.at(-1) || path;
-}
 
 function formatActivity(value: string): string {
   const date = new Date(value);
@@ -1430,7 +1421,7 @@ function RepoPickerPanel({
           continue;
         }
         try {
-          const repo = unwrap(await commands.openRepo(path));
+          const repo = unwrap(await commands.openRepo(normalizePath(path)));
           addRepo(repo);
           openedPaths.push(repo.path);
         } catch {

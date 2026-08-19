@@ -40,7 +40,7 @@ import { AUTO_CHECK_INTERVAL_MS, useUpdater } from '@/hooks/useUpdater'
 import { commands, type RepoInfo } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { log } from '@/lib/log'
-import { samePath } from '@/lib/paths'
+import { normalizePath, samePath } from '@/lib/paths'
 import { hideSplash, setSplashProgress, setSplashStatus } from '@/lib/splash'
 import { ensureToolset } from '@/lib/toolset'
 import { useUiStore } from '@/stores/uiStore'
@@ -149,7 +149,8 @@ function AppInner() {
         // A folder from Explorer's right-click entry. Drained here rather than
         // delivered as an event because the backend parses it before the webview
         // exists, so an event would have had nobody listening.
-        const launchPath = await commands.launchRepoPath()
+        const rawLaunchPath = await commands.launchRepoPath()
+        const launchPath = rawLaunchPath ? normalizePath(rawLaunchPath) : rawLaunchPath
 
         // Behavior > On startup. Off means start empty: no tabs are reopened, but
         // the saved list is left alone so turning it back on restores them.
@@ -164,13 +165,13 @@ function AppInner() {
         // user right-clicked (if any) opens.
         let saved: string[] = []
         if (settings.restore_tabs !== false) {
-          const openReposList = settings.open_repos ?? []
+          const openReposList = (settings.open_repos ?? []).map(normalizePath)
           const recents = settings.recents ?? []
           saved =
             openReposList.length > 0
               ? openReposList
               : recents.length > 0
-                ? [recents[0].path]
+                ? [normalizePath(recents[0].path)]
                 : []
         }
 
@@ -299,7 +300,7 @@ function AppInner() {
   // exiting. Opens the folder as a tab in the window the user already has.
   useEffect(() => {
     const unlisten = listen<string>('open-repo-path', (event) => {
-      const path = event.payload
+      const path = normalizePath(event.payload)
       const { openRepos, addRepo, setActiveRepo } = useWorkspaceStore.getState()
 
       // Already open: focus that tab rather than opening a duplicate.

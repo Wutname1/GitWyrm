@@ -1230,7 +1230,7 @@ function normalizeAliases(
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [path, alias] of Object.entries(aliases ?? {})) {
-    if (alias) out[path] = alias;
+    if (alias) out[normalizePath(path)] = alias;
   }
   return out;
 }
@@ -2826,7 +2826,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         settings.saved_tab_groups,
       );
       set({
-        recents: settings.recents ?? [],
+        recents: (settings.recents ?? []).map((recent) => ({
+          ...recent,
+          path: normalizePath(recent.path),
+        })),
         codeFolders: deserializeCodeFolders(
           settings.code_folders,
           settings.code_folder,
@@ -2962,7 +2965,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         tabLastUsedAt: normalizeTabLastUsedAt(settings.tab_last_used_at),
         pinnedTabPaths: (settings.pinned_tab_paths ?? []).map(normalizePath),
         savedTabGroups,
-        pinnedRepoPaths: settings.pinned_repo_paths ?? [],
+        pinnedRepoPaths: (settings.pinned_repo_paths ?? []).map(normalizePath),
         pinnedSavedGroupIds:
           settings.pinned_saved_group_ids ??
           savedTabGroups.slice(0, 3).map((group) => group.id),
