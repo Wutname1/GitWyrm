@@ -193,12 +193,24 @@ jobs:
           ' src-tauri/Cargo.toml > "$tmp"
           mv "$tmp" src-tauri/Cargo.toml
 
-          if ! grep -qz 'name = "gitwyrm"\nversion = "[^"]*"' src-tauri/Cargo.lock; then
-            echo "::error::gitwyrm package entry not found in Cargo.lock"
-            exit 1
-          fi
-          perl -0pi -e 's/(name = "gitwyrm"\nversion = )"[^"]*"/$1"'"$version"'"/' \
-            src-tauri/Cargo.lock
+          python3 - "$version" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          path = pathlib.Path("src-tauri/Cargo.lock")
+          text = path.read_text()
+          replacement = rf'\g<1>"{sys.argv[1]}"'
+          updated, count = re.subn(
+              r'(?m)^(name = "gitwyrm"\r?\nversion = )"[^"]*"',
+              replacement,
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("gitwyrm package entry not found in Cargo.lock")
+          path.write_text(updated)
+          PY
 
           npm version "$version" --no-git-tag-version --allow-same-version
 
