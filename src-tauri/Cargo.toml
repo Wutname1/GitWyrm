@@ -101,6 +101,16 @@ sha2 = "0.11.0"
 # add and remove it without elevation.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+# Subclassing the window procedure so the custom title bar can answer
+# HTMAXBUTTON and open Snap Layouts. Pinned to the version Tauri already pulls
+# in so the build keeps one copy.
+windows-sys = { version = "0.61", features = [
+	"Win32_Foundation",
+	"Win32_UI_WindowsAndMessaging",
+	"Win32_UI_Input_KeyboardAndMouse",
+	"Win32_System_LibraryLoader",
+	"Win32_Graphics_Gdi",
+] }
 
 [dev-dependencies]
 tempfile = "3"

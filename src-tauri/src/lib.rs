@@ -10,6 +10,7 @@ mod openspec;
 mod perf;
 mod scrub;
 mod settings;
+mod snap_layouts;
 mod state;
 mod telemetry;
 mod watcher;
@@ -303,6 +304,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::spec_link::spec_link_get,
             commands::spec_link::spec_link_set,
             commands::spec_link::spec_link_clear,
+            snap_layouts::set_maximize_button_rect,
         ])
         .typ::<watcher::RepoChangedPayload>()
         .typ::<commands::remote::GitProgressPayload>()

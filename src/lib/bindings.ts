@@ -2992,6 +2992,22 @@ async specLinkClear(repoId: string, branch: string) : Promise<Result<null, strin
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Tell Snap Layouts where the maximize button is, or that there is not one.
+ * 
+ * Called whenever the button moves or resizes -- the title bar reflows as tabs
+ * are opened, and the window itself is resizable.
+ * 
+ * The overlay is created here, on the first report, rather than at startup.
+ * Every window that wants Snap Layouts is a window that draws a maximize button
+ * and therefore calls this, which covers the Spec Desk windows opened later
+ * without a second hook, and leaves any window without a button (the crash bar)
+ * with nothing overlaid on it. Passing `None` hides the overlay, so a title bar
+ * that unmounts stops claiming its pixels.
+ */
+async setMaximizeButtonRect(rect: ButtonRect | null) : Promise<void> {
+    await TAURI_INVOKE("set_maximize_button_rect", { rect });
 }
 }
 
@@ -3183,6 +3199,10 @@ export type BranchSwitchMode =
  */
 "refuse"
 export type BuildInfo = { version: string; build_date: string; git_hash: string; debug: boolean; arch: string }
+/**
+ * The maximize button's bounds, in CSS pixels relative to the client area.
+ */
+export type ButtonRect = { x: number; y: number; width: number; height: number }
 /**
  * A repository path paired with the icon GitWyrm already knows about, for
  * screens that list many repositories at once.

@@ -2,6 +2,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Copy, Minus, Square, X } from 'lucide-react'
 import { TooltipButton } from '@/components/ui/tooltip'
 import { useIsMaximized } from '@/hooks/useIsMaximized'
+import { useSnapLayouts } from '@/hooks/useSnapLayouts'
 import { describeError, log } from '@/lib/log'
 
 const inTauri = '__TAURI_INTERNALS__' in window
@@ -29,8 +30,16 @@ async function closeWindow() {
   }
 }
 
+function toggleMaximize() {
+  void getCurrentWindow().toggleMaximize().catch(() => {})
+}
+
 export function WindowControls() {
   const isMax = useIsMaximized()
+  // Windows owns the pixels under the maximize button once Snap Layouts is
+  // wired up, so hover and click for that one button come from the OS rather
+  // than the DOM.
+  const { ref: maxRef, hovered: maxHovered } = useSnapLayouts(toggleMaximize)
 
   if (!inTauri) return null
 
@@ -47,9 +56,13 @@ export function WindowControls() {
         <Minus size={14} />
       </TooltipButton>
       <TooltipButton
-        onClick={() => getCurrentWindow().toggleMaximize().catch(() => {})}
+        ref={maxRef}
+        onClick={toggleMaximize}
         tooltip={isMax ? 'Restore' : 'Maximize'}
-        className={btn}
+        // `hover:` never fires here on Windows -- the OS took the pixels -- so
+        // the same tint is applied from the flag the backend relays. The CSS
+        // rule stays for every other platform, where the button is ordinary.
+        className={`${btn} ${maxHovered ? 'bg-panel3 text-foreground' : ''}`}
       >
         {isMax ? <Copy size={12} className="rotate-90" /> : <Square size={12} />}
       </TooltipButton>
