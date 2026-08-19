@@ -58,6 +58,32 @@ pub enum InstallOutcome {
     ManualRequired { version: String, url: String },
 }
 
+/// Whether this installation can replace itself with the updater artifact.
+///
+/// AppImages are single writable files and Tauri can update them directly.
+/// A deb/rpm installation belongs to the system package manager instead; the
+/// app should announce the release and show package-manager instructions
+/// without downloading an AppImage or asking for root access.
+#[derive(Debug, Clone, Copy, Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateInstallMode {
+    SelfUpdate,
+    SystemPackage,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn update_install_mode() -> UpdateInstallMode {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if std::env::var_os("APPIMAGE").is_none() {
+            return UpdateInstallMode::SystemPackage;
+        }
+    }
+
+    UpdateInstallMode::SelfUpdate
+}
+
 /// Manifest URL per channel.
 ///
 /// Stable keeps the GitHub URL it has always had. Builds already in the wild
@@ -748,6 +774,14 @@ fn is_privilege_failure(e: &tauri_plugin_updater::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn install_mode_is_a_known_value() {
+        assert!(matches!(
+            update_install_mode(),
+            UpdateInstallMode::SelfUpdate | UpdateInstallMode::SystemPackage
+        ));
+    }
 
     #[test]
     fn each_channel_maps_to_its_own_endpoint() {

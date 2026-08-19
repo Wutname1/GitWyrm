@@ -88,8 +88,7 @@ const LONG_FIXTURE: ChangelogEntry[] = [
 export function UpdateModalPreview() {
   const params = new URLSearchParams(window.location.search)
   const long = params.get('long') === '1'
-  // `?state=manual` shows the Linux case where the update downloaded but the
-  // root prompt was refused, so the app cannot install it itself.
+  // `?state=manual` shows a deb/rpm install owned by the package manager.
   const state = (params.get('state') ?? 'available') as
     | 'available'
     | 'downloading'
@@ -112,7 +111,7 @@ export function UpdateModalPreview() {
         state === 'downloading' ? { downloaded: 42_300_000, total: 96_100_000 } : null
       }
       manualUrl={
-        state === 'manual' ? 'https://github.com/Wutname1/GitWyrm/releases/latest' : null
+        state === 'manual' ? 'https://docs.gitwyrm.com/guide/install-linux' : null
       }
       changelog={empty ? [] : long ? LONG_FIXTURE : FIXTURE}
       loading={loading}

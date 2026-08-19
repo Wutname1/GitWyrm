@@ -188,12 +188,24 @@ jobs:
 
           # Cargo.lock records the package's own version too. Left stale it
           # contradicts Cargo.toml, which fails any --locked/--frozen build.
-          if ! grep -qz 'name = "gitwyrm"\nversion = "[^"]*"' src-tauri/Cargo.lock; then
-            echo "::error::gitwyrm package entry not found in Cargo.lock"
-            exit 1
-          fi
-          perl -0pi -e 's/(name = "gitwyrm"\nversion = )"[^"]*"/$1"'"$version"'"/' \
-            src-tauri/Cargo.lock
+          python3 - "$version" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          path = pathlib.Path("src-tauri/Cargo.lock")
+          text = path.read_text()
+          replacement = rf'\g<1>"{sys.argv[1]}"'
+          updated, count = re.subn(
+              r'(?m)^(name = "gitwyrm"\r?\nversion = )"[^"]*"',
+              replacement,
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("gitwyrm package entry not found in Cargo.lock")
+          path.write_text(updated)
+          PY
 
           npm version "$version" --no-git-tag-version --allow-same-version
 
@@ -492,7 +504,6 @@ jobs:
             echo "Promoted GitWyrm-Setup${suffix}.exe from ${TAG}"
           done
 
-
           for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb GitWyrm-x86_64.rpm; do
             aws s3 cp "${SRC}/${file}" \
               "s3://gitwyrm-cdn/installers/latest/${file}" \
@@ -501,12 +512,135 @@ jobs:
             echo "Promoted ${file} from ${TAG}"
           done
 
+  # Publish the stable deb as a real signed APT archive. The package itself is
+  # immutable and versioned; metadata moves only after every referenced object
+  # and by-hash index exists, with InRelease uploaded last as the commit point.
+  publish-apt:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      APT_SIGNING_KEY_B64: ${{ secrets.APT_SIGNING_KEY_B64 }}
+      APT_SIGNING_KEY_PASSPHRASE: ${{ secrets.APT_SIGNING_KEY_PASSPHRASE }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Build and sign APT repository
+        if: ${{ !contains(github.ref_name, '-beta.') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y apt-utils gnupg
+          pip install awscli
+
+          if [ -z "${APT_SIGNING_KEY_B64:-}" ]; then
+            echo "::error::APT_SIGNING_KEY_B64 is required to publish the APT repository"
+            exit 1
+          fi
+
+          mkdir -p repo/pool/main/g/gitwyrm
+          mkdir -p repo/dists/stable/main/binary-amd64
+          mkdir -p "$HOME/.gnupg"
+          chmod 700 "$HOME/.gnupg"
+
+          deb="repo/pool/main/g/gitwyrm/gitwyrm_${TAG}_amd64.deb"
+          aws s3 cp \
+            "s3://gitwyrm-cdn/releases/${TAG}/GitWyrm-amd64.deb" \
+            "$deb" \
+            --endpoint-url "$R2_ENDPOINT"
+
+          package=$(dpkg-deb --field "$deb" Package)
+          architecture=$(dpkg-deb --field "$deb" Architecture)
+          if [ "$package" != "gitwyrm" ] || [ "$architecture" != "amd64" ]; then
+            echo "::error::Expected package gitwyrm/amd64, got ${package}/${architecture}"
+            exit 1
+          fi
+
+          printf '%s' "$APT_SIGNING_KEY_B64" | base64 --decode > apt-private-key.gpg
+          gpg --batch --import apt-private-key.gpg
+          fingerprint=$(gpg --batch --with-colons --list-secret-keys \
+            | awk -F: '$1 == "fpr" { print $10; exit }')
+          if [ -z "$fingerprint" ]; then
+            echo "::error::The APT signing secret did not contain a private key"
+            exit 1
+          fi
+          gpg --batch --export "$fingerprint" > repo/gitwyrm-archive-keyring.gpg
+
+          (cd repo && apt-ftparchive packages pool) \
+            > repo/dists/stable/main/binary-amd64/Packages
+          gzip -9n -c repo/dists/stable/main/binary-amd64/Packages \
+            > repo/dists/stable/main/binary-amd64/Packages.gz
+
+          cat > apt-release.conf <<'EOF'
+          APT::FTPArchive::Release {
+            Origin "GitWyrm";
+            Label "GitWyrm";
+            Suite "stable";
+            Codename "stable";
+            Architectures "amd64";
+            Components "main";
+            Description "GitWyrm stable Linux packages";
+            Acquire-By-Hash "yes";
+          };
+          EOF
+          (cd repo && apt-ftparchive -c ../apt-release.conf release dists/stable) \
+            > repo/dists/stable/Release
+
+          passphrase_file=$(mktemp)
+          trap 'rm -f "$passphrase_file" apt-private-key.gpg' EXIT
+          chmod 600 "$passphrase_file"
+          printf '%s' "${APT_SIGNING_KEY_PASSPHRASE:-}" > "$passphrase_file"
+          sign=(--batch --yes --pinentry-mode loopback --passphrase-file "$passphrase_file" \
+            --local-user "$fingerprint")
+          gpg "${sign[@]}" --armor --detach-sign \
+            --output repo/dists/stable/Release.gpg repo/dists/stable/Release
+          gpg "${sign[@]}" --clearsign \
+            --output repo/dists/stable/InRelease repo/dists/stable/Release
+
+          index_dir="repo/dists/stable/main/binary-amd64"
+          mkdir -p "$index_dir/by-hash/SHA256"
+          for index in Packages Packages.gz; do
+            hash=$(sha256sum "$index_dir/$index" | cut -d' ' -f1)
+            cp "$index_dir/$index" "$index_dir/by-hash/SHA256/$hash"
+          done
+
+          apt_prefix="s3://gitwyrm-cdn/apt"
+          aws s3 cp "$deb" \
+            "$apt_prefix/pool/main/g/gitwyrm/$(basename "$deb")" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp repo/gitwyrm-archive-keyring.gpg \
+            "$apt_prefix/gitwyrm-archive-keyring.gpg" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --cache-control "public, max-age=3600"
+          aws s3 cp "$index_dir/by-hash" \
+            "$apt_prefix/dists/stable/main/binary-amd64/by-hash" \
+            --recursive --endpoint-url "$R2_ENDPOINT" \
+            --cache-control "public, max-age=31536000, immutable"
+          for index in Packages Packages.gz; do
+            aws s3 cp "$index_dir/$index" \
+              "$apt_prefix/dists/stable/main/binary-amd64/$index" \
+              --endpoint-url "$R2_ENDPOINT" --cache-control "no-cache"
+          done
+          for metadata in Release Release.gpg; do
+            aws s3 cp "repo/dists/stable/$metadata" \
+              "$apt_prefix/dists/stable/$metadata" \
+              --endpoint-url "$R2_ENDPOINT" --cache-control "no-cache"
+          done
+          # Commit point: clients cannot trust the new indexes until this moves.
+          aws s3 cp repo/dists/stable/InRelease \
+            "$apt_prefix/dists/stable/InRelease" \
+            --endpoint-url "$R2_ENDPOINT" --cache-control "no-cache, no-store"
+
   # All build legs share one release, so publishing is a separate job that runs
   # only after every platform has finished and attached its assets. The updater
   # endpoint resolves /releases/latest, which ignores drafts - so the release is
   # not live to users, and updates are not offered, until this job runs.
   publish:
-    needs: [release, promote-cdn-latest]
+    needs: [release, promote-cdn-latest, publish-apt]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -173,6 +173,20 @@ async function fetchUpdate(): Promise<string | null> {
   return res.data;
 }
 
+const LINUX_INSTALL_URL = "https://docs.gitwyrm.com/guide/install-linux";
+
+/** A found version plus whether the system package manager owns installation. */
+async function fetchUpdateOffer(): Promise<{
+  version: string | null;
+  systemPackage: boolean;
+}> {
+  const [version, mode] = await Promise.all([
+    fetchUpdate(),
+    commands.updateInstallMode(),
+  ]);
+  return { version, systemPackage: mode === "system_package" };
+}
+
 async function installUpdate(): Promise<InstallOutcome> {
   const res = await commands.installUpdate();
   if (res.status === "error") throw new Error(res.error);
@@ -359,14 +373,24 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
     if (get().state === "downloading") return;
     set({ state: "checking" });
     try {
-      const version = await fetchUpdate();
+      const { version, systemPackage } = await fetchUpdateOffer();
       if (!version) {
-        set({ state: "none", version: null });
+        set({ state: "none", version: null, manualUrl: null });
         if (!silent) toast("GitWyrm is up to date");
         return;
       }
-      set({ state: "available", version });
-      if (!silent) toast(`Update ${version} is available`);
+      set({
+        state: systemPackage ? "manual" : "available",
+        version,
+        manualUrl: systemPackage ? LINUX_INSTALL_URL : null,
+      });
+      if (!silent) {
+        toast(
+          systemPackage
+            ? `Update ${version} is ready in the Linux package repository`
+            : `Update ${version} is available`,
+        );
+      }
     } catch (e) {
       set({ state: "error" });
       if (!silent) toast.error(`Update check failed: ${(e as Error).message}`);
@@ -378,10 +402,15 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
     if (get().state === "downloading") return;
     set({ state: "checking" });
     try {
-      const version = await fetchUpdate();
+      const { version, systemPackage } = await fetchUpdateOffer();
       if (!version) {
-        set({ state: "none", version: null });
+        set({ state: "none", version: null, manualUrl: null });
         toast("GitWyrm is up to date");
+        return;
+      }
+      if (systemPackage) {
+        set({ state: "manual", version, manualUrl: LINUX_INSTALL_URL });
+        toast(`Update ${version} is ready in the Linux package repository`);
         return;
       }
       await runInstall(version, set);
@@ -410,9 +439,17 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
       // unreachable update server must cost a few seconds rather than the whole
       // startup. The timeout lives here now: the check runs in Rust, and losing
       // the race only abandons the wait, it does not cancel the command.
-      const version = await withTimeout(fetchUpdate(), LAUNCH_CHECK_TIMEOUT_MS);
-      if (!version) {
-        set({ state: "none", version: null });
+      const offer = await withTimeout(fetchUpdateOffer(), LAUNCH_CHECK_TIMEOUT_MS);
+      if (!offer?.version) {
+        set({ state: "none", version: null, manualUrl: null });
+        return;
+      }
+      const { version, systemPackage } = offer;
+
+      // deb/rpm installs belong to apt/dnf. Announce the release in the app,
+      // but do not download an AppImage or ask for root during startup.
+      if (systemPackage) {
+        set({ state: "manual", version, manualUrl: LINUX_INSTALL_URL });
         return;
       }
 

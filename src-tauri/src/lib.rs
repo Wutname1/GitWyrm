@@ -98,6 +98,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::updates::download_update,
             commands::updates::install_downloaded_update,
             commands::updates::update_endpoint,
+            commands::updates::update_install_mode,
             commands::updates::toolset_status,
             commands::updates::install_toolset,
             missing_repos::mark_repo_missing,

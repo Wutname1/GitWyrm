@@ -243,9 +243,8 @@ export function UpdateModalView({
   const downloading = state === 'downloading'
   const downloaded = state === 'downloaded'
   const restarting = state === 'ready'
-  // The update exists but GitWyrm could not get permission to install it -- a
-  // Linux .deb or .rpm needs root. Nothing to retry, so the button becomes a
-  // link to the download rather than another attempt that will fail the same way.
+  // A Linux .deb or .rpm belongs to apt/dnf. Nothing to retry inside the app,
+  // so the button opens the package-manager instructions instead.
   const manual = state === 'manual'
 
   const fraction =
@@ -350,8 +349,8 @@ export function UpdateModalView({
 
             {manual ? (
               <p className="ml-auto max-w-[22rem] text-right text-2xs text-sub">
-                GitWyrm needs your password to install this, and did not get it.
-                Download it and open the file to finish.
+                This copy was installed as a Linux package. Update it with your
+                package manager to keep system updates in one place.
               </p>
             ) : (
               <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-2xs text-sub">
@@ -369,7 +368,7 @@ export function UpdateModalView({
               <Button size="sm" asChild>
                 <a href={manualUrl ?? GITHUB_RELEASES} target="_blank" rel="noreferrer">
                   <ExternalLink className="size-3.5" />
-                  Get the update
+                  View update steps
                 </a>
               </Button>
             ) : downloaded || restarting ? (

@@ -623,6 +623,9 @@ async updateEndpoint() : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async updateInstallMode() : Promise<UpdateInstallMode> {
+    return await TAURI_INVOKE("update_install_mode");
+},
 /**
  * What the toolset looks like right now, and whether it is behind.
  * 
@@ -1657,6 +1660,13 @@ async stashDrop(repoId: string, index: number) : Promise<Result<null, string>> {
  * referenced twice for a moment; if the drop then fails the user has a
  * duplicate, which is recoverable. Dropping first would leave a window where a
  * failed store loses the changes outright.
+ * 
+ * The topmost entry is the exception. `git stash store` refuses to write a
+ * reflog entry for a sha that `refs/stash` already points at -- and it reports
+ * success while doing nothing, so the rename silently did not happen. That
+ * entry has to be dropped before it can be re-stored. Dropping is safe here
+ * because the sha was resolved first and the commit outlives the ref, so the
+ * changes are still reachable even if the store that follows fails.
  */
 async renameStash(repoId: string, index: number, message: string) : Promise<Result<null, string>> {
     try {
@@ -5411,6 +5421,15 @@ export type UnpushedTag = { name: string; target_sha: string;
  */
 commit_on_remote: boolean }
 export type UpdateChannel = "stable" | "beta"
+/**
+ * Whether this installation can replace itself with the updater artifact.
+ * 
+ * AppImages are single writable files and Tauri can update them directly.
+ * A deb/rpm installation belongs to the system package manager instead; the
+ * app should announce the release and show package-manager instructions
+ * without downloading an AppImage or asking for root access.
+ */
+export type UpdateInstallMode = "self_update" | "system_package"
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }
 /**
  * One checkout of the repository: the main one, or a linked worktree.
