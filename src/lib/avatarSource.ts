@@ -130,6 +130,23 @@ function sized(url: string, px: number): string {
 }
 
 /**
+ * Forget one address so the next lookup probes the network again.
+ *
+ * The seven-day TTL means a picture someone just changed - or just created,
+ * since "no picture" is cached for the same week - would otherwise stay stale.
+ * This is the escape hatch behind the refresh button on the author card.
+ */
+export function forgetAvatar(email: string): void {
+  const key = email.trim().toLowerCase()
+  if (!key) return
+  delete load()[key]
+  // A probe already running was started against the old entry, so let the next
+  // caller start a fresh one rather than awaiting this one's stale answer.
+  inflight.delete(key)
+  scheduleFlush()
+}
+
+/**
  * The avatar URL for a commit author at the requested pixel size, or null when
  * they have no picture anywhere. Cached across sessions by email.
  */

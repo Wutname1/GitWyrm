@@ -8,6 +8,12 @@ interface AvatarProps {
   color: string;
   email?: string;
   size?: "sm" | "md";
+  /**
+   * Bump to re-run the lookup. The browser caches the image itself, so this
+   * also rides along on the URL to defeat that second cache - without it a
+   * refresh would re-probe the network and still paint the old picture.
+   */
+  reloadKey?: number;
 }
 
 /**
@@ -22,7 +28,13 @@ export function isDependabot(email: string): boolean {
   );
 }
 
-export function Avatar({ initials, color, email, size = "sm" }: AvatarProps) {
+export function Avatar({
+  initials,
+  color,
+  email,
+  size = "sm",
+  reloadKey = 0,
+}: AvatarProps) {
   const px = size === "sm" ? 19 : 26;
   const bot = !!email && isDependabot(email);
   const [src, setSrc] = useState<string | null>(null);
@@ -31,12 +43,13 @@ export function Avatar({ initials, color, email, size = "sm" }: AvatarProps) {
     if (!email || bot) return;
     let cancelled = false;
     void avatarUrl(email, px * 2).then((url) => {
-      if (!cancelled) setSrc(url);
+      if (cancelled) return;
+      setSrc(url && reloadKey ? `${url}&_r=${reloadKey}` : url);
     });
     return () => {
       cancelled = true;
     };
-  }, [email, px, bot]);
+  }, [email, px, bot, reloadKey]);
 
   if (bot) {
     return (

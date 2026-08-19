@@ -1,6 +1,8 @@
-import type { ReactNode } from 'react'
-import { Copy, ExternalLink, Mail } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { toast } from 'sonner'
+import { Copy, ExternalLink, Mail, RefreshCw } from 'lucide-react'
 import { copyToClipboard } from '@/lib/clipboard'
+import { forgetAvatar } from '@/lib/avatarSource'
 import { authorColor } from '@/lib/gitDisplay'
 import { authorProfileLink } from '@/lib/authorProfile'
 import { openWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
@@ -28,22 +30,52 @@ export function AuthorHoverCard({ name, email, initials, sha, children }: Author
   const target = primary ? remoteWebTarget(primary) : null
   const profile = target ? authorProfileLink(target.provider, email, target.repositoryUrl) : null
   const color = authorColor(email || name)
+  const [reloadKey, setReloadKey] = useState(0)
+
+  // The picture is cached for a week, so someone who just changed theirs would
+  // keep seeing the old one. Forget the address and re-probe on demand.
+  function refreshPhoto(): void {
+    forgetAvatar(email)
+    setReloadKey(Date.now())
+    toast('Checking for a new photo')
+  }
 
   return (
     <HoverCard>
       <HoverCardTrigger asChild>{children}</HoverCardTrigger>
       <HoverCardContent>
-        <button
-          type="button"
-          disabled={!sha}
-          onClick={() => sha && selectCommit(sha)}
-          // Left as `title`: this button is already inside an open hover card,
-          // and a tooltip would stack a second floating layer on top of it.
-          title={sha ? 'Show this commit in the details pane' : undefined}
-          className="-m-1 flex w-[calc(100%+0.5rem)] items-center gap-2.5 rounded-[5px] p-1 text-left enabled:hover:bg-soft"
-        >
-          <Avatar initials={initials} color={color} email={email} size="md" />
-          <div className="min-w-0 flex-1">
+        <div className="-m-1 flex items-center gap-2.5 p-1">
+          {/* Its own hover group so the refresh button appears only for the
+              photo, not whenever the pointer is anywhere in the row. */}
+          <div className="group/photo relative flex-none">
+            <Avatar
+              initials={initials}
+              color={color}
+              email={email}
+              size="md"
+              reloadKey={reloadKey}
+            />
+            {email && (
+              <button
+                type="button"
+                onClick={refreshPhoto}
+                // Left as `title`: this sits inside an open hover card, and a
+                // tooltip would stack a second floating layer on top of it.
+                title="Check for a new photo"
+                aria-label="Check for a new photo"
+                className="absolute inset-0 flex items-center justify-center rounded-full bg-background/80 text-sub opacity-0 transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/photo:opacity-100"
+              >
+                <RefreshCw className="size-3" />
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={!sha}
+            onClick={() => sha && selectCommit(sha)}
+            title={sha ? 'Show this commit in the details pane' : undefined}
+            className="min-w-0 flex-1 rounded-[5px] p-1 text-left enabled:hover:bg-soft"
+          >
             <div className="overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-foreground">
               {name}
             </div>
@@ -52,8 +84,8 @@ export function AuthorHoverCard({ name, email, initials, sha, children }: Author
                 {email}
               </div>
             )}
-          </div>
-        </button>
+          </button>
+        </div>
 
         <div className="mt-2.5 flex flex-col gap-1">
           {email && (
