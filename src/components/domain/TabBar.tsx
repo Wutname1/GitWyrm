@@ -22,7 +22,10 @@ import {
 import { toast } from "sonner";
 import { WindowControls } from "@/components/domain/WindowControls";
 import { RepositoryTabs } from "@/components/domain/RepositoryTabs";
-import { onTitleBarDoubleClick } from "@/components/domain/titleBarDrag";
+import {
+  onTitleBarDoubleClick,
+  onTitleBarMouseDown,
+} from "@/components/domain/titleBarDrag";
 import {
   WyrmExplosion,
   useWyrmEasterEgg,
@@ -514,6 +517,7 @@ export function TabBar() {
         <div
           data-tauri-drag-region
           data-dim-on-drag
+          onMouseDownCapture={onTitleBarMouseDown}
           onDoubleClick={onTitleBarDoubleClick}
           className="flex h-9 flex-none items-stretch border-b border-border bg-background pl-2.5"
         >
@@ -540,6 +544,7 @@ export function TabBar() {
     <div
       data-tauri-drag-region
       data-dim-on-drag
+      onMouseDownCapture={onTitleBarMouseDown}
       onDoubleClick={onTitleBarDoubleClick}
       className="flex h-9 flex-none items-stretch gap-0.5 border-b border-border bg-background pl-2.5"
     >
