@@ -272,6 +272,16 @@ pub async fn git_fetch(
     .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// The remote-tracking ref a failed fetch/pull could not lock, if that is what
+/// the error says. Only `refs/remotes/` names qualify: deleting one of those is
+/// always safe (the next fetch recreates it), which is not true of any other
+/// ref, so anything else stays a real error.
+fn stale_remote_ref(message: &str) -> Option<String> {
+    let rest = message.split("cannot lock ref '").nth(1)?;
+    let name = rest.split('\'').next()?;
+    name.starts_with("refs/remotes/").then(|| name.to_string())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn git_pull(
@@ -294,13 +304,20 @@ pub async fn git_pull(
         // entry rather than dropping it, so the changes are always recoverable. It
         // also applies to both the merge and rebase forms, so it holds regardless of
         // the user's `pull.rebase` setting.
-        run_streaming(
-            &app,
-            &repo_id,
-            Some(&path),
-            "pull",
-            &["pull", "--progress", "--autostash"],
-        )?;
+        let pull_args = ["pull", "--progress", "--autostash"];
+        if let Err(e) = run_streaming(&app, &repo_id, Some(&path), "pull", &pull_args) {
+            // "cannot lock ref 'refs/remotes/...': is at X but expected Y" means
+            // the remote-tracking ref is stale or duplicated (a crashed fetch, or
+            // a loose ref disagreeing with packed-refs). It never fixes itself and
+            // would fail on every pull from then on. Deleting the tracking ref is
+            // always safe -- the retry's fetch recreates it from the remote.
+            let Some(stale) = stale_remote_ref(&e.to_string()) else {
+                return Err(e);
+            };
+            log::warn!("pull blocked by stale tracking ref {stale}; deleting it and retrying");
+            crate::git::shell::run_git(Some(&path), &["update-ref", "-d", &stale])?;
+            run_streaming(&app, &repo_id, Some(&path), "pull", &pull_args)?;
+        }
 
         // A pulled commit can change which version of a submodule the project
         // pins, and git leaves the nested checkout on the old one -- surfacing it
@@ -1350,6 +1367,25 @@ mod tests {
 
     fn lines(raw: &[&str]) -> Vec<String> {
         raw.iter().map(|l| (*l).to_string()).collect()
+    }
+
+    /// Verbatim from a Sentry report: a pull blocked by a stale tracking ref.
+    /// Only `refs/remotes/` names may be treated as safely deletable.
+    #[test]
+    fn stale_tracking_ref_is_extracted_from_the_lock_error() {
+        assert_eq!(
+            stale_remote_ref(
+                "git pull failed: error: cannot lock ref 'refs/remotes/origin/main': is at e261d5ab015542c4d288581ea3f110cf4dccf77d but expected df9833594de8ace0f58856673825bb974033bc23"
+            ),
+            Some("refs/remotes/origin/main".to_string())
+        );
+        // A local branch ref must never be auto-deleted.
+        assert_eq!(
+            stale_remote_ref("error: cannot lock ref 'refs/heads/main': is at a but expected b"),
+            None
+        );
+        // Unrelated failures don't match at all.
+        assert_eq!(stale_remote_ref("could not resolve host: github.com"), None);
     }
 
     /// Git's real stderr for a push refused because the remote moved on. The

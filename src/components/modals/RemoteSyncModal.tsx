@@ -189,6 +189,13 @@ export function RemoteSyncModal() {
         return
       case 'send':
         if (tracking) return void m.push.mutate(undefined, done)
+        // Two local branches: "send" means the other branch simply catches up
+        // to this one, which is a fast-forward of the source ref.
+        if (branchPair)
+          return void m.fastForwardBranch.mutate(
+            { branch: branchPair.source.name, target: branchPair.target.name },
+            done
+          )
         return
       case 'replace':
         return void m.pushForce.mutate(undefined, done)
