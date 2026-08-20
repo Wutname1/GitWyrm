@@ -737,6 +737,92 @@ pub enum StartExecutionOutcome {
     ProviderReconnect { detail: String },
 }
 
+/// Internal-only outcome of the atomic "re-check then write the
+/// `ExecutionRecord`" step inside `start_execution_at`. Not a public/`Type`
+/// enum like `StartExecutionOutcome` -- it exists purely to let that single
+/// `with_session_lock` closure report "someone else already started an
+/// execution here" alongside the ordinary read/write failure modes, without
+/// reusing `UpdateSessionOutcome` (which has no `AlreadyRunning` variant and
+/// is shared by mutations that never need one).
+enum RecordOutcome {
+    Updated { session: AgentSession },
+    AlreadyRunning { execution_id: ExecutionId },
+    NotFound,
+    Damaged { reason: String },
+    WriteFailed { detail: String },
+    Unavailable { detail: String },
+}
+
+/// Atomically re-checks "is an execution already active on this session" and,
+/// if not, writes a fresh `ExecutionRecord` for `execution_id` -- both inside
+/// ONE `with_session_lock` acquisition, so no other caller of this function
+/// (or of `update_session_at`/`stop_execution_at` for the same session) can
+/// observe or act on an in-between state. See `start_execution_at`'s call
+/// site for why this cannot simply be folded into the check that runs before
+/// `CliAgent::discover`: that earlier check runs under a lock that is
+/// released before the (slow, unlocked) discovery step, leaving a window a
+/// second concurrent call could win. This function is the fix: the write
+/// that would let a second call proceed is gated by the same read that
+/// decides whether it is allowed to.
+fn record_execution_if_not_running(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    execution_id: ExecutionId,
+) -> RecordOutcome {
+    use crate::agentdesk::model::SessionLoadError as E;
+    locks.with_session_lock(session_id, || {
+        let mut session = match store::read_session(root, session_id) {
+            Ok(s) => s,
+            Err(E::NotFound) => return RecordOutcome::NotFound,
+            Err(E::Io { detail }) => return RecordOutcome::Unavailable { detail },
+            Err(reason) => {
+                return RecordOutcome::Damaged {
+                    reason: reason.to_string(),
+                }
+            }
+        };
+
+        if let Some(active) = &session.header.active_execution_id {
+            if session.executions.iter().any(|e| {
+                &e.execution_id == active
+                    && matches!(
+                        e.state,
+                        SessionState::Preparing | SessionState::Working | SessionState::NeedsInput
+                    )
+            }) {
+                return RecordOutcome::AlreadyRunning {
+                    execution_id: active.clone(),
+                };
+            }
+        }
+
+        let now = now_rfc3339();
+        session.executions.push(crate::agentdesk::model::ExecutionRecord {
+            execution_id: execution_id.clone(),
+            session_id: session.header.session_id.clone(),
+            parent_execution_id: None,
+            state: SessionState::Preparing,
+            started_at: now,
+            ended_at: None,
+            last_sequence: 0,
+        });
+        session.header.active_execution_id = Some(execution_id.clone());
+        session.header.state = SessionState::Preparing;
+        session.header.updated_at = now_rfc3339();
+
+        match store::write_session(root, &session) {
+            Ok(()) => {
+                let _ = refresh_index(root);
+                RecordOutcome::Updated { session }
+            }
+            Err(e) => RecordOutcome::WriteFailed {
+                detail: e.to_string(),
+            },
+        }
+    })
+}
+
 fn start_execution_at(
     app: &AppHandle,
     locks: &crate::agentdesk::SessionLocks,
@@ -830,35 +916,43 @@ fn start_execution_at(
     // an execution present -- the bridge would eventually create one on the
     // first routed event, but that would leave a window where `Started` says
     // an execution exists and `agent_session_get` disagrees.
-    let record_outcome = update_session_at(locks, root, session_id, |s| {
-        let now = now_rfc3339();
-        s.executions.push(crate::agentdesk::model::ExecutionRecord {
-            execution_id: execution_id.clone(),
-            session_id: s.header.session_id.clone(),
-            parent_execution_id: None,
-            state: SessionState::Preparing,
-            started_at: now,
-            ended_at: None,
-            last_sequence: 0,
-        });
-        s.header.active_execution_id = Some(execution_id.clone());
-        s.header.state = SessionState::Preparing;
-    });
+    //
+    // This is the SECOND lock acquisition for this session (the first, above,
+    // only checked and released). Everything between them -- `manager.get`
+    // and `CliAgent::discover`, in particular the shell-out inside `discover`
+    // -- ran unlocked, so another `start_execution_at` call for the same
+    // session could have raced ahead and started its own execution in that
+    // window. The check from step 1 is therefore repeated HERE, inside this
+    // same lock acquisition that performs the write, so the check and the
+    // write are atomic with respect to every other mutating path for this
+    // session (the exact race `agentdesk::locks` documents). Re-acquiring the
+    // lock rather than holding it across `discover` is deliberate: a slow
+    // shell-out must never serialize behind a held session lock.
+    let record_outcome =
+        record_execution_if_not_running(locks, root, session_id, execution_id.clone());
     let session_after = match record_outcome {
-        UpdateSessionOutcome::Updated { session } => session,
-        UpdateSessionOutcome::NotFound => {
+        RecordOutcome::Updated { session } => session,
+        RecordOutcome::AlreadyRunning { execution_id } => {
+            // No write happened, so nothing to unwind on the session itself --
+            // but the link and gate-answer channel registered above for THIS
+            // (losing) attempt must not linger, since the winning attempt owns
+            // the link now (or will, once its own write lands).
+            links.unlink(&repo_id);
+            return StartExecutionOutcome::AlreadyRunning { execution_id };
+        }
+        RecordOutcome::NotFound => {
             links.unlink(&repo_id);
             return StartExecutionOutcome::NotFound;
         }
-        UpdateSessionOutcome::Damaged { reason } => {
+        RecordOutcome::Damaged { reason } => {
             links.unlink(&repo_id);
             return StartExecutionOutcome::Damaged { reason };
         }
-        UpdateSessionOutcome::WriteFailed { detail } => {
+        RecordOutcome::WriteFailed { detail } => {
             links.unlink(&repo_id);
             return StartExecutionOutcome::WriteFailed { detail };
         }
-        UpdateSessionOutcome::Unavailable { detail } => {
+        RecordOutcome::Unavailable { detail } => {
             links.unlink(&repo_id);
             return StartExecutionOutcome::Unavailable { detail };
         }
@@ -1053,7 +1147,20 @@ fn stop_execution_at(
     // idempotent with this (bridge.rs's `map_run_state`/`last_sequence`
     // handling) -- this write exists so the UI reflects "stopping" without
     // waiting on that event to round-trip through the engine first.
+    //
+    // Whether to unlink the repo afterwards is decided HERE, inside the same
+    // closure that mutates the executions -- not from `stopped.is_empty()`
+    // alone. The session can carry more than one concurrent execution (a lead
+    // plus helpers; `ExecutionRecord::parent_execution_id`), and `StopScope::One`
+    // exists precisely so one of them can be stopped without touching the
+    // rest. Unlinking whenever *anything* stopped (the previous behavior)
+    // severed the repo->session link even when other executions on this same
+    // session were still `Working` -- every later run event for those would
+    // be silently dropped as `NoLinkedSession` in `bridge::route_run_event`.
+    // The correct condition is "no execution on this session is still active
+    // after this mutation."
     let mut stopped = Vec::new();
+    let mut any_still_active = false;
     let outcome = update_session_at(locks, root, session_id, |s| {
         for exec in s.executions.iter_mut() {
             let matches_scope = match &scope {
@@ -1072,6 +1179,12 @@ fn stop_execution_at(
                 stopped.push(exec.execution_id.clone());
             }
         }
+        any_still_active = s.executions.iter().any(|exec| {
+            matches!(
+                exec.state,
+                SessionState::Preparing | SessionState::Working | SessionState::NeedsInput
+            )
+        });
         if !stopped.is_empty() {
             s.header.state = SessionState::Stopped;
             if let Some(active) = &s.header.active_execution_id {
@@ -1085,9 +1198,12 @@ fn stop_execution_at(
         }
     });
 
-    if stopped.is_empty() && matches!(scope, StopScope::All) {
-        links.unlink(&repo_id);
-    } else if !stopped.is_empty() {
+    // Only sever the repo->session link once nothing on this session is still
+    // running -- an in-progress sibling execution must keep receiving routed
+    // run events. `matches!(outcome, UpdateSessionOutcome::Updated { .. })`
+    // guards against unlinking on a failed write, where `any_still_active`
+    // was never actually computed against the persisted state.
+    if matches!(outcome, UpdateSessionOutcome::Updated { .. }) && !any_still_active {
         links.unlink(&repo_id);
     }
 
@@ -1962,6 +2078,70 @@ mod tests {
         assert!(already_running, "the guard must see the active execution as running");
     }
 
+    /// Finding 1 regression test: two callers racing `start_execution_at`'s
+    /// write step for the SAME session must never both win. Before the fix,
+    /// the "nothing running" check and the `ExecutionRecord` write happened
+    /// under two separate lock acquisitions with an unlocked gap between them
+    /// (`manager.get` + `CliAgent::discover`) -- both threads could see
+    /// "nothing active" and both write, leaving the loser's execution
+    /// orphaned with a still-running engine process and only one execution
+    /// actually recorded.
+    ///
+    /// `record_execution_if_not_running` is the atomic replacement: check and
+    /// write inside one `with_session_lock` acquisition. This test drives it
+    /// directly with two real threads and a barrier so they contend for the
+    /// same lock, which is the only way to make the pre-fix race reproduce
+    /// (a sequential call sequence cannot expose it).
+    #[test]
+    fn concurrent_start_attempts_yield_exactly_one_started_and_one_already_running() {
+        let (_dir, root) = temp_root();
+        let locks = std::sync::Arc::new(test_locks());
+        let CreateSessionOutcome::Created { session } =
+            create_session_at(&root, create_request("Race"))
+        else {
+            panic!("expected Created");
+        };
+        let session_id = session.header.session_id.clone();
+
+        let exec_a = crate::agentdesk::execution_id_for_run_session("run-a");
+        let exec_b = crate::agentdesk::execution_id_for_run_session("run-b");
+        let barrier = std::sync::Barrier::new(2);
+        let root_ref = &root;
+        let locks_ref = &locks;
+        let session_id_ref = &session_id;
+
+        let (outcome_a, outcome_b) = std::thread::scope(|scope| {
+            let a = scope.spawn(|| {
+                barrier.wait();
+                record_execution_if_not_running(locks_ref, root_ref, session_id_ref, exec_a.clone())
+            });
+            let b = scope.spawn(|| {
+                barrier.wait();
+                record_execution_if_not_running(locks_ref, root_ref, session_id_ref, exec_b.clone())
+            });
+            (a.join().unwrap(), b.join().unwrap())
+        });
+
+        let outcomes = [outcome_a, outcome_b];
+        let started = outcomes
+            .iter()
+            .filter(|o| matches!(o, RecordOutcome::Updated { .. }))
+            .count();
+        let already_running = outcomes
+            .iter()
+            .filter(|o| matches!(o, RecordOutcome::AlreadyRunning { .. }))
+            .count();
+        assert_eq!(started, 1, "exactly one attempt must win and record its execution");
+        assert_eq!(already_running, 1, "the other attempt must see AlreadyRunning, not also win");
+
+        let final_session = store::read_session(&root, &session_id).expect("session still readable");
+        assert_eq!(
+            final_session.executions.len(),
+            1,
+            "only the winning attempt's ExecutionRecord may be persisted, never both"
+        );
+    }
+
     #[test]
     fn stop_scope_one_stops_only_the_named_execution() {
         let (_dir, root) = temp_root();
@@ -2011,6 +2191,97 @@ mod tests {
         assert_eq!(a.state, SessionState::Working, "the peer execution must keep running");
         assert_eq!(b.state, SessionState::Stopped);
         assert!(b.ended_at.is_some());
+    }
+
+    /// Finding 2 regression test. Before the fix, `stop_execution_at` unlinked
+    /// the repo->session link whenever `stopped` was non-empty, regardless of
+    /// `scope` -- so stopping only a helper (`StopScope::One`) severed the
+    /// link for the whole session even while the lead execution was still
+    /// `Working`. Every later run event for that lead would then hit
+    /// `RunSessionLinks::get` -> `None` in `bridge::route_run_event` and be
+    /// dropped as `NoLinkedSession`, silently freezing the UI for a run that
+    /// was still executing.
+    ///
+    /// This drives the real path end-to-end: link the repo, give the session
+    /// a lead + a helper both `Working`, stop only the helper, assert the
+    /// link survives, then route a real run event for the lead and assert it
+    /// still lands as a persisted message instead of being dropped.
+    #[test]
+    fn stopping_one_helper_leaves_the_link_intact_for_the_still_running_lead() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+        let drivers = crate::commands::airun::DriverRegistry::default();
+        let CreateSessionOutcome::Created { session } =
+            create_session_at(&root, create_request("Lead plus helper"))
+        else {
+            panic!("expected Created");
+        };
+        let session_id = session.header.session_id.clone();
+        let repo_id = session.header.repo_id.clone();
+        links.link(&repo_id, &session_id);
+
+        let lead = crate::agentdesk::execution_id_for_run_session("run-lead");
+        let helper = crate::agentdesk::execution_id_for_run_session("run-helper");
+        update_session_at(&locks, &root, &session_id, |s| {
+            s.executions.push(crate::agentdesk::model::ExecutionRecord {
+                execution_id: lead.clone(),
+                session_id: s.header.session_id.clone(),
+                parent_execution_id: None,
+                state: SessionState::Working,
+                started_at: now_rfc3339(),
+                ended_at: None,
+                last_sequence: 0,
+            });
+            s.executions.push(crate::agentdesk::model::ExecutionRecord {
+                execution_id: helper.clone(),
+                session_id: s.header.session_id.clone(),
+                parent_execution_id: Some(lead.clone()),
+                state: SessionState::Working,
+                started_at: now_rfc3339(),
+                ended_at: None,
+                last_sequence: 0,
+            });
+            s.header.active_execution_id = Some(lead.clone());
+        });
+
+        let outcome = stop_execution_at(
+            &locks,
+            &root,
+            &links,
+            &drivers,
+            &session_id,
+            StopScope::One { execution_id: helper.clone() },
+        );
+        let StopExecutionOutcome::Stopped { stopped, .. } = outcome else {
+            panic!("expected Stopped, got {outcome:?}");
+        };
+        assert_eq!(stopped, vec![helper]);
+
+        assert_eq!(
+            links.get(&repo_id),
+            Some(session_id.clone()),
+            "the link must survive: the lead execution is still Working"
+        );
+
+        // Prove it in practice, not just by inspecting the link table: a run
+        // event for the lead, routed exactly as the live engine would route
+        // one, must still land as a persisted message rather than being
+        // dropped as NoLinkedSession.
+        let event = run_event("run-lead", crate::airun::driver::RunState::Working);
+        let sequence = links.next_sequence(&event.session_id);
+        let routed = crate::agentdesk::route_run_event(
+            &root,
+            &links,
+            &locks,
+            sequence,
+            "2026-01-01T00:00:02Z",
+            &event,
+        );
+        assert!(
+            matches!(routed, crate::agentdesk::RunEventRouted::Persisted { .. }),
+            "expected Persisted, got {routed:?}"
+        );
     }
 
     #[test]

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
-import { commands, type CreateSessionRequest, type RepoInfo } from '@/lib/bindings'
+import { commands, type CreateSessionRequest, type RepoInfo, type SelectDeskTarget } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
-import { readWindowMode } from '@/lib/windowMode'
+import { readWindowMode, type WindowMode } from '@/lib/windowMode'
 import { AgentDeskTitleBar } from '@/components/domain/agent-desk/AgentDeskTitleBar'
 import { SessionSidebar } from '@/components/domain/agent-desk/SessionSidebar'
 import { ConversationPane } from '@/components/domain/agent-desk/ConversationPane'
@@ -15,6 +16,49 @@ import { resolveAgentDeskShellState } from '@/views/agentDeskViewState'
 
 type RightTab = 'context' | 'graph'
 type CenterView = 'conversation' | 'openspec'
+
+/** Matches the Rust side's `agent-desk://select-target` in `spec_desk.rs`. */
+const SELECT_DESK_TARGET_EVENT = 'agent-desk://select-target'
+
+/**
+ * The window's current target (repo, and optionally a change), kept live
+ * instead of frozen at first paint.
+ *
+ * `open_spec_desk` (backend) focuses this window and retargets it whenever
+ * "Open Agent Desk" fires for a *different* repository -- the window is
+ * app-wide now, so a second kickoff does not create a second window, it
+ * redirects this one. The URL query params (`?repo=`/`path=`/`change=`) are
+ * only ever right for the window's first paint; every retarget after that
+ * arrives solely as `SELECT_DESK_TARGET_EVENT`. Without a live listener,
+ * this window shows the first repo it was ever opened for, forever -- which
+ * is Finding 3.
+ *
+ * First paint still reads the URL directly rather than waiting on the event:
+ * `WebviewWindowBuilder::build()` (Rust) returns once the webview exists, not
+ * once its page has subscribed, so an event fired immediately after creating
+ * a fresh window can be missed entirely. Falling back to "whatever the event
+ * says, once it shows up" would leave a freshly created window blank in that
+ * race. Seeding from the URL sidesteps it: the URL is written into the
+ * window's own creation call, so it is never subject to a subscription race,
+ * and every kickoff (including the one that just created this window) also
+ * fires the event, so a window that outlives its first paint stays correct
+ * too.
+ */
+function useDeskTarget(): WindowMode {
+  const [target, setTarget] = useState<WindowMode>(readWindowMode)
+
+  useEffect(() => {
+    const unlisten = listen<SelectDeskTarget>(SELECT_DESK_TARGET_EVENT, (event) => {
+      const { repoId, repoPath, changeId } = event.payload
+      setTarget({ kind: 'agent-desk', repoId, repoPath, changeId })
+    })
+    return () => {
+      void unlisten.then((fn) => fn())
+    }
+  }, [])
+
+  return target
+}
 
 /**
  * Opens the Desk's repository in this window's backend session.
@@ -79,7 +123,7 @@ function CenteredMessage({ title, detail }: { title: string; detail: string }) {
  * internals or assumes there is exactly one.
  */
 export function AgentDeskView() {
-  const [mode] = useState(readWindowMode)
+  const mode = useDeskTarget()
   const { repo, error } = useDeskRepo(mode.repoPath)
   const repoId = repo?.id ?? null
   const qc = useQueryClient()
@@ -89,6 +133,37 @@ export function AgentDeskView() {
   const [centerView, setCenterView] = useState<CenterView>('conversation')
   const [creating, setCreating] = useState(false)
   const composerFocusRef = useRef<HTMLDivElement | null>(null)
+
+  // Rule #1: a retarget must be visibly apparent, not silent. Clearing the
+  // selected session both (a) stops the previous repo's conversation from
+  // staying on screen under the new repo's title/sidebar -- which would look
+  // like data from two repositories got mixed together -- and (b) lets the
+  // "land on the most recent session" effect below pick the new repo's own
+  // most recent chat, the same way it already does on first paint.
+  //
+  // Two separate effects, deliberately: the first reacts to `mode.repoId`
+  // alone so the reset happens the instant a retarget is detected, without
+  // waiting on `useDeskRepo`'s async `openRepo` to resolve. The second reacts
+  // to `repo` (which briefly goes back to `null` while the new repo opens,
+  // then becomes the new `RepoInfo`) so the toast names the repo that was
+  // actually just switched to, not the one being left.
+  const previousRepoId = useRef(mode.repoId)
+  const announceNextRepo = useRef(false)
+  useEffect(() => {
+    if (previousRepoId.current !== mode.repoId) {
+      previousRepoId.current = mode.repoId
+      announceNextRepo.current = true
+      setSelectedSessionId(null)
+      setCenterView('conversation')
+    }
+  }, [mode.repoId])
+
+  useEffect(() => {
+    if (repo && announceNextRepo.current) {
+      announceNextRepo.current = false
+      toast.info(`Switched to ${repo.name}`)
+    }
+  }, [repo])
 
   const filter = repoId
     ? {

@@ -145,13 +145,13 @@ export function SessionRow({
           <span className="flex-none">
             {working ? (
               <span
-                className="block h-1.5 w-1.5 rounded-full bg-[var(--gw-blue)] shadow-[0_0_0_3px_rgba(96,165,250,0.15)]"
+                className="block h-1.5 w-1.5 rounded-full bg-[var(--gw-blue)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--gw-blue)_15%,transparent)]"
                 role="status"
                 aria-label="Working"
               />
             ) : needsYou ? (
               <span
-                className="block h-1.5 w-1.5 rounded-full bg-[var(--gw-amber)] shadow-[0_0_0_3px_rgba(251,191,36,0.18)]"
+                className="block h-1.5 w-1.5 rounded-full bg-[var(--gw-amber)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--gw-amber)_18%,transparent)]"
                 role="status"
                 aria-label="Needs your input"
               />
