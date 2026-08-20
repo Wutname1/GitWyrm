@@ -4,19 +4,21 @@ import type { MessageTarget, SessionMessage } from '@/lib/bindings'
 import { useAgentSession } from '@/hooks/useAgentSessions'
 import { cn } from '@/lib/utils'
 import { Markdown } from '@/components/ui/markdown'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { DisabledHint } from '@/components/ui/tooltip'
 import { isNearBottom } from '@/lib/agentDeskScroll'
 import { resolveMessageTarget } from '@/lib/agentDeskTargets'
-import { computeRailTicks, truncateSnippet, userMessagesForRail } from '@/lib/agentDeskRail'
+import { computeRailTicks, userMessagesForRail } from '@/lib/agentDeskRail'
 import { groupEventStacks, type EventStackGroup } from '@/lib/agentDeskEvents'
 import { parsePlanChecklist } from '@/lib/agentDeskPlan'
 import { foldThoughtSummaries } from '@/lib/agentDeskTranscript'
+import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { SessionSourceBanner } from './SessionSourceBanner'
 import { SessionComposer } from './SessionComposer'
 import { ThoughtBlock } from './ThoughtBlock'
 import { PlanChecklist } from './PlanChecklist'
 import { EventStack } from './EventStack'
+import { MessageHistoryRail } from './MessageHistoryRail'
+import { MessageActions } from './MessageActions'
 
 /** Plain-language label for each message kind, in the order they can appear. */
 function kindLabel(kind: SessionMessage['kind']): string {
@@ -113,6 +115,7 @@ function MessageRow({
   flash,
   onOpenSource,
   thought,
+  onEdit,
 }: {
   message: SessionMessage
   flash: boolean
@@ -124,6 +127,8 @@ function MessageRow({
    * same `.ag-message` as the reply it explains.
    */
   thought?: SessionMessage
+  /** Copy/Edit controls for a user message -- see `MessageActions`. Omitted (no controls rendered) for non-user rows. */
+  onEdit?: (text: string) => void
 }) {
   const isUser = message.role === 'user'
   // "Needs your approval" and tool activity get a visibly different treatment
@@ -145,7 +150,11 @@ function MessageRow({
       data-message-id={message.messageId}
       tabIndex={-1}
       className={cn(
-        'grid grid-cols-[27px_minmax(0,1fr)] gap-2.5 rounded-md px-2 py-1.5 outline-none transition-colors duration-500 motion-reduce:transition-none',
+        // `select-text` at the message level, not just on the body: `body` sets
+        // `user-select: none` (src/index.css), so without this the sender, the
+        // timestamp and any thought/plan rows are unselectable and dragging
+        // across a whole message copies only part of it.
+        'group relative grid select-text grid-cols-[27px_minmax(0,1fr)] gap-2.5 rounded-md px-2 py-1.5 outline-none transition-colors duration-500 motion-reduce:transition-none',
         isApproval && 'border border-[color-mix(in_srgb,var(--gw-amber)_45%,transparent)] bg-[color-mix(in_srgb,var(--gw-amber)_8%,transparent)]',
         flash && 'bg-[color-mix(in_srgb,var(--gw-accent)_18%,transparent)]'
       )}
@@ -159,6 +168,7 @@ function MessageRow({
       >
         {avatarInitials(message)}
       </span>
+      {isUser && onEdit && <MessageActions message={message} onEdit={onEdit} className="absolute right-2 top-1.5" />}
       <div className="min-w-0">
         <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-foreground">
           <span className={cn(isApproval && 'text-[var(--gw-amber)]')}>{kindLabel(message.kind)}</span>
@@ -173,7 +183,7 @@ function MessageRow({
           {message.renderedContent ? (
             <Markdown text={message.renderedContent} />
           ) : (
-            <p className="whitespace-pre-wrap">{message.plainContent}</p>
+            <p className="select-text whitespace-pre-wrap">{message.plainContent}</p>
           )}
         </div>
         {planRows.length > 0 && (
@@ -274,6 +284,15 @@ export function ConversationPane({
   const { session, messages, state, isLoading, isError } = useAgentSession(sessionId)
   const [flashId, setFlashId] = useState<string | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
+  const setComposerDraft = useAgentDeskUiStore((s) => s.setDraft)
+  // Edit (tasks.md's message controls): puts the message's text back into
+  // this session's composer draft for the user to revise and resend. There
+  // is no backend command to amend a message already appended to a
+  // session's transcript, so this is honestly a "resend" affordance, not an
+  // in-place edit -- see `MessageActions`'s doc comment.
+  const editMessage = (text: string) => {
+    if (sessionId) setComposerDraft(sessionId, text)
+  }
   // Tracks whether the reader was near the bottom just before this render's
   // message list changed, so the auto-follow effect below can tell "a new
   // message arrived while I was reading the bottom" (follow it) apart from
@@ -503,6 +522,7 @@ export function ConversationPane({
                     flash={flashId === m.messageId}
                     onOpenSource={onOpenSource}
                     thought={thoughtFor.get(m.messageId)}
+                    onEdit={m.role === 'user' ? editMessage : undefined}
                   />
                 )
               }
@@ -526,64 +546,18 @@ export function ConversationPane({
             sent, mirroring the mockup's `.ag-history-rail` tick strip. Ticks
             are positioned from each message's real measured offset in the
             transcript (5.1, `railTicks`), not from its index. A hover/focus
-            popover -- at least half the transcript's own width (5.2) --
-            lists every user message with its timestamp; the current one is
-            highlighted, matching `.ag-history-jump.is-current`. */}
-        {userMessages.length > 1 && (
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                aria-label="Jump to an earlier message"
-                className="group absolute right-1 top-2 bottom-2 w-3.5 outline-none"
-              >
-                {railTicks.map((tick) => (
-                  <span
-                    key={tick.messageId}
-                    style={{ top: `${tick.position * 100}%` }}
-                    className={cn(
-                      'absolute right-0 block h-px w-1.5 -translate-y-1/2 rounded-full bg-muted-foreground/60 transition-colors group-hover:bg-accent-text',
-                      tick.isCurrent && 'h-0.5 w-3 bg-primary'
-                    )}
-                  />
-                ))}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent
-              side="left"
-              align="end"
-              style={{
-                width: `min(${Math.max(transcriptWidth * 0.5, 288)}px, calc(100vw - 3rem))`,
-              }}
-              className="p-1"
-            >
-              <div className="max-h-80 overflow-y-auto">
-                {userMessages.map((m, i) => {
-                  const { text, truncated } = truncateSnippet(m.plainContent || 'message', 3)
-                  return (
-                    <button
-                      key={m.messageId}
-                      type="button"
-                      onClick={() => jumpToMessage(m.messageId)}
-                      className={cn(
-                        'block w-full rounded px-2 py-1.5 text-left text-2xs leading-snug text-sub hover:bg-panel2 hover:text-foreground',
-                        i === userMessages.length - 1 && 'bg-soft text-foreground'
-                      )}
-                    >
-                      <span className="block whitespace-pre-wrap">
-                        {text}
-                        {truncated && '…'}
-                      </span>
-                      <time className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
-                        {formatClock(m.timestamp)} · you
-                      </time>
-                    </button>
-                  )
-                })}
-              </div>
-            </PopoverContent>
-          </Popover>
-        )}
+            popup -- at least half the transcript's own width (5.2) -- lists
+            every user message with its timestamp; the current one is
+            highlighted, matching `.ag-history-jump.is-current`. Extracted to
+            `MessageHistoryRail` -- see its doc comment for why the popup was
+            anchoring at the bottom-left of the window instead of beside the
+            rail, and how the hover/focus-driven open state works. */}
+        <MessageHistoryRail
+          userMessages={userMessages}
+          railTicks={railTicks}
+          transcriptWidth={transcriptWidth}
+          onJumpToMessage={jumpToMessage}
+        />
       </div>
 
       {/* Composer (tasks.md 6.x): mode/team controls, draft, and Send --
