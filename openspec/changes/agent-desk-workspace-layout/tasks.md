@@ -9,24 +9,24 @@
 
 ## 2. Workspace state
 
-- [ ] 2.1 Add strict `AgentWorkspaceLayout` and `ConversationPaneState` types.
-- [ ] 2.2 Add an Agent Desk layout slice separate from durable session state.
-- [ ] 2.3 Persist split, active pane, pane session IDs, source visibility, dock edge/order,
+- [x] 2.1 Add strict `AgentWorkspaceLayout` and `ConversationPaneState` types.
+- [x] 2.2 Add an Agent Desk layout slice separate from durable session state.
+- [x] 2.3 Persist split, active pane, pane session IDs, source visibility, dock edge/order,
       and clamped panel size.
-- [ ] 2.4 Keep popover, hover, drag preview, and transcript scroll ephemeral.
-- [ ] 2.5 Restore missing-session selections to the newest valid session with a notice.
-- [ ] 2.6 Add schema versioning and a safe default for malformed/older layout data.
-- [ ] 2.7 Unit test defaults, migrations, invalid IDs, and size clamping.
+- [x] 2.4 Keep popover, hover, drag preview, and transcript scroll ephemeral.
+- [x] 2.5 Restore missing-session selections to the newest valid session with a notice.
+- [x] 2.6 Add schema versioning and a safe default for malformed/older layout data.
+- [x] 2.7 Unit test defaults, migrations, invalid IDs, and size clamping.
 
 ## 3. Session-scoped drafts
 
-- [ ] 3.1 Move composer drafts from pane/component state to a map keyed by session ID.
-- [ ] 3.2 Preserve a draft when a different chat replaces its pane.
-- [ ] 3.3 Restore the exact draft when that session is selected again.
-- [ ] 3.4 Keep primary and secondary session drafts independent.
-- [ ] 3.5 Clear only the accepted session draft after Send persists its user event.
-- [ ] 3.6 Preserve a draft when Send fails and show the retry state.
-- [ ] 3.7 Test replacement, split collapse, restart policy, failed Send, and rapid switching.
+- [x] 3.1 Move composer drafts from pane/component state to a map keyed by session ID.
+- [x] 3.2 Preserve a draft when a different chat replaces its pane.
+- [x] 3.3 Restore the exact draft when that session is selected again.
+- [x] 3.4 Keep primary and secondary session drafts independent.
+- [x] 3.5 Clear only the accepted session draft after Send persists its user event.
+- [x] 3.6 Preserve a draft when Send fails and show the retry state.
+- [x] 3.7 Test replacement, split collapse, restart policy, failed Send, and rapid switching.
 
 ## 4. Single-pane replacement
 

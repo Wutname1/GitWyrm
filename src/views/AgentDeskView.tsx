@@ -8,9 +8,11 @@ import { describeError, log } from '@/lib/log'
 import { readWindowMode, type WindowMode } from '@/lib/windowMode'
 import { AgentDeskTitleBar } from '@/components/domain/agent-desk/AgentDeskTitleBar'
 import { SessionSidebar } from '@/components/domain/agent-desk/SessionSidebar'
+import { SessionContextPanel } from '@/components/domain/agent-desk/SessionContextPanel'
+import { AgentGraphPanel } from '@/components/domain/agent-desk/AgentGraphPanel'
 import { ConversationPane } from '@/components/domain/agent-desk/ConversationPane'
 import { OpenSpecEmbeddedDetail } from '@/components/domain/agent-desk/OpenSpecEmbeddedDetail'
-import { useAgentSessionHeaders } from '@/hooks/useAgentSessions'
+import { useAgentSession, useAgentSessionHeaders } from '@/hooks/useAgentSessions'
 import { cn } from '@/lib/utils'
 import { resolveAgentDeskShellState } from '@/views/agentDeskViewState'
 
@@ -129,6 +131,10 @@ export function AgentDeskView() {
   const qc = useQueryClient()
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  // The right panel needs the whole session, not just its id. This is the
+  // same cached query ConversationPane uses, so selecting a chat does not
+  // fetch it twice.
+  const { session: detailSession } = useAgentSession(selectedSessionId)
   const [rightTab, setRightTab] = useState<RightTab>('context')
   const [centerView, setCenterView] = useState<CenterView>('conversation')
   const [creating, setCreating] = useState(false)
@@ -339,19 +345,14 @@ export function AgentDeskView() {
                   ))}
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                  {rightTab === 'context' && (
+                  {detailSession == null ? (
                     <p className="text-2xs leading-relaxed text-muted-foreground">
-                      Project, branch, and source details for the selected chat will appear here.
+                      Pick a chat to see its details.
                     </p>
-                  )}
-                  {rightTab === 'graph' && (
-                    <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
-                      <p className="text-xs font-semibold text-foreground">No agents running</p>
-                      <p className="max-w-[16rem] text-2xs leading-relaxed text-muted-foreground">
-                        Solo chats work alone. Plan drafts a graph and waits for you to start it.
-                        Auto may start helpers on its own when it is useful.
-                      </p>
-                    </div>
+                  ) : rightTab === 'context' ? (
+                    <SessionContextPanel session={detailSession} />
+                  ) : (
+                    <AgentGraphPanel session={detailSession} />
                   )}
                 </div>
               </div>

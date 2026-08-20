@@ -1,16 +1,16 @@
-import { useMemo, useRef, useState } from 'react'
-import { toast } from 'sonner'
-import { ArrowUp, ChevronUp, GitFork, Paperclip, Sparkles, User } from 'lucide-react'
-import { commands, type SessionMessage } from '@/lib/bindings'
-import { unwrap, keys } from '@/lib/queryKeys'
-import { useQueryClient } from '@tanstack/react-query'
-import { describeError, log } from '@/lib/log'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Download, ExternalLink } from 'lucide-react'
+import type { MessageTarget, SessionMessage } from '@/lib/bindings'
 import { useAgentSession } from '@/hooks/useAgentSessions'
 import { cn } from '@/lib/utils'
 import { Markdown } from '@/components/ui/markdown'
-import { Textarea } from '@/components/ui/textarea'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { DisabledHint } from '@/components/ui/tooltip'
+import { isNearBottom } from '@/lib/agentDeskScroll'
+import { resolveMessageTarget } from '@/lib/agentDeskTargets'
+import { computeRailTicks, truncateSnippet, userMessagesForRail } from '@/lib/agentDeskRail'
 import { SessionSourceBanner } from './SessionSourceBanner'
+import { SessionComposer } from './SessionComposer'
 
 /** Plain-language label for each message kind, in the order they can appear. */
 function kindLabel(kind: SessionMessage['kind']): string {
@@ -45,32 +45,104 @@ function avatarInitials(message: SessionMessage): string {
   return source.slice(0, 2)
 }
 
-function MessageRow({ message, flash }: { message: SessionMessage; flash: boolean }) {
+/**
+ * One link to wherever a message points (tasks.md 4.4): `source` is
+ * reachable today via `SessionSourceBanner`'s `onOpenSource`; every other
+ * kind is honestly unavailable in this window rather than a dead-looking
+ * button -- see `resolveMessageTarget` for why, and what makes each kind
+ * reachable in the future.
+ */
+function MessageTargetLink({ target, onOpenSource }: { target: MessageTarget; onOpenSource?: () => void }) {
+  const resolved = resolveMessageTarget(target)
+  if (resolved.kind === 'source') {
+    return (
+      <button
+        type="button"
+        onClick={onOpenSource}
+        disabled={!onOpenSource}
+        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-accent-text hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <ExternalLink size={11} />
+        {resolved.label}
+      </button>
+    )
+  }
+  return (
+    <DisabledHint disabled reason={resolved.reason}>
+      <button
+        type="button"
+        disabled
+        className="inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground disabled:cursor-not-allowed"
+      >
+        <Download size={11} className="flex-none rotate-180" aria-hidden />
+        <span className="truncate">{resolved.label}</span>
+      </button>
+    </DisabledHint>
+  )
+}
+
+/**
+ * A message brought in from another chat client (tasks.md 4.2's "imported"
+ * item). `import` on `SessionMessage` is not a `MessageKind` -- it is
+ * `ImportProvenance`, present only on messages an adapter brought in from
+ * outside GitWyrm -- so it is rendered as a decoration on top of whichever
+ * kind the message actually is, not as a seventh kind of its own. This is
+ * what stops an imported message from ever being presented as native
+ * output, per the field's own doc comment in `bindings.ts`.
+ */
+function ImportedBadge({ adapterId }: { adapterId: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-panel3 px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground"
+      title={`Imported from ${adapterId}`}
+    >
+      <Download size={9} aria-hidden />
+      Imported
+    </span>
+  )
+}
+
+function MessageRow({
+  message,
+  flash,
+  onOpenSource,
+}: {
+  message: SessionMessage
+  flash: boolean
+  onOpenSource?: () => void
+}) {
   const isUser = message.role === 'user'
+  // "Needs your approval" and tool activity get a visibly different treatment
+  // from a plain chat bubble -- an approval in particular must never look
+  // like an ordinary line of text the reader can skim past.
+  const isApproval = message.kind === 'approval'
+  const isTool = message.kind === 'tool'
   return (
     <article
       id={`agent-desk-message-${message.messageId}`}
       data-message-id={message.messageId}
       tabIndex={-1}
       className={cn(
-        'grid grid-cols-[27px_minmax(0,1fr)] gap-2.5 rounded-md px-2 py-1.5 outline-none transition-colors duration-500',
+        'grid grid-cols-[27px_minmax(0,1fr)] gap-2.5 rounded-md px-2 py-1.5 outline-none transition-colors duration-500 motion-reduce:transition-none',
+        isApproval && 'border border-[color-mix(in_srgb,var(--gw-amber)_45%,transparent)] bg-[color-mix(in_srgb,var(--gw-amber)_8%,transparent)]',
         flash && 'bg-[color-mix(in_srgb,var(--gw-accent)_18%,transparent)]'
       )}
     >
       <span
         className={cn(
           'flex h-[27px] w-[27px] flex-none items-center justify-center rounded-full text-[10px] font-bold uppercase',
-          isUser ? 'bg-panel3 text-sub' : 'bg-soft text-accent-text'
+          isUser ? 'bg-panel3 text-sub' : isTool ? 'bg-panel3 text-sub' : 'bg-soft text-accent-text'
         )}
         aria-hidden
       >
         {avatarInitials(message)}
       </span>
       <div className="min-w-0">
-        <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
-          <span>{kindLabel(message.kind)}</span>
+        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-foreground">
+          <span className={cn(isApproval && 'text-[var(--gw-amber)]')}>{kindLabel(message.kind)}</span>
           {message.provider && <span className="font-normal text-muted-foreground">{message.provider}</span>}
           <span className="font-normal text-muted-foreground">{formatClock(message.timestamp)}</span>
+          {message.import && <ImportedBadge adapterId={message.import.adapterId} />}
         </div>
         <div className="text-xs leading-relaxed text-foreground">
           {message.renderedContent ? (
@@ -79,18 +151,16 @@ function MessageRow({ message, flash }: { message: SessionMessage; flash: boolea
             <p className="whitespace-pre-wrap">{message.plainContent}</p>
           )}
         </div>
+        {message.targets.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {message.targets.map((target, i) => (
+              <MessageTargetLink key={`${message.messageId}-target-${i}`} target={target} onOpenSource={onOpenSource} />
+            ))}
+          </div>
+        )}
       </div>
     </article>
   )
-}
-
-type ComposerMode = 'Ask' | 'Plan' | 'Auto'
-type ComposerTeam = 'solo' | 'helpers'
-
-const MODE_NOTES: Record<ComposerMode, string> = {
-  Ask: 'Answers questions and reads the codebase; makes no changes',
-  Plan: 'Drafts a plan and waits for you to start it',
-  Auto: 'Lead may use up to 3 helpers and asks before risky actions',
 }
 
 /**
@@ -111,6 +181,15 @@ export interface ConversationPaneProps {
   headerAnchorRef?: React.RefObject<HTMLDivElement | null>
   /** Rendered into the pane header's slot, e.g. future Source/Context/Graph buttons. */
   headerSlot?: React.ReactNode
+  /**
+   * Opens the live source (issue/PR/OpenSpec item/etc.) this chat started
+   * from, or that a `source`-kind message target points back to. No caller
+   * wires this today -- Agent Desk is a standalone window with no bridge
+   * into the main window's issue/PR/OpenSpec surfaces yet (tasks.md 4.4) --
+   * so both the source banner and any `source` message-target link render
+   * disabled until one is passed in.
+   */
+  onOpenSource?: () => void
 }
 
 export function ConversationPane({
@@ -118,56 +197,89 @@ export function ConversationPane({
   isActive,
   headerAnchorRef,
   headerSlot,
+  onOpenSource,
 }: ConversationPaneProps) {
   const { session, messages, state, isLoading, isError } = useAgentSession(sessionId)
-  const qc = useQueryClient()
-  const [draft, setDraft] = useState('')
-  const [sending, setSending] = useState(false)
   const [flashId, setFlashId] = useState<string | null>(null)
-  const [mode, setMode] = useState<ComposerMode>('Auto')
-  const [team, setTeam] = useState<ComposerTeam>('helpers')
-  const [teamOpen, setTeamOpen] = useState(false)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
+  // Tracks whether the reader was near the bottom just before this render's
+  // message list changed, so the auto-follow effect below can tell "a new
+  // message arrived while I was reading the bottom" (follow it) apart from
+  // "a new message arrived while I had scrolled up to reread something"
+  // (leave the scroll position alone). See `src/lib/agentDeskScroll.ts`.
+  const wasNearBottomRef = useRef(true)
 
-  const userMessages = useMemo(() => messages.filter((m) => m.role === 'user'), [messages])
+  const userMessages = useMemo(() => userMessagesForRail(messages), [messages])
+  const [railTicks, setRailTicks] = useState<ReturnType<typeof computeRailTicks>>([])
+  // Measured transcript width, so the rail popup can be sized to at least
+  // half of it (tasks.md 5.2) instead of a fixed rem value that has no
+  // relationship to the pane it is jumping around in.
+  const [transcriptWidth, setTranscriptWidth] = useState(0)
+
+  // tasks.md 5.1: rail ticks are computed from each user message's real
+  // offset within the transcript, not from its index -- a long tool-output
+  // message between two short ones must not compress the rail's sense of
+  // "how far apart these messages are". Re-measures after every layout pass
+  // (new messages, content finishing streaming) and on window resize, since
+  // a resize can reflow message heights and change every offset at once.
+  useEffect(() => {
+    const el = transcriptRef.current
+    if (!el) return
+    const measure = () => {
+      const containerTop = el.getBoundingClientRect().top
+      const inputs = userMessages.map((m) => {
+        const node = el.querySelector<HTMLElement>(`[data-message-id="${m.messageId}"]`)
+        const offsetTop = node ? node.getBoundingClientRect().top - containerTop + el.scrollTop : 0
+        return { messageId: m.messageId, offsetTop }
+      })
+      setRailTicks(computeRailTicks(inputs, el.scrollHeight))
+      setTranscriptWidth(el.clientWidth)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [userMessages])
+
+  // tasks.md 4.5: auto-follow only when already near the bottom. Reads the
+  // scroll position on every scroll event (not just before a new message
+  // lands) so a manual scroll away is captured immediately, and re-checks
+  // right after the message list grows so a reader at the bottom gets pulled
+  // down to the newest content.
+  useEffect(() => {
+    const el = transcriptRef.current
+    if (!el) return
+    const onScroll = () => {
+      wasNearBottomRef.current = isNearBottom({
+        scrollTop: el.scrollTop,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+      })
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [sessionId])
+
+  useEffect(() => {
+    const el = transcriptRef.current
+    if (!el || messages.length === 0) return
+    if (wasNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [messages])
 
   const jumpToMessage = (messageId: string) => {
     const el = transcriptRef.current?.querySelector(`[data-message-id="${messageId}"]`)
     if (el instanceof HTMLElement) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      el.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' })
       el.focus({ preventScroll: true })
       setFlashId(messageId)
       window.setTimeout(() => setFlashId((current) => (current === messageId ? null : current)), 900)
-    }
-  }
-
-  const canSend = draft.trim().length > 0 && !sending && sessionId != null
-
-  const send = async () => {
-    if (!canSend || !sessionId) return
-    setSending(true)
-    const content = draft.trim()
-    try {
-      const outcome = unwrap(await commands.agentSessionAppendUserMessage(sessionId, content, []))
-      if (outcome.kind === 'appended') {
-        setDraft('')
-        void qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
-        void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
-      } else if (outcome.kind === 'notFound') {
-        toast.error('This session is gone. It may have been archived elsewhere.')
-      } else if (outcome.kind === 'damaged') {
-        toast.error('This session file is damaged and could not accept the message.', {
-          description: outcome.reason,
-        })
-      } else {
-        toast.error('The message could not be saved.', { description: outcome.kind })
-      }
-    } catch (e) {
-      const message = describeError(e)
-      log.error(`agent desk: could not send message: ${message}`)
-      toast.error('Could not send that message.', { description: message })
-    } finally {
-      setSending(false)
     }
   }
 
@@ -213,7 +325,11 @@ export function ConversationPane({
         {headerSlot}
       </div>
 
-      <SessionSourceBanner source={session.header.source} state={state ?? session.header.state} />
+      <SessionSourceBanner
+        source={session.header.source}
+        state={state ?? session.header.state}
+        onOpenSource={onOpenSource}
+      />
 
       <div className="relative flex min-h-0 flex-1">
         <div ref={transcriptRef} className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 py-3">
@@ -225,7 +341,9 @@ export function ConversationPane({
               </p>
             </div>
           ) : (
-            messages.map((m) => <MessageRow key={m.messageId} message={m} flash={flashId === m.messageId} />)
+            messages.map((m) => (
+              <MessageRow key={m.messageId} message={m} flash={flashId === m.messageId} onOpenSource={onOpenSource} />
+            ))
           )}
           {(state === 'working' || state === 'preparing') && (
             <div className="flex items-center gap-2 px-1 py-1 text-2xs text-muted-foreground">
@@ -236,181 +354,74 @@ export function ConversationPane({
         </div>
 
         {/* Message rail (tasks.md 5.x): jump to any earlier message the user
-            sent, mirroring the mockup's `.ag-history-rail` tick strip. A
-            hover/focus popover lists every user message with its timestamp;
-            the current one is highlighted, matching `.ag-history-jump.is-current`. */}
+            sent, mirroring the mockup's `.ag-history-rail` tick strip. Ticks
+            are positioned from each message's real measured offset in the
+            transcript (5.1, `railTicks`), not from its index. A hover/focus
+            popover -- at least half the transcript's own width (5.2) --
+            lists every user message with its timestamp; the current one is
+            highlighted, matching `.ag-history-jump.is-current`. */}
         {userMessages.length > 1 && (
           <Popover>
             <PopoverTrigger asChild>
               <button
                 type="button"
                 aria-label="Jump to an earlier message"
-                className="group absolute right-1 top-2 bottom-2 flex w-3.5 flex-col items-end justify-center gap-1.5 outline-none"
+                className="group absolute right-1 top-2 bottom-2 w-3.5 outline-none"
               >
-                {userMessages.map((m, i) => (
+                {railTicks.map((tick) => (
                   <span
-                    key={m.messageId}
+                    key={tick.messageId}
+                    style={{ top: `${tick.position * 100}%` }}
                     className={cn(
-                      'block h-px rounded-full bg-muted-foreground/60 transition-colors group-hover:bg-accent-text',
-                      i === userMessages.length - 1 ? 'h-0.5 w-3 bg-primary' : (i + 1) % 3 === 0 ? 'w-2.5' : 'w-1.5'
+                      'absolute right-0 block h-px w-1.5 -translate-y-1/2 rounded-full bg-muted-foreground/60 transition-colors group-hover:bg-accent-text',
+                      tick.isCurrent && 'h-0.5 w-3 bg-primary'
                     )}
                   />
                 ))}
               </button>
             </PopoverTrigger>
-            <PopoverContent side="left" align="end" className="w-[min(22rem,calc(100vw-3rem))] p-1">
+            <PopoverContent
+              side="left"
+              align="end"
+              style={{
+                width: `min(${Math.max(transcriptWidth * 0.5, 288)}px, calc(100vw - 3rem))`,
+              }}
+              className="p-1"
+            >
               <div className="max-h-80 overflow-y-auto">
-                {userMessages.map((m, i) => (
-                  <button
-                    key={m.messageId}
-                    type="button"
-                    onClick={() => jumpToMessage(m.messageId)}
-                    className={cn(
-                      'block w-full rounded px-2 py-1.5 text-left text-2xs leading-snug text-sub hover:bg-panel2 hover:text-foreground',
-                      i === userMessages.length - 1 && 'bg-soft text-foreground'
-                    )}
-                  >
-                    <span className="line-clamp-2">{m.plainContent || 'message'}</span>
-                    <time className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
-                      {formatClock(m.timestamp)} · you
-                    </time>
-                  </button>
-                ))}
+                {userMessages.map((m, i) => {
+                  const { text, truncated } = truncateSnippet(m.plainContent || 'message', 3)
+                  return (
+                    <button
+                      key={m.messageId}
+                      type="button"
+                      onClick={() => jumpToMessage(m.messageId)}
+                      className={cn(
+                        'block w-full rounded px-2 py-1.5 text-left text-2xs leading-snug text-sub hover:bg-panel2 hover:text-foreground',
+                        i === userMessages.length - 1 && 'bg-soft text-foreground'
+                      )}
+                    >
+                      <span className="block whitespace-pre-wrap">
+                        {text}
+                        {truncated && '…'}
+                      </span>
+                      <time className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
+                        {formatClock(m.timestamp)} · you
+                      </time>
+                    </button>
+                  )
+                })}
               </div>
             </PopoverContent>
           </Popover>
         )}
       </div>
 
-      <div className="flex-none border-t border-border p-2">
-        <div className="rounded-lg border border-border bg-panel2 p-1.5">
-          <div className="mb-1.5 flex flex-wrap items-center gap-1 px-0.5" role="group" aria-label="Agent operating mode">
-            <span className="mr-0.5 text-2xs text-muted-foreground">Mode</span>
-            {(['Ask', 'Plan', 'Auto'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                aria-pressed={mode === m}
-                className={cn(
-                  'rounded px-1.5 py-0.5 text-2xs font-semibold',
-                  mode === m ? 'bg-soft text-accent-text' : 'text-sub hover:bg-panel3 hover:text-foreground'
-                )}
-              >
-                {m}
-              </button>
-            ))}
-            <span className="ml-auto min-w-0 truncate text-2xs text-muted-foreground">{MODE_NOTES[mode]}</span>
-          </div>
-
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Steer the lead or ask about the work…"
-            aria-label="Message the lead agent"
-            rows={2}
-            className="resize-none border-0 bg-transparent px-1 py-1 text-xs shadow-none focus-visible:ring-0"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                void send()
-              }
-            }}
-          />
-
-          <div className="flex items-center gap-1.5 px-0.5 pt-1">
-            <button
-              type="button"
-              onClick={() => toast('Choose context to attach', { description: 'Coming soon.' })}
-              aria-label="Attach context"
-              className="flex h-6 w-6 flex-none items-center justify-center rounded text-muted-foreground hover:bg-panel3 hover:text-foreground"
-            >
-              <Paperclip size={13} />
-            </button>
-            <span className="flex flex-none items-center gap-1 text-2xs text-muted-foreground">
-              <Sparkles size={12} className="text-accent-text" />
-              <strong className="font-semibold text-foreground">Sol</strong> lead · 3 helpers max
-            </span>
-
-            <Popover open={teamOpen} onOpenChange={setTeamOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className="flex flex-none items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-semibold text-sub hover:bg-panel3 hover:text-foreground"
-                >
-                  <GitFork size={12} />
-                  {team === 'solo' ? 'Solo agent' : 'Lead + helpers'}
-                  <ChevronUp size={11} />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent side="top" align="start" className="w-72 p-2">
-                <div className="mb-2 flex items-center gap-2">
-                  <GitFork size={13} className="text-accent-text" />
-                  <strong className="text-xs font-semibold">Who works on this chat?</strong>
-                  <span className="ml-auto text-[10px] text-muted-foreground">Change at any time</span>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTeam('solo')
-                      setTeamOpen(false)
-                    }}
-                    className={cn(
-                      'flex items-start gap-2 rounded-md border border-border px-2 py-1.5 text-left',
-                      team === 'solo' ? 'border-primary/50 bg-soft' : 'hover:bg-panel3'
-                    )}
-                  >
-                    <User size={14} className="mt-0.5 flex-none text-muted-foreground" />
-                    <span className="min-w-0 flex-1">
-                      <strong className="block text-2xs font-semibold text-foreground">Solo agent</strong>
-                      <span className="block text-[10.5px] leading-snug text-muted-foreground">
-                        One agent owns the chat. No graph is created.
-                      </span>
-                    </span>
-                    <span className="flex-none font-mono text-[9px] text-muted-foreground">1 agent</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTeam('helpers')
-                      setTeamOpen(false)
-                    }}
-                    className={cn(
-                      'flex items-start gap-2 rounded-md border border-border px-2 py-1.5 text-left',
-                      team === 'helpers' ? 'border-primary/50 bg-soft' : 'hover:bg-panel3'
-                    )}
-                  >
-                    <GitFork size={14} className="mt-0.5 flex-none text-muted-foreground" />
-                    <span className="min-w-0 flex-1">
-                      <strong className="block text-2xs font-semibold text-foreground">Lead + helpers</strong>
-                      <span className="block text-[10.5px] leading-snug text-muted-foreground">
-                        Sol splits safe work into a graph. Plan lets you approve it first; Auto starts it when useful.
-                      </span>
-                    </span>
-                    <span className="flex-none font-mono text-[9px] text-muted-foreground">up to 3</span>
-                  </button>
-                </div>
-              </PopoverContent>
-            </Popover>
-
-            <span className="flex-1" />
-
-            {/* Exactly one action button: Send. There is deliberately no
-                separate stop/icon-only button beside it -- "Stop all" lives
-                only in the Graph panel header (tasks.md 6.5). */}
-            <button
-              type="button"
-              disabled={!canSend}
-              onClick={() => void send()}
-              className="flex flex-none items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-2xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {sending ? 'Sending…' : 'Send'}
-              <ArrowUp size={12} />
-            </button>
-          </div>
-        </div>
-      </div>
+      {/* Composer (tasks.md 6.x): mode/team controls, draft, and Send --
+          extracted to `SessionComposer` so this file's section-4/5 work
+          (transcript, targets, auto-follow, history rail) is unaffected by
+          composer changes and vice versa. */}
+      <SessionComposer sessionId={sessionId} />
     </div>
   )
 }

@@ -27,40 +27,60 @@
 
 ## 4. Conversation
 
-- [ ] 4.1 Add source banner for every source variant and live/cached/changed states.
-- [ ] 4.2 Render user, assistant, tool, approval, result, and imported message kinds.
-- [ ] 4.3 Reuse inert markdown rendering; message HTML/scripts never execute.
+- [x] 4.1 Add source banner for every source variant and live/cached/changed states.
+- [x] 4.2 Render user, assistant, tool, approval, result, and imported message kinds.
+- [x] 4.3 Reuse inert markdown rendering; message HTML/scripts never execute.
 - [ ] 4.4 Map existing run event links to current diff/worktree/OpenSpec destinations.
-- [ ] 4.5 Add transcript auto-follow only when already near bottom; never steal manual scroll.
-- [ ] 4.6 Add visible working state during silent provider time.
+- [x] 4.5 Add transcript auto-follow only when already near bottom; never steal manual scroll.
+- [x] 4.6 Add visible working state during silent provider time.
 
 ## 5. Message rail
 
-- [ ] 5.1 Compute rail ticks from user-message offsets after layout and resize.
-- [ ] 5.2 Add hover/focus popup at least 50% of transcript width with collision handling.
-- [ ] 5.3 Truncate snippets by lines, not by shrinking type.
-- [ ] 5.4 Jump, focus, and animate the destination; honor reduced motion.
-- [ ] 5.5 Test keyboard access, 1/50/500 user messages, and resized windows.
+- [x] 5.1 Compute rail ticks from user-message offsets after layout and resize.
+- [x] 5.2 Add hover/focus popup at least 50% of transcript width with collision handling.
+- [x] 5.3 Truncate snippets by lines, not by shrinking type.
+- [x] 5.4 Jump, focus, and animate the destination; honor reduced motion.
+- [x] 5.5 Test keyboard access, 1/50/500 user messages, and resized windows.
 
 ## 6. Composer and controls
 
-- [ ] 6.1 Add Ask/Plan/Auto control with plain authority descriptions.
-- [ ] 6.2 Add Solo/Lead + helpers control independent of operating mode.
-- [ ] 6.3 Append sent user messages visibly before backend execution begins.
-- [ ] 6.4 Prevent duplicate sends while accepting the message.
-- [ ] 6.5 Put labeled Stop all in Graph header only; no ambiguous square beside Send.
+- [x] 6.1 Add Ask/Plan/Auto control with plain authority descriptions.
+- [x] 6.2 Add Solo/Lead + helpers control independent of operating mode.
+- [x] 6.3 Append sent user messages visibly before backend execution begins.
+- [x] 6.4 Prevent duplicate sends while accepting the message.
+- [x] 6.5 Put labeled Stop all in Graph header only; no ambiguous square beside Send.
 
 ## 7. Right panel
 
-- [ ] 7.1 Add Context and Graph tabs with Context default when no graph exists.
-- [ ] 7.2 Show project, branch/worktree, original source, and context-source counts.
-- [ ] 7.3 Add collapsible usage from optional normalized provider data.
-- [ ] 7.4 Omit unknown values and label estimate/report source in accessible details.
-- [ ] 7.5 Add Graph empty state explaining Solo, Plan, and Auto behavior.
+- [x] 7.1 Add Context and Graph tabs with Context default when no graph exists.
+- [x] 7.2 Show project, branch/worktree, original source, and context-source counts.
+- [x] 7.3 Add collapsible usage from optional normalized provider data.
+- [x] 7.4 Omit unknown values and label estimate/report source in accessible details.
+- [x] 7.5 Add Graph empty state explaining Solo, Plan, and Auto behavior.
 
 ## 8. Proof
 
-- [ ] 8.1 Add component/store tests for grouping, selection, rendering, and controls.
+- [x] 8.1 Add component/store tests for grouping, selection, rendering, and controls.
 - [ ] 8.2 Verify 100%, 125%, and 150% Windows scaling in native Tauri.
 - [ ] 8.3 Verify keyboard-only path from session list through history jump and composer.
-- [ ] 8.4 Run typecheck and relevant tests; record Gate 2 evidence.
+- [x] 8.4 Run typecheck and relevant tests; record Gate 2 evidence.
+
+## Gate 2 evidence (automated portion)
+
+Recorded 2026-08-20. Automated proof only - the native items below are still open.
+
+- `npm run typecheck` (tsc -b --force): passes clean.
+- `npm run test:unit`: 464 tests across 40 files, 0 failures.
+- `cargo test --lib`: 749 tests, 0 failures.
+- 1,000-session list behaviour is covered by `src/lib/agentSessionGrouping.test.ts`
+  (1,000 rows, duplicate repo names, missing repo paths, long titles).
+- Grouping, selection, shell states, rail maths, scroll follow, target resolution,
+  composer guards and usage honesty each have pure-logic tests.
+
+Still requires a human at the keyboard, and NOT claimed here:
+- 1.4 repeated old/new entry points focus one window (native).
+- 8.2 100/125/150% Windows display scaling (native).
+- 8.3 keyboard-only path from session list through history jump to composer (native).
+- 4.4 stays open: message targets resolve honestly but no diff/worktree/graph
+  destination is reachable yet, so nothing can be proven to navigate.
+

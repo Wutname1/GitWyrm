@@ -40,6 +40,7 @@ export const keys = {
   agentSessionsAll: ['agentSessions'] as const,
   agentSessions: (filterKey: string) => ['agentSessions', filterKey] as const,
   agentSession: (sessionId: string) => ['agentSession', sessionId] as const,
+  agentSessionUsage: (sessionId: string) => ['agentSessionUsage', sessionId] as const,
 
   /**
    * Prefixes for invalidating every entry of a kind for one repo, regardless of
