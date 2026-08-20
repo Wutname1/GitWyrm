@@ -16,6 +16,7 @@ pub mod openspec_context;
 pub mod policy;
 pub mod reconcile;
 pub mod result;
+pub mod session_recovery;
 pub mod store;
 
 #[allow(unused_imports)]
@@ -59,8 +60,14 @@ pub use result::{
     ResultState,
 };
 #[allow(unused_imports)]
+pub use session_recovery::{
+    is_live_process_state, reconcile_executions, reconcile_header, HeaderReconciliation,
+    INTERRUPTED_REASON,
+};
+#[allow(unused_imports)]
 pub use store::{
-    find_duplicate_session_ids, list_sessions, load_or_rebuild_index, read_session, sort_headers,
-    write_index, write_session, DuplicateSessionId, IndexLoadResult, SessionFileDiagnostic,
-    SessionListFilter, SessionListPage, SessionStoreRoot, StoreInitError, WriteError,
+    find_duplicate_session_ids, list_sessions, list_sessions_reconciled, load_or_rebuild_index,
+    read_session, sort_headers, write_index, write_session, DuplicateSessionId, IndexLoadResult,
+    SessionFileDiagnostic, SessionListFilter, SessionListPage, SessionStoreRoot, StoreInitError,
+    WriteError,
 };

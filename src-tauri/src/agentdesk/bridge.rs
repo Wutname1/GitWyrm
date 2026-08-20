@@ -15,7 +15,7 @@
 //! to emit without a successful write behind it.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -47,16 +47,23 @@ pub const AGENT_SESSION_EVENT: &str = "agent-session-event";
 /// what keeps `ai-run-event` behavior unchanged per task 4.5 -- the durable
 /// path exists and is fully tested, but produces nothing until a caller
 /// opts a repository in.
-#[derive(Default)]
+/// Cheaply `Clone`: every field is behind its own `Arc`, so a clone shares
+/// the same underlying maps rather than snapshotting them. This is what lets
+/// a command hand an owned copy into a `spawn_blocking` closure (`'static`,
+/// crosses threads) without changing how `RunSessionLinks` is registered as
+/// Tauri state (`app.manage(RunSessionLinks::new())`, not
+/// `Arc<RunSessionLinks>`) -- every existing `app.state::<RunSessionLinks>()`
+/// / `tauri::State<'_, RunSessionLinks>` call site keeps working unchanged.
+#[derive(Default, Clone)]
 pub struct RunSessionLinks {
-    inner: Mutex<HashMap<String, SessionId>>,
+    inner: Arc<Mutex<HashMap<String, SessionId>>>,
     /// Per-execution sequence counters, keyed by the `airun` session ID
     /// (which doubles as the durable `execution_id`, see
     /// [`execution_id_for_run_session`]). A fresh counter per execution is
     /// what makes sequence numbers monotonic *per execution* rather than per
     /// repository -- two executions in the same repository (a retry after a
     /// stop) each start their own transcript at sequence 1.
-    sequences: Mutex<HashMap<String, u32>>,
+    sequences: Arc<Mutex<HashMap<String, u32>>>,
 }
 
 impl RunSessionLinks {

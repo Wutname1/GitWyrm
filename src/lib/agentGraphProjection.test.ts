@@ -127,6 +127,41 @@ describe('isNodeActive', () => {
     expect(isNodeActive(exec({ executionId: 'a', state: 'needsInput' }))).toBe(true)
     expect(isNodeActive(exec({ executionId: 'a', state: 'finished' }))).toBe(false)
   })
+
+  it('a reconciled interrupted execution is not active', () => {
+    expect(isNodeActive(exec({ executionId: 'a', state: 'interrupted' }))).toBe(false)
+  })
+})
+
+describe('interrupted state (backend reconciliation on load)', () => {
+  it('gets its own plain status label, distinct from failed/stopped', () => {
+    const node = {
+      execution: exec({ executionId: 'lead', state: 'interrupted' }),
+      isLead: false,
+      blockedOn: [],
+      waitingForSlot: false,
+    }
+    const label = nodeStatusLabel(node)
+    expect(label).not.toBe('failed')
+    expect(label).not.toBe('stopped')
+    expect(label).not.toBe('working')
+    expect(label).not.toBe('done')
+  })
+
+  it('does not get the working or waiting dot tone', () => {
+    const node = {
+      execution: exec({ executionId: 'h1', state: 'interrupted' }),
+      isLead: false,
+      blockedOn: [],
+      waitingForSlot: false,
+    }
+    expect(nodeDotTone(node)).toBeUndefined()
+  })
+
+  it('is excluded from the working/waiting counts in the panel summary', () => {
+    const executions = [exec({ executionId: 'a', state: 'interrupted' }), exec({ executionId: 'b', state: 'finished' })]
+    expect(graphSummary(executions)).toBe('2 agents')
+  })
 })
 
 describe('graphSummary', () => {

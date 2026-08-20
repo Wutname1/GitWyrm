@@ -431,24 +431,76 @@ pub struct SessionListPage {
     pub diagnostics: Vec<SessionFileDiagnostic>,
 }
 
-/// List sessions, filtered and paged.
-///
-/// `cursor` is an opaque token from a previous page's `next_cursor`; `None`
-/// starts from the beginning. The cursor encodes a position in the sorted,
-/// *filtered* sequence, so passing one from a call with different filters is
-/// unsupported and simply restarts from the beginning rather than panicking.
+/// List sessions, filtered and paged, with no reconciliation applied -- every
+/// header is shown exactly as read. Callers that display sessions to a user
+/// should prefer [`list_sessions_reconciled`] (see its own doc comment for
+/// why: a `states` filter needs to see the post-reconciliation state to be
+/// honest about what it matches). This plain version exists for callers that
+/// have no `RunSessionLinks` to consult -- store-layer tests, and any future
+/// non-Tauri caller of this module -- and is kept deliberately non-lossy:
+/// passing `|_| true` ("every session is live") to `list_sessions_reconciled`
+/// would be indistinguishable from this in its effect (nothing gets
+/// reconciled either way), but reads as an assertion about liveness this
+/// function has no basis for; `|_| false` is wrong in the other direction,
+/// since [`reconcile_header`](super::session_recovery::reconcile_header) does
+/// not additionally check `active_execution_id`, so it would reconcile every
+/// `Preparing`/`Working`/`NeedsInput` header this function is asked to list,
+/// including ones a caller populated for reasons that have nothing to do with
+/// process liveness (exactly what several of this module's own fixture-based
+/// tests do). A dedicated no-op closure name states that choice plainly
+/// rather than leaving `|_| true` looking like an arbitrary pick between two
+/// closures with the same observable effect.
 pub fn list_sessions(
     root: &SessionStoreRoot,
     filter: &SessionListFilter,
     cursor: Option<&str>,
     limit: usize,
 ) -> SessionListPage {
+    list_sessions_reconciled(root, filter, cursor, limit, |_| true)
+}
+
+/// [`list_sessions`], but every loaded header is first offered to
+/// `execution_is_live` (given the header, answer "is this header's
+/// `active_execution_id` actually backed by a live process right now") and
+/// reconciled in place via [`super::session_recovery::reconcile_header`] --
+/// this is what stops a session's stale `Preparing`/`Working`/`NeedsInput`
+/// header from ever reaching the *filter*: without reconciling before
+/// `filter.matches`, a `states` filter for `Interrupted` would miss a session
+/// still reading `Working` on disk, and vice versa.
+///
+/// This module has no dependency on `RunSessionLinks` or any Tauri type by
+/// design (see this module's own doc comment and `agentdesk::session_recovery`'s),
+/// so the caller supplies the liveness answer as a plain closure rather than
+/// this function reaching for that registry itself.
+///
+/// Deliberately does **not** write anything back to disk -- this only fixes
+/// what the returned page displays. The durable fix (and the one that
+/// actually unblocks starting a new execution) happens lazily, the first
+/// time a session is actually opened, in `commands::agent_desk::get_session_at`.
+/// Persisting a fix for every stale header on every list call, for
+/// potentially hundreds of sessions, would mean a `SessionLocks` acquisition
+/// and a full read-modify-write per stale session on every sidebar refresh --
+/// exactly the per-call cost this function is built to avoid; a session the
+/// user never re-opens simply keeps showing correctly in the list without
+/// ever needing a write.
+pub fn list_sessions_reconciled(
+    root: &SessionStoreRoot,
+    filter: &SessionListFilter,
+    cursor: Option<&str>,
+    limit: usize,
+    mut execution_is_live: impl FnMut(&AgentSessionHeader) -> bool,
+) -> SessionListPage {
     let loaded = load_or_rebuild_index(root);
-    let matched: Vec<AgentSessionHeader> = loaded
+    let reconciled: Vec<AgentSessionHeader> = loaded
         .headers
         .into_iter()
-        .filter(|h| filter.matches(h))
+        .map(|mut header| {
+            let live = execution_is_live(&header);
+            let _ = super::session_recovery::reconcile_header(&mut header, live);
+            header
+        })
         .collect();
+    let matched: Vec<AgentSessionHeader> = reconciled.into_iter().filter(|h| filter.matches(h)).collect();
 
     let start = cursor
         .and_then(|c| c.parse::<usize>().ok())

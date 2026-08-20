@@ -87,6 +87,8 @@ export function nodeStatusLabel(node: GraphTreeNode): string {
       return 'stopped'
     case 'missingSource':
       return 'source missing'
+    case 'interrupted':
+      return 'stopped early'
   }
 }
 

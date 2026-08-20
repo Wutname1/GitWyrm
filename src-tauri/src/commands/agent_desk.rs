@@ -191,15 +191,25 @@ pub(crate) fn create_session_for_kickoff(
 #[specta::specta]
 pub async fn agent_session_list(
     app: AppHandle,
+    links: tauri::State<'_, crate::agentdesk::RunSessionLinks>,
     filter: SessionListFilterInput,
     cursor: Option<String>,
     limit: u32,
 ) -> Result<SessionListPageOutput, AppError> {
     let root = resolve_root(&app)?;
+    let links = links.inner().clone();
     let filter: SessionListFilter = filter.into();
     let limit = limit.max(1) as usize;
     let page = tauri::async_runtime::spawn_blocking(move || {
-        store::list_sessions(&root, &filter, cursor.as_deref(), limit)
+        // Display-only reconciliation, no write -- see
+        // `list_sessions_reconciled`'s doc comment for why: this call runs on
+        // every sidebar refresh, and persisting per-session would mean a
+        // `SessionLocks` acquisition and a full read-modify-write per stale
+        // header on every one of those. The durable fix happens lazily via
+        // `agent_session_get` when a session is actually opened.
+        store::list_sessions_reconciled(&root, &filter, cursor.as_deref(), limit, |header| {
+            links.get(&header.repo_id).as_deref() == Some(header.session_id.as_str())
+        })
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?;
@@ -334,26 +344,137 @@ pub enum GetSessionOutcome {
     Unavailable { detail: String },
 }
 
-fn get_session_at(root: &SessionStoreRoot, session_id: &str) -> GetSessionOutcome {
+/// Loads one session and reconciles any live-process state it claims against
+/// what is actually alive in this process, writing the fix back if anything
+/// moved -- see `agentdesk::session_recovery`'s module doc for why a session
+/// read right after a crash/force-quit/power-loss/app-update can legitimately
+/// still say `Preparing`/`Working`/`NeedsInput` with nothing behind it.
+///
+/// Two separate `with_session_lock` acquisitions, deliberately, never one
+/// covering both a `RunSessionLinks` read and a session write:
+/// `agentdesk::locks`'s module doc states the fixed order as "nothing here is
+/// ever acquired while holding a `RunSessionLinks` lock, and `RunSessionLinks`
+/// is never acquired while holding a session lock" -- so `links.get` below
+/// runs with no session lock held at all, exactly like `route_run_event`
+/// (`links.get` before `locks.with_session_lock`) and `start_execution_at`
+/// (`links.link` after its session lock has already been released). The
+/// second acquisition re-reads and re-checks from scratch rather than reusing
+/// anything captured under the first -- the same "recheck inside the lock
+/// that performs the write" shape `record_execution_if_not_running` uses for
+/// its own second acquisition, so a mutation racing between the two calls
+/// (e.g. a fresh `agent_session_start_execution` landing in the gap) is
+/// re-validated, not silently overwritten: if the header no longer claims a
+/// live-process state, or does but is now genuinely live, nothing is
+/// reconciled on the second pass.
+fn get_session_at(
+    locks: &crate::agentdesk::SessionLocks,
+    links: &crate::agentdesk::RunSessionLinks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+) -> GetSessionOutcome {
     use crate::agentdesk::model::SessionLoadError as E;
-    match store::read_session(root, session_id) {
-        Ok(session) => GetSessionOutcome::Found { session },
-        Err(E::NotFound) => GetSessionOutcome::NotFound,
-        Err(E::Io { detail }) => GetSessionOutcome::Unavailable { detail },
-        Err(reason) => GetSessionOutcome::Damaged {
-            reason: reason.to_string(),
-        },
-    }
+
+    // First acquisition: read-only, just to learn `repo_id` so `links` can be
+    // consulted with no session lock held.
+    let repo_id = match locks.with_session_lock(session_id, || store::read_session(root, session_id)) {
+        Ok(s) => s.header.repo_id,
+        Err(E::NotFound) => return GetSessionOutcome::NotFound,
+        Err(E::Io { detail }) => return GetSessionOutcome::Unavailable { detail },
+        Err(reason) => {
+            return GetSessionOutcome::Damaged {
+                reason: reason.to_string(),
+            }
+        }
+    };
+    // `RunSessionLinks::get` answers "which durable SESSION is linked to this
+    // repository's live run right now" -- it has no notion of individual
+    // execution IDs (a repository can only ever have one live run), so
+    // liveness here is session-granular: "is *this* session the one this
+    // process currently has a run attached to for its repo." When it is, no
+    // execution belonging to this session gets reconciled, lead or helper
+    // alike, since the running process could still be in the middle of any
+    // of them.
+    let session_is_live = links.get(&repo_id).as_deref() == Some(session_id);
+
+    // Second acquisition: re-read (the file may have changed since the first
+    // read), reconcile against the now-known liveness answer, and write back
+    // in the same critical section as the decision.
+    locks.with_session_lock(session_id, || {
+        let mut session = match store::read_session(root, session_id) {
+            Ok(s) => s,
+            Err(E::NotFound) => return GetSessionOutcome::NotFound,
+            Err(E::Io { detail }) => return GetSessionOutcome::Unavailable { detail },
+            Err(reason) => {
+                return GetSessionOutcome::Damaged {
+                    reason: reason.to_string(),
+                }
+            }
+        };
+
+        let header_changed = reconcile_session_header(&mut session.header, session_is_live);
+        let executions_changed = reconcile_session_executions(&mut session, session_is_live);
+
+        if header_changed || executions_changed > 0 {
+            session.header.updated_at = now_rfc3339();
+            // Best-effort, matching every other reconciliation/index write in
+            // this module: the in-memory fix is what the caller sees either
+            // way, and a failed write here just means the same reconciliation
+            // runs again on the next load rather than being lost.
+            if store::write_session(root, &session).is_ok() {
+                let _ = refresh_index(root);
+            }
+        }
+
+        GetSessionOutcome::Found { session }
+    })
+}
+
+/// Reconciles `header` in place, given whether this session's repository
+/// currently has a live run attached to THIS session in this process.
+/// Returns whether it changed.
+fn reconcile_session_header(header: &mut AgentSessionHeader, session_is_live: bool) -> bool {
+    matches!(
+        crate::agentdesk::reconcile_header(header, session_is_live),
+        crate::agentdesk::HeaderReconciliation::Interrupted
+    )
+}
+
+/// Reconciles every `ExecutionRecord` on `session`, not only the header --
+/// the graph panel renders helper nodes straight from `session.executions`
+/// (tasks.md 6.1, `agentGraphProjection.ts`), so a fix that stopped at the
+/// header would leave every helper showing "Working" forever.
+///
+/// `session_is_live` gates every execution the same way: `RunSessionLinks`
+/// only tracks "which session is this repository's live run attached to,"
+/// with no visibility into which individual execution (lead or helper)
+/// within that session the process happens to be running at this instant --
+/// a repository has at most one live run at a time. So when the session
+/// itself is live, no execution belonging to it is touched (the running
+/// process could be mid-helper, mid-lead, or between the two); when it is
+/// not, every execution still claiming a live-process state is stale by the
+/// same reasoning that made the header stale.
+fn reconcile_session_executions(session: &mut AgentSession, session_is_live: bool) -> u32 {
+    crate::agentdesk::reconcile_executions(&mut session.executions, |_execution_id| session_is_live)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_session_get(
     app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
+    links: tauri::State<'_, crate::agentdesk::RunSessionLinks>,
     session_id: SessionId,
 ) -> Result<GetSessionOutcome, AppError> {
     let root = resolve_root(&app)?;
-    tauri::async_runtime::spawn_blocking(move || get_session_at(&root, &session_id))
+    let locks = locks.inner().clone();
+    // `repo_id` (and therefore which link to look up) is only known once the
+    // session itself has been read, so `RunSessionLinks::get` is called
+    // *inside* the blocking closure -- `links` is cheap to clone (every field
+    // is `Arc`-backed, see its own doc comment) and `'static`, so the clone
+    // travels with the closure rather than the per-header answer being
+    // pre-resolved on the async side.
+    let links = links.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || get_session_at(&locks, &links, &root, &session_id))
         .await
         .map_err(|e| AppError::Other(e.to_string()))
 }
@@ -2245,13 +2366,17 @@ mod tests {
     #[test]
     fn get_returns_not_found_for_an_unknown_id() {
         let (_dir, root) = temp_root();
-        let outcome = get_session_at(&root, "does-not-exist");
+        let locks = test_locks();
+        let links = test_links();
+        let outcome = get_session_at(&locks, &links, &root, "does-not-exist");
         assert!(matches!(outcome, GetSessionOutcome::NotFound));
     }
 
     #[test]
     fn get_returns_damaged_for_a_corrupt_file() {
         let (dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
         let path = dir
             .path()
             .join("agent-desk")
@@ -2259,23 +2384,261 @@ mod tests {
             .join("sessions")
             .join("sess-bad.json");
         std::fs::write(&path, b"{ not json").unwrap();
-        let outcome = get_session_at(&root, "sess-bad");
+        let outcome = get_session_at(&locks, &links, &root, "sess-bad");
         assert!(matches!(outcome, GetSessionOutcome::Damaged { .. }));
     }
 
     #[test]
     fn get_finds_a_created_session() {
         let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
         let CreateSessionOutcome::Created { session } =
             create_session_at(&root, create_request("Findable"))
         else {
             panic!("expected Created");
         };
-        let outcome = get_session_at(&root, &session.header.session_id);
+        let outcome = get_session_at(&locks, &links, &root, &session.header.session_id);
         let GetSessionOutcome::Found { session: found } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
         assert_eq!(found, session);
+    }
+
+    // -- Startup reconciliation: a session persisted mid-run reconciles to
+    // Interrupted on load when nothing in this process backs it. --
+
+    /// Writes a session whose header and one execution both claim `state`
+    /// (a live-process state, in every test below), with `active_execution_id`
+    /// pointing at that execution -- the exact on-disk shape
+    /// `record_execution_if_not_running` leaves behind mid-run, and exactly
+    /// what a crash/force-quit/power-loss/app-update freezes in place.
+    fn write_stuck_session(root: &SessionStoreRoot, session_id: &str, state: SessionState) -> AgentSession {
+        let mut session = AgentSession::new(AgentSessionHeader {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            session_id: session_id.into(),
+            repo_id: "repo-1".into(),
+            repo_path: "C:/code/proj".into(),
+            repo_name: "proj".into(),
+            title: "Stuck session".into(),
+            source: SessionSource::Manual {
+                repo_id: "repo-1".into(),
+            },
+            intent: SessionIntent::Fix,
+            state,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            unread: false,
+            changed_file_count: 0,
+            active_execution_id: Some("exec-1".into()),
+            archived: false,
+        });
+        session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+            "exec-1".into(),
+            session_id.into(),
+            None,
+            state,
+            "2026-01-01T00:00:00Z".into(),
+            None,
+            3,
+        ));
+        store::write_session(root, &session).expect("write fixture session");
+        session
+    }
+
+    #[test]
+    fn a_session_persisted_as_preparing_with_no_live_process_reconciles_on_load() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links(); // empty: nothing linked, exactly a fresh process
+        write_stuck_session(&root, "sess-stuck", SessionState::Preparing);
+
+        let outcome = get_session_at(&locks, &links, &root, "sess-stuck");
+        let GetSessionOutcome::Found { session } = outcome else {
+            panic!("expected Found, got {outcome:?}");
+        };
+        assert_eq!(session.header.state, SessionState::Interrupted);
+        assert_eq!(session.executions[0].state, SessionState::Interrupted, "the execution record, not just the header, must be reconciled");
+
+        // The fix is durable: re-reading directly from disk (bypassing
+        // get_session_at entirely) shows the same reconciled state, so this
+        // is not just an in-memory patch that disappears on the next load.
+        let reread = store::read_session(&root, "sess-stuck").expect("session still readable");
+        assert_eq!(reread.header.state, SessionState::Interrupted);
+        assert_eq!(reread.executions[0].state, SessionState::Interrupted);
+    }
+
+    #[test]
+    fn a_session_persisted_as_working_with_no_live_process_reconciles_on_load() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+        write_stuck_session(&root, "sess-stuck", SessionState::Working);
+
+        let outcome = get_session_at(&locks, &links, &root, "sess-stuck");
+        let GetSessionOutcome::Found { session } = outcome else {
+            panic!("expected Found, got {outcome:?}");
+        };
+        assert_eq!(session.header.state, SessionState::Interrupted);
+    }
+
+    #[test]
+    fn a_session_persisted_as_needs_input_with_no_live_process_reconciles_on_load() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+        write_stuck_session(&root, "sess-stuck", SessionState::NeedsInput);
+
+        let outcome = get_session_at(&locks, &links, &root, "sess-stuck");
+        let GetSessionOutcome::Found { session } = outcome else {
+            panic!("expected Found, got {outcome:?}");
+        };
+        assert_eq!(session.header.state, SessionState::Interrupted);
+    }
+
+    #[test]
+    fn a_session_whose_execution_is_genuinely_linked_is_left_running() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+        write_stuck_session(&root, "sess-live", SessionState::Working);
+        // This is what a real in-process execution looks like: the repo is
+        // linked to this exact session (`start_execution_at` calls
+        // `links.link` before the engine runs).
+        links.link("repo-1", &"sess-live".to_string());
+
+        let outcome = get_session_at(&locks, &links, &root, "sess-live");
+        let GetSessionOutcome::Found { session } = outcome else {
+            panic!("expected Found, got {outcome:?}");
+        };
+        assert_eq!(session.header.state, SessionState::Working, "a genuinely live session must not be reconciled");
+        assert_eq!(session.executions[0].state, SessionState::Working);
+    }
+
+    #[test]
+    fn a_session_already_finished_failed_or_stopped_is_left_untouched_by_reconciliation() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+        for (id, state) in [
+            ("sess-finished", SessionState::Finished),
+            ("sess-failed", SessionState::Failed),
+            ("sess-stopped", SessionState::Stopped),
+        ] {
+            write_stuck_session(&root, id, state);
+            let outcome = get_session_at(&locks, &links, &root, id);
+            let GetSessionOutcome::Found { session } = outcome else {
+                panic!("expected Found for {id}, got {outcome:?}");
+            };
+            assert_eq!(session.header.state, state, "{id} must not be rewritten by reconciliation");
+        }
+    }
+
+    #[test]
+    fn a_damaged_session_file_does_not_prevent_another_sessions_reconciliation() {
+        let (dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+
+        // One corrupt file alongside the stuck session -- store::read_session
+        // reports it as Damaged and never touches it, per store.rs's own
+        // quarantine contract; this just confirms get_session_at inherits
+        // that behavior rather than panicking or otherwise interrupting the
+        // reconciliation of a session it is not even asked about.
+        let bad_path = dir.path().join("agent-desk").join("v1").join("sessions").join("sess-bad.json");
+        std::fs::write(&bad_path, b"{ not json").unwrap();
+        write_stuck_session(&root, "sess-stuck", SessionState::Working);
+
+        let bad_outcome = get_session_at(&locks, &links, &root, "sess-bad");
+        assert!(matches!(bad_outcome, GetSessionOutcome::Damaged { .. }));
+
+        let good_outcome = get_session_at(&locks, &links, &root, "sess-stuck");
+        let GetSessionOutcome::Found { session } = good_outcome else {
+            panic!("expected Found, got {good_outcome:?}");
+        };
+        assert_eq!(session.header.state, SessionState::Interrupted);
+
+        // The corrupt file itself must still be untouched, matching every
+        // other quarantine test in this codebase (store.rs: "One damaged
+        // session").
+        assert_eq!(std::fs::read_to_string(&bad_path).unwrap(), "{ not json");
+    }
+
+    #[test]
+    fn every_stuck_execution_in_a_multi_execution_session_reconciles_not_just_the_active_one() {
+        // Regression for the graph panel: helper nodes render straight from
+        // `session.executions` (agentGraphProjection.ts), so a fix that only
+        // patched the header's own state would leave every helper showing
+        // "Working" forever after a crash mid-graph-run.
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+        let mut session = write_stuck_session(&root, "sess-graph", SessionState::Working);
+        session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+            "exec-helper".into(),
+            "sess-graph".into(),
+            Some("exec-1".into()),
+            SessionState::NeedsInput,
+            "2026-01-01T00:00:00Z".into(),
+            None,
+            1,
+        ));
+        session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+            "exec-done".into(),
+            "sess-graph".into(),
+            Some("exec-1".into()),
+            SessionState::Finished,
+            "2026-01-01T00:00:00Z".into(),
+            Some("2026-01-01T00:01:00Z".into()),
+            5,
+        ));
+        store::write_session(&root, &session).unwrap();
+
+        let outcome = get_session_at(&locks, &links, &root, "sess-graph");
+        let GetSessionOutcome::Found { session: reconciled } = outcome else {
+            panic!("expected Found, got {outcome:?}");
+        };
+        let by_id = |id: &str| reconciled.executions.iter().find(|e| e.execution_id == id).unwrap();
+        assert_eq!(by_id("exec-1").state, SessionState::Interrupted, "lead");
+        assert_eq!(by_id("exec-helper").state, SessionState::Interrupted, "needs-input helper");
+        assert_eq!(by_id("exec-done").state, SessionState::Finished, "already-finished helper untouched");
+    }
+
+    #[test]
+    fn agent_session_list_reconciles_headers_for_display_without_reading_full_session_files() {
+        // A list call must reconcile what it shows (so a filter for
+        // Interrupted or Working is honest) without paying for a full-session
+        // parse of every stuck session -- store::list_sessions_reconciled
+        // only ever touches headers (index.json, or `header` fields during a
+        // rebuild scan). Proven here by writing sessions whose FULL file body
+        // would fail to parse if it were ever read as `AgentSession` (a
+        // `messages` field of the wrong type), while their `header` object on
+        // its own is well-formed -- if list reconciliation reached for the
+        // full session, this test would see a `Damaged`-style failure instead
+        // of a normal reconciled page.
+        let (dir, root) = temp_root();
+        let links = test_links();
+        let session = write_stuck_session(&root, "sess-stuck", SessionState::Working);
+
+        let sessions_dir = dir.path().join("agent-desk").join("v1").join("sessions");
+        let mut raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(sessions_dir.join("sess-stuck.json")).unwrap()).unwrap();
+        raw["messages"] = serde_json::json!("not an array, would fail AgentSession parsing");
+        std::fs::write(sessions_dir.join("sess-stuck.json"), serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+
+        let filter = SessionListFilter::default();
+        let page = store::list_sessions_reconciled(&root, &filter, None, 10, |header| {
+            links.get(&header.repo_id).as_deref() == Some(header.session_id.as_str())
+        });
+
+        assert_eq!(page.headers.len(), 1);
+        assert_eq!(page.headers[0].session_id, session.header.session_id);
+        assert_eq!(
+            page.headers[0].state,
+            SessionState::Interrupted,
+            "the list must show the reconciled state, not the stale one still on disk"
+        );
+        assert!(page.diagnostics.is_empty(), "a header-only scan must never even notice the malformed messages field");
     }
 
     #[test]
@@ -3425,6 +3788,7 @@ mod tests {
         fn a_session_started_from_task_index_6_keeps_naming_task_index_6_across_every_surface() {
             let (dir, root) = temp_root();
             let locks = test_locks();
+            let links = test_links();
             let (manager, repo_id) = repo_with_change(dir.path());
 
             // Task 2.4 is index 6 in the flat, zero-based numbering the
@@ -3512,7 +3876,8 @@ mod tests {
             drop(session);
             drop(after_start);
             drop(after_message);
-            let GetSessionOutcome::Found { session: reloaded } = get_session_at(&root, &session_id)
+            let GetSessionOutcome::Found { session: reloaded } =
+                get_session_at(&locks, &links, &root, &session_id)
             else {
                 panic!("expected the session to survive a restart");
             };
@@ -3590,7 +3955,8 @@ mod tests {
             let status_after = openspec_status_at(&root, &manager, &session_id);
             assert!(matches!(status_after, OpenSpecSessionStatus::Active));
 
-            let GetSessionOutcome::Found { session: final_reload } = get_session_at(&root, &session_id)
+            let GetSessionOutcome::Found { session: final_reload } =
+                get_session_at(&locks, &links, &root, &session_id)
             else {
                 panic!("expected the session to still be readable");
             };

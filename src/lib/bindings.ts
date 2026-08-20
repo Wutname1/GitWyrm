@@ -6210,7 +6210,21 @@ export type SessionState =
  * loaded successfully, as opposed to a snapshot's `live_unavailable`
  * flag, which means it loaded once and later disappeared).
  */
-"missingSource"
+"missingSource" | 
+/**
+ * This session (or one of its executions) was found on load claiming
+ * `Preparing`/`Working`/`NeedsInput` with no live process behind it --
+ * the process that owned the run is gone (crash, force-quit, power
+ * loss, or an app update mid-run), so the state on disk outlived it.
+ * Distinct from `Failed`/`Stopped`: neither of those is true here --
+ * nothing ever decided the run failed or was deliberately stopped, it
+ * just never got to say anything at all. Starting a new execution on
+ * this session (`agent_session_start_execution`) is exactly the
+ * existing recovery path once this state is set, since it is what
+ * unblocks `record_execution_if_not_running`'s "already running" guard.
+ * See `agentdesk::session_recovery`.
+ */
+"interrupted"
 /**
  * Normalized provider usage for one session (architecture.md section 12).
  * Every field is optional -- unknown values are omitted, never zero -- and
