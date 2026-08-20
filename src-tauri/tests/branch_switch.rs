@@ -141,9 +141,21 @@ fn auto_stash_pop_conflict_keeps_stash() {
     switch_to(&repo, "feature").unwrap();
     fs::write(dir.join("shared.txt"), "line1\nFEATURE\n").unwrap();
     commit_all(&repo, "feature edit");
+    // Getting back to the base branch is a precondition, not a best-effort step:
+    // the conflict this test is about only exists if the local edit below is made
+    // on top of base content. `.ok()` here used to swallow a failed switch, and the
+    // test then stashed a no-op diff on `feature` and asserted a conflict that could
+    // never happen - a flake that only showed up when the checkout left feature's
+    // content in place. The branch name depends on init.defaultBranch, so both are
+    // still tried, but one of them has to work.
     switch_to(&repo, "master")
-        .ok()
-        .or_else(|| switch_to(&repo, "main").ok());
+        .or_else(|_| switch_to(&repo, "main"))
+        .expect("could not return to the base branch");
+    assert_eq!(
+        fs::read_to_string(dir.join("shared.txt")).unwrap(),
+        "line1\nline2\n",
+        "base branch must hold base content before the conflicting edit"
+    );
 
     // Back on the base branch, make a conflicting local edit and auto-stash-switch.
     fs::write(dir.join("shared.txt"), "line1\nLOCAL\n").unwrap();

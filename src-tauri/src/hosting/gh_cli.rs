@@ -248,7 +248,10 @@ mod tests {
     /// uses, so a leading slash must not survive into the argument.
     #[test]
     fn strips_the_leading_slash_from_paths() {
-        assert_eq!("/repos/o/r/pulls".trim_start_matches('/'), "repos/o/r/pulls");
+        assert_eq!(
+            "/repos/o/r/pulls".trim_start_matches('/'),
+            "repos/o/r/pulls"
+        );
         assert_eq!("repos/o/r/pulls".trim_start_matches('/'), "repos/o/r/pulls");
     }
 

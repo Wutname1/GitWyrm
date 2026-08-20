@@ -257,13 +257,18 @@ pub async fn gh_cli_status() -> Result<GhCliStatus, AppError> {
     // A PATH walk plus `gh auth status`, both of which touch the filesystem and
     // spawn a process; neither belongs on the IPC thread.
     tauri::async_runtime::spawn_blocking(|| match crate::hosting::gh_cli::availability() {
-        Ok(_) => GhCliStatus { installed: true, signed_in: true },
-        Err(crate::hosting::gh_cli::Unavailable::NotSignedIn) => {
-            GhCliStatus { installed: true, signed_in: false }
-        }
-        Err(crate::hosting::gh_cli::Unavailable::NotInstalled) => {
-            GhCliStatus { installed: false, signed_in: false }
-        }
+        Ok(_) => GhCliStatus {
+            installed: true,
+            signed_in: true,
+        },
+        Err(crate::hosting::gh_cli::Unavailable::NotSignedIn) => GhCliStatus {
+            installed: true,
+            signed_in: false,
+        },
+        Err(crate::hosting::gh_cli::Unavailable::NotInstalled) => GhCliStatus {
+            installed: false,
+            signed_in: false,
+        },
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))

@@ -418,9 +418,7 @@ mod tests {
         );
         let statuses = repo.statuses(None).expect("read statuses");
         assert!(
-            statuses
-                .iter()
-                .all(|e| e.path() != Ok(untracked.as_str())),
+            statuses.iter().all(|e| e.path() != Ok(untracked.as_str())),
             "the discarded file should not still be reported as a change"
         );
     }

@@ -382,7 +382,8 @@ impl HostProvider for GitHub {
         );
         let payload = serde_json::json!({ "body": body });
         let created: ApiComment = http::send_json_via_gh(
-            self.request(app, reqwest::Method::POST, &path)?.json(&payload),
+            self.request(app, reqwest::Method::POST, &path)?
+                .json(&payload),
             HOST,
             ERROR_KEYS,
             http::GhFallback::write("POST", &path, payload),
@@ -400,7 +401,8 @@ impl HostProvider for GitHub {
         let path = format!("/repos/{}/{}/pulls/{number}/reviews", slug.owner, slug.repo);
         let payload = serde_json::json!({ "event": "APPROVE" });
         http::send_via_gh(
-            self.request(app, reqwest::Method::POST, &path)?.json(&payload),
+            self.request(app, reqwest::Method::POST, &path)?
+                .json(&payload),
             HOST,
             ERROR_KEYS,
             http::GhFallback::write("POST", &path, payload),
@@ -424,7 +426,8 @@ impl HostProvider for GitHub {
         let path = format!("/repos/{}/{}/pulls/{number}/merge", slug.owner, slug.repo);
         let payload = serde_json::json!({ "merge_method": method });
         http::send_via_gh(
-            self.request(app, reqwest::Method::PUT, &path)?.json(&payload),
+            self.request(app, reqwest::Method::PUT, &path)?
+                .json(&payload),
             HOST,
             ERROR_KEYS,
             http::GhFallback::write("PUT", &path, payload),
@@ -445,7 +448,8 @@ impl HostProvider for GitHub {
         let path = format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo);
         let payload = serde_json::json!({ "state": "closed" });
         http::send_via_gh(
-            self.request(app, reqwest::Method::PATCH, &path)?.json(&payload),
+            self.request(app, reqwest::Method::PATCH, &path)?
+                .json(&payload),
             HOST,
             ERROR_KEYS,
             http::GhFallback::write("PATCH", &path, payload),
@@ -463,7 +467,8 @@ impl HostProvider for GitHub {
         let path = format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo);
         let payload = serde_json::json!({ "state": "closed" });
         http::send_via_gh(
-            self.request(app, reqwest::Method::PATCH, &path)?.json(&payload),
+            self.request(app, reqwest::Method::PATCH, &path)?
+                .json(&payload),
             HOST,
             ERROR_KEYS,
             http::GhFallback::write("PATCH", &path, payload),

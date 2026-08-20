@@ -237,11 +237,19 @@ pub struct GhFallback {
 
 impl GhFallback {
     pub fn get(path: impl AsRef<str>) -> Self {
-        Self { method: "GET", path: path.as_ref().to_string(), body: None }
+        Self {
+            method: "GET",
+            path: path.as_ref().to_string(),
+            body: None,
+        }
     }
 
     pub fn write(method: &'static str, path: impl AsRef<str>, body: serde_json::Value) -> Self {
-        Self { method, path: path.as_ref().to_string(), body: Some(body) }
+        Self {
+            method,
+            path: path.as_ref().to_string(),
+            body: Some(body),
+        }
     }
 }
 
@@ -324,12 +332,21 @@ fn try_gh(fallback: &GhFallback) -> Option<Result<reqwest::Response, AppError>> 
         fallback.method,
         fallback.path
     );
-    match super::gh_cli::api(&exe, fallback.method, &fallback.path, fallback.body.as_ref()) {
+    match super::gh_cli::api(
+        &exe,
+        fallback.method,
+        &fallback.path,
+        fallback.body.as_ref(),
+    ) {
         Ok(body) => {
             // A 204 has no body, and `serde_json` cannot parse an empty string.
             // The write paths only check status, so an empty object satisfies
             // both them and any caller that does deserialize.
-            let body = if body.trim().is_empty() { "{}".to_string() } else { body };
+            let body = if body.trim().is_empty() {
+                "{}".to_string()
+            } else {
+                body
+            };
             Some(Ok(http_response_from_body(body)))
         }
         Err(e) => Some(Err(e)),
