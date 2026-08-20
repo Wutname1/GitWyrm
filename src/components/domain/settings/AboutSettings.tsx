@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, ChevronDown, RotateCcw } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ExternalLink, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   DropdownMenu,
@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
 import { useUpdater } from '@/hooks/useUpdater'
+import { openWebUrl } from '@/lib/remoteWeb'
 import { commands, type BuildInfo } from '@/lib/bindings'
 import { useWorkspaceStore, type UpdateChannel } from '@/stores/workspaceStore'
 import { cn } from '@/lib/utils'
@@ -126,6 +127,35 @@ export function AboutSettings() {
           )}
         </div>
       </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Legal">
+        <SettingRow
+          label="Privacy and terms"
+          searchId="legal-links"
+          hint="What GitWyrm does with your data, and the terms you use it under. Both open on gitwyrm.com."
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={() => openWebUrl('https://gitwyrm.com/privacy', 'the privacy policy')}
+            >
+              <ExternalLink size={12} />
+              Privacy policy
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={() => openWebUrl('https://gitwyrm.com/terms', 'the terms of service')}
+            >
+              <ExternalLink size={12} />
+              Terms of service
+            </Button>
+          </div>
+        </SettingRow>
       </SettingsGroup>
 
       <div
