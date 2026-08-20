@@ -202,7 +202,7 @@ export function SpecsSection({
             className="mt-0.5 flex w-full items-center gap-1.5 py-1 pl-[22px] pr-3 text-left text-2xs text-muted-foreground hover:text-accent-text"
           >
             <ExternalLink size={11} strokeWidth={2} className="flex-none" />
-            Open Spec Desk
+            Open Agent Desk
           </button>
         </div>
       )}

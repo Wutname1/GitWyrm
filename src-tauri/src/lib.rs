@@ -317,6 +317,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_desk::agent_session_mark_read,
             commands::agent_desk::agent_session_append_user_message,
             commands::agent_desk::agent_session_attach_context,
+            commands::agent_desk::agent_session_start_execution,
+            commands::agent_desk::agent_session_stop_execution,
+            commands::agent_desk::agent_session_usage,
+            commands::agent_desk::agent_session_refresh_source,
         ])
         .typ::<watcher::RepoChangedPayload>()
         .typ::<commands::remote::GitProgressPayload>()
@@ -329,6 +333,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         // task), so like RunEventKind above it needs an explicit `.typ::<>()` or the
         // frontend type would never be generated.
         .typ::<agentdesk::AgentSessionEvent>()
+        // Only ever travels as the `agent-desk://select-target` emit in
+        // commands::spec_desk::open_spec_desk, never as a command param/return, so
+        // it needs the same explicit registration.
+        .typ::<commands::spec_desk::SelectDeskTarget>()
 }
 
 const SENTRY_DSN: &str = "https://543d8fb8597dad94c5d0bef310ad046f@o4511760230907904.ingest.us.sentry.io/4511924397735936";

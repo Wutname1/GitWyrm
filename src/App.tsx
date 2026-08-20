@@ -8,7 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { WorkspaceLayout } from '@/layouts/WorkspaceLayout'
 import { SpecDeskView } from '@/views/SpecDeskView'
-import { AgentDeskDevView } from '@/views/AgentDeskDevView'
+import { AgentDeskView } from '@/views/AgentDeskView'
 import { readWindowMode } from '@/lib/windowMode'
 import { listenForSettingsChanges } from '@/lib/settingsSync'
 import { listenForSpecRefresh, listenForSpecSelection } from '@/lib/specSync'
@@ -524,14 +524,14 @@ function SpecDeskRoot() {
   )
 
   // `agent-desk` reuses this window shell (theme, settings hydration, the AI
-  // run/session listeners) but renders the temporary dev surface from task
-  // 6.2 instead of the Spec Desk UI, until the real Agent Desk view lands in
-  // a later change.
+  // run/session listeners) but renders the real Agent Desk shell instead of
+  // the Spec Desk UI. `useAgentSessionListener` is mounted once above, in
+  // `SpecDeskRoot`, so `AgentDeskView` itself never subscribes again.
   const isAgentDesk = readWindowMode().kind === 'agent-desk'
 
   return (
     <>
-      {isAgentDesk ? <AgentDeskDevView /> : <SpecDeskView />}
+      {isAgentDesk ? <AgentDeskView /> : <SpecDeskView />}
       {/* The Desk mounts no other modals, but "New change" is reachable from
           its header, so this one has to exist in this window too. It needs the
           repo id passed in: this window has no active repo in its store, so the

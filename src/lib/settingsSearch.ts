@@ -277,9 +277,18 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
   {
     id: 'spec-desk',
     section: 'openspec',
-    label: 'Spec Desk',
-    hint: 'Show the Spec Desk button and the Specs list in the sidebar.',
-    keywords: ['spec desk', 'specs', 'openspec', 'plan', 'hide', 'sidebar', 'toolbar'],
+    label: 'Agent Desk',
+    hint: 'Show the Agent Desk button and the Specs list in the sidebar.',
+    keywords: [
+      'spec desk',
+      'agent desk',
+      'specs',
+      'openspec',
+      'plan',
+      'hide',
+      'sidebar',
+      'toolbar',
+    ],
   },
   {
     id: 'openspec-archive-commit-template',
@@ -292,14 +301,14 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     id: 'openspec-archive-confirmation',
     section: 'openspec',
     label: 'Before archiving',
-    hint: 'Restore the warning shown before a Spec Desk change is archived.',
+    hint: 'Restore the warning shown before an Agent Desk change is archived.',
     keywords: ['ask again', 'warning', 'confirm', 'archive', 'do not ask'],
   },
   {
     id: 'openspec-delete-confirmation',
     section: 'openspec',
     label: 'Before deleting',
-    hint: 'Restore the warning shown before a Spec Desk change is deleted.',
+    hint: 'Restore the warning shown before an Agent Desk change is deleted.',
     keywords: ['ask again', 'warning', 'confirm', 'delete', 'do not ask'],
   },
 

@@ -2995,15 +2995,14 @@ async openspecDefaultArchiveCommitTemplate() : Promise<string> {
     return await TAURI_INVOKE("openspec_default_archive_commit_template");
 },
 /**
- * Opens the Spec Desk for a repository, or focuses the one already open.
+ * Opens the app-wide Agent Desk window, or focuses the one already open.
  * 
- * `change_id` is the change to select on arrival. The selection broadcast
- * cannot reach a window that does not exist yet, so a Desk opened from a
- * change carries it in the URL rather than opening empty and waiting for an
- * event that already fired.
- * 
- * Size and position are remembered by Tauri's own window-state handling per
- * label, so reopening lands where the user left it.
+ * `change_id` is the change to select on arrival. Lookup order:
+ * 1. The app-wide [`AGENT_DESK_LABEL`] -- if it exists, focus and retarget it.
+ * 2. Any legacy `spec-desk-<repoId>` window -- migrate the most relevant one
+ * (see [`pick_legacy_desk_to_migrate`]) onto the app-wide label instead of
+ * creating a window with default placement.
+ * 3. Otherwise create the app-wide window fresh.
  */
 async openSpecDesk(repoId: string, changeId: string | null) : Promise<Result<DeskOutcome, string>> {
     try {
@@ -3112,6 +3111,38 @@ async agentSessionAppendUserMessage(sessionId: string, content: string, attachme
 async agentSessionAttachContext(sessionId: string, label: string, target: MessageTarget) : Promise<Result<AttachContextOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_attach_context", { sessionId, label, target }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionStartExecution(sessionId: string, mode: ExecutionMode, team: ExecutionTeam, providerOverride: string | null) : Promise<Result<StartExecutionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_start_execution", { sessionId, mode, team, providerOverride }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionStopExecution(sessionId: string, scope: StopScope) : Promise<Result<StopExecutionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_stop_execution", { sessionId, scope }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionUsage(sessionId: string) : Promise<Result<SessionUsageOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_usage", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionRefreshSource(sessionId: string) : Promise<Result<RefreshSourceOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_refresh_source", { sessionId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -3713,7 +3744,8 @@ export type DeskOutcome =
  */
 "opened" | 
 /**
- * One was already open for this repository; it was brought to the front.
+ * One was already open (new label or a migrated legacy one); it was
+ * brought to the front and retargeted.
  */
 "focused"
 export type DeviceCodeInfo = { device_code: string; user_code: string; verification_uri: string; 
@@ -3834,6 +3866,14 @@ solutions: SolutionFile[] }
  */
 export type EditorKind = "vs_code" | "cursor" | "windsurf" | "jetbrains" | "zed"
 /**
+ * `ask | plan | auto`, matching architecture.md section 8's
+ * `StartAgentSessionRequest.mode`. Defined locally (not re-exported from a
+ * shared `StartAgentSessionRequest`) because that shared type belongs to
+ * `agent-desk-source-kickoffs` task 1.1, not yet landed; this enum only
+ * needs to be structurally compatible with it, not the same Rust item.
+ */
+export type ExecutionMode = "ask" | "plan" | "auto"
+/**
  * One run attached to a session. A session can accumulate more than one
  * execution over its lifetime (retries, follow-ups, helper runs).
  */
@@ -3855,6 +3895,11 @@ endedAt: string | null;
  * late/duplicate event be recognized without rescanning `messages`.
  */
 lastSequence: number }
+/**
+ * `solo | lead`, matching architecture.md section 8's
+ * `StartAgentSessionRequest.team`.
+ */
+export type ExecutionTeam = "solo" | "lead"
 export type FileBlame = { path: string; lines: BlameLine[]; 
 /**
  * Set instead of `lines` when the file can't be blamed line-by-line.
@@ -4408,6 +4453,29 @@ stashed: boolean;
  */
 submodules: SubmoduleFollowed[] }
 /**
+ * What refreshing a session's source found. The snapshot on
+ * [`SessionSource`] itself is immutable provenance (model.rs's own doc
+ * comment: "Never mutated by a refresh"); this reports current status
+ * *alongside* it rather than overwriting it. Live re-fetch of issue/PR/
+ * OpenSpec content belongs to the adapters that own each source kind
+ * (hosting/openspec, per `docs/agent-desk/README.md`'s ownership map) and is
+ * out of scope here -- this command establishes the honest, typed outcome
+ * shape and the one check every source kind can make today regardless of
+ * kind: whether the session's repository is still open and reachable.
+ */
+export type RefreshSourceOutcome = 
+/**
+ * The source's live locator was reachable; `changed` is `true` only when
+ * this refresh actually flipped `live_unavailable` from what it was
+ * before, so the UI is not told "changed" on every no-op refresh.
+ */
+{ kind: "refreshed"; session: AgentSession; changed: boolean } | 
+/**
+ * The source could not be reached this time. The cached snapshot is left
+ * exactly as it was (never overwritten) so the banner keeps showing it.
+ */
+{ kind: "liveUnavailable"; session: AgentSession; detail: string } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string }
+/**
  * How a remote-tracking branch relates to the local repo. This is what makes a
  * remote branch legible without checking it out.
  */
@@ -4746,6 +4814,10 @@ export type ScannedRepo = { name: string; path: string;
  */
 head_branch: string | null }
 /**
+ * Payload of [`SELECT_DESK_TARGET_EVENT`].
+ */
+export type SelectDeskTarget = { repoId: string; repoPath: string; changeId: string | null }
+/**
  * One changed line the caller selected, identified by its diff line numbers.
  * Added lines carry `new_no`; removed lines carry `old_no`.
  */
@@ -4829,6 +4901,18 @@ export type SessionState =
  * flag, which means it loaded once and later disappeared).
  */
 "missingSource"
+/**
+ * Normalized provider usage for one session (architecture.md section 12).
+ * Every field is optional -- unknown values are omitted, never zero -- and
+ * carries its own [`UsageSource`] so the UI can mark estimates as estimates.
+ */
+export type SessionUsage = { sessionTokens: UsageValue | null; sessionRequests: UsageValue | null; sessionCostUsd: UsageValue | null; planLimit: UsageValue | null; planResetAt: string | null; activeHelperCount: number | null; 
+/**
+ * RFC 3339 UTC timestamp of when this data was produced, so the UI can
+ * show "as of" rather than implying it is live.
+ */
+dataTimestamp: string }
+export type SessionUsageOutcome = { kind: "available"; usage: SessionUsage } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string }
 export type Settings = { 
 /**
  * Paths of repos open in tabs, in tab order, so they can be reopened on launch.
@@ -5531,6 +5615,41 @@ identity: string | null;
  */
 workingKey: string | null }
 /**
+ * What happened when the caller asked a session to start an execution.
+ * Architecture.md section 3: "already running, source missing, adapter
+ * unsupported, provider reconnect, and conflicting write are enum variants,
+ * not error strings."
+ */
+export type StartExecutionOutcome = 
+/**
+ * The engine was launched; `execution_id` is the durable ID future run
+ * events for this session will carry.
+ */
+{ kind: "started"; session: AgentSession; execution_id: string } | 
+/**
+ * This session already has an execution running -- starting a second one
+ * would silently orphan the first's events (bridge.rs's
+ * `ExecutionSuperseded`), so this is refused rather than allowed to
+ * clobber.
+ */
+{ kind: "alreadyRunning"; execution_id: string } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string } | 
+/**
+ * The session's repository is not open in this app instance, so there is
+ * nothing to run against.
+ */
+{ kind: "sourceMissing"; detail: string } | 
+/**
+ * The provider transport could not be reached at all (no CLI, version
+ * too old): distinct from `ProviderReconnect` because the fix is
+ * "install/upgrade the tool," not "sign back in."
+ */
+{ kind: "adapterUnsupported"; detail: string } | 
+/**
+ * Credentials exist but were refused -- the user needs to reconnect the
+ * provider, not retry.
+ */
+{ kind: "providerReconnect"; detail: string }
+/**
  * Starting a run either gives you the session or says why not.
  */
 export type StartOutcome = { kind: "started"; session: RunSession } | 
@@ -5569,6 +5688,19 @@ time: number; files_changed: number; additions: number; deletions: number }
  */
 export type StashOutcome = "stashed" | "nothing_to_stash"
 export type StatusCode = "A" | "M" | "D" | "R" | "!"
+export type StopExecutionOutcome = 
+/**
+ * `stopped` lists exactly which executions were told to stop -- empty
+ * for `StopScope::One` naming an execution that was not active, which is
+ * a no-op, not an error (it may have finished a moment earlier).
+ */
+{ kind: "stopped"; session: AgentSession; stopped: string[] } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string }
+/**
+ * Scope of a stop request: one execution, or every execution attached to the
+ * session (spec `agent-desk-agent-graphs`: "Each helper SHALL have Stop for
+ * itself and the Graph header SHALL have a labeled Stop all").
+ */
+export type StopScope = { kind: "one"; execution_id: string } | { kind: "all" }
 /**
  * What a pull did to one submodule whose pinned version it changed.
  */
@@ -5868,6 +6000,12 @@ export type UpdateSessionOutcome = { kind: "updated"; session: AgentSession } | 
  * session is not known to be gone, and a retry may well succeed.
  */
 { kind: "unavailable"; detail: string }
+/**
+ * architecture.md section 12: "Every field is optional and carries
+ * `source: measured | provider_reported | estimated`."
+ */
+export type UsageSource = "measured" | "providerReported" | "estimated"
+export type UsageValue = { value: number; source: UsageSource }
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }
 /**
  * One checkout of the repository: the main one, or a linked worktree.

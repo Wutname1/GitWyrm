@@ -40,6 +40,17 @@ impl DriverRegistry {
     fn clear(&self, repo_id: &str) {
         self.inner.lock().unwrap().remove(repo_id);
     }
+
+    /// Crate-visible accessor so `commands::agent_desk::stop_execution_at` can
+    /// signal the same scripted-demo driver `ai_run_stop` does. Real (non-demo)
+    /// runs started through `agent_session_start_execution` never register
+    /// here -- they are driven by `airun::cli_run::run_task` directly, stopped
+    /// only via the gate-answer channel `gate_answers()` exposes -- so a
+    /// lookup miss for a real run's `repo_id` is the normal, expected case,
+    /// not a bug: it means there is no *demo* driver to signal.
+    pub(crate) fn get_scripted(&self, repo_id: &str) -> Option<Arc<std::sync::Mutex<ScriptedDriver>>> {
+        self.get(repo_id)
+    }
 }
 
 /// Starting a run either gives you the session or says why not.
@@ -381,7 +392,7 @@ fn pump(
 /// since nothing yet calls `RunSessionLinks::link`) takes the
 /// `NoLinkedSession` branch and does nothing further, so this call cannot
 /// change what already happens on `RUN_EVENT`, only add to it.
-fn emit(app: &tauri::AppHandle, repo_id: &str, session_id: &str, state: RunState, step: RunStep) {
+pub(crate) fn emit(app: &tauri::AppHandle, repo_id: &str, session_id: &str, state: RunState, step: RunStep) {
     let event = RunEventKind {
         repo_id: repo_id.to_string(),
         session_id: session_id.to_string(),
@@ -657,6 +668,16 @@ pub async fn ai_run_start(
 static GATE_ANSWERS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<String, std::sync::mpsc::Sender<GateAnswer>>>,
 > = std::sync::LazyLock::new(Default::default);
+
+/// Crate-visible accessor to the same per-repository gate-answer registry
+/// `ai_run_start` populates, so `commands::agent_desk::start_execution_at`
+/// registers a real engine's answer channel exactly the same way -- one
+/// registry, not a second one that `ai_run_answer_gate` would not know about.
+pub(crate) fn gate_answers(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, std::sync::mpsc::Sender<GateAnswer>>>
+{
+    &GATE_ANSWERS
+}
 
 /// Builds the transport and drives the task.
 ///

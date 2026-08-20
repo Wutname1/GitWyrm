@@ -5,7 +5,7 @@ import { openSpecDesk } from '@/lib/specDesk'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 
 /**
- * Toolbar action for opening the Spec Desk window.
+ * Toolbar action for opening the Agent Desk window.
  *
  * The Desk already opens from the sidebar, spec cards, graph chips, and context
  * menus, but all of those need a change to exist first. This is the one place
@@ -16,6 +16,10 @@ import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
  * repo that has never used specs is the one that most needs the way in. Users
  * who don't plan this way turn the whole feature off in Settings > OpenSpec,
  * which takes the button away entirely.
+ *
+ * "Spec Desk" is renamed to "Agent Desk" in every user-facing string here,
+ * but the persisted setting key (`enableSpecDesk`/`enable_spec_desk`) and the
+ * `openSpecDesk` function name stay as-is -- see `src/lib/specDesk.ts`.
  */
 export function OpenSpecDeskButton({
   disabled,
@@ -34,8 +38,8 @@ export function OpenSpecDeskButton({
     <DisabledHint disabled={!!disabled} reason={disabledReason}>
       <TooltipButton
         onClick={() => repo && void openSpecDesk(repo.id)}
-        tooltip={disabled && disabledReason ? disabledReason : 'Open Spec Desk'}
-        aria-label="Open Spec Desk"
+        tooltip={disabled && disabledReason ? disabledReason : 'Open Agent Desk'}
+        aria-label="Open Agent Desk"
         disabled={disabled}
         className={cn(
           'group flex h-[30px] w-8 items-center justify-center rounded-md border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none',
