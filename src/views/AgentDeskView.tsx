@@ -9,6 +9,7 @@ import { readWindowMode, type WindowMode } from '@/lib/windowMode'
 import { AgentDeskTitleBar } from '@/components/domain/agent-desk/AgentDeskTitleBar'
 import { AgentWorkspaceToolbar } from '@/components/domain/agent-desk/AgentWorkspaceToolbar'
 import { SessionSidebar } from '@/components/domain/agent-desk/SessionSidebar'
+import { AgentSetupView } from '@/components/domain/agent-setup/AgentSetupView'
 import { ConversationPane } from '@/components/domain/agent-desk/ConversationPane'
 import { PaneDetailPopover } from '@/components/domain/agent-desk/PaneDetailPopover'
 import { DockedDetailPanel } from '@/components/domain/agent-desk/DockedDetailPanel'
@@ -25,7 +26,7 @@ import { isRightDockSafeAtWidth, resolveDockVisibility, zoneToPlacement, type Do
 import type { DockKind } from '@/lib/agentWorkspaceLayout'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 
-type CenterView = 'conversation' | 'openspec'
+type CenterView = 'conversation' | 'openspec' | 'setup'
 
 /** Matches the Rust side's `agent-desk://select-target` in `spec_desk.rs`. */
 const SELECT_DESK_TARGET_EVENT = 'agent-desk://select-target'
@@ -523,7 +524,13 @@ export function AgentDeskView() {
             <SessionSidebar repoId={repoId} selectedId={activePane === 'secondary' ? secondarySessionId : primarySessionId} onSelectSession={onSelectSession} onNewSession={() => void onNewChat()} />
           )}
 
-          {centerView === 'openspec' ? (
+          {centerView === 'setup' ? (
+            /* Agent setup takes over the centre the way OpenSpec does: it is a
+               whole workspace of its own, not a panel. Closing returns to the
+               conversation rather than to wherever you were, because the setup
+               view can be reached from either. */
+            <AgentSetupView repoId={repo.id} onClose={() => setCenterView('conversation')} />
+          ) : centerView === 'openspec' ? (
             /* Task 2.3: keep current OpenSpec details/actions functional.
                Full-width so DeskDetail/DeskActionRail/DeskChangesList render
                at the same proportions they always have, rather than being
