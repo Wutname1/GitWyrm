@@ -1054,13 +1054,22 @@ fn start_execution_at(
     let app_for_task = app.clone();
     let repo_for_task = repo_id.clone();
     let run_session_id_for_task = run_session_id.clone();
-    tauri::async_runtime::spawn(async move {
+    let join_handle = tauri::async_runtime::spawn(async move {
         let sink: crate::airun::engine::Sink = {
             let app = app_for_task.clone();
             let repo = repo_for_task.clone();
             let session_id = run_session_id_for_task.clone();
             std::sync::Arc::new(move |state, step| {
-                crate::commands::airun::emit(&app, &repo, &session_id, state, step);
+                // Not `commands::airun::emit`: that gates every event on
+                // `SessionRegistry::record`, which only accepts events from a
+                // run `SessionRegistry::start` registered -- something this
+                // execution never does (it has its own concurrency guard,
+                // `record_execution_if_not_running`, keyed by the durable
+                // session rather than by repository). Routing through `emit`
+                // would silently drop every event here, leaving the
+                // execution stuck in `Preparing` forever. See
+                // `emit_agent_desk_only`'s doc comment.
+                crate::commands::airun::emit_agent_desk_only(&app, &repo, &session_id, state, step);
             })
         };
 
@@ -1080,6 +1089,46 @@ fn start_execution_at(
             .lock()
             .unwrap()
             .remove(&repo_for_task);
+    });
+
+    // No-silent-freeze safety net (House Rule #1: every action produces a
+    // visible response). `cli_run::run_task` itself always ends with a sink
+    // call on every path it controls (`connect` failure, a missing incoming
+    // channel, or the prompt's own outcome all reach the final `Ended` step --
+    // see `cli_run.rs`). What it cannot cover is a panic *inside* that spawned
+    // task before any of those paths run (a bug in `CliAgent::discover`'s
+    // shell-out, a panicking dependency, etc.) -- `tauri::async_runtime::spawn`
+    // silently drops a panicked task's result, which would otherwise leave the
+    // execution sitting in `Preparing`/`Working` forever with no typed outcome
+    // and nothing in the transcript explaining why. Awaiting the join handle
+    // from a second task turns that specific failure mode into the same
+    // `Ended`/`Failed` event every other failure already produces.
+    let app_for_watchdog = app.clone();
+    let repo_for_watchdog = repo_id.clone();
+    let run_session_id_for_watchdog = run_session_id.clone();
+    let session_id_for_watchdog = session_id.to_string();
+    tauri::async_runtime::spawn(async move {
+        if let Err(join_error) = join_handle.await {
+            log::error!(
+                "agent desk execution {} for session {} panicked: {join_error}",
+                run_session_id_for_watchdog,
+                session_id_for_watchdog
+            );
+            crate::commands::airun::emit_agent_desk_only(
+                &app_for_watchdog,
+                &repo_for_watchdog,
+                &run_session_id_for_watchdog,
+                crate::airun::driver::RunState::Failed,
+                crate::airun::driver::RunStep::Ended {
+                    state: crate::airun::driver::RunState::Failed,
+                    detail: "Something went wrong while starting the agent, and it never got to report why. Nothing was committed and your own work is untouched.".into(),
+                },
+            );
+            crate::commands::airun::gate_answers()
+                .lock()
+                .unwrap()
+                .remove(&repo_for_watchdog);
+        }
     });
 
     StartExecutionOutcome::Started {
@@ -2698,6 +2747,147 @@ mod tests {
         assert_eq!(reread.messages[0].plain_content, "hello from the engine");
         assert_eq!(reread.messages[0].execution_id, Some(execution_id));
         assert_eq!(reread.header.state, SessionState::Working);
+    }
+
+    /// Regression test for the "Getting ready... forever" bug: an Agent Desk
+    /// execution's engine events were being silently dropped before they ever
+    /// reached `route_to_agent_desk`/`route_run_event`, because
+    /// `start_execution_at` originally routed its sink through
+    /// `commands::airun::emit`, and `emit`'s very first line gates on
+    /// `SessionRegistry::record`, which only accepts an event whose
+    /// `(repo_id, run_session_id)` pair was previously registered via
+    /// `SessionRegistry::start` -- something an Agent Desk execution never
+    /// does (it has its own concurrency guard,
+    /// `record_execution_if_not_running`, keyed by the durable session rather
+    /// than by repository). The first assertion below reproduces that: an
+    /// unregistered repo's event is dropped by the registry exactly as it was
+    /// in production, which is why the session never left `Preparing` no
+    /// matter how many events the engine emitted.
+    ///
+    /// The fix is `commands::airun::emit_agent_desk_only`, which performs the
+    /// same persist-then-emit sequence as `route_to_agent_desk` without ever
+    /// touching `SessionRegistry`. The second half of this test proves that
+    /// half directly (`route_run_event` is the exact function
+    /// `emit_agent_desk_only` calls) -- confirming the durable path succeeds
+    /// on its own, independent of whatever `SessionRegistry` would have said.
+    #[test]
+    fn agent_desk_events_are_not_gated_on_the_airun_session_registry() {
+        let registry = crate::airun::session::SessionRegistry::new();
+        let event = run_event("run-1", crate::airun::driver::RunState::Working);
+
+        // Reproduces the bug: nothing ever called `registry.start(...)` for
+        // this repository (Agent Desk executions never do), so `record`
+        // refuses the event exactly as `commands::airun::emit`'s gate did in
+        // production -- this is why routing an Agent Desk execution's sink
+        // through `emit` left every session stuck in `Preparing`.
+        assert!(
+            !registry.record(&event),
+            "an unregistered repo's event must be dropped by SessionRegistry, \
+             reproducing why routing through commands::airun::emit silently \
+             swallowed every Agent Desk execution event"
+        );
+
+        // The fix: `route_run_event` (what `emit_agent_desk_only` calls)
+        // succeeds on its own, with no dependency on `SessionRegistry` at all
+        // -- proving the durable path Agent Desk actually needs does not run
+        // through the gate that dropped it.
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+        let CreateSessionOutcome::Created { session } =
+            create_session_at(&root, create_request("Not registry-gated"))
+        else {
+            panic!("expected Created");
+        };
+        let session_id = session.header.session_id.clone();
+        links.link(&session.header.repo_id, &session_id);
+
+        let sequence = links.next_sequence(&event.session_id);
+        let routed = crate::agentdesk::route_run_event(&root, &links, &locks, sequence, "2026-01-01T00:00:01Z", &event);
+        assert!(
+            matches!(routed, crate::agentdesk::RunEventRouted::Persisted { .. }),
+            "the durable route must succeed even though SessionRegistry never saw this repo: got {routed:?}"
+        );
+
+        let reread = store::read_session(&root, &session_id).expect("session still readable");
+        assert_eq!(
+            reread.header.state,
+            SessionState::Working,
+            "the session must leave Preparing once the durable route delivers an event, \
+             regardless of SessionRegistry"
+        );
+    }
+
+    /// Regression test for the "no silent freeze" requirement: even a
+    /// preparation that never reports even one event from the engine (the
+    /// spawned task panicked, or the CLI hung before its first message) must
+    /// still be reachable to a typed terminal state rather than sitting in
+    /// `Preparing` forever. `start_execution_at`'s watchdog task achieves this
+    /// by awaiting the engine task's `JoinHandle` and, on panic, emitting a
+    /// `RunStep::Ended { state: Failed, .. }` itself -- this test proves that
+    /// exact event, routed the same way the watchdog routes it, moves a
+    /// session stuck in `Preparing` to a typed `Failed` with a plain-language
+    /// reason in the transcript, not an indefinite hang.
+    #[test]
+    fn a_preparation_that_never_reports_still_reaches_a_typed_failed_state() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+        let CreateSessionOutcome::Created { session } =
+            create_session_at(&root, create_request("Never reports"))
+        else {
+            panic!("expected Created");
+        };
+        let session_id = session.header.session_id.clone();
+
+        // Reproduce `record_execution_if_not_running`'s effect: the session
+        // is left in `Preparing`, exactly where it sits the whole time the
+        // engine task is starting up.
+        let execution_id = crate::agentdesk::execution_id_for_run_session("run-1");
+        links.link(&session.header.repo_id, &session_id);
+        update_session_at(&locks, &root, &session_id, |s| {
+            s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+                execution_id.clone(),
+                s.header.session_id.clone(),
+                None,
+                SessionState::Preparing,
+                now_rfc3339(),
+                None,
+                0,
+            ));
+            s.header.active_execution_id = Some(execution_id.clone());
+            s.header.state = SessionState::Preparing;
+        });
+        let stuck = store::read_session(&root, &session_id).unwrap();
+        assert_eq!(stuck.header.state, SessionState::Preparing, "sanity: still stuck exactly as reported");
+
+        // What the watchdog task sends when the engine task panics or is
+        // otherwise never heard from again: the same `Ended`/`Failed` event
+        // every other engine failure path already produces (see
+        // `cli_run::run_task`'s own `connect`-failure branch).
+        let ended = crate::airun::driver::RunEventKind {
+            repo_id: session.header.repo_id.clone(),
+            session_id: "run-1".into(),
+            state: crate::airun::driver::RunState::Failed,
+            summary: "Something went wrong while starting the agent, and it never got to report why.".into(),
+            step: crate::airun::driver::RunStep::Ended {
+                state: crate::airun::driver::RunState::Failed,
+                detail: "Something went wrong while starting the agent, and it never got to report why. Nothing was committed and your own work is untouched.".into(),
+            },
+        };
+        let sequence = links.next_sequence(&ended.session_id);
+        let routed = crate::agentdesk::route_run_event(&root, &links, &locks, sequence, "2026-01-01T00:00:05Z", &ended);
+        assert!(
+            matches!(routed, crate::agentdesk::RunEventRouted::Persisted { .. }),
+            "the watchdog's Ended/Failed event must persist: got {routed:?}"
+        );
+
+        let final_session = store::read_session(&root, &session_id).expect("session still readable");
+        assert_eq!(
+            final_session.header.state,
+            SessionState::Failed,
+            "a preparation that never reported must still reach a typed terminal state, never stay Preparing"
+        );
     }
 
     #[test]

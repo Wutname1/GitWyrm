@@ -416,6 +416,49 @@ pub(crate) fn emit(app: &tauri::AppHandle, repo_id: &str, session_id: &str, stat
     route_to_agent_desk(app, &event);
 }
 
+/// The Agent Desk equivalent of [`emit`], for executions
+/// `commands::agent_desk::start_execution_at` starts.
+///
+/// `emit` above gates every event on `SessionRegistry::record`, which only
+/// accepts events from a run that was registered with `SessionRegistry::start`
+/// -- the "one run per repository" bookkeeping the AI-run console tab owns.
+/// Agent Desk executions never call `SessionRegistry::start` (they have their
+/// own concurrency guard, `record_execution_if_not_running`, keyed by the
+/// durable session rather than by repository), so routing them through `emit`
+/// means `record` always finds no registered session for the repo and drops
+/// every event before `route_to_agent_desk` ever runs -- the execution's
+/// state then never leaves `Preparing`, no matter what the engine reports.
+///
+/// This function is `emit` minus that gate: it still emits `RUN_EVENT` (so the
+/// AI-run console tab, if the same repo happens to be open there too, sees
+/// the same activity it always would have) and still routes to the durable
+/// store, but never touches `SessionRegistry` -- an Agent Desk execution does
+/// not participate in that registry's "one run per repo" rule at all.
+pub(crate) fn emit_agent_desk_only(
+    app: &tauri::AppHandle,
+    repo_id: &str,
+    session_id: &str,
+    state: RunState,
+    step: RunStep,
+) {
+    let event = RunEventKind {
+        repo_id: repo_id.to_string(),
+        session_id: session_id.to_string(),
+        state,
+        summary: summarize(&step),
+        step,
+    };
+    log::debug!(
+        "agent desk run event: repo={} session={} state={:?}",
+        event.repo_id,
+        event.session_id,
+        event.state
+    );
+    let _ = app.emit(RUN_EVENT, event.clone());
+
+    route_to_agent_desk(app, &event);
+}
+
 /// The durable-path half of [`emit`]. Split out so a failure or an
 /// unavailable store root can never touch the `ai-run-event` emission above
 /// it -- by the time this runs, `RUN_EVENT` has already gone out either way.
