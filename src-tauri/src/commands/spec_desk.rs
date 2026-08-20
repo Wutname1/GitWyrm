@@ -241,6 +241,20 @@ pub async fn open_spec_desk(
         .inner_size(940.0, 760.0)
         .min_inner_size(720.0, 560.0)
         .decorations(false)
+        .resizable(true)
+        // Both of these match the main window's tauri.conf.json entry, and both
+        // are load-bearing rather than cosmetic.
+        //
+        // The drag-drop handler defaults to ENABLED in tauri-runtime, and while
+        // it is on, the OS file-drop handler swallows pointer input over the webview
+        // -- which is exactly what `data-tauri-drag-region` needs to see. The
+        // main window turns it off in tauri.conf.json; this window was built in
+        // code and inherited the default, so its title bar could not drag the
+        // window at all.
+        //
+        // `resizable` is stated for the same reason: nothing here should depend
+        // on a builder default that the main window never relies on.
+        .disable_drag_drop_handler()
         .background_color(tauri::window::Color(0x12, 0x12, 0x12, 0xff))
         .build()
         .map_err(|e| AppError::Other(format!("could not open the Agent Desk window: {e}")))?;

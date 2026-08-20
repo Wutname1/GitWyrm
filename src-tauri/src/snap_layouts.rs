@@ -249,6 +249,13 @@ mod imp {
         }
     }
 
+    /// Every emit here is `emit_to(self.label())`, never a bare `emit`.
+    ///
+    /// `Emitter::emit` goes to ALL targets, so with a second window open the
+    /// child's overlay told every window it had been clicked and each one
+    /// maximized itself -- clicking maximize on Agent Desk maximized the main
+    /// window. The overlay belongs to exactly one window, so its events must
+    /// too.
     unsafe extern "system" fn overlay_proc(
         hwnd: HWND,
         msg: u32,
@@ -271,7 +278,9 @@ mod imp {
             WM_NCMOUSEMOVE => {
                 if !state.hovered {
                     state.hovered = true;
-                    let _ = state.window.emit("snap-layouts://hover", true);
+                    let _ = state
+                        .window
+                        .emit_to(state.window.label(), "snap-layouts://hover", true);
                 }
                 // Re-armed on every move: TrackMouseEvent is one-shot, and
                 // without it there is no leave message, so the button would
@@ -288,7 +297,9 @@ mod imp {
                 state.pressing = false;
                 if state.hovered {
                     state.hovered = false;
-                    let _ = state.window.emit("snap-layouts://hover", false);
+                    let _ = state
+                        .window
+                        .emit_to(state.window.label(), "snap-layouts://hover", false);
                 }
                 0
             }
@@ -301,7 +312,9 @@ mod imp {
             WM_NCLBUTTONUP => {
                 if state.pressing {
                     state.pressing = false;
-                    let _ = state.window.emit("snap-layouts://click", ());
+                    let _ = state
+                        .window
+                        .emit_to(state.window.label(), "snap-layouts://click", ());
                 }
                 0
             }
