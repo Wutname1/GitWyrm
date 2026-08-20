@@ -125,10 +125,10 @@ async openInEditor(repoId: string, editor: EditorKind) : Promise<Result<null, st
  * Which editors are installed, whether Visual Studio is available, and the
  * solutions in this repo. Drives the toolbar's open button and the editor
  * picker in Settings.
- * Detection spawns a process per candidate launcher and walks the repo for
- * solutions, so it must not run on the IPC thread: everything else the
- * frontend asks for queues behind whatever is running there. The repo path is
- * resolved up front because `State` cannot cross into the blocking pool.
+ * Detection spawns vswhere and walks the repo for solutions, so it must not
+ * run on the IPC thread: everything else the frontend asks for queues behind
+ * whatever is running there. The repo path is resolved up front because
+ * `State` cannot cross into the blocking pool.
  */
 async getEditorAvailability(repoId: string | null) : Promise<Result<EditorAvailability, string>> {
     try {
@@ -2500,6 +2500,21 @@ async hostingProviders() : Promise<Result<HostProviderInfo[], string>> {
 }
 },
 /**
+ * Whether the GitHub CLI is installed and signed in.
+ * 
+ * Reported rather than inferred so the settings row can say which of the two
+ * is missing: "install it" and "sign into it" are different next steps, and a
+ * single "unavailable" would send half the users to the wrong one.
+ */
+async ghCliStatus() : Promise<Result<GhCliStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("gh_cli_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Which host a repository's origin belongs to, or None when origin is missing
  * or points at a host GitWyrm does not know.
  */
@@ -3740,6 +3755,18 @@ export type GateRequest = { kind: "addDependency"; name: string } | { kind: "run
 { kind: "unclassified"; summary: string }
 export type GeneratedCommitMessage = { summary: string; description: string }
 /**
+ * What the GitHub CLI fallback can currently do, for the settings row.
+ */
+export type GhCliStatus = { 
+/**
+ * `gh` was found on this machine.
+ */
+installed: boolean; 
+/**
+ * `gh` is installed and has a working login, so the fallback can be used.
+ */
+signed_in: boolean }
+/**
  * Who git thinks the user is. Either field can be empty when git has never
  * been set up, which is the normal state on a fresh machine.
  */
@@ -4706,6 +4733,12 @@ restore_tabs?: boolean;
  * remote branches are current without the user asking. On by default.
  */
 auto_fetch?: boolean; 
+/**
+ * Fall back to the GitHub CLI when an organization blocks GitWyrm's own
+ * sign-in. On by default: the alternative is an empty pull request panel
+ * the user has no way to fix from inside the app.
+ */
+gh_cli_fallback?: boolean; 
 /**
  * Show the short explanations that teach a feature in the sidebar and
  * panels. On by default so the features get found; off leaves the controls

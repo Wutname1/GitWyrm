@@ -65,6 +65,9 @@ tauri-plugin-process = "2.3.1"
 # form bodies, so `form` is required.
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form"] }
 base64 = "0.23"
+# Already in the tree via reqwest; named directly so the GitHub CLI fallback can
+# synthesize a Response from a body the CLI produced.
+http = "1"
 # Object-safe async methods on the HostProvider trait, so the code-host
 # providers can live behind one `&dyn` list.
 async-trait = "0.1"

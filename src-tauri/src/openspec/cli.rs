@@ -75,6 +75,9 @@ impl Invocation {
         // The CLI collects anonymous stats by default; GitWyrm invoking it is not
         // the user opting in, so turn it off for our calls.
         cmd.env("OPENSPEC_TELEMETRY", "0");
+        // Hand this child the system's libraries, not the AppImage's.
+        crate::process_env::scrub_bundled_env(&mut cmd);
+
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
         cmd

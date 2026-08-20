@@ -222,6 +222,131 @@ pub fn clear_cooldown(host: &str) {
     }
 }
 
+/// Enough about a GitHub request to reissue it through the `gh` CLI.
+///
+/// A built `reqwest::RequestBuilder` has already swallowed its method and path
+/// into an opaque object, so the fallback cannot recover them from it. Carrying
+/// them alongside is the smallest thing that works; only GitHub calls build one,
+/// and the other three hosts keep using plain [`send`] untouched.
+#[derive(Clone)]
+pub struct GhFallback {
+    pub method: &'static str,
+    pub path: String,
+    pub body: Option<serde_json::Value>,
+}
+
+impl GhFallback {
+    pub fn get(path: impl AsRef<str>) -> Self {
+        Self { method: "GET", path: path.as_ref().to_string(), body: None }
+    }
+
+    pub fn write(method: &'static str, path: impl AsRef<str>, body: serde_json::Value) -> Self {
+        Self { method, path: path.as_ref().to_string(), body: Some(body) }
+    }
+}
+
+/// Whether the GitHub CLI fallback may be used, set from Settings at startup.
+///
+/// A process-global for the same reason `git::shell::GIT_PROGRAM` is one: the
+/// providers are deep in a call chain that would otherwise have to thread the
+/// setting through every method for a value that changes about once a year.
+static GH_FALLBACK_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_gh_fallback_enabled(enabled: bool) {
+    GH_FALLBACK_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn gh_fallback_enabled() -> bool {
+    GH_FALLBACK_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Send a GitHub request, retrying through the `gh` CLI if the token is refused.
+///
+/// The refusal this exists for is an organization blocking third-party OAuth
+/// apps. That is not something the user can fix from inside GitWyrm, but `gh`
+/// is usually approved where we are not, so the retry turns a dead panel into a
+/// working one. Everything else -- a rate limit, a timeout, a 404 -- is left
+/// exactly as it was, because `gh` would fail the same way.
+///
+/// A successful fallback deliberately does NOT record a cooldown: the request
+/// worked, and benching the host would stop the next one from even trying.
+pub async fn send_via_gh(
+    builder: reqwest::RequestBuilder,
+    host: &str,
+    message_keys: &[&str],
+    fallback: GhFallback,
+) -> Result<reqwest::Response, AppError> {
+    // A remembered refusal is the signal to go straight to `gh`: the direct
+    // call is known to fail, so spending a round trip to confirm it is waste.
+    if let Some(remembered) = cooled_down(host) {
+        return match try_gh(&fallback) {
+            Some(Ok(res)) => Ok(res),
+            Some(Err(e)) => Err(e),
+            None => Err(AppError::Other(remembered)),
+        };
+    }
+
+    let direct = send(builder, host, message_keys).await;
+    let Err(AppError::Other(message)) = &direct else {
+        return direct;
+    };
+    if !is_permission_refusal(message) {
+        return direct;
+    }
+    match try_gh(&fallback) {
+        Some(Ok(res)) => Ok(res),
+        // `gh` was available and still failed. Its message is the more specific
+        // of the two -- it reached the API with a better credential and was told
+        // no anyway -- so it replaces ours rather than being appended.
+        Some(Err(e)) => Err(e),
+        None => direct,
+    }
+}
+
+/// Runs the fallback, or None when the CLI cannot help.
+///
+/// Returns a synthesized `reqwest::Response` so callers deserialize the body
+/// the same way regardless of which transport produced it.
+fn try_gh(fallback: &GhFallback) -> Option<Result<reqwest::Response, AppError>> {
+    if !gh_fallback_enabled() {
+        return None;
+    }
+    let exe = match super::gh_cli::availability() {
+        Ok(exe) => exe,
+        Err(reason) => {
+            log::debug!("GitHub CLI fallback unavailable: {reason:?}");
+            return None;
+        }
+    };
+    log::info!(
+        "GitHub refused our token; retrying {} {} through the GitHub CLI",
+        fallback.method,
+        fallback.path
+    );
+    match super::gh_cli::api(&exe, fallback.method, &fallback.path, fallback.body.as_ref()) {
+        Ok(body) => {
+            // A 204 has no body, and `serde_json` cannot parse an empty string.
+            // The write paths only check status, so an empty object satisfies
+            // both them and any caller that does deserialize.
+            let body = if body.trim().is_empty() { "{}".to_string() } else { body };
+            Some(Ok(http_response_from_body(body)))
+        }
+        Err(e) => Some(Err(e)),
+    }
+}
+
+/// Wraps a body string as a 200 response, so the `gh` path returns the same
+/// type as the HTTP path and every caller downstream stays unchanged.
+fn http_response_from_body(body: String) -> reqwest::Response {
+    reqwest::Response::from(
+        http::Response::builder()
+            .status(200)
+            .body(body)
+            .expect("a 200 with a string body cannot fail to build"),
+    )
+}
+
 pub async fn send(
     builder: reqwest::RequestBuilder,
     host: &str,
@@ -244,6 +369,47 @@ pub async fn send(
         }
     }
     checked
+}
+
+/// Retry an already-failed GitHub request through the `gh` CLI.
+///
+/// For the call sites that inspect the response themselves (`list_prs` treats a
+/// 404 as "no pull requests") and so cannot hand [`send_via_gh`] an unsent
+/// builder. Takes the error they produced and either replaces it with the
+/// fallback's answer or gives it back unchanged.
+pub async fn retry_via_gh<T: DeserializeOwned>(
+    error: AppError,
+    host: &str,
+    fallback: GhFallback,
+) -> Result<T, AppError> {
+    let AppError::Other(message) = &error else {
+        return Err(error);
+    };
+    if !is_permission_refusal(message) {
+        return Err(error);
+    }
+    match try_gh(&fallback) {
+        Some(Ok(res)) => res
+            .json()
+            .await
+            .map_err(|e| AppError::Other(format!("bad response from {host}: {e}"))),
+        Some(Err(e)) => Err(e),
+        None => Err(error),
+    }
+}
+
+/// Send and deserialize through the `gh`-fallback path.
+pub async fn send_json_via_gh<T: DeserializeOwned>(
+    builder: reqwest::RequestBuilder,
+    host: &str,
+    message_keys: &[&str],
+    fallback: GhFallback,
+) -> Result<T, AppError> {
+    send_via_gh(builder, host, message_keys, fallback)
+        .await?
+        .json()
+        .await
+        .map_err(|e| AppError::Other(format!("bad response from {host}: {e}")))
 }
 
 /// Send and deserialize, with the host named in any parse failure.
@@ -340,6 +506,52 @@ mod tests {
             cooled_down(host).is_none(),
             "reconnecting must lift the bench immediately"
         );
+    }
+
+    /// The exact set of failures that reroute to `gh`.
+    ///
+    /// `send_via_gh` gates on `is_permission_refusal`, so this list IS the
+    /// fallback's trigger condition. Rerouting too widely would spawn a process
+    /// on every rate limit and timeout; too narrowly and the org-blocked case
+    /// this exists for never fires.
+    #[test]
+    fn only_permission_refusals_reroute_to_the_cli() {
+        // The case the fallback exists for.
+        assert!(is_permission_refusal(
+      "GitHub refused: Although you appear to have the correct authorization credentials, the `some-org` organization has enabled OAuth App access restrictions."
+    ));
+        // A token that lost its scopes: `gh` has its own and may well succeed.
+        assert!(is_permission_refusal(
+            "GitHub sign-in is no longer valid; connect GitHub again"
+        ));
+
+        // `gh` would hit the same rate limit from the same IP, and spawning a
+        // process to be told so again helps nobody.
+        assert!(!is_permission_refusal(
+            "GitHub rate limit reached; try again in a few minutes"
+        ));
+        // Offline is offline for both transports.
+        assert!(!is_permission_refusal("could not reach GitHub: timed out"));
+        // A real 404 is not an access problem; rerouting would turn a clear
+        // "renamed or deleted" into a confusing CLI error.
+        assert!(!is_permission_refusal(
+      "GitHub could not find that. It may be private, renamed, or your token may not cover it."
+    ));
+    }
+
+    /// The toggle has to actually gate the fallback, not merely be stored.
+    #[test]
+    fn the_setting_turns_the_fallback_off() {
+        // Restored at the end: the flag is process-global and other tests read it.
+        let original = gh_fallback_enabled();
+
+        set_gh_fallback_enabled(false);
+        assert!(
+            try_gh(&GhFallback::get("/repos/o/r/pulls")).is_none(),
+            "a disabled fallback must not run the CLI at all"
+        );
+
+        set_gh_fallback_enabled(original);
     }
 
     #[test]

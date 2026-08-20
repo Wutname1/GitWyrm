@@ -1697,6 +1697,7 @@ dependencies = [
  "fern",
  "git2",
  "github-copilot-sdk",
+ "http",
  "ignore",
  "image",
  "liblzma",

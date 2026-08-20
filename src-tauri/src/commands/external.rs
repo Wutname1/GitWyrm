@@ -208,7 +208,11 @@ fn spawn_terminal_in(path: String) -> Result<(), AppError> {
             &["xterm"],
         ];
         for args in candidates {
-            if Command::new(args[0]).current_dir(&path).spawn().is_ok() {
+            let mut cmd = Command::new(args[0]);
+            cmd.current_dir(&path);
+            // The terminal is a system app; hand it the system's libraries.
+            crate::process_env::scrub_bundled_env(&mut cmd);
+            if cmd.spawn().is_ok() {
                 return Ok(());
             }
         }

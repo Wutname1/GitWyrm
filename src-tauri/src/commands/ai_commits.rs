@@ -152,6 +152,9 @@ fn run_with_index(
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
+    // Hand this child the system's libraries, not the AppImage's.
+    crate::process_env::scrub_bundled_env(&mut command);
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

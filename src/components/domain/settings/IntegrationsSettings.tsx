@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { GithubIcon } from '@/components/domain/github/GithubIcon'
 import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
 import {
+  useGhCliStatus,
   useGithubMutations,
   useGithubSignIn,
   useHostAuthMutations,
@@ -132,9 +133,62 @@ function ProviderRow({
   onConnected?: () => void
 }) {
   return provider.auth_kind === 'device_code' ? (
-    <GithubConnection provider={provider} onConnected={onConnected} />
+    <>
+      <GithubConnection provider={provider} onConnected={onConnected} />
+      <GhCliFallbackRow />
+    </>
   ) : (
     <TokenConnection provider={provider} onConnected={onConnected} />
+  )
+}
+
+/**
+ * The GitHub CLI fallback.
+ *
+ * Some organizations block outside apps like GitWyrm from seeing their code,
+ * which leaves the pull request and issue panels empty with nothing the user
+ * can do about it from in here. The GitHub CLI is usually allowed where we are
+ * not, so borrowing it fills those panels back in.
+ *
+ * The row says what the CLI's actual state is rather than only offering a
+ * switch: "not installed" and "installed but not signed in" need different
+ * fixes, and one vague "unavailable" would send half of the people reading it
+ * to the wrong place.
+ */
+function GhCliFallbackRow() {
+  const ghCliFallback = useWorkspaceStore((s) => s.ghCliFallback)
+  const setGhCliFallback = useWorkspaceStore((s) => s.setGhCliFallback)
+  const status = useGhCliStatus()
+
+  const detail = !status.data
+    ? null
+    : status.data.signed_in
+      ? 'GitHub CLI is ready. It will be used only when GitHub turns GitWyrm away.'
+      : status.data.installed
+        ? 'GitHub CLI is installed, but no one is signed in. Run "gh auth login" to use it.'
+        : 'GitHub CLI is not installed, so there is nothing to fall back to yet.'
+
+  return (
+    <SettingRow
+      label="Use the GitHub CLI as a backup"
+      searchId="gh-cli-fallback"
+      hint="Some organizations block outside apps. When that happens, GitWyrm can ask the GitHub CLI instead so pull requests and issues still show up."
+    >
+      <div className="grid gap-1.5">
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+          <input
+            type="checkbox"
+            checked={ghCliFallback}
+            onChange={(e) => setGhCliFallback(e.target.checked)}
+            className="size-3.5 accent-[var(--gw-accent)]"
+          />
+          Ask the GitHub CLI when GitWyrm is turned away
+        </label>
+        {ghCliFallback && detail && (
+          <div className="text-2xs text-muted-foreground">{detail}</div>
+        )}
+      </div>
+    </SettingRow>
   )
 }
 

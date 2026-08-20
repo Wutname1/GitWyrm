@@ -34,6 +34,7 @@ export const githubKeys = {
 export const hostingKeys = {
   providers: ['hosting-providers'] as const,
   repoProvider: (repoId: string) => ['hosting-repo-provider', repoId] as const,
+  ghCli: ['gh-cli-status'] as const,
 }
 
 /**
@@ -51,6 +52,23 @@ export function useHostingProviders() {
     staleTime: 5 * 60 * 1000,
     retry: false,
     queryFn: async () => unwrap(await commands.hostingProviders()),
+  })
+}
+
+/**
+ * Whether the GitHub CLI is installed and signed in.
+ *
+ * Not cached for long: installing the CLI or running `gh auth login` is exactly
+ * what someone does after reading this row, and a stale "not installed" would
+ * keep saying so while the fix sat finished in another window.
+ */
+export function useGhCliStatus() {
+  return useQuery({
+    queryKey: hostingKeys.ghCli,
+    enabled: isTauri,
+    staleTime: 10 * 1000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.ghCliStatus()),
   })
 }
 

@@ -53,6 +53,9 @@ fn run_ssh_keygen(args: &[&str]) -> Result<String, AppError> {
     let mut cmd = Command::new(&program);
     cmd.args(args);
 
+    // Hand this child the system's libraries, not the AppImage's.
+    crate::process_env::scrub_bundled_env(&mut cmd);
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -284,6 +287,9 @@ fn probe_host(host: &str, identity: Option<&Path>) -> (bool, String) {
         cmd.arg("-o").arg("IdentitiesOnly=yes").arg("-i").arg(key);
     }
     cmd.arg(format!("git@{host}"));
+
+    // Hand this child the system's libraries, not the AppImage's.
+    crate::process_env::scrub_bundled_env(&mut cmd);
 
     #[cfg(windows)]
     {

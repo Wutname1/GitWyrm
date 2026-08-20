@@ -201,6 +201,7 @@ fn known_locations() -> Vec<PathBuf> {
 fn run_version(path: &PathBuf) -> Option<String> {
     let mut cmd = Command::new(path);
     cmd.arg("version");
+    crate::process_env::scrub_bundled_env(&mut cmd);
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
 

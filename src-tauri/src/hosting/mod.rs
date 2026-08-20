@@ -35,6 +35,7 @@
 
 pub mod azure;
 pub mod bitbucket;
+pub mod gh_cli;
 pub mod github;
 pub mod gitlab;
 pub mod http;

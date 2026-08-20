@@ -348,6 +348,11 @@ pub struct Settings {
     /// remote branches are current without the user asking. On by default.
     #[serde(default = "default_auto_fetch")]
     pub auto_fetch: bool,
+    /// Fall back to the GitHub CLI when an organization blocks GitWyrm's own
+    /// sign-in. On by default: the alternative is an empty pull request panel
+    /// the user has no way to fix from inside the app.
+    #[serde(default = "default_gh_cli_fallback")]
+    pub gh_cli_fallback: bool,
     /// Show the short explanations that teach a feature in the sidebar and
     /// panels. On by default so the features get found; off leaves the controls
     /// and the plain empty-state labels, which is what a returning user wants.
@@ -561,6 +566,10 @@ fn default_auto_fetch() -> bool {
     true
 }
 
+fn default_gh_cli_fallback() -> bool {
+    true
+}
+
 fn default_show_tips() -> bool {
     true
 }
@@ -717,6 +726,7 @@ impl Default for Settings {
             openspec_delete_without_asking: false,
             restore_tabs: true,
             auto_fetch: true,
+            gh_cli_fallback: true,
             show_tips: true,
             // No stored choice; resolved per build by `telemetry_level_for`.
             telemetry_level: None,
@@ -983,6 +993,7 @@ pub async fn save_settings(app: tauri::AppHandle, mut settings: Settings) -> Res
     // restart. Every shell-out reads these globals.
     crate::git::shell::set_git_program(settings.git_executable.as_deref());
     crate::git::signing::set_gpg_program(settings.gpg_executable.as_deref());
+    crate::hosting::http::set_gh_fallback_enabled(settings.gh_cli_fallback);
 
     tauri::async_runtime::spawn_blocking(move || {
         let dir = app_data_dir(&app)?;
@@ -999,6 +1010,7 @@ pub fn apply_startup_git_executable(app: &tauri::AppHandle) {
     if let Ok(settings) = read_settings(app) {
         crate::git::shell::set_git_program(settings.git_executable.as_deref());
         crate::git::signing::set_gpg_program(settings.gpg_executable.as_deref());
+        crate::hosting::http::set_gh_fallback_enabled(settings.gh_cli_fallback);
     }
 }
 

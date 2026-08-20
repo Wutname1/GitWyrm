@@ -237,6 +237,38 @@ pub async fn hosting_providers(app: tauri::AppHandle) -> Result<Vec<HostProvider
     Ok(out)
 }
 
+/// What the GitHub CLI fallback can currently do, for the settings row.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct GhCliStatus {
+    /// `gh` was found on this machine.
+    pub installed: bool,
+    /// `gh` is installed and has a working login, so the fallback can be used.
+    pub signed_in: bool,
+}
+
+/// Whether the GitHub CLI is installed and signed in.
+///
+/// Reported rather than inferred so the settings row can say which of the two
+/// is missing: "install it" and "sign into it" are different next steps, and a
+/// single "unavailable" would send half the users to the wrong one.
+#[tauri::command]
+#[specta::specta]
+pub async fn gh_cli_status() -> Result<GhCliStatus, AppError> {
+    // A PATH walk plus `gh auth status`, both of which touch the filesystem and
+    // spawn a process; neither belongs on the IPC thread.
+    tauri::async_runtime::spawn_blocking(|| match crate::hosting::gh_cli::availability() {
+        Ok(_) => GhCliStatus { installed: true, signed_in: true },
+        Err(crate::hosting::gh_cli::Unavailable::NotSignedIn) => {
+            GhCliStatus { installed: true, signed_in: false }
+        }
+        Err(crate::hosting::gh_cli::Unavailable::NotInstalled) => {
+            GhCliStatus { installed: false, signed_in: false }
+        }
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
 /// Which host a repository's origin belongs to, or None when origin is missing
 /// or points at a host GitWyrm does not know.
 #[tauri::command]

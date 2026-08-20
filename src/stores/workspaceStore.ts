@@ -705,6 +705,11 @@ interface WorkspaceState {
   /** Fetch open repositories in the background to keep remote state current (persisted). */
   autoFetch: boolean;
   /**
+   * Use the GitHub CLI when an organization blocks GitWyrm's own sign-in
+   * (persisted). On by default; off means those repositories show nothing.
+   */
+  ghCliFallback: boolean;
+  /**
    * Show the short explanations that teach a feature in the sidebar and panels
    * (persisted). Off hides the prose only: controls, counts, and the plain
    * empty-state labels stay, so no section can read as broken.
@@ -880,6 +885,7 @@ interface WorkspaceState {
   setOpenspecDeleteWithoutAsking: (skip: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
   setAutoFetch: (enabled: boolean) => void;
+  setGhCliFallback: (enabled: boolean) => void;
   setShowTips: (enabled: boolean) => void;
   setTelemetryLevel: (level: TelemetryLevel) => void;
   markOnboardingSeen: () => void;
@@ -1079,6 +1085,7 @@ function toSettings(s: WorkspaceState): Settings {
     restore_tabs: s.restoreTabs,
     show_tips: s.showTips,
     auto_fetch: s.autoFetch,
+    gh_cli_fallback: s.ghCliFallback,
     telemetry_level: s.telemetryLevel,
     onboarding_seen: s.onboardingSeen,
     signing_keys_published: s.signingKeysPublished,
@@ -1394,6 +1401,7 @@ export const SETTINGS_DEFAULTS = {
   openspecDeleteWithoutAsking: false,
   restoreTabs: true,
   autoFetch: true,
+  ghCliFallback: true,
   showTips: true,
   // Deliberately outside the per-screen "behavior" group below: a privacy
   // choice must not change because the user reset an unrelated page of
@@ -1457,6 +1465,7 @@ export const SETTINGS_GROUPS = {
   behavior: [
     "restoreTabs",
     "autoFetch",
+    "ghCliFallback",
     "showTips",
     "discardResetsSubmodules",
   ],
@@ -1542,6 +1551,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   openspecDeleteWithoutAsking: false,
   restoreTabs: true,
   autoFetch: true,
+  ghCliFallback: true,
   showTips: true,
   telemetryLevel: null,
   // Optimistic until the backend answers at startup; corrected by hydration
@@ -2068,6 +2078,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setAutoFetch: (enabled) => {
     set({ autoFetch: enabled });
+    schedulePersist();
+  },
+  setGhCliFallback: (enabled) => {
+    set({ ghCliFallback: enabled });
     schedulePersist();
   },
   setShowTips: (enabled) => {
@@ -2917,6 +2931,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.openspec_delete_without_asking === true,
         restoreTabs: settings.restore_tabs ?? true,
         autoFetch: settings.auto_fetch ?? true,
+        ghCliFallback: settings.gh_cli_fallback ?? true,
         // Absent means on: a settings file written before this flag existed
         // belongs to someone who has been seeing the tips all along, so hiding
         // them on upgrade would look like the sidebar lost content.

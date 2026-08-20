@@ -75,10 +75,11 @@ impl GitHub {
             "/repos/{}/{}/issues/{number}/comments?per_page=100",
             slug.owner, slug.repo
         );
-        let comments: Vec<ApiComment> = http::send_json(
+        let comments: Vec<ApiComment> = http::send_json_via_gh(
             self.request(app, reqwest::Method::GET, &path)?,
             HOST,
             ERROR_KEYS,
+            http::GhFallback::get(&path),
         )
         .await?;
         Ok(comments.into_iter().map(to_comment).collect())
@@ -178,11 +179,15 @@ impl HostProvider for GitHub {
         if res.status().as_u16() == 404 {
             return Ok(Vec::new());
         }
-        let prs: Vec<ApiPr> = http::check(res, HOST, ERROR_KEYS)
-            .await?
-            .json()
-            .await
-            .map_err(|e| AppError::Other(format!("bad response from {HOST}: {e}")))?;
+        // Unlike the other reads this one checks the response by hand, so the
+        // refusal it might carry has to be routed to the fallback explicitly.
+        let prs: Vec<ApiPr> = match http::check(res, HOST, ERROR_KEYS).await {
+            Ok(res) => res
+                .json()
+                .await
+                .map_err(|e| AppError::Other(format!("bad response from {HOST}: {e}")))?,
+            Err(e) => http::retry_via_gh(e, HOST, http::GhFallback::get(&path)).await?,
+        };
         Ok(prs.into_iter().map(Into::into).collect())
     }
 
@@ -195,10 +200,11 @@ impl HostProvider for GitHub {
             "/repos/{}/{}/issues?state=open&per_page=50&sort=updated&direction=desc",
             slug.owner, slug.repo
         );
-        let issues: Vec<ApiIssue> = http::send_json(
+        let issues: Vec<ApiIssue> = http::send_json_via_gh(
             self.request(app, reqwest::Method::GET, &path)?,
             HOST,
             ERROR_KEYS,
+            http::GhFallback::get(&path),
         )
         .await?;
         Ok(issues
@@ -216,10 +222,11 @@ impl HostProvider for GitHub {
         number: u32,
     ) -> Result<PrDetail, AppError> {
         let path = format!("/repos/{}/{}/pulls/{number}", slug.owner, slug.repo);
-        let pr: ApiPr = http::send_json(
+        let pr: ApiPr = http::send_json_via_gh(
             self.request(app, reqwest::Method::GET, &path)?,
             HOST,
             ERROR_KEYS,
+            http::GhFallback::get(&path),
         )
         .await?;
         let comments = self.fetch_comments(app, slug, number).await?;
@@ -252,10 +259,11 @@ impl HostProvider for GitHub {
         number: u32,
     ) -> Result<IssueDetail, AppError> {
         let path = format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo);
-        let issue: ApiIssue = http::send_json(
+        let issue: ApiIssue = http::send_json_via_gh(
             self.request(app, reqwest::Method::GET, &path)?,
             HOST,
             ERROR_KEYS,
+            http::GhFallback::get(&path),
         )
         .await?;
         let comments = self.fetch_comments(app, slug, number).await?;
@@ -291,10 +299,11 @@ impl HostProvider for GitHub {
             "/repos/{}/{}/pulls/{number}/files?per_page=100",
             slug.owner, slug.repo
         );
-        let files: Vec<ApiPrFile> = http::send_json(
+        let files: Vec<ApiPrFile> = http::send_json_via_gh(
             self.request(app, reqwest::Method::GET, &path)?,
             HOST,
             ERROR_KEYS,
+            http::GhFallback::get(&path),
         )
         .await?;
         Ok(files
@@ -330,10 +339,11 @@ impl HostProvider for GitHub {
             "/repos/{}/{}/pulls/{number}/commits?per_page=100",
             slug.owner, slug.repo
         );
-        let commits: Vec<ApiPrCommit> = http::send_json(
+        let commits: Vec<ApiPrCommit> = http::send_json_via_gh(
             self.request(app, reqwest::Method::GET, &path)?,
             HOST,
             ERROR_KEYS,
+            http::GhFallback::get(&path),
         )
         .await?;
         Ok(commits
@@ -370,11 +380,12 @@ impl HostProvider for GitHub {
             "/repos/{}/{}/issues/{number}/comments",
             slug.owner, slug.repo
         );
-        let created: ApiComment = http::send_json(
-            self.request(app, reqwest::Method::POST, &path)?
-                .json(&serde_json::json!({ "body": body })),
+        let payload = serde_json::json!({ "body": body });
+        let created: ApiComment = http::send_json_via_gh(
+            self.request(app, reqwest::Method::POST, &path)?.json(&payload),
             HOST,
             ERROR_KEYS,
+            http::GhFallback::write("POST", &path, payload),
         )
         .await?;
         Ok(to_comment(created))
@@ -387,11 +398,12 @@ impl HostProvider for GitHub {
         number: u32,
     ) -> Result<(), AppError> {
         let path = format!("/repos/{}/{}/pulls/{number}/reviews", slug.owner, slug.repo);
-        http::send(
-            self.request(app, reqwest::Method::POST, &path)?
-                .json(&serde_json::json!({ "event": "APPROVE" })),
+        let payload = serde_json::json!({ "event": "APPROVE" });
+        http::send_via_gh(
+            self.request(app, reqwest::Method::POST, &path)?.json(&payload),
             HOST,
             ERROR_KEYS,
+            http::GhFallback::write("POST", &path, payload),
         )
         .await?;
         Ok(())
@@ -410,11 +422,12 @@ impl HostProvider for GitHub {
             MergeMethod::Rebase => "rebase",
         };
         let path = format!("/repos/{}/{}/pulls/{number}/merge", slug.owner, slug.repo);
-        http::send(
-            self.request(app, reqwest::Method::PUT, &path)?
-                .json(&serde_json::json!({ "merge_method": method })),
+        let payload = serde_json::json!({ "merge_method": method });
+        http::send_via_gh(
+            self.request(app, reqwest::Method::PUT, &path)?.json(&payload),
             HOST,
             ERROR_KEYS,
+            http::GhFallback::write("PUT", &path, payload),
         )
         .await?;
         Ok(())
@@ -430,11 +443,12 @@ impl HostProvider for GitHub {
         // still a separate host operation so the other providers close their PRs
         // through their own endpoints.
         let path = format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo);
-        http::send(
-            self.request(app, reqwest::Method::PATCH, &path)?
-                .json(&serde_json::json!({ "state": "closed" })),
+        let payload = serde_json::json!({ "state": "closed" });
+        http::send_via_gh(
+            self.request(app, reqwest::Method::PATCH, &path)?.json(&payload),
             HOST,
             ERROR_KEYS,
+            http::GhFallback::write("PATCH", &path, payload),
         )
         .await?;
         Ok(())
@@ -447,11 +461,12 @@ impl HostProvider for GitHub {
         number: u32,
     ) -> Result<(), AppError> {
         let path = format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo);
-        http::send(
-            self.request(app, reqwest::Method::PATCH, &path)?
-                .json(&serde_json::json!({ "state": "closed" })),
+        let payload = serde_json::json!({ "state": "closed" });
+        http::send_via_gh(
+            self.request(app, reqwest::Method::PATCH, &path)?.json(&payload),
             HOST,
             ERROR_KEYS,
+            http::GhFallback::write("PATCH", &path, payload),
         )
         .await?;
         Ok(())
@@ -622,6 +637,42 @@ fn to_comment(c: ApiComment) -> HostComment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The premise of the GitHub CLI fallback: `gh api` is a passthrough, so the
+    /// bytes it returns deserialize into the same structs as the HTTP path.
+    ///
+    /// This is a real capture from `gh api repos/cli/cli/pulls`, trimmed to the
+    /// fields we read. If GitHub ever changed shape between the two transports
+    /// the fallback would return empty panels rather than erroring, so the
+    /// contract is worth pinning rather than eyeballing.
+    #[test]
+    fn gh_cli_output_deserializes_as_a_pull_request() {
+        let body = r#"[{
+      "number": 14136,
+      "title": "Add worktree checkout to `gh issue develop`",
+      "state": "open",
+      "body": null,
+      "user": { "login": "sergiou87", "type": "User" },
+      "draft": false,
+      "head": { "ref": "270-gh-issue-develop-worktree" },
+      "base": { "ref": "trunk" },
+      "html_url": "https://github.com/cli/cli/pull/14136",
+      "created_at": "2026-08-13T10:26:41Z",
+      "updated_at": "2026-08-20T17:31:59Z"
+    }]"#;
+
+        let prs: Vec<ApiPr> = serde_json::from_str(body).expect("gh output must parse as ApiPr");
+        let pr = &prs[0];
+        assert_eq!(pr.number, 14136);
+        assert_eq!(pr.user.login, "sergiou87");
+        // `ref` is a Rust keyword and is renamed; a passthrough that lost the
+        // rename would silently yield empty branch names rather than failing.
+        assert_eq!(pr.head.name, "270-gh-issue-develop-worktree");
+        assert_eq!(pr.base.name, "trunk");
+        // Fields the list endpoint omits must fall back rather than fail.
+        assert_eq!(pr.additions, 0);
+        assert!(!pr.merged);
+    }
 
     #[test]
     fn parses_common_remote_urls() {

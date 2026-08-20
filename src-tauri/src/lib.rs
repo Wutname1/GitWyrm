@@ -8,6 +8,7 @@ mod logs;
 mod missing_repos;
 mod openspec;
 mod perf;
+mod process_env;
 mod scrub;
 mod settings;
 mod snap_layouts;
@@ -261,6 +262,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::ai::generate_commit_message,
             commands::ai_commits::generate_commits,
             commands::github::hosting_providers,
+            commands::github::gh_cli_status,
             commands::github::repo_host_provider,
             commands::github::host_connect_token,
             commands::github::host_sign_out,
@@ -578,6 +580,11 @@ pub fn run() {
             // spawns and returns, so a slow or unreachable endpoint cannot delay
             // startup by even a frame.
             telemetry::install::ping_on_launch(app.handle());
+
+            // Note an AppImage launch before anything spawns. The library paths
+            // it exports would otherwise reach every child process; see
+            // process_env for the clone failure that caused.
+            process_env::log_launch_environment();
 
             // Tell the tool resolver where git and gpg live before any shell-out
             // happens. They are downloaded rather than installed with the app, and
