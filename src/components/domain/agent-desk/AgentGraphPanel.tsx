@@ -157,8 +157,9 @@ function InspectorCard({
       <div className="mt-2 flex gap-1.5">
         <button
           type="button"
-          onClick={() => toast('Conversation view for this agent is not available yet.')}
-          className="rounded border border-border bg-panel2 px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3"
+          disabled
+          title="A helper's own conversation cannot be opened yet"
+          className="rounded border border-border bg-panel2 px-1.5 py-1 text-[10px] font-semibold text-foreground opacity-40"
         >
           Open conversation
         </button>

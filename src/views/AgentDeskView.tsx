@@ -108,6 +108,51 @@ function useDeskRepo(repoPath: string | null) {
   return { repo, error }
 }
 
+/**
+ * Calls `commands.agentSessionOpenSource` (`commands::agent_desk::agent_session_open_source`)
+ * for one session, and surfaces the honest outcome as a toast -- Rule #1:
+ * every action gives visible feedback, including "the main window is not
+ * open yet" (a very early startup race) or a load failure for the session
+ * itself, neither of which the button click alone would explain.
+ *
+ * This is the piece that was missing: `SessionSourceBanner`'s "View source"
+ * button, and every `source`-kind message target link, have accepted an
+ * `onOpenSource` prop since they shipped, but no caller in this file ever
+ * passed one, so the button always rendered disabled (`disabled={!onOpenSource}`
+ * in `SessionSourceBanner.tsx`/`SessionSourcePanel.tsx`/`EventStack.tsx`).
+ */
+function openSourceFor(sessionId: string) {
+  void (async () => {
+    try {
+      const result = await commands.agentSessionOpenSource(sessionId)
+      if (result.status === 'error') {
+        toast.error(`Could not open the source: ${result.error}`)
+        return
+      }
+      const outcome = unwrap(result)
+      switch (outcome.kind) {
+        case 'opened':
+          break
+        case 'mainWindowNotOpen':
+          toast.error('The main GitWyrm window is not open yet.')
+          break
+        case 'sessionNotFound':
+          toast.error('This chat could not be found.')
+          break
+        case 'sessionDamaged':
+          toast.error(`This chat's data looks damaged: ${outcome.reason}`)
+          break
+        case 'sessionUnavailable':
+          toast.error(`Could not read this chat right now: ${outcome.detail}`)
+          break
+      }
+    } catch (e) {
+      log.error(`agent desk: could not open source: ${describeError(e)}`)
+      toast.error('Could not open the source.')
+    }
+  })()
+}
+
 function CenteredMessage({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="flex flex-1 items-center justify-center p-8">
@@ -168,10 +213,12 @@ function AgentDeskPane({
         paneLabel={pane === 'primary' ? 'First chat' : 'Second chat'}
         showSourceBanner={showSourceBanner}
         headerAnchorRef={headerAnchorRef}
+        onOpenSource={sessionId ? () => openSourceFor(sessionId) : undefined}
         headerSlot={
           <PaneDetailPopover
             session={detailSession}
             headerAnchorRef={headerAnchorRef}
+            onOpenSource={sessionId ? () => openSourceFor(sessionId) : undefined}
             onPin={(kind, edge) => onPin(pane, kind, edge)}
           />
         }
@@ -581,6 +628,7 @@ export function AgentDeskView() {
                         leftOrder={layout.dock!.leftOrder}
                         sizePx={layout.dock!.sizePx}
                         session={activeDetailSession}
+                        onOpenSource={activeDetailSession ? () => openSourceFor(activeDetailSession.header.sessionId) : undefined}
                         onMove={onMoveDock}
                         onResize={(px) => resizeDock(px, windowWidth)}
                         onResizeReset={() => resizeDock(360, windowWidth)}
@@ -686,6 +734,7 @@ export function AgentDeskView() {
                           edge="bottom"
                           sizePx={layout.dock!.sizePx}
                           session={activeDetailSession}
+                          onOpenSource={activeDetailSession ? () => openSourceFor(activeDetailSession.header.sessionId) : undefined}
                           onMove={onMoveDock}
                           onResize={(px) => resizeDock(px, windowWidth)}
                           onResizeReset={() => resizeDock(360, windowWidth)}
@@ -701,6 +750,7 @@ export function AgentDeskView() {
                         leftOrder={layout.dock!.leftOrder}
                         sizePx={layout.dock!.sizePx}
                         session={activeDetailSession}
+                        onOpenSource={activeDetailSession ? () => openSourceFor(activeDetailSession.header.sessionId) : undefined}
                         onMove={onMoveDock}
                         onResize={(px) => resizeDock(px, windowWidth)}
                         onResizeReset={() => resizeDock(360, windowWidth)}
@@ -714,6 +764,7 @@ export function AgentDeskView() {
                         edge="right"
                         sizePx={layout.dock!.sizePx}
                         session={activeDetailSession}
+                        onOpenSource={activeDetailSession ? () => openSourceFor(activeDetailSession.header.sessionId) : undefined}
                         onMove={onMoveDock}
                         onResize={(px) => resizeDock(px, windowWidth)}
                         onResizeReset={() => resizeDock(360, windowWidth)}

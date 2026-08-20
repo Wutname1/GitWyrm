@@ -77,7 +77,7 @@ export function TeamShapeControl({
             <span className="min-w-0 flex-1">
               <strong className="block text-2xs font-semibold text-foreground">Lead + helpers</strong>
               <span className="block text-[10.5px] leading-snug text-muted-foreground">
-                Sol splits safe work into a graph. Plan lets you approve it first; Auto starts it when useful.
+                The lead splits safe work between helpers. Plan lets you approve the split first; Auto starts it when useful.
               </span>
             </span>
             <span className="flex-none font-mono text-[9px] text-muted-foreground">up to 3</span>

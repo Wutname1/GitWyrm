@@ -1613,6 +1613,103 @@ pub async fn agent_session_refresh_source(
     Ok(outcome)
 }
 
+// -- "View source": the bridge into the main window (package
+//    `agent-desk-docs`) --
+//
+// Agent Desk is a standalone window with no issue/PR viewer, OpenSpec
+// surface, diff view, or graph -- those all live in the main window
+// (`src/App.tsx`'s `AppInner`). `SessionSourceBanner`'s "View source" button
+// has been wired through five components (`ConversationPane`,
+// `SessionSourceBanner`, `EventStack`, `SessionSourcePanel`,
+// `PaneDetailPopover`, `DockedDetailPanel`) since the banner shipped, but
+// `AgentDeskView.tsx` never passed `onOpenSource` down, so the button always
+// rendered disabled. This command is the other half of the same bridge
+// `agent_result_open_diff` (above, in `commands::agent_result`) already
+// built for a result's worktree diff: focus the main window, emit an event
+// carrying enough to resolve, and let the main window's own existing
+// surfaces (GitHub context panel, OpenSpec selection, diff view) do the
+// rendering -- no second issue/PR/diff viewer is built in this window.
+pub const OPEN_SOURCE_EVENT: &str = "agent-desk://open-source";
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenSourceTarget {
+    pub repo_id: String,
+    pub repo_path: String,
+    pub source: SessionSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum OpenSourceOutcome {
+    /// The main window was found and told to open the source.
+    Opened,
+    /// No main window exists yet (a very early startup race) -- mirrors
+    /// `agent_result::OpenResultDiffOutcome::MainWindowNotOpen`.
+    MainWindowNotOpen,
+    SessionNotFound,
+    SessionDamaged { reason: String },
+    SessionUnavailable { detail: String },
+}
+
+fn open_source_at(root: &SessionStoreRoot, session_id: &str) -> Result<AgentSessionHeader, OpenSourceOutcome> {
+    use crate::agentdesk::model::SessionLoadError as E;
+    match store::read_session(root, session_id) {
+        Ok(session) => Ok(session.header),
+        Err(E::NotFound) => Err(OpenSourceOutcome::SessionNotFound),
+        Err(E::Io { detail }) => Err(OpenSourceOutcome::SessionUnavailable { detail }),
+        Err(reason) => Err(OpenSourceOutcome::SessionDamaged {
+            reason: reason.to_string(),
+        }),
+    }
+}
+
+/// Focuses the main window and asks it to open the item a session started
+/// from. Never opens a second main window, never creates any window itself
+/// -- mirrors `agent_result_open_diff`'s "focus what already exists" shape.
+///
+/// `Manual` sources have nothing to navigate to (there was never a source
+/// item); the frontend resolver
+/// (`src/lib/agentDeskTargets.ts`/`useAgentDeskSourceListener.ts`) is
+/// responsible for leaving that case's affordance honestly disabled rather
+/// than calling this command for it, but the event is still emitted here on
+/// a `Manual` source (the caller decides what "nothing to do" looks like,
+/// same division of labor `agent_result_open_diff` uses for a `None` path).
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_open_source(
+    app: AppHandle,
+    session_id: SessionId,
+) -> Result<OpenSourceOutcome, AppError> {
+    use tauri::{Emitter, Manager};
+
+    let root = resolve_root(&app)?;
+    let header = tauri::async_runtime::spawn_blocking(move || open_source_at(&root, &session_id))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let header = match header {
+        Ok(h) => h,
+        Err(outcome) => return Ok(outcome),
+    };
+
+    let Some(main) = app.get_webview_window("main") else {
+        return Ok(OpenSourceOutcome::MainWindowNotOpen);
+    };
+    let _ = main.unminimize();
+    let _ = main.show();
+    let _ = main.set_focus();
+    let _ = app.emit_to(
+        "main",
+        OPEN_SOURCE_EVENT,
+        &OpenSourceTarget {
+            repo_id: header.repo_id,
+            repo_path: header.repo_path,
+            source: header.source,
+        },
+    );
+    Ok(OpenSourceOutcome::Opened)
+}
+
 // -- OpenSpec as a first-class source (package `agent-desk-openspec-workflows`) --
 //
 // Three concerns, kept separate rather than folded into the generic session
@@ -2064,6 +2161,36 @@ mod tests {
         let page = store::list_sessions(&root, &SessionListFilter::default(), None, 10);
         assert_eq!(page.headers.len(), 1);
         assert_eq!(page.headers[0].session_id, session.header.session_id);
+    }
+
+    // -- "View source" bridge (open_source_at): the pure, non-Tauri half of
+    //    `agent_session_open_source` -- resolving the session's header, the
+    //    part `agent_session_open_source` cannot test directly because it
+    //    also needs a live `AppHandle`/main window (see the frontend's
+    //    `agentDeskSourceNav.test.ts` for per-source-kind destination
+    //    coverage, and `useAgentDeskSourceListener.ts` for what the emitted
+    //    event drives once it reaches the main window). --
+
+    #[test]
+    fn open_source_refuses_an_unknown_session() {
+        let (_dir, root) = temp_root();
+        let outcome = open_source_at(&root, "does-not-exist");
+        assert!(matches!(outcome, Err(OpenSourceOutcome::SessionNotFound)));
+    }
+
+    #[test]
+    fn open_source_returns_the_session_header_for_a_real_session() {
+        let (_dir, root) = temp_root();
+        let CreateSessionOutcome::Created { session } =
+            create_session_at(&root, create_request("A session"))
+        else {
+            panic!("expected Created");
+        };
+        let outcome = open_source_at(&root, &session.header.session_id);
+        let header = outcome.expect("expected Ok for a real session");
+        assert_eq!(header.session_id, session.header.session_id);
+        assert_eq!(header.repo_id, "repo-1");
+        assert!(matches!(header.source, SessionSource::Manual { .. }));
     }
 
     #[test]

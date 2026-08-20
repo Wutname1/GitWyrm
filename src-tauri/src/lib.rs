@@ -322,6 +322,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_desk::agent_session_stop_execution,
             commands::agent_desk::agent_session_usage,
             commands::agent_desk::agent_session_refresh_source,
+            commands::agent_desk::agent_session_open_source,
             commands::agent_desk::agent_session_openspec_context,
             commands::agent_desk::agent_session_openspec_status,
             commands::agent_desk::agent_session_complete_openspec_task,

@@ -373,6 +373,14 @@ pub enum UndoResultOutcome {
     SessionDamaged { reason: String },
     SessionUnavailable { detail: String },
     WriteFailed { detail: String },
+    /// Refused: the result's state moved between the peek (which decided
+    /// this worktree was clean and safe to discard) and the locked write --
+    /// most commonly a concurrent `agent_result_commit` landed a real commit
+    /// in between. Discarding now would stamp `Discarded` over a `Committed`
+    /// record and orphan that commit from every session record (the defect
+    /// this fix closes). Nothing was written; the caller should re-read the
+    /// current state instead of retrying blindly.
+    StateChanged { record: ResultRecord },
 }
 
 fn undo_result_at(
@@ -399,6 +407,7 @@ fn undo_result_at(
     let Some(record) = records.iter().find(|r| r.execution_id == execution_id).cloned() else {
         return UndoResultOutcome::ResultNotFound;
     };
+    let peeked_state = record.state;
     let Some(worktree_path) = &record.worktree_path else {
         return UndoResultOutcome::NothingToUndo;
     };
@@ -432,6 +441,24 @@ fn undo_result_at(
         let Some(entry) = records.iter_mut().find(|r| r.execution_id == execution_id) else {
             return UndoResultOutcome::ResultNotFound;
         };
+        // Re-check under THIS lock that the state is still what the peek
+        // observed -- the peek's dirty-count scan ran unlocked, so a
+        // concurrent `agent_result_commit` could have landed a real commit
+        // (setting state to `Committed`) in the window between the peek and
+        // this write. Discarding now would silently overwrite that outcome
+        // and clear `changed_paths` on a record a commit already accounts
+        // for, so refuse instead (mirrors `record_execution_if_not_running`
+        // in `commands::agent_desk`). Also refuse outright if the state was
+        // ALREADY `Committed` at peek time (a stale UI still offering Undo
+        // after a commit it does not know about yet) -- a real commit
+        // exists in git history either way, and Undo must never stamp
+        // `Discarded` over that regardless of which side of the peek the
+        // commit landed on.
+        if entry.state != peeked_state || entry.state == ResultState::Committed {
+            return UndoResultOutcome::StateChanged {
+                record: entry.clone(),
+            };
+        }
         entry.state = ResultState::Discarded;
         entry.changed_paths.clear();
         entry.updated_at = now_rfc3339();
@@ -583,6 +610,15 @@ pub enum CommitResultOutcome {
     /// user what to do).
     GitFailed { detail: String },
     MessageRequired,
+    /// Refused: the result's state moved between the peek (which required
+    /// `Kept`) and the locked write that would have stamped `Committed` --
+    /// most commonly a concurrent Undo discarded this same result while the
+    /// git commit above was running. The commit was already created in git
+    /// history (it cannot be un-created here), but the session record is
+    /// left as-is rather than overwriting whatever the other caller wrote,
+    /// so the caller should surface `oid` to the user as a commit that now
+    /// needs manual reconciliation with the record.
+    RecordStateChanged { record: ResultRecord, oid: String },
 }
 
 /// Create an intentional commit for a kept result. Never called
@@ -668,25 +704,64 @@ fn commit_result_at(
     };
 
     let subject = message.lines().next().unwrap_or_default().to_string();
+    commit_record_if_still_kept(locks, root, session_id, execution_id, oid, &subject)
+}
+
+/// What happened when `commit_record_if_still_kept` tried to stamp a
+/// record `Committed`. Mirrors `commands::agent_graph::CommitGraphOutcome`'s
+/// shape for the same reason: an internal, non-`Type` enum whose only job is
+/// to let the caller distinguish "wrote successfully" from "refused because
+/// the state moved" from "write itself failed" -- `CommitResultOutcome`
+/// carries the public/`Type` version of the same three cases.
+enum CommitRecordOutcome {
+    Committed(Vec<ResultRecord>),
+    StateChanged(ResultRecord),
+    Err(String),
+}
+
+/// Atomically re-checks "is this record still `Kept`" and, if so, stamps it
+/// `Committed` with the given commit reference -- both inside ONE
+/// `with_session_lock` acquisition, so no concurrent `undo_result_at` call
+/// for the same execution can slip a `Discarded` write in between the check
+/// and this write (mirrors `record_execution_if_not_running` in
+/// `commands::agent_desk`, and `undo_result_at`'s matching re-check for the
+/// opposite direction). Split out from `commit_result_at` so this specific
+/// re-check-and-write step can be raced directly by a test with two real
+/// threads -- `commit_result_at` as a whole cannot be raced deterministically
+/// because most of it is a real, variable-latency git commit.
+fn commit_record_if_still_kept(
+    locks: &SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    execution_id: &str,
+    oid: git2::Oid,
+    subject: &str,
+) -> CommitResultOutcome {
     let write = locks.with_session_lock(session_id, || {
         let mut records = match result::read_results(root, session_id) {
             Ok(r) => r,
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return CommitRecordOutcome::Err(e.to_string()),
         };
-        if let Some(entry) = records.iter_mut().find(|r| r.execution_id == execution_id) {
-            entry.state = ResultState::Committed;
-            entry.commit = Some(ResultCommitRef {
-                oid: oid.to_string(),
-                subject,
-            });
-            entry.updated_at = now_rfc3339();
+        let Some(entry) = records.iter_mut().find(|r| r.execution_id == execution_id) else {
+            return CommitRecordOutcome::Err("result vanished during commit".to_string());
+        };
+        if entry.state != ResultState::Kept {
+            return CommitRecordOutcome::StateChanged(entry.clone());
         }
-        result::write_results(root, session_id, &records).map_err(|e| e.to_string())?;
-        Ok(records)
+        entry.state = ResultState::Committed;
+        entry.commit = Some(ResultCommitRef {
+            oid: oid.to_string(),
+            subject: subject.to_string(),
+        });
+        entry.updated_at = now_rfc3339();
+        if let Err(e) = result::write_results(root, session_id, &records) {
+            return CommitRecordOutcome::Err(e.to_string());
+        }
+        CommitRecordOutcome::Committed(records)
     });
 
     match write {
-        Ok(records) => {
+        CommitRecordOutcome::Committed(records) => {
             let record = result::find_result(&records, execution_id)
                 .cloned()
                 .unwrap_or_else(|| ResultRecord::new_reviewing(execution_id.to_string(), ResultOutcomeKind::Finished, &now_rfc3339()));
@@ -695,7 +770,11 @@ fn commit_result_at(
                 oid: oid.to_string(),
             }
         }
-        Err(detail) => CommitResultOutcome::WriteFailed { detail },
+        CommitRecordOutcome::StateChanged(record) => CommitResultOutcome::RecordStateChanged {
+            record,
+            oid: oid.to_string(),
+        },
+        CommitRecordOutcome::Err(detail) => CommitResultOutcome::WriteFailed { detail },
     }
 }
 
@@ -1542,5 +1621,189 @@ mod tests {
             "exec-1",
         );
         assert!(matches!(outcome, CleanupWorktreeOutcome::NotIntegratedOrDiscarded));
+    }
+
+    /// Regression test for the Undo-over-Commit defect: once a result has
+    /// been committed, Undo must refuse to discard it rather than stamping
+    /// `Discarded` over the `Committed` record. Before the fix,
+    /// `undo_result_at`'s locked write closure set `entry.state =
+    /// ResultState::Discarded` unconditionally -- it never re-checked that
+    /// the state was still what the earlier unlocked peek/dirty-scan had
+    /// observed. A commit landing between the peek and the write (this test
+    /// simulates that by actually committing first, which is the concrete
+    /// failure the finding describes: Commit's own real git commit runs
+    /// unlocked and can finish while Undo's dirty-scan -- which finds a
+    /// post-commit tree clean, same as a never-modified one -- is still in
+    /// flight) would have its outcome silently overwritten, orphaning a
+    /// real commit from every session record.
+    #[test]
+    fn undo_refuses_to_discard_a_result_that_was_already_committed() {
+        let (_dir, root) = temp_root();
+        let wt = worktree_with_a_change();
+        let locks = SessionLocks::new();
+        seed_session(&root, "sess-1", "exec-1");
+        build_result_at(
+            &locks,
+            &root,
+            "sess-1",
+            "exec-1".into(),
+            ResultOutcomeKind::Finished,
+            Some(wt.path().to_string_lossy().into_owned()),
+            Some("agent/exec-1".into()),
+            None,
+            Vec::new(),
+            None,
+        );
+        let kept = keep_result_at(&locks, &root, "sess-1", "exec-1");
+        assert!(matches!(kept, KeepResultOutcome::Kept { .. }));
+
+        let commit_outcome =
+            commit_result_at(&locks, &root, "sess-1", "exec-1", SessionIntent::Fix, "improved: land the change");
+        let (committed_oid, committed_subject) = match commit_outcome {
+            CommitResultOutcome::Committed { record, oid } => {
+                assert_eq!(record.state, ResultState::Committed);
+                (oid, record.commit.as_ref().unwrap().subject.clone())
+            }
+            other => panic!("expected Committed, got {other:?}"),
+        };
+
+        // Undo fires for the SAME execution after the commit has already
+        // landed -- the exact interleaving the finding describes (a stale
+        // UI still offering Undo on a result that has since been
+        // committed). The worktree is clean (a commit does not dirty the
+        // tree), so the dirty-scan alone would not stop the old code from
+        // reaching the unconditional `Discarded` write.
+        let undo_outcome = undo_result_at(&locks, &root, "sess-1", "exec-1");
+        match &undo_outcome {
+            UndoResultOutcome::StateChanged { record } => {
+                assert_eq!(record.state, ResultState::Committed, "must report the CURRENT (Committed) state");
+            }
+            other => panic!("expected StateChanged, got {other:?}"),
+        }
+
+        // The persisted record must still say Committed with its commit
+        // reference intact -- not Discarded, and not missing changed_paths
+        // or the commit ref (the mutations the buggy write applied).
+        let records = result::read_results(&root, "sess-1").unwrap();
+        let record = result::find_result(&records, "exec-1").unwrap();
+        assert_eq!(record.state, ResultState::Committed, "undo must not overwrite a Committed result");
+        let commit_ref = record.commit.as_ref().expect("commit reference must survive the refused undo");
+        assert_eq!(commit_ref.oid, committed_oid);
+        assert_eq!(commit_ref.subject, committed_subject);
+
+        // And the commit itself is still reachable in git history --
+        // nothing about the refused undo could have unwound it, but this
+        // confirms the record and the repository still agree with each
+        // other, which is the whole point of refusing instead of
+        // overwriting.
+        let repo = git2::Repository::open(wt.path()).unwrap();
+        assert!(repo.find_commit(git2::Oid::from_str(&committed_oid).unwrap()).is_ok());
+    }
+
+    /// Regression test for the same defect, the other direction described
+    /// by the finding: a concurrent Undo discarding a result while a Commit
+    /// is still mid-flight (Commit's real git commit already succeeded, but
+    /// its own record write has not landed yet).
+    /// `commit_record_if_still_kept` is the extracted, directly-racable
+    /// re-check-and-write step `commit_result_at` calls after its real git
+    /// commit finishes -- before the fix it wrote `Committed`
+    /// unconditionally with no re-check, so a concurrent discard write that
+    /// lands in between would be silently overwritten. This races it
+    /// directly against a raw discard write with two real threads and a
+    /// barrier (the same technique
+    /// `agent_desk::concurrent_start_attempts_yield_exactly_one_started_and_one_already_running`
+    /// and `agent_graph::two_concurrent_starts_on_one_proposal_produce_exactly_one_set_of_helpers`
+    /// use), since `commit_result_at` as a whole cannot be raced
+    /// deterministically -- most of its latency is a real, variable-length
+    /// git commit.
+    #[test]
+    fn commit_refuses_to_overwrite_a_result_that_was_discarded_mid_flight() {
+        let (_dir, root) = temp_root();
+        let wt = worktree_with_a_change();
+        let locks = SessionLocks::new();
+        seed_session(&root, "sess-1", "exec-1");
+        build_result_at(
+            &locks,
+            &root,
+            "sess-1",
+            "exec-1".into(),
+            ResultOutcomeKind::Finished,
+            Some(wt.path().to_string_lossy().into_owned()),
+            Some("agent/exec-1".into()),
+            None,
+            Vec::new(),
+            None,
+        );
+        let kept = keep_result_at(&locks, &root, "sess-1", "exec-1");
+        assert!(matches!(kept, KeepResultOutcome::Kept { .. }));
+
+        // A real commit oid to stamp with -- HEAD is enough; this test is
+        // about the record-write race, not about producing a fresh commit.
+        let repo = git2::Repository::open(wt.path()).unwrap();
+        let oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        let barrier = std::sync::Barrier::new(2);
+        let root_ref = &root;
+        let locks_ref = &locks;
+
+        let (commit_outcome, discard_outcome) = std::thread::scope(|scope| {
+            // Thread A: what `commit_result_at` does AFTER its real git
+            // commit succeeds -- re-check `Kept`, then stamp `Committed`.
+            let a = scope.spawn(|| {
+                barrier.wait();
+                commit_record_if_still_kept(locks_ref, root_ref, "sess-1", "exec-1", oid, "improved: land the change")
+            });
+            // Thread B: what a concurrent Undo does -- a raw discard write
+            // under the same session lock, contending for the exact same
+            // critical section as thread A.
+            let b = scope.spawn(|| {
+                barrier.wait();
+                locks_ref.with_session_lock("sess-1", || {
+                    let mut records = result::read_results(root_ref, "sess-1").unwrap();
+                    if let Some(entry) = records.iter_mut().find(|r| r.execution_id == "exec-1") {
+                        if entry.state == ResultState::Kept {
+                            entry.state = ResultState::Discarded;
+                            entry.changed_paths.clear();
+                            result::write_results(root_ref, "sess-1", &records).unwrap();
+                            return true;
+                        }
+                    }
+                    false
+                })
+            });
+            (a.join().unwrap(), b.join().unwrap())
+        });
+
+        // Whichever order the lock granted them, EXACTLY one of the two
+        // must have actually changed the state -- never both landing their
+        // intended write, which is what "commit refuses to overwrite" means
+        // in practice: only one caller's view of the world survives.
+        let committed = matches!(commit_outcome, CommitResultOutcome::Committed { .. });
+        let commit_saw_conflict = matches!(commit_outcome, CommitResultOutcome::RecordStateChanged { .. });
+        assert!(
+            committed != discard_outcome || (!committed && !discard_outcome && commit_saw_conflict),
+            "exactly one writer's intent may survive: committed={committed} discard_won={discard_outcome}"
+        );
+
+        let records = result::read_results(&root, "sess-1").unwrap();
+        let record = result::find_result(&records, "exec-1").unwrap();
+        if discard_outcome {
+            // Undo's discard ran first and won the lock: Commit's re-check
+            // must have seen `Discarded` (not `Kept`) and refused to
+            // overwrite it with `Committed`.
+            assert_eq!(record.state, ResultState::Discarded, "the discard must not be silently overwritten by Commit");
+            assert!(record.commit.is_none());
+            assert!(
+                commit_saw_conflict,
+                "commit must report RecordStateChanged when it lost the race, got {commit_outcome:?}"
+            );
+        } else {
+            // Commit ran first (or the discard found the state already
+            // `Committed` and declined to touch it, per its own `Kept`
+            // guard): the record must be exactly what Commit wrote.
+            assert!(committed, "expected Committed when discard did not win, got {commit_outcome:?}");
+            assert_eq!(record.state, ResultState::Committed);
+            assert_eq!(record.commit.as_ref().unwrap().oid, oid.to_string());
+        }
     }
 }

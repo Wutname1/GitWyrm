@@ -168,6 +168,11 @@ export function explainUndoOutcome(outcome: UndoResultOutcome): { message: strin
       return { message: `That session could not be read right now: ${outcome.detail}`, refusedHandEdited: false }
     case 'writeFailed':
       return { message: `Could not save: ${outcome.detail}`, refusedHandEdited: false }
+    case 'stateChanged':
+      return {
+        message: 'This result already changed somewhere else -- probably it was just committed. Refresh to see its current state.',
+        refusedHandEdited: false,
+      }
   }
 }
 
@@ -194,6 +199,8 @@ export function explainCommitOutcome(outcome: CommitResultOutcome): string | nul
       return `Could not save: ${outcome.detail}`
     case 'gitFailed':
       return outcome.detail
+    case 'recordStateChanged':
+      return 'The commit was created, but this result changed at the same time (probably an Undo). Refresh and check whether the new commit needs to be reconciled by hand.'
   }
 }
 

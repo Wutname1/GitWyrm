@@ -149,17 +149,25 @@ export function SessionComposer({ sessionId }: { sessionId: string | null }) {
         />
 
         <div className="flex items-center gap-1.5 px-0.5 pt-1">
+          {/* Disabled rather than toast-on-click: a button that looks live and
+              only apologises teaches the user that controls here are decorative.
+              There is no attachment picker behind this yet, so it says so. */}
           <button
             type="button"
-            onClick={() => toast('Choose context to attach', { description: 'Coming soon.' })}
-            aria-label="Attach context"
-            className="flex h-6 w-6 flex-none items-center justify-center rounded text-muted-foreground hover:bg-panel3 hover:text-foreground"
+            disabled
+            aria-label="Attach context (not available yet)"
+            title="Attaching files and notes is not available yet"
+            className="flex h-6 w-6 flex-none items-center justify-center rounded text-muted-foreground opacity-40"
           >
             <Paperclip size={13} />
           </button>
+          {/* The mockup names a lead agent ("Sol"), but nothing produces that
+              name -- the session carries no agent identity, and hardcoding one
+              claims something untrue about whichever provider is really
+              answering. State the shape of the team instead, which is real. */}
           <span className="flex flex-none items-center gap-1 text-2xs text-muted-foreground">
             <Sparkles size={12} className="text-accent-text" />
-            <strong className="font-semibold text-foreground">Sol</strong> lead · 3 helpers max
+            {team === 'solo' ? 'One agent' : 'A lead agent, up to 3 helpers'}
           </span>
 
           <TeamShapeControl team={team} onChange={setTeam} open={teamOpen} onOpenChange={setTeamOpen} />

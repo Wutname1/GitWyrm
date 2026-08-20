@@ -14,16 +14,23 @@ import type { MessageTarget } from '@/lib/bindings'
  * embedded diff viewer, worktree browser, or graph panel today -- those are
  * `DiffView`/`GraphView`/the OpenSpec surfaces in the *main* GitWyrm window.
  * `source` is the one target kind Agent Desk can already open, via
- * `SessionSourceBanner`'s `onOpenSource`. Every other kind resolves to
- * `unavailable` here rather than a link that looks live and does nothing --
- * see the mockup's `.ag-tool-link`/`data-open-setup` pattern for what a real
- * link looks like once a destination exists, and `common-pitfalls`-style
- * "false positive" guidance against building fake affordances.
+ * `SessionSourceBanner`'s `onOpenSource`, which `AgentDeskView.tsx` now wires
+ * to `commands.agentSessionOpenSource(sessionId)` (package `agent-desk-docs`)
+ * -- that command focuses the main window and emits `agent-desk://open-source`,
+ * which `useAgentDeskSourceListener.ts` (mounted in `App.tsx`'s `AppInner`)
+ * catches and routes to the GitHub context panel, an OpenSpec selection, or
+ * the diff view depending on the session's `SessionSource` kind
+ * (`src/lib/agentDeskSourceNav.ts` is the pure per-kind mapping, unit tested
+ * there). Every other `MessageTarget` kind below resolves to `unavailable`
+ * here rather than a link that looks live and does nothing -- see the
+ * mockup's `.ag-tool-link`/`data-open-setup` pattern for what a real link
+ * looks like once a destination exists, and `common-pitfalls`-style "false
+ * positive" guidance against building fake affordances.
  *
- * A navigation bridge into the main window now EXISTS for one destination:
- * `commands.agentResultOpenDiff(worktreePath, path)` (agent-desk-review-and-
- * landing tasks.md 2.2) focuses the main window and opens a result's
- * worktree diff there (`src/hooks/useAgentResultDiff.ts`'s
+ * A navigation bridge into the main window also EXISTS for one more
+ * destination: `commands.agentResultOpenDiff(worktreePath, path)` (agent-
+ * desk-review-and-landing tasks.md 2.2) focuses the main window and opens a
+ * result's worktree diff there (`src/hooks/useAgentResultDiff.ts`'s
  * `agent-result://open-diff` listener, wired at `App.tsx`'s `AppInner`).
  * The `diff` case below stays `unavailable` because `MessageTarget::Diff`'s
  * `scope` field is not yet populated with a worktree path anywhere in the
@@ -34,7 +41,10 @@ import type { MessageTarget } from '@/lib/bindings'
  * calls `agentResultOpenDiff` directly rather than through a message
  * target), route it through that same command instead of adding a second
  * bridge. `graphNode` becomes reachable once section 7's Graph panel exists
- * in this window; `file`/`openSpecTask` still need their own bridges.
+ * in this window; `file`/`openSpecTask` still need their own bridges (a
+ * *message-target* `openSpecTask`, i.e. a chat reply linking to a specific
+ * task -- distinct from a *session source* `openSpecTask`, which
+ * `agentDeskSourceNav.ts` already routes to its parent change).
  */
 export type ResolvedMessageTarget =
   | { kind: 'source'; label: string }

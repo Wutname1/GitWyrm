@@ -3148,6 +3148,27 @@ async agentSessionRefreshSource(sessionId: string) : Promise<Result<RefreshSourc
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Focuses the main window and asks it to open the item a session started
+ * from. Never opens a second main window, never creates any window itself
+ * -- mirrors `agent_result_open_diff`'s "focus what already exists" shape.
+ * 
+ * `Manual` sources have nothing to navigate to (there was never a source
+ * item); the frontend resolver
+ * (`src/lib/agentDeskTargets.ts`/`useAgentDeskSourceListener.ts`) is
+ * responsible for leaving that case's affordance honestly disabled rather
+ * than calling this command for it, but the event is still emitted here on
+ * a `Manual` source (the caller decides what "nothing to do" looks like,
+ * same division of labor `agent_result_open_diff` uses for a `None` path).
+ */
+async agentSessionOpenSource(sessionId: string) : Promise<Result<OpenSourceOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_open_source", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async agentSessionOpenspecContext(sessionId: string) : Promise<Result<OpenSpecSourceOutcome<OpenSpecSourceContext>, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_openspec_context", { sessionId }) };
@@ -4098,7 +4119,18 @@ export type CommitResultOutcome = { kind: "committed"; record: ResultRecord; oid
  * failure message from `git::commit_write`, which already tells the
  * user what to do).
  */
-{ kind: "gitFailed"; detail: string } | { kind: "messageRequired" }
+{ kind: "gitFailed"; detail: string } | { kind: "messageRequired" } | 
+/**
+ * Refused: the result's state moved between the peek (which required
+ * `Kept`) and the locked write that would have stamped `Committed` --
+ * most commonly a concurrent Undo discarded this same result while the
+ * git commit above was running. The commit was already created in git
+ * history (it cannot be un-created here), but the session record is
+ * left as-is rather than overwriting whatever the other caller wrote,
+ * so the caller should surface `oid` to the user as a commit that now
+ * needs manual reconciliation with the record.
+ */
+{ kind: "recordStateChanged"; record: ResultRecord; oid: string }
 /**
  * Diff stats for one commit, fetched on demand for rows in view.
  */
@@ -5077,6 +5109,16 @@ export type OpenResultDiffOutcome =
  * command can do about a window that has not been created.
  */
 { kind: "mainWindowNotOpen" }
+export type OpenSourceOutcome = 
+/**
+ * The main window was found and told to open the source.
+ */
+{ kind: "opened" } | 
+/**
+ * No main window exists yet (a very early startup race) -- mirrors
+ * `agent_result::OpenResultDiffOutcome::MainWindowNotOpen`.
+ */
+{ kind: "mainWindowNotOpen" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string }
 /**
  * tasks.md 4.5 / section 7: archived/deleted/moved change states, each
  * honest and typed, with a real next action -- independent of whether a
@@ -6980,7 +7022,16 @@ export type StartGraphOutcome =
  * half-started: this is checked for every helper before any of them is
  * marked `Ready`.
  */
-{ kind: "worktreeFailed"; node_id: string; detail: string } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string } | { kind: "sourceMissing"; detail: string }
+{ kind: "worktreeFailed"; node_id: string; detail: string } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string } | { kind: "sourceMissing"; detail: string } | 
+/**
+ * A concurrent `agent_session_start_graph` call already consumed this
+ * lead's proposal (double click, frontend retry) between this call's
+ * unlocked read and its locked write. The worktrees THIS call
+ * provisioned were cleaned up before returning, so nothing is leaked --
+ * re-check `agent_session_graph_view` for whatever the winning call
+ * actually started.
+ */
+{ kind: "alreadyStarted" }
 /**
  * Starting a run either gives you the session or says why not.
  */
@@ -7346,7 +7397,17 @@ export type UndoResultOutcome =
  * finished. Nothing was deleted -- the result stays `Reviewing` and the
  * caller should offer Open instead (task 3.2/5.2).
  */
-{ kind: "refusedHandEdited"; record: ResultRecord; modified: number; untracked: number } | { kind: "nothingToUndo" } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string }
+{ kind: "refusedHandEdited"; record: ResultRecord; modified: number; untracked: number } | { kind: "nothingToUndo" } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string } | 
+/**
+ * Refused: the result's state moved between the peek (which decided
+ * this worktree was clean and safe to discard) and the locked write --
+ * most commonly a concurrent `agent_result_commit` landed a real commit
+ * in between. Discarding now would stamp `Discarded` over a `Committed`
+ * record and orphan that commit from every session record (the defect
+ * this fix closes). Nothing was written; the caller should re-read the
+ * current state instead of retrying blindly.
+ */
+{ kind: "stateChanged"; record: ResultRecord }
 /**
  * A local tag the given remote does not have, along with whether the remote
  * already holds the commit it points at. Tags on commits the remote lacks

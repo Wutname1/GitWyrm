@@ -35,6 +35,7 @@ import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { useAiRunListener } from '@/hooks/useAiRun'
 import { useAgentSessionListener } from '@/hooks/useAgentSessions'
 import { useAgentResultDiffListener } from '@/hooks/useAgentResultDiff'
+import { useAgentDeskSourceListener } from '@/hooks/useAgentDeskSourceListener'
 import { useAutoFetch } from '@/hooks/useAutoFetch'
 import { useTheme } from '@/hooks/useTheme'
 import { useFont } from '@/hooks/useFont'
@@ -102,6 +103,13 @@ function AppInner() {
   // tab here and points the diff view at it. Never registered in
   // `SpecDeskRoot` -- that window has no repo tabs to open into.
   useAgentResultDiffListener()
+  // Main-window-only bridge for Agent Desk's "View source" button (package
+  // `agent-desk-docs`): opens the repository a session came from and routes
+  // to whichever existing surface shows that source kind (GitHub context
+  // panel, OpenSpec selection, diff view). Never registered in
+  // `SpecDeskRoot`/Agent Desk's own window, same reason `useAgentResultDiffListener`
+  // is not.
+  useAgentDeskSourceListener()
   useAutoFetch()
   useTheme()
   useFont()

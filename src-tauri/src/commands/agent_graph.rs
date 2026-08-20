@@ -204,6 +204,13 @@ pub enum StartGraphOutcome {
     Unavailable { detail: String },
     WriteFailed { detail: String },
     SourceMissing { detail: String },
+    /// A concurrent `agent_session_start_graph` call already consumed this
+    /// lead's proposal (double click, frontend retry) between this call's
+    /// unlocked read and its locked write. The worktrees THIS call
+    /// provisioned were cleaned up before returning, so nothing is leaked --
+    /// re-check `agent_session_graph_view` for whatever the winning call
+    /// actually started.
+    AlreadyStarted,
 }
 
 #[tauri::command]
@@ -322,13 +329,135 @@ fn start_graph_at(
         });
     }
 
-    // Step 4: one write that marks the lead Working and adds every
-    // provisioned helper as `Ready` -- atomic with respect to every other
-    // mutating path for this session (tasks.md 2.4 "every action changes
-    // graph state immediately").
+    // Step 4: re-check the lead STILL has a proposal to consume (no other
+    // concurrent `start_graph_at` call already won this race) and, if so,
+    // write every provisioned helper as `Ready` -- all inside ONE lock
+    // acquisition via `commit_started_graph_if_still_proposed` (mirrors
+    // `record_execution_if_not_running` in `commands::agent_desk`).
+    // Worktree provisioning above stays unlocked and slow; only this final
+    // step is locked.
     let started_helpers: Vec<ExecutionId> =
         provisioned.iter().map(|p| p.execution_id.clone()).collect();
-    let outcome = update_session_at(locks, root, session_id, |s| {
+    let provisioned_for_commit: Vec<ProvisionedHelper> = provisioned
+        .iter()
+        .map(|p| ProvisionedHelper {
+            node_id: p.node_id.clone(),
+            execution_id: p.execution_id.clone(),
+            branch: p.branch.clone(),
+            path: p.path.clone(),
+        })
+        .collect();
+    let commit_outcome = commit_started_graph_if_still_proposed(
+        locks,
+        root,
+        session_id,
+        &lead_execution_id,
+        &proposed,
+        &provisioned_for_commit,
+    );
+
+    match commit_outcome {
+        CommitGraphOutcome::Started { session } => StartGraphOutcome::Started {
+            session,
+            lead_execution_id,
+            started_helpers,
+        },
+        CommitGraphOutcome::AlreadyStarted => {
+            // The re-check inside the lock found this lead's proposal
+            // already gone -- another concurrent call won the race and
+            // consumed it. The worktrees THIS call just provisioned are not
+            // referenced by any record that will ever be written, so they
+            // must be cleaned up here or they leak on disk (the defect this
+            // fix closes). Best-effort: this call already lost the race, so
+            // a cleanup failure is swallowed rather than surfaced as this
+            // call's own error -- the winning call's result is what the
+            // user sees.
+            for p in &provisioned {
+                if let Ok(repo) = git2::Repository::open(&main_workdir_str) {
+                    let _ = worktree::remove(
+                        &repo,
+                        &main_workdir_str,
+                        &p.path,
+                        worktree::DirtyChoice::Discard,
+                    );
+                }
+            }
+            StartGraphOutcome::AlreadyStarted
+        }
+        CommitGraphOutcome::NotFound => StartGraphOutcome::NotFound,
+        CommitGraphOutcome::Damaged { reason } => StartGraphOutcome::Damaged { reason },
+        CommitGraphOutcome::WriteFailed { detail } => StartGraphOutcome::WriteFailed { detail },
+        CommitGraphOutcome::Unavailable { detail } => StartGraphOutcome::Unavailable { detail },
+    }
+}
+
+/// A worktree `start_graph_at` already provisioned on disk (unlocked,
+/// before this function's single locked re-check-and-write), reduced to
+/// what the write step needs. Kept separate from `start_graph_at`'s private
+/// `Provisioned` so this function has no dependency on that local type and
+/// can be called directly from tests without going through the full
+/// (worktree-provisioning, therefore slow and hard to race deterministically
+/// in a test) `start_graph_at`.
+struct ProvisionedHelper {
+    node_id: String,
+    execution_id: ExecutionId,
+    branch: String,
+    path: String,
+}
+
+/// Internal-only outcome of `commit_started_graph_if_still_proposed`. Not a
+/// public/`Type` enum like `StartGraphOutcome` -- purely lets that single
+/// `with_session_lock` closure report "someone else already started this
+/// graph" alongside the ordinary read/write failure modes, mirroring
+/// `commands::agent_desk::RecordOutcome`.
+enum CommitGraphOutcome {
+    Started { session: AgentSession },
+    AlreadyStarted,
+    NotFound,
+    Damaged { reason: String },
+    WriteFailed { detail: String },
+    Unavailable { detail: String },
+}
+
+/// Atomically re-checks "does the lead still have a proposal to consume"
+/// and, if so, writes every provisioned helper as `Ready` (and any
+/// dependency-gated helper as `Draft`) -- both inside ONE
+/// `with_session_lock` acquisition, so no other concurrent caller of this
+/// function for the same session can observe or act on an in-between state.
+/// This is what makes concurrent `start_graph_at` calls for one proposal
+/// safe: the slow, unlocked worktree provisioning happens before this call,
+/// but only this call's locked re-check decides whether the write actually
+/// happens.
+fn commit_started_graph_if_still_proposed(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    lead_execution_id: &str,
+    proposed: &ProposedGraph,
+    provisioned: &[ProvisionedHelper],
+) -> CommitGraphOutcome {
+    locks.with_session_lock(session_id, || {
+        let mut s = match store::read_session(root, session_id) {
+            Ok(s) => s,
+            Err(SessionLoadError::NotFound) => return CommitGraphOutcome::NotFound,
+            Err(SessionLoadError::Io { detail }) => {
+                return CommitGraphOutcome::Unavailable { detail }
+            }
+            Err(reason) => {
+                return CommitGraphOutcome::Damaged {
+                    reason: reason.to_string(),
+                }
+            }
+        };
+
+        let still_proposed = s
+            .executions
+            .iter()
+            .any(|e| e.execution_id == lead_execution_id && e.proposed_graph.is_some());
+        if !still_proposed {
+            return CommitGraphOutcome::AlreadyStarted;
+        }
+
         for exec in s.executions.iter_mut() {
             if exec.execution_id == lead_execution_id {
                 exec.state = SessionState::Working;
@@ -355,7 +484,7 @@ fn start_graph_at(
             let mut record = ExecutionRecord::minimal(
                 execution_id,
                 s.header.session_id.clone(),
-                Some(lead_execution_id.clone()),
+                Some(lead_execution_id.to_string()),
                 state,
                 now,
                 None,
@@ -402,21 +531,17 @@ fn start_graph_at(
                 .filter_map(|dep_node_id| node_to_exec.get(dep_node_id).cloned())
                 .collect();
         }
-        s.header.active_execution_id = Some(lead_execution_id.clone());
+        s.header.active_execution_id = Some(lead_execution_id.to_string());
         s.header.state = SessionState::Working;
-    });
+        s.header.updated_at = now_rfc3339();
 
-    match outcome {
-        UpdateOutcome::Updated { session } => StartGraphOutcome::Started {
-            session,
-            lead_execution_id,
-            started_helpers,
-        },
-        UpdateOutcome::NotFound => StartGraphOutcome::NotFound,
-        UpdateOutcome::Damaged { reason } => StartGraphOutcome::Damaged { reason },
-        UpdateOutcome::WriteFailed { detail } => StartGraphOutcome::WriteFailed { detail },
-        UpdateOutcome::Unavailable { detail } => StartGraphOutcome::Unavailable { detail },
-    }
+        match store::write_session(root, &s) {
+            Ok(()) => CommitGraphOutcome::Started { session: s },
+            Err(e) => CommitGraphOutcome::WriteFailed {
+                detail: e.to_string(),
+            },
+        }
+    })
 }
 
 fn role_label(role: graph::HelperRole) -> String {
@@ -1023,5 +1148,132 @@ mod tests {
         let helper_view = views.iter().find(|v| v.execution_id == "h1").unwrap();
         assert!(!helper_view.is_lead);
         assert_eq!(helper_view.title, "Trace the crash");
+    }
+
+    /// Regression test for the concurrent-Start defect: two callers racing
+    /// `start_graph_at`'s final locked write step for the SAME lead
+    /// proposal must not both win. Before the fix, that write happened
+    /// unconditionally once `start_graph_at` reached it -- there was no
+    /// re-check that the lead still had a proposal to consume, so if two
+    /// calls both got that far (both having captured the same proposal
+    /// during their earlier UNLOCKED reads and unlocked worktree
+    /// provisioning), both would push a full set of helper `ExecutionRecord`s
+    /// on top of each other.
+    ///
+    /// `commit_started_graph_if_still_proposed` is the atomic replacement:
+    /// re-check and write inside one `with_session_lock` acquisition. This
+    /// test drives it directly with two real threads and a barrier so they
+    /// contend for the same lock -- the only way to make the pre-fix race
+    /// reproduce (two sequential calls cannot expose it: the second would
+    /// simply see the proposal already gone from `start_graph_at`'s own
+    /// earlier, correct, step-1 check, same as
+    /// `agent_desk::concurrent_start_attempts_yield_exactly_one_started_and_one_already_running`
+    /// documents for the sibling single-execution path). Bypassing the full
+    /// `start_graph_at` also avoids real `git worktree add` collisions
+    /// between the two threads (both would otherwise race for the same
+    /// branch name), which is orthogonal to the defect this test targets.
+    #[test]
+    fn two_concurrent_starts_on_one_proposal_produce_exactly_one_set_of_helpers() {
+        let (_dir, root) = temp_root();
+        let locks = std::sync::Arc::new(crate::agentdesk::SessionLocks::new());
+        seed_session(&root, "sess-1");
+
+        let ProposeGraphOutcome::AwaitingStart { execution_id: lead_execution_id, .. } =
+            propose_graph_at(&locks, &root, "sess-1", sample_graph())
+        else {
+            panic!("expected AwaitingStart");
+        };
+
+        let proposed = sample_graph();
+        // Both callers provisioned real worktrees for the same helper
+        // (`research`, the only dependency-free job) under DIFFERENT paths
+        // -- exactly what two racing `start_graph_at` calls would each have
+        // done unlocked, before either reaches this shared write step.
+        let provisioned_a = vec![ProvisionedHelper {
+            node_id: "research".into(),
+            execution_id: "helper-from-a".into(),
+            branch: "agent-desk/lead/research-a".into(),
+            path: "C:/fake/worktree-a".into(),
+        }];
+        let provisioned_b = vec![ProvisionedHelper {
+            node_id: "research".into(),
+            execution_id: "helper-from-b".into(),
+            branch: "agent-desk/lead/research-b".into(),
+            path: "C:/fake/worktree-b".into(),
+        }];
+
+        let barrier = std::sync::Barrier::new(2);
+        let root_ref = &root;
+        let locks_ref = &locks;
+        let lead_ref = lead_execution_id.as_str();
+        let proposed_ref = &proposed;
+
+        let (outcome_a, outcome_b) = std::thread::scope(|scope| {
+            let a = scope.spawn(|| {
+                barrier.wait();
+                commit_started_graph_if_still_proposed(
+                    locks_ref,
+                    root_ref,
+                    "sess-1",
+                    lead_ref,
+                    proposed_ref,
+                    &provisioned_a,
+                )
+            });
+            let b = scope.spawn(|| {
+                barrier.wait();
+                commit_started_graph_if_still_proposed(
+                    locks_ref,
+                    root_ref,
+                    "sess-1",
+                    lead_ref,
+                    proposed_ref,
+                    &provisioned_b,
+                )
+            });
+            (a.join().unwrap(), b.join().unwrap())
+        });
+
+        let outcomes = [&outcome_a, &outcome_b];
+        let started = outcomes
+            .iter()
+            .filter(|o| matches!(o, CommitGraphOutcome::Started { .. }))
+            .count();
+        let already_started = outcomes
+            .iter()
+            .filter(|o| matches!(o, CommitGraphOutcome::AlreadyStarted))
+            .count();
+        assert_eq!(started, 1, "exactly one attempt must win and write its helpers");
+        assert_eq!(
+            already_started, 1,
+            "the other attempt must see AlreadyStarted, not also win"
+        );
+
+        // Exactly one set of helper records exists -- not doubled. Before
+        // the fix this would be 4 (two full sets of the sample graph's 2
+        // helpers) instead of 2.
+        let session = store::read_session(&root, "sess-1").unwrap();
+        let helper_records: Vec<_> = session
+            .executions
+            .iter()
+            .filter(|e| e.parent_execution_id.is_some())
+            .collect();
+        assert_eq!(
+            helper_records.len(),
+            sample_graph().helpers.len(),
+            "only the winning attempt's helper records may be persisted, never both"
+        );
+
+        // The winning set of helper records references exactly one of the
+        // two candidate worktree paths -- never both, and never neither.
+        let ready_helper = helper_records
+            .iter()
+            .find(|e| e.worktree_path.is_some())
+            .expect("the ready helper (research) must be among the winning records");
+        let winning_path = ready_helper.worktree_path.clone().unwrap();
+        assert!(
+            winning_path == "C:/fake/worktree-a" || winning_path == "C:/fake/worktree-b",
+            "winning worktree path must be exactly one candidate's, got {winning_path}"
+        );
     }
 }
