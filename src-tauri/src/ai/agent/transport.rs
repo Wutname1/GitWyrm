@@ -4,6 +4,12 @@
 //! the provider CLI carries its own conversation, so nothing in GitWyrm
 //! assembles turns or tool calls any more. What remains is the vocabulary the
 //! console needs to explain a failure.
+//!
+//! `Transport` had `ApiKey` and `OpenAiCompatible` variants for transports
+//! that were planned but never built past the CLI subprocess path; they were
+//! removed as dead code (2026-08-19) since nothing produced or consumed them
+//! outside this module's own tests. Add a variant back only alongside the
+//! driver that actually implements it.
 
 use std::fmt;
 
@@ -13,30 +19,22 @@ use crate::error::AppError;
 
 /// Which way a provider is reached.
 ///
-/// Not a ranking. Which variant applies is decided by what the user's default
-/// provider actually offers, in [`super::select`].
+/// Currently the only variant is the CLI subprocess path -- see
+/// [`super::cli_agent`]. Kept as an enum rather than inlined so a future
+/// transport has somewhere to attach without reshaping every caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
-    /// A documented HTTP API with the user's own key. Preferred where a key
-    /// exists: a published API is a stable contract, where a CLI's output format
-    /// is not.
-    ApiKey,
     /// The user's own installed CLI, driven as a subprocess. Exists so a
     /// subscription-only user is not shut out. GitWyrm never reads the CLI's
     /// credential files -- it asks the tool and believes its answer.
     Cli,
-    /// Any endpoint speaking the OpenAI dialect: a local opencode server,
-    /// Ollama, LM Studio, or a self-hosted gateway.
-    OpenAiCompatible,
 }
 
 impl fmt::Display for Transport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Transport::ApiKey => "API key",
             Transport::Cli => "command-line tool",
-            Transport::OpenAiCompatible => "OpenAI-compatible endpoint",
         };
         f.write_str(s)
     }

@@ -1,5 +1,17 @@
 # Design
 
+> **2026-08-19 correction:** the sections below describe the original three-transport
+> plan (provider CLI, BYO API key, OpenAI-compatible endpoint) and an in-house
+> plan/act/observe loop. Only the Copilot CLI transport was built. GitWyrm does not run
+> the loop: the CLI's own agent plans, acts, and observes over ACP, and GitWyrm hands it
+> the whole task rather than feeding it single turns (`src-tauri/src/airun/cli_run.rs`).
+> The ToS research below is still the reason Anthropic has no CLI path and Copilot's does
+> exist - that reasoning is unchanged. What's stale is any passage implying an API-key or
+> OpenAI-compatible transport ships, or that GitWyrm counts turns itself; see
+> `tasks.md`'s correction note for what actually runs. "What bounds a run" below is kept
+> for the *concept* of done-means-checkbox-ticked, which still holds; the turn-budget
+> counting is now the CLI's own `max_turn_requests` stop reason, not a GitWyrm counter.
+
 ## What the Claude Code CLI spike established
 
 The spike wrapped the local `claude` CLI and generated a properly-formatted commit
@@ -52,13 +64,14 @@ exact build.
 
 ## Decisions carried forward
 
-- **Prefer a documented API when the user has a key.** A CLI is not a public interface;
-  its output format can change between releases. The CLI path exists so a
-  subscription-only user is not shut out. Where a provider API and a key are available,
-  use them - this is how opencode reaches providers, and it is the more stable transport.
-- **One `ProviderAgent` interface, several implementations.** Claude Code and the Copilot
-  CLI sit behind it, as would a direct-API provider. No provider-specific behavior reaches
-  the console or any other UI.
+- **Prefer a documented API when the user has a key.** *(Planned, not built.)* A CLI is
+  not a public interface; its output format can change between releases. Where a provider
+  API and a key are available, an API transport would be the more stable one - this is
+  how opencode reaches providers. No such transport exists in the shipped code; only the
+  Copilot CLI transport was built.
+- **One `ProviderAgent` interface, several implementations.** *(Narrowed.)* The interface
+  exists (`ai/agent/transport.rs`), but only one implementation is wired to a run: the
+  Copilot CLI over ACP. No provider-specific behavior reaches the console or any other UI.
 - **Guardrails live in GitWyrm's process.** The CLI is a model transport, not a trust
   boundary: never-push, gated side effects, and repo-scoped tools are enforced by our
   code, so they hold no matter what the underlying tool would permit.
@@ -366,6 +379,14 @@ decision made once and applied to situations the user never saw.
 ## What bounds a run
 
 ### Turn budget: 12, and the user can change it
+
+*(Superseded.)* The plan below assumed GitWyrm ran the plan/act/observe loop and counted
+turns itself. It does not: the Copilot CLI runs its own loop over ACP and stops on its
+own `stopReason` (`end_turn`, `max_turn_requests`, `refusal`, `cancelled`). There is no
+GitWyrm-side turn counter or turn-budget setting in the shipped code. The reasoning below
+- turns over wall-clock time, so the same task behaves the same regardless of provider
+speed - is kept as the rationale for treating `max_turn_requests` as "didn't finish", not
+as a description of a setting that exists.
 
 A run is bounded by **turns** - complete plan/act/observe cycles - not by wall-clock time.
 The default is **12**, exposed as a setting so a user who hits it often can raise it.

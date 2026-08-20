@@ -1,5 +1,11 @@
 # ai-runs Spec Delta
 
+> **2026-08-19 correction:** several requirements below describe an in-house
+> plan/act/observe loop and three transports. Only one transport shipped (the
+> Copilot CLI over ACP), and GitWyrm does not run the loop - the CLI's own
+> agent does, over one `session/prompt` per run. Requirements affected are
+> marked inline; unmarked requirements still hold as written.
+
 ## ADDED Requirements
 
 ### Requirement: The agent is GitWyrm's own
@@ -18,16 +24,22 @@ process rather than delegated to another tool.
 - WHEN the engine is asked to do something a guardrail forbids
 - THEN GitWyrm refuses or gates it, regardless of what the underlying provider would allow
 
-### Requirement: Three transports, one interface
+### Requirement: The Copilot CLI transport, behind one interface
 
-The engine SHALL reach models by any of: driving a provider's own installed CLI as a
-subprocess, a provider's documented API with an API key the user supplies, or an
-OpenAI-compatible endpoint. All SHALL sit behind one interface, and no provider-specific
-behavior SHALL reach the console or any other UI.
+**(Narrowed from "three transports" - see correction note.)** The engine SHALL reach
+models by driving the Copilot CLI's own ACP server as a subprocess. The transport SHALL
+sit behind one interface (`ProviderAgent`/`Transport`), so a future transport can be added
+without changing the console or any other UI. No provider-specific behavior SHALL reach
+the console.
+
+A documented-API transport and an OpenAI-compatible-endpoint transport were planned but
+are not implemented. This requirement no longer claims they exist; a future change should
+restore the broader requirement only once such a transport is actually built.
 
 #### Scenario: Provider CLI present
 
-- WHEN the default provider ships a CLI that GitWyrm can drive, and it reports itself usable
+- WHEN the Copilot CLI is installed, at or above the version floor, and reports itself
+  usable
 - THEN the engine runs tasks through it, and never handles a credential itself
 
 #### Scenario: Copilot switched off by an administrator
@@ -38,22 +50,16 @@ behavior SHALL reach the console or any other UI.
 
 #### Scenario: A CLI's integration surface changes
 
-- WHEN a provider CLI's integration protocol changes or becomes unavailable, as a
-  preview-status protocol may
-- THEN the failure is contained to that one transport: the run reports that provider as
-  currently unusable and the copy-handoff path still works, rather than the engine failing
-  as a whole
+- WHEN the Copilot CLI's ACP protocol changes or becomes unavailable, as a preview-status
+  protocol may
+- THEN the run reports the CLI as currently unusable and the copy-handoff path still
+  works, rather than the engine failing as a whole
 
-#### Scenario: API key present
+#### Scenario: No Copilot CLI installed
 
-- WHEN the default provider is configured with an API key
-- THEN the engine runs tasks through that provider's documented API
-
-#### Scenario: A local or self-hosted model
-
-- WHEN the default provider is an OpenAI-compatible endpoint - a local opencode server,
-  Ollama, LM Studio, or similar
-- THEN the engine runs tasks through it with no special-casing
+- WHEN the Copilot CLI is not installed, or is below the version floor
+- THEN the run reports plainly that the command-line tool is missing or needs updating,
+  and does not attempt any other transport
 
 ### Requirement: Never another application's credentials
 
@@ -76,33 +82,44 @@ is in this change's design.md.
   despite credentials existing
 - THEN GitWyrm believes that answer rather than starting a run that would fail later
 
-### Requirement: Anthropic access is by API key only
+### Requirement: Anthropic has no CLI path
 
-The engine SHALL NOT drive an Anthropic CLI as a subprocess. Anthropic prohibits
-third-party products routing requests through Free, Pro, or Max plan credentials on their
-users' behalf, and is the one provider known to have enforced it. Anthropic runs require an
-API key until that position changes or written approval is obtained.
+**(Narrowed - see correction note.)** The engine SHALL NOT drive an Anthropic CLI as a
+subprocess. Anthropic prohibits third-party products routing requests through Free, Pro,
+or Max plan credentials on their users' behalf, and is the one provider known to have
+enforced it.
 
-#### Scenario: Anthropic default without a key
+This requirement no longer claims Anthropic runs are available by API key: no API-key
+transport is implemented for task runs at all (see "The Copilot CLI transport, behind one
+interface" above). Anthropic currently has no run path, the same as every provider other
+than Copilot.
 
-- WHEN the default provider is Anthropic and no API key is configured
-- THEN GitWyrm says plainly that a key is needed and where to get one, does not reach for a
-  locally-installed Anthropic CLI, and leaves the copy-handoff path fully available
+#### Scenario: Anthropic as the default provider
+
+- WHEN the default provider is Anthropic
+- THEN GitWyrm does not reach for a locally-installed Anthropic CLI, reports that task
+  runs are not available for this provider, and leaves the copy-handoff path fully
+  available
 
 ### Requirement: The engine uses the user's default provider
 
-The engine SHALL resolve which provider and model to use from the user's default in AI
-settings, through the same shared path every other AI feature uses. It SHALL NOT carry its
-own provider selection.
+**(Not implemented - see correction note.)** The engine was designed to resolve which
+provider and model to use from the user's default in AI settings, through the same shared
+path every other AI feature uses, so it never carries its own provider selection. What
+ships instead: `run_engine` calls `CliAgent::discover` unconditionally, without reading
+the configured default provider. A run today always attempts the Copilot CLI regardless
+of what the user set as their default AI provider elsewhere in the app. This is tracked
+as a gap, not a design change - the desired behavior is still "one answer everywhere".
 
-#### Scenario: One answer everywhere
+#### Scenario: One answer everywhere (target, not current behavior)
 
 - WHEN a run starts
-- THEN it uses the same provider and model that commit-message generation would use
+- THEN it SHOULD use the same provider and model that commit-message generation would
+  use. Today it always attempts the Copilot CLI instead
 
 #### Scenario: Default cannot run
 
-- WHEN the default provider has no usable transport
+- WHEN the resolved transport has no usable CLI
 - THEN the message names what is missing and what to do, rather than reading as a fault or a
   failed run
 
@@ -141,42 +158,52 @@ always responds.
 - THEN the engine cancels promptly and terminates any child process it started, leaving no
   orphan holding a subscription slot
 
-### Requirement: A bounded tool set
+### Requirement: Shell and network access are denied to the driven CLI
 
-The loop SHALL be able to read a file, edit a file, list a directory, and run one of the
-project's own checks - and nothing else. Every path SHALL resolve inside the repository;
-a path outside it SHALL be refused.
+**(Narrowed from "a bounded tool set" - see correction note.)** GitWyrm does not
+implement its own read/edit/list/check tool set for the loop, because GitWyrm does not
+run the loop. What it enforces instead: the Copilot CLI's ACP server SHALL be started
+with `shell` and network (`url`) tool kinds denied, so the CLI's own broader tool set
+cannot run arbitrary commands or reach the network regardless of what the model asks for.
+Denial SHALL take precedence over any allow rule, including a blanket allow-all.
 
-#### Scenario: Outside the repository
+File edits are not denied - editing files in the repository is the job - and path scoping
+for those edits is the CLI's own concern once shell and network access are removed as
+options.
 
-- WHEN the engine attempts to read or write a path outside the repository
-- THEN the attempt is refused and the run reports it as a step that could not be taken
+#### Scenario: The CLI is asked to run a shell command
 
-#### Scenario: No arbitrary commands
+- WHEN the model asks its own CLI to run a shell command
+- THEN the CLI's server denies it, because `shell` is not an available tool kind for the
+  session
 
-- WHEN the engine wants to run something that is not one of the project's own checks
-- THEN it is raised as a gate rather than executed
+#### Scenario: The CLI is asked to reach the network
 
-### Requirement: A run cannot spin forever
+- WHEN the model asks its own CLI to fetch a URL or otherwise reach the network
+- THEN the CLI's server denies it, because `url` is not an available tool kind for the
+  session
 
-Every run SHALL end: when the targeted task's checkbox is ticked, when its turn budget is
-spent, or when the user stops it. A run that exhausts its budget SHALL report that as its
-cause rather than appearing to still be working.
+### Requirement: A run ends on the CLI's own stop reason
 
-The budget SHALL be counted in turns - complete plan/act/observe cycles - rather than
-elapsed time, so a task behaves the same way regardless of how fast the chosen provider
-is. It SHALL default to 12 and SHALL be adjustable in settings.
+**(Narrowed from "a run cannot spin forever" - see correction note.)** GitWyrm does not
+count turns or enforce a turn budget of its own, because the Copilot CLI runs its own
+agent loop and reports its own stop reason (`end_turn`, `max_turn_requests`, `refusal`,
+`cancelled`) when a `session/prompt` completes. A run SHALL end when the CLI reports one
+of these, or when the user stops it. `max_turn_requests` and `refusal` SHALL be reported
+as "didn't finish", naming the CLI's own reason rather than a GitWyrm-counted budget.
 
-#### Scenario: Budget spent
+There is currently no GitWyrm-side setting to adjust how many turns the CLI's own loop
+may take; that ceiling, if any, belongs to the CLI.
 
-- WHEN the loop reaches its turn budget without the task's checkbox ticked
-- THEN the run ends as "didn't finish", naming the budget as the reason
+#### Scenario: The CLI reports it ran out of turns
 
-#### Scenario: Budget raised
+- WHEN the Copilot CLI's own turn ceiling is reached without the task's checkbox ticked
+- THEN the run ends as "didn't finish", naming the CLI's own stop reason
 
-- WHEN the user raises the turn budget in settings
-- THEN later runs use the new value, and a run already under way keeps the budget it
-  started with
+#### Scenario: The model refuses
+
+- WHEN the CLI's `stopReason` is `refusal`
+- THEN the run ends as "didn't finish" rather than reporting success it did not reach
 
 ### Requirement: Done means the task's checkbox is ticked
 
