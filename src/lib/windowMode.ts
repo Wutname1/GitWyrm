@@ -5,9 +5,18 @@
  * `?window=spec-desk&repo=<id>`. Routing on that keeps one bundle, one dev
  * server, and one set of bindings -- a second entry point would be another thing
  * to keep in sync for no gain.
+ *
+ * `agent-desk` is the session-foundation migration target from
+ * `docs/agent-desk/README.md`'s window-routing row: Agent Desk is meant to
+ * replace and expand Spec Desk as one app-wide second window, not add a
+ * third one. Until the UI itself moves, `?window=agent-desk` is accepted and
+ * reads exactly like `spec-desk` -- same params, same shell -- so opening it
+ * does not 404 into the main window while the rest of the migration lands in
+ * later changes. `spec-desk` keeps working unchanged; this is additive, not
+ * a replacement of that route.
  */
 export interface WindowMode {
-  kind: 'main' | 'spec-desk'
+  kind: 'main' | 'spec-desk' | 'agent-desk'
   /** Repository the Desk is for. Null in the main window. */
   repoId: string | null
   /**
@@ -26,9 +35,10 @@ export interface WindowMode {
 
 export function readWindowMode(): WindowMode {
   const params = new URLSearchParams(window.location.search)
-  if (params.get('window') === 'spec-desk') {
+  const windowParam = params.get('window')
+  if (windowParam === 'spec-desk' || windowParam === 'agent-desk') {
     return {
-      kind: 'spec-desk',
+      kind: windowParam,
       repoId: params.get('repo'),
       repoPath: params.get('path'),
       changeId: params.get('change'),
@@ -37,7 +47,8 @@ export function readWindowMode(): WindowMode {
   return { kind: 'main', repoId: null, repoPath: null, changeId: null }
 }
 
-/** True in the Spec Desk window. Cheap enough to call during render. */
+/** True in the Spec Desk or Agent Desk window. Cheap enough to call during render. */
 export function isSpecDeskWindow(): boolean {
-  return readWindowMode().kind === 'spec-desk'
+  const kind = readWindowMode().kind
+  return kind === 'spec-desk' || kind === 'agent-desk'
 }

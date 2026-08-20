@@ -1,3 +1,4 @@
+mod agentdesk;
 mod ai;
 mod airun;
 mod commands;
@@ -308,6 +309,14 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::spec_link::spec_link_set,
             commands::spec_link::spec_link_clear,
             snap_layouts::set_maximize_button_rect,
+            commands::agent_desk::agent_session_create,
+            commands::agent_desk::agent_session_list,
+            commands::agent_desk::agent_session_get,
+            commands::agent_desk::agent_session_rename,
+            commands::agent_desk::agent_session_archive,
+            commands::agent_desk::agent_session_mark_read,
+            commands::agent_desk::agent_session_append_user_message,
+            commands::agent_desk::agent_session_attach_context,
         ])
         .typ::<watcher::RepoChangedPayload>()
         .typ::<commands::remote::GitProgressPayload>()
@@ -315,6 +324,11 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         // command mentions, and this one only ever travels as an emitted event. Left
         // out, the frontend imports a type that is not there and the build fails.
         .typ::<airun::RunEventKind>()
+        // The durable session event envelope only ever travels as a future
+        // `agent-session-event` emit (architecture.md section 4, wired in a later
+        // task), so like RunEventKind above it needs an explicit `.typ::<>()` or the
+        // frontend type would never be generated.
+        .typ::<agentdesk::AgentSessionEvent>()
 }
 
 const SENTRY_DSN: &str = "https://543d8fb8597dad94c5d0bef310ad046f@o4511760230907904.ingest.us.sentry.io/4511924397735936";
@@ -614,6 +628,8 @@ pub fn run() {
         })
         .manage(crate::airun::SessionRegistry::new())
         .manage(commands::airun::DriverRegistry::default())
+        .manage(agentdesk::RunSessionLinks::new())
+        .manage(std::sync::Arc::new(agentdesk::SessionLocks::new()))
         .manage(RepoManager::default())
         .manage(WatcherRegistry::default())
         .manage(commands::updates::PendingUpdate::default())

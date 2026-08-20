@@ -36,6 +36,11 @@ export const keys = {
   /** Prefix: every branch's spec link for one repo. */
   specLinkAll: (repoId: string) => ['specLink', repoId] as const,
 
+  /** Prefix: every page of the Agent Desk session list, regardless of filter/cursor. */
+  agentSessionsAll: ['agentSessions'] as const,
+  agentSessions: (filterKey: string) => ['agentSessions', filterKey] as const,
+  agentSession: (sessionId: string) => ['agentSession', sessionId] as const,
+
   /**
    * Prefixes for invalidating every entry of a kind for one repo, regardless of
    * the trailing segments. Use these instead of hand-writing a shorter array:

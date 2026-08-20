@@ -125,10 +125,10 @@ async openInEditor(repoId: string, editor: EditorKind) : Promise<Result<null, st
  * Which editors are installed, whether Visual Studio is available, and the
  * solutions in this repo. Drives the toolbar's open button and the editor
  * picker in Settings.
- * Detection spawns a process per candidate launcher and walks the repo for
- * solutions, so it must not run on the IPC thread: everything else the
- * frontend asks for queues behind whatever is running there. The repo path is
- * resolved up front because `State` cannot cross into the blocking pool.
+ * Detection spawns vswhere and walks the repo for solutions, so it must not
+ * run on the IPC thread: everything else the frontend asks for queues behind
+ * whatever is running there. The repo path is resolved up front because
+ * `State` cannot cross into the blocking pool.
  */
 async getEditorAvailability(repoId: string | null) : Promise<Result<EditorAvailability, string>> {
     try {
@@ -3052,6 +3052,70 @@ async specLinkClear(repoId: string, branch: string) : Promise<Result<null, strin
  */
 async setMaximizeButtonRect(rect: ButtonRect | null) : Promise<void> {
     await TAURI_INVOKE("set_maximize_button_rect", { rect });
+},
+async agentSessionCreate(request: CreateSessionRequest) : Promise<Result<CreateSessionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_create", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionList(filter: SessionListFilterInput, cursor: string | null, limit: number) : Promise<Result<SessionListPageOutput, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_list", { filter, cursor, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionGet(sessionId: string) : Promise<Result<GetSessionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_get", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionRename(sessionId: string, title: string) : Promise<Result<UpdateSessionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_rename", { sessionId, title }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionArchive(sessionId: string, archived: boolean) : Promise<Result<UpdateSessionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_archive", { sessionId, archived }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionMarkRead(sessionId: string) : Promise<Result<UpdateSessionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_mark_read", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionAppendUserMessage(sessionId: string, content: string, attachments: MessageTarget[]) : Promise<Result<AppendUserMessageOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_append_user_message", { sessionId, content, attachments }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionAttachContext(sessionId: string, label: string, target: MessageTarget) : Promise<Result<AttachContextOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_attach_context", { sessionId, label, target }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -3065,8 +3129,73 @@ async setMaximizeButtonRect(rect: ButtonRect | null) : Promise<void> {
 
 /** user-defined types **/
 
+/**
+ * The full session file on disk: the header plus everything the transcript,
+ * executions list, and context panel need.
+ */
+export type AgentSession = { header: AgentSessionHeader; segments: ConversationSegment[]; messages: SessionMessage[]; executions: ExecutionRecord[]; attachments: ContextAttachment[] }
+/**
+ * One event on the way from an execution into a durable session.
+ * 
+ * `sequence` is monotonic per `execution_id`. It is what makes a duplicate
+ * harmless (ignore it) and a gap visible (persist and flag it) instead of
+ * silently reordering the transcript.
+ * 
+ * `u32`, matching [`super::model::SessionMessage::sequence`] and
+ * [`super::model::ExecutionRecord::last_sequence`] -- specta's TypeScript
+ * export refuses `u64`/`i64` outright (no built-in JS integer can represent
+ * the full range without precision loss), so every field reachable from an
+ * exported command or type has to stay within `u32` however unlikely
+ * billions of events in one execution actually are.
+ */
+export type AgentSessionEvent = { sessionId: string; executionId: string | null; sequence: number; 
+/**
+ * RFC 3339 UTC timestamp.
+ */
+occurredAt: string; kind: AgentSessionEventKind }
+/**
+ * What happened. Deliberately narrow: everything the UI needs to update
+ * either the transcript or the session header, nothing it has to infer.
+ */
+export type AgentSessionEventKind = 
+/**
+ * A new message was appended to the transcript.
+ */
+{ kind: "messageAppended"; message: SessionMessage } | 
+/**
+ * The session (or one of its executions) changed state.
+ */
+{ kind: "stateChanged"; state: SessionState } | 
+/**
+ * The event's execution is no longer the session's active one, so it was
+ * recorded (if at all) without becoming visible. Sent so a listener that
+ * already rendered something optimistically can reconcile.
+ */
+{ kind: "executionSuperseded"; executionId: string }
+/**
+ * The compact, list-friendly projection of a session.
+ * 
+ * This is what `index.json` stores: enough to render a sidebar row and
+ * resolve filters without reading every session file.
+ */
+export type AgentSessionHeader = { schemaVersion: number; sessionId: string; repoId: string; repoPath: string; repoName: string; title: string; source: SessionSource; intent: SessionIntent; state: SessionState; 
+/**
+ * RFC 3339 UTC timestamp.
+ */
+createdAt: string; 
+/**
+ * RFC 3339 UTC timestamp.
+ */
+updatedAt: string; unread: boolean; changedFileCount: number; activeExecutionId: string | null; archived: boolean }
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
+export type AppendUserMessageOutcome = { kind: "appended"; session: AgentSession; message: SessionMessage } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "writeFailed"; detail: string } | 
+/**
+ * The file could not be read right now -- a permission error, or a lock
+ * held by another process (common on Windows). Nothing was changed; the
+ * session is not known to be gone, and a retry may well succeed.
+ */
+{ kind: "unavailable"; detail: string }
 /**
  * The result of asking to archive: either the CLI ran, or GitWyrm stopped
  * first because the change is not ready.
@@ -3205,6 +3334,13 @@ label: string;
  * Desk tab to open: "proposal", "tasks", "deltas", or "design".
  */
 tab: string }
+export type AttachContextOutcome = { kind: "attached"; session: AgentSession; attachment: ContextAttachment } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "writeFailed"; detail: string } | 
+/**
+ * The file could not be read right now -- a permission error, or a lock
+ * held by another process (common on Windows). Nothing was changed; the
+ * session is not known to be gone, and a retry may well succeed.
+ */
+{ kind: "unavailable"; detail: string }
 /**
  * One line of a file, tagged with the commit that last changed it.
  */
@@ -3509,6 +3645,45 @@ ours_deleted: boolean;
  */
 theirs_deleted: boolean }
 /**
+ * Something attached to a session's context beyond the messages themselves:
+ * a pinned file, a pasted note, a linked OpenSpec task. Kept intentionally
+ * small in this change -- the context panel package defines richer variants.
+ */
+export type ContextAttachment = { attachmentId: string; label: string; target: MessageTarget; 
+/**
+ * RFC 3339 UTC timestamp.
+ */
+addedAt: string }
+/**
+ * A grouping boundary within a session's transcript, e.g. across a
+ * plan-then-execute split or a lead/helper divide. Kept minimal in this
+ * change; the conversation shell package extends how segments render.
+ */
+export type ConversationSegment = { segmentId: string; label: string; 
+/**
+ * RFC 3339 UTC timestamp.
+ */
+startedAt: string }
+/**
+ * A session was created, or the request could not produce one. Kept as an
+ * enum (rather than a plain `AgentSession`) so a future validation refusal
+ * has a variant to land in without becoming an `AppError`; today creation
+ * cannot fail except at the store layer, which still surfaces here rather
+ * than as a bare write error the UI has no name for.
+ */
+export type CreateSessionOutcome = { kind: "created"; session: AgentSession } | 
+/**
+ * The session was built but could not be written to disk. The caller
+ * still gets the header ID that will not be reused, so a retry can log
+ * against the same identity if that ever matters.
+ */
+{ kind: "writeFailed"; detail: string }
+/**
+ * What the caller provides to start a session. Everything the header needs
+ * besides what the backend generates itself (ID, timestamps, initial state).
+ */
+export type CreateSessionRequest = { repoId: string; repoPath: string; repoName: string; title: string; source: SessionSource; intent: SessionIntent }
+/**
  * The credential a provider needs, as entered by the user.
  */
 export type Credential = { token: string; 
@@ -3658,6 +3833,28 @@ solutions: SolutionFile[] }
  * settings, so these names are part of the saved-settings format.
  */
 export type EditorKind = "vs_code" | "cursor" | "windsurf" | "jetbrains" | "zed"
+/**
+ * One run attached to a session. A session can accumulate more than one
+ * execution over its lifetime (retries, follow-ups, helper runs).
+ */
+export type ExecutionRecord = { executionId: string; sessionId: string; 
+/**
+ * `None` for the lead; `Some(execution_id)` of the lead for a helper.
+ */
+parentExecutionId: string | null; state: SessionState; 
+/**
+ * RFC 3339 UTC timestamp.
+ */
+startedAt: string; 
+/**
+ * RFC 3339 UTC timestamp. `None` while still running.
+ */
+endedAt: string | null; 
+/**
+ * Highest sequence number persisted for this execution so far. Lets a
+ * late/duplicate event be recognized without rescanning `messages`.
+ */
+lastSequence: number }
 export type FileBlame = { path: string; lines: BlameLine[]; 
 /**
  * Set instead of `lines` when the file can't be blamed line-by-line.
@@ -3739,6 +3936,26 @@ export type GateRequest = { kind: "addDependency"; name: string } | { kind: "run
  */
 { kind: "unclassified"; summary: string }
 export type GeneratedCommitMessage = { summary: string; description: string }
+/**
+ * A single session lookup either finds the file or explains why not -- kept
+ * distinct from [`AppError`] because "no such session" and "the file exists
+ * but is damaged" are both routine states a caller displays, not faults.
+ */
+export type GetSessionOutcome = { kind: "found"; session: AgentSession } | 
+/**
+ * No file exists at that ID's path (never written, or the ID is wrong).
+ */
+{ kind: "notFound" } | 
+/**
+ * A file exists but could not be turned into a usable session.
+ */
+{ kind: "damaged"; reason: string } | 
+/**
+ * The file could not be read right now -- a permission error, or a lock
+ * held by another process (common on Windows). The session is not known
+ * to be gone; a retry may well succeed.
+ */
+{ kind: "unavailable"; detail: string }
 /**
  * Who git thinks the user is. Either field can be empty when git has never
  * been set up, which is the normal state on a fresh machine.
@@ -3828,6 +4045,18 @@ export type IgnoredFile = {
  * Path relative to the source checkout.
  */
 path: string; size_bytes: number }
+/**
+ * Where an imported message actually came from. Present only on messages
+ * brought in from an external client adapter (a later change); native
+ * messages leave this `None`. Its presence is what stops an imported message
+ * from ever being presented as native output.
+ */
+export type ImportProvenance = { adapterId: string; externalSessionId: string; externalMessageId: string; 
+/**
+ * RFC 3339 UTC timestamp of the import operation itself, distinct from
+ * the message's own `timestamp`.
+ */
+importedAt: string }
 /**
  * What happened when an install was attempted.
  * 
@@ -3955,6 +4184,19 @@ full_message: string | null;
  * with `operation: None`.
  */
 conflicts: string[] }
+/**
+ * What kind of content a message carries. Separate from `role`: an assistant
+ * role can produce a thought summary, a tool call, or a final result, and the
+ * UI renders each differently.
+ */
+export type MessageKind = "user" | "assistant" | "thoughtSummary" | "tool" | "approval" | "system" | "result"
+export type MessageRole = "user" | "assistant" | "system"
+/**
+ * A link from a message to something else in the app: a file, a diff, the
+ * session's own source, a graph node, or an OpenSpec task. Exhaustive so a
+ * message never carries a target the UI has no renderer for.
+ */
+export type MessageTarget = { kind: "file"; path: string } | { kind: "diff"; scope: string } | { kind: "source" } | { kind: "graphNode"; executionId: string } | { kind: "openSpecTask"; changeId: string; taskIndex: number }
 export type ModelList = { models: CatalogModel[]; 
 /**
  * True when the list came from the provider's own `/models` endpoint, so
@@ -4508,6 +4750,85 @@ head_branch: string | null }
  * Added lines carry `new_no`; removed lines carry `old_no`.
  */
 export type SelectedLine = { hunk_index: number; old_no: number | null; new_no: number | null }
+export type SessionFileDiagnosticOutput = { path: string; reason: string }
+/**
+ * What the user was trying to do when the session started. Drives the
+ * default mode/team/write/worktree policy in `src-tauri/src/agentdesk/policy.rs`
+ * (a later task), not persisted behavior here.
+ */
+export type SessionIntent = "ask" | "explain" | "plan" | "fix" | "review" | "summarize"
+/**
+ * Bindings-friendly mirror of [`SessionListFilter`]: the store type uses
+ * `Vec<&'static str>` for source kinds, which specta cannot export as-is, and
+ * every filter field is required here (rather than defaulted) so the
+ * frontend request shape is explicit about "no filter" being an empty
+ * vec/`None`, not an omitted field.
+ */
+export type SessionListFilterInput = { repoId: string | null; projectPath: string | null; states: SessionState[]; sourceKinds: string[]; hasChangedFiles: boolean | null; archived: boolean | null; titleContains: string | null }
+/**
+ * Bindings-friendly mirror of [`SessionListPage`], with diagnostics reduced
+ * to display-safe strings -- the frontend does not need to distinguish
+ * [`crate::agentdesk::model::SessionLoadError`] variants, only that a file
+ * could not be read and why, so the specta surface does not have to reach
+ * into that error enum too.
+ */
+export type SessionListPageOutput = { headers: AgentSessionHeader[]; nextCursor: string | null; diagnostics: SessionFileDiagnosticOutput[] }
+/**
+ * One entry in the transcript.
+ */
+export type SessionMessage = { messageId: string; segmentId: string; role: MessageRole; 
+/**
+ * RFC 3339 UTC timestamp.
+ */
+timestamp: string; plainContent: string; renderedContent: string | null; provider: string | null; model: string | null; kind: MessageKind; executionId: string | null; 
+/**
+ * Position within that execution's ordered event stream. `None` for
+ * messages not produced by an execution (user messages, system notes).
+ */
+sequence: number | null; import: ImportProvenance | null; targets: MessageTarget[] }
+/**
+ * What started a session, and what to show if the live thing it points to
+ * disappears.
+ * 
+ * Every variant carries a cached snapshot captured at launch time. Refreshing
+ * a session updates the live locator's data but must never overwrite the
+ * snapshot -- that is the only honest record of what the user actually
+ * clicked, and it is what the source banner falls back to when the live
+ * source is gone (see spec `Deleted issue` scenario).
+ */
+export type SessionSource = { kind: "manual"; repoId: string } | { kind: "issue"; hostId: string; owner: string; repo: string; number: number; url: string; snapshot: SourceSnapshot } | { kind: "pullRequest"; hostId: string; owner: string; repo: string; number: number; url: string; head: string; base: string; snapshot: SourceSnapshot } | { kind: "openSpecChange"; changeId: string; snapshot: SourceSnapshot } | { kind: "openSpecTask"; changeId: string; taskIndex: number; taskText: string; snapshot: SourceSnapshot } | { kind: "commit"; oid: string; snapshot: SourceSnapshot } | { kind: "diff"; scope: string; paths: string[]; snapshot: SourceSnapshot } | { kind: "workingChanges"; paths: string[]; snapshot: SourceSnapshot } | { kind: "checkFailure"; provider: string; checkId: string; url: string | null; snapshot: SourceSnapshot }
+/**
+ * Where a session is. Distinct from `airun::RunState`: a session outlives any
+ * single execution and has states -- `Draft`, `Ready`, `MissingSource` -- that
+ * have no execution running at all.
+ */
+export type SessionState = 
+/**
+ * Created but no message sent yet.
+ */
+"draft" | 
+/**
+ * Kickoff accepted; provider/policy resolution has not finished.
+ */
+"preparing" | 
+/**
+ * Has a plan or transcript, no execution currently running.
+ */
+"ready" | 
+/**
+ * An execution is actively running.
+ */
+"working" | 
+/**
+ * Paused at a gate or awaiting a plan-mode start decision.
+ */
+"needsInput" | "finished" | "failed" | "stopped" | 
+/**
+ * The source this session depends on could not be loaded at all (never
+ * loaded successfully, as opposed to a snapshot's `live_unavailable`
+ * flag, which means it loaded once and later disappeared).
+ */
+"missingSource"
 export type Settings = { 
 /**
  * Paths of repos open in tabs, in tab order, so they can be reopened on launch.
@@ -5014,6 +5335,21 @@ relative_path: string;
  */
 absolute_path: string }
 /**
+ * The cached title/body captured when a session was created from a source.
+ * Never mutated by a refresh -- refreshes update the live-availability flag
+ * on the surrounding variant's own fields, not this snapshot.
+ */
+export type SourceSnapshot = { title: string; summary: string; 
+/**
+ * RFC 3339 UTC timestamp of when the snapshot was captured.
+ */
+capturedAt: string; 
+/**
+ * Set once a refresh finds the live source cannot be loaded. The snapshot
+ * itself is left untouched so the banner can keep showing it.
+ */
+liveUnavailable: boolean }
+/**
  * One change folder, fully parsed.
  */
 export type SpecChange = { 
@@ -5519,6 +5855,19 @@ export type UpdateChannel = "stable" | "beta"
  * without downloading an AppImage or asking for root access.
  */
 export type UpdateInstallMode = "self_update" | "system_package"
+/**
+ * The shared shape of every "load, mutate the header, write back" command:
+ * rename, archive, and mark-read all reduce to this with a different
+ * mutation closure, so the not-found/damaged/write-failed branches are
+ * written and tested exactly once.
+ */
+export type UpdateSessionOutcome = { kind: "updated"; session: AgentSession } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "writeFailed"; detail: string } | 
+/**
+ * The file could not be read right now -- a permission error, or a lock
+ * held by another process (common on Windows). Nothing was changed; the
+ * session is not known to be gone, and a retry may well succeed.
+ */
+{ kind: "unavailable"; detail: string }
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }
 /**
  * One checkout of the repository: the main one, or a linked worktree.

@@ -8,6 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { WorkspaceLayout } from '@/layouts/WorkspaceLayout'
 import { SpecDeskView } from '@/views/SpecDeskView'
+import { AgentDeskDevView } from '@/views/AgentDeskDevView'
 import { readWindowMode } from '@/lib/windowMode'
 import { listenForSettingsChanges } from '@/lib/settingsSync'
 import { listenForSpecRefresh, listenForSpecSelection } from '@/lib/specSync'
@@ -32,6 +33,7 @@ import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
 import { noteRepoAvailability } from '@/hooks/useRepoActions'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { useAiRunListener } from '@/hooks/useAiRun'
+import { useAgentSessionListener } from '@/hooks/useAgentSessions'
 import { useAutoFetch } from '@/hooks/useAutoFetch'
 import { useTheme } from '@/hooks/useTheme'
 import { useFont } from '@/hooks/useFont'
@@ -90,6 +92,10 @@ function AppInner() {
   // One listener for the window. Each surface that shows a run reads the shared
   // store rather than subscribing itself.
   useAiRunListener()
+  // Same shape, for Agent Desk sessions: one `agent-session-event` listener at
+  // the app root, idempotent across remount (see the ref-count guard in
+  // `useAgentSessions.ts`) so a future second mount site never double-applies.
+  useAgentSessionListener()
   useAutoFetch()
   useTheme()
   useFont()
@@ -472,6 +478,7 @@ function SpecDeskRoot() {
   // edit in any of the other open tabs would refetch this window's queries too.
   useRepoWatcher(readWindowMode().repoId)
   useAiRunListener()
+  useAgentSessionListener()
 
   // Opened from a change, so start on it. The selection broadcast that keeps the
   // two windows in step cannot reach a window that did not exist when it fired,
@@ -516,9 +523,15 @@ function SpecDeskRoot() {
     []
   )
 
+  // `agent-desk` reuses this window shell (theme, settings hydration, the AI
+  // run/session listeners) but renders the temporary dev surface from task
+  // 6.2 instead of the Spec Desk UI, until the real Agent Desk view lands in
+  // a later change.
+  const isAgentDesk = readWindowMode().kind === 'agent-desk'
+
   return (
     <>
-      <SpecDeskView />
+      {isAgentDesk ? <AgentDeskDevView /> : <SpecDeskView />}
       {/* The Desk mounts no other modals, but "New change" is reachable from
           its header, so this one has to exist in this window too. It needs the
           repo id passed in: this window has no active repo in its store, so the
@@ -541,7 +554,11 @@ export default function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider delayDuration={300}>
-          {mode.kind === 'spec-desk' ? <SpecDeskRoot /> : <AppInner />}
+          {mode.kind === 'spec-desk' || mode.kind === 'agent-desk' ? (
+            <SpecDeskRoot />
+          ) : (
+            <AppInner />
+          )}
         </TooltipProvider>
       </QueryClientProvider>
     </ErrorBoundary>

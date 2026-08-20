@@ -48,6 +48,9 @@ time = { version = "0.3", features = ["formatting", "local-offset", "macros", "p
 thiserror = "2"
 git2 = "0.21"
 notify = "8"
+# Atomic session-file writes for Agent Desk (temp file + rename), not just a
+# test helper -- this is why it moved out of [dev-dependencies].
+tempfile = "3"
 # Deleting a file from the changes menu goes to the Recycle Bin / Trash, not
 # straight off disk, so a misclick stays recoverable.
 trash = "5"
@@ -111,9 +114,6 @@ windows-sys = { version = "0.61", features = [
 	"Win32_System_LibraryLoader",
 	"Win32_Graphics_Gdi",
 ] }
-
-[dev-dependencies]
-tempfile = "3"
 
 [profile.release]
 codegen-units = 1

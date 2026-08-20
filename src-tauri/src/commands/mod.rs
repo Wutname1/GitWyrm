@@ -1,3 +1,4 @@
+pub mod agent_desk;
 pub mod ai;
 pub mod ai_commits;
 pub mod airun;

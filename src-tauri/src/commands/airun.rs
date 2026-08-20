@@ -373,6 +373,14 @@ fn pump(
 /// The registry is asked first: it drops anything from a session that is no
 /// longer current, so a driver still finishing cannot write into a newer run's
 /// console.
+///
+/// After the existing `ai-run-event` emission (unchanged -- task 4.5), this
+/// also routes the same event toward the durable Agent Desk store via
+/// `agentdesk::route_run_event`. That path is additive and self-contained: a
+/// repository with no linked durable session (the case for every run today,
+/// since nothing yet calls `RunSessionLinks::link`) takes the
+/// `NoLinkedSession` branch and does nothing further, so this call cannot
+/// change what already happens on `RUN_EVENT`, only add to it.
 fn emit(app: &tauri::AppHandle, repo_id: &str, session_id: &str, state: RunState, step: RunStep) {
     let event = RunEventKind {
         repo_id: repo_id.to_string(),
@@ -392,7 +400,75 @@ fn emit(app: &tauri::AppHandle, repo_id: &str, session_id: &str, state: RunState
         event.session_id,
         event.state
     );
-    let _ = app.emit(RUN_EVENT, event);
+    let _ = app.emit(RUN_EVENT, event.clone());
+
+    route_to_agent_desk(app, &event);
+}
+
+/// The durable-path half of [`emit`]. Split out so a failure or an
+/// unavailable store root can never touch the `ai-run-event` emission above
+/// it -- by the time this runs, `RUN_EVENT` has already gone out either way.
+fn route_to_agent_desk(app: &tauri::AppHandle, event: &RunEventKind) {
+    use crate::agentdesk::{
+        route_run_event, RunEventRouted, RunSessionLinks, SessionLocks, SessionStoreRoot,
+    };
+
+    let links = app.state::<RunSessionLinks>();
+    // No repository is linked yet in normal operation (nothing calls
+    // `RunSessionLinks::link` in this change), so this is almost always a
+    // single uncontended map lookup that returns `NoLinkedSession` -- resolving
+    // the store root first would mean touching the filesystem on every single
+    // run event for no reason.
+    if links.get(&event.repo_id).is_none() {
+        return;
+    }
+
+    let root = match SessionStoreRoot::resolve(app) {
+        Ok(root) => root,
+        Err(e) => {
+            log::warn!("agent desk store unavailable, durable run event dropped: {e}");
+            return;
+        }
+    };
+
+    let now = time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into());
+    let sequence = links.next_sequence(&event.session_id);
+    let locks = app.state::<Arc<SessionLocks>>();
+
+    match route_run_event(&root, &links, &locks, sequence, &now, event) {
+        RunEventRouted::Persisted { event: durable } => {
+            let _ = app.emit(crate::agentdesk::AGENT_SESSION_EVENT, durable);
+        }
+        // Ignored per design.md ("Duplicate event sequence: ignore it" /
+        // "Event for replaced execution: ignore it in both backend and
+        // frontend"): correct, silent behavior, not a fault. In particular,
+        // `BridgeOutcome::ExecutionSuperseded` is deliberately *not* turned
+        // into an `AgentSessionEventKind::ExecutionSuperseded` emit here --
+        // design.md is explicit that a superseded event is ignored on both
+        // sides, and nothing was persisted for it to describe (see
+        // "Persist an event before emitting it to the UI", also design.md).
+        // `AgentSessionEventKind::ExecutionSuperseded` exists in the event
+        // enum and `agentSessionStore.ts` handles it, but nothing in this
+        // change's scope produces one; see that store's doc comment for the
+        // forward-looking reason it stays.
+        RunEventRouted::NoLinkedSession
+        | RunEventRouted::Ignored(_) => {}
+        RunEventRouted::SessionUnavailable => {
+            log::warn!(
+                "agent desk session for repo {} could not be read; durable run event dropped",
+                event.repo_id
+            );
+        }
+        RunEventRouted::WriteFailed { detail } => {
+            // Per task 4.3/design.md: a write failure must never be followed
+            // by an emit. There is nothing more to do here than log it --
+            // `ai-run-event` already carried the event to the live UI, so the
+            // run itself is unaffected, only its durable copy is missing.
+            log::warn!("agent desk durable write failed, event not persisted: {detail}");
+        }
+    }
 }
 
 /// Make a disposable folder for a run to work in, on its own branch.
