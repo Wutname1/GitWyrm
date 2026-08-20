@@ -6,6 +6,7 @@ import {
   ClipboardCopy,
   Code2,
   MessageCircleQuestion,
+  MessagesSquare,
   Play,
   Sparkles,
   SquareTerminal,
@@ -24,6 +25,8 @@ import { commands } from "@/lib/bindings";
 import { unwrap } from "@/lib/queryKeys";
 import { openAiSettings } from "@/lib/openAiSettings";
 import { composeTaskHandoff, copyTaskHandoff } from "@/lib/specHandoff";
+import { openSpecChangeSourceInput, openSpecTaskSourceInput } from "@/lib/agentDeskSources";
+import { useStartAgentSession } from "@/hooks/useStartAgentSession";
 import { nextTask, useOpenspecMutations } from "@/hooks/useOpenspec";
 import { useSpecAi } from "@/hooks/useSpecAi";
 import { useAiSelection } from "@/hooks/useAiSelection";
@@ -225,6 +228,28 @@ export function DeskActionRail({
   const allDone = !task && !change.progress.is_draft;
   const remaining = change.progress.total - change.progress.done;
   const handoff = composeTaskHandoff(change, task);
+
+  // Package `agent-desk-openspec-workflows` tasks.md 1.1/1.3: opens (or
+  // focuses) a durable Agent Desk session for this exact task/change,
+  // alongside -- not instead of -- Spec Desk's own run/handoff actions
+  // above. `repoName` is not threaded through as a prop today, so it is
+  // derived from `repoPath` the same way the backend derives it for a fresh
+  // Agent Desk window title (`commands::spec_desk::open_spec_desk`'s
+  // `repo_name` from `path.file_name()`).
+  const { startSession, startingKey: agentDeskStartingKey } = useStartAgentSession();
+  const repoName = repoPath.split(/[\\/]/).filter(Boolean).pop() ?? repoPath;
+  const agentDeskKey = task ? `openSpecTask:${change.id}:${task.index}` : `openSpecChange:${change.id}`;
+  const openInAgentDesk = () => {
+    void startSession({
+      repoId,
+      repoPath,
+      repoName,
+      intent: task ? "fix" : "plan",
+      key: agentDeskKey,
+      source: task ? openSpecTaskSourceInput(change, task) : openSpecChangeSourceInput(change),
+    });
+  };
+  const agentDeskStarting = agentDeskStartingKey === agentDeskKey;
 
   // Whether opencode can actually be launched. A machine-level fact, so it is
   // not keyed by repo. Assumed available until the probe answers, so the button
@@ -473,6 +498,16 @@ export function DeskActionRail({
           </p>
 
           <div className="mt-3 flex flex-col gap-2">
+            {/* Opens a durable Agent Desk session naming this exact task
+                (or the whole change, with no task open) as its source --
+                separate from Spec Desk's own inline run above, and
+                available whether or not Spec Desk itself has AI
+                configured, since Agent Desk resolves its own provider. */}
+            <RailButton
+              icon={<MessagesSquare size={12} strokeWidth={2.2} />}
+              label={agentDeskStarting ? "Starting…" : "Open in Agent Desk"}
+              onClick={openInAgentDesk}
+            />
             {ai.configured ? (
               <>
                 {task && (

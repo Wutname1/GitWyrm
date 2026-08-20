@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
@@ -7,16 +7,24 @@ import { unwrap, keys } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { readWindowMode, type WindowMode } from '@/lib/windowMode'
 import { AgentDeskTitleBar } from '@/components/domain/agent-desk/AgentDeskTitleBar'
+import { AgentWorkspaceToolbar } from '@/components/domain/agent-desk/AgentWorkspaceToolbar'
 import { SessionSidebar } from '@/components/domain/agent-desk/SessionSidebar'
-import { SessionContextPanel } from '@/components/domain/agent-desk/SessionContextPanel'
-import { AgentGraphPanel } from '@/components/domain/agent-desk/AgentGraphPanel'
 import { ConversationPane } from '@/components/domain/agent-desk/ConversationPane'
+import { PaneDetailPopover } from '@/components/domain/agent-desk/PaneDetailPopover'
+import { DockedDetailPanel } from '@/components/domain/agent-desk/DockedDetailPanel'
+import { AgentDeskDockDropZone } from '@/components/domain/agent-desk/AgentDeskDockDropZones'
 import { OpenSpecEmbeddedDetail } from '@/components/domain/agent-desk/OpenSpecEmbeddedDetail'
 import { useAgentSession, useAgentSessionHeaders } from '@/hooks/useAgentSessions'
+import { useContainerWidth } from '@/hooks/useContainerWidth'
+import { resolveDrop, resolveResponsiveMode, resolveSplitPresentation, shouldHideButtonLabels, zoneLabel } from '@/lib/agentDeskDock'
+import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { cn } from '@/lib/utils'
 import { resolveAgentDeskShellState } from '@/views/agentDeskViewState'
+import { otherPane, resolvePaneTarget, type PaneId } from '@/lib/agentDeskPaneTargeting'
+import { isRightDockSafeAtWidth, resolveDockVisibility, zoneToPlacement, type DockZone } from '@/lib/agentDeskDockPlacement'
+import type { DockKind } from '@/lib/agentWorkspaceLayout'
+import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 
-type RightTab = 'context' | 'graph'
 type CenterView = 'conversation' | 'openspec'
 
 /** Matches the Rust side's `agent-desk://select-target` in `spec_desk.rs`. */
@@ -111,18 +119,79 @@ function CenteredMessage({ title, detail }: { title: string; detail: string }) {
 }
 
 /**
- * The Agent Desk window: dense session navigation on the left, one active
- * conversation in the center, and Context/Graph/OpenSpec detail on the
- * right.
+ * One conversation pane plus its own Source/Context/Graph header buttons and
+ * popover -- kept as a small local component (not a new file) since
+ * everything it needs (`headerAnchorRef`, the popover) is scoped to exactly
+ * one pane instance and never shared with its sibling.
+ */
+function AgentDeskPane({
+  pane,
+  sessionId,
+  isActive,
+  onFocusPane,
+  onPin,
+  detailSession,
+  showSourceBanner,
+}: {
+  pane: PaneId
+  sessionId: string | null
+  isActive: boolean
+  onFocusPane: (pane: PaneId) => void
+  onPin: (pane: PaneId, kind: DockKind, edge: 'left' | 'right' | 'bottom') => void
+  detailSession: ReturnType<typeof useAgentSession>['session']
+  /**
+   * tasks.md 8.1/8.2: the workspace toolbar's visibility toggle reaches the
+   * big source bar above each transcript -- and only that. The Source button
+   * in `headerSlot` below is deliberately not gated on it, so hiding the bars
+   * never takes the information away, it just stops it taking up room.
+   */
+  showSourceBanner: boolean
+}) {
+  const headerAnchorRef = useRef<HTMLDivElement | null>(null)
+  return (
+    <section
+      data-pane={pane}
+      onFocusCapture={() => onFocusPane(pane)}
+      onMouseDownCapture={() => onFocusPane(pane)}
+      className={cn(
+        'flex min-h-0 flex-1 flex-col outline-none',
+        // tasks.md 4.2/5.3: an unmistakable, inset accent border marks the
+        // active pane, matching the mockup's `.ag-pane.is-active` treatment.
+        isActive && 'shadow-[inset_0_2px_0_var(--gw-accent)]'
+      )}
+      aria-label={isActive ? 'Active conversation pane' : 'Conversation pane'}
+    >
+      <ConversationPane
+        sessionId={sessionId}
+        isActive={isActive}
+        paneLabel={pane === 'primary' ? 'First chat' : 'Second chat'}
+        showSourceBanner={showSourceBanner}
+        headerAnchorRef={headerAnchorRef}
+        headerSlot={
+          <PaneDetailPopover
+            session={detailSession}
+            headerAnchorRef={headerAnchorRef}
+            onPin={(kind, edge) => onPin(pane, kind, edge)}
+          />
+        }
+      />
+    </section>
+  )
+}
+
+/**
+ * The Agent Desk window: dense session navigation on the left, one or two
+ * active conversation panes in the center (Split View), and a shared
+ * Context/Graph/Source dock that follows the active pane -- plus OpenSpec
+ * detail as a full-width alternate center view.
  *
- * Layout seam for the future workspace-layout package: everything below the
- * titlebar lives inside `.agent-desk-columns`, a single flex row of
- * `[sidebar][center][right]`. Adding a second `ConversationPane` (Split
- * View) or a dock on another edge means changing what sits in the center
- * slot and adding a sibling column here -- it does not require touching the
- * sidebar or titlebar. `ConversationPane` itself only ever receives a
- * `sessionId` and `isActive`; nothing in this file reaches into a pane's
- * internals or assumes there is exactly one.
+ * Pane/dock/draft state now lives in `useAgentDeskUiStore`
+ * (`src/stores/agentDeskUiStore.ts`) rather than local `useState`: that
+ * store is the persisted, restart-surviving source of truth for the layout
+ * (architecture.md section 5), and this view is only ever a reader/writer of
+ * it through its documented API (`setPaneSession`, `setActivePane`,
+ * `openSplit`/`closeSplit`, `openDock`/`moveDock`/`resizeDock`/`closeDock`,
+ * `resetLayout`, `setSourceBarsVisible`/`toggleSourceBarsVisible`).
  */
 export function AgentDeskView() {
   const mode = useDeskTarget()
@@ -130,15 +199,69 @@ export function AgentDeskView() {
   const repoId = repo?.id ?? null
   const qc = useQueryClient()
 
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
-  // The right panel needs the whole session, not just its id. This is the
-  // same cached query ConversationPane uses, so selecting a chat does not
-  // fetch it twice.
-  const { session: detailSession } = useAgentSession(selectedSessionId)
-  const [rightTab, setRightTab] = useState<RightTab>('context')
+  const hydrated = useAgentDeskUiStore((s) => s.hydrated)
+  const hydrate = useAgentDeskUiStore((s) => s.hydrate)
+  const layout = useAgentDeskUiStore((s) => s.layout)
+  const setPaneSession = useAgentDeskUiStore((s) => s.setPaneSession)
+  const setActivePane = useAgentDeskUiStore((s) => s.setActivePane)
+  const restorePaneToFallback = useAgentDeskUiStore((s) => s.restorePaneToFallback)
+  const openSplit = useAgentDeskUiStore((s) => s.openSplit)
+  const closeSplit = useAgentDeskUiStore((s) => s.closeSplit)
+  const setSourceBarsVisible = useAgentDeskUiStore((s) => s.setSourceBarsVisible)
+  const toggleSourceBarsVisible = useAgentDeskUiStore((s) => s.toggleSourceBarsVisible)
+  const openDock = useAgentDeskUiStore((s) => s.openDock)
+  const moveDock = useAgentDeskUiStore((s) => s.moveDock)
+  const resizeDock = useAgentDeskUiStore((s) => s.resizeDock)
+  const closeDock = useAgentDeskUiStore((s) => s.closeDock)
+  const resetLayout = useAgentDeskUiStore((s) => s.resetLayout)
+
+  // tasks.md 8.5: restore layout before first paint, not after -- runs once,
+  // synchronously in an effect with no dependency on anything that could
+  // delay it (repo open, session list) so the pane grid never flashes from
+  // "single pane" to "restored split" a frame after mount.
+  useEffect(() => {
+    hydrate(window.innerWidth)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const [centerView, setCenterView] = useState<CenterView>('conversation')
   const [creating, setCreating] = useState(false)
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
+  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth)
   const composerFocusRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  /**
+   * tasks.md 5.8: the conversation column's own width, not the window's,
+   * decides whether the panes sit side by side, stack, or reduce to one pane
+   * plus a switcher.
+   *
+   * Measured rather than taken from a viewport media query because this
+   * column shares the window with the chat list and (often) a docked panel:
+   * a wide window with a wide left dock still leaves the panes cramped, and
+   * a `min-[761px]` utility class cannot see that. `SessionSidebar` already
+   * measures its own container the same way, for the same reason.
+   */
+  const paneAreaRef = useRef<HTMLDivElement | null>(null)
+  const paneAreaWidth = useContainerWidth(paneAreaRef)
+  const responsiveMode = resolveResponsiveMode(paneAreaWidth)
+  const splitPresentation = resolveSplitPresentation(layout.split, responsiveMode)
+
+  const primarySessionId = layout.primarySessionId
+  const secondarySessionId = layout.secondarySessionId
+  const activePane = layout.activePane
+
+  // The dock (and each pane's popover) needs the whole session, not just its
+  // id. Both read through the same cached `useAgentSession` query
+  // `ConversationPane` uses, so following the active pane never refetches.
+  const { session: primaryDetailSession } = useAgentSession(primarySessionId)
+  const { session: secondaryDetailSession } = useAgentSession(secondarySessionId)
+  const activeDetailSession = activePane === 'secondary' ? secondaryDetailSession : primaryDetailSession
 
   // Rule #1: a retarget must be visibly apparent, not silent. Clearing the
   // selected session both (a) stops the previous repo's conversation from
@@ -159,10 +282,11 @@ export function AgentDeskView() {
     if (previousRepoId.current !== mode.repoId) {
       previousRepoId.current = mode.repoId
       announceNextRepo.current = true
-      setSelectedSessionId(null)
+      setPaneSession('primary', null)
+      setPaneSession('secondary', null)
       setCenterView('conversation')
     }
-  }, [mode.repoId])
+  }, [mode.repoId, setPaneSession])
 
   useEffect(() => {
     if (repo && announceNextRepo.current) {
@@ -196,17 +320,41 @@ export function AgentDeskView() {
   // Land on the most recent session automatically so the window is never
   // just an empty pane the first time it opens with sessions already saved.
   useEffect(() => {
-    if (selectedSessionId == null && headers.length > 0) {
-      setSelectedSessionId(headers[0].sessionId)
+    if (hydrated && primarySessionId == null && secondarySessionId == null && headers.length > 0) {
+      setPaneSession('primary', headers[0].sessionId)
     }
-  }, [headers, selectedSessionId])
+  }, [hydrated, headers, primarySessionId, secondarySessionId, setPaneSession])
+
+  // tasks.md 4.5: a pane whose session no longer resolves (deleted/archived
+  // out from under it) falls back to the newest valid session rather than
+  // showing a dead reference forever.
+  useEffect(() => {
+    if (!hydrated || headers.length === 0) return
+    const validIds = new Set(headers.map((h) => h.sessionId))
+    if (primarySessionId && !validIds.has(primarySessionId)) {
+      restorePaneToFallback('primary', headers[0].sessionId)
+    }
+    if (layout.split && secondarySessionId && !validIds.has(secondarySessionId)) {
+      restorePaneToFallback('secondary', headers[0].sessionId)
+    }
+  }, [hydrated, headers, primarySessionId, secondarySessionId, layout.split, restorePaneToFallback])
 
   const onSelectSession = (sessionId: string) => {
-    setSelectedSessionId(sessionId)
-    // Rule #1: a click always produces a visible response. Selecting a
-    // session both highlights the row (handled by SessionSidebar's
-    // aria-current styling) and moves focus into the conversation so a
-    // keyboard user lands somewhere useful, not on a stale focus target.
+    const target = resolvePaneTarget({
+      split: layout.split,
+      activePane: layout.activePane,
+      primarySessionId,
+      secondarySessionId,
+      sessionId,
+    })
+    if (target.action === 'open') {
+      setPaneSession(target.pane, sessionId)
+    }
+    setActivePane(target.pane)
+    // Rule #1: a click always produces a visible response. Selecting (or
+    // refocusing) a session both highlights its pane (via `activePane`) and
+    // moves focus into the conversation so a keyboard user lands somewhere
+    // useful, not on a stale focus target.
     composerFocusRef.current?.focus()
   }
 
@@ -224,9 +372,11 @@ export function AgentDeskView() {
       }
       const outcome = unwrap(await commands.agentSessionCreate(request))
       if (outcome.kind === 'created') {
-        setSelectedSessionId(outcome.session.header.sessionId)
+        // tasks.md 4.6: New chat replaces the *active* pane and focuses its composer.
+        setPaneSession(layout.activePane, outcome.session.header.sessionId)
         void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
         toast.success('New chat started.')
+        composerFocusRef.current?.focus()
       } else {
         toast.error('Could not start a new chat.', { description: outcome.kind })
       }
@@ -239,6 +389,75 @@ export function AgentDeskView() {
     }
   }
 
+  const onFocusPane = (pane: PaneId) => {
+    if (pane !== layout.activePane) setActivePane(pane)
+  }
+
+  const onPin = (pane: PaneId, kind: DockKind, edge: 'left' | 'right' | 'bottom') => {
+    if (pane !== layout.activePane) setActivePane(pane)
+    openDock(kind, edge)
+  }
+
+  /**
+   * The single move path behind all three ways to place a panel (tasks.md
+   * 7.4/7.5/7.7): the Move menu, a pointer drop, and the keyboard all end up
+   * here, so no destination is reachable by one route and not the others.
+   *
+   * `resolveDrop` decides whether the move is real, and a rejection always
+   * carries a plain-language reason (7.6) -- so a drop that cannot be
+   * honoured says why and leaves the panel exactly where it was, rather than
+   * silently doing nothing and looking broken.
+   */
+  const onMoveDock = (zone: DockZone) => {
+    const outcome = resolveDrop({
+      targetZone: zone,
+      dock: layout.dock,
+      // The right edge is only offered while it is actually safe -- below
+      // that width a right dock would crush the conversation (7.10).
+      rightZoneUnavailable: !isRightDockSafeAtWidth(windowWidth),
+    })
+    if (outcome.status === 'reject') {
+      toast.info(outcome.reason)
+      return
+    }
+    const placement = zoneToPlacement(outcome.zone)
+    moveDock(placement.edge, placement.leftOrder)
+    toast.success(`Panel moved: ${zoneLabel(outcome.zone).toLowerCase()}.`)
+  }
+
+  const onDockDrop = onMoveDock
+
+  // tasks.md 8.4: Ctrl+Alt+S toggles the source bars, and Ctrl+1/Ctrl+2
+  // focus a pane. Scoped to this window only, following App.tsx's own
+  // addEventListener idiom (there is no command-palette/keybinding registry
+  // to hook into instead).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        toggleSourceBarsVisible()
+        return
+      }
+      if (e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (e.key === '1') {
+          e.preventDefault()
+          setActivePane('primary')
+        } else if (e.key === '2' && layout.split) {
+          e.preventDefault()
+          setActivePane('secondary')
+        } else if (e.key === '\\') {
+          // Focus-the-other-pane, a lightweight complement to Ctrl+1/2 when split.
+          if (layout.split) {
+            e.preventDefault()
+            setActivePane(otherPane(layout.activePane))
+          }
+        }
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [layout.split, layout.activePane, toggleSourceBarsVisible, setActivePane])
+
   const repoName = repo?.name ?? 'Loading…'
 
   const shellState = resolveAgentDeskShellState({
@@ -247,8 +466,16 @@ export function AgentDeskView() {
     repoReady: repo != null,
     sessionsLoading,
     sessionCount: headers.length,
-    hasSelection: selectedSessionId != null,
+    hasSelection: primarySessionId != null || secondarySessionId != null,
   })
+
+  const dockVisibility = useMemo(() => resolveDockVisibility(layout.dock, windowWidth), [layout.dock, windowWidth])
+  // tasks.md 7.10: at unsafe widths a pinned right dock falls back to being
+  // reachable only through each pane's own popover -- the dock's session
+  // stays exactly what it was, just not rendered pinned, so re-widening the
+  // window (or a resize back above the threshold) brings it back with no
+  // extra state to reconcile.
+  const showPinnedDock = layout.dock != null && dockVisibility === 'pinned'
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-foreground">
@@ -293,18 +520,34 @@ export function AgentDeskView() {
               </p>
             </div>
           ) : (
-            <SessionSidebar repoId={repoId} selectedId={selectedSessionId} onSelectSession={onSelectSession} onNewSession={() => void onNewChat()} />
+            <SessionSidebar repoId={repoId} selectedId={activePane === 'secondary' ? secondarySessionId : primarySessionId} onSelectSession={onSelectSession} onNewSession={() => void onNewChat()} />
           )}
 
           {centerView === 'openspec' ? (
             /* Task 2.3: keep current OpenSpec details/actions functional.
                Full-width so DeskDetail/DeskActionRail/DeskChangesList render
                at the same proportions they always have, rather than being
-               squeezed into the 306px right rail meant for Context/Graph. */
+               squeezed into the right dock meant for Context/Graph/Source. */
             <OpenSpecEmbeddedDetail repoId={repo.id} repoPath={repo.path} />
           ) : (
             <>
-              <div ref={composerFocusRef} tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
+              <div ref={composerFocusRef} tabIndex={-1} className="relative flex min-h-0 flex-1 flex-col outline-none">
+                {/* Workspace toolbar: Split View, source-bar visibility, the
+                    panel/dock menu, and the reset-layout escape hatch
+                    (tasks.md 5.1, 7.4, 8.1, 8.6). */}
+                <AgentWorkspaceToolbar
+                  split={layout.split}
+                  onToggleSplit={() => (layout.split ? closeSplit() : openSplit())}
+                  sourceBarsVisible={layout.sourceBarsVisible}
+                  onToggleSourceBars={toggleSourceBarsVisible}
+                  dock={layout.dock}
+                  onMoveDock={onMoveDock}
+                  onUnpinDock={closeDock}
+                  onPinDock={(kind) => openDock(kind, 'right')}
+                  onResetLayout={() => setResetConfirmOpen(true)}
+                  hideLabels={shouldHideButtonLabels(responsiveMode)}
+                />
+
                 {/* Explicit empty state when there are no chats at all yet:
                     SessionSidebar already covers "no rows"; here the
                     center column explains what a first click gets you. */}
@@ -317,49 +560,207 @@ export function AgentDeskView() {
                     </p>
                   </div>
                 ) : (
-                  <ConversationPane sessionId={selectedSessionId} isActive />
-                )}
-              </div>
+                  <div
+                    className={cn(
+                      'flex min-h-0 flex-1',
+                      layout.split ? 'flex-col min-[761px]:flex-row' : 'flex-row'
+                    )}
+                  >
+                    {/* left-above/left-below docks sandwich the pane grid inside this row/column so both orders are simple flex placement, no absolute positioning. */}
+                    {showPinnedDock && layout.dock!.edge === 'left' && layout.dock!.leftOrder !== 'below-chats' && (
+                      <DockedDetailPanel
+                        kind={layout.dock!.kind}
+                        edge="left"
+                        leftOrder={layout.dock!.leftOrder}
+                        sizePx={layout.dock!.sizePx}
+                        session={activeDetailSession}
+                        onMove={onMoveDock}
+                        onResize={(px) => resizeDock(px, windowWidth)}
+                        onResizeReset={() => resizeDock(360, windowWidth)}
+                        onUnpin={closeDock}
+                      />
+                    )}
 
-              <div className="flex min-h-0 w-[306px] flex-none flex-col border-l border-border bg-panel">
-                <div
-                  role="tablist"
-                  aria-label="Session details"
-                  className="flex flex-none gap-3 border-b border-border px-3 pt-2"
-                >
-                  {(['context', 'graph'] as const).map((t) => (
-                    <button
-                      key={t}
-                      role="tab"
-                      aria-selected={rightTab === t}
-                      onClick={() => setRightTab(t)}
-                      className={cn(
-                        '-mb-px border-b-2 pb-1.5 text-2xs font-semibold capitalize transition-colors',
-                        rightTab === t
-                          ? 'border-primary text-foreground'
-                          : 'border-transparent text-sub hover:text-foreground'
+                    <div className={cn('flex min-h-0 flex-1', layout.split ? 'flex-col' : 'flex-row')}>
+                      {/* tasks.md 5.8, three presentations driven by the
+                          measured column width (`splitPresentation`):
+                          side-by-side when wide, stacked at the compact
+                          breakpoint so neither composer is clipped, and one
+                          pane plus a switcher when narrow. The switcher is
+                          what keeps the hidden pane reachable -- the mockup
+                          simply drops content at its narrow breakpoint with
+                          no way back, which house Rule #1 does not allow. */}
+                      <div ref={paneAreaRef} className="flex min-h-0 flex-1 flex-col">
+                        {layout.split && splitPresentation === 'active-only' && (
+                          <div
+                            role="tablist"
+                            aria-label="Which chat to show"
+                            className="flex flex-none gap-1 border-b border-border bg-panel px-2 py-1"
+                          >
+                            {(['primary', 'secondary'] as const).map((pane) => (
+                              <button
+                                key={pane}
+                                role="tab"
+                                aria-selected={activePane === pane}
+                                onClick={() => onFocusPane(pane)}
+                                className={cn(
+                                  'rounded px-2 py-1 text-2xs font-semibold',
+                                  activePane === pane
+                                    ? 'bg-soft text-accent-text'
+                                    : 'text-sub hover:bg-panel3 hover:text-foreground'
+                                )}
+                              >
+                                {pane === 'primary' ? 'First chat' : 'Second chat'}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        <div
+                          className={cn(
+                            'flex min-h-0 flex-1',
+                            splitPresentation === 'stacked' ? 'flex-col' : 'flex-row'
+                          )}
+                        >
+                          {splitPresentation === 'active-only' ? (
+                            /* One pane only. When the split is open this is
+                               whichever pane the switcher/Ctrl+1/Ctrl+2 has
+                               made active; when it is closed there is only
+                               ever the primary pane to show. */
+                            layout.split && activePane === 'secondary' ? (
+                              <AgentDeskPane
+                                pane="secondary"
+                                sessionId={secondarySessionId}
+                                isActive
+                                onFocusPane={onFocusPane}
+                                onPin={onPin}
+                                showSourceBanner={layout.sourceBarsVisible}
+                                detailSession={secondaryDetailSession}
+                              />
+                            ) : (
+                              <AgentDeskPane
+                                pane="primary"
+                                sessionId={primarySessionId}
+                                isActive={!layout.split || activePane === 'primary'}
+                                onFocusPane={onFocusPane}
+                                onPin={onPin}
+                                showSourceBanner={layout.sourceBarsVisible}
+                                detailSession={primaryDetailSession}
+                              />
+                            )
+                          ) : (
+                            <>
+                              <AgentDeskPane
+                                pane="primary"
+                                sessionId={primarySessionId}
+                                isActive={activePane === 'primary'}
+                                onFocusPane={onFocusPane}
+                                onPin={onPin}
+                                showSourceBanner={layout.sourceBarsVisible}
+                                detailSession={primaryDetailSession}
+                              />
+                              <AgentDeskPane
+                                pane="secondary"
+                                sessionId={secondarySessionId}
+                                isActive={activePane === 'secondary'}
+                                onFocusPane={onFocusPane}
+                                onPin={onPin}
+                                showSourceBanner={layout.sourceBarsVisible}
+                                detailSession={secondaryDetailSession}
+                              />
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {showPinnedDock && layout.dock!.edge === 'bottom' && (
+                        <DockedDetailPanel
+                          kind={layout.dock!.kind}
+                          edge="bottom"
+                          sizePx={layout.dock!.sizePx}
+                          session={activeDetailSession}
+                          onMove={onMoveDock}
+                          onResize={(px) => resizeDock(px, windowWidth)}
+                          onResizeReset={() => resizeDock(360, windowWidth)}
+                          onUnpin={closeDock}
+                        />
                       )}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                  {detailSession == null ? (
-                    <p className="text-2xs leading-relaxed text-muted-foreground">
-                      Pick a chat to see its details.
-                    </p>
-                  ) : rightTab === 'context' ? (
-                    <SessionContextPanel session={detailSession} />
-                  ) : (
-                    <AgentGraphPanel session={detailSession} />
-                  )}
-                </div>
+                    </div>
+
+                    {showPinnedDock && layout.dock!.edge === 'left' && layout.dock!.leftOrder === 'below-chats' && (
+                      <DockedDetailPanel
+                        kind={layout.dock!.kind}
+                        edge="left"
+                        leftOrder={layout.dock!.leftOrder}
+                        sizePx={layout.dock!.sizePx}
+                        session={activeDetailSession}
+                        onMove={onMoveDock}
+                        onResize={(px) => resizeDock(px, windowWidth)}
+                        onResizeReset={() => resizeDock(360, windowWidth)}
+                        onUnpin={closeDock}
+                      />
+                    )}
+
+                    {showPinnedDock && layout.dock!.edge === 'right' && (
+                      <DockedDetailPanel
+                        kind={layout.dock!.kind}
+                        edge="right"
+                        sizePx={layout.dock!.sizePx}
+                        session={activeDetailSession}
+                        onMove={onMoveDock}
+                        onResize={(px) => resizeDock(px, windowWidth)}
+                        onResizeReset={() => resizeDock(360, windowWidth)}
+                        onUnpin={closeDock}
+                      />
+                    )}
+
+                    {/* Drag-drop zones (tasks.md 7.5): rendered only while a
+                        panel drag is in progress (`AgentDeskDockDropZone`
+                        itself no-ops otherwise), one per placement. */}
+                    <AgentDeskDockDropZone
+                      zone="right"
+                      onDrop={onDockDrop}
+                      label="Right"
+                      className="absolute right-2 top-12 bottom-2 w-24"
+                    />
+                    <AgentDeskDockDropZone
+                      zone="bottom"
+                      onDrop={onDockDrop}
+                      label="Bottom"
+                      className="absolute inset-x-2 bottom-2 h-16"
+                    />
+                    <AgentDeskDockDropZone
+                      zone="left-above"
+                      onDrop={onDockDrop}
+                      label="Left, above chats"
+                      className="absolute left-2 top-12 h-20 w-24"
+                    />
+                    <AgentDeskDockDropZone
+                      zone="left-below"
+                      onDrop={onDockDrop}
+                      label="Left, below chats"
+                      className="absolute bottom-2 left-2 h-20 w-24"
+                    />
+                  </div>
+                )}
               </div>
             </>
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={resetConfirmOpen}
+        onOpenChange={setResetConfirmOpen}
+        title="Reset workspace layout?"
+        description="This puts Split View, panel placement, and panel size back to their defaults. Your chats and messages are not affected."
+        confirmLabel="Reset layout"
+        onConfirm={() => {
+          resetLayout()
+          setResetConfirmOpen(false)
+          toast.success('Workspace layout reset.')
+        }}
+      />
     </div>
   )
 }

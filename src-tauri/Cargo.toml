@@ -55,6 +55,11 @@ tempfile = "3"
 # straight off disk, so a misclick stays recoverable.
 trash = "5"
 notify-debouncer-full = "0.7"
+# OpenCode's real session data lives in a SQLite database
+# (`opencode.db`), not flat files -- read-only, opened with SQLITE_OPEN_READ_ONLY
+# (see agentdesk/adapters/opencode.rs). `bundled` avoids depending on a
+# system SQLite install/version.
+rusqlite = { version = "0.40", features = ["bundled"] }
 # Parses .gitignore chains into a fast, lock-free matcher so the file watcher can
 # skip ignored paths without contending with the repo lock that git status holds.
 ignore = "0.4"

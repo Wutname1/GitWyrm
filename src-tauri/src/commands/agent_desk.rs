@@ -13,6 +13,8 @@
 //! "not found" and "nothing changed" are expected states a caller branches on,
 //! not exceptional conditions.
 
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::AppHandle;
@@ -26,6 +28,7 @@ use crate::agentdesk::store::{
     self, SessionListFilter, SessionListPage, SessionStoreRoot, StoreInitError, WriteError,
 };
 use crate::error::AppError;
+use crate::openspec::write;
 
 /// Now, formatted as the RFC 3339 UTC timestamp every persisted field on this
 /// module uses. A single seam so every command stamps time the same way.
@@ -162,6 +165,26 @@ pub async fn agent_session_create(
     tauri::async_runtime::spawn_blocking(move || create_session_at(&root, request))
         .await
         .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// `create_session_at`, reshaped as a plain `Result` for
+/// `commands::agent_kickoff`, which has no use for the `WriteFailed` variant
+/// carrying a session ID that (unlike a rename/archive failure) never got
+/// written anywhere -- kickoff's own `StartAgentSessionOutcome::WriteFailed`
+/// only needs the detail string. Not `pub(crate)`-restricted further than
+/// that: this is the one sanctioned way to create a session from outside
+/// this module, so a future caller other than kickoff needing the same
+/// "create and get a plain session back" shape has somewhere to reuse rather
+/// than reaching for `create_session_at` (private) or re-deriving the
+/// success/failure split itself.
+pub(crate) fn create_session_for_kickoff(
+    root: &SessionStoreRoot,
+    request: CreateSessionRequest,
+) -> Result<AgentSession, String> {
+    match create_session_at(root, request) {
+        CreateSessionOutcome::Created { session } => Ok(session),
+        CreateSessionOutcome::WriteFailed { detail } => Err(detail),
+    }
 }
 
 #[tauri::command]
@@ -682,26 +705,18 @@ pub async fn agent_session_attach_context(
 // the very run events this call is about to produce).
 
 /// `ask | plan | auto`, matching architecture.md section 8's
-/// `StartAgentSessionRequest.mode`. Defined locally (not re-exported from a
-/// shared `StartAgentSessionRequest`) because that shared type belongs to
-/// `agent-desk-source-kickoffs` task 1.1, not yet landed; this enum only
-/// needs to be structurally compatible with it, not the same Rust item.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub enum ExecutionMode {
-    Ask,
-    Plan,
-    Auto,
-}
+/// `StartAgentSessionRequest.mode`. `agent-desk-source-kickoffs` task 1.1
+/// landed the canonical definition in `agentdesk::policy`; this command
+/// module re-exports it rather than keeping a second, structurally-identical
+/// copy, which specta would otherwise export as two colliding `ExecutionMode`
+/// TypeScript types (the frontend build breaks on the duplicate identifier).
+pub use crate::agentdesk::policy::ExecutionMode;
 
 /// `solo | lead`, matching architecture.md section 8's
-/// `StartAgentSessionRequest.team`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub enum ExecutionTeam {
-    Solo,
-    Lead,
-}
+/// `StartAgentSessionRequest.team`. See [`ExecutionMode`]'s doc comment --
+/// same reasoning, re-exported from `agentdesk::policy` rather than
+/// duplicated.
+pub use crate::agentdesk::policy::ExecutionTeam;
 
 /// What happened when the caller asked a session to start an execution.
 /// Architecture.md section 3: "already running, source missing, adapter
@@ -735,6 +750,11 @@ pub enum StartExecutionOutcome {
     /// Credentials exist but were refused -- the user needs to reconnect the
     /// provider, not retry.
     ProviderReconnect { detail: String },
+    /// This session's intent requires an isolated worktree (Fix, or Plan
+    /// once started) and one could not be provisioned. Task 5.2: "If
+    /// provisioning fails, do not fall back to the user's checkout" -- the
+    /// engine is never started against `open.path` when this is returned.
+    WorktreeFailed { detail: String },
 }
 
 /// Internal-only outcome of the atomic "re-check then write the
@@ -798,15 +818,15 @@ fn record_execution_if_not_running(
         }
 
         let now = now_rfc3339();
-        session.executions.push(crate::agentdesk::model::ExecutionRecord {
-            execution_id: execution_id.clone(),
-            session_id: session.header.session_id.clone(),
-            parent_execution_id: None,
-            state: SessionState::Preparing,
-            started_at: now,
-            ended_at: None,
-            last_sequence: 0,
-        });
+        session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+            execution_id.clone(),
+            session.header.session_id.clone(),
+            None,
+            SessionState::Preparing,
+            now,
+            None,
+            0,
+        ));
         session.header.active_execution_id = Some(execution_id.clone());
         session.header.state = SessionState::Preparing;
         session.header.updated_at = now_rfc3339();
@@ -884,6 +904,66 @@ fn start_execution_at(
     };
     let _ = repo_path; // header.repo_path is provenance; `open.path` is live truth.
 
+    // Step 2b: resolve the root the engine will actually be given as its
+    // working directory -- this IS the enforcement point for
+    // `agentdesk::policy::WorktreePolicy` (agent-desk-source-kickoffs task
+    // 5.1: "Provision a marked worktree before the Fix engine receives edit
+    // capability"). A `WorktreePolicy::Always` intent (Fix) gets an
+    // isolated worktree here, unconditionally, before `CliAgent::discover`
+    // ever sees a path -- the engine has no other route to a working
+    // directory, so this is not advisory, it is the actual boundary.
+    //
+    // `WorktreePolicy::NotUntilStart` (Plan) is treated as `open.path` here:
+    // this function is "start THIS execution," and a Plan-mode session that
+    // has reached the point of calling `start_execution` has, by
+    // definition, already been started by the user (architecture.md
+    // section 9's "No until Start" -- the gate is upstream of this call,
+    // in whatever UI action transitions a Plan session out of
+    // `AwaitingStart`, not inside `start_execution_at` itself). Once
+    // started, Plan behaves like Fix and also gets a worktree.
+    let policy = crate::agentdesk::policy::for_intent(session.header.intent);
+    let engine_root = match policy.worktree {
+        crate::agentdesk::policy::WorktreePolicy::Never => open.path.clone(),
+        crate::agentdesk::policy::WorktreePolicy::Always
+        | crate::agentdesk::policy::WorktreePolicy::NotUntilStart => {
+            // Named after the session's own title, matching
+            // `commands::agent_kickoff::provision_kickoff_worktree`'s
+            // convention -- that function IS this step; called here rather
+            // than duplicated.
+            let title = session.header.title.clone();
+            // The branch this execution's worktree starts from: the
+            // repository's current HEAD, since a Fix session has no
+            // "pinned branch" concept of its own the way an OpenSpec task
+            // run does (`commands::airun`'s `branch` parameter) -- it works
+            // from whatever the user has checked out right now.
+            let base_branch = {
+                let repo = open.repo.lock().unwrap();
+                // git2 0.21's `Reference::shorthand` returns
+                // `Result<&str, Utf8Error>`, not `Option<&str>` (an accessor
+                // migration from earlier git2 versions) -- `.ok()` here is
+                // the UTF-8-validity check, not a "does a shorthand exist"
+                // check; a HEAD with a non-UTF-8 shorthand falls through to
+                // the "main" default same as no HEAD at all.
+                repo.head()
+                    .ok()
+                    .and_then(|h| h.shorthand().ok().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "main".to_string())
+            };
+            match crate::commands::agent_kickoff::provision_kickoff_worktree(&open, &base_branch, &title)
+            {
+                crate::commands::agent_kickoff::ProvisionKickoffWorktreeOutcome::Provisioned {
+                    path,
+                    ..
+                } => std::path::PathBuf::from(path),
+                crate::commands::agent_kickoff::ProvisionKickoffWorktreeOutcome::Failed { detail } => {
+                    // Task 5.2: refused outright, never falls back to
+                    // `open.path`.
+                    return StartExecutionOutcome::WorktreeFailed { detail };
+                }
+            }
+        }
+    };
+
     // Step 3: mint the durable execution ID up front and link the repository
     // to this session *before* the engine can produce a single event -- a run
     // event that races ahead of the link would be silently dropped as
@@ -893,8 +973,10 @@ fn start_execution_at(
 
     // Discover the transport up front so an unusable CLI or stale credentials
     // are reported as a typed outcome instead of only surfacing later as an
-    // opaque failed run.
-    let agent = match crate::ai::agent::cli_agent::CliAgent::discover(open.path.clone()) {
+    // opaque failed run. `engine_root` (not `open.path`) is the working
+    // directory handed to the engine -- see step 2b: this is what makes
+    // isolation for Fix actually load-bearing rather than advisory.
+    let agent = match crate::ai::agent::cli_agent::CliAgent::discover(engine_root.clone()) {
         Ok(a) => a,
         Err(e) => {
             links.unlink(&repo_id);
@@ -1429,7 +1511,48 @@ fn refresh_source_at(
         }
     };
 
-    let reachable = manager.get(&repo_id).is_ok();
+    let open_repo = manager.get(&repo_id).ok();
+    let reachable = open_repo.is_some();
+
+    // For an OpenSpec source, "reachable" is not just "is the repository
+    // open" -- the change itself can have moved (renamed folder) or gone
+    // away (deleted, or archived, which is its own honest state rather than
+    // "unavailable" -- tasks.md 4.5/7). This is the same
+    // `resolve_change_status` the context builder and
+    // `agent_session_openspec_status` use (task 6: "Rebuild context on
+    // file-watcher refresh"), so a refresh triggered by
+    // `useRepoWatcher`/`repo-changed` and a direct status check can never
+    // disagree about whether the source is still live.
+    let mut openspec_live = true;
+    if let Some(open) = &open_repo {
+        let peek = locks.with_session_lock(session_id, || store::read_session(root, session_id));
+        if let Ok(session) = peek {
+            if let Some(target) = openspec_target_of(&session.header.source) {
+                if let Some(dir) = openspec_dir_for(&open.path) {
+                    use crate::agentdesk::openspec_context::{resolve_change_status, OpenSpecChangeStatus};
+                    let (change_id, snapshot_title) = match &target {
+                        OpenSpecTarget::Change { change_id, snapshot_title } => {
+                            (change_id.clone(), snapshot_title.clone())
+                        }
+                        OpenSpecTarget::Task { change_id, snapshot_title, .. } => {
+                            (change_id.clone(), snapshot_title.clone())
+                        }
+                    };
+                    // Archived counts as still live for banner purposes --
+                    // it is a normal end state with its own next action
+                    // (`agent_session_openspec_status`), not an outage.
+                    openspec_live = !matches!(
+                        resolve_change_status(&dir, &change_id, &snapshot_title),
+                        OpenSpecChangeStatus::Moved { .. } | OpenSpecChangeStatus::Deleted
+                    );
+                } else {
+                    // The repository lost its `openspec/` folder entirely.
+                    openspec_live = false;
+                }
+            }
+        }
+    }
+    let reachable = reachable && openspec_live;
 
     let mut changed = false;
     let outcome = update_session_at(locks, root, session_id, |s| {
@@ -1487,6 +1610,414 @@ pub async fn agent_session_refresh_source(
     let locks_arc = locks.inner().clone();
     let manager_owned = manager.inner();
     let outcome = refresh_source_at(&locks_arc, &root, manager_owned, &session_id);
+    Ok(outcome)
+}
+
+// -- OpenSpec as a first-class source (package `agent-desk-openspec-workflows`) --
+//
+// Three concerns, kept separate rather than folded into the generic session
+// commands above:
+//
+//   1. `agent_session_openspec_context` (tasks.md section 2): the context a
+//      lead agent reads to understand the source and the OpenSpec plan --
+//      proposal, design, deltas, tasks, progress, and (for an `OpenSpecTask`
+//      source) the exact target task, located by identity rather than
+//      position (tasks.md 1.2, 2.3).
+//   2. `agent_session_openspec_kickoff` (tasks.md 1.3): the compatibility
+//      mapping from the current Spec Desk selected change/task into a durable
+//      session -- reuses an existing non-archived session for the same
+//      change/task rather than accumulating a duplicate every time the same
+//      row is clicked.
+//   3. `agent_session_openspec_status` (tasks.md 4.5, 7): archived/deleted/
+//      moved change states, each typed and each carrying a real next action,
+//      independent of whether a context can currently be built.
+//
+// All three are read-only with respect to OpenSpec files -- they never call
+// into `crate::openspec::write`. The one write path this package adds
+// (routing an accepted task completion through the existing checkbox writer)
+// is `agent_session_complete_openspec_task`, directly below them.
+
+fn openspec_dir_for(root: &Path) -> Option<PathBuf> {
+    crate::openspec::openspec_dir(root)
+}
+
+/// What the session's `SessionSource` names, extracted once so every OpenSpec
+/// command below shares the same "this session is not an OpenSpec source at
+/// all" branch instead of three copies of the same match.
+enum OpenSpecTarget {
+    Change { change_id: String, snapshot_title: String },
+    Task { change_id: String, task_index: u32, task_text: String, snapshot_title: String },
+}
+
+fn openspec_target_of(source: &SessionSource) -> Option<OpenSpecTarget> {
+    match source {
+        SessionSource::OpenSpecChange { change_id, snapshot } => Some(OpenSpecTarget::Change {
+            change_id: change_id.clone(),
+            snapshot_title: snapshot.title.clone(),
+        }),
+        SessionSource::OpenSpecTask {
+            change_id,
+            task_index,
+            task_text,
+            snapshot,
+        } => Some(OpenSpecTarget::Task {
+            change_id: change_id.clone(),
+            task_index: *task_index,
+            task_text: task_text.clone(),
+            snapshot_title: snapshot.title.clone(),
+        }),
+        _ => None,
+    }
+}
+
+/// Outcome of asking for a session's OpenSpec context or status. Shared by
+/// both read commands below so "not an OpenSpec source", "repo not open",
+/// and "found" are the same three named states everywhere this question is
+/// asked, rather than each command inventing its own shape.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum OpenSpecSourceOutcome<T> {
+    Found { value: T },
+    /// The session's source is not `OpenSpecChange`/`OpenSpecTask` -- asking
+    /// this question of a manual chat or an issue session is a caller bug,
+    /// not a runtime fault, but it is still reported rather than panicking.
+    NotAnOpenSpecSource,
+    /// The session's repository is not open in this app instance, so its
+    /// `openspec/` folder cannot be read at all.
+    RepoNotOpen,
+    /// The repository is open but has no `openspec/` folder -- true for any
+    /// repo that never adopted OpenSpec, and also the honest state right
+    /// after someone deletes the whole folder.
+    NoOpenSpecFolder,
+    SessionNotFound,
+    SessionDamaged { reason: String },
+    SessionUnavailable { detail: String },
+}
+
+fn load_openspec_target(
+    root: &SessionStoreRoot,
+    session_id: &str,
+) -> Result<(AgentSession, OpenSpecTarget), OpenSpecSourceOutcome<crate::agentdesk::openspec_context::OpenSpecSourceContext>>
+{
+    use crate::agentdesk::model::SessionLoadError as E;
+    let session = match store::read_session(root, session_id) {
+        Ok(s) => s,
+        Err(E::NotFound) => return Err(OpenSpecSourceOutcome::SessionNotFound),
+        Err(E::Io { detail }) => return Err(OpenSpecSourceOutcome::SessionUnavailable { detail }),
+        Err(reason) => {
+            return Err(OpenSpecSourceOutcome::SessionDamaged {
+                reason: reason.to_string(),
+            })
+        }
+    };
+    let Some(target) = openspec_target_of(&session.header.source) else {
+        return Err(OpenSpecSourceOutcome::NotAnOpenSpecSource);
+    };
+    Ok((session, target))
+}
+
+/// tasks.md section 2: the context builder. Builds
+/// [`crate::agentdesk::openspec_context::OpenSpecSourceContext`] from the
+/// session's live `openspec/` folder -- proposal, design, every delta, tasks,
+/// progress, history, and (for a task source) the exact target task located
+/// by identity, honest about divergence since launch (tasks.md 2.3, 2.4).
+///
+/// Reused directly by [`refresh_source_at`]'s OpenSpec branch (task 6): a
+/// file-watcher-triggered refresh calls the same `resolve_change_status` this
+/// command does, so "the context after a live refresh" and "the context this
+/// command reports" can never disagree.
+fn openspec_context_at(
+    root: &SessionStoreRoot,
+    manager: &crate::state::RepoManager,
+    session_id: &str,
+) -> OpenSpecSourceOutcome<crate::agentdesk::openspec_context::OpenSpecSourceContext> {
+    let (session, target) = match load_openspec_target(root, session_id) {
+        Ok(v) => v,
+        Err(outcome) => return outcome,
+    };
+
+    if manager.get(&session.header.repo_id).is_err() {
+        return OpenSpecSourceOutcome::RepoNotOpen;
+    }
+    let repo_path = PathBuf::from(&session.header.repo_path);
+
+    match resolve_openspec_context(&repo_path, &target) {
+        Some(ctx) => OpenSpecSourceOutcome::Found { value: ctx },
+        None => OpenSpecSourceOutcome::NoOpenSpecFolder,
+    }
+}
+
+/// Builds the context, or `None` when there is nothing file-backed to build
+/// one from -- no `openspec/` folder at all, or the change is `Moved`/
+/// `Deleted` (that case gets its own typed, actionable answer from
+/// [`agent_session_openspec_status`] instead of a context here).
+fn resolve_openspec_context(
+    repo_path: &Path,
+    target: &OpenSpecTarget,
+) -> Option<crate::agentdesk::openspec_context::OpenSpecSourceContext> {
+    use crate::agentdesk::openspec_context::{context_for_change, context_for_task, resolve_change_status, OpenSpecChangeStatus};
+
+    let dir = openspec_dir_for(repo_path)?;
+
+    let (change_id, snapshot_title) = match target {
+        OpenSpecTarget::Change { change_id, snapshot_title } => (change_id.clone(), snapshot_title.clone()),
+        OpenSpecTarget::Task { change_id, snapshot_title, .. } => (change_id.clone(), snapshot_title.clone()),
+    };
+
+    let change = match resolve_change_status(&dir, &change_id, &snapshot_title) {
+        OpenSpecChangeStatus::Active { change } | OpenSpecChangeStatus::Archived { change } => change,
+        OpenSpecChangeStatus::Moved { .. } | OpenSpecChangeStatus::Deleted => return None,
+    };
+
+    match target {
+        OpenSpecTarget::Change { .. } => context_for_change(repo_path, &change, None),
+        OpenSpecTarget::Task {
+            task_index, task_text, ..
+        } => context_for_task(repo_path, &change, *task_index, task_text, None),
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_openspec_context(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::state::RepoManager>,
+    session_id: SessionId,
+) -> Result<OpenSpecSourceOutcome<crate::agentdesk::openspec_context::OpenSpecSourceContext>, AppError> {
+    let root = resolve_root(&app)?;
+    // Synchronous, not `spawn_blocking`, matching `agent_session_refresh_source`
+    // just above: `RepoManager` is Tauri `State`, not `'static`-owned or
+    // `Clone`, and this command's I/O (parsing a handful of small markdown
+    // files) is the same order of magnitude as that command's own work.
+    Ok(openspec_context_at(&root, manager.inner(), &session_id))
+}
+
+/// tasks.md 4.5 / section 7: archived/deleted/moved change states, each
+/// honest and typed, with a real next action -- independent of whether a
+/// context can currently be built (a moved change, for instance, has no
+/// context here but a very real next action: open the change at its new id).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum OpenSpecSessionStatus {
+    /// The change is exactly where the session left it.
+    Active,
+    /// The change finished and was archived -- not a fault. Next action:
+    /// open the archived change (read-only, matches
+    /// `openspec_get_archived_change`'s own contract).
+    Archived,
+    /// The folder is gone under this id, but a change with a matching title
+    /// exists elsewhere -- most likely renamed. Next action: offer to
+    /// re-point this session at `likely_new_id`.
+    #[serde(rename_all = "camelCase")]
+    Moved { likely_new_id: String, archived: bool },
+    /// Nothing matches under this id or by title. Next action: the session's
+    /// transcript and cached snapshot remain readable (session history is
+    /// never lost, tasks.md 4.5), but there is no live source to act on
+    /// beyond that.
+    Deleted,
+    RepoNotOpen,
+    NotAnOpenSpecSource,
+    SessionNotFound,
+    SessionDamaged { reason: String },
+    SessionUnavailable { detail: String },
+}
+
+fn openspec_status_at(
+    root: &SessionStoreRoot,
+    manager: &crate::state::RepoManager,
+    session_id: &str,
+) -> OpenSpecSessionStatus {
+    use crate::agentdesk::model::SessionLoadError as E;
+    let session = match store::read_session(root, session_id) {
+        Ok(s) => s,
+        Err(E::NotFound) => return OpenSpecSessionStatus::SessionNotFound,
+        Err(E::Io { detail }) => return OpenSpecSessionStatus::SessionUnavailable { detail },
+        Err(reason) => {
+            return OpenSpecSessionStatus::SessionDamaged {
+                reason: reason.to_string(),
+            }
+        }
+    };
+    let Some(target) = openspec_target_of(&session.header.source) else {
+        return OpenSpecSessionStatus::NotAnOpenSpecSource;
+    };
+    if manager.get(&session.header.repo_id).is_err() {
+        return OpenSpecSessionStatus::RepoNotOpen;
+    }
+    let repo_path = std::path::PathBuf::from(&session.header.repo_path);
+    let Some(dir) = openspec_dir_for(&repo_path) else {
+        // No openspec/ folder at all reads as Deleted from this session's
+        // point of view: there is nothing left to find it under any id.
+        return OpenSpecSessionStatus::Deleted;
+    };
+
+    use crate::agentdesk::openspec_context::{resolve_change_status, OpenSpecChangeStatus};
+    let (change_id, snapshot_title) = match &target {
+        OpenSpecTarget::Change { change_id, snapshot_title } => (change_id.clone(), snapshot_title.clone()),
+        OpenSpecTarget::Task { change_id, snapshot_title, .. } => (change_id.clone(), snapshot_title.clone()),
+    };
+    match resolve_change_status(&dir, &change_id, &snapshot_title) {
+        OpenSpecChangeStatus::Active { .. } => OpenSpecSessionStatus::Active,
+        OpenSpecChangeStatus::Archived { .. } => OpenSpecSessionStatus::Archived,
+        OpenSpecChangeStatus::Moved { likely_new_id, archived } => {
+            OpenSpecSessionStatus::Moved { likely_new_id, archived }
+        }
+        OpenSpecChangeStatus::Deleted => OpenSpecSessionStatus::Deleted,
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_openspec_status(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::state::RepoManager>,
+    session_id: SessionId,
+) -> Result<OpenSpecSessionStatus, AppError> {
+    let root = resolve_root(&app)?;
+    Ok(openspec_status_at(&root, manager.inner(), &session_id))
+}
+
+// -- File-backed task completion (tasks.md section 4) --
+
+/// Whether an accepted execution's OpenSpec task completion may be written
+/// through to `tasks.md`. Tasks.md 4.4: "Never tick a task solely because an
+/// execution emitted Finished; require existing review/completion policy."
+/// The only policy that exists today for "may this write happen" is explicit
+/// user acceptance -- there is no autonomous accept step anywhere in `airun`
+/// (verified: `SessionState`/`ExecutionRecord` carry no such flag) -- so this
+/// command requires the caller to have already gotten that acceptance (a
+/// button the user pressed) rather than inferring it from execution state.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum CompleteOpenSpecTaskOutcome {
+    /// The checkbox was toggled (or already in the requested state) and the
+    /// session's own record of its target task was refreshed so the source
+    /// banner reflects the new state immediately (tasks.md 4.3).
+    Completed {
+        session: AgentSession,
+        toggle: write::ToggleOutcome,
+    },
+    NotAnOpenSpecTaskSource,
+    RepoNotOpen,
+    NoOpenSpecFolder,
+    SessionNotFound,
+    SessionDamaged { reason: String },
+    SessionUnavailable { detail: String },
+    WriteFailed { detail: String },
+}
+
+fn complete_openspec_task_at(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    manager: &crate::state::RepoManager,
+    session_id: &str,
+    done: bool,
+) -> CompleteOpenSpecTaskOutcome {
+    use crate::agentdesk::model::SessionLoadError as E;
+
+    // Read first (outside the session-mutating lock) only to learn which
+    // file/line to write -- the actual write goes through
+    // `write::toggle_task_line`, the SAME function
+    // `commands::openspec::openspec_toggle_task` calls, so a task ticked from
+    // an accepted run and one ticked by clicking the checkbox in Spec Desk
+    // hit the identical code path (design.md: "Reuse existing OpenSpec
+    // writers for task/spec updates").
+    let (change_id, task_index, task_text, repo_id, repo_path) =
+        match locks.with_session_lock(session_id, || store::read_session(root, session_id)) {
+            Ok(session) => match &session.header.source {
+                SessionSource::OpenSpecTask {
+                    change_id,
+                    task_index,
+                    task_text,
+                    ..
+                } => (
+                    change_id.clone(),
+                    *task_index,
+                    task_text.clone(),
+                    session.header.repo_id.clone(),
+                    session.header.repo_path.clone(),
+                ),
+                _ => return CompleteOpenSpecTaskOutcome::NotAnOpenSpecTaskSource,
+            },
+            Err(E::NotFound) => return CompleteOpenSpecTaskOutcome::SessionNotFound,
+            Err(E::Io { detail }) => return CompleteOpenSpecTaskOutcome::SessionUnavailable { detail },
+            Err(reason) => {
+                return CompleteOpenSpecTaskOutcome::SessionDamaged {
+                    reason: reason.to_string(),
+                }
+            }
+        };
+
+    if manager.get(&repo_id).is_err() {
+        return CompleteOpenSpecTaskOutcome::RepoNotOpen;
+    }
+    let repo_root = std::path::PathBuf::from(&repo_path);
+    let Some(dir) = openspec_dir_for(&repo_root) else {
+        return CompleteOpenSpecTaskOutcome::NoOpenSpecFolder;
+    };
+
+    // Re-parse fresh (not from a cached context) so the line number handed to
+    // the writer is current -- the same "re-read rather than guess" stance
+    // `write::toggle_task_line`'s own `LineMoved` guard takes, applied one
+    // layer up so this command locates the right line even if the session's
+    // cached target predates a file edit.
+    use crate::agentdesk::openspec_context::locate_target_task;
+    let Some(change) = crate::openspec::parse::parse_change_dir(&dir.join("changes").join(&change_id)) else {
+        return CompleteOpenSpecTaskOutcome::NoOpenSpecFolder;
+    };
+    let located = locate_target_task(&change.tasks, task_index, &task_text);
+    let Some(current_index) = located.current_index else {
+        return CompleteOpenSpecTaskOutcome::WriteFailed {
+            detail: "the target task could not be found in the current tasks.md".into(),
+        };
+    };
+    let Some(task) = change.tasks.iter().find(|t| t.index == current_index) else {
+        return CompleteOpenSpecTaskOutcome::WriteFailed {
+            detail: "the target task could not be found in the current tasks.md".into(),
+        };
+    };
+
+    let toggle = match write::toggle_task_line(&write::tasks_path(&dir, &change_id), task.line, done) {
+        Ok(outcome) => outcome,
+        Err(e) => return CompleteOpenSpecTaskOutcome::WriteFailed { detail: e.to_string() },
+    };
+
+    // Refresh the session's own state to match (task 4.3: "Refresh all
+    // main/Desk progress surfaces after writes" -- the session's side of
+    // that is its own record, since a caller reading the session right after
+    // this returns must see the same answer this command just gave).
+    let update_outcome = update_session_at(locks, root, session_id, |_s| {
+        // Nothing on `SessionSource::OpenSpecTask` itself needs to change --
+        // `task_text`/`task_index` are launch provenance, not live state
+        // (model.rs: "Never mutated by a refresh"). Touching `updated_at`
+        // (which `update_session_at` always does) is what makes the session
+        // list re-sort this session to the top after its task completes,
+        // which is the visible feedback this write should produce.
+    });
+
+    match update_outcome {
+        UpdateSessionOutcome::Updated { session } => {
+            CompleteOpenSpecTaskOutcome::Completed { session, toggle }
+        }
+        UpdateSessionOutcome::NotFound => CompleteOpenSpecTaskOutcome::SessionNotFound,
+        UpdateSessionOutcome::Damaged { reason } => CompleteOpenSpecTaskOutcome::SessionDamaged { reason },
+        UpdateSessionOutcome::WriteFailed { detail } => CompleteOpenSpecTaskOutcome::WriteFailed { detail },
+        UpdateSessionOutcome::Unavailable { detail } => CompleteOpenSpecTaskOutcome::SessionUnavailable { detail },
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_complete_openspec_task(
+    app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
+    manager: tauri::State<'_, crate::state::RepoManager>,
+    session_id: SessionId,
+    done: bool,
+) -> Result<CompleteOpenSpecTaskOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    let locks_arc = locks.inner().clone();
+    let outcome = complete_openspec_task_at(&locks_arc, &root, manager.inner(), &session_id, done);
     Ok(outcome)
 }
 
@@ -2002,15 +2533,15 @@ mod tests {
         let execution_id = crate::agentdesk::execution_id_for_run_session("run-1");
         links.link(&session.header.repo_id, &session_id);
         let recorded = update_session_at(&locks, &root, &session_id, |s| {
-            s.executions.push(crate::agentdesk::model::ExecutionRecord {
-                execution_id: execution_id.clone(),
-                session_id: s.header.session_id.clone(),
-                parent_execution_id: None,
-                state: SessionState::Preparing,
-                started_at: now_rfc3339(),
-                ended_at: None,
-                last_sequence: 0,
-            });
+            s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+                    execution_id.clone(),
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::Preparing,
+                    now_rfc3339(),
+                    None,
+                    0,
+                ));
             s.header.active_execution_id = Some(execution_id.clone());
             s.header.state = SessionState::Preparing;
         });
@@ -2054,15 +2585,15 @@ mod tests {
         let session_id = session.header.session_id.clone();
         let execution_id = crate::agentdesk::execution_id_for_run_session("run-1");
         update_session_at(&locks, &root, &session_id, |s| {
-            s.executions.push(crate::agentdesk::model::ExecutionRecord {
-                execution_id: execution_id.clone(),
-                session_id: s.header.session_id.clone(),
-                parent_execution_id: None,
-                state: SessionState::Working,
-                started_at: now_rfc3339(),
-                ended_at: None,
-                last_sequence: 3,
-            });
+            s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+                    execution_id.clone(),
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::Working,
+                    now_rfc3339(),
+                    None,
+                    3,
+                ));
             s.header.active_execution_id = Some(execution_id.clone());
             s.header.state = SessionState::Working;
         });
@@ -2161,15 +2692,15 @@ mod tests {
                 (exec_a.clone(), SessionState::Working),
                 (exec_b.clone(), SessionState::Working),
             ] {
-                s.executions.push(crate::agentdesk::model::ExecutionRecord {
-                    execution_id: id,
-                    session_id: s.header.session_id.clone(),
-                    parent_execution_id: Some(exec_a.clone()),
+                s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+                    id,
+                    s.header.session_id.clone(),
+                    Some(exec_a.clone()),
                     state,
-                    started_at: now_rfc3339(),
-                    ended_at: None,
-                    last_sequence: 1,
-                });
+                    now_rfc3339(),
+                    None,
+                    1,
+                ));
             }
             s.header.active_execution_id = Some(exec_b.clone());
         });
@@ -2224,24 +2755,24 @@ mod tests {
         let lead = crate::agentdesk::execution_id_for_run_session("run-lead");
         let helper = crate::agentdesk::execution_id_for_run_session("run-helper");
         update_session_at(&locks, &root, &session_id, |s| {
-            s.executions.push(crate::agentdesk::model::ExecutionRecord {
-                execution_id: lead.clone(),
-                session_id: s.header.session_id.clone(),
-                parent_execution_id: None,
-                state: SessionState::Working,
-                started_at: now_rfc3339(),
-                ended_at: None,
-                last_sequence: 0,
-            });
-            s.executions.push(crate::agentdesk::model::ExecutionRecord {
-                execution_id: helper.clone(),
-                session_id: s.header.session_id.clone(),
-                parent_execution_id: Some(lead.clone()),
-                state: SessionState::Working,
-                started_at: now_rfc3339(),
-                ended_at: None,
-                last_sequence: 0,
-            });
+            s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+                    lead.clone(),
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::Working,
+                    now_rfc3339(),
+                    None,
+                    0,
+                ));
+            s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+                    helper.clone(),
+                    s.header.session_id.clone(),
+                    Some(lead.clone()),
+                    SessionState::Working,
+                    now_rfc3339(),
+                    None,
+                    0,
+                ));
             s.header.active_execution_id = Some(lead.clone());
         });
 
@@ -2300,15 +2831,15 @@ mod tests {
         let exec_b = crate::agentdesk::execution_id_for_run_session("run-b");
         update_session_at(&locks, &root, &session_id, |s| {
             for id in [exec_a.clone(), exec_b.clone()] {
-                s.executions.push(crate::agentdesk::model::ExecutionRecord {
-                    execution_id: id,
-                    session_id: s.header.session_id.clone(),
-                    parent_execution_id: None,
-                    state: SessionState::Working,
-                    started_at: now_rfc3339(),
-                    ended_at: None,
-                    last_sequence: 1,
-                });
+                s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+                    id,
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::Working,
+                    now_rfc3339(),
+                    None,
+                    1,
+                ));
             }
             s.header.active_execution_id = Some(exec_b.clone());
         });
@@ -2336,15 +2867,15 @@ mod tests {
         let session_id = session.header.session_id.clone();
         let exec_a = crate::agentdesk::execution_id_for_run_session("run-a");
         update_session_at(&locks, &root, &session_id, |s| {
-            s.executions.push(crate::agentdesk::model::ExecutionRecord {
-                execution_id: exec_a.clone(),
-                session_id: s.header.session_id.clone(),
-                parent_execution_id: None,
-                state: SessionState::Finished,
-                started_at: now_rfc3339(),
-                ended_at: Some(now_rfc3339()),
-                last_sequence: 5,
-            });
+            s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+                    exec_a.clone(),
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::Finished,
+                    now_rfc3339(),
+                    Some(now_rfc3339()),
+                    5,
+                ));
         });
 
         let outcome = stop_execution_at(
@@ -2530,5 +3061,232 @@ mod tests {
             outcome,
             RefreshSourceOutcome::LiveUnavailable { .. }
         ));
+    }
+
+    // -- Gate 4: a session started from a specific NON-NEXT task still names
+    // that exact task (change id + task index + task text) after a
+    // simulated restart -- across execution, transcript, checkbox write,
+    // progress, and the source banner. This is the core claim
+    // `docs/agent-desk/build-order.md` section 4's Gate 4 asks for, and the
+    // reason `OpenSpecTask::task_index`/`task_text` exist as launch
+    // provenance separate from whatever tasks.md says right now.
+    mod gate_4_exact_task_identity {
+        use super::*;
+        use std::fs;
+
+        /// A real git repo (so `RepoManager::open` succeeds) with an
+        /// `openspec/` folder containing three OPEN tasks, task 3 (index 2)
+        /// deliberately left open so the "non-next" claim is not
+        /// coincidentally true.
+        fn repo_with_change(root: &std::path::Path) -> (crate::state::RepoManager, String) {
+            git2::Repository::init(root).expect("init repo");
+            let change_dir = root.join("openspec").join("changes").join("add-thing");
+            fs::create_dir_all(&change_dir).unwrap();
+            fs::write(
+                change_dir.join("proposal.md"),
+                "# Change: Add thing\n\n## Why\n\nBecause users need it.\n",
+            )
+            .unwrap();
+            fs::write(
+                change_dir.join("tasks.md"),
+                "## 1. Backend\n\n\
+                 - [ ] 1.1 First task (still open)\n\
+                 - [ ] 1.2 Second task (still open)\n\
+                 - [ ] 1.3 Third task (still open)\n\n\
+                 ## 2. Frontend\n\n\
+                 - [ ] 2.4 Wire the kickoff button\n",
+            )
+            .unwrap();
+
+            let manager = crate::state::RepoManager::default();
+            let (repo_id, _open, _reused) =
+                manager.open(root.to_str().expect("utf8 path")).expect("open repo");
+            (manager, repo_id)
+        }
+
+        #[test]
+        fn a_session_started_from_task_index_6_keeps_naming_task_index_6_across_every_surface() {
+            let (dir, root) = temp_root();
+            let locks = test_locks();
+            let (manager, repo_id) = repo_with_change(dir.path());
+
+            // Task 2.4 is index 6 in the flat, zero-based numbering the
+            // parser assigns (three tasks under "1. Backend" at indices
+            // 0-2, then "2.4 Wire the kickoff button" is the fourth
+            // heading-relative task overall but the parser numbers across
+            // the WHOLE file, so recompute it the same way the parser does
+            // rather than hand-asserting a guessed number).
+            let openspec_dir = dir.path().join("openspec");
+            let change =
+                crate::openspec::parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing"))
+                    .expect("change parses");
+            let target = change
+                .tasks
+                .iter()
+                .find(|t| t.text.contains("Wire the kickoff button"))
+                .expect("target task present")
+                .clone();
+            // The claim only means something if this is genuinely not the
+            // next open task -- tasks 1.1-1.3 are all still open ahead of it.
+            assert!(change.tasks.iter().any(|t| !t.done && t.index < target.index));
+
+            // 1. START: create a session naming this exact task, not
+            // "whatever the next open task is."
+            let snapshot = crate::agentdesk::model::SourceSnapshot {
+                title: change.title.clone(),
+                summary: target.text.clone(),
+                captured_at: "2026-01-01T00:00:00Z".into(),
+                live_unavailable: false,
+            };
+            let create_request = CreateSessionRequest {
+                repo_id: repo_id.clone(),
+                repo_path: dir.path().to_string_lossy().into_owned(),
+                repo_name: "proj".into(),
+                title: format!("{} · {}", change.title, target.text),
+                source: SessionSource::OpenSpecTask {
+                    change_id: "add-thing".into(),
+                    task_index: target.index,
+                    task_text: target.text.clone(),
+                    snapshot,
+                },
+                intent: SessionIntent::Fix,
+            };
+            let CreateSessionOutcome::Created { session } = create_session_at(&root, create_request)
+            else {
+                panic!("expected Created");
+            };
+            let session_id = session.header.session_id.clone();
+
+            // Sanity: the header itself already names the exact task.
+            let SessionSource::OpenSpecTask { task_index, task_text, .. } = &session.header.source else {
+                panic!("expected an OpenSpecTask source");
+            };
+            assert_eq!(*task_index, target.index);
+            assert_eq!(task_text, &target.text);
+
+            // 2. EXECUTION: record an execution on this session (what
+            // `agent_session_start_execution` does before handing off to
+            // the engine) and confirm the record is keyed to this session,
+            // not a different task's.
+            let record_outcome =
+                record_execution_if_not_running(&locks, &root, &session_id, "exec-1".to_string());
+            let RecordOutcome::Updated { session: after_start } = record_outcome else {
+                panic!("expected the execution to record");
+            };
+            assert_eq!(after_start.header.active_execution_id.as_deref(), Some("exec-1"));
+
+            // 3. TRANSCRIPT: append a user message (what kickoff/the
+            // composer does) and confirm it lands on the same session,
+            // still naming the same task via its unchanged header.
+            let append_outcome =
+                append_user_message_at(&locks, &root, &session_id, "Get started on this.".into(), vec![]);
+            let AppendUserMessageOutcome::Appended { session: after_message, .. } = append_outcome else {
+                panic!("expected the message to append");
+            };
+            let SessionSource::OpenSpecTask { task_index, task_text, .. } = &after_message.header.source
+            else {
+                panic!("expected an OpenSpecTask source");
+            };
+            assert_eq!(*task_index, target.index);
+            assert_eq!(task_text, &target.text);
+
+            // 4. SIMULATED RESTART: drop every in-memory value and re-read
+            // purely from disk, exactly as a fresh process would on launch.
+            drop(session);
+            drop(after_start);
+            drop(after_message);
+            let GetSessionOutcome::Found { session: reloaded } = get_session_at(&root, &session_id)
+            else {
+                panic!("expected the session to survive a restart");
+            };
+
+            // The header still names the exact task -- this is the
+            // provenance claim (model.rs: "Never mutated by a refresh").
+            let SessionSource::OpenSpecTask {
+                change_id: reloaded_change_id,
+                task_index: reloaded_index,
+                task_text: reloaded_text,
+                ..
+            } = &reloaded.header.source
+            else {
+                panic!("expected an OpenSpecTask source after restart");
+            };
+            assert_eq!(reloaded_change_id, "add-thing");
+            assert_eq!(*reloaded_index, target.index);
+            assert_eq!(reloaded_text, &target.text);
+
+            // 5. SOURCE BANNER content: `openspec_context_at` (what backs
+            // the banner/context panel) still resolves the SAME task by
+            // identity from the live file, honestly reporting it has not
+            // diverged.
+            let context_outcome = openspec_context_at(&root, &manager, &session_id);
+            let OpenSpecSourceOutcome::Found { value: context } = context_outcome else {
+                panic!("expected a context, got {context_outcome:?}");
+            };
+            let target_task = context.target_task.expect("target task context present");
+            assert_eq!(target_task.current_index, Some(target.index));
+            assert_eq!(target_task.current_text.as_deref(), Some(target.text.as_str()));
+            assert!(!target_task.diverged);
+
+            // 6. CHECKBOX WRITE + PROGRESS: complete the task through the
+            // exact same command an accepted run uses, which re-locates the
+            // task by identity (not by trusting a possibly-stale index) and
+            // routes through the shared `write::toggle_task_line` writer.
+            let complete_outcome =
+                complete_openspec_task_at(&locks, &root, &manager, &session_id, true);
+            let CompleteOpenSpecTaskOutcome::Completed { session: after_complete, toggle } =
+                complete_outcome
+            else {
+                panic!("expected the task to complete, got {complete_outcome:?}");
+            };
+            assert!(matches!(toggle, write::ToggleOutcome::Toggled));
+            // The session's own record of its target task is UNCHANGED --
+            // still task index 6/"2.4 Wire the kickoff button" -- completion
+            // does not silently retarget the session onto a different task.
+            let SessionSource::OpenSpecTask { task_index, task_text, .. } = &after_complete.header.source
+            else {
+                panic!("expected an OpenSpecTask source");
+            };
+            assert_eq!(*task_index, target.index);
+            assert_eq!(task_text, &target.text);
+
+            // Progress moved on disk: re-parsing tasks.md shows exactly one
+            // task done, and it is the target task, not task 1.1 (the "next
+            // open task" this whole test exists to prove was NOT silently
+            // substituted).
+            let reparsed =
+                crate::openspec::parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing"))
+                    .expect("change still parses after the write");
+            assert_eq!(reparsed.progress.done, 1);
+            let completed_task = reparsed
+                .tasks
+                .iter()
+                .find(|t| t.done)
+                .expect("exactly one task is done");
+            assert_eq!(completed_task.text, target.text);
+            assert!(reparsed.tasks[0..3].iter().all(|t| !t.done), "task 1.1-1.3 must remain untouched");
+
+            // 7. AFTER A SECOND RESTART: the source banner still names the
+            // exact task, and `agent_session_openspec_status` reports it as
+            // a normal Active change (not Moved/Deleted) with the one task
+            // now showing done.
+            let status_after = openspec_status_at(&root, &manager, &session_id);
+            assert!(matches!(status_after, OpenSpecSessionStatus::Active));
+
+            let GetSessionOutcome::Found { session: final_reload } = get_session_at(&root, &session_id)
+            else {
+                panic!("expected the session to still be readable");
+            };
+            let SessionSource::OpenSpecTask {
+                task_index: final_index,
+                task_text: final_text,
+                ..
+            } = &final_reload.header.source
+            else {
+                panic!("expected an OpenSpecTask source on the final reload");
+            };
+            assert_eq!(*final_index, target.index, "task index must survive every step, including the write");
+            assert_eq!(final_text, &target.text, "task text must survive every step, including the write");
+        }
     }
 }

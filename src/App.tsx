@@ -34,6 +34,7 @@ import { noteRepoAvailability } from '@/hooks/useRepoActions'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { useAiRunListener } from '@/hooks/useAiRun'
 import { useAgentSessionListener } from '@/hooks/useAgentSessions'
+import { useAgentResultDiffListener } from '@/hooks/useAgentResultDiff'
 import { useAutoFetch } from '@/hooks/useAutoFetch'
 import { useTheme } from '@/hooks/useTheme'
 import { useFont } from '@/hooks/useFont'
@@ -96,6 +97,11 @@ function AppInner() {
   // the app root, idempotent across remount (see the ref-count guard in
   // `useAgentSessions.ts`) so a future second mount site never double-applies.
   useAgentSessionListener()
+  // Main-window-only bridge for Agent Desk's "View diff" (tasks.md 2.2,
+  // `agent-desk-review-and-landing`): opens a result's worktree as a repo
+  // tab here and points the diff view at it. Never registered in
+  // `SpecDeskRoot` -- that window has no repo tabs to open into.
+  useAgentResultDiffListener()
   useAutoFetch()
   useTheme()
   useFont()

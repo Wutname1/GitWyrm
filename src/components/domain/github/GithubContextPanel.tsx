@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeftRight, Bot, Check, ChevronDown, ExternalLink, RefreshCw } from 'lucide-react'
+import { ArrowLeftRight, Bot, Check, ChevronDown, ExternalLink, RefreshCw, Sparkles } from 'lucide-react'
 import { GithubItemIcon } from '@/lib/githubDisplay'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
@@ -19,7 +19,10 @@ import {
   useGithubMutations,
   useGithubPrDetail,
   useGithubSlug,
+  useRepoHostProvider,
 } from '@/hooks/useGithub'
+import { useStartAgentSession } from '@/hooks/useStartAgentSession'
+import { issueSourceInput, pullRequestSourceInput } from '@/lib/agentDeskSources'
 import {
   DEPENDABOT_COMMANDS,
   DEPENDABOT_IGNORE_COMMANDS,
@@ -212,6 +215,20 @@ function PrPanel({ number }: { number: number }) {
   const gh = useGithubMutations(slug.data, repo?.id)
   const git = useGitMutations(repo?.id ?? null)
   const branches = useBranches(repo?.id ?? null)
+  const hostProvider = useRepoHostProvider(repo?.id ?? null)
+  const { startSession, starting, startingKey } = useStartAgentSession()
+
+  const startAiAction = (intent: 'review' | 'summarize') => {
+    if (!repo || !slug.data || !pr.data || !hostProvider.data) return
+    void startSession({
+      repoId: repo.id,
+      repoPath: repo.path,
+      repoName: repo.name,
+      intent,
+      key: `pr:${number}:${intent}`,
+      source: pullRequestSourceInput(hostProvider.data, slug.data.owner, slug.data.repo, pr.data),
+    })
+  }
 
   const [confirmMerge, setConfirmMerge] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
@@ -297,6 +314,30 @@ function PrPanel({ number }: { number: number }) {
       status={merged ? 'Merged' : closed ? 'Closed' : detail.draft ? 'Draft' : 'Open'}
       footer={
         <>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button
+              size="sm"
+              className="h-7 text-2xs font-bold"
+              disabled={!repo || !slug.data || !pr.data || !hostProvider.data || starting}
+              aria-busy={startingKey === `pr:${number}:review` || undefined}
+              onClick={() => startAiAction('review')}
+            >
+              {startingKey === `pr:${number}:review` ? <PendingIndicator /> : <Sparkles size={12} />}
+              Review with AI
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 text-2xs font-bold"
+              disabled={!repo || !slug.data || !pr.data || !hostProvider.data || starting}
+              aria-busy={startingKey === `pr:${number}:summarize` || undefined}
+              onClick={() => startAiAction('summarize')}
+            >
+              {startingKey === `pr:${number}:summarize` ? <PendingIndicator /> : <Sparkles size={12} />}
+              Summarize with AI
+            </Button>
+          </div>
+
           <div className="flex overflow-hidden rounded-md border border-primary">
             <Button
               size="sm"
@@ -470,10 +511,24 @@ function IssuePanel({ number }: { number: number }) {
   const gh = useGithubMutations(slug.data, repo?.id)
   const git = useGitMutations(repo?.id ?? null)
   const branches = useBranches(repo?.id ?? null)
+  const hostProvider = useRepoHostProvider(repo?.id ?? null)
+  const { startSession, starting, startingKey } = useStartAgentSession()
 
   const [startOpen, setStartOpen] = useState(false)
   const [branchName, setBranchName] = useState('')
   const [confirmClose, setConfirmClose] = useState(false)
+
+  const startAiAction = (intent: 'fix' | 'plan' | 'explain') => {
+    if (!repo || !slug.data || !issue.data || !hostProvider.data) return
+    void startSession({
+      repoId: repo.id,
+      repoPath: repo.path,
+      repoName: repo.name,
+      intent,
+      key: `issue:${number}:${intent}`,
+      source: issueSourceInput(hostProvider.data, slug.data.owner, slug.data.repo, issue.data),
+    })
+  }
 
   if (!issue.data) {
     return (
@@ -498,6 +553,40 @@ function IssuePanel({ number }: { number: number }) {
       status={closed ? 'Closed' : 'Open'}
       footer={
         <>
+          <Button
+            size="sm"
+            className="h-8 text-xs font-bold"
+            disabled={closed || !repo || !slug.data || !hostProvider.data || starting}
+            aria-busy={startingKey === `issue:${number}:fix` || undefined}
+            onClick={() => startAiAction('fix')}
+          >
+            {startingKey === `issue:${number}:fix` ? <PendingIndicator /> : <Sparkles size={13} />}
+            Fix with AI
+          </Button>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 text-2xs"
+              disabled={closed || !repo || !slug.data || !hostProvider.data || starting}
+              aria-busy={startingKey === `issue:${number}:plan` || undefined}
+              onClick={() => startAiAction('plan')}
+            >
+              {startingKey === `issue:${number}:plan` ? <PendingIndicator /> : null}
+              Plan
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 text-2xs"
+              disabled={!repo || !slug.data || !hostProvider.data || starting}
+              aria-busy={startingKey === `issue:${number}:explain` || undefined}
+              onClick={() => startAiAction('explain')}
+            >
+              {startingKey === `issue:${number}:explain` ? <PendingIndicator /> : null}
+              Explain
+            </Button>
+          </div>
           <Button
             size="sm"
             className="h-8 text-xs font-bold"

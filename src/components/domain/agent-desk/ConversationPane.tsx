@@ -9,8 +9,14 @@ import { DisabledHint } from '@/components/ui/tooltip'
 import { isNearBottom } from '@/lib/agentDeskScroll'
 import { resolveMessageTarget } from '@/lib/agentDeskTargets'
 import { computeRailTicks, truncateSnippet, userMessagesForRail } from '@/lib/agentDeskRail'
+import { groupEventStacks, type EventStackGroup } from '@/lib/agentDeskEvents'
+import { parsePlanChecklist } from '@/lib/agentDeskPlan'
+import { foldThoughtSummaries } from '@/lib/agentDeskTranscript'
 import { SessionSourceBanner } from './SessionSourceBanner'
 import { SessionComposer } from './SessionComposer'
+import { ThoughtBlock } from './ThoughtBlock'
+import { PlanChecklist } from './PlanChecklist'
+import { EventStack } from './EventStack'
 
 /** Plain-language label for each message kind, in the order they can appear. */
 function kindLabel(kind: SessionMessage['kind']): string {
@@ -106,10 +112,18 @@ function MessageRow({
   message,
   flash,
   onOpenSource,
+  thought,
 }: {
   message: SessionMessage
   flash: boolean
   onOpenSource?: () => void
+  /**
+   * A `thoughtSummary` message folded into this row, per
+   * `foldThoughtSummaries` -- rendered inline above the body as a
+   * `ThoughtBlock`, matching the mockup's `.ag-thought` sitting inside the
+   * same `.ag-message` as the reply it explains.
+   */
+  thought?: SessionMessage
 }) {
   const isUser = message.role === 'user'
   // "Needs your approval" and tool activity get a visibly different treatment
@@ -117,6 +131,14 @@ function MessageRow({
   // like an ordinary line of text the reader can skim past.
   const isApproval = message.kind === 'approval'
   const isTool = message.kind === 'tool'
+  // Plan checklist rows (tasks.md's structured Plan block): parsed from the
+  // message's own plain text via the lead's Markdown checklist convention --
+  // see `src/lib/agentDeskPlan.ts`. A message with no checklist lines parses
+  // to an empty list, so most rows never mount a `PlanChecklist` at all.
+  const planRows = useMemo(
+    () => (message.kind === 'assistant' || message.kind === 'result' ? parsePlanChecklist(message.plainContent) : []),
+    [message.kind, message.plainContent]
+  )
   return (
     <article
       id={`agent-desk-message-${message.messageId}`}
@@ -144,6 +166,9 @@ function MessageRow({
           <span className="font-normal text-muted-foreground">{formatClock(message.timestamp)}</span>
           {message.import && <ImportedBadge adapterId={message.import.adapterId} />}
         </div>
+        {thought && (
+          <ThoughtBlock text={thought.plainContent} variant={message.kind === 'result' ? 'reviewing' : 'thinking'} />
+        )}
         <div className="text-xs leading-relaxed text-foreground">
           {message.renderedContent ? (
             <Markdown text={message.renderedContent} />
@@ -151,6 +176,9 @@ function MessageRow({
             <p className="whitespace-pre-wrap">{message.plainContent}</p>
           )}
         </div>
+        {planRows.length > 0 && (
+          <PlanChecklist rows={planRows} label={message.kind === 'result' ? 'Review findings' : 'Agent plan'} />
+        )}
         {message.targets.length > 0 && (
           <div className="mt-1 flex flex-wrap items-center gap-1">
             {message.targets.map((target, i) => (
@@ -158,6 +186,33 @@ function MessageRow({
             ))}
           </div>
         )}
+      </div>
+    </article>
+  )
+}
+
+/** A standalone thought block for a `thoughtSummary` message not folded into a later reply -- see `foldThoughtSummaries`. */
+function StandaloneThoughtRow({ message }: { message: SessionMessage }) {
+  return (
+    <article
+      id={`agent-desk-message-${message.messageId}`}
+      data-message-id={message.messageId}
+      tabIndex={-1}
+      className="grid grid-cols-[27px_minmax(0,1fr)] gap-2.5 rounded-md px-2 py-1.5 outline-none"
+    >
+      <span
+        className="flex h-[27px] w-[27px] flex-none items-center justify-center rounded-full bg-soft text-[10px] font-bold uppercase text-accent-text"
+        aria-hidden
+      >
+        {avatarInitials(message)}
+      </span>
+      <div className="min-w-0">
+        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-foreground">
+          <span>{kindLabel(message.kind)}</span>
+          {message.provider && <span className="font-normal text-muted-foreground">{message.provider}</span>}
+          <span className="font-normal text-muted-foreground">{formatClock(message.timestamp)}</span>
+        </div>
+        <ThoughtBlock text={message.plainContent} />
       </div>
     </article>
   )
@@ -190,6 +245,21 @@ export interface ConversationPaneProps {
    * disabled until one is passed in.
    */
   onOpenSource?: () => void
+  /**
+   * Whether the large source bar above the transcript is shown (tasks.md
+   * 8.1/8.2). New prop rather than reading the layout store here, so this
+   * component keeps its "a pane owns only what it is handed" contract -- and
+   * so hiding the bar never hides the per-pane Source button, which lives in
+   * `headerSlot` and is controlled separately by the caller. Defaults to
+   * visible, which is what every existing caller already got.
+   */
+  showSourceBanner?: boolean
+  /**
+   * Accessible name for the pane region (tasks.md 4.2), e.g. "First chat".
+   * Only meaningful once a second pane exists; without it the pane is not
+   * announced as a landmark at all.
+   */
+  paneLabel?: string
 }
 
 export function ConversationPane({
@@ -198,6 +268,8 @@ export function ConversationPane({
   headerAnchorRef,
   headerSlot,
   onOpenSource,
+  showSourceBanner = true,
+  paneLabel,
 }: ConversationPaneProps) {
   const { session, messages, state, isLoading, isError } = useAgentSession(sessionId)
   const [flashId, setFlashId] = useState<string | null>(null)
@@ -210,6 +282,23 @@ export function ConversationPane({
   const wasNearBottomRef = useRef(true)
 
   const userMessages = useMemo(() => userMessagesForRail(messages), [messages])
+
+  // Thinking block (mockup's `.ag-thought`): fold each `thoughtSummary`
+  // message into the reply that follows it, or render it standalone when it
+  // has no reply yet -- see `foldThoughtSummaries`.
+  const { thoughtFor, folded: foldedThoughtIds } = useMemo(() => foldThoughtSummaries(messages), [messages])
+
+  // Event stack (mockup's `.ag-event-stack`): every run of consecutive
+  // `tool`-kind messages becomes one compact activity feed rendered after
+  // the message that preceded the run -- see `groupEventStacks`. `tool`
+  // messages themselves are skipped from normal row rendering below.
+  const eventGroups = useMemo(() => groupEventStacks(messages), [messages])
+  const eventGroupsByAnchor = useMemo(() => {
+    const map = new Map<string, EventStackGroup>()
+    for (const group of eventGroups) map.set(group.afterMessageId, group)
+    return map
+  }, [eventGroups])
+
   const [railTicks, setRailTicks] = useState<ReturnType<typeof computeRailTicks>>([])
   // Measured transcript width, so the rail popup can be sized to at least
   // half of it (tasks.md 5.2) instead of a fixed rem value that has no
@@ -283,53 +372,105 @@ export function ConversationPane({
     }
   }
 
+  /**
+   * The pane's own header, drawn identically in every state.
+   *
+   * tasks.md 4.4 ("show a loading skeleton inside the targeted pane without
+   * clearing its header"): the loading, error, and no-selection branches
+   * below used to return a bare centered message, which took the header --
+   * and with it the per-pane Source/Context/Graph buttons in `headerSlot` --
+   * off screen for as long as the chat took to load. That made a pane look
+   * like it had lost its controls mid-click. Now only the *body* swaps.
+   */
+  const header = (
+    <div ref={headerAnchorRef} className="flex flex-none items-center gap-2 border-b border-border px-3 py-1.5">
+      <p className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
+        {session?.header.title || (sessionId ? 'Opening…' : 'No chat selected')}
+      </p>
+      {headerSlot}
+    </div>
+  )
+
+  const shellClass = cn('flex h-full min-h-0 flex-1 flex-col', !isActive && 'opacity-90')
+  /**
+   * tasks.md 4.2: the pane needs an accessible active label, not just a
+   * colour change. `aria-current="true"` is what a screen reader announces
+   * for "this is the one your next click lands in"; the visible accent
+   * border is drawn by the caller around the pane, since only the caller
+   * knows whether there is a second pane to distinguish it from.
+   */
+  const shellProps = paneLabel
+    ? ({ role: 'region', 'aria-label': paneLabel, 'aria-current': isActive } as const)
+    : {}
+
   if (!sessionId) {
     return (
-      <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-1.5 p-8 text-center">
-        <p className="text-sm font-semibold text-foreground">No chat selected</p>
-        <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
-          Pick a chat on the left, or start a new one to begin.
-        </p>
+      <div className={shellClass} {...shellProps}>
+        {header}
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 p-8 text-center">
+          <p className="text-sm font-semibold text-foreground">No chat selected</p>
+          <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
+            Pick a chat on the left, or start a new one to begin.
+          </p>
+        </div>
       </div>
     )
   }
 
   if (isLoading) {
     return (
-      <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-1.5 p-8 text-center">
-        <p className="text-sm font-semibold text-foreground">Opening this chat…</p>
-        <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
-          This takes a moment on first open.
-        </p>
+      <div className={shellClass} {...shellProps}>
+        {header}
+        {/* A shaped skeleton rather than a spinner: it stands where the
+            source banner and first messages will land, so the pane does not
+            visibly jump once the real content arrives. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 p-3" aria-busy="true" aria-live="polite">
+          <span className="sr-only">Opening this chat…</span>
+          <div className="h-11 flex-none animate-pulse rounded-md bg-panel2 motion-reduce:animate-none" aria-hidden />
+          <div className="flex flex-col gap-2" aria-hidden>
+            {[0, 1, 2].map((row) => (
+              <div key={row} className="flex gap-2.5">
+                <span className="h-[27px] w-[27px] flex-none animate-pulse rounded-full bg-panel2 motion-reduce:animate-none" />
+                <span
+                  className="h-12 flex-1 animate-pulse rounded-md bg-panel2 motion-reduce:animate-none"
+                  style={{ opacity: 1 - row * 0.25 }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     )
   }
 
   if (isError || !session) {
     return (
-      <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-1.5 p-8 text-center">
-        <p className="text-sm font-semibold text-foreground">This chat could not be opened</p>
-        <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
-          Its saved file may be missing or damaged. Try another chat, or start a new one.
-        </p>
+      <div className={shellClass} {...shellProps}>
+        {header}
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 p-8 text-center">
+          <p className="text-sm font-semibold text-foreground">This chat could not be opened</p>
+          <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
+            Its saved file may be missing or damaged. Try another chat, or start a new one.
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-1 flex-col', !isActive && 'opacity-90')}>
-      <div ref={headerAnchorRef} className="flex flex-none items-center gap-2 border-b border-border px-3 py-1.5">
-        <p className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
-          {session.header.title || 'Untitled chat'}
-        </p>
-        {headerSlot}
-      </div>
+    <div className={shellClass} {...shellProps}>
+      {header}
 
-      <SessionSourceBanner
-        source={session.header.source}
-        state={state ?? session.header.state}
-        onOpenSource={onOpenSource}
-      />
+      {/* tasks.md 8.2: hiding the source bars hides only this banner. The
+          pane's own Source button (in `headerSlot`) is untouched, so the
+          same information is always one click away. */}
+      {showSourceBanner && (
+        <SessionSourceBanner
+          source={session.header.source}
+          state={state ?? session.header.state}
+          onOpenSource={onOpenSource}
+        />
+      )}
 
       <div className="relative flex min-h-0 flex-1">
         <div ref={transcriptRef} className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 py-3">
@@ -341,9 +482,37 @@ export function ConversationPane({
               </p>
             </div>
           ) : (
-            messages.map((m) => (
-              <MessageRow key={m.messageId} message={m} flash={flashId === m.messageId} onOpenSource={onOpenSource} />
-            ))
+            messages.flatMap((m) => {
+              // `tool` messages render as part of an `EventStack` (anchored
+              // after the message preceding their run), never as their own
+              // row -- see `groupEventStacks`.
+              if (m.kind === 'tool') return []
+              // A folded `thoughtSummary` renders inside the reply it
+              // precedes (via `MessageRow`'s `thought` prop), so its own row
+              // is skipped here -- see `foldThoughtSummaries`.
+              if (foldedThoughtIds.has(m.messageId)) return []
+
+              const nodes: React.ReactNode[] = []
+              if (m.kind === 'thoughtSummary') {
+                nodes.push(<StandaloneThoughtRow key={m.messageId} message={m} />)
+              } else {
+                nodes.push(
+                  <MessageRow
+                    key={m.messageId}
+                    message={m}
+                    flash={flashId === m.messageId}
+                    onOpenSource={onOpenSource}
+                    thought={thoughtFor.get(m.messageId)}
+                  />
+                )
+              }
+
+              const eventGroup = eventGroupsByAnchor.get(m.messageId)
+              if (eventGroup) {
+                nodes.push(<EventStack key={`${m.messageId}-events`} items={eventGroup.items} onOpenSource={onOpenSource} />)
+              }
+              return nodes
+            })
           )}
           {(state === 'working' || state === 'preparing') && (
             <div className="flex items-center gap-2 px-1 py-1 text-2xs text-muted-foreground">

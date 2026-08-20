@@ -62,6 +62,19 @@ impl SessionStoreRoot {
         &self.0
     }
 
+    /// The store root's own path, for sibling stores that live alongside
+    /// `sessions/`/`index.json` under the same app-data directory without
+    /// duplicating `SessionStoreRoot::resolve`'s app-data lookup. Used by
+    /// `agentdesk::result`'s per-session result sidecar files (task 1.2):
+    /// results are read/written far more often than the session transcript
+    /// itself as review/keep/undo/commit actions run, so keeping them in
+    /// their own small files avoids rewriting the whole transcript file (and
+    /// racing `SessionLocks`-guarded transcript mutations) on every result
+    /// update.
+    pub fn root_path(&self) -> &Path {
+        &self.0
+    }
+
     fn sessions_dir(&self) -> PathBuf {
         self.0.join(SESSIONS_DIR)
     }
@@ -113,7 +126,7 @@ pub enum WriteError {
 /// The temp file is created in the same directory as `path` (not the OS temp
 /// directory) so the final rename is same-filesystem and therefore atomic on
 /// every platform GitWyrm ships on.
-fn write_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), WriteError> {
+pub(crate) fn write_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), WriteError> {
     let json = serde_json::to_vec_pretty(value).map_err(|e| WriteError::Serialize {
         detail: e.to_string(),
     })?;
@@ -317,7 +330,7 @@ fn extract_header_value(mut raw: serde_json::Value) -> Result<serde_json::Value,
 /// Everything downstream (commands mapping this to a typed outcome) can then
 /// tell "the session is really gone" apart from "the file could not be read
 /// right now" without re-deriving that distinction itself.
-fn read_json_file(path: &Path) -> Result<serde_json::Value, SessionLoadError> {
+pub(crate) fn read_json_file(path: &Path) -> Result<serde_json::Value, SessionLoadError> {
     let raw = fs::read_to_string(path).map_err(|e| {
         if e.kind() == io::ErrorKind::NotFound {
             SessionLoadError::NotFound

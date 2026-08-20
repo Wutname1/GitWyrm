@@ -6,6 +6,7 @@ import { unwrap, keys } from '@/lib/queryKeys'
 import { useQueryClient } from '@tanstack/react-query'
 import { describeError, log } from '@/lib/log'
 import { Textarea } from '@/components/ui/textarea'
+import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import {
   canSendComposerDraft,
   modeToExecutionMode,
@@ -36,10 +37,24 @@ import { TeamShapeControl } from './TeamShapeControl'
  * Exactly one action button -- Send. There is deliberately no separate
  * stop/icon-only button beside it; "Stop all" lives only in the Graph panel
  * header (tasks.md 6.5, `AgentGraphPanel`).
+ *
+ * Draft text is session-scoped through `useAgentDeskUiStore` (task group 3:
+ * "Session-scoped drafts") rather than local `useState` -- replacing this
+ * pane's session (a sidebar click, Split View swapping which session is
+ * active) must not discard whatever the user was mid-typing, and switching
+ * back to that session must restore it verbatim. `getDraft`/`setDraft` are
+ * keyed by `sessionId`, so two panes showing two different sessions keep
+ * fully independent drafts for free -- there is nothing pane-local to keep
+ * in sync.
  */
 export function SessionComposer({ sessionId }: { sessionId: string | null }) {
   const qc = useQueryClient()
-  const [draft, setDraft] = useState('')
+  const draft = useAgentDeskUiStore((s) => (sessionId ? (s.drafts[sessionId]?.text ?? '') : ''))
+  const setDraftInStore = useAgentDeskUiStore((s) => s.setDraft)
+  const clearDraft = useAgentDeskUiStore((s) => s.clearDraft)
+  const setDraft = (text: string) => {
+    if (sessionId) setDraftInStore(sessionId, text)
+  }
   const [sending, setSending] = useState(false)
   const [mode, setMode] = useState<ComposerMode>('Auto')
   const [team, setTeam] = useState<ComposerTeam>('helpers')
@@ -57,7 +72,9 @@ export function SessionComposer({ sessionId }: { sessionId: string | null }) {
         // The message is durably saved and the transcript query is about to
         // reflect it -- clear the draft and invalidate before touching
         // execution, so a failure below never hides that the send worked.
-        setDraft('')
+        // tasks.md 3.5: clear only *this* session's draft, and only now that
+        // Send has actually persisted its user event.
+        clearDraft(sessionId)
         void qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
         void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
 

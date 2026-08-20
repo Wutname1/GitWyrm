@@ -3147,6 +3147,351 @@ async agentSessionRefreshSource(sessionId: string) : Promise<Result<RefreshSourc
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async agentSessionOpenspecContext(sessionId: string) : Promise<Result<OpenSpecSourceOutcome<OpenSpecSourceContext>, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_openspec_context", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionOpenspecStatus(sessionId: string) : Promise<Result<OpenSpecSessionStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_openspec_status", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionCompleteOpenspecTask(sessionId: string, done: boolean) : Promise<Result<CompleteOpenSpecTaskOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_complete_openspec_task", { sessionId, done }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionProposeGraph(sessionId: string, graph: ProposedGraph) : Promise<Result<ProposeGraphOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_propose_graph", { sessionId, graph }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionStartGraph(sessionId: string) : Promise<Result<StartGraphOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_start_graph", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionUseSoloInstead(sessionId: string) : Promise<Result<UseSoloOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_use_solo_instead", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionGraphView(sessionId: string) : Promise<Result<GraphViewOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_graph_view", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionResolveConflict(sessionId: string, executionId: string, resolution: ConflictResolution) : Promise<Result<ResolveConflictOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_resolve_conflict", { sessionId, executionId, resolution }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Records a conflict on a helper's execution -- called by the integration
+ * step (tasks.md 5.1/5.2/5.3), exposed as a command for tests and for a
+ * future integration-runner caller to invoke without duplicating the
+ * read-modify-write.
+ */
+async agentSessionRecordConflict(sessionId: string, executionId: string, conflict: IntegrationConflict) : Promise<Result<ResolveConflictOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_record_conflict", { sessionId, executionId, conflict }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentSessionStart(request: StartAgentSessionRequest) : Promise<Result<StartAgentSessionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_start", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The intent policy table (`agentdesk::policy::for_intent`), exposed to the
+ * frontend so `useStartAgentSession` and the source menus can show correct
+ * mode/team defaults and know up front whether an intent can ever write,
+ * without hand-copying architecture.md section 9's table into TypeScript.
+ */
+async agentIntentPolicy(intent: SessionIntent) : Promise<IntentPolicy> {
+    return await TAURI_INVOKE("agent_intent_policy", { intent });
+},
+/**
+ * Read-only scan across every known client location, optionally scoped to
+ * one open repo for repo-local configuration paths. Never writes anything
+ * (task 1.2, spec "Scan").
+ */
+async agentConfigScan(repoId: string | null) : Promise<Result<InventoryEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_config_scan", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Which clients were detected on this machine, for the "Detected apps" tab.
+ */
+async agentConfigDetectClients(repoId: string | null) : Promise<Result<ClientDetection[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_config_detect_clients", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Compute a not-yet-applied plan copying `item_id`'s source content to each
+ * of `destinations`. Every destination's proposed content, before-hash, and
+ * warnings are computed here; nothing is written (task 3.1).
+ */
+async agentConfigPreviewCopy(repoId: string | null, itemId: string, destinations: ClientId[]) : Promise<Result<PreviewOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_config_preview_copy", { repoId, itemId, destinations }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Apply one previously computed plan. Every destination in the plan is
+ * written one at a time; a destination whose file changed since preview is
+ * refused (never overwritten) while the rest of the batch still proceeds
+ * (task 3.2, 5.2).
+ */
+async agentConfigApplyCopy(planId: string) : Promise<Result<ApplyOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_config_apply_copy", { planId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * "Match selected apps": apply several previously previewed plans in one
+ * batch. Deliberately built from the same [`apply_copy_at`] used by a
+ * single-item apply -- there is no separate "sync everything" code path
+ * (task 2.4, 5).
+ */
+async agentConfigApplyBatch(request: BatchApplyRequest) : Promise<Result<BatchApplyOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_config_apply_batch", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Undo one operation by ID, restoring byte-identical prior content unless
+ * the destination changed since the write (task 3.4).
+ */
+async agentConfigUndo(operationId: string) : Promise<Result<UndoOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_config_undo", { operationId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentResultBuild(sessionId: string, executionId: string, outcome: ResultOutcomeKind, worktreePath: string | null, branch: string | null, baseOid: string | null, checks: ResultCheckOutcome[], openspecChangeId: string | null) : Promise<Result<BuildResultOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_build", { sessionId, executionId, outcome, worktreePath, branch, baseOid, checks, openspecChangeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentResultList(sessionId: string) : Promise<Result<ListResultsOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_list", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Focuses the main window and asks it to open one result's worktree diff.
+ * Never opens a second main window, never creates any window itself --
+ * mirrors `commands::spec_desk::open_spec_desk`'s "focus what already
+ * exists" shape, aimed the other direction (Agent Desk -> main).
+ */
+async agentResultOpenDiff(worktreePath: string, path: string | null) : Promise<Result<OpenResultDiffOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_open_diff", { worktreePath, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentResultKeep(sessionId: string, executionId: string) : Promise<Result<KeepResultOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_keep", { sessionId, executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentResultUndo(sessionId: string, executionId: string) : Promise<Result<UndoResultOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_undo", { sessionId, executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentResultRequestRevision(sessionId: string, executionId: string) : Promise<Result<RequestRevisionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_request_revision", { sessionId, executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * A draft commit message for a kept result: subject plus trailers,
+ * generated the same way `commands::airun::ai_run_completion` does
+ * (`airun::complete::commit_message`) so a run started from Agent Desk and
+ * one started from the old task-run console read identically in history.
+ * **Read-only** -- building this never writes a commit; see
+ * `agent_result_commit` for the explicit action that does (task 3.4:
+ * "Never auto-commit merely because the lead says finished").
+ */
+async agentResultDraftCommitMessage(sessionId: string, executionId: string, taskText: string, provider: string) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_draft_commit_message", { sessionId, executionId, taskText, provider }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentResultCommit(sessionId: string, executionId: string, intent: SessionIntent, message: string) : Promise<Result<CommitResultOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_commit", { sessionId, executionId, intent, message }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Confirms a message carries the `Spec:`/`Assisted-by:` trailers this
+ * module composes, for callers that build their own message text (e.g. an
+ * edited draft) rather than using `agent_result_draft_commit_message`
+ * verbatim.
+ */
+async agentResultMessageTrailers(message: string) : Promise<Result<[string | null, string | null], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_message_trailers", { message }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentResultDraftPullRequest(sessionId: string, executionId: string) : Promise<Result<DraftPullRequestOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_draft_pull_request", { sessionId, executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Opens the host's compare/new-PR page in the user's default browser. The
+ * **only** action in this module that reaches outside the app, and it opens
+ * a URL a browser GET request loads -- nothing here pushes a branch, calls
+ * a host write API, or posts anything. Reuses `tauri_plugin_opener`, the
+ * same mechanism `commands::external::reveal_in_file_manager` uses for
+ * "open in file manager"/"open in editor".
+ */
+async agentResultOpenPullRequestPage(url: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_open_pull_request_page", { url }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentResultCleanupWorktree(repoId: string, sessionId: string, executionId: string) : Promise<Result<CleanupWorktreeOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_cleanup_worktree", { repoId, sessionId, executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentResultFindOrphaned(sessionId: string) : Promise<Result<OrphanedResult[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_find_orphaned", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentImportListAdapters() : Promise<Result<AdapterListEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_import_list_adapters") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentImportScan(adapterId: string) : Promise<Result<ImportScanOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_import_scan", { adapterId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentImportSession(adapterId: string, externalSessionId: string) : Promise<Result<ImportSessionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_import_session", { adapterId, externalSessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentImportContinuationCapability(adapterId: string, externalSessionId: string) : Promise<Result<ContinuationOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_import_continuation_capability", { adapterId, externalSessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentImportContinueHere(sessionId: string) : Promise<Result<ContinueHereOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_import_continue_here", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -3160,6 +3505,20 @@ async agentSessionRefreshSource(sessionId: string) : Promise<Result<RefreshSourc
 
 /** user-defined types **/
 
+/**
+ * Why an adapter could not do what was asked. Every variant here is a real,
+ * distinguishable next action -- never a bare string the UI has to sniff.
+ */
+export type AdapterError = { kind: "clientNotDetected" } | { kind: "unsupportedVersion"; found: string; supportedRange: string } | { kind: "missingPath"; path: string } | { kind: "corruptSession"; detail: string } | { kind: "sessionNotFound"; externalSessionId: string } | { kind: "timedOut"; millis: number } | { kind: "io"; detail: string }
+/**
+ * One adapter's row for the detected-clients UI (task 4.1): identity,
+ * whether its capability flag is on, and its detection outcome. Detection
+ * still runs for a disabled adapter (OpenChamber) so the UI can say "found,
+ * not supported yet" rather than nothing at all -- `enabled` is what gates
+ * whether import actions are offered, completely independent of whether the
+ * client was found.
+ */
+export type AdapterListEntry = { adapterId: string; displayName: string; enabled: boolean; supportedVersionRange: string; detection: DetectionOutcome }
 /**
  * The full session file on disk: the header plus everything the transcript,
  * executions list, and context panel need.
@@ -3227,6 +3586,7 @@ export type AppendUserMessageOutcome = { kind: "appended"; session: AgentSession
  * session is not known to be gone, and a retry may well succeed.
  */
 { kind: "unavailable"; detail: string }
+export type ApplyOutcome = { planId: string; results: DestinationApplyResult[] }
 /**
  * The result of asking to archive: either the CLI ran, or GitWyrm stopped
  * first because the change is not ready.
@@ -3372,6 +3732,14 @@ export type AttachContextOutcome = { kind: "attached"; session: AgentSession; at
  * session is not known to be gone, and a retry may well succeed.
  */
 { kind: "unavailable"; detail: string }
+export type BatchApplyOutcome = { outcomes: ApplyOutcome[] }
+/**
+ * Request shape for `agent_config_apply_copy`'s batch form ("Match selected
+ * apps"): a list of plan IDs, each already previewed individually. There is
+ * no separate "sync everything" code path -- a batch is just several plans
+ * applied in sequence (task 2.4).
+ */
+export type BatchApplyRequest = { planIds: string[] }
 /**
  * One line of a file, tagged with the commit that last changed it.
  */
@@ -3436,6 +3804,14 @@ export type BranchSwitchMode =
 "refuse"
 export type BuildInfo = { version: string; build_date: string; git_hash: string; debug: boolean; arch: string }
 /**
+ * What building/refreshing a result record found.
+ */
+export type BuildResultOutcome = { kind: "built"; record: ResultRecord } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string } | 
+/**
+ * The execution named is not one this session knows about.
+ */
+{ kind: "executionNotFound" }
+/**
  * The maximize button's bounds, in CSS pixels relative to the client area.
  */
 export type ButtonRect = { x: number; y: number; width: number; height: number }
@@ -3486,6 +3862,12 @@ export type ChangeStatus =
  */
 "readyToArchive"
 /**
+ * One human-readable line describing a semantic change, with secret values
+ * already redacted. Never the raw file diff -- a line names the field and
+ * what kind of change happened, not arbitrary content.
+ */
+export type ChangeSummaryLine = { fieldPath: string; change: FieldChangeKind }
+/**
  * One release, with its notes.
  */
 export type ChangelogEntry = { version: string; released_at: string | null; items?: ChangelogItem[] }
@@ -3499,6 +3881,11 @@ export type ChangelogEntry = { version: string; released_at: string | null; item
  * markdown.
  */
 export type ChangelogItem = { section: string; text: string; tags?: string[] }
+export type CheckRunOutcome = "passed" | "failed" | 
+/**
+ * The check was configured but never ran (execution stopped first).
+ */
+"skipped"
 /**
  * What happened to uncommitted changes during a branch switch.
  */
@@ -3545,6 +3932,18 @@ export type CheckoutReport = { outcome: CheckoutOutcome;
  * about each. Empty when the repo has no submodules or none of them moved.
  */
 submodules: SubmoduleFollowed[] }
+export type CleanupWorktreeOutcome = { kind: "removed"; record: ResultRecord } | 
+/**
+ * Hand edits or other uncommitted work remain -- the worktree is kept
+ * and the caller should offer Open rather than deleting (task 5.2).
+ */
+{ kind: "keptHandEdited"; record: ResultRecord; modified: number; untracked: number } | 
+/**
+ * Not safe to clean up yet: the result is not `Committed` or
+ * `Discarded` (task 5.1: "only after safe integration or confirmed
+ * discard").
+ */
+{ kind: "notIntegratedOrDiscarded" } | { kind: "nothingToClean" } | { kind: "refusedLocked"; path: string } | { kind: "partiallyRemoved"; path: string } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string }
 /**
  * Whether the CLI is usable, and which version answered.
  */
@@ -3574,6 +3973,53 @@ export type CliOutcome =
  * No CLI available. `hint` explains what to install, in plain words.
  */
 { kind: "cliMissing"; hint: string }
+/**
+ * Whether a client was found on this machine at all, independent of whether
+ * it has any items configured yet.
+ */
+export type ClientDetection = { client: ClientId; present: boolean; 
+/**
+ * `false` once a merge writer exists and is wired in [`super::writers`].
+ * Drives the "Unsupported" badge and keeps discovery-only clients from
+ * ever reaching an apply path (task 4.6).
+ */
+writeSupported: boolean }
+/**
+ * Which agent client a location/state belongs to. Kept as a fixed enum
+ * (rather than a free string) so the UI's per-client columns and the
+ * writers dispatch table are exhaustive-checked by the compiler.
+ */
+export type ClientId = "codex" | "claude-code" | "open-code" | "vs-code-copilot" | "open-chamber"
+/**
+ * One item's comparison state against a chosen source, for one destination
+ * client (task 1.4). The mockup's badge vocabulary is richer than a plain
+ * same/different/missing split, so every observed badge text maps to a
+ * distinct variant rather than being collapsed:
+ * 
+ * - `Synced` -> [`ClientSyncState::Same`]
+ * - `Different` -> [`ClientSyncState::Different`]
+ * - `Missing` -> [`ClientSyncState::Missing`]
+ * - `Older` -> [`ClientSyncState::Outdated`] (present, differs, and is behind the
+ * source by a detectable version/update marker)
+ * - `Source` -> [`ClientSyncState::IsSource`] (this destination *is* the chosen
+ * source item; never a copy target for itself)
+ * - `Unsupported` -> [`ClientSyncState::Unsupported`] (client detected, but no
+ * writer exists, or the item's shape cannot be represented there)
+ * - `Own copy` -> [`ClientSyncState::KeptSeparate`] (deliberately excluded from
+ * sync, e.g. user marked it client-specific; still "good" in the UI)
+ * - `Needs setup` -> [`ClientSyncState::NeedsSetup`] (client present, matching
+ * item present, but missing a required piece such as an MCP command that
+ * is not yet runnable there)
+ * - `Off` -> [`ClientSyncState::Disabled`] (client detected but the user turned
+ * sync off for it, or the client itself has this feature disabled)
+ */
+export type ClientSyncState = "same" | "different" | "missing" | "outdated" | "isSource" | "unsupported" | "keptSeparate" | "needsSetup" | "disabled" | 
+/**
+ * Client not detected on this machine at all -- distinct from `Missing`
+ * (client present, item absent) so the UI can explain the difference.
+ */
+"clientNotDetected"
+export type ClientSyncStatus = { client: ClientId; state: ClientSyncState }
 /**
  * A folder scanned for repositories. Several can be watched at once, each
  * scanned on its own so an unplugged drive never holds up the others.
@@ -3639,10 +4085,74 @@ spec_id: string | null;
  * AI provider from this commit's `Assisted-by:` trailer, if a run wrote it.
  */
 assisted_by: string | null }
+export type CommitResultOutcome = { kind: "committed"; record: ResultRecord; oid: string } | 
+/**
+ * Refused: the intent this session's result came from cannot write
+ * (`agentdesk::policy::for_intent`'s `can_write`) -- a Review/Summarize
+ * result has nothing to commit by design, not by accident.
+ */
+{ kind: "readOnlyIntent" } | { kind: "nothingToCommit" } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string } | 
+/**
+ * The worktree could not be opened, or committing in it failed --
+ * `detail` carries the underlying git error (may include a signing
+ * failure message from `git::commit_write`, which already tells the
+ * user what to do).
+ */
+{ kind: "gitFailed"; detail: string } | { kind: "messageRequired" }
 /**
  * Diff stats for one commit, fetched on demand for rows in view.
  */
 export type CommitStats = { files_changed: number; additions: number; deletions: number }
+/**
+ * Whether an accepted execution's OpenSpec task completion may be written
+ * through to `tasks.md`. Tasks.md 4.4: "Never tick a task solely because an
+ * execution emitted Finished; require existing review/completion policy."
+ * The only policy that exists today for "may this write happen" is explicit
+ * user acceptance -- there is no autonomous accept step anywhere in `airun`
+ * (verified: `SessionState`/`ExecutionRecord` carry no such flag) -- so this
+ * command requires the caller to have already gotten that acceptance (a
+ * button the user pressed) rather than inferring it from execution state.
+ */
+export type CompleteOpenSpecTaskOutcome = 
+/**
+ * The checkbox was toggled (or already in the requested state) and the
+ * session's own record of its target task was refreshed so the source
+ * banner reflects the new state immediately (tasks.md 4.3).
+ */
+{ kind: "completed"; session: AgentSession; toggle: ToggleOutcome } | { kind: "notAnOpenSpecTaskSource" } | { kind: "repoNotOpen" } | { kind: "noOpenSpecFolder" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string }
+/**
+ * What makes a helper's job "done" -- checked by the scheduler, not left to
+ * the helper's own judgment, so a helper cannot silently run forever or stop
+ * early without anyone noticing (tasks.md 1.1, 1.2 "explicit completion
+ * conditions").
+ */
+export type CompletionCondition = 
+/**
+ * The helper reports its own result via the typed engine output/tool
+ * (tasks.md 2.1) and the scheduler accepts that as done.
+ */
+{ kind: "reportsResult" } | 
+/**
+ * The named check command must pass in the helper's worktree.
+ */
+{ kind: "checksPass"; command: string } | 
+/**
+ * The listed repo-relative paths must all have been touched.
+ */
+{ kind: "filesChanged"; paths: string[] }
+/**
+ * Where a discovered item's configuration file lives, on this machine, for
+ * one client. `scope` distinguishes a personal (user-home) location from a
+ * this-repository location so the same skill name can exist at both scopes
+ * without colliding.
+ */
+export type ConfigLocation = { client: ClientId; scope: ConfigScope; 
+/**
+ * Absolute path to the file this item's configuration lives in (or would
+ * be written to). Never a directory: writers always target one file.
+ */
+path: string }
+export type ConfigScope = "personal" | "repo"
 /**
  * The three sides of a conflicted file, as full text.
  */
@@ -3676,6 +4186,12 @@ ours_deleted: boolean;
  */
 theirs_deleted: boolean }
 /**
+ * Which side of a conflict the user picked, or that they supplied their own
+ * merged text -- never inferred, always an explicit user action so neither
+ * copy is silently preferred.
+ */
+export type ConflictResolution = { kind: "keepHelper" } | { kind: "keepIntegrated" } | { kind: "useMerged"; text: string }
+/**
  * Something attached to a session's context beyond the messages themselves:
  * a pinned file, a pasted note, a linked OpenSpec task. Kept intentionally
  * small in this change -- the context panel package defines richer variants.
@@ -3685,6 +4201,25 @@ export type ContextAttachment = { attachmentId: string; label: string; target: M
  * RFC 3339 UTC timestamp.
  */
 addedAt: string }
+export type ContinuationOutcome = 
+/**
+ * The client cannot resume this exact session, but it can be opened.
+ * The UI must render this as "Open client," never "Continue session"
+ * (spec scenario "Open only").
+ */
+{ kind: "openOnly" } | 
+/**
+ * No supported launch mechanism exists at all.
+ */
+{ kind: "unsupported" } | { kind: "clientNotDetected" } | { kind: "adapterDisabled" }
+/**
+ * "Continue here" (task 4.4/9): append a new native segment to an imported
+ * session with a short handoff summary, preserving every prior message's
+ * provenance untouched. The handoff message itself carries no
+ * `ImportProvenance` -- it is genuinely native GitWyrm output from this
+ * point forward, and that boundary is exactly what the new segment marks.
+ */
+export type ContinueHereOutcome = { kind: "continued"; session: AgentSession } | { kind: "notFound" } | { kind: "writeFailed"; detail: string }
 /**
  * A grouping boundary within a session's transcript, e.g. across a
  * plan-then-execute split or a lead/helper divide. Kept minimal in this
@@ -3695,6 +4230,13 @@ export type ConversationSegment = { segmentId: string; label: string;
  * RFC 3339 UTC timestamp.
  */
 startedAt: string }
+/**
+ * A reviewed, not-yet-applied plan: one item copied to one or more
+ * destinations. Persisted so `agent_config_apply_copy(plan_id)` can look it
+ * up, and so "Match selected apps" is built from the same plans as a
+ * single-item copy (task 2.4).
+ */
+export type CopyPlan = { planId: string; itemId: string; sourceItem: RawItem; destinations: DestinationPreview[]; createdAt: string }
 /**
  * A session was created, or the request could not produce one. Kept as an
  * enum (rather than a plain `AgentSession`) so a future validation refusal
@@ -3748,6 +4290,47 @@ export type DeskOutcome =
  * brought to the front and retargeted.
  */
 "focused"
+/**
+ * Per-destination result of an apply pass. One [`ApplyOutcome`] can contain
+ * a mix of `Applied` and `Refused`/`Failed` entries -- a batch never treats
+ * partial success as an all-or-nothing unit (task 5.2).
+ */
+export type DestinationApplyResult = { kind: "applied"; client: ClientId; operationId: string; receipt: OperationReceipt } | 
+/**
+ * The destination file changed since preview was computed. Nothing was
+ * written; the caller should refresh the plan and try again.
+ */
+{ kind: "concurrentChangeRefused"; client: ClientId; expectedHash: string | null; actualHash: string | null } | { kind: "writeFailed"; client: ClientId; detail: string }
+/**
+ * One destination's computed preview: the exact content GitWyrm proposes to
+ * write, the current file hash it was computed against, and any warnings.
+ * Nothing here is applied until [`ApplyRequest`] confirms this exact hash.
+ */
+export type DestinationPreview = { client: ClientId; destinationPath: string; 
+/**
+ * `None` when the destination file does not exist yet (a create, not a
+ * merge).
+ */
+beforeHash: string | null; proposedContent: string; 
+/**
+ * Redacted rendering safe to show in the UI: secret values already
+ * replaced with a marker before this ever reaches the frontend log or
+ * the plan file (task 1.5, 5.4).
+ */
+redactedDiffSummary: ChangeSummaryLine[]; warnings: PlanWarning[]; writeSupported: boolean }
+/**
+ * What detecting one adapter found. Distinct from [`AdapterError`]: this is
+ * the *registry's* view across every adapter (task 1.2), so a panic and a
+ * timeout are outcomes here rather than propagated errors -- one bad adapter
+ * must never take the scan down.
+ */
+export type DetectionOutcome = { kind: "detected"; version: string | null; supported: boolean } | { kind: "notDetected" } | 
+/**
+ * `detect` returned an error, timed out, or panicked. `detail` is
+ * logged, never a live error object -- see task 5.2 (redact from normal
+ * logs) for why message content specifically must never land here.
+ */
+{ kind: "failed"; detail: string }
 export type DeviceCodeInfo = { device_code: string; user_code: string; verification_uri: string; 
 /**
  * Minimum seconds between polls.
@@ -3792,6 +4375,18 @@ export type DirtyChoice =
  * read the same.
  */
 export type DirtyCount = { modified: number; untracked: number }
+export type DraftPullRequest = { title: string; body: string; 
+/**
+ * The host's own "open a new PR" page, built from `web_base`/branch
+ * helpers already in `git::remote_url` -- the same URL a user would
+ * reach by clicking "Compare & pull request" on the host's site. Opening
+ * it is the entire "create PR" action here: GitWyrm drafts the text,
+ * the user reviews and submits it on the host, and no GitWyrm code ever
+ * calls a host write API or a push. `None` when the remote is not a
+ * host this app recognizes.
+ */
+compareUrl: string | null }
+export type DraftPullRequestOutcome = { kind: "drafted"; draft: DraftPullRequest } | { kind: "resultNotFound" } | { kind: "noCommit" } | { kind: "noRemote" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string }
 /**
  * One artifact the AI drafted, as offered for review.
  * 
@@ -3866,11 +4461,11 @@ solutions: SolutionFile[] }
  */
 export type EditorKind = "vs_code" | "cursor" | "windsurf" | "jetbrains" | "zed"
 /**
- * `ask | plan | auto`, matching architecture.md section 8's
- * `StartAgentSessionRequest.mode`. Defined locally (not re-exported from a
- * shared `StartAgentSessionRequest`) because that shared type belongs to
- * `agent-desk-source-kickoffs` task 1.1, not yet landed; this enum only
- * needs to be structurally compatible with it, not the same Rust item.
+ * `ask | plan | auto`. Kept in this module (not re-exported from
+ * `commands::agent_desk::ExecutionMode`) as the canonical definition;
+ * `agent_session_start_execution`'s own `ExecutionMode` predates this policy
+ * table and is structurally identical, not the same Rust item -- see task
+ * 1.1's shared-contract note in `commands::agent_desk`.
  */
 export type ExecutionMode = "ask" | "plan" | "auto"
 /**
@@ -3894,12 +4489,86 @@ endedAt: string | null;
  * Highest sequence number persisted for this execution so far. Lets a
  * late/duplicate event be recognized without rescanning `messages`.
  */
-lastSequence: number }
+lastSequence: number; 
 /**
- * `solo | lead`, matching architecture.md section 8's
- * `StartAgentSessionRequest.team`.
+ * Short label for this node's job -- what the inspector shows as its
+ * title (mockup `.ag-inspector-title` / `.ag-node-title`). `None` for the
+ * lead, whose title the UI derives from the session itself.
+ */
+jobTitle?: string | null; 
+/**
+ * One or two sentences describing what this node is doing, shown in the
+ * inspector card (mockup `.ag-inspector-copy`).
+ */
+jobDescription?: string | null; 
+/**
+ * `researcher | builder | verifier`, shown in the node's meta line
+ * (mockup: "Luna · researcher · read-only"). `None` for the lead.
+ */
+helperRole?: string | null; 
+/**
+ * Repo-relative path globs this node may write to. Empty for read-only
+ * nodes and for the lead (whose allowance is the whole repository).
+ */
+allowedPaths?: string[]; 
+/**
+ * Absolute path of the isolated worktree this helper runs in. `None` for
+ * the lead (which runs against the session's own source) and for
+ * read-only helpers that never provision one.
+ */
+worktreePath?: string | null; 
+/**
+ * Branch checked out in `worktree_path`.
+ */
+branch?: string | null; 
+/**
+ * Other execution IDs (within the same session) this node depends on --
+ * it will not be scheduled until all of them reach `Finished`.
+ */
+dependsOn?: string[]; 
+/**
+ * How many files this node changed, for the inspector's files line.
+ */
+changedFileCount?: number; 
+/**
+ * One-line summary of what the node produced, once finished.
+ */
+outputSummary?: string | null; 
+/**
+ * Present only on a lead execution that has drafted a graph and is
+ * waiting for the user's Start/Revise/Use-solo decision (`state` is
+ * `NeedsInput` while this is set -- "Paused at a gate or awaiting a
+ * plan-mode start decision", `SessionState::NeedsInput`'s own doc
+ * comment). Cleared once Start is chosen.
+ */
+proposedGraph?: ProposedGraph | null; 
+/**
+ * Present only while this node's result integration hit a conflict
+ * (tasks.md 5.3). Cleared once a person resolves it.
+ */
+conflict?: IntegrationConflict | null }
+/**
+ * `solo | lead`.
  */
 export type ExecutionTeam = "solo" | "lead"
+/**
+ * One external session as an adapter's `list` reports it -- enough to render
+ * a picker row before any message content is read.
+ */
+export type ExternalSessionSummary = { externalSessionId: string; title: string; 
+/**
+ * RFC 3339 UTC timestamp of the session's own last-modified time, taken
+ * from the file/record itself, never from import time.
+ */
+updatedAt: string; 
+/**
+ * The absolute path the external client itself recorded as the working
+ * directory/project for this session, if the client records one at all.
+ * Reconciled against known repos by `super::reconcile`, never guessed at
+ * here.
+ */
+projectPath: string | null; messageCount: number; model: string | null }
+export type FieldChangeKind = "added" | "updated" | "unchanged"
 export type FileBlame = { path: string; lines: BlameLine[]; 
 /**
  * Set instead of `lines` when the file can't be blamed line-by-line.
@@ -4018,6 +4687,58 @@ export type GitProgressPayload = { repo_id: string; operation: string; line: str
 export type GithubRepoRef = { owner: string; repo: string }
 export type GithubRepository = { full_name: string; clone_url: string; html_url: string; description: string | null; private: boolean; pushed_at: string; starred: boolean }
 /**
+ * One renderable node in the UI's graph tree -- built entirely from
+ * [`ExecutionRecord`] rows plus the schedule decision, never from separate
+ * frontend state (tasks.md 6.1: "no separate frontend graph truth").
+ */
+export type GraphNodeView = { executionId: string; parentExecutionId: string | null; isLead: boolean; title: string; role: HelperRole | null; state: SessionState; dependsOn: string[]; allowedPaths: string[]; worktreePath: string | null; changedFileCount: number; outputSummary: string | null; 
+/**
+ * True when this node is in `schedule()`'s `ready`/active set right now
+ * -- lets the UI show "queued" vs. "waiting on X" distinctly even
+ * though both map to the same underlying `Ready`/`Draft` state.
+ */
+blockedOn: string[] }
+/**
+ * Every way a proposed graph can fail validation (tasks.md 1.2, 1.3 "fixture
+ * tests for every invalid shape"). Exhaustive and typed -- never a bare
+ * string -- so the UI can render a specific, actionable message per case
+ * and tests can assert on the exact failure.
+ */
+export type GraphValidationError = 
+/**
+ * More than [`MAX_CONCURRENT_HELPERS`] helper nodes were proposed.
+ */
+{ kind: "tooManyHelpers"; found: number; max: number } | 
+/**
+ * Two nodes share the same `node_id`.
+ */
+{ kind: "duplicateNodeId"; node_id: string } | 
+/**
+ * A node's `depends_on` names a node id that is not in the proposal.
+ */
+{ kind: "unknownDependency"; node_id: string; missing: string } | 
+/**
+ * The dependency edges contain a cycle.
+ */
+{ kind: "cycle"; node_ids: string[] } | 
+/**
+ * A node has an empty `node_id`, `title`, or a budget of zero.
+ */
+{ kind: "emptyJob"; node_id: string; detail: string } | 
+/**
+ * A node with `allowed_paths` claims to write but its role is read-only,
+ * or a writing node has no `allowed_paths` at all -- both are treated as
+ * "no allowed paths" by the policy layer's `can_write` gate, which is a
+ * silent all-or-nothing allowance no graph should rely on implicitly.
+ */
+{ kind: "missingAllowedPaths"; node_id: string }
+export type GraphViewOutcome = { kind: "found"; nodes: GraphNodeView[] } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string }
+/**
+ * What kind of work a helper does, shown in its node meta line (mockup:
+ * "Luna · researcher · read-only").
+ */
+export type HelperRole = "researcher" | "builder" | "verifier"
+/**
  * What a host can and cannot do, so the UI hides controls that would fail
  * rather than showing buttons that error on click.
  */
@@ -4102,6 +4823,17 @@ export type ImportProvenance = { adapterId: string; externalSessionId: string; e
  * the message's own `timestamp`.
  */
 importedAt: string }
+export type ImportScanOutcome = { kind: "scanned"; sessions: ScannedExternalSession[] } | { kind: "adapterDisabled" } | { kind: "clientNotDetected" } | { kind: "failed"; error: AdapterError }
+export type ImportSessionOutcome = 
+/**
+ * A brand-new GitWyrm session was created from the external history.
+ */
+{ kind: "created"; session: AgentSession } | 
+/**
+ * The session had already been imported before; only messages newer
+ * than the ledger's dedup anchor (task 2.3) were appended, if any.
+ */
+{ kind: "refreshed"; session: AgentSession; newMessageCount: number } | { kind: "adapterDisabled" } | { kind: "clientNotDetected" } | { kind: "sessionNotFound" } | { kind: "corruptSession"; detail: string } | { kind: "writeFailed"; detail: string }
 /**
  * What happened when an install was attempted.
  * 
@@ -4138,8 +4870,94 @@ label: string;
  * The launcher that was found, e.g. "code" or "rider".
  */
 command: string }
+/**
+ * One conflicted file: the shared ancestor text, this helper's version, and
+ * the version already sitting in the integration target (which may itself
+ * be another helper's already-applied change, or the lead's own edit).
+ * Nothing here is ever silently dropped -- resolution is a user action that
+ * picks or merges these into a fourth, final copy.
+ */
+export type IntegrationConflict = { path: string; 
+/**
+ * The execution id whose already-integrated change this one collided
+ * with.
+ */
+conflictingWith: string; 
+/**
+ * Full file text as it stood before either change (the merge base).
+ */
+baseText: string; 
+/**
+ * Full file text as this helper's worktree left it.
+ */
+helperText: string; 
+/**
+ * Full file text as it stands in the integration target right now
+ * (i.e. after `conflicting_with`'s change was applied).
+ */
+integratedText: string }
+/**
+ * The full policy for one [`SessionIntent`]: defaults plus the two hard
+ * permissions every other system in this package must consult before
+ * letting a session touch the repository.
+ * 
+ * `can_write` and `worktree` are the enforcement surface task 4.5 exists to
+ * prove: Review and Summarize (and Ask/Explain) report `can_write: false`,
+ * and nothing downstream of [`IntentPolicy::for_intent`] has any other way
+ * to decide whether a tool call is a write -- see
+ * `PolicyGuard`/`ToolCapability` below.
+ */
+export type IntentPolicy = { intent: SessionIntent; defaultMode: ExecutionMode; defaultTeam: ExecutionTeam; 
+/**
+ * Whether this intent may ever call an edit/write tool (create, modify,
+ * delete a file; commit; push; post to a host). `false` means: refused
+ * unconditionally, not "refused until some later state" -- Review and
+ * Summarize can never write, full stop, regardless of mode/team
+ * overrides (task 4.5).
+ */
+canWrite: boolean; worktree: WorktreePolicy }
+/**
+ * One row of the inventory table: one logical item (matched by identity
+ * across clients) plus its chosen source and per-client state.
+ */
+export type InventoryEntry = { itemId: string; kind: ItemKind; displayName: string; scope: ConfigScope; 
+/**
+ * The client currently treated as this item's source of truth --
+ * usually where it was first found, but can be "this repository" for a
+ * repo-scoped `.agents`-style location.
+ */
+source: ItemSource; perClient: ClientSyncStatus[]; hasSecrets: boolean }
 export type IssueDetail = { number: number; title: string; body: string; author: string; state: string; labels: string[]; assignee: string | null; comments: HostComment[]; html_url: string; created_at: string; updated_at: string | null }
 export type IssueSummary = { number: number; title: string; author: string; labels: string[]; assignee: string | null; comments: number; updated_at: string | null; html_url: string }
+/**
+ * The kind of configuration item being synced. `Skill` covers Agent Skills
+ * / prompt-style capabilities; `McpConnector` covers MCP server entries.
+ */
+export type ItemKind = "skill" | "mcpConnector"
+export type ItemSource = { kind: "client"; client: ClientId } | 
+/**
+ * A repository-scoped source not owned by any single client app, e.g.
+ * an `.agents` directory checked into the repo (mockup: "source: this
+ * repository" / "source: .agents").
+ */
+{ kind: "repository" }
+/**
+ * Bounds on how much a helper may do before it must stop and report back,
+ * even if its completion condition was never met (tasks.md 3.2).
+ */
+export type JobBudget = { maxTurns: number; 
+/**
+ * Wall-clock budget in seconds -- `u32`, not `u64` (specta cannot export
+ * 64-bit integers; matches `ExecutionRecord::last_sequence`'s reasoning).
+ */
+maxSeconds: number }
+export type KeepResultOutcome = { kind: "kept"; record: ResultRecord } | 
+/**
+ * Nothing to keep: no worktree, or a worktree with zero changes (a
+ * read-only intent's result, or a helper that made no edits).
+ */
+{ kind: "nothingToKeep" } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string }
+export type ListResultsOutcome = { kind: "found"; records: ResultRecord[] } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string }
 /**
  * One file in the log folder, for the day picker in the log viewer.
  */
@@ -4248,6 +5066,115 @@ export type ModelList = { models: CatalogModel[];
  * `enabled` reflects real entitlements rather than a static assumption.
  */
 live: boolean }
+export type OpenResultDiffOutcome = 
+/**
+ * The main window was found and told to open the diff.
+ */
+{ kind: "opened" } | 
+/**
+ * No main window exists yet (a very early startup race). The caller
+ * should not treat this as a hard failure -- there is nothing this
+ * command can do about a window that has not been created.
+ */
+{ kind: "mainWindowNotOpen" }
+/**
+ * tasks.md 4.5 / section 7: archived/deleted/moved change states, each
+ * honest and typed, with a real next action -- independent of whether a
+ * context can currently be built (a moved change, for instance, has no
+ * context here but a very real next action: open the change at its new id).
+ */
+export type OpenSpecSessionStatus = 
+/**
+ * The change is exactly where the session left it.
+ */
+{ kind: "active" } | 
+/**
+ * The change finished and was archived -- not a fault. Next action:
+ * open the archived change (read-only, matches
+ * `openspec_get_archived_change`'s own contract).
+ */
+{ kind: "archived" } | 
+/**
+ * The folder is gone under this id, but a change with a matching title
+ * exists elsewhere -- most likely renamed. Next action: offer to
+ * re-point this session at `likely_new_id`.
+ */
+{ kind: "moved"; likelyNewId: string; archived: boolean } | 
+/**
+ * Nothing matches under this id or by title. Next action: the session's
+ * transcript and cached snapshot remain readable (session history is
+ * never lost, tasks.md 4.5), but there is no live source to act on
+ * beyond that.
+ */
+{ kind: "deleted" } | { kind: "repoNotOpen" } | { kind: "notAnOpenSpecSource" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string }
+/**
+ * The context a lead agent reads to "understand the source and the OpenSpec
+ * plan" (this package's stated purpose). Built from proposal, design, every
+ * delta, tasks, and progress -- tasks.md 2.1.
+ * 
+ * Every optional document records its own honest absence (tasks.md 2.2)
+ * rather than the whole context failing to build: a change with no
+ * design.md still produces a usable context, it just says so.
+ */
+export type OpenSpecSourceContext = { changeId: string; title: string; proposal: Proposal; 
+/**
+ * `None` when `design.md` does not exist for this change -- distinct
+ * from `Some(String::new())`, which would mean the file exists but is
+ * empty.
+ */
+design: string | null; deltas: SpecDelta[]; tasks: SpecTask[]; progress: SpecProgress; 
+/**
+ * Populated only when this context was built for one exact task
+ * (`OpenSpecTask` source) rather than the whole change
+ * (`OpenSpecChange` source). Carries the task's *current* parsed index
+ * and text, which can differ from the session's cached
+ * `SourceSnapshot`/`OpenSpecTask::task_text` if the file changed after
+ * launch -- see [`TargetTaskContext`] for how that divergence is
+ * surfaced (tasks.md 2.3, 2.4).
+ */
+targetTask: TargetTaskContext | null; 
+/**
+ * Commits touching this change's folder, newest first. Empty (not an
+ * error) for a change never committed.
+ */
+history: SpecHistoryEntry[]; 
+/**
+ * Set when this change also has a linked branch by naming convention
+ * (`<change_id>` as a branch name) -- best-effort, never invented: only
+ * populated when the caller actually found one (see
+ * `context_for_active_change`/`context_for_task`, which pass this
+ * through from the branch lookup already used elsewhere in the app).
+ */
+branchLink: string | null; 
+/**
+ * Plain-language notes about anything that could not be parsed,
+ * forwarded from [`parse::SpecChange::notes`].
+ */
+notes: string[] }
+/**
+ * Outcome of asking for a session's OpenSpec context or status. Shared by
+ * both read commands below so "not an OpenSpec source", "repo not open",
+ * and "found" are the same three named states everywhere this question is
+ * asked, rather than each command inventing its own shape.
+ */
+export type OpenSpecSourceOutcome<T> = { kind: "found"; value: T } | 
+/**
+ * The session's source is not `OpenSpecChange`/`OpenSpecTask` -- asking
+ * this question of a manual chat or an issue session is a caller bug,
+ * not a runtime fault, but it is still reported rather than panicking.
+ */
+{ kind: "notAnOpenSpecSource" } | 
+/**
+ * The session's repository is not open in this app instance, so its
+ * `openspec/` folder cannot be read at all.
+ */
+{ kind: "repoNotOpen" } | 
+/**
+ * The repository is open but has no `openspec/` folder -- true for any
+ * repo that never adopted OpenSpec, and also the honest state right
+ * after someone deletes the whole folder.
+ */
+{ kind: "noOpenSpecFolder" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string }
 /**
  * Whether this repository uses OpenSpec, and whether the CLI is around.
  * 
@@ -4273,6 +5200,38 @@ archived_count: number; cli: CliInfo }
  * A pending index-level operation that can leave conflicts to resolve.
  */
 export type OperationKind = "Merge" | "CherryPick" | "Revert" | "Rebase"
+/**
+ * Everything needed to undo one write, byte-for-byte (task 3.4, 5.1).
+ * Backups are stored under the app data directory, never beside the
+ * destination file, so a corrupted client directory cannot also destroy the
+ * recovery copy.
+ */
+export type OperationReceipt = { operationId: string; planId: string; client: ClientId; destinationPath: string; 
+/**
+ * Hash of the destination's content immediately before this write (the
+ * same value the write was gated on). `None` if the file did not exist
+ * before this write (undo then means "delete the file we created").
+ */
+beforeHash: string | null; afterHash: string; 
+/**
+ * Path to the byte-identical backup of the pre-write content, under app
+ * data. Absent when `before_hash` is `None` (nothing to back up).
+ */
+backupPath: string | null; appliedAt: string; undone: boolean }
+/**
+ * Reconciles result records at startup: worktrees whose folder is gone are
+ * flagged rather than silently dropped (task 5.3: "without deleting
+ * automatically"). Returns the execution IDs whose worktree could not be
+ * found, so the caller can surface a recovery affordance instead of a
+ * blank/broken result.
+ */
+export type OrphanedResult = { executionId: string; worktreePath: string }
+export type PlanWarning = { kind: WarningKind; 
+/**
+ * Plain-language explanation, already redacted -- never contains a
+ * secret value.
+ */
+message: string }
 export type PollResult = 
 /**
  * Token acquired and saved; sign-in is complete.
@@ -4336,6 +5295,10 @@ export type PreflightItem = { label: string;
  */
 done: boolean; detail: string }
 /**
+ * Outcome of computing a preview.
+ */
+export type PreviewOutcome = { kind: "ready"; plan: CopyPlan } | { kind: "itemNotFound" } | { kind: "noDestinations" }
+/**
  * One identity you commit under.
  */
 export type Profile = { 
@@ -4357,6 +5320,28 @@ signCommits?: boolean;
  */
 folders?: string[] }
 /**
+ * The result of trying to match one external session's recorded project
+ * path against known repositories.
+ */
+export type ProjectResolution = 
+/**
+ * Matched exactly one known repo.
+ */
+{ kind: "resolved"; repoId: string; repoName: string; repoPath: string } | 
+/**
+ * The external client recorded no project path at all for this
+ * session -- distinct from `Unresolved`, since there is nothing to
+ * retry a match against later even if the user adds the repo.
+ */
+{ kind: "noProjectRecorded" } | 
+/**
+ * A path was recorded but does not match any known repo. Carries the
+ * raw path back so the UI can show *what* could not be found and offer
+ * "Open this folder" / "Add as repo" rather than silently dropping the
+ * session (spec: "keep unresolved paths visible").
+ */
+{ kind: "unresolved"; recordedPath: string }
+/**
  * The three narrative sections of proposal.md. Each is raw markdown; when a
  * heading is missing the field is empty and `raw` carries the whole file so the
  * UI can still show something real.
@@ -4367,6 +5352,52 @@ export type Proposal = { why: string; what_changes: string; impact: string;
  * three sections came up empty.
  */
 raw: string }
+export type ProposeGraphOutcome = 
+/**
+ * The proposal validated and was persisted on a fresh lead execution in
+ * `NeedsInput` (AwaitingStart) -- nothing has started running yet
+ * (tasks.md 2.1, 2.2).
+ */
+{ kind: "awaitingStart"; session: AgentSession; execution_id: string } | { kind: "invalid"; reason: GraphValidationError } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string } | 
+/**
+ * This session already has an execution running -- a second lead cannot
+ * be proposed on top of one already in flight.
+ */
+{ kind: "alreadyRunning"; execution_id: string }
+/**
+ * A full Plan-mode graph proposal: one lead plus its proposed helpers.
+ * Persisted as the payload of an `AwaitingStart` execution record
+ * (tasks.md 1.4, 2.2).
+ */
+export type ProposedGraph = { leadSummary: string; helpers: ProposedHelperJob[]; 
+/**
+ * RFC 3339 UTC timestamp of when the lead drafted this proposal.
+ */
+proposedAt: string }
+/**
+ * One helper job in a lead's proposed graph, before any execution ID has
+ * been minted. Mirrors the shape [`super::openspec_context::ProposedGraphNode`]
+ * uses for OpenSpec provenance, but carries what the *scheduler* needs to
+ * run the job: role, path allowance, budget, and an explicit completion
+ * condition (tasks.md 1.1).
+ */
+export type ProposedHelperJob = { 
+/**
+ * Caller-assigned, unique within the proposal. Becomes the durable
+ * `execution_id`'s human-readable seed once started, but is not itself
+ * an `ExecutionId` -- those are minted at Start (tasks.md 3.1).
+ */
+nodeId: string; title: string; description: string; role: HelperRole; 
+/**
+ * Repo-relative path globs this helper may write to. Read-only helpers
+ * (role `Researcher` / `Verifier` inspecting only) may leave this empty.
+ */
+allowedPaths: string[]; 
+/**
+ * Other node ids in the same proposal this one depends on -- it will not
+ * be scheduled until all of them finish (tasks.md 1.1, 3.3).
+ */
+dependsOn: string[]; budget: JobBudget; completion: CompletionCondition }
 /**
  * Stable identifier for a host, used as the `auth.json` key and in the UI.
  * 
@@ -4410,6 +5441,30 @@ upstream: string | null;
  * Commits handed to the remote. Zero means the remote already matched.
  */
 pushed: number }
+/**
+ * One discovered item, normalized enough to compare across clients while
+ * retaining the client's own raw fields and source path (task 1.3).
+ */
+export type RawItem = { location: ConfigLocation; kind: ItemKind; 
+/**
+ * Stable identity used to match the "same" item across clients: for a
+ * skill this is its directory/file name; for an MCP connector, its
+ * configured server name. Comparison is case-sensitive and exact --
+ * fuzzy matching would risk merging two genuinely different items.
+ */
+identity: string; displayName: string; description: string | null; 
+/**
+ * Every field this client's schema defines, normalized keys where
+ * GitWyrm understands them (`command`, `args`, `env`, `url`, `headers`)
+ * plus anything else under its original key in `extra`.
+ */
+extra: Partial<{ [key in string]: unknown }>; secretFields: SecretFieldRef[]; 
+/**
+ * Content hash of this item's raw serialized form, used to detect when
+ * an item has changed since it was last scanned (task 3.2 concurrent
+ * edit detection operates on the *file*, this is for the item itself).
+ */
+contentHash: string }
 /**
  * Outcome of a rebase. A clean rebase returns no conflicts; a paused rebase
  * (conflicts to resolve) lists the conflicted paths and leaves the repo in its
@@ -4627,6 +5682,7 @@ uncommitted: number }
 export type RepoIcon = { source_path: string; label: string; data_url: string; custom: boolean }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
 export type RepositoryStarter = "blank" | "node" | "rust" | "csharp" | "all_in_one"
+export type RequestRevisionOutcome = { kind: "requested"; record: ResultRecord } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string }
 /**
  * How far a reset rewinds: ref only, ref+index, or ref+index+working tree.
  */
@@ -4656,6 +5712,175 @@ export type Resolution =
  * Use the provided, hand-edited text.
  */
 { kind: "manual"; text: string }
+export type ResolveConflictOutcome = 
+/**
+ * The conflict was cleared on this node; only THIS node's integration
+ * resumes (tasks.md 5.4) -- no other node's state is touched.
+ */
+{ kind: "resolved"; session: AgentSession; resolved_text: string } | { kind: "noConflict" } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string }
+/**
+ * A changed file, named but not diffed -- the diff itself is read from the
+ * worktree at render time via the existing status/diff commands, never
+ * stored here.
+ */
+export type ResultChangedPath = { path: string; oldPath: string | null; 
+/**
+ * `"A" | "M" | "D" | "R" | "!"`, mirroring [`crate::git::types::StatusCode`]'s
+ * serde tag directly rather than re-exporting that type here -- the result
+ * model deliberately does not depend on the status/diff module's internal
+ * shape, only on a string small enough that a UI can key off it.
+ */
+status: string }
+/**
+ * One check's outcome, named and summarized -- never the raw terminal
+ * output (task 2.4: "without raw terminal flood").
+ */
+export type ResultCheckOutcome = { 
+/**
+ * The command name as configured (e.g. "npm run typecheck"), not its
+ * full invocation with flags -- what the user would recognize.
+ */
+commandName: string; outcome: CheckRunOutcome; 
+/**
+ * A short, plain-language summary line (e.g. "3 errors"), never the raw
+ * stdout/stderr stream.
+ */
+summary: string | null }
+/**
+ * A reference to the commit a kept result landed as, once one exists.
+ */
+export type ResultCommitRef = { oid: string; 
+/**
+ * The subject line only, for display in a result summary -- the full
+ * message (with trailers) is read from the commit object itself, not
+ * duplicated here.
+ */
+subject: string }
+/**
+ * Why an execution ended, when it did not simply "finish" cleanly. Persisted
+ * alongside a result record so a stopped/failed/conflicted execution still
+ * has something to review (task 1.3) rather than vanishing with no result at
+ * all.
+ */
+export type ResultOutcomeKind = 
+/**
+ * The lead reported the work complete.
+ */
+"finished" | 
+/**
+ * The user (or a peer Stop all) stopped the execution before it
+ * finished.
+ */
+"stopped" | 
+/**
+ * The provider/engine reported a failure.
+ */
+"failed" | 
+/**
+ * A helper's integration hit a conflict with another helper or the base
+ * (architecture.md section 10: "A helper conflict pauses only that
+ * integration and preserves both sides").
+ */
+"conflicted"
+/**
+ * The unified result record: everything a review/landing surface needs to
+ * know about what one execution produced, as references into repository
+ * truth.
+ * 
+ * One record per execution that reached a reviewable outcome. A session with
+ * a lead plus helpers has one record per execution ID (task 2.2: "graph node
+ * Output/View diff open its helper-scoped result"), plus -- once the lead
+ * finishes -- a combined record whose `execution_id` is the lead's own
+ * (`parent_execution_id: None` on the lead's `ExecutionRecord` is how a
+ * reader tells "this is the combined/top-level result" from "this is one
+ * helper's").
+ */
+export type ResultRecord = { 
+/**
+ * Which execution this result belongs to. Joins to
+ * `AgentSession.executions` by `execution_id`.
+ */
+executionId: string; outcome: ResultOutcomeKind; state: ResultState; 
+/**
+ * Absolute path of the worktree the execution ran in. `None` for a
+ * read-only intent (Ask/Explain/Review/Summarize; see
+ * `agentdesk::policy::for_intent`), which never provisions one.
+ */
+worktreePath: string | null; 
+/**
+ * The branch checked out in that worktree, when one exists.
+ */
+branch: string | null; 
+/**
+ * The commit the worktree started from.
+ */
+baseOid: string | null; 
+/**
+ * The worktree's HEAD when the result was captured. Equal to `base_oid`
+ * when nothing was committed inside the worktree itself (the common
+ * case: changes sit uncommitted until Keep -> Commit).
+ */
+headOid: string | null; changedPaths: ResultChangedPath[]; checks: ResultCheckOutcome[]; 
+/**
+ * Set once `agent_result_commit` (task 3.3) lands a commit for this
+ * result.
+ */
+commit: ResultCommitRef | null; 
+/**
+ * The OpenSpec change this result should be linked to via the `Spec:`
+ * trailer, when the session's source or an attached task names one.
+ */
+openspecChangeId: string | null; 
+/**
+ * RFC 3339 UTC timestamp this record was created or last updated.
+ */
+updatedAt: string }
+/**
+ * Where a session's result stands in the review/land lifecycle.
+ * 
+ * design.md: "Keep/Undo/Revise preserve current run-completion semantics.
+ * Commit is intentional." Nothing but an explicit user action advances past
+ * `Reviewing` -- see `agent_result_keep`/`agent_result_commit` in
+ * `commands::agent_result`, the only writers of `Kept`/`Committed`.
+ */
+export type ResultState = 
+/**
+ * The execution finished (or stopped/failed/conflicted) and produced
+ * something to look at. The default state the moment a result record
+ * exists -- spec "Finished does not mean committed".
+ */
+"reviewing" | 
+/**
+ * The user asked the lead to revise; a new lead message/execution step
+ * was appended (task 2.5) and this result is superseded once that step
+ * produces its own record.
+ */
+"revisionRequested" | 
+/**
+ * The user chose Keep: the worktree's changes are considered good and
+ * ready to commit, but no commit has been made yet.
+ */
+"kept" | 
+/**
+ * An intentional commit was created from this result (task 3.3).
+ */
+"committed" | 
+/**
+ * The user chose Undo: the changes were discarded/reverted via the
+ * existing run-completion path (task 3.1).
+ */
+"discarded" | 
+/**
+ * The result is committed/discarded but its worktree still needs
+ * cleanup (task 5) and that cleanup has not run yet or was refused
+ * because of hand edits.
+ */
+"cleanupNeeded" | 
+/**
+ * Cleanup was attempted and failed (e.g. Windows file lock) -- task 5.5
+ * retries this, and the UI offers a manual retry meanwhile.
+ */
+"cleanupFailed"
 /**
  * What a finished run offers for approval.
  */
@@ -4808,11 +6033,42 @@ id: string;
  * Repo-relative paths written, in creation order.
  */
 files: string[] }
+/**
+ * One external session as offered to the import picker: the adapter's own
+ * summary, plus how its project path resolves against known GitWyrm repos
+ * (task 2.4) so the UI can show an honest "unresolved" state per-row
+ * without a second round trip.
+ */
+export type ScannedExternalSession = { adapterId: string; summary: ExternalSessionSummary; project: ProjectResolution; 
+/**
+ * `true` when this external session already has a matching GitWyrm
+ * session per the import ledger, so the UI can offer "Open imported
+ * session" instead of "Import" (task 2.3).
+ */
+alreadyImported: boolean }
 export type ScannedRepo = { name: string; path: string; 
 /**
  * Current branch parsed from .git/HEAD as text (None when detached/unreadable).
  */
 head_branch: string | null }
+/**
+ * One field that may carry a secret (a token, API key, header value, or
+ * command argument that looks like a credential). The identity of the field
+ * is kept; the value never is (task 1.5, spec "Secrets are not spread
+ * silently").
+ */
+export type SecretFieldRef = { 
+/**
+ * Dotted path within the item's normalized fields, e.g. `env.API_KEY` or
+ * `headers.Authorization`.
+ */
+fieldPath: string; 
+/**
+ * Why this field is treated as secret: env var, header, command arg, or
+ * a field literally named token/key/secret/password.
+ */
+reason: SecretReason }
+export type SecretReason = "environmentValue" | "headerValue" | "commandArgument" | "namedSecretField"
 /**
  * Payload of [`SELECT_DESK_TARGET_EVENT`].
  */
@@ -4869,6 +6125,18 @@ sequence: number | null; import: ImportProvenance | null; targets: MessageTarget
  * source is gone (see spec `Deleted issue` scenario).
  */
 export type SessionSource = { kind: "manual"; repoId: string } | { kind: "issue"; hostId: string; owner: string; repo: string; number: number; url: string; snapshot: SourceSnapshot } | { kind: "pullRequest"; hostId: string; owner: string; repo: string; number: number; url: string; head: string; base: string; snapshot: SourceSnapshot } | { kind: "openSpecChange"; changeId: string; snapshot: SourceSnapshot } | { kind: "openSpecTask"; changeId: string; taskIndex: number; taskText: string; snapshot: SourceSnapshot } | { kind: "commit"; oid: string; snapshot: SourceSnapshot } | { kind: "diff"; scope: string; paths: string[]; snapshot: SourceSnapshot } | { kind: "workingChanges"; paths: string[]; snapshot: SourceSnapshot } | { kind: "checkFailure"; provider: string; checkId: string; url: string | null; snapshot: SourceSnapshot }
+/**
+ * What a source surface actually knows at click time, before any network
+ * round-trip -- architecture.md section 8: "Create from known row data,
+ * then enrich in the Desk." This is intentionally NOT the same type as
+ * [`SessionSource`]: that type carries a [`crate::agentdesk::model::SourceSnapshot`]
+ * with a `captured_at` timestamp and a `live_unavailable` flag that only the
+ * backend should stamp, so a frontend cannot construct a source that lies
+ * about when it was captured or claims to already know the live source is
+ * gone. `into_source_and_title` is where a `SessionSourceInput` becomes a
+ * real [`SessionSource`], stamping the snapshot itself.
+ */
+export type SessionSourceInput = { kind: "manual" } | { kind: "issue"; hostId: string; owner: string; repo: string; number: number; url: string; title: string; summary: string } | { kind: "pullRequest"; hostId: string; owner: string; repo: string; number: number; url: string; head: string; base: string; title: string; summary: string } | { kind: "openSpecChange"; changeId: string; title: string; summary: string } | { kind: "openSpecTask"; changeId: string; taskIndex: number; taskText: string; title: string; summary: string } | { kind: "commit"; oid: string; title: string; summary: string } | { kind: "diff"; scope: string; paths: string[]; title: string; summary: string } | { kind: "workingChanges"; paths: string[]; title: string; summary: string } | { kind: "checkFailure"; provider: string; checkId: string; url: string | null; title: string; summary: string }
 /**
  * Where a session is. Distinct from `airun::RunState`: a session outlives any
  * single execution and has states -- `Draft`, `Ready`, `MissingSource` -- that
@@ -5615,6 +6883,38 @@ identity: string | null;
  */
 workingKey: string | null }
 /**
+ * What kickoff found or did. Every branch is something the frontend's
+ * `useStartAgentSession` (task 2.1) can react to without inventing its own
+ * state machine -- `FocusedExisting` in particular is what makes double-Fix
+ * (spec `Duplicate active work`) show the existing session instead of a
+ * silently-forked second one.
+ */
+export type StartAgentSessionOutcome = 
+/**
+ * A brand-new session was created for this source/intent and is now
+ * `Preparing` (or `Draft`, for intents that do not auto-start).
+ */
+{ kind: "created"; session: AgentSession } | 
+/**
+ * An active (non-finished/failed/stopped) session already exists for
+ * this exact repo/source-identity/intent -- design.md: "An active
+ * session with the same repo/source/intent is focused and explained."
+ * No new session was created; the caller should select `session` and
+ * tell the user why.
+ */
+{ kind: "focusedExisting"; session: AgentSession } | { kind: "writeFailed"; detail: string }
+/**
+ * Everything a source surface (issue row, PR row, OpenSpec task, ...) needs
+ * to say "start an Agent Desk session for this" -- architecture.md section
+ * 8's `StartAgentSessionRequest`, given a Rust/Specta home.
+ * 
+ * `mode`/`team`/`provider_override` are optional: when omitted, the
+ * intent's policy default (`agentdesk::policy::for_intent`) is used, so a
+ * caller that just wants "Fix with AI" does not have to know Fix defaults
+ * to Auto + Lead.
+ */
+export type StartAgentSessionRequest = { repoId: string; repoPath: string; repoName: string; source: SessionSourceInput; intent: SessionIntent; mode: ExecutionMode | null; team: ExecutionTeam | null; providerOverride: string | null }
+/**
  * What happened when the caller asked a session to start an execution.
  * Architecture.md section 3: "already running, source missing, adapter
  * unsupported, provider reconnect, and conflicting write are enum variants,
@@ -5648,7 +6948,39 @@ export type StartExecutionOutcome =
  * Credentials exist but were refused -- the user needs to reconnect the
  * provider, not retry.
  */
-{ kind: "providerReconnect"; detail: string }
+{ kind: "providerReconnect"; detail: string } | 
+/**
+ * This session's intent requires an isolated worktree (Fix, or Plan
+ * once started) and one could not be provisioned. Task 5.2: "If
+ * provisioning fails, do not fall back to the user's checkout" -- the
+ * engine is never started against `open.path` when this is returned.
+ */
+{ kind: "worktreeFailed"; detail: string }
+export type StartGraphOutcome = 
+/**
+ * The lead's `NeedsInput` proposal became `Working`, and every
+ * dependency-ready helper (up to the 3-way cap) was minted an execution
+ * ID, a branch, and a mandatory worktree, then marked `Ready` so the
+ * scheduler will pick them up (tasks.md 2.3, 2.4, 3.1, 3.3, 4).
+ */
+{ kind: "started"; session: AgentSession; lead_execution_id: string; started_helpers: string[] } | 
+/**
+ * No `NeedsInput` proposal was found on this session -- Start was
+ * called with nothing to start.
+ */
+{ kind: "noProposal" } | 
+/**
+ * The proposal that was drafted no longer validates (e.g. a concurrent
+ * edit corrupted it) -- re-checked here, not trusted from draft time
+ * (tasks.md 2.3 "revalidate current source/policy/worktree capacity").
+ */
+{ kind: "invalid"; reason: GraphValidationError } | 
+/**
+ * A helper's worktree could not be created. No helper is left
+ * half-started: this is checked for every helper before any of them is
+ * marked `Ready`.
+ */
+{ kind: "worktreeFailed"; node_id: string; detail: string } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string } | { kind: "sourceMissing"; detail: string }
 /**
  * Starting a run either gives you the session or says why not.
  */
@@ -5867,6 +7199,33 @@ push_on_create?: boolean | null;
  */
 delete_on_remote?: boolean | null }
 /**
+ * The exact task a session targets, plus whether the live file still agrees
+ * with what the session captured at launch (tasks.md 2.4: "mark launch-vs-
+ * live differences").
+ */
+export type TargetTaskContext = { 
+/**
+ * The task's current index in the freshly parsed file. `None` when no
+ * task at the session's original index still looks like the same task
+ * (tasks.md 2.3: "even when it is not the next open task"; this field is
+ * what "identity preserved" means concretely -- see
+ * [`locate_target_task`]).
+ */
+currentIndex: number | null; currentText: string | null; currentDone: boolean | null; 
+/**
+ * The index/text the session was launched with -- always present,
+ * unlike the `current_*` fields, because this is provenance the session
+ * itself carries regardless of what the live file says now.
+ */
+launchedIndex: number; launchedText: string; 
+/**
+ * True when the file changed under this task since launch: the text at
+ * `launched_index` no longer matches `launched_text`, or the task is
+ * gone entirely. Drives the "stale, refresh or accept" affordance
+ * (tasks.md 2.4, and design.md's staleness rule for plan graphs).
+ */
+diverged: boolean }
+/**
  * How much GitWyrm reports about itself. One choice covering every kind of
  * outgoing diagnostic, ordered so that each level is a superset of the one
  * before it.
@@ -5966,6 +7325,28 @@ path: string;
  * it by name instead of guessing.
  */
 feature_branch: string }
+export type UndoOutcome = { kind: "restored"; receipt: OperationReceipt } | { kind: "alreadyUndone" } | { kind: "operationNotFound" } | 
+/**
+ * The destination changed since the write this receipt describes, so
+ * undoing would clobber someone else's newer edit. Nothing was touched.
+ */
+{ kind: "concurrentChangeRefused"; expectedHash: string; actualHash: string | null } | { kind: "restoreFailed"; detail: string }
+/**
+ * What Undo did to a result's worktree. Mirrors
+ * `commands::airun::RunDiscardPlan`/`git::worktree::RemoveOutcome`'s shape:
+ * hand-edited work is never silently thrown away (task 3.2).
+ */
+export type UndoResultOutcome = 
+/**
+ * The worktree had only what the agent wrote; it was discarded.
+ */
+{ kind: "discarded"; record: ResultRecord } | 
+/**
+ * The user (or someone) edited the worktree by hand since the agent
+ * finished. Nothing was deleted -- the result stays `Reviewing` and the
+ * caller should offer Open instead (task 3.2/5.2).
+ */
+{ kind: "refusedHandEdited"; record: ResultRecord; modified: number; untracked: number } | { kind: "nothingToUndo" } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string }
 /**
  * A local tag the given remote does not have, along with whether the remote
  * already holds the commit it points at. Tags on commits the remote lacks
@@ -6006,6 +7387,31 @@ export type UpdateSessionOutcome = { kind: "updated"; session: AgentSession } | 
  */
 export type UsageSource = "measured" | "providerReported" | "estimated"
 export type UsageValue = { value: number; source: UsageSource }
+export type UseSoloOutcome = 
+/**
+ * The proposal was discarded; the session is back to a plain
+ * `Ready` session with no graph, so the ordinary
+ * `agent_session_start_execution` (solo) path can be used.
+ */
+{ kind: "cleared"; session: AgentSession } | { kind: "noProposal" } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string }
+export type WarningKind = 
+/**
+ * The item carries secret fields that will not be copied as literal
+ * values into this destination's format.
+ */
+"secretNotCopied" | 
+/**
+ * The destination format cannot represent something the source has;
+ * the write will proceed but drop that piece (named in the warning
+ * alongside this variant by the caller-facing message, kept out of this
+ * enum since the message text is UI copy, not the typed reason).
+ */
+"unsupportedField" | 
+/**
+ * The destination client was not detected as installed; the file would
+ * still be written to the conventional path.
+ */
+"clientNotDetected"
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }
 /**
  * One checkout of the repository: the main one, or a linked worktree.
@@ -6053,6 +7459,29 @@ is_locked: boolean; state: WorktreeState;
  * True when this worktree was created to run a Spec Desk task in.
  */
 is_run_worktree: boolean }
+/**
+ * Whether an intent may create/use an isolated worktree, and when.
+ */
+export type WorktreePolicy = 
+/**
+ * Never provisions a worktree. Execution runs read-only against the
+ * existing checkout (which it also may not write to -- see
+ * [`IntentPolicy::can_write`]).
+ */
+"never" | 
+/**
+ * No worktree is created until a Plan-mode session is explicitly
+ * started (the user's Start action), at which point it behaves like
+ * [`WorktreePolicy::Always`].
+ */
+"notUntilStart" | 
+/**
+ * A worktree is provisioned before the first edit, every time. Refusing
+ * to fall back to the user's own checkout is enforced by the caller
+ * (task 5.2), not by this enum -- this only says isolation is
+ * mandatory, not how provisioning failure is handled.
+ */
+"always"
 /**
  * What kind of shape a worktree's folder is in.
  * 

@@ -320,15 +320,15 @@ fn find_or_start_execution<'a>(
         .any(|e| &e.execution_id == execution_id);
 
     if !already_present {
-        session.executions.push(ExecutionRecord {
-            execution_id: execution_id.clone(),
-            session_id: session.header.session_id.clone(),
-            parent_execution_id: None,
-            state: SessionState::Working,
-            started_at: occurred_at.to_string(),
-            ended_at: None,
-            last_sequence: 0,
-        });
+        session.executions.push(ExecutionRecord::minimal(
+            execution_id.clone(),
+            session.header.session_id.clone(),
+            None,
+            SessionState::Working,
+            occurred_at.to_string(),
+            None,
+            0,
+        ));
         session.header.active_execution_id = Some(execution_id.clone());
     }
 

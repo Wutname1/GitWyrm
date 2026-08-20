@@ -13,7 +13,7 @@ import type { SessionSource, SessionState } from '@/lib/bindings'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
 import { cn } from '@/lib/utils'
 
-const KIND_ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+export const SOURCE_KIND_ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   manual: MessageSquareText,
   issue: CircleDot,
   pullRequest: GitPullRequest,
@@ -25,8 +25,13 @@ const KIND_ICON: Record<string, React.ComponentType<{ size?: number; className?:
   checkFailure: CircleAlert,
 }
 
-/** Plain-language kicker/title/meta for the source banner, per source kind. */
-function describeSource(source: SessionSource): { kicker: string; title: string; meta: string } {
+/**
+ * Plain-language kicker/title/meta for the source banner, per source kind.
+ * Exported so `SessionSourcePanel` (the popover/dock content behind the
+ * per-pane Source button, tasks.md 6.6/7.1) describes the same source the
+ * same way instead of duplicating this switch.
+ */
+export function describeSource(source: SessionSource): { kicker: string; title: string; meta: string } {
   switch (source.kind) {
     case 'manual':
       return { kicker: 'New chat', title: 'Started without a specific issue, PR, or task', meta: 'Manual chat' }
@@ -103,7 +108,7 @@ export function SessionSourceBanner({
   onOpenSource?: () => void
 }) {
   const { kicker, title, meta } = describeSource(source)
-  const Icon = KIND_ICON[source.kind] ?? MessageSquareText
+  const Icon = SOURCE_KIND_ICON[source.kind] ?? MessageSquareText
   const liveUnavailable = source.kind !== 'manual' && source.snapshot.liveUnavailable
   const missingSource = state === 'missingSource'
   const readOnly = source.kind === 'pullRequest' || source.kind === 'commit' || source.kind === 'diff'

@@ -1,3 +1,4 @@
+mod agent_config;
 mod agentdesk;
 mod ai;
 mod airun;
@@ -321,6 +322,41 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_desk::agent_session_stop_execution,
             commands::agent_desk::agent_session_usage,
             commands::agent_desk::agent_session_refresh_source,
+            commands::agent_desk::agent_session_openspec_context,
+            commands::agent_desk::agent_session_openspec_status,
+            commands::agent_desk::agent_session_complete_openspec_task,
+            commands::agent_graph::agent_session_propose_graph,
+            commands::agent_graph::agent_session_start_graph,
+            commands::agent_graph::agent_session_use_solo_instead,
+            commands::agent_graph::agent_session_graph_view,
+            commands::agent_graph::agent_session_resolve_conflict,
+            commands::agent_graph::agent_session_record_conflict,
+            commands::agent_kickoff::agent_session_start,
+            commands::agent_kickoff::agent_intent_policy,
+            commands::agent_config::agent_config_scan,
+            commands::agent_config::agent_config_detect_clients,
+            commands::agent_config::agent_config_preview_copy,
+            commands::agent_config::agent_config_apply_copy,
+            commands::agent_config::agent_config_apply_batch,
+            commands::agent_config::agent_config_undo,
+            commands::agent_result::agent_result_build,
+            commands::agent_result::agent_result_list,
+            commands::agent_result::agent_result_open_diff,
+            commands::agent_result::agent_result_keep,
+            commands::agent_result::agent_result_undo,
+            commands::agent_result::agent_result_request_revision,
+            commands::agent_result::agent_result_draft_commit_message,
+            commands::agent_result::agent_result_commit,
+            commands::agent_result::agent_result_message_trailers,
+            commands::agent_result::agent_result_draft_pull_request,
+            commands::agent_result::agent_result_open_pull_request_page,
+            commands::agent_result::agent_result_cleanup_worktree,
+            commands::agent_result::agent_result_find_orphaned,
+            commands::agent_import::agent_import_list_adapters,
+            commands::agent_import::agent_import_scan,
+            commands::agent_import::agent_import_session,
+            commands::agent_import::agent_import_continuation_capability,
+            commands::agent_import::agent_import_continue_here,
         ])
         .typ::<watcher::RepoChangedPayload>()
         .typ::<commands::remote::GitProgressPayload>()

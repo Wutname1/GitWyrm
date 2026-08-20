@@ -12,20 +12,29 @@ import type { MessageTarget } from '@/lib/bindings'
  *
  * Agent Desk is a standalone webview window (see `AgentDeskView.tsx`) with no
  * embedded diff viewer, worktree browser, or graph panel today -- those are
- * `DiffView`/`GraphView`/the OpenSpec surfaces in the *main* GitWyrm window,
- * and no navigation bridge between the two exists yet. `source` is the one
- * target kind Agent Desk can already open, via `SessionSourceBanner`'s
- * `onOpenSource`. Every other kind resolves to `unavailable` here rather than
- * a link that looks live and does nothing -- see the mockup's
- * `.ag-tool-link`/`data-open-setup` pattern for what a real link looks like
- * once a destination exists, and `common-pitfalls`-style "false positive"
- * guidance against building fake affordances.
+ * `DiffView`/`GraphView`/the OpenSpec surfaces in the *main* GitWyrm window.
+ * `source` is the one target kind Agent Desk can already open, via
+ * `SessionSourceBanner`'s `onOpenSource`. Every other kind resolves to
+ * `unavailable` here rather than a link that looks live and does nothing --
+ * see the mockup's `.ag-tool-link`/`data-open-setup` pattern for what a real
+ * link looks like once a destination exists, and `common-pitfalls`-style
+ * "false positive" guidance against building fake affordances.
  *
- * `graphNode` becomes reachable once section 7's Graph panel exists in this
- * window; `file`/`diff`/`openSpecTask` become reachable once a navigation
- * bridge into the main window (or an embedded equivalent) exists. Revisit
- * this table when either lands -- it is the single place that decides
- * reachability, so nothing else has to re-derive it.
+ * A navigation bridge into the main window now EXISTS for one destination:
+ * `commands.agentResultOpenDiff(worktreePath, path)` (agent-desk-review-and-
+ * landing tasks.md 2.2) focuses the main window and opens a result's
+ * worktree diff there (`src/hooks/useAgentResultDiff.ts`'s
+ * `agent-result://open-diff` listener, wired at `App.tsx`'s `AppInner`).
+ * The `diff` case below stays `unavailable` because `MessageTarget::Diff`'s
+ * `scope` field is not yet populated with a worktree path anywhere in the
+ * backend (only test fixtures construct one, per
+ * `src-tauri/src/agentdesk/model.rs`) -- there is nothing to resolve
+ * `target.scope` INTO yet, not a missing destination. Once a real caller
+ * attaches a `Diff` target carrying a worktree path (or the review panel
+ * calls `agentResultOpenDiff` directly rather than through a message
+ * target), route it through that same command instead of adding a second
+ * bridge. `graphNode` becomes reachable once section 7's Graph panel exists
+ * in this window; `file`/`openSpecTask` still need their own bridges.
  */
 export type ResolvedMessageTarget =
   | { kind: 'source'; label: string }

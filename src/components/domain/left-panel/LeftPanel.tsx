@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react'
-import { ArchiveRestore, ArrowLeftRight, CloudOff, ExternalLink, Eye, Tag, Trash2, Upload } from 'lucide-react'
+import { ArchiveRestore, ArrowLeftRight, CloudOff, ExternalLink, Eye, Sparkles, Tag, Trash2, Upload } from 'lucide-react'
 import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
 import { useBranches, useCommitEntry, useRemotes, useStashes, useTags } from '@/hooks/useGitQueries'
@@ -13,6 +13,10 @@ import {
   useHostingProviders,
   useRepoHostProvider,
 } from '@/hooks/useGithub'
+import { useStartAgentSession } from '@/hooks/useStartAgentSession'
+import { useAiCatalog } from '@/hooks/useAi'
+import { useAiSelection } from '@/hooks/useAiSelection'
+import { issueSourceInput, pullRequestSourceInput } from '@/lib/agentDeskSources'
 import { matchExplanation } from '@/lib/commitPr'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
@@ -21,6 +25,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
@@ -74,6 +81,56 @@ export function LeftPanel() {
   const issues = useGithubIssues(githubSlug.data, githubConnected, repo?.id)
   const openGithubItem = useUiStore((s) => s.openGithubItem)
   const showSettings = useUiStore((s) => s.showSettings)
+  const { startSession } = useStartAgentSession()
+  // "Fix with…"/"Review with…" secondary override (task 3.2/4.2): only the
+  // providers the user actually has credentials for.
+  const aiSelection = useAiSelection()
+  const aiCatalog = useAiCatalog(aiSelection.configured.length > 0)
+  const configuredAiProviders = aiSelection.configured
+    .map((id) => aiCatalog.data?.find((p) => p.id === id))
+    .filter((p): p is NonNullable<typeof p> => p != null)
+
+  // Right-click AI kickoff for an issue row -- task 3.1/3.2. Built from the
+  // row data `issues` already loaded for the sidebar list, so a
+  // context-menu click never waits on a network round-trip (architecture.md
+  // section 8: "Create from known row data"). `providerOverride` is only
+  // set by the "Fix with…" secondary submenu.
+  const startIssueAiAction = (
+    number: number,
+    intent: 'fix' | 'plan' | 'explain',
+    providerOverride?: string
+  ) => {
+    const source = issues.data?.find((i) => i.number === number)
+    if (!repo || !githubSlug.data || !repoHost.data || !source) return
+    void startSession({
+      repoId: repo.id,
+      repoPath: repo.path,
+      repoName: repo.name,
+      intent,
+      providerOverride,
+      key: `issue:${number}:${intent}`,
+      source: issueSourceInput(repoHost.data, githubSlug.data.owner, githubSlug.data.repo, source),
+    })
+  }
+
+  // Right-click AI kickoff for a PR row -- task 4.1/4.2.
+  const startPrAiAction = (
+    number: number,
+    intent: 'review' | 'summarize',
+    providerOverride?: string
+  ) => {
+    const source = prs.data?.find((p) => p.number === number)
+    if (!repo || !githubSlug.data || !repoHost.data || !source) return
+    void startSession({
+      repoId: repo.id,
+      repoPath: repo.path,
+      repoName: repo.name,
+      intent,
+      providerOverride,
+      key: `pr:${number}:${intent}`,
+      source: pullRequestSourceInput(repoHost.data, githubSlug.data.owner, githubSlug.data.repo, source),
+    })
+  }
 
   // The pull request the selected commit belongs to, so its row in the list
   // below can say so. Reuses the same match the commit drawer shows, which is
@@ -373,11 +430,70 @@ export function LeftPanel() {
     if ((section.type === 'pr' || section.type === 'issue') && item.id != null) {
       const githubKind = section.type === 'pr' ? 'pr' : 'issue'
       const kind = githubKind === 'pr' ? 'Pull request' : 'Issue'
+      const number = item.id
       return (
         <ContextMenu>
           <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
           <ContextMenuContent className="w-52">
-            <ContextMenuItem onSelect={() => openGithubItem(githubKind, item.id!)}>
+            {githubKind === 'issue' ? (
+              <>
+                <ContextMenuItem onSelect={() => startIssueAiAction(number, 'fix')}>
+                  <Sparkles />
+                  Fix with AI
+                </ContextMenuItem>
+                {configuredAiProviders.length > 1 && (
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger>
+                      <Sparkles />
+                      Fix with…
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent>
+                      {configuredAiProviders.map((p) => (
+                        <ContextMenuItem key={p.id} onSelect={() => startIssueAiAction(number, 'fix', p.id)}>
+                          {p.name}
+                        </ContextMenuItem>
+                      ))}
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                )}
+                <ContextMenuItem onSelect={() => startIssueAiAction(number, 'plan')}>
+                  <Sparkles />
+                  Plan
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => startIssueAiAction(number, 'explain')}>
+                  <Sparkles />
+                  Explain
+                </ContextMenuItem>
+              </>
+            ) : (
+              <>
+                <ContextMenuItem onSelect={() => startPrAiAction(number, 'review')}>
+                  <Sparkles />
+                  Review with AI
+                </ContextMenuItem>
+                {configuredAiProviders.length > 1 && (
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger>
+                      <Sparkles />
+                      Review with…
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent>
+                      {configuredAiProviders.map((p) => (
+                        <ContextMenuItem key={p.id} onSelect={() => startPrAiAction(number, 'review', p.id)}>
+                          {p.name}
+                        </ContextMenuItem>
+                      ))}
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                )}
+                <ContextMenuItem onSelect={() => startPrAiAction(number, 'summarize')}>
+                  <Sparkles />
+                  Summarize with AI
+                </ContextMenuItem>
+              </>
+            )}
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => openGithubItem(githubKind, number)}>
               <Eye />
               View {kind.toLowerCase()}
             </ContextMenuItem>

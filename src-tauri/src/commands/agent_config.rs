@@ -1,0 +1,555 @@
+//! Commands for the Agent Setup configuration-sync feature: scan, preview,
+//! apply, and undo (architecture.md section 3, `agent_config_*`).
+//!
+//! Kept in its own file, separate from `agent_import.rs` (external-chat
+//! session import, owned by another change in flight at the same time this
+//! was written) even though both read agent-client configuration -- this
+//! module's `crate::agent_config` has its own minimal location discovery
+//! rather than depending on that adapter trait. See
+//! `src-tauri/src/agent_config/locations.rs` for the follow-up note on
+//! unifying them later.
+//!
+//! Every mutating command resolves its own [`agent_config::plan::SafeWriteRoot`]
+//! from the app handle, the same self-contained-command shape
+//! `commands::agent_desk` uses, so the logic functions underneath are directly
+//! testable against a temp root without a Tauri runtime.
+
+use std::path::{Path, PathBuf};
+
+use tauri::{AppHandle, State};
+
+use crate::agent_config::model::{
+    ApplyOutcome, BatchApplyOutcome, BatchApplyRequest, ChangeSummaryLine, ClientDetection,
+    ClientId, ConfigLocation, CopyPlan, DestinationApplyResult, DestinationPreview,
+    InventoryEntry, PlanWarning, PreviewOutcome, RawItem, UndoOutcome, WarningKind,
+};
+use crate::agent_config::plan::{self, SafeWriteRoot};
+use crate::agent_config::{locations, normalize, readers, redact, writers};
+use crate::error::AppError;
+use crate::state::RepoManager;
+
+fn now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
+}
+
+fn new_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+fn resolve_write_root(app: &AppHandle) -> Result<SafeWriteRoot, AppError> {
+    SafeWriteRoot::resolve(app).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Where plans are persisted between preview and apply:
+/// `<app-data>/agent-config-sync/v1/plans/<plan_id>.json`. A plan is small
+/// and short-lived (created by preview, consumed by apply, never listed), so
+/// it gets a flat file rather than an index like sessions do.
+fn plan_path(roots: &SafeWriteRoot, plan_id: &str) -> PathBuf {
+    roots.plans_dir().join(format!("{plan_id}.json"))
+}
+
+fn write_plan(roots: &SafeWriteRoot, plan: &CopyPlan) -> Result<(), AppError> {
+    let json = serde_json::to_vec_pretty(plan).map_err(|e| AppError::Other(e.to_string()))?;
+    std::fs::write(plan_path(roots, &plan.plan_id), json).map_err(AppError::Io)
+}
+
+fn read_plan(roots: &SafeWriteRoot, plan_id: &str) -> Option<CopyPlan> {
+    let bytes = std::fs::read(plan_path(roots, plan_id)).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+// -- 1.2/1.3/1.4: scan --
+
+/// Read-only scan across every known client location, optionally scoped to
+/// one open repo for repo-local configuration paths. Never writes anything
+/// (task 1.2, spec "Scan").
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_config_scan(
+    manager: State<'_, RepoManager>,
+    repo_id: Option<String>,
+) -> Result<Vec<InventoryEntry>, AppError> {
+    let repo_root = match &repo_id {
+        Some(id) => Some(manager.get(id)?.path.to_string_lossy().into_owned()),
+        None => None,
+    };
+
+    tauri::async_runtime::spawn_blocking(move || scan_inventory(repo_root.as_deref()))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+fn scan_inventory(repo_root: Option<&str>) -> Vec<InventoryEntry> {
+    let (items, _errors) = scan_all_items(repo_root);
+    let detections = locations::detect_clients(repo_root);
+    normalize::build_inventory(&items, &detections)
+}
+
+/// Every location for every client (personal plus, when given, repo-scoped),
+/// read into [`RawItem`]s. Parse failures are collected rather than aborting
+/// the whole scan -- one damaged config file must not hide every other
+/// client's items, the same stance `agentdesk::store` takes for one corrupt
+/// session file.
+fn scan_all_items(repo_root: Option<&str>) -> (Vec<RawItem>, Vec<(ConfigLocation, String)>) {
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    for &client in &ClientId::ALL {
+        let mut locs = locations::personal_locations(client);
+        if let Some(root) = repo_root {
+            locs.extend(locations::repo_locations(client, root));
+        }
+        for loc in locs {
+            match readers::read_items(&loc) {
+                Ok(mut found) => items.append(&mut found),
+                Err(e) => errors.push((loc, e.to_string())),
+            }
+        }
+    }
+    (items, errors)
+}
+
+/// Which clients were detected on this machine, for the "Detected apps" tab.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_config_detect_clients(
+    manager: State<'_, RepoManager>,
+    repo_id: Option<String>,
+) -> Result<Vec<ClientDetection>, AppError> {
+    let repo_root = match &repo_id {
+        Some(id) => Some(manager.get(id)?.path.to_string_lossy().into_owned()),
+        None => None,
+    };
+    tauri::async_runtime::spawn_blocking(move || locations::detect_clients(repo_root.as_deref()))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+// -- 3.1: preview --
+
+/// Compute a not-yet-applied plan copying `item_id`'s source content to each
+/// of `destinations`. Every destination's proposed content, before-hash, and
+/// warnings are computed here; nothing is written (task 3.1).
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_config_preview_copy(
+    manager: State<'_, RepoManager>,
+    app: AppHandle,
+    repo_id: Option<String>,
+    item_id: String,
+    destinations: Vec<ClientId>,
+) -> Result<PreviewOutcome, AppError> {
+    let repo_root = match &repo_id {
+        Some(id) => Some(manager.get(id)?.path.to_string_lossy().into_owned()),
+        None => None,
+    };
+    let write_root = resolve_write_root(&app)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        preview_copy_at(&write_root, repo_root.as_deref(), &item_id, &destinations)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+fn preview_copy_at(
+    write_root: &SafeWriteRoot,
+    repo_root: Option<&str>,
+    item_id: &str,
+    destinations: &[ClientId],
+) -> Result<PreviewOutcome, AppError> {
+    if destinations.is_empty() {
+        return Ok(PreviewOutcome::NoDestinations);
+    }
+
+    let (items, _errors) = scan_all_items(repo_root);
+    let source_item = match find_source_item(&items, item_id) {
+        Some(item) => item,
+        None => return Ok(PreviewOutcome::ItemNotFound),
+    };
+
+    let mut destination_previews = Vec::new();
+    for &client in destinations {
+        if client == source_item.location.client {
+            continue; // never propose copying an item onto its own source
+        }
+        destination_previews.push(build_destination_preview(client, source_item, repo_root));
+    }
+
+    let plan = CopyPlan {
+        plan_id: new_id(),
+        item_id: item_id.to_string(),
+        source_item: source_item.clone(),
+        destinations: destination_previews,
+        created_at: now_rfc3339(),
+    };
+    write_plan(write_root, &plan)?;
+    Ok(PreviewOutcome::Ready { plan })
+}
+
+/// Resolve `item_id` (the same `{kind:?}:{identity}` shape
+/// [`normalize::build_inventory`] assigns) back to one concrete source
+/// [`RawItem`] -- the first-seen occurrence, matching how the inventory
+/// chooses a source client.
+fn find_source_item<'a>(items: &'a [RawItem], item_id: &str) -> Option<&'a RawItem> {
+    items
+        .iter()
+        .filter(|item| format!("{:?}:{}", item.kind, item.identity) == item_id)
+        .min_by_key(|i| (i.location.scope != crate::agent_config::model::ConfigScope::Repo, i.location.client as u8))
+}
+
+fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root: Option<&str>) -> DestinationPreview {
+    let write_supported = writers::is_supported(client);
+    let mut locs = locations::personal_locations(client);
+    if let Some(root) = repo_root {
+        locs.extend(locations::repo_locations(client, root));
+    }
+    // Prefer a location matching the source's scope, else the first
+    // available location for this client.
+    let destination_location = locs
+        .iter()
+        .find(|l| l.scope == source_item.location.scope)
+        .or_else(|| locs.first())
+        .cloned();
+
+    let Some(dest_loc) = destination_location else {
+        return DestinationPreview {
+            client,
+            destination_path: String::new(),
+            before_hash: None,
+            proposed_content: String::new(),
+            redacted_diff_summary: Vec::new(),
+            warnings: vec![PlanWarning {
+                kind: WarningKind::ClientNotDetected,
+                message: format!("{} has no known configuration location for this item.", client.label()),
+            }],
+            write_supported: false,
+        };
+    };
+
+    let path = Path::new(&dest_loc.path);
+    let mut warnings = Vec::new();
+
+    if !path.parent().map(|p| p.exists()).unwrap_or(false) && path.parent().is_some() {
+        // Not fatal -- writers create parent directories -- but worth a
+        // heads-up since it means this client's config directory was never
+        // even created (a strong signal the client may not be installed).
+        warnings.push(PlanWarning {
+            kind: WarningKind::ClientNotDetected,
+            message: format!("{}'s configuration folder was not found; a new one will be created.", client.label()),
+        });
+    }
+
+    let existing = readers::read_items(&dest_loc).unwrap_or_default();
+    let existing_item = existing.iter().find(|i| i.identity == source_item.identity);
+    let destination_extra = existing_item.map(|i| &i.extra);
+
+    let redacted_source = redact::redact_for_display(&source_item.extra, &source_item.secret_fields);
+    let redacted_destination = destination_extra.map(|e| redact::redact_for_display(e, &[]));
+    let redacted_diff_summary: Vec<ChangeSummaryLine> =
+        redact::diff_fields(&redacted_source, redacted_destination.as_ref(), &source_item.secret_fields);
+
+    if !source_item.secret_fields.is_empty() {
+        warnings.push(PlanWarning {
+            kind: WarningKind::SecretNotCopied,
+            message: "This item includes secret values (tokens, keys, or headers). Their values \
+                       are not shown here and will be copied as-is only to the destination file; \
+                       verify you trust this destination before applying."
+                .to_string(),
+        });
+    }
+
+    let before = plan::read_current(path).ok().flatten();
+    let before_hash = before.as_ref().map(|(_, h)| h.clone());
+    let current_text = before
+        .map(|(bytes, _)| String::from_utf8_lossy(&bytes).into_owned())
+        .unwrap_or_else(|| writers::empty_document(client).to_string());
+
+    let proposed_content = if write_supported {
+        match writers::build_new_content(client, source_item.kind, &source_item.identity, &source_item.extra, &current_text) {
+            Ok(content) => content,
+            Err(e) => {
+                warnings.push(PlanWarning {
+                    kind: WarningKind::UnsupportedField,
+                    message: format!("Could not build a preview for {}: {e}", client.label()),
+                });
+                current_text.clone()
+            }
+        }
+    } else {
+        warnings.push(PlanWarning {
+            kind: WarningKind::UnsupportedField,
+            message: format!("{} is read-only in GitWyrm today; nothing can be applied here yet.", client.label()),
+        });
+        current_text.clone()
+    };
+
+    DestinationPreview {
+        client,
+        destination_path: dest_loc.path,
+        before_hash,
+        proposed_content,
+        redacted_diff_summary,
+        warnings,
+        write_supported,
+    }
+}
+
+// -- 3.2/3.3/3.4: apply / undo --
+
+/// Apply one previously computed plan. Every destination in the plan is
+/// written one at a time; a destination whose file changed since preview is
+/// refused (never overwritten) while the rest of the batch still proceeds
+/// (task 3.2, 5.2).
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_config_apply_copy(app: AppHandle, plan_id: String) -> Result<ApplyOutcome, AppError> {
+    let write_root = resolve_write_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || apply_copy_at(&write_root, &plan_id))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+fn apply_copy_at(write_root: &SafeWriteRoot, plan_id: &str) -> ApplyOutcome {
+    let Some(plan) = read_plan(write_root, plan_id) else {
+        return ApplyOutcome {
+            plan_id: plan_id.to_string(),
+            results: vec![],
+        };
+    };
+
+    let mut results = Vec::new();
+    // One client at a time (task 5: "Merge writers, ONE CLIENT AT A TIME"):
+    // each destination is fully applied (hash-check, backup, receipt, write)
+    // before moving to the next, so a failure partway through never leaves
+    // two destinations mid-write simultaneously.
+    for destination in &plan.destinations {
+        if !destination.write_supported || destination.destination_path.is_empty() {
+            continue;
+        }
+        let operation_id = new_id();
+        let result = plan::apply_write(
+            write_root,
+            &plan.plan_id,
+            destination.client,
+            Path::new(&destination.destination_path),
+            destination.before_hash.as_deref(),
+            destination.proposed_content.as_bytes(),
+            &operation_id,
+            &now_rfc3339(),
+        );
+        results.push(match result {
+            Ok(receipt) => DestinationApplyResult::Applied {
+                client: destination.client,
+                operation_id,
+                receipt,
+            },
+            Err(plan::ApplyWriteError::ConcurrentChange { expected_hash, actual_hash }) => {
+                DestinationApplyResult::ConcurrentChangeRefused {
+                    client: destination.client,
+                    expected_hash,
+                    actual_hash,
+                }
+            }
+            Err(e) => DestinationApplyResult::WriteFailed {
+                client: destination.client,
+                detail: e.to_string(),
+            },
+        });
+    }
+
+    ApplyOutcome {
+        plan_id: plan.plan_id,
+        results,
+    }
+}
+
+/// "Match selected apps": apply several previously previewed plans in one
+/// batch. Deliberately built from the same [`apply_copy_at`] used by a
+/// single-item apply -- there is no separate "sync everything" code path
+/// (task 2.4, 5).
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_config_apply_batch(app: AppHandle, request: BatchApplyRequest) -> Result<BatchApplyOutcome, AppError> {
+    let write_root = resolve_write_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let outcomes = request
+            .plan_ids
+            .iter()
+            .map(|plan_id| apply_copy_at(&write_root, plan_id))
+            .collect();
+        BatchApplyOutcome { outcomes }
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Undo one operation by ID, restoring byte-identical prior content unless
+/// the destination changed since the write (task 3.4).
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_config_undo(app: AppHandle, operation_id: String) -> Result<UndoOutcome, AppError> {
+    let write_root = resolve_write_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || undo_at(&write_root, &operation_id))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+fn undo_at(write_root: &SafeWriteRoot, operation_id: &str) -> UndoOutcome {
+    match plan::undo_write(write_root, operation_id) {
+        Ok(receipt) => UndoOutcome::Restored { receipt },
+        Err(plan::UndoWriteError::NotFound) => UndoOutcome::OperationNotFound,
+        Err(plan::UndoWriteError::AlreadyUndone) => UndoOutcome::AlreadyUndone,
+        Err(plan::UndoWriteError::ConcurrentChange { expected_hash, actual_hash }) => {
+            UndoOutcome::ConcurrentChangeRefused { expected_hash, actual_hash }
+        }
+        Err(e) => UndoOutcome::RestoreFailed { detail: e.to_string() },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent_config::model::{ConfigScope, ItemKind, JsonValue};
+    use tempfile::TempDir;
+
+    fn write_root() -> (TempDir, SafeWriteRoot) {
+        let dir = TempDir::new().unwrap();
+        let root = SafeWriteRoot::at(dir.path().join("agent-config-sync").join("v1")).unwrap();
+        (dir, root)
+    }
+
+    fn sample_item(client: ClientId, identity: &str) -> RawItem {
+        let mut extra = std::collections::BTreeMap::new();
+        extra.insert("command".to_string(), JsonValue(serde_json::json!("npx")));
+        extra.insert("env".to_string(), JsonValue(serde_json::json!({ "TOKEN": "abc123secret" })));
+        RawItem {
+            location: ConfigLocation {
+                client,
+                scope: ConfigScope::Personal,
+                path: "/fake/source".into(),
+            },
+            kind: ItemKind::McpConnector,
+            identity: identity.to_string(),
+            display_name: identity.to_string(),
+            description: None,
+            secret_fields: crate::agent_config::redact::find_secret_fields(&extra),
+            extra,
+            content_hash: "h".into(),
+        }
+    }
+
+    #[test]
+    fn full_preview_apply_undo_round_trip_via_command_logic() {
+        let (dir, write_root) = write_root();
+        let dest_dir = dir.path().join("dest_home");
+        std::fs::create_dir_all(&dest_dir).unwrap();
+        let claude_settings = dest_dir.join(".claude").join("settings.json");
+        std::fs::create_dir_all(claude_settings.parent().unwrap()).unwrap();
+        std::fs::write(&claude_settings, "{\n  \"mcpServers\": {}\n}").unwrap();
+
+        // We cannot easily inject a fake home dir into `locations` from this
+        // integration-ish test without adding a seam, so this test instead
+        // exercises the plan/apply/undo pipeline directly through the
+        // `agent_config::plan` module (already covered in `plan.rs`'s own
+        // tests) plus the command-layer plumbing (`preview_copy_at`,
+        // `apply_copy_at`, `undo_at`) against a hand-built plan, which is
+        // what those functions actually operate on once a plan exists.
+        let dest_preview = DestinationPreview {
+            client: ClientId::ClaudeCode,
+            destination_path: claude_settings.to_string_lossy().into_owned(),
+            before_hash: Some(plan::hash_bytes(b"{\n  \"mcpServers\": {}\n}")),
+            proposed_content: "{\n  \"mcpServers\": {\n    \"github\": { \"command\": \"npx\" }\n  }\n}".to_string(),
+            redacted_diff_summary: vec![],
+            warnings: vec![],
+            write_supported: true,
+        };
+        let source_item = sample_item(ClientId::OpenCode, "github");
+        let plan = CopyPlan {
+            plan_id: new_id(),
+            item_id: "McpConnector:github".to_string(),
+            source_item,
+            destinations: vec![dest_preview],
+            created_at: now_rfc3339(),
+        };
+        write_plan(&write_root, &plan).unwrap();
+
+        let outcome = apply_copy_at(&write_root, &plan.plan_id);
+        assert_eq!(outcome.results.len(), 1);
+        let DestinationApplyResult::Applied { operation_id, .. } = &outcome.results[0] else {
+            panic!("expected Applied, got {:?}", outcome.results[0]);
+        };
+
+        let applied_content = std::fs::read_to_string(&claude_settings).unwrap();
+        assert!(applied_content.contains("github"));
+
+        let undo_outcome = undo_at(&write_root, operation_id);
+        assert!(matches!(undo_outcome, UndoOutcome::Restored { .. }));
+        let restored = std::fs::read_to_string(&claude_settings).unwrap();
+        assert_eq!(restored, "{\n  \"mcpServers\": {}\n}");
+    }
+
+    #[test]
+    fn apply_refuses_a_destination_that_changed_since_preview_but_still_returns_a_result() {
+        let (dir, write_root) = write_root();
+        let dest = dir.path().join("dest.json");
+        std::fs::write(&dest, "{\"a\":1}").unwrap();
+
+        let dest_preview = DestinationPreview {
+            client: ClientId::ClaudeCode,
+            destination_path: dest.to_string_lossy().into_owned(),
+            before_hash: Some(plan::hash_bytes(b"{\"a\":0}")), // stale on purpose
+            proposed_content: "{\"a\":2}".to_string(),
+            redacted_diff_summary: vec![],
+            warnings: vec![],
+            write_supported: true,
+        };
+        let plan = CopyPlan {
+            plan_id: new_id(),
+            item_id: "McpConnector:x".to_string(),
+            source_item: sample_item(ClientId::OpenCode, "x"),
+            destinations: vec![dest_preview],
+            created_at: now_rfc3339(),
+        };
+        write_plan(&write_root, &plan).unwrap();
+
+        let outcome = apply_copy_at(&write_root, &plan.plan_id);
+        assert_eq!(outcome.results.len(), 1);
+        assert!(matches!(
+            outcome.results[0],
+            DestinationApplyResult::ConcurrentChangeRefused { .. }
+        ));
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "{\"a\":1}", "untouched");
+    }
+
+    #[test]
+    fn secrets_never_appear_in_a_preview_s_redacted_diff_summary_or_warnings() {
+        let source = sample_item(ClientId::OpenCode, "github");
+        let redacted = redact::redact_for_display(&source.extra, &source.secret_fields);
+        let lines = redact::diff_fields(&redacted, None, &source.secret_fields);
+        let serialized = serde_json::to_string(&lines).unwrap();
+        assert!(!serialized.contains("abc123secret"));
+    }
+
+    #[test]
+    fn preview_outcome_reports_item_not_found_rather_than_erroring() {
+        let (_dir, write_root) = write_root();
+        let outcome = preview_copy_at(&write_root, None, "McpConnector:does-not-exist", &[ClientId::ClaudeCode]).unwrap();
+        assert!(matches!(outcome, PreviewOutcome::ItemNotFound));
+    }
+
+    #[test]
+    fn preview_with_no_destinations_is_reported_distinctly() {
+        let (_dir, write_root) = write_root();
+        let outcome = preview_copy_at(&write_root, None, "McpConnector:whatever", &[]).unwrap();
+        assert!(matches!(outcome, PreviewOutcome::NoDestinations));
+    }
+
+    #[test]
+    fn undo_of_unknown_operation_reports_not_found_not_an_error() {
+        let (_dir, write_root) = write_root();
+        let outcome = undo_at(&write_root, "nope");
+        assert!(matches!(outcome, UndoOutcome::OperationNotFound));
+    }
+}

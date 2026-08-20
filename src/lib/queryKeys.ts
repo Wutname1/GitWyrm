@@ -41,6 +41,25 @@ export const keys = {
   agentSessions: (filterKey: string) => ['agentSessions', filterKey] as const,
   agentSession: (sessionId: string) => ['agentSession', sessionId] as const,
   agentSessionUsage: (sessionId: string) => ['agentSessionUsage', sessionId] as const,
+  /** The context a lead agent reads for an `openSpecChange`/`openSpecTask` session source. */
+  agentSessionOpenspecContext: (sessionId: string) => ['agentSessionOpenspecContext', sessionId] as const,
+  /** Active/archived/moved/deleted status of an `openSpecChange`/`openSpecTask` session source. */
+  agentSessionOpenspecStatus: (sessionId: string) => ['agentSessionOpenspecStatus', sessionId] as const,
+  /** Review/landing: every result record for one session (agent-desk-review-and-landing). */
+  agentResults: (sessionId: string) => ['agentResults', sessionId] as const,
+
+  /** Agent Setup: the cross-client skill/MCP inventory, scoped to a repo (or personal-only when null). */
+  agentConfigInventory: (repoId: string | null) => ['agentConfigInventory', repoId] as const,
+  /** Agent Setup: which agent clients were detected on this machine, scoped to a repo (or null). */
+  agentConfigDetectedClients: (repoId: string | null) => ['agentConfigDetectedClients', repoId] as const,
+
+  /** External chat import: adapter detection/enabled list (agent-desk-external-chat-import). */
+  agentImportAdapters: ['agentImportAdapters'] as const,
+  /** External chat import: one adapter's scanned external sessions. */
+  agentImportScan: (adapterId: string) => ['agentImportScan', adapterId] as const,
+  /** External chat import: whether/how a specific external session can be continued externally. */
+  agentImportContinuation: (adapterId: string, externalSessionId: string) =>
+    ['agentImportContinuation', adapterId, externalSessionId] as const,
 
   /**
    * Prefixes for invalidating every entry of a kind for one repo, regardless of

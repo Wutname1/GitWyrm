@@ -162,6 +162,60 @@ impl SessionSource {
             SessionSource::CheckFailure { .. } => "checkFailure",
         }
     }
+
+    /// A stable key identifying *what real-world thing* this source points
+    /// at -- deliberately excludes the snapshot (title/body/captured time),
+    /// which changes on every refresh and would otherwise make two sessions
+    /// for the same issue look like different sources. Used by
+    /// `agent_desk::find_active_session_for_source` (task 1.4) to detect
+    /// "the user is starting the same source/intent a second time" without
+    /// the store layer knowing anything about issues, PRs, or OpenSpec.
+    ///
+    /// Two sources with equal `identity_key()` and equal `SessionIntent` are
+    /// the same real-world request -- re-clicking Fix on the same issue
+    /// should focus the existing session, not fork a second one (design.md
+    /// "Deduplication").
+    pub fn identity_key(&self) -> String {
+        match self {
+            SessionSource::Manual { repo_id } => format!("manual:{repo_id}"),
+            SessionSource::Issue {
+                host_id,
+                owner,
+                repo,
+                number,
+                ..
+            } => format!("issue:{host_id}:{owner}/{repo}#{number}"),
+            SessionSource::PullRequest {
+                host_id,
+                owner,
+                repo,
+                number,
+                ..
+            } => format!("pullRequest:{host_id}:{owner}/{repo}#{number}"),
+            SessionSource::OpenSpecChange { change_id, .. } => {
+                format!("openSpecChange:{change_id}")
+            }
+            SessionSource::OpenSpecTask {
+                change_id,
+                task_index,
+                ..
+            } => format!("openSpecTask:{change_id}#{task_index}"),
+            SessionSource::Commit { oid, .. } => format!("commit:{oid}"),
+            SessionSource::Diff { scope, paths, .. } => {
+                let mut sorted = paths.clone();
+                sorted.sort();
+                format!("diff:{scope}:{}", sorted.join(","))
+            }
+            SessionSource::WorkingChanges { paths, .. } => {
+                let mut sorted = paths.clone();
+                sorted.sort();
+                format!("workingChanges:{}", sorted.join(","))
+            }
+            SessionSource::CheckFailure {
+                provider, check_id, ..
+            } => format!("checkFailure:{provider}:{check_id}"),
+        }
+    }
 }
 
 /// The cached title/body captured when a session was created from a source.
@@ -324,6 +378,88 @@ pub struct ExecutionRecord {
     /// Highest sequence number persisted for this execution so far. Lets a
     /// late/duplicate event be recognized without rescanning `messages`.
     pub last_sequence: u32,
+    /// Short label for this node's job -- what the inspector shows as its
+    /// title (mockup `.ag-inspector-title` / `.ag-node-title`). `None` for the
+    /// lead, whose title the UI derives from the session itself.
+    #[serde(default)]
+    pub job_title: Option<String>,
+    /// One or two sentences describing what this node is doing, shown in the
+    /// inspector card (mockup `.ag-inspector-copy`).
+    #[serde(default)]
+    pub job_description: Option<String>,
+    /// `researcher | builder | verifier`, shown in the node's meta line
+    /// (mockup: "Luna · researcher · read-only"). `None` for the lead.
+    #[serde(default)]
+    pub helper_role: Option<String>,
+    /// Repo-relative path globs this node may write to. Empty for read-only
+    /// nodes and for the lead (whose allowance is the whole repository).
+    #[serde(default)]
+    pub allowed_paths: Vec<String>,
+    /// Absolute path of the isolated worktree this helper runs in. `None` for
+    /// the lead (which runs against the session's own source) and for
+    /// read-only helpers that never provision one.
+    #[serde(default)]
+    pub worktree_path: Option<String>,
+    /// Branch checked out in `worktree_path`.
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// Other execution IDs (within the same session) this node depends on --
+    /// it will not be scheduled until all of them reach `Finished`.
+    #[serde(default)]
+    pub depends_on: Vec<ExecutionId>,
+    /// How many files this node changed, for the inspector's files line.
+    #[serde(default)]
+    pub changed_file_count: u32,
+    /// One-line summary of what the node produced, once finished.
+    #[serde(default)]
+    pub output_summary: Option<String>,
+    /// Present only on a lead execution that has drafted a graph and is
+    /// waiting for the user's Start/Revise/Use-solo decision (`state` is
+    /// `NeedsInput` while this is set -- "Paused at a gate or awaiting a
+    /// plan-mode start decision", `SessionState::NeedsInput`'s own doc
+    /// comment). Cleared once Start is chosen.
+    #[serde(default)]
+    pub proposed_graph: Option<crate::agentdesk::graph::ProposedGraph>,
+    /// Present only while this node's result integration hit a conflict
+    /// (tasks.md 5.3). Cleared once a person resolves it.
+    #[serde(default)]
+    pub conflict: Option<crate::agentdesk::graph::IntegrationConflict>,
+}
+
+impl ExecutionRecord {
+    /// A bare-minimum record with every graph-only field left empty --
+    /// existing call sites (single-execution sessions predating this change)
+    /// use this so they do not have to spell out every new field by hand.
+    pub fn minimal(
+        execution_id: ExecutionId,
+        session_id: SessionId,
+        parent_execution_id: Option<ExecutionId>,
+        state: SessionState,
+        started_at: String,
+        ended_at: Option<String>,
+        last_sequence: u32,
+    ) -> Self {
+        Self {
+            execution_id,
+            session_id,
+            parent_execution_id,
+            state,
+            started_at,
+            ended_at,
+            last_sequence,
+            job_title: None,
+            job_description: None,
+            helper_role: None,
+            allowed_paths: Vec::new(),
+            worktree_path: None,
+            branch: None,
+            depends_on: Vec::new(),
+            changed_file_count: 0,
+            output_summary: None,
+            proposed_graph: None,
+            conflict: None,
+        }
+    }
 }
 
 /// Something attached to a session's context beyond the messages themselves:
@@ -593,15 +729,15 @@ mod tests {
                 label: "Plan".into(),
                 started_at: "2026-01-01T00:00:00Z".into(),
             });
-            session.executions.push(ExecutionRecord {
-                execution_id: "exec-1".into(),
-                session_id: session.header.session_id.clone(),
-                parent_execution_id: None,
-                state: SessionState::Working,
-                started_at: "2026-01-01T00:00:00Z".into(),
-                ended_at: None,
-                last_sequence: 5,
-            });
+            session.executions.push(ExecutionRecord::minimal(
+                "exec-1".into(),
+                session.header.session_id.clone(),
+                None,
+                SessionState::Working,
+                "2026-01-01T00:00:00Z".into(),
+                None,
+                5,
+            ));
             session.attachments.push(ContextAttachment {
                 attachment_id: "att-1".into(),
                 label: "a.rs".into(),
@@ -834,5 +970,132 @@ mod tests {
 
         let back: MessageTarget = serde_json::from_str(&json).unwrap();
         assert_eq!(back, target, "round trip changed the value");
+    }
+
+    // -- SessionSource::identity_key (agent-desk-source-kickoffs task 1.4) --
+
+    #[test]
+    fn identity_key_ignores_the_snapshot() {
+        // Two sources pointing at the same issue but with different cached
+        // snapshots (as happens after a refresh finds a new title) must
+        // still be recognized as the same real-world source.
+        let a = SessionSource::Issue {
+            host_id: "github".into(),
+            owner: "acme".into(),
+            repo: "widgets".into(),
+            number: 42,
+            url: "https://example.test/issues/42".into(),
+            snapshot: snapshot("Old title"),
+        };
+        let b = SessionSource::Issue {
+            host_id: "github".into(),
+            owner: "acme".into(),
+            repo: "widgets".into(),
+            number: 42,
+            url: "https://example.test/issues/42".into(),
+            snapshot: snapshot("New title after refresh"),
+        };
+        assert_eq!(a.identity_key(), b.identity_key());
+    }
+
+    #[test]
+    fn identity_key_distinguishes_different_issues() {
+        let issue_42 = SessionSource::Issue {
+            host_id: "github".into(),
+            owner: "acme".into(),
+            repo: "widgets".into(),
+            number: 42,
+            url: "https://example.test/issues/42".into(),
+            snapshot: snapshot("Title"),
+        };
+        let issue_43 = SessionSource::Issue {
+            host_id: "github".into(),
+            owner: "acme".into(),
+            repo: "widgets".into(),
+            number: 43,
+            url: "https://example.test/issues/43".into(),
+            snapshot: snapshot("Title"),
+        };
+        assert_ne!(issue_42.identity_key(), issue_43.identity_key());
+    }
+
+    #[test]
+    fn identity_key_distinguishes_issue_from_pull_request_with_same_number() {
+        // An issue and a PR can share a number on the same host (GitHub's
+        // issue/PR numbering is one sequence per repo, but this must not be
+        // assumed) -- the key must still tell them apart by kind.
+        let issue = SessionSource::Issue {
+            host_id: "github".into(),
+            owner: "acme".into(),
+            repo: "widgets".into(),
+            number: 7,
+            url: "https://example.test/issues/7".into(),
+            snapshot: snapshot("Title"),
+        };
+        let pr = SessionSource::PullRequest {
+            host_id: "github".into(),
+            owner: "acme".into(),
+            repo: "widgets".into(),
+            number: 7,
+            url: "https://example.test/pull/7".into(),
+            head: "feature".into(),
+            base: "main".into(),
+            snapshot: snapshot("Title"),
+        };
+        assert_ne!(issue.identity_key(), pr.identity_key());
+    }
+
+    #[test]
+    fn identity_key_distinguishes_different_hosts_for_the_same_number() {
+        let github = SessionSource::Issue {
+            host_id: "github".into(),
+            owner: "acme".into(),
+            repo: "widgets".into(),
+            number: 1,
+            url: "https://github.example/issues/1".into(),
+            snapshot: snapshot("Title"),
+        };
+        let gitlab = SessionSource::Issue {
+            host_id: "gitlab".into(),
+            owner: "acme".into(),
+            repo: "widgets".into(),
+            number: 1,
+            url: "https://gitlab.example/issues/1".into(),
+            snapshot: snapshot("Title"),
+        };
+        assert_ne!(github.identity_key(), gitlab.identity_key());
+    }
+
+    #[test]
+    fn identity_key_diff_paths_ignore_input_order() {
+        let a = SessionSource::Diff {
+            scope: "working".into(),
+            paths: vec!["b.rs".into(), "a.rs".into()],
+            snapshot: snapshot("Diff"),
+        };
+        let b = SessionSource::Diff {
+            scope: "working".into(),
+            paths: vec!["a.rs".into(), "b.rs".into()],
+            snapshot: snapshot("Diff"),
+        };
+        assert_eq!(a.identity_key(), b.identity_key());
+    }
+
+    #[test]
+    fn identity_key_is_stable_across_every_variant() {
+        // Every variant produces a non-empty, kind-prefixed key -- exercised
+        // over the same fixture list used elsewhere so a new variant added
+        // without updating `identity_key` shows up here too (it would panic
+        // in the `match` at compile time, but this also proves the string is
+        // sane, not just present).
+        for source in all_source_variants() {
+            let key = source.identity_key();
+            assert!(!key.is_empty());
+            assert!(
+                key.starts_with(source.kind_label()),
+                "key {key} should start with kind label {}",
+                source.kind_label()
+            );
+        }
     }
 }
