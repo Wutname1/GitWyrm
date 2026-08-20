@@ -109,7 +109,7 @@ function BrandMark() {
             onClick={onLogoClick}
             aria-label="GitWyrm"
             data-tauri-drag-region
-            className="flex items-center gap-[7px] outline-none"
+            className="flex items-center gap-[7px] rounded-[5px] px-1 -mx-1 outline-none transition-[background-color,opacity] hover:bg-panel2 active:bg-panel3 active:opacity-80"
           >
             <img
               key={bounceNonce}
@@ -351,8 +351,8 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
               aria-label="Open and recent repositories"
               className={
                 compact
-                  ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
-                  : "flex items-center px-2 text-sub hover:text-foreground"
+                  ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub transition-colors hover:border-muted-foreground hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
+                  : "flex items-center rounded-[5px] px-2 text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground"
               }
             >
               <ChevronDown size={14} strokeWidth={2} />
@@ -448,8 +448,8 @@ function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
       onClick={() => (pickerShowing ? closeRepoPicker() : showRepoPicker())}
       className={
         compact
-          ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
-          : "flex items-center px-2 text-sub hover:text-foreground"
+          ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub transition-colors hover:border-muted-foreground hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
+          : "flex items-center rounded-[5px] px-2 text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground"
       }
       tooltip={pickerShowing ? "Close" : "Open or clone a repository"}
       disabled={openRepo.isPending}
@@ -475,7 +475,7 @@ function VerticalTabsButton() {
         setTabLayout("vertical");
         toast.success("Repository tabs moved to the left side");
       }}
-      className="flex items-center px-2 text-sub hover:text-foreground"
+      className="flex items-center rounded-[5px] px-2 text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground"
       tooltip="Use vertical tabs"
     >
       <PanelLeft size={15} strokeWidth={1.9} />
@@ -495,7 +495,7 @@ function SettingsButton() {
     <TooltipButton
       onClick={() => (inSettings ? showGraph() : showSettings())}
       className={cn(
-        "flex items-center px-2 hover:text-foreground",
+        "flex items-center rounded-[5px] px-2 transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground",
         inSettings ? "text-accent-text" : "text-sub",
       )}
       tooltip={inSettings ? "Close settings" : "Settings"}
@@ -642,7 +642,7 @@ export function VerticalTabRail() {
           <button
             type="button"
             onClick={() => useUiStore.getState().showRepoPicker()}
-            className="flex h-[31px] flex-1 items-center justify-center gap-1.5 rounded-[5px] border border-border bg-panel2 text-2xs text-foreground hover:border-muted-foreground hover:bg-panel3"
+            className="flex h-[31px] flex-1 items-center justify-center gap-1.5 rounded-[5px] border border-border bg-panel2 text-2xs text-foreground transition-colors hover:border-muted-foreground hover:bg-panel3 active:bg-panel"
           >
             <Plus size={13} />
             Open a repository
@@ -653,14 +653,14 @@ export function VerticalTabRail() {
             setTabLayout("horizontal");
             toast.success("Repository tabs moved to the top");
           }}
-          className="flex size-[31px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
+          className="flex size-[31px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub transition-colors hover:border-muted-foreground hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
           tooltip="Use top tabs"
         >
           <Columns3 size={14} />
         </TooltipButton>
         <TooltipButton
           onClick={() => showSettings()}
-          className="flex size-[31px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
+          className="flex size-[31px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub transition-colors hover:border-muted-foreground hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
           tooltip="Settings"
         >
           <Settings size={14} />

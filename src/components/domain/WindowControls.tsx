@@ -44,7 +44,7 @@ export function WindowControls() {
   if (!inTauri) return null
 
   const btn =
-    'inline-flex h-full w-11 flex-none items-center justify-center text-sub transition-colors hover:bg-panel3 hover:text-foreground'
+    'inline-flex h-full w-11 flex-none items-center justify-center text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground'
 
   return (
     <div className="titlebar-no-drag -mr-2 flex h-full items-stretch">
@@ -69,7 +69,7 @@ export function WindowControls() {
       <TooltipButton
         onClick={closeWindow}
         tooltip="Close"
-        className="inline-flex h-full w-11 flex-none items-center justify-center text-sub transition-colors hover:bg-red-600 hover:text-white mr-2 rounded-tr"
+        className="inline-flex h-full w-11 flex-none items-center justify-center text-sub transition-colors hover:bg-red-600 hover:text-white active:bg-red-700 active:text-white mr-2 rounded-tr"
       >
         <X size={14} />
       </TooltipButton>
