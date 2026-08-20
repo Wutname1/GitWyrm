@@ -67,21 +67,28 @@ export function SessionSidebar({
   // query, since the sidebar can be narrow inside a wide window (e.g. Split
   // View with a docked right panel) and vice versa.
   const containerRef = useRef<HTMLDivElement>(null)
-  const [containerWidth, setContainerWidth] = useState<number | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
+  // Measure the WINDOW, not this element.
+  //
+  // This used to observe `containerRef` -- the sidebar's own wrapper -- which
+  // is only ever 218-282px wide, i.e. permanently under the breakpoint. So the
+  // sidebar collapsed to a drawer on every window size and never came back:
+  // entering drawer mode shrinks the wrapper to a 36px strip, which keeps the
+  // measurement below the threshold forever. Only the viewport can answer
+  // "is there room for a sidebar here".
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window === 'undefined' ? DRAWER_BREAKPOINT_PX + 1 : window.innerWidth
+  )
+
   useEffect(() => {
-    const node = containerRef.current
-    if (!node) return
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry) setContainerWidth(entry.contentRect.width)
-    })
-    observer.observe(node)
-    return () => observer.disconnect()
+    const onResize = () => setViewportWidth(window.innerWidth)
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  const isDrawerMode = containerWidth != null && containerWidth < DRAWER_BREAKPOINT_PX
+  const isDrawerMode = viewportWidth < DRAWER_BREAKPOINT_PX
 
   // Selecting a session while the sidebar is a drawer implies the user is
   // done with it -- closing automatically keeps the drawer from covering the
