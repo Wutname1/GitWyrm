@@ -24,8 +24,8 @@
 
 ## 2. Review UI
 
-- [x] 2.1 Mount the changed-file list and combined summary in the production completion flow,
-      linked to the existing diff view.
+- [x] 2.1 Mount the solo execution changed-file list and summary in the production completion
+      flow, linked to the existing diff view.
       Reversed as of 2026-08-21 (R3.8 landed): `ConversationPane.tsx` now genuinely imports
       and renders `ResultReviewPanel`, gated on `shouldShowResultPanel(state, activeExecutionId)`
       so it appears once an execution reaches a terminal state, keyed to that execution so it
@@ -50,6 +50,12 @@
 - [ ] 2.5 Add Review requested changes as a new lead message and start a real execution step.
       (`agent_result_request_revision` flips state to `RevisionRequested`; appending the
       actual follow-up message reuses the existing `agent_session_append_user_message`)
+- [ ] 2.6 Mount a graph's primary result from the lead integration worktree, not the lead's
+      earlier Plan execution. Show the combined diff/checks and make each helper result
+      reachable from the same review surface.
+- [ ] 2.7 Wire accepted OpenSpec results to the existing completion writer using the exact
+      source task ID, then invalidate session source, OpenSpec detail, task list, and progress
+      queries. Do not infer a task when provenance is missing.
 
 ## 3. Keep, undo, and commit
 

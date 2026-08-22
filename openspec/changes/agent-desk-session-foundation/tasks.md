@@ -38,6 +38,11 @@
 - [x] 4.3 Save the mapped event before emitting `agent-session-event`.
 - [x] 4.4 Reject stale execution events and duplicate sequences in Rust tests.
 - [x] 4.5 Keep `ai-run-event` unchanged until all current consumers migrate.
+- [ ] 4.6 Replace repository-keyed run links with execution-ID-to-session links. Repository
+      identity may resolve context but must never choose an event's destination session.
+- [ ] 4.7 Test two concurrent lead/helper executions in separate sessions for the same repo,
+      including duplicate, late, terminal, unlink, and unknown execution events. Prove no
+      transcript, result, gate, or graph state crosses sessions.
 
 ## 5. Frontend data layer
 

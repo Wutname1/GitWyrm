@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import type { ResultChangedPath, ResultCheckOutcome, ResultRecord, SessionState, StartExecutionOutcome } from '@/lib/bindings'
+import type {
+  CompleteOpenSpecTaskOutcome,
+  ResultChangedPath,
+  ResultCheckOutcome,
+  ResultRecord,
+  SessionState,
+  StartExecutionOutcome,
+  ToggleOutcome,
+} from '@/lib/bindings'
 import {
   changedPathsSummaryLine,
   checksSummaryLine,
   explainAutoStartOutcome,
   explainCommitOutcome,
+  explainCompleteOpenSpecTaskOutcome,
   explainKeepOutcome,
   explainUndoOutcome,
   hasFailingCheck,
@@ -259,6 +268,52 @@ describe('explainAutoStartOutcome', () => {
       { kind: 'writeFailed', detail: 'disk error' },
     ]
     const messages = outcomes.map((o) => explainAutoStartOutcome(o))
+    for (const m of messages) {
+      expect(m).toBeTruthy()
+    }
+    expect(new Set(messages).size).toBe(messages.length)
+  })
+})
+
+// -- P1-C wiring 1: explainCompleteOpenSpecTaskOutcome -- the plain-language
+// half of "accepted task completion ticks the exact task through the
+// existing writer." `ResultReviewPanel.handleKeep` calls
+// `commands.agentSessionCompleteOpenspecTask` and this function whenever
+// `isOpenSpecTask` is true; this pins that mapping without driving the
+// panel's own DOM/query-client plumbing.
+describe('explainCompleteOpenSpecTaskOutcome', () => {
+  // `session` is never read by `explainCompleteOpenSpecTaskOutcome` (it only
+  // branches on `.kind`/`.toggle`), so a minimal cast avoids pinning this
+  // test to a full `AgentSession` fixture -- same reasoning
+  // `explainAutoStartOutcome`'s own tests give for the same pattern above.
+  const completed = (toggle: ToggleOutcome): CompleteOpenSpecTaskOutcome =>
+    ({ kind: 'completed', session: {}, toggle }) as unknown as CompleteOpenSpecTaskOutcome
+
+  it('toggled and alreadyThatWay both need no extra explanation -- the ordinary Keep toast already covers success', () => {
+    expect(explainCompleteOpenSpecTaskOutcome(completed('toggled'))).toBeNull()
+    expect(explainCompleteOpenSpecTaskOutcome(completed('alreadyThatWay'))).toBeNull()
+  })
+
+  it('lineMoved still explains itself even though the session write succeeded -- the checkbox itself may be wrong', () => {
+    const msg = explainCompleteOpenSpecTaskOutcome(completed('lineMoved'))
+    expect(msg).toBeTruthy()
+    expect(msg).toContain('tasks.md')
+  })
+
+  it('notAnOpenSpecTaskSource is silent -- ResultReviewPanel is never supposed to call this for such a session', () => {
+    expect(explainCompleteOpenSpecTaskOutcome({ kind: 'notAnOpenSpecTaskSource' })).toBeNull()
+  })
+
+  it('every real failure kind produces non-empty, distinct text', () => {
+    const outcomes: CompleteOpenSpecTaskOutcome[] = [
+      { kind: 'repoNotOpen' },
+      { kind: 'noOpenSpecFolder' },
+      { kind: 'sessionNotFound' },
+      { kind: 'sessionDamaged', reason: 'bad json' },
+      { kind: 'sessionUnavailable', detail: 'locked' },
+      { kind: 'writeFailed', detail: 'disk error' },
+    ]
+    const messages = outcomes.map((o) => explainCompleteOpenSpecTaskOutcome(o))
     for (const m of messages) {
       expect(m).toBeTruthy()
     }

@@ -354,6 +354,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_result::agent_result_open_pull_request_page,
             commands::agent_result::agent_result_cleanup_worktree,
             commands::agent_result::agent_result_find_orphaned,
+            commands::agent_result::agent_result_find_orphaned_all,
             commands::agent_import::agent_import_list_adapters,
             commands::agent_import::agent_import_scan,
             commands::agent_import::agent_import_session,

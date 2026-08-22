@@ -44,7 +44,9 @@
 
 ## 6. Composer and controls
 
-- [x] 6.1 Wire Ask/Plan/Auto control to live authority and execution behavior, with plain descriptions.
+- [ ] 6.1 Wire Ask/Plan/Auto to hard execution authority, not only policy metadata. Ask and
+      the Plan proposal turn must launch with writes disabled. Pass `started=false` while
+      drafting; only the visible Start transition may enable graph/helper writes.
 - [x] 6.2 Wire Solo/Lead + helpers control to live execution behavior independent of operating mode.
 - [x] 6.3 Append sent user messages visibly before backend execution begins.
 - [x] 6.4 Prevent duplicate sends while accepting the message.
@@ -84,7 +86,13 @@ Still requires a human at the keyboard, and NOT claimed here:
 - 4.4 stays open: message targets resolve honestly but no diff/worktree/graph
   destination is reachable yet, so nothing can be proven to navigate.
 
-## Status 2026-08-21
+## Status 2026-08-22 second audit
+
+Task 6.1 is reopened. The controls reach policy resolution, but production currently passes
+`started=true` to every run, so Plan can write before the user chooses Start. The execution
+launch must carry proposal-state authority and hard provider write denial.
+
+## Prior status 2026-08-21 (historical)
 
 Ticked 6.1 and 6.2 during this reconciliation pass. Evidence: `SessionComposer.tsx`
 maps the Ask/Plan/Auto pill through `modeToExecutionMode` and the Solo/Lead+helpers

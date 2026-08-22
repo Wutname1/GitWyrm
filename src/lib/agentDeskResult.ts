@@ -1,5 +1,6 @@
 import type {
   CommitResultOutcome,
+  CompleteOpenSpecTaskOutcome,
   KeepResultOutcome,
   ResultCheckOutcome,
   ResultChangedPath,
@@ -203,6 +204,51 @@ export function explainCommitOutcome(outcome: CommitResultOutcome): string | nul
       return outcome.detail
     case 'recordStateChanged':
       return 'The commit was created, but this result changed at the same time (probably an Undo). Refresh and check whether the new commit needs to be reconciled by hand.'
+  }
+}
+
+/**
+ * P1-C wiring 1 ("the OpenSpec completion hook has no consumer"): plain-
+ * language explanation for `commands.agentSessionCompleteOpenspecTask`'s
+ * outcome, matching every other `explain*Outcome` helper's shape in this
+ * file. Returns `null` for the two "the checkbox now reflects Done" cases
+ * (`completed` with `toggle: 'toggled' | 'alreadyThatWay'`) -- a caller
+ * reads `null` as "say nothing extra, the ordinary Keep success toast
+ * already covers it." `completed` with `toggle: 'lineMoved'` still returns
+ * a message: the SESSION write succeeded, but the actual checkbox in
+ * `tasks.md` could not be located anymore (the file changed underneath the
+ * session, `write::toggle_task_line`'s own guard) -- worth surfacing so the
+ * user knows to double check the spec file by hand, distinct from a hard
+ * failure.
+ */
+export function explainCompleteOpenSpecTaskOutcome(outcome: CompleteOpenSpecTaskOutcome): string | null {
+  switch (outcome.kind) {
+    case 'completed':
+      if (outcome.toggle === 'lineMoved') {
+        return 'Saved, but the task list changed since this chat started -- check tasks.md by hand to confirm the right item is checked off.'
+      }
+      // 'toggled' | 'alreadyThatWay': the ordinary Keep success toast
+      // already covers it, nothing extra to say.
+      return null
+    case 'notAnOpenSpecTaskSource':
+      // Not an error a user caused: this chat simply was not started from
+      // an OpenSpec task, so there is nothing to check off. Callers should
+      // not invoke this command for such a session in the first place (see
+      // `ResultReviewPanel`'s `isOpenSpecTask` guard) -- this branch exists
+      // so the switch is exhaustive, not because it is expected to fire.
+      return null
+    case 'repoNotOpen':
+      return 'Open this project to update its task list.'
+    case 'noOpenSpecFolder':
+      return 'This project has no OpenSpec folder anymore, so the task list could not be updated.'
+    case 'sessionNotFound':
+      return 'That chat could not be found.'
+    case 'sessionDamaged':
+      return `That chat's file is damaged: ${outcome.reason}`
+    case 'sessionUnavailable':
+      return `That chat could not be read right now: ${outcome.detail}`
+    case 'writeFailed':
+      return `Could not update the task list: ${outcome.detail}`
   }
 }
 

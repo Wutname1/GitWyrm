@@ -37,6 +37,23 @@ from replaced executions and duplicate sequences SHALL not alter the session.
 - WHEN an old execution emits after a replacement starts
 - THEN that output does not appear in the current transcript
 
+### Requirement: Execution routing is execution-addressed
+
+Every live execution SHALL be linked to exactly one session by execution ID. Repository
+identity MAY help find context but SHALL NOT select the destination session for an event.
+Linking or unlinking one execution SHALL NOT replace or remove another execution in the
+same repository.
+
+#### Scenario: Concurrent sessions in one repository
+
+- WHEN two sessions in the same repository run at the same time
+- THEN each event is appended only to the session linked to its execution ID
+
+#### Scenario: One execution finishes
+
+- WHEN one of those executions reaches a terminal state
+- THEN only its exact execution link is removed and the other session keeps receiving events
+
 ### Requirement: The index is rebuildable
 
 The session list index SHALL contain derived headers only and SHALL be rebuildable from

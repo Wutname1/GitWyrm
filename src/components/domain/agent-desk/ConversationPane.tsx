@@ -675,6 +675,10 @@ export function ConversationPane({
             intent={session.header.intent}
             taskText={session.header.title}
             provider="copilot"
+            // P1-C wiring 1: lets Keep also check off the originating
+            // OpenSpec task -- see `ResultReviewPanel`'s `isOpenSpecTask`
+            // doc comment.
+            isOpenSpecTask={session.header.source.kind === 'openSpecTask'}
           />
         </div>
       )}

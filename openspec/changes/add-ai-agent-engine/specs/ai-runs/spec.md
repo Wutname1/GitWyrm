@@ -167,9 +167,10 @@ with `shell` and network (`url`) tool kinds denied, so the CLI's own broader too
 cannot run arbitrary commands or reach the network regardless of what the model asks for.
 Denial SHALL take precedence over any allow rule, including a blanket allow-all.
 
-File edits are not denied - editing files in the repository is the job - and path scoping
-for those edits is the CLI's own concern once shell and network access are removed as
-options.
+Write-capable isolated runs MAY expose file edits. Read-only operations and Plan proposals
+before Start SHALL also launch with the provider's write tool denied. Runtime permission
+handling SHALL remain a second boundary but SHALL NOT be the only protection, because a
+provider-side allow rule may suppress a permission request.
 
 #### Scenario: The CLI is asked to run a shell command
 
@@ -182,6 +183,16 @@ options.
 - WHEN the model asks its own CLI to fetch a URL or otherwise reach the network
 - THEN the CLI's server denies it, because `url` is not an available tool kind for the
   session
+
+#### Scenario: Read-only run has a remembered allow rule
+
+- WHEN a provider-side rule would normally allow writes without asking GitWyrm
+- THEN the provider process still has its write tool denied for that execution
+
+#### Scenario: Plan proposal before Start
+
+- WHEN Plan is drafting a proposal and the user has not chosen Start
+- THEN the provider process has write denied and cannot change the checkout
 
 ### Requirement: A run ends on the CLI's own stop reason
 

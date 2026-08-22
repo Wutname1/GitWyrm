@@ -468,12 +468,15 @@ fn route_to_agent_desk(app: &tauri::AppHandle, event: &RunEventKind) {
     };
 
     let links = app.state::<RunSessionLinks>();
-    // No repository is linked yet in normal operation (nothing calls
-    // `RunSessionLinks::link` in this change), so this is almost always a
-    // single uncontended map lookup that returns `NoLinkedSession` -- resolving
+    // Looked up by `event.session_id` (the `airun` run's own ID, which IS the
+    // durable `execution_id` -- see `agentdesk::execution_id_for_run_session`),
+    // never by `event.repo_id`. This is the P0 routing fix: two sessions with
+    // live executions against the same repository each keep their own
+    // mapping, so an event for one never lands in the other. Most events for
+    // an unlinked execution return `NoLinkedSession` here cheaply -- resolving
     // the store root first would mean touching the filesystem on every single
     // run event for no reason.
-    if links.get(&event.repo_id).is_none() {
+    if links.get(&event.session_id).is_none() {
         return;
     }
 

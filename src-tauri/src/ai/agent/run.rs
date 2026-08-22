@@ -8,9 +8,9 @@
 ///
 /// States the boundaries plainly rather than relying on enforcement alone.
 /// What actually holds is the denied tool list the CLI is spawned with (see
-/// [`super::cli_agent::DENIED_TOOLS`]) -- a prompt is a request, not a control
-/// -- but a model that knows the rules wastes fewer turns discovering them by
-/// being refused.
+/// [`super::cli_agent::denied_tools_for`]) -- a prompt is a request, not a
+/// control -- but a model that knows the rules wastes fewer turns discovering
+/// them by being refused.
 pub const SYSTEM_PROMPT: &str = "You are working inside a single git repository, on one task from a spec.
 
 Rules that are enforced by the tool, not just asked of you:

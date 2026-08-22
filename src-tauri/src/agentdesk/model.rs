@@ -46,6 +46,28 @@ pub struct AgentSessionHeader {
     pub changed_file_count: u32,
     pub active_execution_id: Option<ExecutionId>,
     pub archived: bool,
+    /// RFC 3339 UTC timestamp of the moment this session's write authority
+    /// was durably granted -- the user pressing Start on a Plan proposal
+    /// (`agent_session_start_graph`), or "Use solo instead" abandoning the
+    /// proposal in favor of an ordinary run. `None` for a session that has
+    /// never been started this way: a fresh session of any intent (Fix
+    /// included -- it needs no separate Start, its intent policy already
+    /// grants write authority from creation) or a Plan session still sitting
+    /// on an unactioned proposal.
+    ///
+    /// This is the fix for "Plan can write before Start": before this field
+    /// existed, `start_execution_at` passed `started: true` into every
+    /// `cli_run::run_task` call unconditionally, including the very first
+    /// Plan-mode turn that PRODUCES the proposal -- so a proposal turn had
+    /// the same write authority as a turn that ran after the user actually
+    /// accepted the graph. `started_for_execution` (in
+    /// `commands::agent_desk`) reads this field, not any in-memory or
+    /// graph-shape signal, so the answer survives a restart and is not
+    /// re-derivable from "does an executed helper exist yet" (a Plan session
+    /// with a proposal that has zero ready-now helpers would otherwise look
+    /// identical to one that never proposed at all).
+    #[serde(default)]
+    pub graph_started_at: Option<String>,
 }
 
 /// The full session file on disk: the header plus everything the transcript,
@@ -477,6 +499,15 @@ pub struct ExecutionRecord {
     /// helper launched before this field existed.
     #[serde(default)]
     pub budget: Option<crate::agentdesk::graph::JobBudget>,
+    /// Present only on the LEAD's own execution record: the absolute path of
+    /// the dedicated worktree helper results are integrated into. Provisioned
+    /// lazily (`commands::agent_graph::ensure_integration_worktree`) the first
+    /// time any helper finishes, from the lead's own current HEAD in the
+    /// session's real repository -- never `session.header.repo_path` itself,
+    /// which is the user's own open checkout. `None` for a helper record, and
+    /// for a lead that has not yet had a helper finish.
+    #[serde(default)]
+    pub integration_worktree_path: Option<String>,
 }
 
 impl ExecutionRecord {
@@ -517,6 +548,7 @@ impl ExecutionRecord {
             proposed_graph: None,
             conflict: None,
             budget: None,
+            integration_worktree_path: None,
         }
     }
 }
@@ -648,6 +680,7 @@ mod tests {
             changed_file_count: 0,
             active_execution_id: None,
             archived: false,
+            graph_started_at: None,
         }
     }
 

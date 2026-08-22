@@ -47,11 +47,18 @@ the matching message.
 
 Agent Desk SHALL expose Ask, Plan, and Auto authority separately from Solo and Lead +
 helpers execution shape.
+Ask and a Plan proposal before Start SHALL run with provider-level write capabilities
+disabled. Team shape SHALL NOT increase the authority granted by the selected mode.
 
 #### Scenario: Plan with lead
 
 - WHEN Plan and Lead + helpers are selected
 - THEN a graph may be drafted but no helper starts until the user chooses Start
+
+#### Scenario: Plan proposal requests a write
+
+- WHEN the lead provider requests a write before the user chooses Start
+- THEN the engine refuses it and keeps the graph in proposal state
 
 ### Requirement: Context and usage are honest
 

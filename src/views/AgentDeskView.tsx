@@ -17,6 +17,7 @@ import { DockedDetailPanel } from '@/components/domain/agent-desk/DockedDetailPa
 import { AgentDeskDockDropZone } from '@/components/domain/agent-desk/AgentDeskDockDropZones'
 import { OpenSpecEmbeddedDetail } from '@/components/domain/agent-desk/OpenSpecEmbeddedDetail'
 import { useAgentSession, useAgentSessionHeaders } from '@/hooks/useAgentSessions'
+import { useOrphanResultReconciliation } from '@/hooks/useOrphanResultReconciliation'
 import { useContainerWidth } from '@/hooks/useContainerWidth'
 import { resolveDrop, resolveResponsiveMode, resolveSplitPresentation, shouldHideButtonLabels, zoneLabel } from '@/lib/agentDeskDock'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
@@ -433,6 +434,13 @@ export function AgentDeskView() {
     // not on a stale focus target.
     focusComposer()
   }
+
+  // P1-C wiring 3: scan every session, once, for a Kept/CleanupNeeded result
+  // whose worktree folder has vanished -- see the hook's own doc comment.
+  // Reuses `onSelectSession` (not a bespoke navigation path) so the toast's
+  // "open it" action behaves exactly like clicking that session in the
+  // sidebar would.
+  useOrphanResultReconciliation(onSelectSession)
 
   // R3.1/R3.3: a source kickoff (issue Fix, etc.) tells this window exactly
   // which session to show the instant it exists, rather than this window

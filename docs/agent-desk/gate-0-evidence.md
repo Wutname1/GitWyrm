@@ -147,3 +147,36 @@ the concurrent R1/R2 agent at the time):
 `PreviewOutcome::Ready`'s changed field type (R7), and `ExecutionRecord`'s new
 `baseOid`/`provider`/`mode`/`team`/`contextFingerprint` fields (R3/R5). Regenerate once
 Rust compiles - the frontend will not typecheck until then.
+
+---
+
+# Second audit response (2026-08-22)
+
+## Step 1 - execution-addressed routing and launch authority (landed)
+
+**P0-A: an event could reach the wrong chat.** `RunSessionLinks` was keyed by REPOSITORY, so
+linking a second session for the same repo overwrote the first, and routing resolved the
+destination from `event.repo_id`. With an app-wide sidebar and concurrent helpers, two chats
+in one repository could cross-contaminate. It is now keyed by execution ID - the same
+addressing `ExecutionRegistry` already used, rather than a third structure. Unlinking one
+execution can no longer disturb a sibling's mapping.
+
+The fix also surfaced a latent shadowing bug: in the `AlreadyRunning` arm the returned
+`execution_id` shadowed the outer just-linked one, so the cleanup unlinked the WINNER rather
+than the loser.
+
+**P0-B: read-only was advisory.** `DENIED_TOOLS` was a single hardcoded constant
+`["shell", "url"]`. `write` was never denied, `discover(cwd)` took no policy, and `connect()`
+passed the same list every time - so Review and Summarize launched WITH write capability. The
+engine-boundary refusal only fires when the provider chooses to ask; remembered approvals or
+`--allow-all-tools` suppress the request entirely.
+
+Now `denied_tools_for(policy, started)` appends `"write"` whenever
+`policy.check_tool_capability(started, EditFile)` refuses - the SAME function the runtime check
+calls, so the two layers cannot drift apart. Denial takes precedence over every allow rule
+including `--allow-all-tools`, which is the property worth having. The runtime check stays as
+defense in depth.
+
+I had previously reported read-only as "enforced at the engine boundary". That was true of the
+code path I read and false as a security claim, because I only verified the path where the
+provider asks. The audit's word - advisory - was correct.

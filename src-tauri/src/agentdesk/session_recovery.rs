@@ -5,20 +5,20 @@
 //! only truthful while the process that started that execution is still
 //! running: nothing else ever advances a session out of those states. Every
 //! in-process registry that could make one of them true again --
-//! [`super::bridge::RunSessionLinks`] (which repository is linked to which
-//! durable session's live execution) and `airun::SessionRegistry` -- starts
-//! empty on every launch (`app.manage(...::new())` in `lib.rs`), so a session
-//! read with one of those three states is, by construction, describing a
-//! process that no longer exists: a crash, a force-quit, a power loss, or an
-//! app update all leave exactly this shape on disk with nothing left to
-//! finish the job.
+//! [`super::execution_registry::ExecutionRegistry`] (keyed by
+//! `(session_id, execution_id)`) and `airun::SessionRegistry` -- starts empty
+//! on every launch (`app.manage(...::new())` in `lib.rs`), so a session read
+//! with one of those three states is, by construction, describing a process
+//! that no longer exists: a crash, a force-quit, a power loss, or an app
+//! update all leave exactly this shape on disk with nothing left to finish
+//! the job.
 //!
 //! This module has no Tauri dependency, matching [`super::reconcile`]'s
-//! shape: callers (`commands/agent_desk.rs`) resolve "is this session's repo
-//! actually linked to a live execution in this process" themselves and pass
-//! the answer in as a plain `bool`, so [`reconcile_header`] and
-//! [`reconcile_executions`] stay pure functions directly testable without a
-//! running app.
+//! shape: callers (`commands/agent_desk.rs`) resolve "is this session's
+//! execution actually live in this process" themselves (via
+//! `ExecutionRegistry::live_executions_for_session`) and pass the answer in
+//! as a plain `bool`, so [`reconcile_header`] and [`reconcile_executions`]
+//! stay pure functions directly testable without a running app.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -68,12 +68,9 @@ pub enum HeaderReconciliation {
 ///
 /// `execution_is_live` answers "does this process currently have a live run
 /// attached to this exact session right now" -- callers derive this from
-/// `RunSessionLinks::get(&header.repo_id) == Some(header.session_id)`
-/// (`RunSessionLinks` is repository-granular: a repository has at most one
-/// live run, linked to one session, with no finer-grained notion of which
-/// execution within that session is currently active), which this function
-/// has no way to check itself (it has no dependency on that registry's type,
-/// by design -- see module doc).
+/// `!ExecutionRegistry::live_executions_for_session(&header.session_id).is_empty()`,
+/// which this function has no way to check itself (it has no dependency on
+/// that registry's type, by design -- see module doc).
 pub fn reconcile_header(header: &mut AgentSessionHeader, execution_is_live: bool) -> HeaderReconciliation {
     if !is_live_process_state(header.state) || execution_is_live {
         return HeaderReconciliation::Unchanged;
@@ -90,12 +87,13 @@ pub fn reconcile_header(header: &mut AgentSessionHeader, execution_is_live: bool
 ///
 /// `is_live` is called once per execution record still claiming a
 /// live-process state; it should answer "is this specific `execution_id`
-/// backed by something alive in this process right now." Callers with only a
-/// session-granular liveness answer (see `reconcile_header`'s doc comment for
-/// why `RunSessionLinks` cannot distinguish individual executions) pass a
-/// closure that ignores its argument and returns that one answer for every
-/// execution in the session. Returns the number of records actually changed,
-/// so the caller can skip a write when nothing moved.
+/// backed by something alive in this process right now" -- typically
+/// `ExecutionRegistry::is_live(&session_id, execution_id)` directly, since the
+/// registry IS execution-granular. A caller with only a coarser,
+/// session-granular liveness answer may still pass a closure that ignores its
+/// argument and returns that one answer for every execution in the session.
+/// Returns the number of records actually changed, so the caller can skip a
+/// write when nothing moved.
 ///
 /// A helper with `conflict.is_some()` is left alone even though its state is
 /// `NeedsInput` (a live-process state by [`is_live_process_state`]'s general
@@ -162,6 +160,7 @@ mod tests {
             changed_file_count: 0,
             active_execution_id: Some("exec-1".into()),
             archived: false,
+            graph_started_at: None,
         }
     }
 

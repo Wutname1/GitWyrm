@@ -16,8 +16,9 @@
 //! final message." A tool call requires the provider to expose a
 //! *custom* tool this app defines and the CLI to invoke it -- `ai::agent::acp`
 //! only ever sees `Incoming::ToolCall` for tools the CLI itself already
-//! knows about (file edits, shell, etc; see `cli_agent::DENIED_TOOLS` for the
-//! ones we already refuse), and there is no mechanism today for GitWyrm to
+//! knows about (file edits, shell, etc; see `cli_agent::denied_tools_for` for
+//! which ones a given execution refuses at launch), and there is no
+//! mechanism today for GitWyrm to
 //! register a NEW tool the model can call -- that would mean implementing
 //! the MCP/tool-registration side of ACP, a materially larger change than
 //! this gap calls for. A fenced block in the model's own final text reply

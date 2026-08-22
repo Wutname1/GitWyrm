@@ -117,6 +117,7 @@ fn create_session_at(
         changed_file_count: 0,
         active_execution_id: None,
         archived: false,
+        graph_started_at: None,
     };
     let session = AgentSession::new(header);
 
@@ -191,13 +192,13 @@ pub(crate) fn create_session_for_kickoff(
 #[specta::specta]
 pub async fn agent_session_list(
     app: AppHandle,
-    links: tauri::State<'_, crate::agentdesk::RunSessionLinks>,
+    executions: tauri::State<'_, crate::agentdesk::ExecutionRegistry>,
     filter: SessionListFilterInput,
     cursor: Option<String>,
     limit: u32,
 ) -> Result<SessionListPageOutput, AppError> {
     let root = resolve_root(&app)?;
-    let links = links.inner().clone();
+    let executions = executions.inner().clone();
     let filter: SessionListFilter = filter.into();
     let limit = limit.max(1) as usize;
     let page = tauri::async_runtime::spawn_blocking(move || {
@@ -207,8 +208,18 @@ pub async fn agent_session_list(
         // `SessionLocks` acquisition and a full read-modify-write per stale
         // header on every one of those. The durable fix happens lazily via
         // `agent_session_get` when a session is actually opened.
+        //
+        // Session-granular, via `ExecutionRegistry` (keyed by (session,
+        // execution), never by repository) -- NOT `RunSessionLinks::get`,
+        // which used to answer this with a repo-keyed lookup that could name
+        // a DIFFERENT session sharing this header's repository (the P0 "wrong
+        // chat" bug this whole change closes). "Is this session live" is
+        // honestly "does this session have at least one execution this
+        // process currently has registered."
         store::list_sessions_reconciled(&root, &filter, cursor.as_deref(), limit, |header| {
-            links.get(&header.repo_id).as_deref() == Some(header.session_id.as_str())
+            !executions
+                .live_executions_for_session(&header.session_id)
+                .is_empty()
         })
     })
     .await
@@ -350,55 +361,31 @@ pub enum GetSessionOutcome {
 /// read right after a crash/force-quit/power-loss/app-update can legitimately
 /// still say `Preparing`/`Working`/`NeedsInput` with nothing behind it.
 ///
-/// Two separate `with_session_lock` acquisitions, deliberately, never one
-/// covering both a `RunSessionLinks` read and a session write:
-/// `agentdesk::locks`'s module doc states the fixed order as "nothing here is
-/// ever acquired while holding a `RunSessionLinks` lock, and `RunSessionLinks`
-/// is never acquired while holding a session lock" -- so `links.get` below
-/// runs with no session lock held at all, exactly like `route_run_event`
-/// (`links.get` before `locks.with_session_lock`) and `start_execution_at`
-/// (`links.link` after its session lock has already been released). The
-/// second acquisition re-reads and re-checks from scratch rather than reusing
-/// anything captured under the first -- the same "recheck inside the lock
-/// that performs the write" shape `record_execution_if_not_running` uses for
-/// its own second acquisition, so a mutation racing between the two calls
-/// (e.g. a fresh `agent_session_start_execution` landing in the gap) is
-/// re-validated, not silently overwritten: if the header no longer claims a
-/// live-process state, or does but is now genuinely live, nothing is
-/// reconciled on the second pass.
+/// Liveness is read from [`crate::agentdesk::ExecutionRegistry`]
+/// (`(session_id, execution_id)`-keyed), not `RunSessionLinks` -- unlike
+/// `RunSessionLinks`, which now only answers "which session owns THIS exact
+/// execution's routed events" and has no per-repository or per-session
+/// enumeration, `ExecutionRegistry::live_executions_for_session` directly
+/// answers the session-granular question this function actually needs, with
+/// no repository indirection to get wrong. Read with no session lock held
+/// (`ExecutionRegistry` has its own internal lock), matching
+/// `agentdesk::locks`'s fixed lock-ordering rule.
 fn get_session_at(
     locks: &crate::agentdesk::SessionLocks,
-    links: &crate::agentdesk::RunSessionLinks,
     executions: &crate::agentdesk::ExecutionRegistry,
     root: &SessionStoreRoot,
     session_id: &str,
 ) -> GetSessionOutcome {
     use crate::agentdesk::model::SessionLoadError as E;
 
-    // First acquisition: read-only, just to learn `repo_id` so `links` can be
-    // consulted with no session lock held.
-    let repo_id = match locks.with_session_lock(session_id, || store::read_session(root, session_id)) {
-        Ok(s) => s.header.repo_id,
-        Err(E::NotFound) => return GetSessionOutcome::NotFound,
-        Err(E::Io { detail }) => return GetSessionOutcome::Unavailable { detail },
-        Err(reason) => {
-            return GetSessionOutcome::Damaged {
-                reason: reason.to_string(),
-            }
-        }
-    };
-    // `RunSessionLinks::get` answers "which durable SESSION is linked to this
-    // repository's live run right now" -- it has no notion of individual
-    // execution IDs (a repository can only ever have one live run), so this
-    // is session-granular: "is *this* session the one this process currently
-    // has a run attached to for its repo." Used only for the header (task
-    // 2.7: "retain recovery information" -- the header's own state has no
-    // per-execution breakdown to be more precise than this with).
-    let session_is_live = links.get(&repo_id).as_deref() == Some(session_id);
+    // "Is this session live" for the header (task 2.7: "retain recovery
+    // information" -- the header's own state has no per-execution breakdown
+    // to be more precise than this with): does this process have at least
+    // one execution registered for this exact session, right now.
+    let session_is_live = !executions.live_executions_for_session(&session_id.to_string()).is_empty();
 
-    // Second acquisition: re-read (the file may have changed since the first
-    // read), reconcile against the now-known liveness answer, and write back
-    // in the same critical section as the decision.
+    // Reconcile against the now-known liveness answer, and write back in the
+    // same critical section as the decision.
     locks.with_session_lock(session_id, || {
         let mut session = match store::read_session(root, session_id) {
             Ok(s) => s,
@@ -469,22 +456,14 @@ fn reconcile_session_executions(
 pub async fn agent_session_get(
     app: AppHandle,
     locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
-    links: tauri::State<'_, crate::agentdesk::RunSessionLinks>,
     executions: tauri::State<'_, crate::agentdesk::ExecutionRegistry>,
     session_id: SessionId,
 ) -> Result<GetSessionOutcome, AppError> {
     let root = resolve_root(&app)?;
     let locks = locks.inner().clone();
-    // `repo_id` (and therefore which link to look up) is only known once the
-    // session itself has been read, so `RunSessionLinks::get` is called
-    // *inside* the blocking closure -- `links` is cheap to clone (every field
-    // is `Arc`-backed, see its own doc comment) and `'static`, so the clone
-    // travels with the closure rather than the per-header answer being
-    // pre-resolved on the async side.
-    let links = links.inner().clone();
     let executions = executions.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        get_session_at(&locks, &links, &executions, &root, &session_id)
+        get_session_at(&locks, &executions, &root, &session_id)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))
@@ -1056,7 +1035,45 @@ fn record_execution_if_not_running(
     })
 }
 
-fn start_execution_at(
+/// P1-C wiring 4 ("a losing solo-start race can provision a worktree and
+/// return without cleaning it"): removes a worktree `start_execution_at`
+/// itself just provisioned (step 2b) once it is clear this call is NOT
+/// going to hand it to the engine after all -- every early return between
+/// "worktree provisioned" and "engine actually launched" (`CliAgent::discover`
+/// failing, or any `RecordOutcome` other than `Updated` from the second,
+/// re-checked lock acquisition, the exact race the audit names) leaked
+/// exactly this folder before this function existed.
+///
+/// Best-effort and silent on failure: this call is already unwinding from
+/// one error, and a cleanup failure here must never mask or replace the
+/// original `StartExecutionOutcome` the caller is about to return -- the
+/// worktree is freshly created by this same call (nothing but an empty,
+/// freshly branched checkout could be in it), so `DirtyChoice::Discard` is
+/// safe without a confirmation step: there is no user data to protect, only
+/// this function's own leftover. If removal fails anyway (a Windows file
+/// lock is the realistic case, matching every other worktree-removal call
+/// site's own comments on this), the folder is simply left behind exactly
+/// as it would have been before this fix -- a pre-existing, separately
+/// tracked failure mode, not a regression this fix needs to also solve.
+fn cleanup_unused_worktree(open: &std::sync::Arc<crate::state::OpenRepo>, worktree_path: &str) {
+    let main_path = open.path.to_string_lossy().into_owned();
+    let repo = open.repo.lock().unwrap();
+    let _ = crate::git::worktree::remove(
+        &repo,
+        &main_path,
+        worktree_path,
+        crate::git::worktree::DirtyChoice::Discard,
+    );
+}
+
+/// `pub(crate)`, not `fn`: `commands::agent_kickoff::agent_session_start`
+/// (task/P1-A "every explicit source action starts immediately") calls this
+/// directly, right after creating a fresh session, exactly the way
+/// `create_session_for_kickoff` already lets that module reuse session
+/// creation without reimplementing it -- kickoff's own job stays "build the
+/// right request and dedupe," never a second copy of "how an execution
+/// actually starts."
+pub(crate) fn start_execution_at(
     app: &AppHandle,
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
@@ -1197,20 +1214,24 @@ fn start_execution_at(
     // ever sees a path -- the engine has no other route to a working
     // directory, so this is not advisory, it is the actual boundary.
     //
-    // `WorktreePolicy::NotUntilStart` (Plan) is treated as `open.path` here:
-    // this function is "start THIS execution," and a Plan-mode session that
-    // has reached the point of calling `start_execution` has, by
-    // definition, already been started by the user (architecture.md
-    // section 9's "No until Start" -- the gate is upstream of this call,
-    // in whatever UI action transitions a Plan session out of
-    // `AwaitingStart`, not inside `start_execution_at` itself). Once
-    // started, Plan behaves like Fix and also gets a worktree.
+    // `WorktreePolicy::NotUntilStart` (Plan) is `open.path` (read-only,
+    // no isolation) for a session whose graph has NOT been started yet --
+    // a Plan proposal turn only reads the repository to draft its proposal,
+    // so it has no more reason to provision a worktree than Ask/Review do
+    // (`agent_kickoff.rs`'s own doc comment: "Plan calls it only once the
+    // user explicitly starts it, at which point it behaves like Fix"). Once
+    // `started_for_execution` reports `true` -- durably, via
+    // `header.graph_started_at`, set by `agent_session_start_graph`'s commit
+    // step -- Plan behaves exactly like Fix and gets an isolated worktree
+    // for every turn from then on, including this one.
     let intent_policy = crate::agentdesk::policy::for_intent(session.header.intent);
+    let started = started_for_execution(&session.header, &intent_policy);
     // Set only when a worktree is provisioned below (R3.5).
     let mut run_branch: Option<String> = None;
     let mut base_oid_for_record: Option<String> = None;
     let engine_root = match intent_policy.worktree {
         crate::agentdesk::policy::WorktreePolicy::Never => open.path.clone(),
+        crate::agentdesk::policy::WorktreePolicy::NotUntilStart if !started => open.path.clone(),
         crate::agentdesk::policy::WorktreePolicy::Always
         | crate::agentdesk::policy::WorktreePolicy::NotUntilStart => {
             // Named after the session's own title, matching
@@ -1265,12 +1286,15 @@ fn start_execution_at(
     // read-only run that works against the checkout in place.
     let run_branch_for_record = run_branch.clone();
 
-    // Step 3: mint the durable execution ID up front and link the repository
-    // to this session *before* the engine can produce a single event -- a run
-    // event that races ahead of the link would be silently dropped as
-    // `NoLinkedSession` (bridge.rs).
+    // Step 3: mint the durable execution ID up front and link THIS EXECUTION
+    // (never the repository -- see `RunSessionLinks`'s own doc comment on why
+    // that was the P0 "event reaches the wrong chat" bug) to this session
+    // *before* the engine can produce a single event -- a run event that
+    // races ahead of the link would be silently dropped as `NoLinkedSession`
+    // (bridge.rs). A second, concurrent session against the same repository
+    // links its own execution ID and never overwrites this one.
     let execution_id = crate::agentdesk::execution_id_for_run_session(&new_id());
-    links.link(&repo_id, &session_id.to_string());
+    links.link(&execution_id, &session_id.to_string());
 
     // Discover the transport up front so an unusable CLI or stale credentials
     // are reported as a typed outcome instead of only surfacing later as an
@@ -1280,7 +1304,14 @@ fn start_execution_at(
     let agent = match crate::ai::agent::cli_agent::CliAgent::discover(engine_root.clone()) {
         Ok(a) => a,
         Err(e) => {
-            links.unlink(&repo_id);
+            links.unlink(&execution_id);
+            // P1-C wiring 4: this call provisioned `engine_root` as an
+            // isolated worktree (whenever `run_branch_for_record.is_some()`)
+            // and is now unwinding without ever handing it to an engine --
+            // clean it up rather than leaking it.
+            if run_branch_for_record.is_some() {
+                cleanup_unused_worktree(&open, &engine_root.to_string_lossy());
+            }
             return match &e {
                 crate::ai::agent::transport::AgentError::NeedsReconnect { detail } => {
                     StartExecutionOutcome::ProviderReconnect {
@@ -1329,30 +1360,62 @@ fn start_execution_at(
                 team: Some(format!("{:?}", policy.team)),
             },
         );
+    // P1-C wiring 4: every branch below this point that returns instead of
+    // reaching `RecordOutcome::Updated` is a losing attempt that already
+    // provisioned `engine_root` as a worktree (step 2b) -- this is EXACTLY
+    // the race the audit names ("a losing solo-start race can provision a
+    // worktree and return without cleaning it"). Cleaned up unconditionally
+    // for every non-`Updated` variant, not only `AlreadyRunning`: `NotFound`/
+    // `Damaged`/`WriteFailed`/`Unavailable` are rarer, but each one is just
+    // as much a losing attempt that must not leave its worktree behind.
     let session_after = match record_outcome {
         RecordOutcome::Updated { session } => session,
-        RecordOutcome::AlreadyRunning { execution_id } => {
+        RecordOutcome::AlreadyRunning { execution_id: winning_execution_id } => {
             // No write happened, so nothing to unwind on the session itself --
-            // but the link and gate-answer channel registered above for THIS
-            // (losing) attempt must not linger, since the winning attempt owns
-            // the link now (or will, once its own write lands).
-            links.unlink(&repo_id);
-            return StartExecutionOutcome::AlreadyRunning { execution_id };
+            // but the link registered above for THIS (losing) attempt's own
+            // `execution_id` must not linger. `winning_execution_id` (the
+            // `RecordOutcome`'s own field, deliberately renamed here so it
+            // cannot be confused with the outer `execution_id` this losing
+            // attempt minted) names a DIFFERENT execution -- the one that won
+            // the race -- and must never be unlinked from here: it is not
+            // this call's mapping to remove, and now that `RunSessionLinks`
+            // is execution-addressed (not repo-addressed) there is no longer
+            // any shared repo-level entry the two attempts could even
+            // contend over.
+            links.unlink(&execution_id);
+            if run_branch_for_record.is_some() {
+                cleanup_unused_worktree(&open, &engine_root.to_string_lossy());
+            }
+            return StartExecutionOutcome::AlreadyRunning {
+                execution_id: winning_execution_id,
+            };
         }
         RecordOutcome::NotFound => {
-            links.unlink(&repo_id);
+            links.unlink(&execution_id);
+            if run_branch_for_record.is_some() {
+                cleanup_unused_worktree(&open, &engine_root.to_string_lossy());
+            }
             return StartExecutionOutcome::NotFound;
         }
         RecordOutcome::Damaged { reason } => {
-            links.unlink(&repo_id);
+            links.unlink(&execution_id);
+            if run_branch_for_record.is_some() {
+                cleanup_unused_worktree(&open, &engine_root.to_string_lossy());
+            }
             return StartExecutionOutcome::Damaged { reason };
         }
         RecordOutcome::WriteFailed { detail } => {
-            links.unlink(&repo_id);
+            links.unlink(&execution_id);
+            if run_branch_for_record.is_some() {
+                cleanup_unused_worktree(&open, &engine_root.to_string_lossy());
+            }
             return StartExecutionOutcome::WriteFailed { detail };
         }
         RecordOutcome::Unavailable { detail } => {
-            links.unlink(&repo_id);
+            links.unlink(&execution_id);
+            if run_branch_for_record.is_some() {
+                cleanup_unused_worktree(&open, &engine_root.to_string_lossy());
+            }
             return StartExecutionOutcome::Unavailable { detail };
         }
     };
@@ -1418,10 +1481,19 @@ fn start_execution_at(
             sink,
             answer_rx,
             policy,
-            // A session that has reached `start_execution_at` has, by
-            // definition, been started -- see step 2b's doc comment on why
-            // `WorktreePolicy::NotUntilStart` is resolved as "started" here.
-            true,
+            // P1-B fix: no longer unconditionally `true`. `started` is
+            // computed once above (`started_for_execution`, step 2b) from
+            // this session's durable `header.graph_started_at` -- `false`
+            // for a Plan session's proposal turn (and any later turn on a
+            // Plan session whose proposal has not yet been accepted),
+            // `true` for every other intent and for a Plan session once
+            // Start has actually been pressed. `cli_run::handle` consults
+            // this on every `PermissionRequest`
+            // (`policy.check_tool_capability(started, ..)`), so a proposal
+            // turn is hard-refused any write tool the same way Ask/Review
+            // are, rather than merely "not offered a worktree to write
+            // into."
+            started,
             cancel_handle,
             // R6.4: no budget applies to the lead/solo path -- only a
             // proposed helper job carries one (`ExecutionRecord::budget`,
@@ -1536,6 +1608,42 @@ fn source_summary(source: &SessionSource) -> (String, String) {
             (snapshot.title.clone(), snapshot.summary.clone())
         }
     }
+}
+
+/// Whether the write-authority "Start" transition has durably happened for
+/// this session, as of the header read `start_execution_at` took at the top
+/// of this call. This is P1-B's actual fix ("Plan can write before Start"):
+/// before this existed, `start_execution_at` passed `started: true` into
+/// every `cli_run::run_task` call unconditionally -- including the very
+/// first Plan-mode turn that PRODUCES the proposal the user has not yet
+/// accepted.
+///
+/// `intent_policy.worktree != WorktreePolicy::NotUntilStart` covers every
+/// intent except Plan: Fix is always started (it never has a proposal gate
+/// to begin with -- `for_intent(Fix)` already grants `can_write: true` from
+/// creation), and every read-only intent's `check_tool_capability` refuses
+/// writes regardless of what this returns, so returning `true` for them is
+/// harmless -- `started` only changes the answer for
+/// `WorktreePolicy::NotUntilStart` (see `policy::check_tool_capability`'s own
+/// doc comment).
+///
+/// For Plan, the answer is `header.graph_started_at.is_some()` -- set once,
+/// durably, by `agent_session_start_graph`'s commit step
+/// (`commands::agent_graph::commit_started_graph_if_still_proposed`) the
+/// moment the user presses Start, and never cleared afterward. This is a
+/// property of the SESSION, not of any single execution or in-memory graph
+/// state: a Plan session's proposal turn (this function's `false` case) and
+/// every later follow-up turn on the same session (this function's `true`
+/// case, once Start has been pressed) both reach `start_execution_at`
+/// through the exact same `agent_session_start_execution` command
+/// (`SessionComposer`'s Send button routes every follow-up message through
+/// it, not just the first turn) -- so this durable header flag, read fresh
+/// on every call, is what keeps the answer correct across an arbitrary
+/// number of turns and an app restart in between, rather than a value that
+/// could only be right for one call.
+fn started_for_execution(header: &AgentSessionHeader, intent_policy: &crate::agentdesk::policy::IntentPolicy) -> bool {
+    intent_policy.worktree != crate::agentdesk::policy::WorktreePolicy::NotUntilStart
+        || header.graph_started_at.is_some()
 }
 
 /// The OpenSpec change this session's source names, if any -- what
@@ -1743,18 +1851,6 @@ async fn stop_execution_at(
     // distinction task 2.5 asks for; the persisted state does not need a
     // parallel distinction to make that promise honest.
     //
-    // Whether to unlink the repo afterwards is decided HERE, inside the same
-    // closure that mutates the executions -- not from `stopped.is_empty()`
-    // alone. The session can carry more than one concurrent execution (a lead
-    // plus helpers; `ExecutionRecord::parent_execution_id`), and `StopScope::One`
-    // exists precisely so one of them can be stopped without touching the
-    // rest. Unlinking whenever *anything* stopped (the previous behavior)
-    // severed the repo->session link even when other executions on this same
-    // session were still `Working` -- every later run event for those would
-    // be silently dropped as `NoLinkedSession` in `bridge::route_run_event`.
-    // The correct condition is "no execution on this session is still active
-    // after this mutation."
-    let mut any_still_active = false;
     let outcome = update_session_at(locks, root, session_id, |s| {
         for exec in s.executions.iter_mut() {
             let acted_on = stopped.contains(&exec.execution_id) || timed_out.contains(&exec.execution_id);
@@ -1769,12 +1865,6 @@ async fn stop_execution_at(
                 exec.ended_at = Some(now_rfc3339());
             }
         }
-        any_still_active = s.executions.iter().any(|exec| {
-            matches!(
-                exec.state,
-                SessionState::Preparing | SessionState::Working | SessionState::NeedsInput
-            )
-        });
         if !stopped.is_empty() || !timed_out.is_empty() {
             s.header.state = SessionState::Stopped;
             if let Some(active) = &s.header.active_execution_id {
@@ -1788,13 +1878,20 @@ async fn stop_execution_at(
         }
     });
 
-    // Only sever the repo->session link once nothing on this session is still
-    // running -- an in-progress sibling execution must keep receiving routed
-    // run events. `matches!(outcome, UpdateSessionOutcome::Updated { .. })`
-    // guards against unlinking on a failed write, where `any_still_active`
-    // was never actually computed against the persisted state.
-    if matches!(outcome, UpdateSessionOutcome::Updated { .. }) && !any_still_active {
-        links.unlink(&repo_id);
+    // Unlink exactly the executions this call actually acted on (stopped or
+    // timed out), never the repository as a whole. `RunSessionLinks` is now
+    // execution-addressed (the P0 routing fix), so this no longer needs the
+    // "is any OTHER execution on this session still active" guard the old
+    // repo-keyed link required -- unlinking `exec-1` can never disturb
+    // `exec-2`'s own mapping, whether that sibling belongs to this session or
+    // (in the cross-contamination case this fix closes) a different one that
+    // happens to share the repository. Guarded on `Updated` so a failed write
+    // never unlinks an execution whose persisted state was not actually
+    // changed.
+    if matches!(outcome, UpdateSessionOutcome::Updated { .. }) {
+        for execution_id in stopped.iter().chain(timed_out.iter()) {
+            links.unlink(execution_id);
+        }
     }
 
     match outcome {
@@ -2735,6 +2832,184 @@ mod tests {
         assert_eq!(page.headers[0].session_id, session.header.session_id);
     }
 
+    // -- P1-B: `started_for_execution` -- the durable-flag half of "Plan can
+    //    write before Start". `cli_run::run_task`'s own `started` parameter
+    //    is proven to gate writes correctly by `policy.rs`'s
+    //    `plan_cannot_write_before_start_but_can_after` and
+    //    `read_only_intents_can_never_write` tests; what those tests cannot
+    //    prove is that `start_execution_at` computes the VALUE it passes in
+    //    correctly, from the session's own durable header rather than a
+    //    hardcoded `true` (the actual bug) -- that is this function's job,
+    //    and these are its tests. --
+
+    fn header_with_intent_and_graph_started(intent: SessionIntent, graph_started_at: Option<&str>) -> AgentSessionHeader {
+        AgentSessionHeader {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            session_id: "sess-1".into(),
+            repo_id: "repo-1".into(),
+            repo_path: "C:/code/proj".into(),
+            repo_name: "proj".into(),
+            title: "Test session".into(),
+            source: SessionSource::Manual {
+                repo_id: "repo-1".into(),
+            },
+            intent,
+            state: SessionState::Ready,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            unread: false,
+            changed_file_count: 0,
+            active_execution_id: None,
+            archived: false,
+            graph_started_at: graph_started_at.map(|s| s.to_string()),
+        }
+    }
+
+    /// A freshly proposed Plan session (no Start pressed yet) must compute
+    /// `started == false` -- this is the exact turn that used to receive
+    /// write authority it had not earned, before this fix.
+    #[test]
+    fn plan_without_graph_started_at_is_not_started() {
+        let header = header_with_intent_and_graph_started(SessionIntent::Plan, None);
+        let policy = crate::agentdesk::policy::for_intent(header.intent);
+        assert!(!started_for_execution(&header, &policy));
+    }
+
+    /// Once `agent_session_start_graph`'s commit step has durably stamped
+    /// `graph_started_at` (P1-B's actual fix), every later turn on that same
+    /// session -- not just the one immediately after Start -- must compute
+    /// `started == true`.
+    #[test]
+    fn plan_with_graph_started_at_is_started() {
+        let header = header_with_intent_and_graph_started(SessionIntent::Plan, Some("2026-01-01T00:00:00Z"));
+        let policy = crate::agentdesk::policy::for_intent(header.intent);
+        assert!(started_for_execution(&header, &policy));
+    }
+
+    /// Every non-Plan intent is `started` regardless of `graph_started_at`
+    /// (which they never set in the first place) -- Fix has no Start gate at
+    /// all, and read-only intents are refused writes by `can_write` itself,
+    /// not by this flag, so this must not accidentally start gating them.
+    #[test]
+    fn non_plan_intents_are_always_started_regardless_of_graph_started_at() {
+        for intent in [
+            SessionIntent::Ask,
+            SessionIntent::Explain,
+            SessionIntent::Review,
+            SessionIntent::Summarize,
+            SessionIntent::Fix,
+        ] {
+            let header = header_with_intent_and_graph_started(intent, None);
+            let policy = crate::agentdesk::policy::for_intent(intent);
+            assert!(started_for_execution(&header, &policy), "{intent:?} should always report started");
+        }
+    }
+
+    // -- P1-C wiring 4: `cleanup_unused_worktree` -- the mechanism a losing
+    //    solo-start race (and a `CliAgent::discover` failure after
+    //    provisioning) calls into so the worktree that call itself just
+    //    created is not left behind. Exercising the full race through
+    //    `start_execution_at` would require a real `CliAgent::discover`
+    //    shell-out (an external process), so this proves the mechanism
+    //    directly: provision exactly the way `start_execution_at` step 2b
+    //    does, then confirm cleanup actually removes the folder and its
+    //    branch, matching `agent_graph.rs`'s own
+    //    `commit_started_graph_if_still_proposed`/`AlreadyStarted` cleanup
+    //    for the equivalent graph-start race. --
+
+    /// A real git repo with one commit on `main`, matching
+    /// `commands::agent_kickoff`'s own `repo_with_commit` fixture (kept as a
+    /// separate copy rather than made `pub(crate)` and shared -- this
+    /// module's own test conventions keep fixtures private per file, same as
+    /// every other `temp_root`/`test_locks` helper here).
+    fn repo_with_commit() -> (tempfile::TempDir, std::sync::Arc<crate::state::OpenRepo>) {
+        let dir = tempfile::TempDir::new().expect("temp repo");
+        let repo = git2::Repository::init(dir.path()).expect("init repo");
+        {
+            let mut config = repo.config().expect("config");
+            config.set_str("user.name", "Cleanup Test").expect("name");
+            config
+                .set_str("user.email", "cleanup@example.com")
+                .expect("email");
+        }
+        std::fs::write(dir.path().join("a.txt"), "a").expect("write file");
+        let mut index = repo.index().expect("index");
+        index.add_path(Path::new("a.txt")).expect("add");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("tree id");
+        let sig = git2::Signature::now("Cleanup Test", "cleanup@example.com").expect("sig");
+        {
+            let tree = repo.find_tree(tree_id).expect("tree");
+            repo.commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+                .expect("commit");
+        }
+        let open = std::sync::Arc::new(crate::state::OpenRepo::for_test(repo));
+        (dir, open)
+    }
+
+    /// The exact shape a losing race leaves behind before this fix: a
+    /// worktree `provision_kickoff_worktree` (step 2b's own call) created,
+    /// with nothing else ever referencing it. Proves `cleanup_unused_worktree`
+    /// actually removes it from disk and from `git worktree list`, not just
+    /// that it returns without erroring.
+    #[test]
+    fn cleanup_unused_worktree_removes_a_freshly_provisioned_worktree() {
+        let (_repo_dir, open) = repo_with_commit();
+        let base_branch = {
+            let repo = open.repo.lock().unwrap();
+            // Bound, not chained: the `Reference` borrows `repo`, so a
+            // temporary would still be alive when the guard drops.
+            let head = repo.head().expect("head");
+            head.shorthand().expect("shorthand").to_string()
+        };
+        let outcome = crate::commands::agent_kickoff::provision_kickoff_worktree(
+            &open,
+            &base_branch,
+            "Losing race test",
+        );
+        let crate::commands::agent_kickoff::ProvisionKickoffWorktreeOutcome::Provisioned { path, .. } = outcome
+        else {
+            panic!("expected the worktree to be provisioned");
+        };
+        assert!(Path::new(&path).exists(), "worktree must exist before cleanup runs");
+
+        cleanup_unused_worktree(&open, &path);
+
+        assert!(
+            !Path::new(&path).exists(),
+            "a losing attempt's worktree must not be left behind on disk"
+        );
+        let repo = open.repo.lock().unwrap();
+        assert!(
+            crate::git::worktree::list(&repo, None)
+                .into_iter()
+                .all(|w| !crate::git::worktree::paths_equal(std::path::Path::new(&w.path), Path::new(&path))),
+            "the removed worktree must not still be listed"
+        );
+    }
+
+    /// `cleanup_unused_worktree` must never touch the main checkout -- only
+    /// ever called (from `start_execution_at`) with the path this same call
+    /// provisioned, but proven here directly since a future call-site bug
+    /// passing `open.path` by mistake would otherwise silently discard the
+    /// user's own working folder instead of a scratch worktree.
+    #[test]
+    fn cleanup_unused_worktree_refuses_the_main_checkout() {
+        let (_repo_dir, open) = repo_with_commit();
+        let main_path = open.path.to_string_lossy().into_owned();
+        assert!(Path::new(&main_path).join("a.txt").exists());
+
+        cleanup_unused_worktree(&open, &main_path);
+
+        // `git::worktree::remove` refuses `entry.is_main` outright (see its
+        // own doc comment) and `cleanup_unused_worktree` swallows that
+        // refusal -- the file must still be there.
+        assert!(
+            Path::new(&main_path).join("a.txt").exists(),
+            "the main checkout must survive a cleanup call, even if one were ever mis-targeted at it"
+        );
+    }
+
     // -- "View source" bridge (open_source_at): the pure, non-Tauri half of
     //    `agent_session_open_source` -- resolving the session's header, the
     //    part `agent_session_open_source` cannot test directly because it
@@ -2769,9 +3044,8 @@ mod tests {
     fn get_returns_not_found_for_an_unknown_id() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
-        let links = test_links();
         let executions = crate::agentdesk::ExecutionRegistry::new();
-        let outcome = get_session_at(&locks, &links, &executions, &root, "does-not-exist");
+        let outcome = get_session_at(&locks, &executions, &root, "does-not-exist");
         assert!(matches!(outcome, GetSessionOutcome::NotFound));
     }
 
@@ -2788,7 +3062,7 @@ mod tests {
             .join("sessions")
             .join("sess-bad.json");
         std::fs::write(&path, b"{ not json").unwrap();
-        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-bad");
+        let outcome = get_session_at(&locks, &executions, &root, "sess-bad");
         assert!(matches!(outcome, GetSessionOutcome::Damaged { .. }));
     }
 
@@ -2796,14 +3070,13 @@ mod tests {
     fn get_finds_a_created_session() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
-        let links = test_links();
         let executions = crate::agentdesk::ExecutionRegistry::new();
         let CreateSessionOutcome::Created { session } =
             create_session_at(&root, create_request("Findable"))
         else {
             panic!("expected Created");
         };
-        let outcome = get_session_at(&locks, &links, &executions, &root, &session.header.session_id);
+        let outcome = get_session_at(&locks, &executions, &root, &session.header.session_id);
         let GetSessionOutcome::Found { session: found } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2837,6 +3110,7 @@ mod tests {
             changed_file_count: 0,
             active_execution_id: Some("exec-1".into()),
             archived: false,
+            graph_started_at: None,
         });
         session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
             "exec-1".into(),
@@ -2855,11 +3129,10 @@ mod tests {
     fn a_session_persisted_as_preparing_with_no_live_process_reconciles_on_load() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
-        let links = test_links(); // empty: nothing linked, exactly a fresh process
         let executions = crate::agentdesk::ExecutionRegistry::new(); // empty: nothing registered either
         write_stuck_session(&root, "sess-stuck", SessionState::Preparing);
 
-        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-stuck");
+        let outcome = get_session_at(&locks, &executions, &root, "sess-stuck");
         let GetSessionOutcome::Found { session } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2878,11 +3151,10 @@ mod tests {
     fn a_session_persisted_as_working_with_no_live_process_reconciles_on_load() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
-        let links = test_links();
         let executions = crate::agentdesk::ExecutionRegistry::new();
         write_stuck_session(&root, "sess-stuck", SessionState::Working);
 
-        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-stuck");
+        let outcome = get_session_at(&locks, &executions, &root, "sess-stuck");
         let GetSessionOutcome::Found { session } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2893,11 +3165,10 @@ mod tests {
     fn a_session_persisted_as_needs_input_with_no_live_process_reconciles_on_load() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
-        let links = test_links();
         let executions = crate::agentdesk::ExecutionRegistry::new();
         write_stuck_session(&root, "sess-stuck", SessionState::NeedsInput);
 
-        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-stuck");
+        let outcome = get_session_at(&locks, &executions, &root, "sess-stuck");
         let GetSessionOutcome::Found { session } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2908,25 +3179,21 @@ mod tests {
     fn a_session_whose_execution_is_genuinely_linked_is_left_running() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
-        let links = test_links();
         let executions = crate::agentdesk::ExecutionRegistry::new();
         write_stuck_session(&root, "sess-live", SessionState::Working);
-        // This is what a real in-process execution looks like: the repo is
-        // linked to this exact session (`start_execution_at` calls
-        // `links.link` before the engine runs) AND the runtime registry has
-        // the execution registered (task 2.2: registered before `Working` is
-        // ever emitted) -- both are set here since `reconcile_session_header`
-        // still reads `links` (session-granular) while
-        // `reconcile_session_executions` now reads `executions`
-        // (execution-granular, task 2.7).
-        links.link("repo-1", &"sess-live".to_string());
+        // This is what a real in-process execution looks like: the runtime
+        // registry has the execution registered (task 2.2: registered before
+        // `Working` is ever emitted) -- `get_session_at` reads liveness
+        // straight from `ExecutionRegistry` (session-granular, no repository
+        // indirection) for both the header (`reconcile_session_header`) and
+        // the execution records (`reconcile_session_executions`).
         executions.register(
             "sess-live".to_string(),
             "exec-1".to_string(),
             crate::airun::cli_run::CancelHandle::new(),
         );
 
-        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-live");
+        let outcome = get_session_at(&locks, &executions, &root, "sess-live");
         let GetSessionOutcome::Found { session } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2938,7 +3205,6 @@ mod tests {
     fn a_session_already_finished_failed_or_stopped_is_left_untouched_by_reconciliation() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
-        let links = test_links();
         let executions = crate::agentdesk::ExecutionRegistry::new();
         for (id, state) in [
             ("sess-finished", SessionState::Finished),
@@ -2946,7 +3212,7 @@ mod tests {
             ("sess-stopped", SessionState::Stopped),
         ] {
             write_stuck_session(&root, id, state);
-            let outcome = get_session_at(&locks, &links, &executions, &root, id);
+            let outcome = get_session_at(&locks, &executions, &root, id);
             let GetSessionOutcome::Found { session } = outcome else {
                 panic!("expected Found for {id}, got {outcome:?}");
             };
@@ -2970,10 +3236,10 @@ mod tests {
         std::fs::write(&bad_path, b"{ not json").unwrap();
         write_stuck_session(&root, "sess-stuck", SessionState::Working);
 
-        let bad_outcome = get_session_at(&locks, &links, &executions, &root, "sess-bad");
+        let bad_outcome = get_session_at(&locks, &executions, &root, "sess-bad");
         assert!(matches!(bad_outcome, GetSessionOutcome::Damaged { .. }));
 
-        let good_outcome = get_session_at(&locks, &links, &executions, &root, "sess-stuck");
+        let good_outcome = get_session_at(&locks, &executions, &root, "sess-stuck");
         let GetSessionOutcome::Found { session } = good_outcome else {
             panic!("expected Found, got {good_outcome:?}");
         };
@@ -2993,7 +3259,6 @@ mod tests {
         // "Working" forever after a crash mid-graph-run.
         let (_dir, root) = temp_root();
         let locks = test_locks();
-        let links = test_links();
         let executions = crate::agentdesk::ExecutionRegistry::new();
         let mut session = write_stuck_session(&root, "sess-graph", SessionState::Working);
         session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
@@ -3016,7 +3281,7 @@ mod tests {
         ));
         store::write_session(&root, &session).unwrap();
 
-        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-graph");
+        let outcome = get_session_at(&locks, &executions, &root, "sess-graph");
         let GetSessionOutcome::Found { session: reconciled } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -3036,7 +3301,6 @@ mod tests {
     fn only_the_specific_registered_execution_is_left_running_not_its_siblings() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
-        let links = test_links();
         let executions = crate::agentdesk::ExecutionRegistry::new();
         let mut session = write_stuck_session(&root, "sess-mixed", SessionState::Working);
         session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
@@ -3050,7 +3314,6 @@ mod tests {
         ));
         store::write_session(&root, &session).unwrap();
 
-        links.link("repo-1", &"sess-mixed".to_string());
         // Only the lead ("exec-1") is registered as live -- the helper is
         // not, simulating a crash that happened mid-helper.
         executions.register(
@@ -3059,7 +3322,7 @@ mod tests {
             crate::airun::cli_run::CancelHandle::new(),
         );
 
-        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-mixed");
+        let outcome = get_session_at(&locks, &executions, &root, "sess-mixed");
         let GetSessionOutcome::Found { session: reconciled } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -3081,7 +3344,7 @@ mod tests {
         // full session, this test would see a `Damaged`-style failure instead
         // of a normal reconciled page.
         let (dir, root) = temp_root();
-        let links = test_links();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         let session = write_stuck_session(&root, "sess-stuck", SessionState::Working);
 
         let sessions_dir = dir.path().join("agent-desk").join("v1").join("sessions");
@@ -3092,7 +3355,9 @@ mod tests {
 
         let filter = SessionListFilter::default();
         let page = store::list_sessions_reconciled(&root, &filter, None, 10, |header| {
-            links.get(&header.repo_id).as_deref() == Some(header.session_id.as_str())
+            !executions
+                .live_executions_for_session(&header.session_id)
+                .is_empty()
         });
 
         assert_eq!(page.headers.len(), 1);
@@ -3587,10 +3852,11 @@ mod tests {
         let session_id = session.header.session_id.clone();
         assert!(session.messages.is_empty());
 
-        // What `start_execution_at` does before it ever touches the CLI: link
-        // the repository, mint an execution ID, and record it on the session.
+        // What `start_execution_at` does before it ever touches the CLI: mint
+        // an execution ID, link THAT execution (never the repository -- see
+        // `RunSessionLinks`'s own doc comment) to this session, and record it.
         let execution_id = crate::agentdesk::execution_id_for_run_session("run-1");
-        links.link(&session.header.repo_id, &session_id);
+        links.link(&execution_id, &session_id);
         let recorded = update_session_at(&locks, &root, &session_id, |s| {
             s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
                     execution_id.clone(),
@@ -3683,7 +3949,7 @@ mod tests {
             panic!("expected Created");
         };
         let session_id = session.header.session_id.clone();
-        links.link(&session.header.repo_id, &session_id);
+        links.link(&event.session_id, &session_id);
 
         let sequence = links.next_sequence(&event.session_id);
         let routed = crate::agentdesk::route_run_event(&root, &links, &locks, sequence, "2026-01-01T00:00:01Z", &event);
@@ -3727,7 +3993,7 @@ mod tests {
         // is left in `Preparing`, exactly where it sits the whole time the
         // engine task is starting up.
         let execution_id = crate::agentdesk::execution_id_for_run_session("run-1");
-        links.link(&session.header.repo_id, &session_id);
+        links.link(&execution_id, &session_id);
         update_session_at(&locks, &root, &session_id, |s| {
             s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
                 execution_id.clone(),
@@ -3937,10 +4203,15 @@ mod tests {
     /// dropped as `NoLinkedSession`, silently freezing the UI for a run that
     /// was still executing.
     ///
-    /// This drives the real path end-to-end: link the repo, give the session
-    /// a lead + a helper both `Working`, stop only the helper, assert the
-    /// link survives, then route a real run event for the lead and assert it
-    /// still lands as a persisted message instead of being dropped.
+    /// This drives the real path end-to-end: link the lead's AND the helper's
+    /// own execution IDs (now that `RunSessionLinks` is execution-addressed,
+    /// there is no single "the repo's link" to share between them -- each
+    /// execution gets its own mapping, exactly like a real
+    /// `start_execution_at`/`launch_helper` pair would), give the session a
+    /// lead + a helper both `Working`, stop only the helper, assert the
+    /// LEAD's own link survives (and the helper's is gone), then route a
+    /// real run event for the lead and assert it still lands as a persisted
+    /// message instead of being dropped.
     #[tokio::test]
     async fn stopping_one_helper_leaves_the_link_intact_for_the_still_running_lead() {
         let (_dir, root) = temp_root();
@@ -3954,11 +4225,11 @@ mod tests {
             panic!("expected Created");
         };
         let session_id = session.header.session_id.clone();
-        let repo_id = session.header.repo_id.clone();
-        links.link(&repo_id, &session_id);
 
         let lead = crate::agentdesk::execution_id_for_run_session("run-lead");
         let helper = crate::agentdesk::execution_id_for_run_session("run-helper");
+        links.link(&lead, &session_id);
+        links.link(&helper, &session_id);
         update_session_at(&locks, &root, &session_id, |s| {
             s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
                     lead.clone(),
@@ -3994,12 +4265,17 @@ mod tests {
         let StopExecutionOutcome::Stopped { stopped, .. } = outcome else {
             panic!("expected Stopped, got {outcome:?}");
         };
-        assert_eq!(stopped, vec![helper]);
+        assert_eq!(stopped, vec![helper.clone()]);
 
         assert_eq!(
-            links.get(&repo_id),
+            links.get(&lead),
             Some(session_id.clone()),
-            "the link must survive: the lead execution is still Working"
+            "the lead's own link must survive: it is still Working"
+        );
+        assert_eq!(
+            links.get(&helper),
+            None,
+            "the stopped helper's own link must be removed"
         );
 
         // Prove it in practice, not just by inspecting the link table: a run
@@ -4019,6 +4295,107 @@ mod tests {
         assert!(
             matches!(routed, crate::agentdesk::RunEventRouted::Persisted { .. }),
             "expected Persisted, got {routed:?}"
+        );
+    }
+
+    /// P0 regression, at the `stop_execution_at` command level rather than
+    /// `bridge.rs`'s pure-function level: TWO SESSIONS (not two executions in
+    /// one session, which the test above already covers) share a repository,
+    /// each with its own live execution linked. Stopping session A's
+    /// execution must unlink only A's own mapping -- session B's link (and
+    /// its ability to keep receiving routed events) must be untouched.
+    /// Before the P0 fix (`RunSessionLinks` keyed by `repo_id`), linking B's
+    /// execution would have silently overwritten A's link the moment B
+    /// started, and stopping A would have unlinked whichever session's link
+    /// happened to currently occupy that one repo-keyed slot -- not
+    /// necessarily A's own.
+    #[tokio::test]
+    async fn stopping_session_as_execution_never_touches_session_bs_link_for_the_same_repo() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+        let drivers = crate::commands::airun::DriverRegistry::default();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
+
+        let CreateSessionOutcome::Created { session: session_a } =
+            create_session_at(&root, create_request("Session A"))
+        else {
+            panic!("expected Created");
+        };
+        let CreateSessionOutcome::Created { session: session_b } =
+            create_session_at(&root, create_request("Session B"))
+        else {
+            panic!("expected Created");
+        };
+        let session_id_a = session_a.header.session_id.clone();
+        let session_id_b = session_b.header.session_id.clone();
+
+        let exec_a = crate::agentdesk::execution_id_for_run_session("run-a");
+        let exec_b = crate::agentdesk::execution_id_for_run_session("run-b");
+        // Both sessions' own executions get linked, exactly as
+        // `start_execution_at` links each execution it mints -- note these
+        // two sessions are NOT required to share a repository for this
+        // registry to isolate them (it never reads `repo_id` at all), but the
+        // audit's own wording calls out "same repository" as the sharpest
+        // version of the bug, so both fixtures use the default test repo.
+        links.link(&exec_a, &session_id_a);
+        links.link(&exec_b, &session_id_b);
+
+        for (session_id, execution_id) in [(session_id_a.clone(), exec_a.clone()), (session_id_b.clone(), exec_b.clone())] {
+            update_session_at(&locks, &root, &session_id, |s| {
+                s.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+                    execution_id.clone(),
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::Working,
+                    now_rfc3339(),
+                    None,
+                    0,
+                ));
+                s.header.active_execution_id = Some(execution_id.clone());
+            });
+        }
+
+        let outcome = stop_execution_at(
+            &locks,
+            &root,
+            &links,
+            &drivers,
+            &executions,
+            &session_id_a,
+            StopScope::One { execution_id: exec_a.clone() },
+        )
+        .await;
+        assert!(matches!(outcome, StopExecutionOutcome::Stopped { .. }), "got {outcome:?}");
+
+        assert_eq!(links.get(&exec_a), None, "session A's own execution must be unlinked");
+        assert_eq!(
+            links.get(&exec_b),
+            Some(session_id_b.clone()),
+            "session B's link must survive stopping session A's unrelated execution"
+        );
+
+        // Prove it end-to-end: a run event for B's execution still routes to
+        // session B, not silently dropped.
+        let event_for_b = crate::airun::driver::RunEventKind {
+            repo_id: session_b.header.repo_id.clone(),
+            session_id: "run-b".into(),
+            state: crate::airun::driver::RunState::Working,
+            summary: "still alive".into(),
+            step: crate::airun::driver::RunStep::Note { text: "still alive".into() },
+        };
+        let sequence = links.next_sequence(&event_for_b.session_id);
+        let routed = crate::agentdesk::route_run_event(
+            &root,
+            &links,
+            &locks,
+            sequence,
+            "2026-01-01T00:00:05Z",
+            &event_for_b,
+        );
+        assert!(
+            matches!(routed, crate::agentdesk::RunEventRouted::Persisted { .. }),
+            "session B must keep receiving its own routed events after A stopped: got {routed:?}"
         );
     }
 
@@ -4323,7 +4700,6 @@ mod tests {
         fn a_session_started_from_task_index_6_keeps_naming_task_index_6_across_every_surface() {
             let (dir, root) = temp_root();
             let locks = test_locks();
-            let links = test_links();
             let executions = crate::agentdesk::ExecutionRegistry::new();
             let (manager, repo_id) = repo_with_change(dir.path());
 
@@ -4413,7 +4789,7 @@ mod tests {
             drop(after_start);
             drop(after_message);
             let GetSessionOutcome::Found { session: reloaded } =
-                get_session_at(&locks, &links, &executions, &root, &session_id)
+                get_session_at(&locks, &executions, &root, &session_id)
             else {
                 panic!("expected the session to survive a restart");
             };
@@ -4492,7 +4868,7 @@ mod tests {
             assert!(matches!(status_after, OpenSpecSessionStatus::Active));
 
             let GetSessionOutcome::Found { session: final_reload } =
-                get_session_at(&locks, &links, &executions, &root, &session_id)
+                get_session_at(&locks, &executions, &root, &session_id)
             else {
                 panic!("expected the session to still be readable");
             };

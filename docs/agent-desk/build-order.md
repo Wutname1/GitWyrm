@@ -3,10 +3,9 @@
 This is the dependency order, not a menu. Each slice must be releasable behind the current
 Spec Desk setting and must leave the existing flow working.
 
-> **Implementation reset - 2026-08-21:** the current branch does not pass Gate 0 and must not
-> advance by package number until the safety and end-to-end solo-run recovery in
-> `implementation-reset-2026-08-21.md` is complete. Existing checkmarks were audited again;
-> disconnected helpers and unmounted UI no longer count as finished behavior.
+> **Second audit - 2026-08-22:** automated Gate 0 is green. Development must now pass the
+> safety-convergence order below before advancing by package number. Existing UI and passing
+> unit tests do not make event routing, read-only authority, or graph consolidation safe.
 
 ## Status legend
 
@@ -54,9 +53,32 @@ Minimum prerequisite:
 **Gate 0:** existing single-agent OpenSpec run works natively from start through stop or
 finish, and an isolated worktree survives app restart without losing the only copy.
 
-Current status: **FAILED.** Real Agent Desk CLI runs have no cancellation handle; read-only
-authority is not enforced at the engine boundary; the Rust suite and strict OpenSpec
-validation are red. See Reset stages R0-R2 in `implementation-reset-2026-08-21.md`.
+Current status: **AUTOMATED BASELINE PASSED; NATIVE FLOOR OPEN.** Cancellation is wired and
+the automated suites are green. The native start/stop/restart proof remains open.
+
+### Gate 0A. Safety convergence (new controlling order)
+
+This gate sits before the numbered feature packages, even where partial implementations
+already exist:
+
+1. Replace repo-keyed event routing with execution-ID-to-session routing and stress two
+   concurrent sessions in one repo.
+2. Add provider launch-time write denial for Ask, Review, Summarize, Explain, and Plan before
+   Start. Keep the runtime permission handler as defense in depth.
+3. Give every graph a dedicated lead integration worktree; never consolidate into the user's
+   open checkout.
+4. Integrate the real helper worktree delta, including uncommitted edits and full git file
+   operation/byte/mode semantics.
+5. Persist integration operations/conflicts and run a lead combined review/check that builds
+   one combined result before Finished.
+6. Make every source action start its selected operation and preserve provider/mode/team in
+   the first run.
+7. Wire revision, exact OpenSpec task acceptance, and startup result/worktree reconciliation.
+
+**Gate 0A:** adversarial read-only and Plan runs leave the checkout byte-identical; two
+same-repo sessions never cross-route; two real uncommitted helper results combine in an
+isolated integration worktree; delete/rename/binary tests pass; and the graph exposes one
+reviewable combined result without touching the user's checkout.
 
 ## 1. Durable session foundation
 
@@ -178,8 +200,11 @@ Order:
 7. Per-helper stop and room-level Stop all.
 8. Central approval queue routed to the originating helper only.
 9. Completion-order integration and typed conflict state.
-10. Lead integration/review step and final session response.
-11. Restart/recovery of running, waiting, and conflicted graphs.
+10. Dedicated lead integration worktree and real staged/unstaged/committed helper delta.
+11. Operation fidelity for add/modify/delete/rename/binary/symlink/file modes.
+12. Durable conflict resolution applied to the integration worktree.
+13. Lead combined review/check, helper result links, and one combined result.
+14. Restart/recovery of running, waiting, integrating, and conflicted graphs.
 
 Do not add nested helper-created helpers in this release.
 

@@ -28,7 +28,7 @@ use crate::agentdesk::store::{self, SessionStoreRoot};
 use crate::commands::spec_desk::AGENT_DESK_LABEL;
 use crate::error::AppError;
 
-use super::agent_desk::CreateSessionRequest;
+use super::agent_desk::{CreateSessionRequest, StartExecutionOutcome};
 
 /// Emitted at the Agent Desk window right after `agent_session_start`
 /// resolves, naming the exact session it should show -- R3.3: "Send a
@@ -352,14 +352,39 @@ impl SessionSourceInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum StartAgentSessionOutcome {
-    /// A brand-new session was created for this source/intent and is now
-    /// `Preparing` (or `Draft`, for intents that do not auto-start).
-    Created { session: AgentSession },
+    /// A brand-new session was created for this source/intent, and this
+    /// command already attempted to run its first turn -- P1-A ("source
+    /// clicks do not all do what they say"): EVERY explicit source action
+    /// starts immediately, not just the ones whose intent happens to allow
+    /// writes. `start` is that attempt's own outcome: `Some(Started {..})`
+    /// once execution is genuinely running (Ask/Explain/Review/Summarize
+    /// included -- those intents run and can respond, they simply cannot
+    /// reach a write tool, per `agentdesk::policy::IntentPolicy::can_write`
+    /// -- authority is a capability check inside the run, never a gate on
+    /// whether the run happens at all). A non-`Started` variant inside
+    /// `Some` (e.g. `SourceMissing`, `AdapterUnsupported`) means the session
+    /// exists and is visible, but its first turn could not begin; the
+    /// caller should surface that reason (`agentDeskResult::explainAutoStartOutcome`
+    /// already knows how) rather than silently leaving the session sitting
+    /// in `Draft`. `start` is only ever `None` for a request whose intent's
+    /// own `mode`/`team`/`provider_override` could not even be resolved
+    /// before the session was created -- today that never happens (session
+    /// creation has no policy dependency), so this exists for forward
+    /// compatibility rather than a real path in this build.
+    Created {
+        session: AgentSession,
+        start: Option<StartExecutionOutcome>,
+    },
     /// An active (non-finished/failed/stopped) session already exists for
     /// this exact repo/source-identity/intent -- design.md: "An active
     /// session with the same repo/source/intent is focused and explained."
-    /// No new session was created; the caller should select `session` and
-    /// tell the user why.
+    /// No new session was created and no execution is (re)started here: the
+    /// existing session may already be running, or may be exactly the
+    /// `Draft`/`Ready` session a near-simultaneous first click already
+    /// triggered a start for -- starting a second execution on top of it
+    /// would either be refused as `AlreadyRunning` or, worse, race the
+    /// first attempt. The caller should select `session` and tell the user
+    /// why.
     FocusedExisting { session: AgentSession },
     WriteFailed { detail: String },
 }
@@ -412,17 +437,55 @@ fn resolve_root(app: &AppHandle) -> Result<SessionStoreRoot, AppError> {
     SessionStoreRoot::resolve(app).map_err(|e| AppError::Other(e.to_string()))
 }
 
-fn start_agent_session_at(
+/// P1-A: what mode/team a freshly created session's first execution should
+/// actually run under -- the request's own explicit choice when it named
+/// one, the intent's policy default otherwise. Pulled out as its own pure
+/// function (not inlined into `agent_session_start`'s async body) so a test
+/// can prove the override survives without needing Tauri state or a real
+/// `CliAgent` -- this is the exact value that used to be silently discarded:
+/// `StartAgentSessionRequest.mode`/`.team` were accepted into the request
+/// and then never read by anything, because the old frontend auto-start call
+/// always passed the intent's OWN policy default and a hardcoded `null`
+/// override, regardless of what a "Fix with <mode>" caller had asked for.
+fn resolve_kickoff_execution_params(
+    intent: SessionIntent,
+    mode: Option<ExecutionMode>,
+    team: Option<ExecutionTeam>,
+) -> (ExecutionMode, ExecutionTeam) {
+    let intent_policy = policy::for_intent(intent);
+    (
+        mode.unwrap_or(intent_policy.default_mode),
+        team.unwrap_or(intent_policy.default_team),
+    )
+}
+
+/// The find-existing-or-create half of kickoff, kept separate from actually
+/// starting an execution: creation is a fast, local, disk-only step
+/// (`architecture.md` section 8's step (c)), and the caller
+/// (`agent_session_start`) needs to know precisely which case happened --
+/// `Created` (attempt to start a fresh execution, carrying this exact
+/// request's `mode`/`team`/`provider_override`) vs `Focused` (never attempt
+/// a start: an active session already owns this repo/source/intent, and it
+/// may already be running or already mid-start from a near-simultaneous
+/// click).
+#[derive(Debug)]
+enum FoundOrCreatedSession {
+    Created { session: AgentSession },
+    Focused { session: AgentSession },
+    WriteFailed { detail: String },
+}
+
+fn find_or_create_agent_session_at(
     root: &SessionStoreRoot,
     request: StartAgentSessionRequest,
-) -> StartAgentSessionOutcome {
+) -> FoundOrCreatedSession {
     let (source, title) = request.source.into_source_and_title(&request.repo_id);
 
     if let Some(existing) =
         find_active_session_for_source(root, &request.repo_id, &source, request.intent)
     {
         match store::read_session(root, &existing.session_id) {
-            Ok(session) => return StartAgentSessionOutcome::FocusedExisting { session },
+            Ok(session) => return FoundOrCreatedSession::Focused { session },
             Err(_) => {
                 // The header was in the index but the file itself could not
                 // be read right now (a transient lock, most likely on
@@ -446,28 +509,123 @@ fn start_agent_session_at(
     };
 
     match super::agent_desk::create_session_for_kickoff(root, create_request) {
-        Ok(session) => StartAgentSessionOutcome::Created { session },
-        Err(detail) => StartAgentSessionOutcome::WriteFailed { detail },
+        Ok(session) => FoundOrCreatedSession::Created { session },
+        Err(detail) => FoundOrCreatedSession::WriteFailed { detail },
     }
 }
 
+/// P1-A ("source clicks do not all do what they say" / "one-click source
+/// execution"): the single kickoff entry point every source surface calls,
+/// now responsible end to end for BOTH durably creating the session AND
+/// starting its first turn -- not split across a backend create step and a
+/// frontend-side "should I also start this" decision the way
+/// `useStartAgentSession.autoStartIfWriteCapable` used to work.
+///
+/// That frontend gate was the actual bug: it read `IntentPolicy::canWrite`
+/// and skipped starting altogether for Review/Summarize (and Ask/Explain),
+/// so clicking "Review with AI" created a session that then just sat in
+/// `Draft` forever -- the click LOOKED like it worked (a session appeared)
+/// but nothing ever ran. The fix is not to grant those intents write
+/// authority (they must stay hard-refused any write tool, enforced entirely
+/// by `agentdesk::policy::check_tool_capability`, independent of this
+/// function) -- it is to stop conflating "can this intent ever write" with
+/// "should this session's first turn run at all." Every intent's first turn
+/// runs; only some of them are ever allowed to write once running.
+///
+/// This also fixes "kickoff provider overrides are passed into session
+/// creation, then automatic start uses no override": `request.mode`/`.team`/
+/// `.provider_override` used to be accepted into `StartAgentSessionRequest`
+/// and then silently dropped -- `CreateSessionRequest` (session creation)
+/// has no such fields, and the OLD frontend auto-start call
+/// (`commands.agentSessionStartExecution(id, policy.defaultMode,
+/// policy.defaultTeam, null)`) always passed the INTENT'S policy default and
+/// a hardcoded `null` override, never what the user actually picked at
+/// kickoff. Here, the exact same request that named the override is what
+/// starts the execution -- `request.mode.unwrap_or(intent default)`,
+/// `request.team.unwrap_or(intent default)`, and `request.provider_override`
+/// verbatim -- so a "Fix with <provider>" click's choice survives all the
+/// way into the first `cli_run::run_task` call, not just into the session
+/// header.
+///
+/// Deliberately does NOT start anything for `FocusedExisting`: that session
+/// may already be running (starting a second execution on it would be
+/// refused as `AlreadyRunning`, which is correct but pointless to attempt),
+/// or may itself be mid-start from the click that created it -- either way,
+/// this is not this call's session to start.
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_session_start(
     app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
+    links: tauri::State<'_, crate::agentdesk::RunSessionLinks>,
+    manager: tauri::State<'_, crate::state::RepoManager>,
+    executions: tauri::State<'_, crate::agentdesk::ExecutionRegistry>,
     request: StartAgentSessionRequest,
 ) -> Result<StartAgentSessionOutcome, AppError> {
     let root = resolve_root(&app)?;
-    let outcome = tauri::async_runtime::spawn_blocking(move || start_agent_session_at(&root, request))
-        .await
-        .map_err(|e| AppError::Other(e.to_string()))?;
+    let root_for_find = root.clone();
+    let request_for_find = request.clone();
+    let found = tauri::async_runtime::spawn_blocking(move || {
+        find_or_create_agent_session_at(&root_for_find, request_for_find)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?;
+
+    let outcome = match found {
+        FoundOrCreatedSession::Focused { session } => StartAgentSessionOutcome::FocusedExisting { session },
+        FoundOrCreatedSession::WriteFailed { detail } => StartAgentSessionOutcome::WriteFailed { detail },
+        FoundOrCreatedSession::Created { session } => {
+            // Step (c)/(d) of architecture.md section 8, now performed in
+            // the SAME command rather than left to a separate frontend
+            // call: the session is durable the instant `Created` above
+            // returned, so starting its execution here (still inside this
+            // one `agent_session_start` invocation, still before the
+            // frontend's `await` resolves for a fast path, but never
+            // blocking the eventual return on a slow provider/worktree --
+            // see below) is what makes "every explicit source action starts
+            // immediately" literally true rather than a UI-side promise
+            // that could drift from what the backend actually does.
+            let session_id = session.header.session_id.clone();
+            let (mode, team) = resolve_kickoff_execution_params(request.intent, request.mode, request.team);
+            let provider_override = request.provider_override.clone();
+            // Synchronous, not `spawn_blocking`: matches
+            // `agent_session_start_execution`'s own call to this exact
+            // function (see that command's doc comment on why -- the slow
+            // work `start_execution_at` does is a shell-out inside
+            // `CliAgent::discover`, which it already isolates into its own
+            // `tauri::async_runtime::spawn`'d task before returning
+            // `Started`; nothing about the caller needing a blocking thread
+            // pool of its own).
+            let locks_arc = locks.inner().clone();
+            let start = super::agent_desk::start_execution_at(
+                &app,
+                &locks_arc,
+                &root,
+                links.inner(),
+                manager.inner(),
+                executions.inner(),
+                &session_id,
+                mode,
+                team,
+                provider_override,
+            );
+            StartAgentSessionOutcome::Created {
+                session,
+                start: Some(start),
+            }
+        }
+    };
 
     // R3.3: tell the Desk window exactly which session to select, the moment
     // it exists -- whether it was freshly created or an existing one was
     // focused (double-Fix must land on the same session just as surely as a
-    // first Fix does).
+    // first Fix does). Fires regardless of whether the start attempt above
+    // succeeded: the session itself is real and visible either way, and the
+    // user needs to land on it to see why a start failed just as much as to
+    // watch one succeed.
     match &outcome {
-        StartAgentSessionOutcome::Created { session } | StartAgentSessionOutcome::FocusedExisting { session } => {
+        StartAgentSessionOutcome::Created { session, .. }
+        | StartAgentSessionOutcome::FocusedExisting { session } => {
             emit_select_session(&app, &session.header.session_id);
         }
         StartAgentSessionOutcome::WriteFailed { .. } => {}
@@ -677,12 +835,60 @@ mod tests {
         assert_eq!(SELECT_SESSION_EVENT, "agent-desk://select-session");
     }
 
+    // -- P1-A: `resolve_kickoff_execution_params` -- proves a kickoff's own
+    //    explicit mode/team choice reaches the first run rather than being
+    //    silently replaced by the intent's policy default, which is exactly
+    //    what the old frontend-only auto-start path did (it always called
+    //    `agentSessionStartExecution(id, policy.defaultMode,
+    //    policy.defaultTeam, null)`, discarding whatever the kickoff request
+    //    itself had named). --
+
+    /// A caller that names neither `mode` nor `team` gets the intent's own
+    /// policy defaults -- the ordinary "Fix" (no "...with" override) case.
+    #[test]
+    fn no_override_falls_back_to_the_intents_policy_defaults() {
+        let (mode, team) = resolve_kickoff_execution_params(SessionIntent::Fix, None, None);
+        let policy = policy::for_intent(SessionIntent::Fix);
+        assert_eq!(mode, policy.default_mode);
+        assert_eq!(team, policy.default_team);
+    }
+
+    /// An explicit mode override reaches the resolved params even when it
+    /// disagrees with the intent's own default -- this is the value that
+    /// used to be accepted into `StartAgentSessionRequest` and then dropped.
+    #[test]
+    fn explicit_mode_override_is_not_replaced_by_the_intent_default() {
+        // Fix's own default is `Auto` -- naming `Ask` here proves the
+        // request's choice wins, not the table's.
+        let (mode, _team) = resolve_kickoff_execution_params(SessionIntent::Fix, Some(ExecutionMode::Ask), None);
+        assert_eq!(mode, ExecutionMode::Ask);
+    }
+
+    /// Same proof for `team`: Fix defaults to `Lead`, so naming `Solo`
+    /// explicitly must survive.
+    #[test]
+    fn explicit_team_override_is_not_replaced_by_the_intent_default() {
+        let (_mode, team) = resolve_kickoff_execution_params(SessionIntent::Fix, None, Some(ExecutionTeam::Solo));
+        assert_eq!(team, ExecutionTeam::Solo);
+    }
+
+    /// Both named at once, on an intent whose defaults differ from both --
+    /// proves the two overrides are independent and both survive together,
+    /// not just whichever one a narrower test happened to check.
+    #[test]
+    fn both_overrides_together_survive_independently() {
+        let (mode, team) =
+            resolve_kickoff_execution_params(SessionIntent::Plan, Some(ExecutionMode::Auto), Some(ExecutionTeam::Solo));
+        assert_eq!(mode, ExecutionMode::Auto);
+        assert_eq!(team, ExecutionTeam::Solo);
+    }
+
     #[test]
     fn first_kickoff_creates_a_session() {
         let (_dir, root) = temp_root();
-        let outcome = start_agent_session_at(&root, request(SessionIntent::Fix, 1));
+        let outcome = find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 1));
         match outcome {
-            StartAgentSessionOutcome::Created { session } => {
+            FoundOrCreatedSession::Created { session } => {
                 assert_eq!(session.header.intent, SessionIntent::Fix);
                 assert_eq!(session.header.repo_id, "repo-1");
                 assert_eq!(session.header.title, "Issue #1");
@@ -694,14 +900,14 @@ mod tests {
     #[test]
     fn re_clicking_the_same_intent_on_the_same_issue_focuses_the_existing_session() {
         let (_dir, root) = temp_root();
-        let first = start_agent_session_at(&root, request(SessionIntent::Fix, 1));
-        let StartAgentSessionOutcome::Created { session: first_session } = first else {
+        let first = find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 1));
+        let FoundOrCreatedSession::Created { session: first_session } = first else {
             panic!("expected first kickoff to create a session");
         };
 
-        let second = start_agent_session_at(&root, request(SessionIntent::Fix, 1));
+        let second = find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 1));
         match second {
-            StartAgentSessionOutcome::FocusedExisting { session } => {
+            FoundOrCreatedSession::Focused { session } => {
                 assert_eq!(
                     session.header.session_id, first_session.header.session_id,
                     "the second Fix click must focus the first session, not fork a new one"
@@ -714,10 +920,10 @@ mod tests {
     #[test]
     fn different_intents_on_the_same_issue_get_separate_sessions() {
         let (_dir, root) = temp_root();
-        let fix = start_agent_session_at(&root, request(SessionIntent::Fix, 1));
-        let explain = start_agent_session_at(&root, request(SessionIntent::Explain, 1));
+        let fix = find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 1));
+        let explain = find_or_create_agent_session_at(&root, request(SessionIntent::Explain, 1));
 
-        let (StartAgentSessionOutcome::Created { session: fix_session }, StartAgentSessionOutcome::Created { session: explain_session }) =
+        let (FoundOrCreatedSession::Created { session: fix_session }, FoundOrCreatedSession::Created { session: explain_session }) =
             (fix, explain)
         else {
             panic!("both Fix and Explain should create their own session the first time");
@@ -725,13 +931,36 @@ mod tests {
         assert_ne!(fix_session.header.session_id, explain_session.header.session_id);
     }
 
+    /// P1-A ("source clicks do not all do what they say"): the create half
+    /// of kickoff must succeed identically for Review and Summarize -- the
+    /// two read-only intents the audit named by name -- as it does for Fix.
+    /// This is the necessary precondition for `agent_session_start`'s fix:
+    /// nothing about `find_or_create_agent_session_at` branches on
+    /// `IntentPolicy.canWrite`, so there is nothing here that could gate
+    /// creation OR (by the same absence of a canWrite check in
+    /// `agent_session_start`'s own body -- see that command's doc comment)
+    /// the start attempt that follows it, the way the old frontend-only
+    /// `autoStartIfWriteCapable` used to.
+    #[test]
+    fn review_and_summarize_create_a_session_exactly_like_fix_does() {
+        let (_dir, root) = temp_root();
+        for intent in [SessionIntent::Review, SessionIntent::Summarize, SessionIntent::Fix] {
+            let outcome = find_or_create_agent_session_at(&root, request(intent, 100 + intent as u32));
+            let FoundOrCreatedSession::Created { session } = outcome else {
+                panic!("expected {intent:?} to create a session, got a different outcome");
+            };
+            assert_eq!(session.header.intent, intent);
+            assert_eq!(session.header.state, SessionState::Draft);
+        }
+    }
+
     #[test]
     fn different_issues_get_separate_sessions() {
         let (_dir, root) = temp_root();
-        let one = start_agent_session_at(&root, request(SessionIntent::Fix, 1));
-        let two = start_agent_session_at(&root, request(SessionIntent::Fix, 2));
+        let one = find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 1));
+        let two = find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 2));
 
-        let (StartAgentSessionOutcome::Created { session: s1 }, StartAgentSessionOutcome::Created { session: s2 }) =
+        let (FoundOrCreatedSession::Created { session: s1 }, FoundOrCreatedSession::Created { session: s2 }) =
             (one, two)
         else {
             panic!("both issues should create their own session");
@@ -742,8 +971,8 @@ mod tests {
     #[test]
     fn a_finished_session_does_not_block_starting_a_new_one() {
         let (_dir, root) = temp_root();
-        let first = start_agent_session_at(&root, request(SessionIntent::Fix, 1));
-        let StartAgentSessionOutcome::Created { mut session } = first else {
+        let first = find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 1));
+        let FoundOrCreatedSession::Created { mut session } = first else {
             panic!("expected Created");
         };
         session.header.state = SessionState::Finished;
@@ -756,9 +985,9 @@ mod tests {
         let (headers, _diagnostics) = store::rebuild_index_from_sessions(&root);
         store::write_index(&root, &headers).expect("refresh index");
 
-        let second = start_agent_session_at(&root, request(SessionIntent::Fix, 1));
+        let second = find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 1));
         match second {
-            StartAgentSessionOutcome::Created { session: new_session } => {
+            FoundOrCreatedSession::Created { session: new_session } => {
                 assert_ne!(
                     new_session.header.session_id, session.header.session_id,
                     "a finished session must not be treated as still active"
@@ -771,8 +1000,8 @@ mod tests {
     #[test]
     fn an_archived_active_session_does_not_block_a_new_one() {
         let (_dir, root) = temp_root();
-        let first = start_agent_session_at(&root, request(SessionIntent::Fix, 1));
-        let StartAgentSessionOutcome::Created { mut session } = first else {
+        let first = find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 1));
+        let FoundOrCreatedSession::Created { mut session } = first else {
             panic!("expected Created");
         };
         // Still "Working" (active), but archived -- archiving is a stronger
@@ -785,8 +1014,8 @@ mod tests {
         let (headers, _diagnostics) = store::rebuild_index_from_sessions(&root);
         store::write_index(&root, &headers).expect("refresh index");
 
-        let second = start_agent_session_at(&root, request(SessionIntent::Fix, 1));
-        assert!(matches!(second, StartAgentSessionOutcome::Created { .. }));
+        let second = find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 1));
+        assert!(matches!(second, FoundOrCreatedSession::Created { .. }));
     }
 
     #[test]
@@ -797,9 +1026,9 @@ mod tests {
         let mut in_repo_b = request(SessionIntent::Fix, 1);
         in_repo_b.repo_id = "repo-b".into();
 
-        let a = start_agent_session_at(&root, in_repo_a);
-        let b = start_agent_session_at(&root, in_repo_b);
-        let (StartAgentSessionOutcome::Created { session: sa }, StartAgentSessionOutcome::Created { session: sb }) =
+        let a = find_or_create_agent_session_at(&root, in_repo_a);
+        let b = find_or_create_agent_session_at(&root, in_repo_b);
+        let (FoundOrCreatedSession::Created { session: sa }, FoundOrCreatedSession::Created { session: sb }) =
             (a, b)
         else {
             panic!("same issue number in two different repos must both create sessions");
@@ -810,8 +1039,8 @@ mod tests {
     #[test]
     fn find_active_session_for_source_matches_identity_and_intent_and_repo() {
         let (_dir, root) = temp_root();
-        let StartAgentSessionOutcome::Created { session } =
-            start_agent_session_at(&root, request(SessionIntent::Review, 9))
+        let FoundOrCreatedSession::Created { session } =
+            find_or_create_agent_session_at(&root, request(SessionIntent::Review, 9))
         else {
             panic!("expected Created");
         };
@@ -832,8 +1061,8 @@ mod tests {
         let (_dir, root) = temp_root();
         let mut req = request(SessionIntent::Ask, 1);
         req.source = SessionSourceInput::Manual;
-        let first = start_agent_session_at(&root, req);
-        assert!(matches!(first, StartAgentSessionOutcome::Created { .. }));
+        let first = find_or_create_agent_session_at(&root, req);
+        assert!(matches!(first, FoundOrCreatedSession::Created { .. }));
     }
 
     // -- provision_kickoff_worktree (task 5.1/5.2) --

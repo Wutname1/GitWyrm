@@ -1204,6 +1204,69 @@ pub async fn agent_result_find_orphaned(
     .map_err(|e| AppError::Other(e.to_string()))
 }
 
+/// One orphaned result, named to the session it belongs to -- what
+/// [`agent_result_find_orphaned`] cannot say on its own, since it already
+/// takes a single `session_id` and answers only for that one session.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanedResultInSession {
+    pub session_id: SessionId,
+    pub repo_id: String,
+    pub session_title: String,
+    pub orphan: OrphanedResult,
+}
+
+/// P1-C wiring 3 ("orphan-result detection is registered but not called at
+/// startup"): [`agent_result_find_orphaned`] existed, was registered, and
+/// worked correctly for one session, but nothing ever called it -- a run
+/// that crashed with a `Kept`/`CleanupNeeded` result pointing at a worktree
+/// folder that is now gone would sit that way silently forever, since
+/// nothing about opening the app, or opening that one session, re-checks
+/// every result's worktree path against disk.
+///
+/// This is the whole-store counterpart the frontend can call once, at Agent
+/// Desk startup, without first knowing which session(s) might have an
+/// orphan -- it scans every session's index entry (not a full session read
+/// each: `result::read_results` is its own sidecar file per session,
+/// [`store::load_or_rebuild_index`] is what gives the session id/repo id/
+/// title cheaply) and reuses [`find_orphaned_worktrees_at`] per session, the
+/// exact same detection `agent_result_find_orphaned` already used -- this
+/// command is a fan-out over sessions, not a second implementation of what
+/// "orphaned" means.
+///
+/// A session whose result sidecar cannot be read (`unwrap_or_default`, same
+/// stance as the single-session command above) is skipped rather than
+/// failing the whole scan -- one damaged session's results must never hide
+/// every other session's real orphans from the startup reconciliation this
+/// exists to drive.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_result_find_orphaned_all(app: AppHandle) -> Result<Vec<OrphanedResultInSession>, AppError> {
+    let root = resolve_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let loaded = crate::agentdesk::store::load_or_rebuild_index(&root);
+        loaded
+            .headers
+            .into_iter()
+            .filter(|h| !h.archived)
+            .flat_map(|header| {
+                let records = result::read_results(&root, &header.session_id).unwrap_or_default();
+                find_orphaned_worktrees_at(&records)
+                    .into_iter()
+                    .map(move |orphan| OrphanedResultInSession {
+                        session_id: header.session_id.clone(),
+                        repo_id: header.repo_id.clone(),
+                        session_title: header.title.clone(),
+                        orphan,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1236,6 +1299,7 @@ mod tests {
             changed_file_count: 0,
             active_execution_id: Some("exec-1".into()),
             archived: false,
+            graph_started_at: None,
         }
     }
 

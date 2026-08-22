@@ -462,6 +462,88 @@ pub fn detect_conflict(
 }
 
 // ---------------------------------------------------------------------------
+// Typed file operations (P0-D: byte/mode fidelity)
+// ---------------------------------------------------------------------------
+
+/// A file's executable bit, tracked separately from its content so a
+/// mode-only change (`chmod +x`, no byte changed) is representable and never
+/// silently dropped by a content-only diff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum FileExecutable {
+    No,
+    Yes,
+}
+
+/// What a path actually is in a git tree/workdir, beyond "some bytes" --
+/// enough to round-trip a symlink or an executable script without ever
+/// reading it as UTF-8 text. `Text`/`Binary` both carry the literal file
+/// bytes (never decoded, never lossily re-encoded); `Symlink` carries the
+/// link target string instead of file bytes, matching how git itself stores
+/// a symlink as a blob whose content IS the target path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum FileContent {
+    Text { bytes: Vec<u8>, executable: FileExecutable },
+    Binary { bytes: Vec<u8>, executable: FileExecutable },
+    Symlink { target: String },
+}
+
+/// One typed, path-scoped repository change a helper's worktree delta (or a
+/// base-revision read) produced. Deliberately never a bare string diff: each
+/// variant carries exactly the bytes/mode needed to reproduce the change
+/// faithfully in the integration worktree, so a delete cannot be mistaken for
+/// "no change" and a binary file is never routed through UTF-8 decoding
+/// (P0-D).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum FileOperation {
+    /// `path` did not exist at the base revision and now does.
+    Add { path: String, content: FileContent },
+    /// `path` existed at the base revision and its content and/or mode
+    /// changed.
+    Modify { path: String, content: FileContent },
+    /// `path` existed at the base revision and no longer does.
+    Delete { path: String },
+    /// `path` was renamed from `from_path` to `path`, optionally with new
+    /// content -- git tracks a similarity-detected rename as one delta, and
+    /// collapsing it into a delete+add would lose that relationship (and,
+    /// for a large file, needlessly duplicate its bytes in the conflict/undo
+    /// history).
+    Rename {
+        from_path: String,
+        path: String,
+        content: FileContent,
+    },
+}
+
+impl FileOperation {
+    /// The repo-relative path this operation applies to going forward (the
+    /// destination path for a rename, the only path for everything else) --
+    /// what the integration target's tree should be keyed on.
+    pub fn path(&self) -> &str {
+        match self {
+            FileOperation::Add { path, .. }
+            | FileOperation::Modify { path, .. }
+            | FileOperation::Delete { path }
+            | FileOperation::Rename { path, .. } => path,
+        }
+    }
+}
+
+/// What happened when applying one [`FileOperation`] to the integration
+/// worktree. A partial write can never surface as `Applied` -- `Failed`
+/// means the target path was left exactly as it stood before this call, so a
+/// caller can safely retry without risking a truncated/mixed file (P0-D:
+/// "never report a partial operation as Finished").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ApplyOperationOutcome {
+    Applied,
+    Failed { path: String, detail: String },
+}
+
+// ---------------------------------------------------------------------------
 // Graph projection (tasks.md 6.1, 6.2)
 // ---------------------------------------------------------------------------
 

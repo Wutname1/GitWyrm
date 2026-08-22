@@ -1,25 +1,44 @@
 # Agent Desk implementation reset
 
-Recorded 2026-08-21 after an end-to-end audit of the working branch. This is the controlling
-handoff until every Reset gate passes. It does not authorize product work outside these
-steps, and it does not treat existing scaffolding as shipped behavior.
+Recorded 2026-08-21 and revised after the 2026-08-22 second audit. This remains the
+controlling handoff until every Reset gate passes. The detailed evidence and newly found
+release blockers are in `audit-2026-08-22.md`.
 
 ## Current truth
 
-The branch contains useful session storage, models, adapters, panels, and tests, but it is
-not a working Agent Desk release. The most serious gaps are behavioral:
+The branch now passes its automated baseline and several previously disconnected paths are
+wired. It is still not a working Agent Desk release. The second audit found deeper safety
+and correctness failures:
 
-- Stop updates persisted state but does not cancel a real CLI execution.
-- Ask, Plan, Review, and Summarize do not enforce read-only authority at the engine boundary.
-- source actions create a session but do not start the requested agent operation;
-- a message appended during a run is not delivered to that running agent;
-- graph helpers are provisioned as records/worktrees but are not launched;
-- results and review UI are not created/mounted from live completion;
-- OpenSpec context and accepted task completion are not connected to the live run;
-- Import UI exists but is not reachable;
-- Match selected apps writes a broad batch without the promised item/destination preview;
-- repository filtering prevents a truly app-wide, cross-project session workspace; and
-- the Rust suite and strict OpenSpec validation are currently red.
+- live events are routed through a repository-keyed link that can overwrite another session
+  in the same repository;
+- read-only policy depends on a permission request the provider may suppress with remembered
+  allow rules; provider launch does not deny writes;
+- Plan starts its proposal run with `started=true`, allowing edits before Start;
+- Review and Summarize create a chat but do not start the requested operation;
+- kickoff provider/mode/team choices are discarded before automatic execution;
+- graph consolidation targets the user's open checkout instead of a dedicated integration
+  worktree;
+- graph integration ignores ordinary uncommitted helper edits and loses delete, rename,
+  binary, symlink, and mode semantics;
+- graph Finished has no combined lead review or combined result;
+- accepted OpenSpec completion, real revision execution, and startup result reconciliation
+  remain unwired; and
+- native safety, restart, scaling, accessibility, and performance proof remains open.
+
+## 2026-08-22 blocker order
+
+Do not resume feature breadth until these clusters pass in order:
+
+1. **Execution identity and hard authority:** execution-addressed routing, provider launch-time
+   write denial, Plan proposal denial, and same-repo concurrency tests.
+2. **Safe graph consolidation:** dedicated integration worktree, real worktree delta,
+   byte/operation fidelity, durable conflicts, combined lead review, and combined result.
+3. **One-click source truth:** every explicit intent starts, provider/mode/team survive, and
+   losing start races clean up.
+4. **Review completion:** real revision turn, exact OpenSpec task acceptance, helper/combined
+   diff navigation, and startup recovery.
+5. **Native release proof:** run the full acceptance matrix only after 1-4 are green.
 
 ## Completion vocabulary
 
@@ -34,17 +53,21 @@ Every task and review must use these terms consistently:
 
 ## R0 - freeze and restore a trustworthy baseline
 
-- [ ] R0.1 Stop concurrent edits or record the owner and purpose of every dirty file.
-- [ ] R0.2 Reconcile the three existing dirty files without overwriting another agent's work.
-- [ ] R0.3 Fix strict validation for `add-ai-agent-engine`; every normative requirement uses
+- [x] R0.1 Stop concurrent edits or record the owner and purpose of every dirty file.
+- [x] R0.2 Reconcile the three existing dirty files without overwriting another agent's work.
+- [x] R0.3 Fix strict validation for `add-ai-agent-engine`; every normative requirement uses
       SHALL or MUST and still expresses the intended default-provider behavior.
-- [ ] R0.4 Fix the failing agent-config location test without weakening client detection.
-- [ ] R0.5 Run one Cargo test process only; record exact pass/fail/ignored counts.
-- [ ] R0.6 Run TypeScript typecheck and the complete frontend unit suite.
-- [ ] R0.7 Record `git status --short`, test commands, and outputs in a Gate 0 evidence file.
+- [x] R0.4 Fix the failing agent-config location test without weakening client detection.
+- [x] R0.5 Run one Cargo test process only; record exact pass/fail/ignored counts.
+- [x] R0.6 Run TypeScript typecheck and the complete frontend unit suite.
+- [x] R0.7 Record `git status --short`, test commands, and outputs in a Gate 0 evidence file.
 
 **R0 gate:** clean ownership, strict OpenSpec green, TypeScript green, frontend tests green,
 Rust tests green. No product behavior is claimed yet.
+
+Gate 0 passed on 2026-08-21. The second audit does not reopen the baseline; it adds the
+behavioral blockers above. Latest audit run: TypeScript green, 683 frontend tests green,
+1,115 Rust tests green with one ignored, and 17 strict OpenSpec changes green.
 
 ## R1 - make execution authority real
 
@@ -59,6 +82,10 @@ Rust tests green. No product behavior is claimed yet.
 - [ ] R1.7 Add adversarial live-adapter tests where the model asks to write under every
       read-only intent and the engine refuses before touching disk.
 - [ ] R1.8 Native-test Review/Summarize against a dirty checkout and prove byte-identical files.
+- [ ] R1.9 Launch read-only and pre-Start Plan providers with write capability denied, even
+      when provider configuration contains a remembered/global allow rule.
+- [ ] R1.10 Route events by execution ID to one session; prove two simultaneous sessions in
+      the same repository cannot overwrite or receive each other's events.
 
 **R1 gate:** read-only behavior is enforced below the prompt layer. A malicious or confused
 provider cannot write around it.
@@ -92,6 +119,10 @@ provider cannot write around it.
 - [ ] R3.8 Mount result review in the completed conversation and link changed files to Diff.
 - [ ] R3.9 Wire Keep, Revise, Undo, Commit, cleanup, and PR draft from that mounted result.
 - [ ] R3.10 Run issue Fix from click through reviewed diff and intentional commit in native Tauri.
+- [ ] R3.11 Auto-start Plan, Explain, Review, and Summarize as well as Fix; read-only limits
+      authority but never adds a hidden second-Send step.
+- [ ] R3.12 Carry kickoff provider/mode/team into the first execution and clean a losing
+      concurrent start's unused worktree.
 
 **R3 gate:** one issue can be fixed from its real repository/host source without opening the
 user checkout, and the user reaches a reviewable result without hidden manual steps.
@@ -136,6 +167,12 @@ completion after restart.
 - [ ] R6.8 Preserve all sides of conflicts and resume only the selected integration.
 - [ ] R6.9 Run the lead's combined review/check before declaring the graph complete.
 - [ ] R6.10 Reconstruct or interrupt graphs honestly after restart.
+- [ ] R6.11 Integrate only into a dedicated lead worktree; never write graph results into the
+      user's open checkout.
+- [ ] R6.12 Derive and apply staged, unstaged, and committed helper changes with delete,
+      rename, binary, symlink, executable-bit, and mode fidelity.
+- [ ] R6.13 Build the primary result from the combined integration worktree and link every
+      helper result before Finished.
 
 **R6 gate:** two real helpers execute concurrently, can be stopped independently, survive a
 restart safely, and preserve both results through a forced same-line conflict.

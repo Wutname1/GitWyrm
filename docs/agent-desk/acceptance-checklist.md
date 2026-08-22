@@ -3,7 +3,7 @@
 This list is additive to each OpenSpec package. A checked task without the matching proof
 below is not finished.
 
-Implementation reset status, 2026-08-21: **no section below is released or gate-complete.**
+Second-audit status, 2026-08-22: **no section below is released or gate-complete.**
 Unit-tested types, helpers, commands, and unmounted components are supporting evidence, not
 acceptance. Check an item only after the production path is wired and its named automated or
 native evidence is linked from the implementation report.
@@ -19,6 +19,8 @@ native evidence is linked from the implementation report.
 - [ ] A damaged session file is isolated and the remaining index rebuilds.
 - [ ] Agent Desk is one app-wide second window; two repository kickoffs never create two
       Desk windows.
+- [ ] Two sessions in the same repository can run concurrently; events, approvals, stops,
+      results, and terminal unlinking remain attached to the exact execution/session.
 
 ## Workspace layout
 
@@ -41,11 +43,15 @@ native evidence is linked from the implementation report.
 
 - [ ] Issue Fix visibly enters Preparing within one animation frame.
 - [ ] Pull request Review and Summarize do not create or modify a worktree.
+- [ ] Review and Summarize start from the source click without a second Send.
+- [ ] Fix, Plan, Explain, Review, and Summarize use the selected/configured provider, mode,
+      and team on their first execution.
 - [ ] Fix never edits the checkout the user has open.
 - [ ] The source banner survives source deletion and labels the cached snapshot honestly.
 - [ ] Refresh shows when the live source changed since launch.
 - [ ] Duplicate kickoff offers/focuses the existing matching session instead of silently
       creating a second run.
+- [ ] A losing concurrent start leaves no unused worktree or branch behind.
 - [ ] Missing provider, expired sign-in, offline host, and worktree failure each leave a
       usable session with a clear next action.
 
@@ -53,6 +59,8 @@ native evidence is linked from the implementation report.
 
 - [ ] User Send appends immediately and disables duplicate submission until accepted.
 - [ ] Ask cannot edit; Plan cannot execute before Start; Auto still obeys approval gates.
+- [ ] Ask, Review, Summarize, Explain, and Plan-before-Start remain byte-identical even when
+      the provider has remembered/global write permission and emits no permission request.
 - [ ] Solo produces no graph; Lead + helpers makes the graph entry available.
 - [ ] Message rail includes user messages only, opens by hover and keyboard focus, is at
       least half the transcript width, and jumps/flashes the target.
@@ -74,6 +82,13 @@ native evidence is linked from the implementation report.
 - [ ] Stop all is labeled in the Graph header and responds immediately.
 - [ ] A stale helper event cannot land in a newer session or execution.
 - [ ] A helper conflict pauses only that integration and preserves both sides.
+- [ ] The graph has a dedicated lead integration worktree and never writes to the user's open
+      checkout before intentional Keep/landing.
+- [ ] Uncommitted and staged helper edits appear in the combined result without helper commits.
+- [ ] Add, modify, delete, rename, binary, symlink, executable-bit, and file-mode changes are
+      preserved where the platform supports them; missing/read errors never become empty files.
+- [ ] The graph cannot show Finished until a lead combined review/check creates one result
+      linked to every helper result.
 - [ ] Closing and reopening Agent Desk reconstructs the live graph from backend state.
 - [ ] A crashed app can recover every worktree that contains the only copy of work.
 
@@ -81,6 +96,8 @@ native evidence is linked from the implementation report.
 
 - [ ] Proposal, design, deltas, tasks, and progress come from repository files.
 - [ ] A task completion uses the existing OpenSpec writer and refreshes every surface.
+- [ ] The accepted result completes the exact source task, including duplicate task numbers
+      elsewhere and a task that was not next in order.
 - [ ] Plan graph nodes link back to the requirement/task that caused them.
 - [ ] A repo without OpenSpec still has a fully usable Agent Desk.
 - [ ] OpenSpec CLI absence never blocks reading or source-bound chat.

@@ -36,17 +36,24 @@ use super::store::{self, SessionStoreRoot, WriteError};
 /// the same relationship `RUN_EVENT` has to `RunEventKind`.
 pub const AGENT_SESSION_EVENT: &str = "agent-session-event";
 
-/// Which durable [`SessionId`] a repository's live `airun` runs feed into,
-/// when one has been linked.
+/// Which durable [`SessionId`] one EXECUTION's live `airun` run feeds into,
+/// when it has been linked.
 ///
-/// A run event only carries `repo_id` and its own `airun` session ID -- it
-/// has no idea a durable Agent Desk session exists at all. Nothing populates
-/// this registry yet (that is `agent_session_start_execution`, a later
-/// task/command not in this change's scope); until something does,
-/// `bridge_run_event` below finds no link and is a no-op, which is exactly
-/// what keeps `ai-run-event` behavior unchanged per task 4.5 -- the durable
-/// path exists and is fully tested, but produces nothing until a caller
-/// opts a repository in.
+/// Keyed by execution ID, not repository ID (the P0 fix for "an event can
+/// reach the wrong chat": the reset audit's own words are "map execution ID
+/// to session ID, unlink only that exact mapping"). A run event's own
+/// `RunEventKind::session_id` field IS the durable `execution_id` in every
+/// real (non-legacy-demo) caller -- see [`execution_id_for_run_session`] --
+/// so this map answers "which durable session owns this exact execution's
+/// events," never "which session currently owns this repository." Linking a
+/// second, third, ... concurrent execution for the SAME repository (two
+/// chats open on one repo, or a lead plus helpers) each gets its own entry
+/// and none of them overwrite each other, which is the actual bug this
+/// replaces: the previous `HashMap<repo_id, SessionId>` shape meant linking
+/// session B's execution silently stole routing for every future event that
+/// happened to name the same `repo_id`, even one still destined for session
+/// A's still-running execution.
+///
 /// Cheaply `Clone`: every field is behind its own `Arc`, so a clone shares
 /// the same underlying maps rather than snapshotting them. This is what lets
 /// a command hand an owned copy into a `spawn_blocking` closure (`'static`,
@@ -56,6 +63,8 @@ pub const AGENT_SESSION_EVENT: &str = "agent-session-event";
 /// / `tauri::State<'_, RunSessionLinks>` call site keeps working unchanged.
 #[derive(Default, Clone)]
 pub struct RunSessionLinks {
+    /// `execution_id -> session_id`. THE routing table `route_run_event`
+    /// consults. Never keyed by repository.
     inner: Arc<Mutex<HashMap<String, SessionId>>>,
     /// Per-execution sequence counters, keyed by the `airun` session ID
     /// (which doubles as the durable `execution_id`, see
@@ -71,20 +80,30 @@ impl RunSessionLinks {
         Self::default()
     }
 
-    /// Links `repo_id`'s future run events to durable session `session_id`.
-    pub fn link(&self, repo_id: &str, session_id: &SessionId) {
+    /// Links `execution_id`'s future run events to durable session
+    /// `session_id`. `execution_id` is the `airun` run's own session ID
+    /// (`RunEventKind::session_id`), which is the same string as the durable
+    /// `ExecutionId` for every real caller (see
+    /// [`execution_id_for_run_session`]) -- callers pass whichever they
+    /// already have in hand under either name.
+    pub fn link(&self, execution_id: &str, session_id: &SessionId) {
         self.inner
             .lock()
             .unwrap()
-            .insert(repo_id.to_string(), session_id.clone());
+            .insert(execution_id.to_string(), session_id.clone());
     }
 
-    pub fn get(&self, repo_id: &str) -> Option<SessionId> {
-        self.inner.lock().unwrap().get(repo_id).cloned()
+    /// Which durable session `execution_id`'s events belong to, if any.
+    pub fn get(&self, execution_id: &str) -> Option<SessionId> {
+        self.inner.lock().unwrap().get(execution_id).cloned()
     }
 
-    pub fn unlink(&self, repo_id: &str) {
-        self.inner.lock().unwrap().remove(repo_id);
+    /// Removes exactly `execution_id`'s mapping. A sibling execution (a
+    /// helper, or a second session's own execution that happens to share a
+    /// repository) is untouched -- this is the "unlink only that exact
+    /// mapping" half of the P0 fix.
+    pub fn unlink(&self, execution_id: &str) {
+        self.inner.lock().unwrap().remove(execution_id);
     }
 
     /// The next sequence number for `run_session_id`, starting at 1. Callers
@@ -332,10 +351,17 @@ pub enum RunEventRouted {
 /// like every mutating command in `commands/agent_desk.rs` -- otherwise a
 /// user action (rename, archive, mark-read, append) racing this call could
 /// read the same stale state and clobber whichever of the two wrote last.
-/// `links.get(&event.repo_id)` is called *before* the session lock is taken
-/// and `RunSessionLinks` is never touched again inside this function, so
-/// there is exactly one lock-acquisition order in play -- see
+/// `links.get(&event.session_id)` is called *before* the session lock is
+/// taken and `RunSessionLinks` is never touched again inside this function,
+/// so there is exactly one lock-acquisition order in play -- see
 /// `agentdesk::locks`'s module doc for the full argument.
+///
+/// Looked up by `event.session_id` (the `airun` run's own ID, which IS the
+/// durable `execution_id` -- see [`execution_id_for_run_session`]), never by
+/// `event.repo_id`. This is the P0 routing fix: two sessions with live
+/// executions against the same repository each keep their own mapping, so an
+/// event for one never lands in the other just because both name the same
+/// repository.
 pub fn route_run_event(
     root: &SessionStoreRoot,
     links: &RunSessionLinks,
@@ -344,7 +370,7 @@ pub fn route_run_event(
     occurred_at: &str,
     event: &RunEventKind,
 ) -> RunEventRouted {
-    let Some(session_id) = links.get(&event.repo_id) else {
+    let Some(session_id) = links.get(&event.session_id) else {
         return RunEventRouted::NoLinkedSession;
     };
 
@@ -644,6 +670,7 @@ mod tests {
             changed_file_count: 0,
             active_execution_id: None,
             archived: false,
+            graph_started_at: None,
         }
     }
 
@@ -934,11 +961,32 @@ mod tests {
     #[test]
     fn a_link_can_be_set_read_and_removed() {
         let links = RunSessionLinks::new();
-        assert_eq!(links.get("repo-1"), None);
-        links.link("repo-1", &"sess-1".to_string());
-        assert_eq!(links.get("repo-1"), Some("sess-1".to_string()));
-        links.unlink("repo-1");
-        assert_eq!(links.get("repo-1"), None);
+        assert_eq!(links.get("exec-1"), None);
+        links.link("exec-1", &"sess-1".to_string());
+        assert_eq!(links.get("exec-1"), Some("sess-1".to_string()));
+        links.unlink("exec-1");
+        assert_eq!(links.get("exec-1"), None);
+    }
+
+    /// The P0 fix's actual proof at this layer: linking a second execution
+    /// must never disturb a first execution's own mapping, even when both
+    /// belong to the same repository (not modeled here at all -- this type
+    /// no longer has any notion of repository) or the same session.
+    #[test]
+    fn linking_a_second_execution_does_not_overwrite_the_first() {
+        let links = RunSessionLinks::new();
+        links.link("exec-1", &"sess-a".to_string());
+        links.link("exec-2", &"sess-b".to_string());
+        assert_eq!(links.get("exec-1"), Some("sess-a".to_string()));
+        assert_eq!(links.get("exec-2"), Some("sess-b".to_string()));
+
+        links.unlink("exec-1");
+        assert_eq!(links.get("exec-1"), None);
+        assert_eq!(
+            links.get("exec-2"),
+            Some("sess-b".to_string()),
+            "unlinking one execution must not touch a sibling's mapping"
+        );
     }
 
     // -- route_run_event --
@@ -968,7 +1016,7 @@ mod tests {
         let locks = SessionLocks::new();
         let session = session();
         store::write_session(&root, &session).unwrap();
-        links.link("repo-1", &session.header.session_id);
+        links.link("run-1", &session.header.session_id);
 
         let event = run_event(AirunRunState::Working, RunStep::Note { text: "hi".into() });
         let seq = links.next_sequence(&event.session_id);
@@ -991,7 +1039,7 @@ mod tests {
         let (_dir, root) = temp_store();
         let links = RunSessionLinks::new();
         let locks = SessionLocks::new();
-        links.link("repo-1", &"does-not-exist".to_string());
+        links.link("run-1", &"does-not-exist".to_string());
 
         let event = run_event(AirunRunState::Working, RunStep::Note { text: "a".into() });
         let routed = route_run_event(&root, &links, &locks, 1, "2026-01-01T00:00:01Z", &event);
@@ -1005,7 +1053,7 @@ mod tests {
         let locks = SessionLocks::new();
         let session = session();
         store::write_session(&root, &session).unwrap();
-        links.link("repo-1", &session.header.session_id);
+        links.link("run-1", &session.header.session_id);
 
         let event = run_event(AirunRunState::Working, RunStep::Note { text: "a".into() });
         route_run_event(&root, &links, &locks, 1, "2026-01-01T00:00:01Z", &event);
@@ -1028,7 +1076,11 @@ mod tests {
         let locks = SessionLocks::new();
         let session = session();
         store::write_session(&root, &session).unwrap();
-        links.link("repo-1", &session.header.session_id);
+        // Both executions are linked to the same session -- a retry/second
+        // execution against the same repository still routes to the session
+        // that owns it, it just becomes the new active lead once it arrives.
+        links.link("run-1", &session.header.session_id);
+        links.link("run-2", &session.header.session_id);
 
         let first = RunEventKind {
             repo_id: "repo-1".into(),
@@ -1072,7 +1124,7 @@ mod tests {
         let locks = SessionLocks::new();
         let session = session();
         store::write_session(&root, &session).unwrap();
-        links.link("repo-1", &session.header.session_id);
+        links.link("run-1", &session.header.session_id);
 
         // Distinct step kinds (not three `Note`s -- see the coalescing tests
         // below for that case): each is its own row, so this still checks
@@ -1099,6 +1151,128 @@ mod tests {
         let reread = store::read_session(&root, &session.header.session_id).unwrap();
         assert_eq!(reread.messages.len(), 3);
         assert_eq!(reread.executions[0].last_sequence, 3);
+    }
+
+    // -- P0: execution-addressed routing (two sessions, one repository) --
+
+    fn header_for(session_id: &str, repo_id: &str) -> AgentSessionHeader {
+        AgentSessionHeader {
+            session_id: session_id.into(),
+            repo_id: repo_id.into(),
+            source: SessionSource::Manual {
+                repo_id: repo_id.into(),
+            },
+            ..header()
+        }
+    }
+
+    /// THE regression test for "an event can reach the wrong chat": two
+    /// sessions, each with its own live execution, share ONE repository --
+    /// exactly the scenario the reset audit names (a helper's own session,
+    /// concurrent with a lead's, or simply two chats open on the same repo).
+    /// An event for execution A must land ONLY in session A, never in B, even
+    /// though both `RunEventKind`s carry the same `repo_id`.
+    #[test]
+    fn an_event_for_execution_a_lands_in_session_a_only_when_two_sessions_share_a_repository() {
+        let (_dir, root) = temp_store();
+        let links = RunSessionLinks::new();
+        let locks = SessionLocks::new();
+
+        let session_a = AgentSession::new(header_for("sess-a", "repo-shared"));
+        let session_b = AgentSession::new(header_for("sess-b", "repo-shared"));
+        store::write_session(&root, &session_a).unwrap();
+        store::write_session(&root, &session_b).unwrap();
+
+        // Session A's lead execution and session B's own (different)
+        // execution, both against the same repository.
+        links.link("exec-a", &"sess-a".to_string());
+        links.link("exec-b", &"sess-b".to_string());
+
+        let event_for_a = RunEventKind {
+            repo_id: "repo-shared".into(),
+            session_id: "exec-a".into(),
+            state: AirunRunState::Working,
+            summary: "a".into(),
+            step: RunStep::Note { text: "hello from A's execution".into() },
+        };
+        let routed = route_run_event(&root, &links, &locks, 1, "2026-01-01T00:00:01Z", &event_for_a);
+        assert!(matches!(routed, RunEventRouted::Persisted { .. }), "got {routed:?}");
+
+        let a_after = store::read_session(&root, "sess-a").unwrap();
+        let b_after = store::read_session(&root, "sess-b").unwrap();
+        assert_eq!(a_after.messages.len(), 1, "the event must land in session A");
+        assert_eq!(a_after.messages[0].plain_content, "hello from A's execution");
+        assert!(b_after.messages.is_empty(), "the event must NEVER land in session B, which shares the repository but not the execution");
+
+        // Unlinking A's execution must leave B's own mapping intact -- the
+        // other half of the audit's required outcome ("unlink only that
+        // exact mapping").
+        links.unlink("exec-a");
+        assert_eq!(links.get("exec-a"), None);
+        assert_eq!(
+            links.get("exec-b"),
+            Some("sess-b".to_string()),
+            "unlinking A's execution must not disturb B's own mapping"
+        );
+
+        // And B's execution still routes correctly afterward.
+        let event_for_b = RunEventKind {
+            repo_id: "repo-shared".into(),
+            session_id: "exec-b".into(),
+            state: AirunRunState::Working,
+            summary: "b".into(),
+            step: RunStep::Note { text: "hello from B's execution".into() },
+        };
+        let routed_b = route_run_event(&root, &links, &locks, 1, "2026-01-01T00:00:02Z", &event_for_b);
+        assert!(matches!(routed_b, RunEventRouted::Persisted { .. }), "got {routed_b:?}");
+        let b_final = store::read_session(&root, "sess-b").unwrap();
+        assert_eq!(b_final.messages.len(), 1);
+        assert_eq!(b_final.messages[0].plain_content, "hello from B's execution");
+    }
+
+    /// A helper and its lead, in DIFFERENT sessions, sharing a repository
+    /// (the same shape a "run a helper-style follow-up in a fresh chat on the
+    /// same repo" scenario produces): each execution's events land only in
+    /// its own session, with no cross-contamination in either direction.
+    #[test]
+    fn a_helper_and_its_lead_in_different_sessions_of_the_same_repo_do_not_cross_contaminate() {
+        let (_dir, root) = temp_store();
+        let links = RunSessionLinks::new();
+        let locks = SessionLocks::new();
+
+        let lead_session = AgentSession::new(header_for("sess-lead", "repo-shared"));
+        let helper_session = AgentSession::new(header_for("sess-helper", "repo-shared"));
+        store::write_session(&root, &lead_session).unwrap();
+        store::write_session(&root, &helper_session).unwrap();
+
+        links.link("exec-lead", &"sess-lead".to_string());
+        links.link("exec-helper", &"sess-helper".to_string());
+
+        let lead_event = RunEventKind {
+            repo_id: "repo-shared".into(),
+            session_id: "exec-lead".into(),
+            state: AirunRunState::Working,
+            summary: "lead".into(),
+            step: RunStep::Note { text: "lead output".into() },
+        };
+        let helper_event = RunEventKind {
+            repo_id: "repo-shared".into(),
+            session_id: "exec-helper".into(),
+            state: AirunRunState::Working,
+            summary: "helper".into(),
+            step: RunStep::Note { text: "helper output".into() },
+        };
+
+        // Interleaved, as a real concurrent lead+helper run would produce.
+        route_run_event(&root, &links, &locks, 1, "2026-01-01T00:00:01Z", &helper_event);
+        route_run_event(&root, &links, &locks, 1, "2026-01-01T00:00:02Z", &lead_event);
+
+        let lead_after = store::read_session(&root, "sess-lead").unwrap();
+        let helper_after = store::read_session(&root, "sess-helper").unwrap();
+        assert_eq!(lead_after.messages.len(), 1);
+        assert_eq!(lead_after.messages[0].plain_content, "lead output");
+        assert_eq!(helper_after.messages.len(), 1);
+        assert_eq!(helper_after.messages[0].plain_content, "helper output");
     }
 
     // -- Note coalescing (streamed-text chunks folding into one message) --
@@ -1315,7 +1489,7 @@ mod tests {
         let locks = SessionLocks::new();
         let session = session();
         store::write_session(&root, &session).unwrap();
-        links.link("repo-1", &session.header.session_id);
+        links.link("run-1", &session.header.session_id);
 
         for text in ["chunk one ", "chunk two ", "chunk three"] {
             let event = run_event(AirunRunState::Working, RunStep::Note { text: text.into() });

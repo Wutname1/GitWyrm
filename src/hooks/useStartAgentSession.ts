@@ -14,71 +14,44 @@ import { openSpecDesk } from '@/lib/specDesk'
 import { explainAutoStartOutcome } from '@/lib/agentDeskResult'
 
 /**
- * R3.2: "After persistence and worktree provisioning, start execution
- * automatically; no second user message is required."
+ * P1-A fix ("source clicks do not all do what they say"): starting a
+ * session's first turn is no longer decided here at all. It used to be --
+ * this function read `IntentPolicy.canWrite` and skipped starting for any
+ * read-only intent (Ask/Explain/Review/Summarize), so "Review with AI"
+ * created a session that then sat in `Draft` forever, looking like it
+ * worked (a chat appeared) while nothing ever ran. That was the wrong test:
+ * "can this intent ever write" is a CAPABILITY question the backend's
+ * `agentdesk::policy::check_tool_capability` already enforces on every tool
+ * call inside a run; it says nothing about whether the run itself should
+ * start.
  *
- * Fires the same `agentSessionStartExecution` call `SessionComposer`'s Send
- * button makes, using the intent's own policy default mode/team
- * (`commands::agentdesk::policy::for_intent`) rather than inventing a second
- * default here. Only for a *freshly created* session -- `FocusedExisting`
- * (R3.4's duplicate-source case) must never restart an execution the user
- * may already be reviewing or mid-conversation with; the caller focuses that
- * session and stops, exactly as before.
- *
- * Deliberately does not gate on `intent === 'fix'` by name: the correct test
- * is "can this intent write at all" (`IntentPolicy.canWrite`), which is also
- * true for Plan once a user has explicitly chosen Start (this hook is not
- * that path) -- but false for Ask/Explain/Review/Summarize, which must show
- * the user their new session and let *them* decide whether/how to run it
- * (R1.3/R1.4: read-only intents are never executed without an explicit
- * user action). Reading the real policy table over the wire, instead of
- * hand-copying "fix" as a magic string, is what keeps this in sync with R1's
- * enforcement rather than silently drifting from it.
+ * The backend's `agent_session_start` command (`commands::agent_kickoff`)
+ * now performs the create-and-start sequence in one call, for every intent,
+ * carrying whatever `mode`/`team`/`providerOverride` the caller (or the
+ * intent's own policy default) named -- so `StartAgentSessionOutcome::Created`
+ * already carries `start: StartExecutionOutcome | null` by the time it gets
+ * here. This function only reports that outcome; `explainAutoStartOutcome`
+ * (`@/lib/agentDeskResult`) is the same plain-language mapping the old
+ * frontend-driven start used, reused verbatim so the messages a user sees
+ * have not changed even though which layer decided to start has.
  */
-async function autoStartIfWriteCapable(session: AgentSession): Promise<void> {
-  let policy
-  try {
-    policy = await commands.agentIntentPolicy(session.header.intent)
-  } catch (e) {
-    // The policy lookup itself is read-only and side-effect-free; a failure
-    // here just means we cannot safely decide whether to auto-start, so we
-    // don't. The session is still visible and the user can send a message
-    // manually -- this is a degraded-but-safe fallback, not a hard failure.
-    log.error(`agent desk: could not resolve intent policy for auto-start: ${describeError(e)}`)
+function reportCreatedStart(start: NonNullable<Extract<StartAgentSessionOutcome, { kind: 'created' }>['start']>): void {
+  if (start.kind === 'started') {
+    // Rule #1: the session already shows "Preparing" the instant it was
+    // created (`record_execution_if_not_running` sets that state inside the
+    // same locked write `start_execution_at` performs, now called directly
+    // from `agent_session_start`) -- this toast confirms the engine itself
+    // is now running, not just queued to.
+    toast.success('Started working on this.')
     return
   }
-  if (!policy.canWrite) return
-
-  try {
-    const outcome = unwrap(
-      await commands.agentSessionStartExecution(
-        session.header.sessionId,
-        policy.defaultMode,
-        policy.defaultTeam,
-        null
-      )
-    )
-    if (outcome.kind === 'started') {
-      // Rule #1: the session already shows "Preparing" the instant it was
-      // created (`record_execution_if_not_running` sets that state inside
-      // the same locked write `agentSessionStartExecution` performs) --
-      // this toast confirms the engine itself is now running, not just
-      // queued to.
-      toast.success('Started working on this.')
-      return
-    }
-    const explanation = explainAutoStartOutcome(outcome)
-    if (explanation) toast.error('Could not start working on this.', { description: explanation })
-    // `explanation === null` and `outcome.kind !== 'started'` only for
-    // `alreadyRunning`: an execution is already active on this session (a
-    // near-simultaneous second kickoff, most likely) -- it is already
-    // visibly Working, which is the same state this call would have
-    // produced, so nothing more to say.
-  } catch (e) {
-    const message = describeError(e)
-    log.error(`agent desk: auto-start execution failed: ${message}`)
-    toast.error('Could not start working on this.', { description: message })
-  }
+  const explanation = explainAutoStartOutcome(start)
+  if (explanation) toast.error('Could not start working on this.', { description: explanation })
+  // `explanation === null` and `start.kind !== 'started'` only for
+  // `alreadyRunning`: an execution is already active on this session (a
+  // near-simultaneous second kickoff, most likely) -- it is already visibly
+  // Working, which is the same state this call would have produced, so
+  // nothing more to say.
 }
 
 export interface StartAgentSessionRequest {
@@ -109,16 +82,19 @@ export interface StartAgentSessionRequest {
  *   c. the session (new, or an existing active one for the same
  *      repo/source/intent -- task 1.4) is created durably, which is what
  *      puts a fresh session in `Draft`/`Preparing` before any provider
- *      call. `agent_session_start` never calls the provider itself, only
- *      `agent_session_start_execution` (a caller's later, separate step)
- *      does that;
+ *      call;
  *   d. Starting clears on every success/failure/unmount path (the `finally`
  *      below).
  *
- * Deliberately NOT itself calling `agent_session_start_execution`: kickoff's
- * job is "get a session showing in Agent Desk right now," not "run the
- * agent" -- Ask/Explain/Review/Summarize/Plan may want the user to see the
- * session before anything executes.
+ * P1-A: `commands.agentSessionStart` (backend: `agent_kickoff::agent_session_start`)
+ * now performs BOTH create and first-turn-start as one call for a freshly
+ * created session -- every explicit source action starts immediately, for
+ * every intent, not only the ones that happen to be able to write. This
+ * hook no longer decides whether to start a second time on the frontend
+ * (there used to be a separate `agentSessionStartExecution` call here,
+ * gated on `IntentPolicy.canWrite`, which is exactly what left Review/
+ * Summarize sessions sitting in `Draft` forever) -- it only reports the
+ * `start` outcome the backend already attempted, via `reportCreatedStart`.
  *
  * Routes through `commands.agentSessionStart` (backend:
  * `commands::agent_kickoff::agent_session_start`), not the lower-level
@@ -168,14 +144,12 @@ export function useStartAgentSession() {
 
       switch (outcome.kind) {
         case 'created':
-          // R3.2: no second user message required -- fire-and-forget so a
-          // slow provider/worktree provisioning never blocks this function
-          // from returning the session (which the caller uses to focus the
-          // Desk pane immediately, per R3.1). Errors are reported by
-          // `autoStartIfWriteCapable` itself via toast; nothing here awaits
-          // it or can regress the "session shows up in Preparing right away"
-          // guarantee into "session shows up only once the agent finishes."
-          void autoStartIfWriteCapable(outcome.session)
+          // R3.2: no second user message required. The backend has already
+          // attempted the start by the time this resolves (P1-A) --
+          // `outcome.start` is that attempt's own outcome (`null` only in a
+          // forward-compatibility case that does not occur in this build,
+          // see `StartAgentSessionOutcome::Created`'s doc comment).
+          if (outcome.start) reportCreatedStart(outcome.start)
           return outcome.session
         case 'focusedExisting':
           toast.info('Already working on this. Focused the existing chat.')

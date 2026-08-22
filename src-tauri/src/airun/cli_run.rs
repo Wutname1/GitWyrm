@@ -158,7 +158,7 @@ pub async fn run_task(
     cancel: CancelHandle,
     budget: Option<JobBudget>,
 ) {
-    let mut conn = match agent.connect().await {
+    let mut conn = match agent.connect(&policy, started).await {
         Ok(c) => c,
         Err(e) => {
             let detail = crate::ai::agent::select::plain_explanation(&e);

@@ -8,6 +8,7 @@ import {
   changedPathsSummaryLine,
   checksSummaryLine,
   explainCommitOutcome,
+  explainCompleteOpenSpecTaskOutcome,
   explainKeepOutcome,
   explainUndoOutcome,
   hasFailingCheck,
@@ -31,6 +32,21 @@ import { cn } from '@/lib/utils'
  * (the lead's own execution id for the combined result, or a helper's for
  * its scoped one -- tasks.md 2.2's "graph node Output/View diff open that
  * helper-scoped result").
+ *
+ * `isOpenSpecTask` is P1-C wiring 1 ("the OpenSpec completion hook has no
+ * consumer"): `commands::agent_desk::agent_session_complete_openspec_task`
+ * existed, was registered, and had a passing test suite, but no UI ever
+ * called it -- accepting a result from a session started on an OpenSpec
+ * task never actually checked that task off in `tasks.md`. Keep (this
+ * panel's "the changes are good" gesture -- `CompleteOpenSpecTaskOutcome`'s
+ * own doc comment: "requires the caller to have already gotten that
+ * acceptance ... rather than inferring it from execution state") is that
+ * gesture, so `handleKeep` fires the completion call right alongside
+ * `agentResultKeep` whenever this session's source is an OpenSpec task.
+ * Sessions from any other source pass `false` and this never fires --
+ * exactly what `CompleteOpenSpecTaskOutcome::NotAnOpenSpecTaskSource` exists
+ * to refuse anyway, so the frontend gate is belt-and-suspenders, not the
+ * only thing stopping a bad call.
  */
 export function ResultReviewPanel({
   sessionId,
@@ -38,15 +54,23 @@ export function ResultReviewPanel({
   intent,
   taskText,
   provider,
+  isOpenSpecTask = false,
 }: {
   sessionId: string
   executionId: string
   intent: SessionIntent
   taskText: string
   provider: string
+  isOpenSpecTask?: boolean
 }) {
   const queryClient = useQueryClient()
   const [commitMessage, setCommitMessage] = useState<string | null>(null)
+  // P1-C wiring 2 ("Request revision changes state but does not append
+  // guidance or start a turn"): `null` means the guidance box is closed;
+  // `''`/text means it is open and the user is typing what needs to
+  // change. Mirrors `commitMessage`'s own null-means-closed convention just
+  // above.
+  const [revisionText, setRevisionText] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const query = useQuery({
@@ -95,6 +119,24 @@ export function ResultReviewPanel({
       }
       toast.success('Kept -- ready to commit when you are.')
       refresh()
+
+      // P1-C wiring 1: Keep is this panel's "accepted" gesture -- check the
+      // originating OpenSpec task off in the same breath, for sessions that
+      // came from one. Deliberately fire-and-forget-with-its-own-toast
+      // rather than blocking the Keep success above on it: the result was
+      // genuinely kept either way, and a task-list write failure is a
+      // separate, secondary thing to tell the user about, not a reason to
+      // make Keep itself look like it failed.
+      if (isOpenSpecTask) {
+        try {
+          const taskOutcome = unwrap(await commands.agentSessionCompleteOpenspecTask(sessionId, true))
+          const taskExplanation = explainCompleteOpenSpecTaskOutcome(taskOutcome)
+          if (taskExplanation) toast.warning(taskExplanation)
+        } catch (e) {
+          log.error(`could not check off the OpenSpec task after Keep: ${describeError(e)}`)
+          toast.warning('Kept, but the task list could not be updated. Check it off by hand.')
+        }
+      }
     })
   }
 
@@ -116,11 +158,84 @@ export function ResultReviewPanel({
     })
   }
 
-  async function handleRequestRevision() {
+  /** Opens the guidance box -- the actual revision request is submitted by
+   * `handleSubmitRevision` once the user has written what needs to change.
+   * Splitting "start requesting a revision" from "submit it" mirrors the
+   * commit-message flow's `handleDraftCommitMessage`/`handleCommit` split
+   * just below, and is why this is not itself wrapped in `withBusy`: opening
+   * a text box has nothing to be busy about. */
+  function handleRequestRevision() {
+    setRevisionText('')
+  }
+
+  /**
+   * P1-C wiring 2: what `request_revision_at`'s own doc comment says the
+   * caller is responsible for, done here as the three real steps in order --
+   * `agentResultRequestRevision`'s doc comment is explicit that flipping the
+   * result's state was never meant to be the whole feature:
+   *
+   *   1. Flip the result's state to `RevisionRequested` (what the backend
+   *      command already did, in isolation, before this wiring existed).
+   *   2. Append the user's guidance as a real transcript message, so the
+   *      lead sees exactly what changed request -- not a bare re-run with
+   *      no new instruction.
+   *   3. Start a new execution on the same session/mode/team the ordinary
+   *      Send button would use, so "Review requested changes" genuinely
+   *      continues the conversation instead of leaving the user to
+   *      separately go find the composer and repeat themselves.
+   *
+   * A failure at step 2 or 3 still leaves the result correctly marked
+   * `RevisionRequested` (step 1 already committed) -- the guidance and/or
+   * turn simply did not go out, and the toast says so plainly rather than
+   * claiming a turn started when it did not (the same "never claim delivery
+   * that did not happen" rule `SessionComposer`'s own `alreadyRunning`
+   * branch follows).
+   */
+  async function handleSubmitRevision() {
+    const guidance = (revisionText ?? '').trim()
+    if (!guidance) {
+      toast.error('Write what needs to change first.')
+      return
+    }
     await withBusy(async () => {
-      unwrap(await commands.agentResultRequestRevision(sessionId, executionId))
-      toast.success('Marked for revision. Send the lead a follow-up message to continue.')
+      const requestOutcome = unwrap(await commands.agentResultRequestRevision(sessionId, executionId))
+      if (requestOutcome.kind !== 'requested') {
+        toast.error('Could not mark this result for revision.', { description: requestOutcome.kind })
+        return
+      }
       refresh()
+
+      try {
+        const appended = unwrap(await commands.agentSessionAppendUserMessage(sessionId, guidance, []))
+        if (appended.kind !== 'appended') {
+          toast.error('Marked for revision, but your guidance could not be saved.', { description: appended.kind })
+          return
+        }
+        setRevisionText(null)
+
+        // Reads the real policy table (`agentdesk::policy::for_intent`)
+        // rather than hand-copying "auto"/"lead" here -- same reasoning
+        // `useStartAgentSession`'s own doc comment gives for doing the
+        // equivalent lookup: it is what keeps this in sync with the
+        // backend's table instead of silently drifting from it.
+        const policy = await commands.agentIntentPolicy(intent)
+        const startOutcome = unwrap(
+          await commands.agentSessionStartExecution(sessionId, policy.defaultMode, policy.defaultTeam, null)
+        )
+        if (startOutcome.kind === 'started') {
+          toast.success('Sent -- the lead is working on your requested changes.')
+        } else if (startOutcome.kind === 'alreadyRunning') {
+          // Same "do not claim delivery that did not happen" stance
+          // `SessionComposer` takes: the guidance is saved and visible, but
+          // this specific call did not start a new turn for it.
+          toast.info('Saved for the next turn. The agent is still finishing its current one.')
+        } else {
+          toast.error('Your guidance was saved, but the agent could not start.', { description: startOutcome.kind })
+        }
+      } catch (e) {
+        log.error(`could not continue after requesting revision: ${describeError(e)}`)
+        toast.error('Marked for revision, but could not send your guidance. Send it from the composer instead.')
+      }
     })
   }
 
@@ -239,6 +354,19 @@ export function ResultReviewPanel({
         </div>
       )}
 
+      {revisionText !== null && availability.canRequestRevision && (
+        <div className="flex flex-col gap-1.5">
+          <textarea
+            value={revisionText}
+            onChange={(e) => setRevisionText(e.target.value)}
+            rows={4}
+            autoFocus
+            className="w-full resize-none rounded-md border border-border bg-panel2 p-2 text-2xs text-foreground"
+            placeholder="What needs to change?"
+          />
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-1.5">
         {availability.canKeep && (
           <ActionButton onClick={handleKeep} disabled={busy}>
@@ -250,10 +378,20 @@ export function ResultReviewPanel({
             Undo
           </ActionButton>
         )}
-        {availability.canRequestRevision && (
+        {availability.canRequestRevision && revisionText === null && (
           <ActionButton onClick={handleRequestRevision} disabled={busy} variant="ghost">
             Review requested changes
           </ActionButton>
+        )}
+        {availability.canRequestRevision && revisionText !== null && (
+          <>
+            <ActionButton onClick={() => void handleSubmitRevision()} disabled={busy} variant="primary">
+              Send to the lead
+            </ActionButton>
+            <ActionButton onClick={() => setRevisionText(null)} disabled={busy} variant="ghost">
+              Cancel
+            </ActionButton>
+          </>
         )}
         {availability.canCommit && commitMessage === null && (
           <ActionButton onClick={handleDraftCommitMessage} disabled={busy}>

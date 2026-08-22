@@ -3264,6 +3264,46 @@ async agentSessionRecordConflict(sessionId: string, executionId: string, conflic
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * P1-A ("source clicks do not all do what they say" / "one-click source
+ * execution"): the single kickoff entry point every source surface calls,
+ * now responsible end to end for BOTH durably creating the session AND
+ * starting its first turn -- not split across a backend create step and a
+ * frontend-side "should I also start this" decision the way
+ * `useStartAgentSession.autoStartIfWriteCapable` used to work.
+ * 
+ * That frontend gate was the actual bug: it read `IntentPolicy::canWrite`
+ * and skipped starting altogether for Review/Summarize (and Ask/Explain),
+ * so clicking "Review with AI" created a session that then just sat in
+ * `Draft` forever -- the click LOOKED like it worked (a session appeared)
+ * but nothing ever ran. The fix is not to grant those intents write
+ * authority (they must stay hard-refused any write tool, enforced entirely
+ * by `agentdesk::policy::check_tool_capability`, independent of this
+ * function) -- it is to stop conflating "can this intent ever write" with
+ * "should this session's first turn run at all." Every intent's first turn
+ * runs; only some of them are ever allowed to write once running.
+ * 
+ * This also fixes "kickoff provider overrides are passed into session
+ * creation, then automatic start uses no override": `request.mode`/`.team`/
+ * `.provider_override` used to be accepted into `StartAgentSessionRequest`
+ * and then silently dropped -- `CreateSessionRequest` (session creation)
+ * has no such fields, and the OLD frontend auto-start call
+ * (`commands.agentSessionStartExecution(id, policy.defaultMode,
+ * policy.defaultTeam, null)`) always passed the INTENT'S policy default and
+ * a hardcoded `null` override, never what the user actually picked at
+ * kickoff. Here, the exact same request that named the override is what
+ * starts the execution -- `request.mode.unwrap_or(intent default)`,
+ * `request.team.unwrap_or(intent default)`, and `request.provider_override`
+ * verbatim -- so a "Fix with <provider>" click's choice survives all the
+ * way into the first `cli_run::run_task` call, not just into the session
+ * header.
+ * 
+ * Deliberately does NOT start anything for `FocusedExisting`: that session
+ * may already be running (starting a second execution on it would be
+ * refused as `AlreadyRunning`, which is correct but pointless to attempt),
+ * or may itself be mid-start from the click that created it -- either way,
+ * this is not this call's session to start.
+ */
 async agentSessionStart(request: StartAgentSessionRequest) : Promise<Result<StartAgentSessionOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_start", { request }) };
@@ -3491,6 +3531,39 @@ async agentResultFindOrphaned(sessionId: string) : Promise<Result<OrphanedResult
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * P1-C wiring 3 ("orphan-result detection is registered but not called at
+ * startup"): [`agent_result_find_orphaned`] existed, was registered, and
+ * worked correctly for one session, but nothing ever called it -- a run
+ * that crashed with a `Kept`/`CleanupNeeded` result pointing at a worktree
+ * folder that is now gone would sit that way silently forever, since
+ * nothing about opening the app, or opening that one session, re-checks
+ * every result's worktree path against disk.
+ * 
+ * This is the whole-store counterpart the frontend can call once, at Agent
+ * Desk startup, without first knowing which session(s) might have an
+ * orphan -- it scans every session's index entry (not a full session read
+ * each: `result::read_results` is its own sidecar file per session,
+ * [`store::load_or_rebuild_index`] is what gives the session id/repo id/
+ * title cheaply) and reuses [`find_orphaned_worktrees_at`] per session, the
+ * exact same detection `agent_result_find_orphaned` already used -- this
+ * command is a fan-out over sessions, not a second implementation of what
+ * "orphaned" means.
+ * 
+ * A session whose result sidecar cannot be read (`unwrap_or_default`, same
+ * stance as the single-session command above) is skipped rather than
+ * failing the whole scan -- one damaged session's results must never hide
+ * every other session's real orphans from the startup reconciliation this
+ * exists to drive.
+ */
+async agentResultFindOrphanedAll() : Promise<Result<OrphanedResultInSession[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_find_orphaned_all") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async agentImportListAdapters() : Promise<Result<AdapterListEntry[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_import_list_adapters") };
@@ -3628,7 +3701,30 @@ createdAt: string;
 /**
  * RFC 3339 UTC timestamp.
  */
-updatedAt: string; unread: boolean; changedFileCount: number; activeExecutionId: string | null; archived: boolean }
+updatedAt: string; unread: boolean; changedFileCount: number; activeExecutionId: string | null; archived: boolean; 
+/**
+ * RFC 3339 UTC timestamp of the moment this session's write authority
+ * was durably granted -- the user pressing Start on a Plan proposal
+ * (`agent_session_start_graph`), or "Use solo instead" abandoning the
+ * proposal in favor of an ordinary run. `None` for a session that has
+ * never been started this way: a fresh session of any intent (Fix
+ * included -- it needs no separate Start, its intent policy already
+ * grants write authority from creation) or a Plan session still sitting
+ * on an unactioned proposal.
+ * 
+ * This is the fix for "Plan can write before Start": before this field
+ * existed, `start_execution_at` passed `started: true` into every
+ * `cli_run::run_task` call unconditionally, including the very first
+ * Plan-mode turn that PRODUCES the proposal -- so a proposal turn had
+ * the same write authority as a turn that ran after the user actually
+ * accepted the graph. `started_for_execution` (in
+ * `commands::agent_desk`) reads this field, not any in-memory or
+ * graph-shape signal, so the answer survives a restart and is not
+ * re-derivable from "does an executed helper exist yet" (a Plan session
+ * with a proposal that has zero ready-now helpers would otherwise look
+ * identical to one that never proposed at all).
+ */
+graphStartedAt?: string | null }
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
 /**
@@ -4639,7 +4735,17 @@ conflict?: IntegrationConflict | null;
  * `None` for the lead (no proposed budget applies to it) and for any
  * helper launched before this field existed.
  */
-budget?: JobBudget | null }
+budget?: JobBudget | null; 
+/**
+ * Present only on the LEAD's own execution record: the absolute path of
+ * the dedicated worktree helper results are integrated into. Provisioned
+ * lazily (`commands::agent_graph::ensure_integration_worktree`) the first
+ * time any helper finishes, from the lead's own current HEAD in the
+ * session's real repository -- never `session.header.repo_path` itself,
+ * which is the user's own open checkout. `None` for a helper record, and
+ * for a lead that has not yet had a helper finish.
+ */
+integrationWorktreePath?: string | null }
 /**
  * `solo | lead`.
  */
@@ -5329,6 +5435,12 @@ backupPath: string | null; appliedAt: string; undone: boolean }
  * blank/broken result.
  */
 export type OrphanedResult = { executionId: string; worktreePath: string }
+/**
+ * One orphaned result, named to the session it belongs to -- what
+ * [`agent_result_find_orphaned`] cannot say on its own, since it already
+ * takes a single `session_id` and answers only for that one session.
+ */
+export type OrphanedResultInSession = { sessionId: string; repoId: string; sessionTitle: string; orphan: OrphanedResult }
 export type PlanWarning = { kind: WarningKind; 
 /**
  * Plain-language explanation, already redacted -- never contains a
@@ -7004,16 +7116,38 @@ workingKey: string | null }
  */
 export type StartAgentSessionOutcome = 
 /**
- * A brand-new session was created for this source/intent and is now
- * `Preparing` (or `Draft`, for intents that do not auto-start).
+ * A brand-new session was created for this source/intent, and this
+ * command already attempted to run its first turn -- P1-A ("source
+ * clicks do not all do what they say"): EVERY explicit source action
+ * starts immediately, not just the ones whose intent happens to allow
+ * writes. `start` is that attempt's own outcome: `Some(Started {..})`
+ * once execution is genuinely running (Ask/Explain/Review/Summarize
+ * included -- those intents run and can respond, they simply cannot
+ * reach a write tool, per `agentdesk::policy::IntentPolicy::can_write`
+ * -- authority is a capability check inside the run, never a gate on
+ * whether the run happens at all). A non-`Started` variant inside
+ * `Some` (e.g. `SourceMissing`, `AdapterUnsupported`) means the session
+ * exists and is visible, but its first turn could not begin; the
+ * caller should surface that reason (`agentDeskResult::explainAutoStartOutcome`
+ * already knows how) rather than silently leaving the session sitting
+ * in `Draft`. `start` is only ever `None` for a request whose intent's
+ * own `mode`/`team`/`provider_override` could not even be resolved
+ * before the session was created -- today that never happens (session
+ * creation has no policy dependency), so this exists for forward
+ * compatibility rather than a real path in this build.
  */
-{ kind: "created"; session: AgentSession } | 
+{ kind: "created"; session: AgentSession; start: StartExecutionOutcome | null } | 
 /**
  * An active (non-finished/failed/stopped) session already exists for
  * this exact repo/source-identity/intent -- design.md: "An active
  * session with the same repo/source/intent is focused and explained."
- * No new session was created; the caller should select `session` and
- * tell the user why.
+ * No new session was created and no execution is (re)started here: the
+ * existing session may already be running, or may be exactly the
+ * `Draft`/`Ready` session a near-simultaneous first click already
+ * triggered a start for -- starting a second execution on top of it
+ * would either be refused as `AlreadyRunning` or, worse, race the
+ * first attempt. The caller should select `session` and tell the user
+ * why.
  */
 { kind: "focusedExisting"; session: AgentSession } | { kind: "writeFailed"; detail: string }
 /**

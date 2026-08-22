@@ -412,10 +412,10 @@ impl ToolCapability {
     /// or a future ACP kind this build has not seen yet, must be refused
     /// under a read-only intent rather than waved through because this
     /// function guessed "read." `execute` (arbitrary shell) is likewise
-    /// treated as a write: `cli_agent::DENIED_TOOLS` already blocks `shell`
-    /// at the CLI's own launch flags, but this classifier does not assume
-    /// that denial is in effect -- it gates on what the tool call itself
-    /// claims to be.
+    /// treated as a write: `cli_agent::ALWAYS_DENIED_TOOLS` already blocks
+    /// `shell` at the CLI's own launch flags for every execution, but this
+    /// classifier does not assume that denial is in effect -- it gates on
+    /// what the tool call itself claims to be.
     pub fn from_acp_kind(kind: Option<&str>) -> ToolCapability {
         match kind {
             Some("read") | Some("search") | Some("think") | Some("fetch") => ToolCapability::Read,

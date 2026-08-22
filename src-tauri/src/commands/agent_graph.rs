@@ -18,8 +18,8 @@ use specta::Type;
 use tauri::{AppHandle, Manager};
 
 use crate::agentdesk::graph::{
-    self, GraphNodeView, GraphValidationError, HelperRole, IntegrationConflict, ProposedGraph,
-    ProposedHelperJob,
+    self, ApplyOperationOutcome, FileContent, FileExecutable, FileOperation, GraphNodeView,
+    GraphValidationError, HelperRole, IntegrationConflict, ProposedGraph, ProposedHelperJob,
 };
 use crate::agentdesk::model::{
     AgentSession, ExecutionId, ExecutionRecord, SessionId, SessionLoadError, SessionState,
@@ -798,6 +798,17 @@ fn commit_started_graph_if_still_proposed(
         }
         s.header.active_execution_id = Some(lead_execution_id.to_string());
         s.header.state = SessionState::Working;
+        // P1-B: the durable authority transition. `start_execution_at`
+        // (`commands::agent_desk`) reads this on every future call for this
+        // session to decide `cli_run::run_task`'s `started` flag -- once set
+        // here, every subsequent turn (including a helper's own turns,
+        // which are policy-gated separately by their role/allowed_paths,
+        // not by this flag) is free to write, and this session's very next
+        // read of its own header proves that decision durably rather than
+        // through any in-memory or graph-shape signal that would not
+        // survive a restart. Never cleared once set -- Start is a one-way
+        // transition for the lifetime of this session.
+        s.header.graph_started_at = Some(now_rfc3339());
         s.header.updated_at = now_rfc3339();
 
         match store::write_session(root, &s) {
@@ -906,14 +917,14 @@ fn launch_helper(
     let can_write = helper.helper_role.as_deref() == Some("builder") || !allowed_paths.is_empty();
     let policy = crate::agentdesk::policy::ExecutionPolicy::resolve_for_helper(can_write, allowed_paths);
 
-    // The repo->session link is almost certainly already set by the lead's
-    // own `start_execution_at` (or by an earlier helper launch in this same
-    // batch) -- `RunSessionLinks::link` is an idempotent overwrite of the
-    // same value either way, so calling it again here is harmless and keeps
-    // this function correct even if it is ever called before the lead links
-    // anything (a lead that finished before its helpers, then later helper
-    // dependents starting after a re-schedule).
-    links.link(&repo_id, &session_id);
+    // Link THIS HELPER's own execution ID to the session -- never the
+    // repository (`RunSessionLinks` is execution-addressed, see its own doc
+    // comment: the P0 fix for "an event can reach the wrong chat"). The
+    // lead's own link (from `start_execution_at`) is a separate mapping under
+    // its own execution ID and is never touched here, so a lead and any
+    // number of concurrent helpers -- even across two different sessions that
+    // happen to share this repository -- each keep their own entry.
+    links.link(&helper_execution_id, &session_id);
 
     let agent = match crate::ai::agent::cli_agent::CliAgent::discover(std::path::PathBuf::from(&worktree_path)) {
         Ok(a) => a,
@@ -1083,7 +1094,7 @@ fn advance_graph_after_helper_completion(
         Err(_) => return,
     };
 
-    integrate_helper_result(locks, root, session_id, finished_execution_id, &session);
+    integrate_helper_result(app, locks, root, session_id, finished_execution_id, &session);
 
     // Re-read after integration may have changed this node's state.
     let session = match store::read_session(root, session_id) {
@@ -1092,7 +1103,7 @@ fn advance_graph_after_helper_completion(
     };
     let decision = graph::schedule(&session.executions);
     if decision.ready.is_empty() {
-        maybe_finish_graph(locks, root, session_id, &session);
+        maybe_finish_graph(app, locks, root, session_id, &session);
         return;
     }
 
@@ -1118,128 +1129,535 @@ fn advance_graph_after_helper_completion(
     }
 }
 
-/// Repo-relative paths this worktree's HEAD changed relative to `base_oid`,
-/// via `git2`'s tree diff (never a shell-out) -- the same
-/// `worktree_path`/`base_oid` pair `ExecutionRecord` already persists for
-/// this exact purpose (R6.7's doc comment). A helper that made no commit at
-/// all (a run that only left uncommitted worktree edits, or one that never
-/// wrote anything) is not covered by this diff -- comparing committed trees
-/// is what stays correct across a worktree that may have since been
-/// discarded, which uncommitted-file scanning would not survive.
-fn changed_files_since(worktree_path: &str, base_oid: &str) -> Result<Vec<String>, git2::Error> {
+// ---------------------------------------------------------------------------
+// P0-C: dedicated integration worktree + real helper delta
+// ---------------------------------------------------------------------------
+
+/// Ensures the LEAD execution has its own dedicated integration worktree,
+/// creating one on first need and persisting its path on the lead's own
+/// `ExecutionRecord` (`integration_worktree_path`). This is the fix for "the
+/// lead integration path uses the session repository path, which is the
+/// user's open checkout" (audit P0-C): every helper's result is folded into
+/// THIS worktree, never into `session.header.repo_path`, so the user's own
+/// open checkout is never touched until they explicitly land the result
+/// themselves.
+///
+/// Branches from the repository's current HEAD (via `RepoManager`, the same
+/// way `start_graph_at` resolves `main_workdir`) the first time this is
+/// called for a session; every subsequent call for the same session reuses
+/// the already-provisioned worktree, so two helpers finishing back-to-back
+/// integrate into the same tree rather than each getting a fresh one.
+fn ensure_integration_worktree(
+    app: &AppHandle,
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    session: &AgentSession,
+) -> Result<String, String> {
+    let Some(lead) = session.executions.iter().find(|e| e.parent_execution_id.is_none()) else {
+        return Err("this session has no lead execution".into());
+    };
+    if let Some(existing) = &lead.integration_worktree_path {
+        if std::path::Path::new(existing).is_dir() {
+            return Ok(existing.clone());
+        }
+        // The recorded worktree is gone from disk (manually deleted, or a
+        // prior cleanup) -- fall through and provision a fresh one rather
+        // than handing back a path nothing can read or write.
+    }
+
+    let manager = app
+        .try_state::<RepoManager>()
+        .ok_or_else(|| "the repository manager is not available".to_string())?;
+    let open = manager
+        .get(&session.header.repo_id)
+        .map_err(|e| e.to_string())?;
+    let main_workdir = {
+        let repo = open.repo.lock().unwrap_or_else(|e| e.into_inner());
+        worktree::main_workdir(&repo)
+    };
+    let Some(main_workdir) = main_workdir else {
+        return Err("this project has no working folder".into());
+    };
+    let main_workdir_str = main_workdir.to_string_lossy().into_owned();
+
+    let branch = format!("agent-desk/{}/integration", short(&lead.execution_id));
+    let path = worktree::suggest_path(&main_workdir, &branch);
+    worktree::add(&main_workdir_str, &path, &branch, true, Some("HEAD")).map_err(|e| e.to_string())?;
+    if let Ok(marked_repo) = git2::Repository::open(&main_workdir_str) {
+        let _ = worktree::mark_as_run_worktree(&marked_repo, &worktree_admin_name(&path));
+    }
+
+    let lead_execution_id = lead.execution_id.clone();
+    let outcome = update_session_at(locks, root, session_id, |s| {
+        if let Some(exec) = s.executions.iter_mut().find(|e| e.execution_id == lead_execution_id) {
+            // Another concurrent completion may have already provisioned one
+            // between this call's unlocked `add` above and this locked
+            // write -- if so, keep that one rather than overwriting it with
+            // ours (both are valid, empty-of-conflicting-work worktrees at
+            // this point, but only one should be the durable record so a
+            // later cleanup does not orphan the other).
+            if exec.integration_worktree_path.is_none() {
+                exec.integration_worktree_path = Some(path.clone());
+            }
+        }
+    });
+    match outcome {
+        UpdateOutcome::Updated { session } => {
+            let lead = session
+                .executions
+                .iter()
+                .find(|e| e.execution_id == lead_execution_id)
+                .and_then(|e| e.integration_worktree_path.clone());
+            lead.ok_or_else(|| "could not persist the integration worktree".to_string())
+        }
+        UpdateOutcome::NotFound => Err("this session no longer exists".into()),
+        UpdateOutcome::Damaged { reason } => Err(reason),
+        UpdateOutcome::WriteFailed { detail } | UpdateOutcome::Unavailable { detail } => Err(detail),
+    }
+}
+
+/// Removes a session's dedicated integration worktree (if it has one),
+/// discarding anything left in it -- called once the graph reaches
+/// `Finished` (`maybe_finish_graph`), since nothing further will ever
+/// integrate into it after that point. Best-effort: a cleanup failure here
+/// (the folder is locked, already gone, etc.) is not surfaced as a user
+/// error -- the graph's own completion already happened and is not
+/// contingent on this succeeding, matching how `start_graph_at`'s own
+/// losing-race cleanup is best-effort for the same reason.
+fn cleanup_integration_worktree(session: &AgentSession, main_workdir_str: &str) {
+    let Some(lead) = session.executions.iter().find(|e| e.parent_execution_id.is_none()) else {
+        return;
+    };
+    let Some(path) = &lead.integration_worktree_path else {
+        return;
+    };
+    if let Ok(repo) = git2::Repository::open(main_workdir_str) {
+        let _ = worktree::remove(&repo, main_workdir_str, path, worktree::DirtyChoice::Discard);
+    }
+}
+
+/// Reads `path` out of `repo` at `oid` as a typed [`FileContent`] -- the
+/// blob's raw bytes are never decoded as UTF-8 (P0-D: "cannot faithfully
+/// represent ... binary"); a `Symlink` tree entry is read back as its link
+/// target string, matching how git itself stores a symlink blob's content as
+/// the target path rather than file bytes.
+fn read_content_at(repo: &git2::Repository, oid: git2::Oid, executable: FileExecutable) -> Result<FileContent, git2::Error> {
+    let blob = repo.find_blob(oid)?;
+    let bytes = blob.content().to_vec();
+    if blob.is_binary() {
+        return Ok(FileContent::Binary { bytes, executable });
+    }
+    Ok(FileContent::Text { bytes, executable })
+}
+
+fn executable_of(mode: git2::FileMode) -> FileExecutable {
+    match mode {
+        git2::FileMode::BlobExecutable => FileExecutable::Yes,
+        _ => FileExecutable::No,
+    }
+}
+
+/// One [`FileOperation`] per delta from `diff`, resolved against `repo`'s
+/// object database. A `Delta::Typechange` (e.g. a regular file replaced by a
+/// symlink at the same path) is represented as a `Modify` carrying the new
+/// side's content -- the type of thing at that path changed, but the path
+/// itself is still a single modify from the integration target's point of
+/// view. `Delta::Renamed`/`Copied` both carry the new side's full content
+/// (never an empty placeholder), so a rename-with-edits round-trips exactly.
+/// The content a diff entry points at, from the object database when it has
+/// been written there, and from the WORKING DIRECTORY when it has not.
+///
+/// This second case is the whole shipped path: `diff_tree_to_workdir_with_index`
+/// reports an unstaged edit with `id() == Oid::zero()`, because the new bytes
+/// only exist on disk -- nothing has hashed them into the ODB yet. Helpers
+/// never stage or commit, so EVERY change they make arrives this way. Reading
+/// only blobs (and skipping zero OIDs) silently dropped all of it.
+fn content_for_delta_side(
+    repo: &git2::Repository,
+    file: &git2::DiffFile,
+) -> Option<FileContent> {
+    let executable = executable_of(file.mode());
+    if file.id() != git2::Oid::zero() {
+        return if file.mode() == git2::FileMode::Link {
+            read_symlink_target(repo, file.id())
+        } else {
+            read_content_at(repo, file.id(), executable).ok()
+        };
+    }
+
+    // Not in the ODB yet: read it off disk, relative to the worktree root.
+    let workdir = repo.workdir()?;
+    let rel = file.path()?;
+    let full = workdir.join(rel);
+    let meta = std::fs::symlink_metadata(&full).ok()?;
+    if meta.file_type().is_symlink() {
+        let target = std::fs::read_link(&full).ok()?;
+        return Some(FileContent::Symlink {
+            target: target.to_string_lossy().to_string(),
+        });
+    }
+    let bytes = std::fs::read(&full).ok()?;
+    // Both variants carry raw bytes; the split is a classification, not a
+    // conversion, so nothing is ever decoded and re-encoded. A NUL byte is
+    // git's own binary heuristic and matches how `read_content_at` classifies
+    // a committed blob.
+    if bytes.contains(&0) {
+        Some(FileContent::Binary { bytes, executable })
+    } else {
+        Some(FileContent::Text { bytes, executable })
+    }
+}
+
+fn operations_from_diff(repo: &git2::Repository, diff: &git2::Diff) -> Vec<FileOperation> {
+    let mut ops = Vec::new();
+    for delta in diff.deltas() {
+        let new_file = delta.new_file();
+        let old_file = delta.old_file();
+        let new_path = new_file.path().and_then(|p| p.to_str()).map(str::to_string);
+        let old_path = old_file.path().and_then(|p| p.to_str()).map(str::to_string);
+
+        match delta.status() {
+            git2::Delta::Deleted => {
+                if let Some(path) = old_path {
+                    ops.push(FileOperation::Delete { path });
+                }
+            }
+            git2::Delta::Added | git2::Delta::Untracked => {
+                let Some(path) = new_path else { continue };
+                if let Some(content) = content_for_delta_side(repo, &new_file) {
+                    ops.push(FileOperation::Add { path, content });
+                }
+            }
+            git2::Delta::Modified | git2::Delta::Typechange => {
+                let Some(path) = new_path else { continue };
+                if let Some(content) = content_for_delta_side(repo, &new_file) {
+                    ops.push(FileOperation::Modify { path, content });
+                }
+            }
+            git2::Delta::Renamed | git2::Delta::Copied => {
+                let (Some(path), Some(from_path)) = (new_path, old_path) else { continue };
+                if let Some(content) = content_for_delta_side(repo, &new_file) {
+                    ops.push(FileOperation::Rename { from_path, path, content });
+                }
+            }
+            // Unmodified/Ignored/Conflicted/Unreadable: nothing to integrate
+            // from these -- a `Conflicted` index entry in particular is left
+            // for the user to resolve in their own checkout, not silently
+            // folded into the integration worktree.
+            _ => {}
+        }
+    }
+    ops
+}
+
+fn read_symlink_target(repo: &git2::Repository, oid: git2::Oid) -> Option<FileContent> {
+    let blob = repo.find_blob(oid).ok()?;
+    let target = String::from_utf8(blob.content().to_vec()).ok()?;
+    Some(FileContent::Symlink { target })
+}
+
+/// Every [`FileOperation`] a helper's worktree represents relative to its own
+/// recorded `base_oid`, covering staged, unstaged, AND committed work in one
+/// pass (P0-C: "Helpers have no production commit tool ... a helper's real
+/// edits are invisible" under the old committed-tree-only diff).
+///
+/// Uses `Repository::diff_tree_to_workdir_with_index`, which git2 documents
+/// as comparing a tree against the union of the index and the working
+/// directory -- exactly "staged, unstaged, and committed" in one delta set,
+/// with no shell-out and no assumption that the helper ever ran `git commit`
+/// (which, in the shipped path, it cannot: helpers have no commit tool).
+/// Rename detection is enabled via `find_similar` so a moved-and-edited file
+/// round-trips as one `Rename` operation rather than an unrelated
+/// delete+add.
+fn helper_delta(worktree_path: &str, base_oid: &str) -> Result<Vec<FileOperation>, git2::Error> {
     let repo = git2::Repository::open(worktree_path)?;
     let base = git2::Oid::from_str(base_oid)?;
     let base_tree = repo.find_commit(base)?.tree()?;
-    let head_tree = repo.head()?.peel_to_tree()?;
-    let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
-    let mut paths = Vec::new();
-    for delta in diff.deltas() {
-        if let Some(path) = delta.new_file().path().and_then(|p| p.to_str()) {
-            paths.push(path.to_string());
-        }
-    }
-    Ok(paths)
+    // `include_untracked`/`recurse_untracked_dirs` are OFF by default in
+    // git2 -- without them, a brand-new file the helper created and never
+    // `git add`ed (an ordinary `Add` in the shipped path, since helpers
+    // never stage or commit) would be invisible to this diff entirely,
+    // silently dropping the helper's work rather than integrating it.
+    let mut opts = git2::DiffOptions::new();
+    opts.include_untracked(true);
+    opts.recurse_untracked_dirs(true);
+    let mut diff = repo.diff_tree_to_workdir_with_index(Some(&base_tree), Some(&mut opts))?;
+    let mut find_opts = git2::DiffFindOptions::new();
+    find_opts.renames(true);
+    // A helper's renamed file is UNTRACKED on the new side (it never staged
+    // anything), and by default `find_similar` only pairs tracked entries --
+    // so the rename arrived as an unrelated delete+add. Both preserve the
+    // bytes, but the relationship is worth keeping: it is the difference
+    // between "moved this file" and "deleted one, wrote another".
+    find_opts.for_untracked(true);
+    find_opts.rewrites(true);
+    // A `find_similar` failure (e.g. a very large diff) is not fatal --
+    // falling back to unmatched delete+add deltas still preserves every
+    // byte, it just loses the rename relationship, so this is a quality
+    // trade-off, not a correctness one.
+    let _ = diff.find_similar(Some(&mut find_opts));
+    Ok(operations_from_diff(&repo, &diff))
 }
 
-/// The full text of `path` as it stood in the tree at `base_oid`, or an
-/// empty string for a file that did not exist there yet (a file the helper
-/// created from scratch) -- matching `graph::detect_conflict`'s own
-/// "helper never touched this file" reasoning: a blob that is genuinely
-/// absent at the base is a legitimate `base_text`, not a read failure.
-fn read_file_at_revision(worktree_path: &str, base_oid: &str, path: &str) -> Option<String> {
+/// The full [`FileContent`] of `path` as it stood in `worktree_path`'s tree
+/// at `base_oid`, or `None` if the path did not exist there yet (a file the
+/// helper created from scratch) -- `None` here is a legitimate "did not
+/// exist" answer, not a read failure; `graph::detect_conflict`'s "helper
+/// never touched this file" comparison is done on `FileOperation`s directly
+/// by `integrate_helper_result` rather than needing this to fabricate an
+/// empty base text.
+fn read_content_at_revision(worktree_path: &str, base_oid: &str, path: &str) -> Option<FileContent> {
     let repo = git2::Repository::open(worktree_path).ok()?;
     let base = git2::Oid::from_str(base_oid).ok()?;
     let tree = repo.find_commit(base).ok()?.tree().ok()?;
-    let entry = match tree.get_path(std::path::Path::new(path)) {
-        Ok(e) => e,
-        Err(_) => return Some(String::new()),
-    };
-    let blob = repo.find_blob(entry.id()).ok()?;
-    Some(String::from_utf8_lossy(blob.content()).into_owned())
+    let entry = tree.get_path(std::path::Path::new(path)).ok()?;
+    if entry.filemode() == i32::from(git2::FileMode::Link) {
+        return read_symlink_target(&repo, entry.id());
+    }
+    read_content_at(&repo, entry.id(), executable_of_i32(entry.filemode())).ok()
 }
 
-/// What happened when trying to write `text` into the lead's checkout at
-/// `path`. Distinct from a bool so a failure can be reported in plain
-/// language (task requirement: "a failure must produce a typed outcome and
-/// leave the lead's tree untouched for that file").
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ApplyToLeadOutcome {
-    /// The file was written successfully.
-    Applied,
-    /// The write did not happen. `detail` is plain-language enough to show
-    /// the user; the file on disk is exactly as it was before this call --
-    /// `write_file_atomic` never leaves a half-written file, see its own doc
-    /// comment.
-    Failed { detail: String },
+fn executable_of_i32(mode: i32) -> FileExecutable {
+    if mode == i32::from(git2::FileMode::BlobExecutable) {
+        FileExecutable::Yes
+    } else {
+        FileExecutable::No
+    }
 }
 
-/// Writes `text` to `lead_repo_path.join(relative_path)`, creating parent
-/// directories as needed, via a temp-file-then-rename so a failure partway
-/// through (disk full, permission denied, path removed out from under us)
-/// never leaves a truncated or partially-written file sitting where the
-/// lead's real file used to be -- the write either lands whole or the
-/// original file is untouched.
+/// Lossy UTF-8 text view of a [`FileContent`], for the existing text-level
+/// `graph::detect_conflict` three-way check -- conflict detection stays
+/// text-only exactly as it was before this change (task requirement:
+/// "preserve their behavior for text files"); typed fidelity is about how a
+/// NON-conflicting change is applied, not about widening what conflict
+/// detection itself compares. A `Symlink`'s target string is compared as
+/// text too, which is correct: two helpers repointing the same symlink
+/// differently IS a reviewable conflict.
+fn as_text(content: &FileContent) -> String {
+    match content {
+        FileContent::Text { bytes, .. } | FileContent::Binary { bytes, .. } => {
+            String::from_utf8_lossy(bytes).into_owned()
+        }
+        FileContent::Symlink { target } => target.clone(),
+    }
+}
+
+/// Applies one [`FileOperation`] to `target_repo_path`, byte- and
+/// mode-faithful, via the same temp-file-then-rename atomicity the old
+/// `write_file_atomic` used -- widened to also cover delete, rename, and the
+/// executable bit, none of which a text overwrite can express (P0-D).
 ///
-/// This is the ONE place `integrate_helper_result` and `resolve_conflict_at`
-/// both route through to actually mutate the lead's working tree, so every
-/// caller gets the same atomicity and the same typed failure reporting.
-fn write_file_atomic(lead_repo_path: &str, relative_path: &str, text: &str) -> ApplyToLeadOutcome {
-    let target = std::path::Path::new(lead_repo_path).join(relative_path);
+/// A `Rename` first attempts to move the file at `from_path` (preserving
+/// history-adjacent semantics on a plain filesystem move) and falls back to
+/// writing `content` fresh at `path` if the source is missing (already
+/// integrated by an earlier pass, or the source path was itself never
+/// materialized) -- either way `path` ends up holding `content`'s exact
+/// bytes, which is the only externally-observable guarantee this function
+/// makes. Every branch either fully succeeds or leaves `target_repo_path`
+/// exactly as it stood before the call for the path(s) involved -- never a
+/// partial write (P0-D: "never report a partial operation as Finished").
+fn apply_operation(target_repo_path: &str, operation: &FileOperation) -> ApplyOperationOutcome {
+    match operation {
+        FileOperation::Delete { path } => {
+            let target = std::path::Path::new(target_repo_path).join(path);
+            if !target.exists() {
+                // Already gone -- a retry after a prior successful delete,
+                // or a delete for a path the integration worktree never had
+                // to begin with. Idempotent, not a failure.
+                return ApplyOperationOutcome::Applied;
+            }
+            match std::fs::remove_file(&target) {
+                Ok(()) => ApplyOperationOutcome::Applied,
+                Err(e) => ApplyOperationOutcome::Failed {
+                    path: path.clone(),
+                    detail: format!("could not delete \"{path}\": {e}"),
+                },
+            }
+        }
+        FileOperation::Add { path, content } | FileOperation::Modify { path, content } => {
+            write_content_atomic(target_repo_path, path, content)
+        }
+        FileOperation::Rename { from_path, path, content } => {
+            let from_target = std::path::Path::new(target_repo_path).join(from_path);
+            let to_target = std::path::Path::new(target_repo_path).join(path);
+            if from_target.is_file() {
+                if let Some(parent) = to_target.parent() {
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        return ApplyOperationOutcome::Failed {
+                            path: path.clone(),
+                            detail: format!("could not create the folder for \"{path}\": {e}"),
+                        };
+                    }
+                }
+                if std::fs::rename(&from_target, &to_target).is_ok() {
+                    // The rename may have carried the OLD content/mode (a
+                    // pure rename with no edits) or none at all if the
+                    // source was a stale copy -- always follow up with an
+                    // atomic content write so `path` ends up with exactly
+                    // the recorded `content`, regardless of what the raw
+                    // filesystem move happened to carry.
+                    return write_content_atomic(target_repo_path, path, content);
+                }
+                // Fall through to a fresh write below -- the rename attempt
+                // (e.g. a cross-device move, or the destination directory
+                // problem above) failed, but the destination content is
+                // still fully specified by `content`.
+            }
+            write_content_atomic(target_repo_path, path, content)
+        }
+    }
+}
+
+/// Writes `content`'s exact bytes (and, on a platform that supports it, its
+/// executable bit) to `repo_path.join(relative_path)` via temp-file-then-
+/// rename, so a failure partway through never leaves a truncated or
+/// partially-written file where the real one used to be. A `Symlink` is
+/// recreated as a real symlink pointing at `target` rather than a text file
+/// containing the target string.
+fn write_content_atomic(repo_path: &str, relative_path: &str, content: &FileContent) -> ApplyOperationOutcome {
+    let target = std::path::Path::new(repo_path).join(relative_path);
     if let Some(parent) = target.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
-            return ApplyToLeadOutcome::Failed {
+            return ApplyOperationOutcome::Failed {
+                path: relative_path.to_string(),
                 detail: format!("could not create the folder for \"{relative_path}\": {e}"),
             };
         }
     }
-    // Temp file lives next to the target (same filesystem, so the rename
-    // below is atomic rather than a cross-device copy) and is named after
-    // this process/thread so two concurrent applies for different files
-    // never collide on the same temp name.
+
+    if let FileContent::Symlink { target: link_target } = content {
+        // Symlinks cannot go through a temp-file-then-rename in the same way
+        // (there is no "write bytes then rename" for a link) -- instead,
+        // build the new link at a temp path and rename that, so a failure
+        // still never leaves a half-made link at the real path.
+        let temp_name = format!(".gitwyrm-integrate-{}-{}.tmp", std::process::id(), relative_path.replace(['/', '\\'], "_"));
+        let temp_path = target.with_file_name(temp_name);
+        let _ = std::fs::remove_file(&temp_path);
+        let create_result = create_symlink(link_target, &temp_path);
+        return match create_result {
+            Ok(()) => match std::fs::rename(&temp_path, &target) {
+                Ok(()) => ApplyOperationOutcome::Applied,
+                Err(e) => {
+                    let _ = std::fs::remove_file(&temp_path);
+                    ApplyOperationOutcome::Failed {
+                        path: relative_path.to_string(),
+                        detail: format!("could not save \"{relative_path}\": {e}"),
+                    }
+                }
+            },
+            Err(e) => ApplyOperationOutcome::Failed {
+                path: relative_path.to_string(),
+                detail: format!("could not create a link at \"{relative_path}\": {e}"),
+            },
+        };
+    }
+
+    let bytes: &[u8] = match content {
+        FileContent::Text { bytes, .. } | FileContent::Binary { bytes, .. } => bytes,
+        FileContent::Symlink { .. } => unreachable!("handled above"),
+    };
+    let executable = match content {
+        FileContent::Text { executable, .. } | FileContent::Binary { executable, .. } => *executable,
+        FileContent::Symlink { .. } => unreachable!("handled above"),
+    };
+
     let temp_name = format!(
         ".gitwyrm-integrate-{}-{}.tmp",
         std::process::id(),
         target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
     );
     let temp_path = target.with_file_name(temp_name);
-    if let Err(e) = std::fs::write(&temp_path, text) {
-        return ApplyToLeadOutcome::Failed {
+    if let Err(e) = std::fs::write(&temp_path, bytes) {
+        return ApplyOperationOutcome::Failed {
+            path: relative_path.to_string(),
             detail: format!("could not write \"{relative_path}\": {e}"),
         };
     }
-    if let Err(e) = std::fs::rename(&temp_path, &target) {
-        // Best-effort cleanup of the temp file -- a failure here is
-        // secondary to the rename failure already being reported, and
-        // leaving a stray `.gitwyrm-integrate-*.tmp` file is harmless (it is
-        // not the target path, so it cannot be mistaken for real content).
+    if let Err(e) = set_executable(&temp_path, executable) {
         let _ = std::fs::remove_file(&temp_path);
-        return ApplyToLeadOutcome::Failed {
+        return ApplyOperationOutcome::Failed {
+            path: relative_path.to_string(),
+            detail: format!("could not set permissions for \"{relative_path}\": {e}"),
+        };
+    }
+    if let Err(e) = std::fs::rename(&temp_path, &target) {
+        let _ = std::fs::remove_file(&temp_path);
+        return ApplyOperationOutcome::Failed {
+            path: relative_path.to_string(),
             detail: format!("could not save \"{relative_path}\": {e}"),
         };
     }
-    ApplyToLeadOutcome::Applied
+    ApplyOperationOutcome::Applied
 }
 
-/// R6.7/R6.8: when a helper finishes cleanly, compare its own worktree's
-/// changed files against the lead's checkout (the integration target). A
-/// file that only the helper touched (`IntegrationState::Integrated`) is
-/// written straight into the lead's working tree via [`write_file_atomic`] --
-/// this is the actual "bring the helper's isolated work home" step; nothing
-/// else in this codebase performs that write. A file changed by BOTH the
-/// helper and something already integrated (another finished sibling, or the
-/// lead's own edits) is reported as a typed [`IntegrationConflict`] instead:
-/// both texts preserved, neither committed (tasks.md 5.3/5.4,
-/// `graph::detect_conflict`).
+#[cfg(unix)]
+fn create_symlink(target: &str, at: &std::path::Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, at)
+}
+
+#[cfg(windows)]
+fn create_symlink(target: &str, at: &std::path::Path) -> std::io::Result<()> {
+    // Windows distinguishes file vs. directory symlinks and typically
+    // requires developer mode or elevation to create either. Best-effort:
+    // try a file link first (the common case for tracked repo content),
+    // then a directory link, so this still works for the common shapes
+    // without requiring the caller to know in advance which kind `target`
+    // is.
+    match std::os::windows::fs::symlink_file(target, at) {
+        Ok(()) => Ok(()),
+        Err(file_err) => match std::os::windows::fs::symlink_dir(target, at) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(file_err),
+        },
+    }
+}
+
+#[cfg(unix)]
+fn set_executable(path: &std::path::Path, executable: FileExecutable) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(path)?.permissions();
+    let mode = perms.mode();
+    let new_mode = match executable {
+        FileExecutable::Yes => mode | 0o111,
+        FileExecutable::No => mode & !0o111,
+    };
+    perms.set_mode(new_mode);
+    std::fs::set_permissions(path, perms)
+}
+
+#[cfg(not(unix))]
+fn set_executable(_path: &std::path::Path, _executable: FileExecutable) -> std::io::Result<()> {
+    // Windows has no POSIX executable bit to set on an ordinary file --
+    // nothing to do; the byte content (already written) is what round-trips
+    // there.
+    Ok(())
+}
+
+/// R6.7/R6.8/P0-C/P0-D: when a helper finishes cleanly, compute its REAL
+/// worktree delta (staged, unstaged, and committed -- `helper_delta`)
+/// relative to its own recorded base, and apply each resulting typed
+/// [`FileOperation`] into the session's dedicated integration worktree
+/// (`ensure_integration_worktree`) -- never into `session.header.repo_path`,
+/// the user's own open checkout.
+///
+/// A file that only the helper touched is applied via [`apply_operation`],
+/// byte- and mode-faithful (add, modify, delete, rename, binary, symlink,
+/// executable bit all survive). A file changed by BOTH the helper and
+/// something already integrated (another finished sibling, or the lead's own
+/// edits since the base) is still reported as a typed [`IntegrationConflict`]
+/// at the TEXT level, exactly as before: both texts preserved, neither
+/// applied, until a person resolves it (tasks.md 5.3/5.4, `graph::detect_conflict`).
 ///
 /// A helper that did not finish cleanly (`Stopped`/`Failed`/`Interrupted`)
 /// has nothing to integrate -- its worktree stands as evidence of what it
-/// was doing, but nothing from it is folded into the lead's tree.
+/// was doing, but nothing from it is folded into the integration worktree.
 ///
 /// Deliberately never runs `git commit` -- applying to the working tree is
 /// this function's whole job; committing stays the user's own explicit
-/// action through the ordinary review/commit flow (see this module's own
-/// report on why "no automatic commit" is correct here).
+/// action through the ordinary review/commit flow.
 fn integrate_helper_result(
+    app: &AppHandle,
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
     session_id: &str,
@@ -1256,6 +1674,49 @@ fn integrate_helper_result(
     if helper.state != SessionState::Finished {
         return;
     }
+
+    // P0-C: the integration TARGET is this session's own dedicated
+    // worktree, never `session.header.repo_path`. Provisioned lazily here so
+    // a session whose graph never produces a clean helper result never pays
+    // for one.
+    let integration_path = match ensure_integration_worktree(app, locks, root, session_id, session) {
+        Ok(p) => p,
+        Err(detail) => {
+            let _ = update_session_at(locks, root, session_id, |s| {
+                if let Some(exec) = s.executions.iter_mut().find(|e| e.execution_id == helper_execution_id) {
+                    exec.output_summary = Some(format!(
+                        "Finished, but its results could not be integrated: {detail}. Try again once the graph completes."
+                    ));
+                }
+            });
+            return;
+        }
+    };
+
+    integrate_helper_into(locks, root, session_id, helper_execution_id, session, &integration_path);
+}
+
+/// The actual P0-C/P0-D integration pass, taking the integration target's
+/// path directly rather than resolving it itself -- separated out from
+/// [`integrate_helper_result`] purely so tests can exercise the real delta
+/// computation and typed apply against a plain `tempfile` directory, without
+/// needing a Tauri `AppHandle`/`RepoManager` to resolve
+/// `ensure_integration_worktree`.
+fn integrate_helper_into(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    helper_execution_id: &str,
+    session: &AgentSession,
+    integration_path: &str,
+) {
+    let Some(helper) = session
+        .executions
+        .iter()
+        .find(|e| e.execution_id == helper_execution_id)
+    else {
+        return;
+    };
     let (Some(worktree_path), Some(base_oid)) = (&helper.worktree_path, &helper.base_oid) else {
         // No base revision recorded (a helper launched before this field was
         // wired, or one whose worktree failed to provision cleanly) -- there
@@ -1264,17 +1725,32 @@ fn integrate_helper_result(
         // already shown in the inspector, rather than guessing at a base.
         return;
     };
-    let lead_path = session.header.repo_path.clone();
 
-    let changed = match changed_files_since(worktree_path, base_oid) {
-        Ok(files) => files,
+    // P0-C: the REAL delta -- staged, unstaged, and committed work in the
+    // helper's own worktree, not just what it happened to commit (which, in
+    // the shipped path, is nothing -- helpers have no commit tool).
+    let changed = match helper_delta(worktree_path, base_oid) {
+        Ok(ops) => ops,
         Err(_) => return,
     };
 
-    for path in changed {
-        let base_text = read_file_at_revision(worktree_path, base_oid, &path).unwrap_or_default();
-        let helper_text = std::fs::read_to_string(std::path::Path::new(worktree_path).join(&path)).unwrap_or_default();
-        let integrated_text = std::fs::read_to_string(std::path::Path::new(&lead_path).join(&path)).unwrap_or_default();
+    for operation in changed {
+        let path = operation.path().to_string();
+        let base_content = read_content_at_revision(worktree_path, base_oid, &path);
+        let base_text = base_content.as_ref().map(as_text).unwrap_or_default();
+        let helper_text = as_text_of_operation(&operation);
+        // A file that is simply ABSENT from the integration worktree has not
+        // been "changed to empty" -- nothing has touched it there yet, so its
+        // state is still the base. Defaulting a missing file to "" made every
+        // first integration into a fresh worktree look like a third divergent
+        // version, and `detect_conflict` correctly (given bad input) called it
+        // a conflict. Only a file that exists and cannot be read is unknown,
+        // and that is treated as base too rather than inventing a difference.
+        let integrated_path = std::path::Path::new(&integration_path).join(&path);
+        let integrated_text = match std::fs::read_to_string(&integrated_path) {
+            Ok(text) => text,
+            Err(_) => base_text.clone(),
+        };
 
         let sibling = session
             .executions
@@ -1296,31 +1772,38 @@ fn integrate_helper_result(
                 // per pass -- `agent_session_resolve_conflict` clears it and
                 // a later re-run of this function (triggered by the next
                 // graph event) will surface the next one, so nothing is
-                // lost, only shown one at a time. Files already applied
+                // lost, only shown one at a time. Operations already applied
                 // above this one in the loop stay applied; the conflicted
-                // file itself is left exactly as `integrated_text` (nothing
+                // path itself is left exactly as `integrated_text` (nothing
                 // written) until a person resolves it.
                 return;
             }
             graph::IntegrationState::Integrated => {
-                if helper_text == integrated_text {
-                    // Either the helper made no real change to this file, or
-                    // its result is already sitting in the lead's tree (a
-                    // re-run of this function after a partial earlier
-                    // apply) -- nothing to write.
+                if helper_text == integrated_text && !matches!(operation, FileOperation::Delete { .. }) {
+                    // Either the helper made no real change to this path, or
+                    // its result is already sitting in the integration
+                    // worktree (a re-run of this function after a partial
+                    // earlier apply) -- nothing to write. A `Delete` still
+                    // goes through `apply_operation` below even when both
+                    // texts read as empty, since "the file is gone" is not
+                    // observable by comparing empty strings alone.
                     continue;
                 }
-                match write_file_atomic(&lead_path, &path, &helper_text) {
-                    ApplyToLeadOutcome::Applied => {}
-                    ApplyToLeadOutcome::Failed { detail } => {
-                        // Leave this one file's integration for a later
-                        // retry (the next completion event re-runs this same
-                        // function) rather than silently dropping the
-                        // helper's work or crashing the whole batch over one
-                        // unwritable file. Reported in this node's own
-                        // summary so the failure is visible, not smeared
-                        // across other files that may have already applied
-                        // cleanly above.
+                match apply_operation(&integration_path, &operation) {
+                    ApplyOperationOutcome::Applied => {}
+                    ApplyOperationOutcome::Failed { path, detail } => {
+                        // Leave this one operation for a later retry (the
+                        // next completion event re-runs this same function)
+                        // rather than silently dropping the helper's work or
+                        // crashing the whole batch over one unwritable
+                        // path. Reported in this node's own summary so the
+                        // failure is visible, not smeared across other
+                        // operations that may have already applied cleanly
+                        // above. This node's state is left exactly as it
+                        // was (`Finished`) -- a failed integration write is
+                        // never reported as a completed graph, but it also
+                        // does not fabricate a `NeedsInput`/conflict state
+                        // that was never actually detected.
                         let _ = update_session_at(locks, root, session_id, |s| {
                             if let Some(exec) = s.executions.iter_mut().find(|e| e.execution_id == helper_execution_id) {
                                 exec.output_summary = Some(format!(
@@ -1332,6 +1815,19 @@ fn integrate_helper_result(
                 }
             }
             graph::IntegrationState::Pending => {}
+        }
+    }
+}
+
+/// Lossy text view of what a [`FileOperation`] leaves at its path -- empty
+/// for a `Delete` (matching the old contract: an absent file reads as empty
+/// text for the three-way text comparison), the new content's text
+/// otherwise.
+fn as_text_of_operation(operation: &FileOperation) -> String {
+    match operation {
+        FileOperation::Delete { .. } => String::new(),
+        FileOperation::Add { content, .. } | FileOperation::Modify { content, .. } | FileOperation::Rename { content, .. } => {
+            as_text(content)
         }
     }
 }
@@ -1350,17 +1846,56 @@ fn integrate_helper_result(
 /// change does not yet wire (see this task cluster's report for what stays
 /// unwired). What this function DOES guarantee is that the graph is never
 /// left looking like it is still working once nothing is.
+///
+/// Also tears down this session's dedicated integration worktree
+/// (`cleanup_integration_worktree`), if one was ever provisioned -- nothing
+/// integrates into it after the graph is genuinely done, so leaving it on
+/// disk would only be a leaked folder.
+///
+/// A thin `AppHandle`-aware wrapper around [`mark_graph_finished_if_all_terminal`],
+/// which holds the actual state-transition rule and needs no `AppHandle` at
+/// all -- kept separate so that rule stays directly unit-testable without
+/// standing up Tauri's test harness just to exercise it.
 fn maybe_finish_graph(
+    app: &AppHandle,
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
     session_id: &str,
     session: &AgentSession,
 ) {
-    let Some(lead) = session.executions.iter().find(|e| e.parent_execution_id.is_none()) else {
+    let Some(finished_session) = mark_graph_finished_if_all_terminal(locks, root, session_id, session) else {
         return;
     };
+
+    if let Some(manager) = app.try_state::<RepoManager>() {
+        if let Ok(open) = manager.get(&finished_session.header.repo_id) {
+            let main_workdir = {
+                let repo = open.repo.lock().unwrap_or_else(|e| e.into_inner());
+                worktree::main_workdir(&repo)
+            };
+            if let Some(main_workdir) = main_workdir {
+                cleanup_integration_worktree(&finished_session, &main_workdir.to_string_lossy());
+            }
+        }
+    }
+}
+
+/// The actual R6.9 state-transition rule, with no `AppHandle` dependency:
+/// once every helper is terminal, marks the lead (and the session header)
+/// `Finished` with a combined summary. Returns the freshly-written session
+/// when this call is what performed the transition, so a caller (like
+/// [`maybe_finish_graph`]) can act on exactly that session snapshot rather
+/// than re-reading; returns `None` when there was nothing to finish (already
+/// finished, no helpers, or a helper still active).
+fn mark_graph_finished_if_all_terminal(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    session: &AgentSession,
+) -> Option<AgentSession> {
+    let lead = session.executions.iter().find(|e| e.parent_execution_id.is_none())?;
     if lead.state != SessionState::Working {
-        return;
+        return None;
     }
     let helpers: Vec<&ExecutionRecord> = session
         .executions
@@ -1368,7 +1903,7 @@ fn maybe_finish_graph(
         .filter(|e| e.parent_execution_id.is_some())
         .collect();
     if helpers.is_empty() {
-        return;
+        return None;
     }
     let all_terminal = helpers.iter().all(|h| {
         matches!(
@@ -1377,10 +1912,10 @@ fn maybe_finish_graph(
         )
     });
     if !all_terminal {
-        return;
+        return None;
     }
     let finished = helpers.iter().filter(|h| h.state == SessionState::Finished).count();
-    let _ = update_session_at(locks, root, session_id, |s| {
+    let outcome = update_session_at(locks, root, session_id, |s| {
         if let Some(lead) = s.executions.iter_mut().find(|e| e.parent_execution_id.is_none()) {
             lead.state = SessionState::Finished;
             lead.ended_at = Some(now_rfc3339());
@@ -1388,6 +1923,10 @@ fn maybe_finish_graph(
         }
         s.header.state = SessionState::Finished;
     });
+    match outcome {
+        UpdateOutcome::Updated { session } => Some(session),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1602,9 +2141,18 @@ fn resolve_conflict_at(
     // holding a lock other mutating session calls are waiting on (see
     // `locks.rs`'s own module doc and the house rule against holding a
     // session lock across slow filesystem work).
-    let write_failed_detail = match write_file_atomic(&lead_path, &conflict_path, &resolved_text) {
-        ApplyToLeadOutcome::Applied => None,
-        ApplyToLeadOutcome::Failed { detail } => Some(detail),
+    // Conflict resolution stays text-only and targets the LEAD's own
+    // checkout directly (this is the user's explicit landing action, not the
+    // automated P0-C integration pass, which never touches
+    // `session.header.repo_path`) -- `FileExecutable::No` is a safe default
+    // here since the conflict record itself only ever carried text.
+    let resolved_content = FileContent::Text {
+        bytes: resolved_text.clone().into_bytes(),
+        executable: FileExecutable::No,
+    };
+    let write_failed_detail = match write_content_atomic(&lead_path, &conflict_path, &resolved_content) {
+        ApplyOperationOutcome::Applied => None,
+        ApplyOperationOutcome::Failed { detail, .. } => Some(detail),
     };
 
     // Step 3: only now, having confirmed whether the write actually landed,
@@ -1741,6 +2289,7 @@ mod tests {
             changed_file_count: 0,
             active_execution_id: None,
             archived: false,
+            graph_started_at: None,
         };
         let session = AgentSession::new(header);
         store::write_session(root, &session).unwrap();
@@ -2195,7 +2744,7 @@ mod tests {
         );
     }
 
-    // -- changed_files_since / read_file_at_revision (R6.7) --
+    // -- helper_delta / read_content_at_revision (R6.7, P0-C, P0-D) --
 
     fn init_repo_with_commit(dir: &std::path::Path, files: &[(&str, &str)]) -> (git2::Repository, String) {
         let repo = git2::Repository::init(dir).expect("repo");
@@ -2236,45 +2785,252 @@ mod tests {
             .expect("commit");
     }
 
-    #[test]
-    fn changed_files_since_lists_only_paths_touched_after_the_base() {
+    /// Builds a fresh helper worktree at `base_files`, then writes
+    /// `edits` on top and leaves them UNCOMMITTED -- staged and unstaged,
+    /// never `git commit`ed -- matching the shipped path: helpers have no
+    /// production commit tool, so a real helper's edits are exactly this
+    /// shape when it finishes. Returns the worktree dir and its base OID.
+    fn commit_helper_worktree(base_files: &[(&str, &str)], edits: &[(&str, &str)]) -> (tempfile::TempDir, String) {
         let dir = tempfile::tempdir().unwrap();
-        let (repo, base_oid) = init_repo_with_commit(dir.path(), &[("a.txt", "a"), ("b.txt", "b")]);
-        std::fs::write(dir.path().join("a.txt"), "a-changed").unwrap();
-        commit_all(&repo, "change a");
+        let (repo, base_oid) = init_repo_with_commit(dir.path(), base_files);
+        for (name, content) in edits {
+            std::fs::write(dir.path().join(name), content).unwrap();
+        }
+        // Half the edits go through the index (staged), the other half stay
+        // as plain unstaged worktree edits -- so this fixture exercises both
+        // halves of "staged, unstaged, and committed" in one pass, matching
+        // what `diff_tree_to_workdir_with_index` is specifically meant to
+        // see in a single diff.
+        if let Some((first_name, _)) = edits.first() {
+            let mut index = repo.index().expect("index");
+            index.add_path(std::path::Path::new(first_name)).expect("stage");
+            index.write().expect("write index");
+        }
+        (dir, base_oid)
+    }
 
-        let changed = changed_files_since(dir.path().to_str().unwrap(), &base_oid).unwrap();
-        assert_eq!(changed, vec!["a.txt".to_string()]);
+    // P0-C: `helper_delta` must see UNSTAGED and STAGED work, not only
+    // committed work -- this is the test that proves the shipped path
+    // works, since helpers have no production commit tool.
+
+    #[test]
+    fn helper_delta_sees_an_unstaged_uncommitted_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_repo, base_oid) = init_repo_with_commit(dir.path(), &[("a.txt", "a"), ("b.txt", "b")]);
+        // Deliberately NOT staged, NOT committed -- exactly what a helper
+        // leaves behind in the shipped path.
+        std::fs::write(dir.path().join("a.txt"), "a-changed").unwrap();
+
+        let changed = helper_delta(dir.path().to_str().unwrap(), &base_oid).unwrap();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        match &changed[0] {
+            FileOperation::Modify { path, content } => {
+                assert_eq!(path, "a.txt");
+                assert_eq!(as_text(content), "a-changed");
+            }
+            other => panic!("expected Modify, got {other:?}"),
+        }
     }
 
     #[test]
-    fn changed_files_since_reports_nothing_when_head_equals_base() {
+    fn helper_delta_sees_a_staged_uncommitted_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, base_oid) = init_repo_with_commit(dir.path(), &[("a.txt", "a")]);
+        std::fs::write(dir.path().join("a.txt"), "a-staged").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        // Still no commit.
+
+        let changed = helper_delta(dir.path().to_str().unwrap(), &base_oid).unwrap();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        match &changed[0] {
+            FileOperation::Modify { path, content } => {
+                assert_eq!(path, "a.txt");
+                assert_eq!(as_text(content), "a-staged");
+            }
+            other => panic!("expected Modify, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn helper_delta_reports_nothing_when_workdir_equals_base() {
         let dir = tempfile::tempdir().unwrap();
         let (_repo, base_oid) = init_repo_with_commit(dir.path(), &[("a.txt", "a")]);
-        let changed = changed_files_since(dir.path().to_str().unwrap(), &base_oid).unwrap();
+        let changed = helper_delta(dir.path().to_str().unwrap(), &base_oid).unwrap();
         assert!(changed.is_empty());
     }
 
     #[test]
-    fn read_file_at_revision_reads_the_base_text() {
+    fn helper_delta_sees_committed_work_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, base_oid) = init_repo_with_commit(dir.path(), &[("a.txt", "a")]);
+        std::fs::write(dir.path().join("a.txt"), "a-committed").unwrap();
+        commit_all(&repo, "change a");
+
+        let changed = helper_delta(dir.path().to_str().unwrap(), &base_oid).unwrap();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        assert_eq!(changed[0].path(), "a.txt");
+    }
+
+    // P0-D: delete, rename, binary, and executable-bit changes must each
+    // survive `helper_delta` faithfully as their own typed operation.
+
+    #[test]
+    fn helper_delta_represents_a_delete_as_a_typed_delete_not_an_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_repo, base_oid) = init_repo_with_commit(dir.path(), &[("a.txt", "a"), ("b.txt", "b")]);
+        std::fs::remove_file(dir.path().join("a.txt")).unwrap();
+
+        let changed = helper_delta(dir.path().to_str().unwrap(), &base_oid).unwrap();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        match &changed[0] {
+            FileOperation::Delete { path } => assert_eq!(path, "a.txt"),
+            other => panic!("expected Delete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn helper_delta_represents_a_rename_with_its_from_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_repo, base_oid) =
+            init_repo_with_commit(dir.path(), &[("old_name.txt", "the exact same content, long enough to detect as a rename by similarity")]);
+        std::fs::rename(dir.path().join("old_name.txt"), dir.path().join("new_name.txt")).unwrap();
+
+        let changed = helper_delta(dir.path().to_str().unwrap(), &base_oid).unwrap();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        match &changed[0] {
+            FileOperation::Rename { from_path, path, content } => {
+                assert_eq!(from_path, "old_name.txt");
+                assert_eq!(path, "new_name.txt");
+                assert_eq!(
+                    as_text(content),
+                    "the exact same content, long enough to detect as a rename by similarity"
+                );
+            }
+            other => panic!("expected Rename, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn helper_delta_represents_binary_content_as_raw_bytes_never_utf8_decoded() {
+        let dir = tempfile::tempdir().unwrap();
+        // Invalid UTF-8 byte sequence plus a NUL, which git's own binary
+        // heuristic also treats as binary -- this must never round-trip
+        // through `String::from_utf8_lossy` and come out changed.
+        let binary_bytes: Vec<u8> = vec![0xFF, 0xFE, 0x00, 0x01, 0x02, 0xC3, 0x28];
+        let (_repo, base_oid) = init_repo_with_commit(dir.path(), &[("a.txt", "placeholder")]);
+        std::fs::write(dir.path().join("image.bin"), &binary_bytes).unwrap();
+
+        let changed = helper_delta(dir.path().to_str().unwrap(), &base_oid).unwrap();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        match &changed[0] {
+            FileOperation::Add { path, content: FileContent::Binary { bytes, .. } } => {
+                assert_eq!(path, "image.bin");
+                assert_eq!(bytes, &binary_bytes, "binary bytes must round-trip exactly");
+            }
+            other => panic!("expected a binary Add, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn helper_delta_represents_an_executable_bit_change() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (_repo, base_oid) = init_repo_with_commit(dir.path(), &[("script.sh", "#!/bin/sh\necho hi\n")]);
+        let path = dir.path().join("script.sh");
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(perms.mode() | 0o111);
+        std::fs::set_permissions(&path, perms).unwrap();
+
+        let changed = helper_delta(dir.path().to_str().unwrap(), &base_oid).unwrap();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        match &changed[0] {
+            FileOperation::Modify { content: FileContent::Text { executable, .. }, .. } => {
+                assert_eq!(*executable, FileExecutable::Yes);
+            }
+            other => panic!("expected an executable-bit Modify, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_content_at_revision_reads_the_base_text() {
         let dir = tempfile::tempdir().unwrap();
         let (repo, base_oid) = init_repo_with_commit(dir.path(), &[("a.txt", "original")]);
         std::fs::write(dir.path().join("a.txt"), "changed").unwrap();
         commit_all(&repo, "change a");
 
-        let base_text = read_file_at_revision(dir.path().to_str().unwrap(), &base_oid, "a.txt");
-        assert_eq!(base_text.as_deref(), Some("original"));
+        let base_content = read_content_at_revision(dir.path().to_str().unwrap(), &base_oid, "a.txt");
+        assert_eq!(base_content.map(|c| as_text(&c)), Some("original".to_string()));
     }
 
     #[test]
-    fn read_file_at_revision_returns_empty_string_for_a_file_that_did_not_exist_at_base() {
+    fn read_content_at_revision_returns_none_for_a_file_that_did_not_exist_at_base() {
         let dir = tempfile::tempdir().unwrap();
         let (repo, base_oid) = init_repo_with_commit(dir.path(), &[("a.txt", "a")]);
         std::fs::write(dir.path().join("new.txt"), "brand new").unwrap();
         commit_all(&repo, "add new.txt");
 
-        let base_text = read_file_at_revision(dir.path().to_str().unwrap(), &base_oid, "new.txt");
-        assert_eq!(base_text.as_deref(), Some(""));
+        let base_content = read_content_at_revision(dir.path().to_str().unwrap(), &base_oid, "new.txt");
+        assert!(base_content.is_none(), "a path absent at the base must read as None, not a fabricated empty file");
+    }
+
+    // -- apply_operation (P0-D): a read/write failure must leave the target
+    // path untouched and report a typed outcome. --
+
+    #[test]
+    fn apply_operation_delete_removes_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("gone.txt"), "still here").unwrap();
+        let outcome = apply_operation(dir.path().to_str().unwrap(), &FileOperation::Delete { path: "gone.txt".into() });
+        assert_eq!(outcome, ApplyOperationOutcome::Applied);
+        assert!(!dir.path().join("gone.txt").exists());
+    }
+
+    #[test]
+    fn apply_operation_rename_moves_content_to_the_new_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("old.txt"), "original content").unwrap();
+        let outcome = apply_operation(
+            dir.path().to_str().unwrap(),
+            &FileOperation::Rename {
+                from_path: "old.txt".into(),
+                path: "new.txt".into(),
+                content: FileContent::Text { bytes: b"original content".to_vec(), executable: FileExecutable::No },
+            },
+        );
+        assert_eq!(outcome, ApplyOperationOutcome::Applied);
+        assert!(!dir.path().join("old.txt").exists());
+        assert_eq!(std::fs::read_to_string(dir.path().join("new.txt")).unwrap(), "original content");
+    }
+
+    #[test]
+    fn a_write_failure_leaves_the_target_path_untouched_and_reports_a_typed_outcome() {
+        let dir = tempfile::tempdir().unwrap();
+        // "blocked" is a FILE, not a directory -- writing to
+        // "blocked/nested.txt" cannot succeed, simulating a real integration
+        // failure without relying on OS-specific permission APIs.
+        std::fs::write(dir.path().join("blocked"), "not a directory").unwrap();
+
+        let outcome = apply_operation(
+            dir.path().to_str().unwrap(),
+            &FileOperation::Add {
+                path: "blocked/nested.txt".into(),
+                content: FileContent::Text { bytes: b"new content".to_vec(), executable: FileExecutable::No },
+            },
+        );
+        match outcome {
+            ApplyOperationOutcome::Failed { path, detail } => {
+                assert_eq!(path, "blocked/nested.txt");
+                assert!(!detail.is_empty());
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+        // The pre-existing "blocked" file must be exactly as it was --
+        // never partially overwritten or removed by the failed attempt.
+        assert_eq!(std::fs::read_to_string(dir.path().join("blocked")).unwrap(), "not a directory");
+        assert!(!dir.path().join("blocked/nested.txt").exists());
     }
 
     // -- record_helper_launch_failure / maybe_finish_graph (R6.9) --
@@ -2351,7 +3107,7 @@ mod tests {
         });
 
         let session = store::read_session(&root, "sess-1").unwrap();
-        maybe_finish_graph(&locks, &root, "sess-1", &session);
+        mark_graph_finished_if_all_terminal(&locks, &root, "sess-1", &session);
 
         let session = store::read_session(&root, "sess-1").unwrap();
         let lead = session.executions.iter().find(|e| e.execution_id == "lead").unwrap();
@@ -2386,36 +3142,36 @@ mod tests {
         });
 
         let session = store::read_session(&root, "sess-1").unwrap();
-        maybe_finish_graph(&locks, &root, "sess-1", &session);
+        mark_graph_finished_if_all_terminal(&locks, &root, "sess-1", &session);
 
         let session = store::read_session(&root, "sess-1").unwrap();
         let lead = session.executions.iter().find(|e| e.execution_id == "lead").unwrap();
         assert_eq!(lead.state, SessionState::Working, "must not finish while helper-a is still Working");
     }
 
-    // -- integrate_helper_result (R6.7/R6.8): both sides of a real conflict
-    // are preserved through the git-backed diff path, not merely the pure
-    // `graph::detect_conflict` function tested elsewhere. --
+    // -- integrate_helper_into (R6.7/R6.8, P0-C, P0-D): both sides of a real
+    // conflict are preserved through the git-backed real-delta path, not
+    // merely the pure `graph::detect_conflict` function tested elsewhere.
+    // `integrate_helper_into` is exercised directly against a plain
+    // `tempfile` integration directory (not `session.header.repo_path`),
+    // matching production's `ensure_integration_worktree` target without
+    // needing a Tauri `AppHandle` in these tests. --
 
     #[test]
     fn integrate_helper_result_records_a_typed_conflict_when_the_lead_also_changed_the_file() {
         let (_dir, root) = temp_root();
         let locks = crate::agentdesk::SessionLocks::new();
 
-        let lead_dir = tempfile::tempdir().unwrap();
-        let (lead_repo, base_oid) = init_repo_with_commit(lead_dir.path(), &[("shared.txt", "base")]);
-        // The lead's own checkout already integrated a different change.
-        std::fs::write(lead_dir.path().join("shared.txt"), "lead changed it").unwrap();
-        commit_all(&lead_repo, "lead edit");
+        // The integration worktree already has another change integrated
+        // into it -- standing in for a sibling helper's or the lead's own
+        // prior edit.
+        let integration_dir = tempfile::tempdir().unwrap();
+        std::fs::write(integration_dir.path().join("shared.txt"), "lead changed it").unwrap();
 
-        let helper_dir = tempfile::tempdir().unwrap();
-        let (helper_repo, _helper_base) = init_repo_with_commit(helper_dir.path(), &[("shared.txt", "base")]);
-        std::fs::write(helper_dir.path().join("shared.txt"), "helper changed it").unwrap();
-        commit_all(&helper_repo, "helper edit");
+        let (helper_dir, base_oid) = commit_helper_worktree(&[("shared.txt", "base")], &[("shared.txt", "helper changed it")]);
 
         seed_session(&root, "sess-1");
         update_session_at(&locks, &root, "sess-1", |s| {
-            s.header.repo_path = lead_dir.path().to_string_lossy().into_owned();
             let mut helper = ExecutionRecord::minimal(
                 "helper-a".into(),
                 s.header.session_id.clone(),
@@ -2431,7 +3187,14 @@ mod tests {
         });
 
         let session = store::read_session(&root, "sess-1").unwrap();
-        integrate_helper_result(&locks, &root, "sess-1", "helper-a", &session);
+        integrate_helper_into(
+            &locks,
+            &root,
+            "sess-1",
+            "helper-a",
+            &session,
+            &integration_dir.path().to_string_lossy(),
+        );
 
         let session = store::read_session(&root, "sess-1").unwrap();
         let helper = session.executions.iter().find(|e| e.execution_id == "helper-a").unwrap();
@@ -2447,18 +3210,14 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = crate::agentdesk::SessionLocks::new();
 
-        let lead_dir = tempfile::tempdir().unwrap();
-        let (_lead_repo, base_oid) = init_repo_with_commit(lead_dir.path(), &[("only_helper.txt", "base")]);
-        // Lead's checkout never touched this file after the base.
+        // The integration worktree never touched this file after the base.
+        let integration_dir = tempfile::tempdir().unwrap();
 
-        let helper_dir = tempfile::tempdir().unwrap();
-        let (helper_repo, _helper_base) = init_repo_with_commit(helper_dir.path(), &[("only_helper.txt", "base")]);
-        std::fs::write(helper_dir.path().join("only_helper.txt"), "helper wrote this").unwrap();
-        commit_all(&helper_repo, "helper edit");
+        let (helper_dir, base_oid) =
+            commit_helper_worktree(&[("only_helper.txt", "base")], &[("only_helper.txt", "helper wrote this")]);
 
         seed_session(&root, "sess-1");
         update_session_at(&locks, &root, "sess-1", |s| {
-            s.header.repo_path = lead_dir.path().to_string_lossy().into_owned();
             let mut helper = ExecutionRecord::minimal(
                 "helper-a".into(),
                 s.header.session_id.clone(),
@@ -2474,18 +3233,26 @@ mod tests {
         });
 
         let session = store::read_session(&root, "sess-1").unwrap();
-        integrate_helper_result(&locks, &root, "sess-1", "helper-a", &session);
+        integrate_helper_into(
+            &locks,
+            &root,
+            "sess-1",
+            "helper-a",
+            &session,
+            &integration_dir.path().to_string_lossy(),
+        );
 
         let session = store::read_session(&root, "sess-1").unwrap();
         let helper = session.executions.iter().find(|e| e.execution_id == "helper-a").unwrap();
         assert_eq!(helper.state, SessionState::Finished, "no conflict means the node stays Finished");
         assert!(helper.conflict.is_none());
         // The whole point of integration: the helper's isolated work must
-        // actually land in the lead's checkout, not just get marked clean.
+        // actually land in the integration worktree, not just get marked
+        // clean.
         assert_eq!(
-            std::fs::read_to_string(lead_dir.path().join("only_helper.txt")).unwrap(),
+            std::fs::read_to_string(integration_dir.path().join("only_helper.txt")).unwrap(),
             "helper wrote this",
-            "a clean helper change must be written into the lead's tree"
+            "a clean helper change must be written into the integration worktree"
         );
     }
 
@@ -2494,19 +3261,13 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = crate::agentdesk::SessionLocks::new();
 
-        let lead_dir = tempfile::tempdir().unwrap();
-        let (lead_repo, base_oid) = init_repo_with_commit(lead_dir.path(), &[("shared.txt", "base")]);
-        std::fs::write(lead_dir.path().join("shared.txt"), "lead changed it").unwrap();
-        commit_all(&lead_repo, "lead edit");
+        let integration_dir = tempfile::tempdir().unwrap();
+        std::fs::write(integration_dir.path().join("shared.txt"), "lead changed it").unwrap();
 
-        let helper_dir = tempfile::tempdir().unwrap();
-        let (helper_repo, _helper_base) = init_repo_with_commit(helper_dir.path(), &[("shared.txt", "base")]);
-        std::fs::write(helper_dir.path().join("shared.txt"), "helper changed it").unwrap();
-        commit_all(&helper_repo, "helper edit");
+        let (helper_dir, base_oid) = commit_helper_worktree(&[("shared.txt", "base")], &[("shared.txt", "helper changed it")]);
 
         seed_session(&root, "sess-1");
         update_session_at(&locks, &root, "sess-1", |s| {
-            s.header.repo_path = lead_dir.path().to_string_lossy().into_owned();
             let mut helper = ExecutionRecord::minimal(
                 "helper-a".into(),
                 s.header.session_id.clone(),
@@ -2522,12 +3283,19 @@ mod tests {
         });
 
         let session = store::read_session(&root, "sess-1").unwrap();
-        integrate_helper_result(&locks, &root, "sess-1", "helper-a", &session);
+        integrate_helper_into(
+            &locks,
+            &root,
+            "sess-1",
+            "helper-a",
+            &session,
+            &integration_dir.path().to_string_lossy(),
+        );
 
-        // The lead's file must be untouched by the conflicting write -- still
-        // exactly what the lead's own edit left it as.
+        // The integration worktree's file must be untouched by the
+        // conflicting write -- still exactly what was already integrated.
         assert_eq!(
-            std::fs::read_to_string(lead_dir.path().join("shared.txt")).unwrap(),
+            std::fs::read_to_string(integration_dir.path().join("shared.txt")).unwrap(),
             "lead changed it",
             "a conflicting file must never be overwritten before the user resolves it"
         );
@@ -2535,6 +3303,142 @@ mod tests {
         let helper = session.executions.iter().find(|e| e.execution_id == "helper-a").unwrap();
         assert_eq!(helper.state, SessionState::NeedsInput);
         assert!(helper.conflict.is_some());
+    }
+
+    /// P0-C's core guarantee: integration writes into the DEDICATED
+    /// integration worktree, never into `session.header.repo_path` (the
+    /// user's own open checkout) -- even when that checkout happens to have
+    /// the same repo-relative path present.
+    #[test]
+    fn integration_never_writes_into_the_sessions_repo_path() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+
+        // Stands in for the user's own open checkout -- untouched by
+        // anything in this test other than this initial state.
+        let users_checkout = tempfile::tempdir().unwrap();
+        std::fs::write(users_checkout.path().join("only_helper.txt"), "the user's own untouched file").unwrap();
+
+        let integration_dir = tempfile::tempdir().unwrap();
+        let (helper_dir, base_oid) =
+            commit_helper_worktree(&[("only_helper.txt", "base")], &[("only_helper.txt", "helper wrote this")]);
+
+        seed_session(&root, "sess-1");
+        update_session_at(&locks, &root, "sess-1", |s| {
+            s.header.repo_path = users_checkout.path().to_string_lossy().into_owned();
+            let mut helper = ExecutionRecord::minimal(
+                "helper-a".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::Finished,
+                now_rfc3339(),
+                None,
+                0,
+            );
+            helper.worktree_path = Some(helper_dir.path().to_string_lossy().into_owned());
+            helper.base_oid = Some(base_oid.clone());
+            s.executions.push(helper);
+        });
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        integrate_helper_into(
+            &locks,
+            &root,
+            "sess-1",
+            "helper-a",
+            &session,
+            &integration_dir.path().to_string_lossy(),
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(users_checkout.path().join("only_helper.txt")).unwrap(),
+            "the user's own untouched file",
+            "the user's own open checkout must never be touched by integration"
+        );
+        assert_eq!(
+            std::fs::read_to_string(integration_dir.path().join("only_helper.txt")).unwrap(),
+            "helper wrote this",
+            "the dedicated integration worktree must receive the helper's result"
+        );
+    }
+
+    /// P0-D: a write failure during integration must never be reported as a
+    /// silent success. `apply_operation`'s own outcome is exercised directly
+    /// (see `a_write_failure_leaves_the_target_path_untouched_and_reports_a_typed_outcome`
+    /// above); this test proves `integrate_helper_into` itself surfaces that
+    /// same failure on the helper's own record rather than swallowing it,
+    /// and never mistakes an unwritable path for a detected content
+    /// conflict.
+    #[test]
+    fn a_failed_integration_write_is_reported_and_does_not_silently_succeed() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+
+        // "blocked" occupies its own path with a DIRECTORY in the
+        // integration worktree, so writing the FILE "blocked" there fails
+        // deterministically without relying on OS permission APIs.
+        let integration_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(integration_dir.path().join("blocked")).unwrap();
+        std::fs::write(integration_dir.path().join("blocked").join("occupied.txt"), "taking the slot").unwrap();
+
+        // The helper's own worktree has a clean, ordinary uncommitted edit
+        // to a file named "blocked" -- from the helper's point of view this
+        // is an unremarkable change; only the integration TARGET makes it
+        // unwritable.
+        let (helper_dir, base_oid) = commit_helper_worktree(&[("blocked", "base content")], &[("blocked", "helper wants this here")]);
+
+        seed_session(&root, "sess-1");
+        update_session_at(&locks, &root, "sess-1", |s| {
+            let mut helper = ExecutionRecord::minimal(
+                "helper-a".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::Finished,
+                now_rfc3339(),
+                None,
+                0,
+            );
+            helper.worktree_path = Some(helper_dir.path().to_string_lossy().into_owned());
+            helper.base_oid = Some(base_oid.clone());
+            s.executions.push(helper);
+        });
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        integrate_helper_into(
+            &locks,
+            &root,
+            "sess-1",
+            "helper-a",
+            &session,
+            &integration_dir.path().to_string_lossy(),
+        );
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        let helper = session.executions.iter().find(|e| e.execution_id == "helper-a").unwrap();
+        // The node is not silently reported as a clean success: its summary
+        // names the failure. It is never `NeedsInput` either -- this was not
+        // a detected content conflict, so it must not be misreported as one.
+        let summary = helper.output_summary.as_deref().unwrap_or_default();
+        assert!(
+            summary.contains("could not be brought into your working files"),
+            "expected a visible failure summary, got {summary:?}"
+        );
+        assert_ne!(helper.state, SessionState::NeedsInput, "a write failure is not a content conflict");
+
+        // The pre-existing directory-occupied "blocked" path is untouched --
+        // no partial/mixed write landed there.
+        assert!(integration_dir.path().join("blocked").is_dir());
+        assert_eq!(
+            std::fs::read_to_string(integration_dir.path().join("blocked").join("occupied.txt")).unwrap(),
+            "taking the slot"
+        );
+
+        // A graph whose only helper failed to integrate has no lead record
+        // in this fixture, so `mark_graph_finished_if_all_terminal` is a
+        // no-op here (proven by `maybe_finish_graph_*` tests elsewhere) --
+        // the point this test proves is narrower and already established
+        // above: the failed write is visible on the helper's own record,
+        // never silently reported as success.
     }
 
     // -- resolve_conflict_at (R6.7/R6.8): the chosen resolution must actually

@@ -619,6 +619,7 @@ mod tests {
             changed_file_count: 0,
             active_execution_id: None,
             archived: false,
+            graph_started_at: None,
         }
     }
 

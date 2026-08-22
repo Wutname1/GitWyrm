@@ -5,11 +5,11 @@
 - [x] 1.1 Define `StartAgentSessionRequest`, typed source inputs, mode, team, and provider
       override in Rust/Specta. (`src-tauri/src/commands/agent_kickoff.rs`:
       `StartAgentSessionRequest`, `SessionSourceInput`.)
-- [x] 1.2 Implement intent policy table and enforce refusal of writes at the live engine/tool
-      boundary for read-only intents.
-      (`src-tauri/src/agentdesk/policy.rs`: `for_intent`, `check_tool_capability`, called from
-      `src-tauri/src/airun/cli_run.rs` `handle()` at the `Incoming::PermissionRequest` match
-      arm, before any gate is shown or `answers` channel is touched.)
+- [ ] 1.2 Enforce read-only intent at provider launch and again at the runtime permission
+      boundary. The provider process must start with write disabled (for Copilot ACP,
+      `--deny-tool=write` or the version-gated equivalent), so remembered/global allow rules
+      cannot bypass GitWyrm when no `PermissionRequest` is emitted. The existing
+      `check_tool_capability` handler remains defense in depth, not the sole boundary.
 - [x] 1.3 Add policy tests for all intent/mode/team combinations. (`policy.rs` `mod tests`,
       9 tests including the exhaustive read-only proof.)
 - [x] 1.4 Add duplicate-session lookup by repo/source identity/intent/active state.
@@ -38,6 +38,12 @@
       `WorktreeFailed`) exist as typed backend outcomes but have no dedicated retry UI card
       yet -- native follow-up.
 - [x] 2.5 Clear Starting on all success/failure/unmount paths. (`finally` block.)
+- [ ] 2.6 Start every explicit source operation after session creation. Fix, Plan, Explain,
+      Review, and Summarize must not require a second composer Send; read-only intents run
+      immediately with read-only authority.
+- [ ] 2.7 Persist and carry the kickoff intent, mode, team, and provider override into the
+      first execution. With no override, use the configured default provider; show an
+      unsupported/unavailable choice instead of silently falling back.
 
 ## 3. Issue actions
 
@@ -67,14 +73,9 @@
       `PrDetail` binding, so the snapshot text omits them honestly rather than fabricating.)
 - [ ] 4.4 Enrich commits/files/diffs/comments in Agent Desk using capability gates. Not
       built by this package -- native follow-up alongside 3.4.
-- [x] 4.5 Prove the live Review/Summarize execution cannot call edit/worktree tools. (`policy.rs`:
-      `review_and_summarize_cannot_call_edit_or_worktree_tools`,
-      `read_only_intents_can_never_reach_a_write_or_worktree_tool`; and, against the actual
-      production `handle()` in `cli_run.rs` rather than a mock,
-      `explain_review_and_summarize_also_refuse_writes_before_asking`, which drives a real
-      `Incoming::PermissionRequest{kind:"edit"}` through Explain/Review/Summarize policies and
-      asserts `RejectOnce` with no `Gate` ever shown. Still short of R1.8's byte-identical
-      dirty-checkout native proof -- that remains open, see 6.4.)
+- [ ] 4.5 Prove live Review/Summarize cannot edit even when the provider has a remembered or
+      global allow rule and never asks GitWyrm for permission. Assert the provider launch
+      contains a hard write denial and native-test a dirty checkout byte-for-byte.
 - [ ] 4.6 Escalating a review into a requested fix creates a new isolated execution linked to
       the same session/source. Not built -- would live inside `ConversationPane.tsx`
       (owned by another in-flight package during this work); native follow-up.
@@ -95,6 +96,9 @@
 - [x] 5.4 Never push or post a host comment/review as part of kickoff. (Kickoff never
       constructs a `ToolCapability::Push`/`PostToHost` call; documented explicitly in
       `policy.rs`'s `fix_write_gate_does_not_by_itself_authorize_push_or_host_posts_at_kickoff`.)
+- [ ] 5.5 Make concurrent start preparation transactional. If a final locked check finds a
+      winner after this request provisioned a worktree, remove the unused worktree and branch
+      unless they contain unique work; test the losing race leaves no orphan.
 
 ## 6. Host coverage and proof
 
@@ -113,7 +117,16 @@
 - [ ] 6.5 Run typecheck, Rust tests, and record Gate 3 evidence. See verification output
       recorded in this change's implementation notes.
 
-## Status 2026-08-21
+## Status 2026-08-22 second audit
+
+The earlier 2026-08-21 status below is superseded where it claimed 1.2 and 4.5 complete.
+Runtime `PermissionRequest` refusal is useful but is not a hard read-only boundary because
+provider allow rules can suppress the request. The second audit also found source actions
+do not all start their selected operation, kickoff overrides are discarded before the first
+run, and a losing concurrent start can leak its prepared worktree. Tasks 1.2, 2.6, 2.7,
+4.5, and 5.5 are release blockers.
+
+## Prior status 2026-08-21 (historical)
 
 Reconciliation pass ticked 1.2, 2.3, and 4.5 (all previously unchecked, all with real
 production wiring found on re-read):

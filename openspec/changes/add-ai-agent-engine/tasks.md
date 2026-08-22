@@ -72,6 +72,10 @@ prompt/act/observe driver GitWyrm implements.
       no orphan. Proven with a real child process rather than by reading the builder
       call, and the detector itself checked against a live process so the test cannot pass
       vacuously
+- [ ] 2.8 Add version-gated provider launch capabilities. Read-only operations and Plan
+      proposals SHALL launch with write denied before the provider starts; write-capable
+      operations SHALL still deny shell/network unless a separately approved design changes
+      that boundary. Test generated arguments against supported provider CLI versions.
 
 ## 3. The run
 
@@ -88,8 +92,9 @@ say this plainly: "GitWyrm does not run the loop itself."
 - [x] 3.2 ~~Tools, and only these: read file, edit file, list directory, run a project
       check.~~ **Not what ships.** The Copilot CLI keeps its own broader tool set;
       GitWyrm denies only `shell` and `url` at server start (`cli_agent::DENIED_TOOLS`,
-      verified against `copilot help permissions` on 1.0.76). `write` is deliberately not
-      denied - editing files in the repository is the job. There is no GitWyrm-side
+      verified against `copilot help permissions` on 1.0.76). The current implementation
+      does not deny `write`; task 2.8 must add execution-specific denial for read-only and
+      pre-Start Plan runs while retaining writes for isolated Fix/Auto work. There is no GitWyrm-side
       allow-list of file operations, and no separate lexical/canonicalize path check in
       this module - path scoping is Copilot CLI's own concern once shell and network
       access are denied
@@ -134,6 +139,9 @@ model and a bounded tool set.
       console's keep/undo choices can act on. `session/cancel` is a notification the ACP
       spec requires the agent to answer with `stopReason: "cancelled"`, so Stop has a
       defined completion rather than a dropped pipe. Proven with a real child process
+- [ ] 4.6 Treat runtime permission requests as defense in depth. Add an adversarial transport
+      test where a provider-side allow rule suppresses the write request and prove the
+      launch-time capability denial still prevents disk mutation.
 
 ## 5. Verify
 
