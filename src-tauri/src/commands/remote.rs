@@ -262,10 +262,10 @@ pub async fn git_fetch(
     let open = manager.get(&repo_id)?;
     let path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
-        run_streaming(
+        run_with_stale_ref_retry(
             &app,
             &repo_id,
-            Some(&path),
+            &path,
             "fetch",
             &["fetch", "--all", "--prune", "--progress"],
         )?;
@@ -281,8 +281,42 @@ pub async fn git_fetch(
 /// ref, so anything else stays a real error.
 fn stale_remote_ref(message: &str) -> Option<String> {
     let rest = message.split("cannot lock ref '").nth(1)?;
-    let name = rest.split('\'').next()?;
+    // Require the closing quote: without it the message was truncated, and
+    // `split` would otherwise hand back the remainder as if it were a ref name.
+    let name = rest.split_once('\'')?.0;
     name.starts_with("refs/remotes/").then(|| name.to_string())
+}
+
+/// Run a network operation, and if it is blocked by a stale remote-tracking
+/// ref, clear that ref and run it once more.
+///
+/// "cannot lock ref 'refs/remotes/...': is at X but expected Y" means the
+/// tracking ref disagrees with itself -- a loose ref left behind by a crashed
+/// fetch, or one contradicting packed-refs. It never resolves on its own, so
+/// every later fetch, pull, or sync fails the same way until someone deletes
+/// the ref by hand. Deleting it is safe: it is a cache of the remote, and the
+/// retry recreates it.
+///
+/// Every ref-updating network call goes through here. Fixing this on the pull
+/// path alone left the identical failure reaching users through plain fetch.
+fn run_with_stale_ref_retry(
+    app: &AppHandle,
+    repo_id: &str,
+    repo_path: &str,
+    operation: &str,
+    args: &[&str],
+) -> Result<String, AppError> {
+    match run_streaming(app, repo_id, Some(repo_path), operation, args) {
+        Ok(out) => Ok(out),
+        Err(e) => {
+            let Some(stale) = stale_remote_ref(&e.to_string()) else {
+                return Err(e);
+            };
+            log::warn!("{operation} blocked by stale tracking ref {stale}; clearing it and retrying");
+            crate::git::shell::run_git(Some(repo_path), &["update-ref", "-d", &stale])?;
+            run_streaming(app, repo_id, Some(repo_path), operation, args)
+        }
+    }
 }
 
 #[tauri::command]
@@ -307,20 +341,13 @@ pub async fn git_pull(
         // entry rather than dropping it, so the changes are always recoverable. It
         // also applies to both the merge and rebase forms, so it holds regardless of
         // the user's `pull.rebase` setting.
-        let pull_args = ["pull", "--progress", "--autostash"];
-        if let Err(e) = run_streaming(&app, &repo_id, Some(&path), "pull", &pull_args) {
-            // "cannot lock ref 'refs/remotes/...': is at X but expected Y" means
-            // the remote-tracking ref is stale or duplicated (a crashed fetch, or
-            // a loose ref disagreeing with packed-refs). It never fixes itself and
-            // would fail on every pull from then on. Deleting the tracking ref is
-            // always safe -- the retry's fetch recreates it from the remote.
-            let Some(stale) = stale_remote_ref(&e.to_string()) else {
-                return Err(e);
-            };
-            log::warn!("pull blocked by stale tracking ref {stale}; deleting it and retrying");
-            crate::git::shell::run_git(Some(&path), &["update-ref", "-d", &stale])?;
-            run_streaming(&app, &repo_id, Some(&path), "pull", &pull_args)?;
-        }
+        run_with_stale_ref_retry(
+            &app,
+            &repo_id,
+            &path,
+            "pull",
+            &["pull", "--progress", "--autostash"],
+        )?;
 
         // A pulled commit can change which version of a submodule the project
         // pins, and git leaves the nested checkout on the old one -- surfacing it
@@ -658,7 +685,7 @@ pub async fn git_pull_branch(
     // `<branch>:<branch>` updates the local ref directly. git refuses this
     // when it would not be a fast-forward, which is the guard we want.
     let refspec = format!("{branch}:{branch}");
-    run_streaming(&app, &repo_id, Some(&path), "fetch", &["fetch", "--progress", &remote, &refspec])?;
+    run_with_stale_ref_retry(&app, &repo_id, &path, "fetch", &["fetch", "--progress", &remote, &refspec])?;
 
     let after = { branch_tracking_state(&open.repo.lock().unwrap(), Some(&branch)) };
     Ok(PullResult {
@@ -1389,6 +1416,34 @@ mod tests {
         );
         // Unrelated failures don't match at all.
         assert_eq!(stale_remote_ref("could not resolve host: github.com"), None);
+    }
+
+    /// The same corruption reaches us through fetch, not just pull, and git
+    /// wraps it in `update_ref failed for ref ...` so the phrase appears twice
+    /// on one line. Reproduced against a real repo by giving `update-ref` a
+    /// stale expected old-value; this is that message verbatim.
+    #[test]
+    fn a_stale_ref_is_recognized_in_gits_fetch_wording() {
+        assert_eq!(
+            stale_remote_ref(
+                "git fetch failed: fatal: update_ref failed for ref 'refs/remotes/origin/main': cannot lock ref 'refs/remotes/origin/main': is at 948e7d6c8f9137991bdeb5c3ab694de9cf5744f3 but expected 88706f9dec37d11da92b8872c1116599ba416552"
+            ),
+            Some("refs/remotes/origin/main".to_string())
+        );
+        // A remote other than origin, and a branch name containing a slash.
+        assert_eq!(
+            stale_remote_ref(
+                "error: cannot lock ref 'refs/remotes/upstream/feature/login': is at a but expected b"
+            ),
+            Some("refs/remotes/upstream/feature/login".to_string())
+        );
+        // Tags are not a remote-tracking cache; deleting one loses real data.
+        assert_eq!(
+            stale_remote_ref("error: cannot lock ref 'refs/tags/v1.0.0': is at a but expected b"),
+            None
+        );
+        // A malformed message must not yield a half-parsed ref name.
+        assert_eq!(stale_remote_ref("cannot lock ref 'refs/remotes/origin/main"), None);
     }
 
     /// Git's real stderr for a push refused because the remote moved on. The
