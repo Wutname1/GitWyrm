@@ -198,7 +198,7 @@ pub enum PolicyRefusal {
 /// dispatch (`cli_run::run_task`/`handle`) -- see task 1.1/1.2. No downstream
 /// code re-derives any part of this from UI state; everything after
 /// `resolve` reads fields off this struct.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionPolicy {
     pub intent: SessionIntent,
     pub mode: ExecutionMode,
@@ -207,6 +207,15 @@ pub struct ExecutionPolicy {
     /// The intent's static write/worktree table -- kept alongside rather
     /// than re-derived at every call site.
     pub intent_policy: IntentPolicy,
+    /// Repo-relative path globs a helper execution may write to (R6.4:
+    /// "Enforce per-helper worktree, allowed paths ... Enforcement, not
+    /// storage"). `None` for the lead and for solo executions, which are not
+    /// path-scoped at all beyond their worktree boundary -- `Some(paths)`
+    /// (even an empty `Vec`) marks this policy as belonging to a helper node,
+    /// so [`Self::check_tool_capability`] can additionally reject an edit
+    /// whose declared path falls outside every glob, on top of the ordinary
+    /// intent-level write gate every execution already goes through.
+    pub allowed_paths: Option<Vec<String>>,
 }
 
 impl ExecutionPolicy {
@@ -240,7 +249,34 @@ impl ExecutionPolicy {
             team,
             provider,
             intent_policy: for_intent(intent),
+            allowed_paths: None,
         })
+    }
+
+    /// Builds the policy for one HELPER execution in a lead-and-helper graph
+    /// (R6.4). A helper is never gated by [`SessionIntent`] the way a solo or
+    /// lead execution is -- its write authority comes from
+    /// `graph::ProposedHelperJob::role`/`allowed_paths` instead. `can_write`
+    /// mirrors `SessionIntent::Fix` when the job may write at all (Builder,
+    /// or any role with a non-empty path allowance -- the same rule
+    /// `graph::validate_graph`'s `MissingAllowedPaths` check already enforces
+    /// at proposal time) and `SessionIntent::Review` (read-only) otherwise,
+    /// so a Researcher/Verifier helper cannot reach a write tool no matter
+    /// what the lead's own prompt asked it to do.
+    pub fn resolve_for_helper(can_write: bool, allowed_paths: Vec<String>) -> Self {
+        let intent = if can_write {
+            SessionIntent::Fix
+        } else {
+            SessionIntent::Review
+        };
+        Self {
+            intent,
+            mode: ExecutionMode::Auto,
+            team: ExecutionTeam::Lead,
+            provider: ExecutionProvider::Copilot,
+            intent_policy: for_intent(intent),
+            allowed_paths: Some(allowed_paths),
+        }
     }
 
     /// Whether a tool call requesting `capability` may run right now.
@@ -256,6 +292,61 @@ impl ExecutionPolicy {
     ) -> Result<(), ToolRefusal> {
         check_tool_capability(self.intent, started, capability)
     }
+
+    /// R6.4's actual enforcement, not merely storage: on top of the ordinary
+    /// intent gate above, a HELPER execution (`allowed_paths.is_some()`) that
+    /// is about to edit/delete/move a specific file must have that path
+    /// covered by one of its allowed globs. `path` is `None` when the tool
+    /// call carried no location this build could read (see
+    /// `cli_run::extract_edit_path`'s doc comment) -- treated as a refusal
+    /// for a path-scoped helper, same fail-closed stance as
+    /// `ToolCapability::from_acp_kind`'s unknown-kind case, since a write
+    /// this code cannot locate cannot be proven to stay inside the
+    /// allowance.
+    pub fn check_path_allowance(&self, capability: ToolCapability, path: Option<&str>) -> Result<(), ToolRefusal> {
+        let Some(allowed) = &self.allowed_paths else {
+            // Not a path-scoped (helper) policy -- nothing further to check.
+            return Ok(());
+        };
+        if !capability.is_write() {
+            return Ok(());
+        }
+        let Some(path) = path else {
+            return Err(ToolRefusal::PathNotAllowed {
+                path: "(unknown path)".to_string(),
+            });
+        };
+        if allowed.iter().any(|glob| path_matches_glob(path, glob)) {
+            Ok(())
+        } else {
+            Err(ToolRefusal::PathNotAllowed {
+                path: path.to_string(),
+            })
+        }
+    }
+}
+
+/// A small, dependency-free glob match: `**` matches any number of path
+/// segments (including zero), `*` matches within one segment, everything
+/// else is literal. Repo-relative, forward-slash-normalized on both sides
+/// before comparing, so a Windows-style path from the tool call still
+/// compares correctly against a Unix-style glob from `ProposedHelperJob`.
+fn path_matches_glob(path: &str, glob: &str) -> bool {
+    let path = path.replace('\\', "/");
+    let glob = glob.replace('\\', "/");
+    if glob == "**" || glob == "*" {
+        return true;
+    }
+    if let Some(prefix) = glob.strip_suffix("/**") {
+        return path == prefix || path.starts_with(&format!("{prefix}/"));
+    }
+    if let Some(prefix) = glob.strip_suffix("**") {
+        return path.starts_with(prefix);
+    }
+    if let Some(prefix) = glob.strip_suffix("/*") {
+        return path.starts_with(&format!("{prefix}/")) && !path[prefix.len() + 1..].contains('/');
+    }
+    path == glob
 }
 
 /// A tool an execution might try to call, coarse enough to gate against
@@ -343,7 +434,9 @@ impl ToolCapability {
 /// through it, surfaced to the user) rather than silently dropping the call
 /// -- an agent that tried to write and got no error would look broken, not
 /// safely refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+// Not `Copy`: `PathNotAllowed` carries the offending path, so this owns a
+// `String` now. Cloned explicitly at the few call sites that need it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ToolRefusal {
     /// This intent can never call a write tool, regardless of mode/team.
@@ -351,6 +444,10 @@ pub enum ToolRefusal {
     /// This intent may write eventually, but not before the session's
     /// explicit Start action (Plan mode, before Start).
     NotStartedYet { intent: SessionIntent },
+    /// R6.4: a helper execution tried to write outside its own
+    /// `allowed_paths`. Distinct from `ReadOnlyIntent` -- this helper CAN
+    /// write, just not here.
+    PathNotAllowed { path: String },
 }
 
 /// THE enforcement point (task 4.5): decides whether `capability` may be
@@ -700,5 +797,72 @@ mod tests {
             ToolCapability::from_acp_kind(Some("some_future_kind_this_build_has_never_seen")),
             ToolCapability::EditFile
         );
+    }
+
+    // -- ExecutionPolicy::resolve_for_helper / check_path_allowance (R6.4) --
+
+    #[test]
+    fn a_helper_writing_inside_its_allowed_paths_is_permitted() {
+        let policy = ExecutionPolicy::resolve_for_helper(true, vec!["src/**".into()]);
+        assert!(policy
+            .check_path_allowance(ToolCapability::EditFile, Some("src/lib.rs"))
+            .is_ok());
+        assert!(policy
+            .check_path_allowance(ToolCapability::EditFile, Some("src/mod/inner.rs"))
+            .is_ok());
+    }
+
+    #[test]
+    fn a_helper_writing_outside_its_allowed_paths_is_refused() {
+        let policy = ExecutionPolicy::resolve_for_helper(true, vec!["src/**".into()]);
+        let result = policy.check_path_allowance(ToolCapability::EditFile, Some("Cargo.toml"));
+        assert!(matches!(result, Err(ToolRefusal::PathNotAllowed { ref path }) if path == "Cargo.toml"));
+    }
+
+    /// A write whose path this code could not read from the tool call at all
+    /// must fail closed for a path-scoped helper -- an unlocatable write
+    /// cannot be proven to stay inside the allowance.
+    #[test]
+    fn a_helper_write_with_no_readable_path_fails_closed() {
+        let policy = ExecutionPolicy::resolve_for_helper(true, vec!["src/**".into()]);
+        assert!(matches!(
+            policy.check_path_allowance(ToolCapability::EditFile, None),
+            Err(ToolRefusal::PathNotAllowed { .. })
+        ));
+    }
+
+    /// A read-only helper (Researcher/Verifier, empty `allowed_paths`) still
+    /// refuses at the ordinary `check_tool_capability` gate -- proven here so
+    /// the two enforcement layers (intent-level and path-level) are shown to
+    /// compose rather than one silently substituting for the other.
+    #[test]
+    fn a_read_only_helper_is_refused_at_the_capability_gate_before_path_checking_matters() {
+        let policy = ExecutionPolicy::resolve_for_helper(false, vec![]);
+        assert!(matches!(
+            policy.check_tool_capability(true, ToolCapability::EditFile),
+            Err(ToolRefusal::ReadOnlyIntent { .. })
+        ));
+    }
+
+    /// A solo/lead policy (`allowed_paths: None`) is never path-scoped --
+    /// `check_path_allowance` must be a no-op for it regardless of path.
+    #[test]
+    fn a_non_helper_policy_is_never_path_scoped() {
+        let policy = ExecutionPolicy::resolve(SessionIntent::Fix, ExecutionMode::Auto, ExecutionTeam::Lead, None)
+            .unwrap();
+        assert!(policy
+            .check_path_allowance(ToolCapability::EditFile, Some("anything/at/all.rs"))
+            .is_ok());
+    }
+
+    #[test]
+    fn glob_matching_supports_double_star_single_star_and_literal_paths() {
+        assert!(path_matches_glob("src/lib.rs", "src/**"));
+        assert!(path_matches_glob("src/a/b/c.rs", "src/**"));
+        assert!(path_matches_glob("src/lib.rs", "src/*"));
+        assert!(!path_matches_glob("src/a/b.rs", "src/*"));
+        assert!(path_matches_glob("Cargo.toml", "Cargo.toml"));
+        assert!(!path_matches_glob("Cargo.lock", "Cargo.toml"));
+        assert!(path_matches_glob("anything/here.rs", "**"));
     }
 }

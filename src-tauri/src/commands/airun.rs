@@ -665,10 +665,14 @@ pub async fn ai_run_start(
         .join("tasks.md");
 
     let (answer_tx, answer_rx) = std::sync::mpsc::channel::<GateAnswer>();
+    // This legacy path has at most one execution per repository at a time,
+    // so `(repo_id, repo_id)` is a faithful encoding of its old single-key
+    // behavior under the new `(session, execution)` key shape -- see
+    // `gate_answers`'s own doc comment.
     GATE_ANSWERS
         .lock()
         .unwrap()
-        .insert(repo_id.clone(), answer_tx);
+        .insert((repo_id.clone(), repo_id.clone()), answer_tx);
 
     let session_id = session.session_id.clone();
     let repo = repo_id.clone();
@@ -701,23 +705,41 @@ pub async fn ai_run_start(
                 },
             );
         }
-        GATE_ANSWERS.lock().unwrap().remove(&repo);
+        GATE_ANSWERS.lock().unwrap().remove(&(repo.clone(), repo));
     });
 
     Ok(StartOutcome::Started { session })
 }
 
-/// Gate answers, per repository, so `ai_run_answer_gate` can reach a live run.
+/// Gate answers, per (session, execution), so a real Agent Desk run's answer
+/// channel can be reached without colliding with a sibling execution.
+///
+/// R6.6: "Key approvals by session, execution, and gate ID." Before this
+/// change the map was keyed by `repo_id` alone -- correct for the demo
+/// console (one scripted run per repository) but wrong the moment a session
+/// can carry more than one concurrent execution against the same repository
+/// (a lead plus helpers, `ExecutionRecord::parent_execution_id`): two
+/// executions hitting a gate around the same time would insert into the SAME
+/// map entry, and the second insert would silently replace the first's
+/// sender -- an approval typed for the lead's gate could resume a helper's
+/// run instead, or vice versa, with no error either way. `ai_run_start`
+/// (the demo/legacy real-run path, still `repo_id`-only, unchanged) is
+/// unaffected: it never has more than one execution per repository at a
+/// time, so `(repo_id.clone(), repo_id.clone())` below is a faithful,
+/// harmless encoding of its existing single-key behavior -- see that
+/// call site's own comment.
+pub(crate) type GateAnswerKey = (String, String);
+
 static GATE_ANSWERS: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<String, std::sync::mpsc::Sender<GateAnswer>>>,
+    std::sync::Mutex<std::collections::HashMap<GateAnswerKey, std::sync::mpsc::Sender<GateAnswer>>>,
 > = std::sync::LazyLock::new(Default::default);
 
-/// Crate-visible accessor to the same per-repository gate-answer registry
-/// `ai_run_start` populates, so `commands::agent_desk::start_execution_at`
-/// registers a real engine's answer channel exactly the same way -- one
-/// registry, not a second one that `ai_run_answer_gate` would not know about.
+/// Crate-visible accessor to the same gate-answer registry `ai_run_start`
+/// populates, so `commands::agent_desk::start_execution_at` (and, for R6.3,
+/// every helper launch) registers a real engine's answer channel exactly the
+/// same way -- one registry, not a second one nothing else would know about.
 pub(crate) fn gate_answers(
-) -> &'static std::sync::Mutex<std::collections::HashMap<String, std::sync::mpsc::Sender<GateAnswer>>>
+) -> &'static std::sync::Mutex<std::collections::HashMap<GateAnswerKey, std::sync::mpsc::Sender<GateAnswer>>>
 {
     &GATE_ANSWERS
 }

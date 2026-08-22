@@ -320,6 +320,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_desk::agent_session_attach_context,
             commands::agent_desk::agent_session_start_execution,
             commands::agent_desk::agent_session_stop_execution,
+            commands::agent_desk::agent_session_answer_gate,
             commands::agent_desk::agent_session_usage,
             commands::agent_desk::agent_session_refresh_source,
             commands::agent_desk::agent_session_open_source,

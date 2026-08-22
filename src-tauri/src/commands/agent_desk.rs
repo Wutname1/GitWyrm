@@ -966,6 +966,20 @@ enum RecordOutcome {
 /// second concurrent call could win. This function is the fix: the write
 /// that would let a second call proceed is gated by the same read that
 /// decides whether it is allowed to.
+/// The "what actually ran" facts stamped onto an execution when it is created
+/// (R3.5). Bundled rather than passed as six more parameters, so the recorder's
+/// signature stays readable and a future field is one struct member instead of
+/// another argument at every call site.
+#[derive(Default, Clone)]
+struct ExecutionProvenance {
+    worktree_path: Option<String>,
+    branch: Option<String>,
+    base_oid: Option<String>,
+    provider: Option<String>,
+    mode: Option<String>,
+    team: Option<String>,
+}
+
 fn record_execution_if_not_running(
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
@@ -976,6 +990,10 @@ fn record_execution_if_not_running(
     // same locked write that creates the record, so the record and the context
     // it was given can never disagree.
     context_fingerprint: Option<String>,
+    // R3.5: where this run worked and under what authority, written in the same
+    // locked write that creates the record so a restart can always answer
+    // "what actually ran, and where are its changes".
+    provenance: ExecutionProvenance,
 ) -> RecordOutcome {
     use crate::agentdesk::model::SessionLoadError as E;
     locks.with_session_lock(session_id, || {
@@ -1015,6 +1033,12 @@ fn record_execution_if_not_running(
             0,
         );
         record.context_fingerprint = context_fingerprint.clone();
+        record.worktree_path = provenance.worktree_path.clone();
+        record.branch = provenance.branch.clone();
+        record.base_oid = provenance.base_oid.clone();
+        record.provider = provenance.provider.clone();
+        record.mode = provenance.mode.clone();
+        record.team = provenance.team.clone();
         session.executions.push(record);
         session.header.active_execution_id = Some(execution_id.clone());
         session.header.state = SessionState::Preparing;
@@ -1164,6 +1188,9 @@ fn start_execution_at(
     // `AwaitingStart`, not inside `start_execution_at` itself). Once
     // started, Plan behaves like Fix and also gets a worktree.
     let intent_policy = crate::agentdesk::policy::for_intent(session.header.intent);
+    // Set only when a worktree is provisioned below (R3.5).
+    let mut run_branch: Option<String> = None;
+    let mut base_oid_for_record: Option<String> = None;
     let engine_root = match intent_policy.worktree {
         crate::agentdesk::policy::WorktreePolicy::Never => open.path.clone(),
         crate::agentdesk::policy::WorktreePolicy::Always
@@ -1180,6 +1207,10 @@ fn start_execution_at(
             // from whatever the user has checked out right now.
             let base_branch = {
                 let repo = open.repo.lock().unwrap();
+                // R3.5: the commit this run started from, so a later reader can
+                // diff against exactly what the agent saw rather than against
+                // wherever the branch has since moved.
+                base_oid_for_record = repo.head().ok().and_then(|h| h.target()).map(|o| o.to_string());
                 // git2 0.21's `Reference::shorthand` returns
                 // `Result<&str, Utf8Error>`, not `Option<&str>` (an accessor
                 // migration from earlier git2 versions) -- `.ok()` here is
@@ -1195,8 +1226,14 @@ fn start_execution_at(
             {
                 crate::commands::agent_kickoff::ProvisionKickoffWorktreeOutcome::Provisioned {
                     path,
-                    ..
-                } => std::path::PathBuf::from(path),
+                    branch,
+                } => {
+                    // R3.5: remember where this run actually worked and what it
+                    // branched from. Without these a restart can tell you a run
+                    // happened but not where its changes live.
+                    run_branch = Some(branch);
+                    std::path::PathBuf::from(path)
+                }
                 crate::commands::agent_kickoff::ProvisionKickoffWorktreeOutcome::Failed { detail } => {
                     // Task 5.2: refused outright, never falls back to
                     // `open.path`.
@@ -1205,6 +1242,10 @@ fn start_execution_at(
             }
         }
     };
+
+    // Filled in above when this intent provisions a worktree; `None` for a
+    // read-only run that works against the checkout in place.
+    let run_branch_for_record = run_branch.clone();
 
     // Step 3: mint the durable execution ID up front and link the repository
     // to this session *before* the engine can produce a single event -- a run
@@ -1253,7 +1294,23 @@ fn start_execution_at(
     // lock rather than holding it across `discover` is deliberate: a slow
     // shell-out must never serialize behind a held session lock.
     let record_outcome =
-        record_execution_if_not_running(locks, root, session_id, execution_id.clone(), context_fingerprint);
+        record_execution_if_not_running(
+            locks,
+            root,
+            session_id,
+            execution_id.clone(),
+            context_fingerprint,
+            ExecutionProvenance {
+                worktree_path: run_branch_for_record
+                    .as_ref()
+                    .map(|_| engine_root.to_string_lossy().to_string()),
+                branch: run_branch_for_record.clone(),
+                base_oid: base_oid_for_record.clone(),
+                provider: Some(format!("{:?}", policy.provider)),
+                mode: Some(format!("{:?}", policy.mode)),
+                team: Some(format!("{:?}", policy.team)),
+            },
+        );
     let session_after = match record_outcome {
         RecordOutcome::Updated { session } => session,
         RecordOutcome::AlreadyRunning { execution_id } => {
@@ -1291,7 +1348,14 @@ fn start_execution_at(
     // duplicates that fan-out.
     let run_session_id = execution_id.clone();
     let (answer_tx, answer_rx) = std::sync::mpsc::channel::<crate::airun::driver::GateAnswer>();
-    crate::commands::airun::gate_answers().lock().unwrap().insert(repo_id.clone(), answer_tx);
+    // R6.6: keyed by (session, execution), not `repo_id` -- a lead and its
+    // helpers share one `repo_id` but must never share one gate-answer slot
+    // (see `gate_answers`'s own doc comment for the exact failure this
+    // avoids).
+    crate::commands::airun::gate_answers()
+        .lock()
+        .unwrap()
+        .insert((session_id.to_string(), run_session_id.clone()), answer_tx);
 
     // Task 2.1/2.2: this execution's entry in the runtime registry -- keyed
     // by the durable session and execution ID, not `repo_id` -- is created
@@ -1347,7 +1411,7 @@ fn start_execution_at(
         crate::commands::airun::gate_answers()
             .lock()
             .unwrap()
-            .remove(&repo_for_task);
+            .remove(&(session_id_for_task.clone(), run_session_id_for_task.clone()));
         // Task 2.5's other half: whatever called `ExecutionRegistry::stop`
         // and is awaiting `wait_for_stop` needs to observe completion
         // exactly once `run_task` has actually finished (including its own
@@ -1393,7 +1457,7 @@ fn start_execution_at(
             crate::commands::airun::gate_answers()
                 .lock()
                 .unwrap()
-                .remove(&repo_for_watchdog);
+                .remove(&(session_id_for_watchdog.clone(), run_session_id_for_watchdog.clone()));
             // A panic inside the spawned task skips the ordinary
             // `executions_for_task.complete(...)` call above entirely (the
             // panic unwinds out of that task, not into this watchdog's own
@@ -1745,6 +1809,57 @@ pub async fn agent_session_stop_execution(
     )
     .await;
     Ok(outcome)
+}
+
+/// Whether an approval reached a live gate. R6.6's other half: an approval
+/// must reach ONLY the execution that actually asked for it -- a helper's
+/// gate can never be answered by a click meant for the lead's, or a
+/// sibling's, even though all three can be open in the same session at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum AnswerGateOutcome {
+    /// The answer reached a live gate for this exact (session, execution).
+    Delivered,
+    /// Nothing in this process is waiting on a gate for this (session,
+    /// execution) pair -- it may have already been answered, the run may
+    /// have finished/stopped, or this process never started it (a session
+    /// reopened after a restart). Not an error: the visible effect is simply
+    /// that nothing happens, same as `ExecutionRegistry::stop`'s `NotLive`.
+    NoLiveGate,
+}
+
+/// Answers a gate for exactly one live Agent Desk execution.
+///
+/// Looked up by `(session_id, execution_id)` in the SAME registry
+/// `start_execution_at` populates before the run's first `Working` event
+/// (see that function's own comment on `gate_answers()`) -- never by
+/// `repo_id` alone, which is what let one session's lead and helper gates
+/// collide before R6.6.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_answer_gate(
+    session_id: SessionId,
+    execution_id: ExecutionId,
+    answer: crate::airun::driver::GateAnswer,
+) -> Result<AnswerGateOutcome, AppError> {
+    let sender = crate::commands::airun::gate_answers()
+        .lock()
+        .unwrap()
+        .get(&(session_id, execution_id))
+        .cloned();
+    match sender {
+        Some(tx) => {
+            // A closed receiver means the run already ended between the
+            // lookup above and this send -- reported the same as never
+            // having found one, since the visible effect (nothing resumes)
+            // is identical either way.
+            match tx.send(answer) {
+                Ok(()) => Ok(AnswerGateOutcome::Delivered),
+                Err(_) => Ok(AnswerGateOutcome::NoLiveGate),
+            }
+        }
+        None => Ok(AnswerGateOutcome::NoLiveGate),
+    }
 }
 
 /// Normalized provider usage for one session (architecture.md section 12).
@@ -3690,11 +3805,11 @@ mod tests {
         let (outcome_a, outcome_b) = std::thread::scope(|scope| {
             let a = scope.spawn(|| {
                 barrier.wait();
-                record_execution_if_not_running(locks_ref, root_ref, session_id_ref, exec_a.clone(), None)
+                record_execution_if_not_running(locks_ref, root_ref, session_id_ref, exec_a.clone(), None, ExecutionProvenance::default())
             });
             let b = scope.spawn(|| {
                 barrier.wait();
-                record_execution_if_not_running(locks_ref, root_ref, session_id_ref, exec_b.clone(), None)
+                record_execution_if_not_running(locks_ref, root_ref, session_id_ref, exec_b.clone(), None, ExecutionProvenance::default())
             });
             (a.join().unwrap(), b.join().unwrap())
         });
@@ -4232,7 +4347,7 @@ mod tests {
             // the engine) and confirm the record is keyed to this session,
             // not a different task's.
             let record_outcome =
-                record_execution_if_not_running(&locks, &root, &session_id, "exec-1".to_string(), None);
+                record_execution_if_not_running(&locks, &root, &session_id, "exec-1".to_string(), None, ExecutionProvenance::default());
             let RecordOutcome::Updated { session: after_start } = record_outcome else {
                 panic!("expected the execution to record");
             };

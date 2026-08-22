@@ -300,6 +300,24 @@ fn handle(
                 return;
             }
 
+            // R6.4: a HELPER execution (`policy.allowed_paths.is_some()`)
+            // that passed the ordinary capability gate above must still stay
+            // inside its own path allowance -- enforced here, not merely
+            // recorded on the `ExecutionRecord`, so a helper cannot edit a
+            // sibling's files just because its role permits writing at all.
+            let edit_path = extract_edit_path(&tool_call);
+            if let Err(refusal) = policy.check_path_allowance(capability, edit_path.as_deref()) {
+                sink(
+                    RunState::Working,
+                    RunStep::Note {
+                        text: refusal_note(&refusal),
+                    },
+                );
+                let decision = pick(&options, false);
+                let _ = respond.send(decision);
+                return;
+            }
+
             sink(RunState::NeedsYou, RunStep::Gate { request });
 
             // Blocking here is what "the run fully pauses" means: the agent's turn
@@ -329,7 +347,26 @@ fn refusal_note(refusal: &crate::agentdesk::policy::ToolRefusal) -> String {
         ToolRefusal::NotStartedYet { .. } => {
             "This plan hasn't been started yet, so that change was turned down. Press Start to let it make changes.".to_string()
         }
+        ToolRefusal::PathNotAllowed { path } => {
+            format!("This helper can only change its own files, and \"{path}\" isn't one of them, so that change was turned down.")
+        }
     }
+}
+
+/// Best-effort extraction of the file path a write-shaped tool call names,
+/// from ACP's `toolCall.locations` array (`[{ "path": "...": ... }, ...]`).
+/// Only the first location is used -- a tool call touching several files at
+/// once is not a shape any provider this build talks to produces today, and
+/// `check_path_allowance` fails closed (refuses) when this returns `None`
+/// rather than guessing a single path covers a multi-file edit.
+fn extract_edit_path(tool_call: &serde_json::Value) -> Option<String> {
+    tool_call
+        .get("locations")
+        .and_then(|v| v.as_array())
+        .and_then(|locations| locations.first())
+        .and_then(|loc| loc.get("path"))
+        .and_then(|p| p.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Chooses an allow-once or reject-once option from what the agent offered.
@@ -617,6 +654,73 @@ mod tests {
         let (sink, log) = recording_sink();
         let (answer_tx, answers) = mpsc::channel::<GateAnswer>();
         let (item, mut decision_rx) = permission_request("edit");
+
+        answer_tx.send(GateAnswer::AllowOnce).unwrap();
+        handle(item, &sink, &answers, &policy, true);
+
+        let decision = decision_rx.try_recv().expect("a decision was sent");
+        assert!(matches!(decision, PermissionDecision::AllowOnce { .. }));
+        let recorded = log.lock().unwrap();
+        assert!(recorded.iter().any(|(_, step)| matches!(step, RunStep::Gate { .. })));
+    }
+
+    // -- R6.4: helper path-allowance enforcement inside handle() --
+
+    fn permission_request_with_path(
+        kind: &str,
+        path: &str,
+    ) -> (Incoming, tokio::sync::oneshot::Receiver<PermissionDecision>) {
+        let (respond, rx) = tokio::sync::oneshot::channel();
+        let item = Incoming::PermissionRequest {
+            tool_call: serde_json::json!({
+                "title": "Edit a file",
+                "kind": kind,
+                "locations": [{ "path": path }],
+            }),
+            options: vec![opt("allow_once", "a"), opt("reject_once", "r")],
+            respond,
+        };
+        (item, rx)
+    }
+
+    #[test]
+    fn extract_edit_path_reads_the_first_location() {
+        let call = serde_json::json!({ "locations": [{ "path": "src/lib.rs" }, { "path": "src/other.rs" }] });
+        assert_eq!(extract_edit_path(&call).as_deref(), Some("src/lib.rs"));
+    }
+
+    #[test]
+    fn extract_edit_path_is_none_when_no_locations_are_present() {
+        assert_eq!(extract_edit_path(&serde_json::json!({})), None);
+    }
+
+    /// The literal R6.4 scenario: a helper whose `allowed_paths` is
+    /// `src/**` tries to edit a file outside that allowance. Refused before
+    /// the user ever sees a gate, exactly like the read-only-intent case.
+    #[test]
+    fn a_helper_edit_outside_its_allowed_paths_is_refused_before_a_gate_is_shown() {
+        let policy = ExecutionPolicy::resolve_for_helper(true, vec!["src/**".into()]);
+        let (sink, log) = recording_sink();
+        let answers = closed_answers();
+        let (item, mut decision_rx) = permission_request_with_path("edit", "Cargo.toml");
+
+        handle(item, &sink, &answers, &policy, true);
+
+        let decision = decision_rx.try_recv().expect("a decision was sent");
+        assert!(matches!(decision, PermissionDecision::RejectOnce { .. }));
+        let recorded = log.lock().unwrap();
+        assert!(recorded.iter().any(|(_, step)| matches!(step, RunStep::Note { .. })));
+        assert!(!recorded.iter().any(|(_, step)| matches!(step, RunStep::Gate { .. })));
+    }
+
+    /// The same helper editing a file that IS inside its allowance reaches
+    /// the ordinary approval gate exactly like a lead/solo execution would.
+    #[test]
+    fn a_helper_edit_inside_its_allowed_paths_reaches_the_approval_gate() {
+        let policy = ExecutionPolicy::resolve_for_helper(true, vec!["src/**".into()]);
+        let (sink, log) = recording_sink();
+        let (answer_tx, answers) = mpsc::channel::<GateAnswer>();
+        let (item, mut decision_rx) = permission_request_with_path("edit", "src/lib.rs");
 
         answer_tx.send(GateAnswer::AllowOnce).unwrap();
         handle(item, &sink, &answers, &policy, true);

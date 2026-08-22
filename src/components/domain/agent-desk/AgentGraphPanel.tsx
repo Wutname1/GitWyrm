@@ -111,6 +111,45 @@ function InspectorCard({
         .filter(Boolean)
         .join(' · ')
   const canStop = execution.state === 'working' || execution.state === 'preparing' || execution.state === 'needsInput'
+  const [resolving, setResolving] = useState<'helper' | 'integrated' | null>(null)
+
+  // R6.8: preserve both sides of a conflict and resume only the selected
+  // integration -- this node's own `conflict` (set by
+  // `integrate_helper_result` on the backend) names the base/helper/
+  // already-integrated text; picking either keeps the OTHER copy fully
+  // intact on disk (it was never overwritten), it just is not the one this
+  // node's own result carries forward.
+  const resolveConflict = async (resolution: 'keepHelper' | 'keepIntegrated') => {
+    if (resolving) return
+    setResolving(resolution === 'keepHelper' ? 'helper' : 'integrated')
+    try {
+      const outcome = unwrap(
+        await commands.agentSessionResolveConflict(session.header.sessionId, execution.executionId, {
+          kind: resolution,
+        })
+      )
+      if (outcome.kind === 'resolved') {
+        void qc.invalidateQueries({ queryKey: keys.agentSession(session.header.sessionId) })
+        toast.success(
+          resolution === 'keepHelper' ? 'Kept this agent’s version.' : 'Kept the already-integrated version.'
+        )
+      } else if (outcome.kind === 'noConflict') {
+        toast.error('That conflict is already resolved.')
+      } else if (outcome.kind === 'notFound') {
+        toast.error('This chat is gone. It may have been archived elsewhere.')
+      } else if (outcome.kind === 'damaged') {
+        toast.error('This chat file is damaged.', { description: outcome.reason })
+      } else {
+        toast.error('Could not resolve that conflict.', { description: outcome.kind })
+      }
+    } catch (e) {
+      const message = describeError(e)
+      log.error(`agent desk: could not resolve conflict on ${execution.executionId}: ${message}`)
+      toast.error('Could not resolve that conflict.', { description: message })
+    } finally {
+      setResolving(null)
+    }
+  }
 
   const stopThis = async () => {
     if (stopping) return
@@ -154,6 +193,35 @@ function InspectorCard({
       <div className="mt-1 text-xs font-semibold text-foreground">{title}</div>
       <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">{description}</p>
       {filesLine ? <div className="mt-1.5 font-mono text-[10px] text-muted-foreground">{filesLine}</div> : null}
+      {execution.conflict ? (
+        <div className="mt-2 rounded border border-[var(--gw-amber)]/50 bg-panel2 p-2">
+          <div className="text-[9px] font-bold uppercase tracking-wide text-[var(--gw-amber)]">
+            Both versions changed {execution.conflict.path}
+          </div>
+          <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
+            This agent and another change to the same file both edited it. Nothing was kept automatically -- pick which
+            version to carry forward. The other version stays on disk either way.
+          </p>
+          <div className="mt-2 flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => void resolveConflict('keepHelper')}
+              disabled={resolving !== null}
+              className="rounded border border-border bg-panel px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {resolving === 'helper' ? 'Keeping…' : 'Keep this agent’s version'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void resolveConflict('keepIntegrated')}
+              disabled={resolving !== null}
+              className="rounded border border-border bg-panel px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {resolving === 'integrated' ? 'Keeping…' : 'Keep the other version'}
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="mt-2 flex gap-1.5">
         <button
           type="button"

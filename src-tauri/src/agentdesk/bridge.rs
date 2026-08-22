@@ -155,17 +155,35 @@ pub fn apply_run_event(
     occurred_at: &str,
     event: &RunEventKind,
 ) -> BridgeOutcome {
+    // Whether `execution_id` already has a record naming it a HELPER
+    // (`parent_execution_id.is_some()`) -- R6.3/R6.7: a helper's events must
+    // keep landing on its own `ExecutionRecord` and must never be treated as
+    // "superseded" just because the session's single `active_execution_id`
+    // slot names the lead (or a different helper). `active_execution_id` is
+    // a lead-track concept only -- see `find_or_start_execution`'s own doc
+    // comment on why a brand-new id is never rejected here, and this is the
+    // same reasoning extended to an id that already exists but is a helper's.
+    let is_known_helper = session
+        .executions
+        .iter()
+        .any(|e| &e.execution_id == execution_id && e.parent_execution_id.is_some());
+
     // "Event for a replaced execution": this execution has already appeared
-    // in the session (it has a record) but is no longer the active one.
-    // A never-before-seen execution ID is always allowed to start and become
-    // active -- that is how a session's second, third, ... execution (a
-    // retry, a follow-up) is meant to begin. It is only an event arriving
-    // *after* its execution was superseded by another that is stale.
+    // in the session (it has a record) but is no longer the active LEAD
+    // track. A never-before-seen execution ID is always allowed to start and
+    // become active -- that is how a session's second, third, ... execution
+    // (a retry, a follow-up) is meant to begin. It is only an event arriving
+    // *after* its lead execution was superseded by another that is stale.
+    // Helper executions are exempt: `active_execution_id` never names a
+    // helper (see `commit_started_graph_if_still_proposed`, which sets it to
+    // the lead), so a helper record is never "the active one" by that
+    // check's original meaning, and applying it to helpers would silently
+    // drop every helper event forever the moment the graph starts.
     let already_known = session
         .executions
         .iter()
         .any(|e| &e.execution_id == execution_id);
-    if already_known {
+    if already_known && !is_known_helper {
         if let Some(active) = &session.header.active_execution_id {
             if active != execution_id {
                 return BridgeOutcome::ExecutionSuperseded {
@@ -196,6 +214,8 @@ pub fn apply_run_event(
     // there is no separate stored flag because the gap is fully recoverable
     // from `sequence` vs. the previous message's `sequence` for the same
     // execution.
+    let record_is_helper = record.parent_execution_id.is_some();
+
     record.last_sequence = sequence;
     record.state = map_run_state(event.state);
     if !matches!(event.state, AirunRunState::Finished | AirunRunState::Stopped | AirunRunState::Failed) {
@@ -235,12 +255,25 @@ pub fn apply_run_event(
         }
         AgentSessionEventKind::StateChanged { .. } | AgentSessionEventKind::ExecutionSuperseded { .. } => {}
     }
-    // The session's own state always tracks its active execution's state,
-    // not only on the `Ended` step that produces an explicit `StateChanged`
-    // event -- a run entering `Preparing`/`Working`/`NeedsYou` moves the
-    // session there too, it just does so alongside a transcript message
-    // instead of as the event's sole content.
-    session.header.state = map_run_state(event.state);
+    // The session's own header state always tracks its LEAD execution's
+    // state, not only on the `Ended` step that produces an explicit
+    // `StateChanged` event -- a run entering `Preparing`/`Working`/`NeedsYou`
+    // moves the session there too, it just does so alongside a transcript
+    // message instead of as the event's sole content.
+    //
+    // A helper's own event must NEVER overwrite this (R6.3/R6.7): before this
+    // guard, a helper finishing after the lead had already moved on to
+    // reviewing results would flip `session.header.state` back to
+    // `Finished`/`Working` and, via `find_or_start_execution`'s brand-new-id
+    // branch, `active_execution_id` itself, hijacking the whole session's
+    // displayed status away from the lead the user is actually watching. The
+    // Graph panel still sees every helper's own state through
+    // `session.executions` (`agentGraphProjection.ts`, `graph::project_graph`)
+    // regardless of this guard -- only the single session-wide header summary
+    // is scoped to the lead.
+    if !record_is_helper {
+        session.header.state = map_run_state(event.state);
+    }
     session.header.updated_at = occurred_at.to_string();
 
     let durable = AgentSessionEvent {
@@ -1299,5 +1332,134 @@ mod tests {
         );
         assert_eq!(reread.messages[0].plain_content, "chunk one chunk two chunk three");
         assert_eq!(reread.executions[0].last_sequence, 3);
+    }
+
+    // -- R6.3/R6.7: a helper's own events must keep landing while the lead
+    // (or a sibling helper) is the session's `active_execution_id`. --
+
+    fn helper_record(execution_id: &str, lead_id: &str) -> ExecutionRecord {
+        ExecutionRecord::minimal(
+            execution_id.into(),
+            "sess-1".into(),
+            Some(lead_id.into()),
+            SessionState::Ready,
+            "2026-01-01T00:00:00Z".into(),
+            None,
+            0,
+        )
+    }
+
+    /// Before the fix, a helper record that already existed (created by
+    /// `commit_started_graph_if_still_proposed` before it is launched) but
+    /// was not `active_execution_id` would hit the "replaced execution"
+    /// branch and be reported `ExecutionSuperseded` -- silently dropping
+    /// every one of its events forever, since `active_execution_id` never
+    /// names a helper at all.
+    #[test]
+    fn a_helpers_own_events_are_applied_even_though_the_lead_is_the_active_execution() {
+        let mut session = session();
+        session.header.active_execution_id = Some("lead-1".into());
+        session.executions.push(ExecutionRecord::minimal(
+            "lead-1".into(),
+            "sess-1".into(),
+            None,
+            SessionState::Working,
+            "2026-01-01T00:00:00Z".into(),
+            None,
+            0,
+        ));
+        session.executions.push(helper_record("helper-1", "lead-1"));
+
+        let event = run_event(AirunRunState::Working, RunStep::Note { text: "helper says hi".into() });
+        let outcome = apply_run_event(&mut session, &"helper-1".to_string(), 1, "2026-01-01T00:00:01Z", &event);
+
+        match outcome {
+            BridgeOutcome::Applied { session: applied, .. } => {
+                let helper = applied
+                    .executions
+                    .iter()
+                    .find(|e| e.execution_id == "helper-1")
+                    .unwrap();
+                assert_eq!(helper.last_sequence, 1, "the helper's own event must be recorded, not dropped");
+                assert_eq!(helper.state, SessionState::Working);
+            }
+            other => panic!("expected Applied, got {other:?}"),
+        }
+    }
+
+    /// A helper reaching a terminal state (Finished) must never overwrite
+    /// `session.header.state`/`active_execution_id` away from the lead --
+    /// the header is the single session-wide status the sidebar/title bar
+    /// show, and it must always reflect the LEAD, not whichever execution's
+    /// event happened to land last.
+    #[test]
+    fn a_finished_helper_does_not_hijack_the_session_header_away_from_the_working_lead() {
+        let mut session = session();
+        session.header.active_execution_id = Some("lead-1".into());
+        session.header.state = SessionState::Working;
+        session.executions.push(ExecutionRecord::minimal(
+            "lead-1".into(),
+            "sess-1".into(),
+            None,
+            SessionState::Working,
+            "2026-01-01T00:00:00Z".into(),
+            None,
+            0,
+        ));
+        session.executions.push(helper_record("helper-1", "lead-1"));
+
+        let event = run_event(
+            AirunRunState::Finished,
+            RunStep::Ended { state: AirunRunState::Finished, detail: "done".into() },
+        );
+        let outcome = apply_run_event(&mut session, &"helper-1".to_string(), 1, "2026-01-01T00:00:01Z", &event);
+
+        match outcome {
+            BridgeOutcome::Applied { session: applied, .. } => {
+                assert_eq!(
+                    applied.header.state,
+                    SessionState::Working,
+                    "the session header must keep tracking the lead, not the helper that just finished"
+                );
+                assert_eq!(applied.header.active_execution_id, Some("lead-1".to_string()));
+                let helper = applied
+                    .executions
+                    .iter()
+                    .find(|e| e.execution_id == "helper-1")
+                    .unwrap();
+                assert_eq!(helper.state, SessionState::Finished, "the helper's OWN record still reflects its finish");
+            }
+            other => panic!("expected Applied, got {other:?}"),
+        }
+    }
+
+    /// The LEAD's own events still drive the session header exactly as
+    /// before this change -- the guard only exempts helpers.
+    #[test]
+    fn the_leads_own_event_still_drives_the_session_header() {
+        let mut session = session();
+        session.header.active_execution_id = Some("lead-1".into());
+        session.executions.push(ExecutionRecord::minimal(
+            "lead-1".into(),
+            "sess-1".into(),
+            None,
+            SessionState::Working,
+            "2026-01-01T00:00:00Z".into(),
+            None,
+            0,
+        ));
+
+        let event = run_event(
+            AirunRunState::Finished,
+            RunStep::Ended { state: AirunRunState::Finished, detail: "done".into() },
+        );
+        let outcome = apply_run_event(&mut session, &"lead-1".to_string(), 1, "2026-01-01T00:00:01Z", &event);
+
+        match outcome {
+            BridgeOutcome::Applied { session: applied, .. } => {
+                assert_eq!(applied.header.state, SessionState::Finished);
+            }
+            other => panic!("expected Applied, got {other:?}"),
+        }
     }
 }

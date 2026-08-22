@@ -3132,6 +3132,23 @@ async agentSessionStopExecution(sessionId: string, scope: StopScope) : Promise<R
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Answers a gate for exactly one live Agent Desk execution.
+ * 
+ * Looked up by `(session_id, execution_id)` in the SAME registry
+ * `start_execution_at` populates before the run's first `Working` event
+ * (see that function's own comment on `gate_answers()`) -- never by
+ * `repo_id` alone, which is what let one session's lead and helper gates
+ * collide before R6.6.
+ */
+async agentSessionAnswerGate(sessionId: string, executionId: string, answer: GateAnswer) : Promise<Result<AnswerGateOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_answer_gate", { sessionId, executionId, answer }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async agentSessionUsage(sessionId: string) : Promise<Result<SessionUsageOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_usage", { sessionId }) };
@@ -3614,6 +3631,25 @@ createdAt: string;
 updatedAt: string; unread: boolean; changedFileCount: number; activeExecutionId: string | null; archived: boolean }
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
+/**
+ * Whether an approval reached a live gate. R6.6's other half: an approval
+ * must reach ONLY the execution that actually asked for it -- a helper's
+ * gate can never be answered by a click meant for the lead's, or a
+ * sibling's, even though all three can be open in the same session at once.
+ */
+export type AnswerGateOutcome = 
+/**
+ * The answer reached a live gate for this exact (session, execution).
+ */
+{ kind: "delivered" } | 
+/**
+ * Nothing in this process is waiting on a gate for this (session,
+ * execution) pair -- it may have already been answered, the run may
+ * have finished/stopped, or this process never started it (a session
+ * reopened after a restart). Not an error: the visible effect is simply
+ * that nothing happens, same as `ExecutionRegistry::stop`'s `NotLive`.
+ */
+{ kind: "noLiveGate" }
 export type AppendUserMessageOutcome = { kind: "appended"; session: AgentSession; message: SessionMessage } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "writeFailed"; detail: string } | 
 /**
  * The file could not be read right now -- a permission error, or a lock
