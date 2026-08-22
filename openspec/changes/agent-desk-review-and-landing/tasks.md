@@ -5,20 +5,38 @@
 - [x] 1.1 Define result references for execution/helper, worktree, base/head, changed paths,
       checks, commit, source, OpenSpec task, and cleanup state.
       (`src-tauri/src/agentdesk/result.rs`: `ResultRecord`)
-- [ ] 1.2 Build result records automatically from live completion state; do not duplicate diff text.
-      (`commands::agent_result::agent_result_build` reads worktree status live via git2,
-      never persists diff text)
+- [x] 1.2 Build result records automatically from live completion state; do not duplicate diff text.
+      Reversed as of 2026-08-21 (R3.7 landed): `route_to_agent_desk` (`commands/airun.rs`) now
+      calls `build_result_for_completed_execution` automatically the moment a durable event
+      reaches `Finished`/`Stopped`/`Failed` (`terminal_result_outcome`), not only on a
+      user-triggered "refresh." Verified `agent_result_build` reads worktree status live via
+      git2 and the `ResultRecord` type has no diff-text field.
 - [ ] 1.3 Persist partial results automatically for stopped/failed/conflicted executions.
-      (`ResultOutcomeKind::{Stopped,Failed,Conflicted}`, accepted by `agent_result_build`)
+      PARTIAL: Stopped and Failed are genuinely covered by the same automatic build (1.2).
+      Conflicted is not reachable: `ResultOutcomeKind::Conflicted` is defined
+      (`agentdesk/result.rs`) but `terminal_result_outcome`'s match only produces
+      `Finished`/`Stopped`/`Failed` -- there is no `SessionState::Conflicted` at all (a
+      conflicted helper is `NeedsInput`, indistinguishable there from a gate-wait, per the
+      `agent-desk-agent-graphs` audit's finding). Left unchecked because the task names
+      "conflicted" explicitly and it is definitionally unreachable today.
 - [x] 1.4 Add typed states: reviewing, revision-requested, kept, committed, discarded,
       cleanup-needed, and cleanup-failed. (`ResultState` enum, all 7 variants)
 
 ## 2. Review UI
 
-- [ ] 2.1 Mount the changed-file list and combined summary in the production completion flow,
+- [x] 2.1 Mount the changed-file list and combined summary in the production completion flow,
       linked to the existing diff view.
-      (`ResultReviewPanel.tsx`; "View diff" opens the real `DiffView` via the new
-      main-window bridge, not a copy)
+      Reversed as of 2026-08-21 (R3.8 landed): `ConversationPane.tsx` now genuinely imports
+      and renders `ResultReviewPanel`, gated on `shouldShowResultPanel(state, activeExecutionId)`
+      so it appears once an execution reaches a terminal state, keyed to that execution so it
+      never shows a stale earlier run's result. Its own doc comment says "existed since the
+      review-and-landing package shipped but had zero importers anywhere in the app" -- this
+      is the fix. "View diff" calls `commands.agentResultOpenDiff`, which
+      (`src-tauri/src/commands/agent_result.rs`) focuses the real main window and emits
+      `agent-result://open-diff`; `useAgentResultDiffListener` (mounted in `App.tsx`, main
+      window only) opens the worktree as a real repo tab via `commands.openRepo` and points
+      the actual `uiStore.openDiff` at it -- the SAME `DiffView` an ordinary repo tab uses,
+      not a second diff renderer.
 - [ ] 2.2 Let graph node Output/View diff open its helper-scoped result.
       (`agent_result_open_diff` command + `useAgentResultDiffListener` bridge; wiring
       the graph node's own button is owned by whoever builds `AgentGraphPanel.tsx`,
@@ -35,9 +53,12 @@
 
 ## 3. Keep, undo, and commit
 
-- [ ] 3.1 Route the mounted Keep/Undo actions through existing run completion commands/outcomes.
-      (`agent_result_keep`/`agent_result_undo` reuse `git::worktree::dirty_count`/`remove`,
-      the same primitives `commands::airun`'s discard-plan uses)
+- [x] 3.1 Route the mounted Keep/Undo actions through existing run completion commands/outcomes.
+      Reversed as of 2026-08-21: the task's own name says "mounted," and per 2.1 the panel
+      genuinely is now. `ResultReviewPanel.tsx`'s `handleKeep`/`handleUndo` call
+      `commands.agentResultKeep`/`agentResultUndo`, and both were already confirmed (2026-08-20
+      pass) to reuse `git::worktree::dirty_count`/`remove` -- the same primitives
+      `commands::airun`'s discard-plan uses. The remaining blocker was reachability, now fixed.
 - [x] 3.2 Refuse Undo when hand edits would be destroyed; explain and preserve them.
       (`UndoResultOutcome::RefusedHandEdited`; test:
       `undo_refuses_a_hand_edited_worktree`)
@@ -135,3 +156,37 @@ left unticked as native/cross-package/process work this session did not and coul
 except 6.7 (typecheck/test/binding verification) which the building agent already ran and
 reported -- see the verbatim re-run below for this audit's own confirmation of those same
 numbers.
+
+## Status 2026-08-21 (second pass)
+
+The 2026-08-20 pass's headline finding was `ResultReviewPanel` having zero importers
+anywhere in the app; this session's R3.8 fixed exactly that. `ConversationPane.tsx` now
+mounts it, gated on the execution reaching a terminal state. This unblocks several tasks
+that were correctly withheld only for reachability, not logic:
+
+- 1.2: reversed. `route_to_agent_desk` now calls `build_result_for_completed_execution`
+  automatically on Finished/Stopped/Failed (R3.7), not only via a manual refresh.
+- 2.1: reversed. The panel is mounted, and "View diff" genuinely opens the real `DiffView`
+  in the main window via a Tauri event bridge (`agent_result_open_diff` ->
+  `useAgentResultDiffListener`), confirmed to call `commands.openRepo` and the actual
+  `uiStore.openDiff` -- not a second diff renderer.
+- 3.1: reversed. Keep/Undo are reachable through the now-mounted panel and route through the
+  same worktree primitives `commands::airun`'s discard-plan already used.
+
+**Also corrected:** 1.3 was previously checked as if Stopped/Failed/Conflicted were all
+covered; re-reading `terminal_result_outcome` shows only Finished/Stopped/Failed are
+reachable -- `ResultOutcomeKind::Conflicted` is defined but never produced, because
+`SessionState` has no `Conflicted` variant at all (conflicts use `NeedsInput`, per the
+`agent-desk-agent-graphs` audit). Reverted to unchecked with the precise gap recorded.
+
+**Still correctly unchecked, re-confirmed:** 2.2 (no `AgentGraphPanel.tsx` wiring for a
+node-scoped Output/View-diff button), 2.3 (no selection-preservation code), 2.5 (Request
+revision only flips state and shows a toast asking the user to type a follow-up manually --
+it does not itself append a message or start an execution), 3.5 (only its own `agentResults`
+query is invalidated), 5.3 (`agent_result_find_orphaned` is registered as a command but
+nothing calls it at startup), and all of section 6 (native/process work).
+
+The tasks.md's own 2026-08-20 note said "24 of 32 ticked" -- a factual error against its own
+checkbox list (15 of 32 were actually checked at that point). Flagging this since a wrong
+headline count is exactly the kind of thing that misleads a reviewer skimming instead of
+counting; the checkboxes themselves were accurate, only the summary sentence was wrong.

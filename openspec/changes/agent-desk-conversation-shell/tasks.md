@@ -44,8 +44,8 @@
 
 ## 6. Composer and controls
 
-- [ ] 6.1 Wire Ask/Plan/Auto control to live authority and execution behavior, with plain descriptions.
-- [ ] 6.2 Wire Solo/Lead + helpers control to live execution behavior independent of operating mode.
+- [x] 6.1 Wire Ask/Plan/Auto control to live authority and execution behavior, with plain descriptions.
+- [x] 6.2 Wire Solo/Lead + helpers control to live execution behavior independent of operating mode.
 - [x] 6.3 Append sent user messages visibly before backend execution begins.
 - [x] 6.4 Prevent duplicate sends while accepting the message.
 - [x] 6.5 Put labeled Stop all in Graph header only; no ambiguous square beside Send.
@@ -83,3 +83,22 @@ Still requires a human at the keyboard, and NOT claimed here:
 - 8.3 keyboard-only path from session list through history jump to composer (native).
 - 4.4 stays open: message targets resolve honestly but no diff/worktree/graph
   destination is reachable yet, so nothing can be proven to navigate.
+
+## Status 2026-08-21
+
+Ticked 6.1 and 6.2 during this reconciliation pass. Evidence: `SessionComposer.tsx`
+maps the Ask/Plan/Auto pill through `modeToExecutionMode` and the Solo/Lead+helpers
+pill through `teamToExecutionTeam` (`src/lib/agentDeskComposer.ts`), both passed as
+real arguments to the `agentSessionStartExecution` command. On the Rust side,
+`start_execution_at` (`src-tauri/src/commands/agent_desk.rs`) reads those values and
+calls `ExecutionPolicy::resolve(intent, mode, team, provider_override)`
+(`src-tauri/src/agentdesk/policy.rs`) *before* any worktree/CLI/write side effect,
+and an unsupported provider override returns `StartExecutionOutcome::UnsupportedProvider`
+rather than silently falling back. This is the same policy plumbing R1 landed and
+`cli_run.rs` enforces at the ACP boundary. Plain-language mode notes
+(`MODE_NOTES` in `agentDeskComposer.ts`) are shown next to the pills per 6.1.
+
+Everything else in this file was already accurately checked/unchecked before this
+pass; no other false positives found. 4.4 remains correctly unchecked -- verified
+`agentDeskRail.ts` only computes intra-transcript jump targets, nothing resolves a
+diff/worktree/OpenSpec destination from a rail tick.

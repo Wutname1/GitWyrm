@@ -96,6 +96,21 @@ pub fn reconcile_header(header: &mut AgentSessionHeader, execution_is_live: bool
 /// closure that ignores its argument and returns that one answer for every
 /// execution in the session. Returns the number of records actually changed,
 /// so the caller can skip a write when nothing moved.
+///
+/// A helper with `conflict.is_some()` is left alone even though its state is
+/// `NeedsInput` (a live-process state by [`is_live_process_state`]'s general
+/// rule): `agent_graph::integrate_helper_result` sets that combination
+/// directly, with no live process behind it at all -- it is durably waiting
+/// on a person to pick `KeepHelper`/`KeepIntegrated`/`UseMerged`
+/// (`agent_graph::resolve_conflict_at`), not on the CLI subprocess that
+/// finished and deregistered from [`super::ExecutionRegistry`] well before
+/// the conflict was ever recorded (see `advance_graph_after_helper_completion`
+/// in `commands/agent_graph.rs`: `executions.complete()` runs before
+/// `integrate_helper_result` even starts looking for conflicts). Without this
+/// carve-out, every conflict left unresolved across an app restart would
+/// silently flip to `Interrupted` on the very next load, and the user's
+/// pending choice -- and the two preserved texts it was about to pick between
+/// -- would vanish from the graph panel with no way back.
 pub fn reconcile_executions(
     executions: &mut [ExecutionRecord],
     mut is_live: impl FnMut(&str) -> bool,
@@ -103,6 +118,9 @@ pub fn reconcile_executions(
     let mut changed = 0u32;
     for execution in executions.iter_mut() {
         if !is_live_process_state(execution.state) {
+            continue;
+        }
+        if execution.conflict.is_some() {
             continue;
         }
         if is_live(&execution.execution_id) {
@@ -251,6 +269,52 @@ mod tests {
         let changed = reconcile_executions(&mut executions, |_| false);
         assert_eq!(changed, 0);
         assert_eq!(executions[0].state, SessionState::Finished);
+    }
+
+    /// A conflicted helper survives a session reload without becoming
+    /// `Interrupted`, even though it is `NeedsInput` (ordinarily a
+    /// live-process state) and nothing in this process backs it -- the
+    /// secondary bug this module's own doc comment on `reconcile_executions`
+    /// explains: a conflict is a durable wait for a person, not for a
+    /// process, and `advance_graph_after_helper_completion` always
+    /// deregisters the helper from `ExecutionRegistry` before a conflict is
+    /// even detected, so `is_live` legitimately returns false here.
+    #[test]
+    fn a_conflicted_helper_survives_reconciliation_without_becoming_interrupted() {
+        let mut exec = execution("helper-a", SessionState::NeedsInput);
+        exec.conflict = Some(crate::agentdesk::graph::IntegrationConflict {
+            path: "src/greet.rs".into(),
+            conflicting_with: "lead".into(),
+            base_text: "base".into(),
+            helper_text: "helper version".into(),
+            integrated_text: "lead version".into(),
+        });
+        let mut executions = vec![exec];
+
+        let changed = reconcile_executions(&mut executions, |_| false);
+
+        assert_eq!(changed, 0, "a conflicted node must not be counted as reconciled");
+        assert_eq!(
+            executions[0].state,
+            SessionState::NeedsInput,
+            "a conflicted node must stay NeedsInput, never flip to Interrupted"
+        );
+        assert!(
+            executions[0].conflict.is_some(),
+            "the conflict itself, and the two preserved texts inside it, must survive the reload"
+        );
+    }
+
+    /// A plain (non-conflict) `NeedsInput` execution -- e.g. a live approval
+    /// gate -- must still be reconciled normally when nothing backs it. The
+    /// carve-out above is specific to conflicts, not to `NeedsInput` as a
+    /// whole.
+    #[test]
+    fn a_plain_needs_input_execution_with_no_conflict_is_still_reconciled() {
+        let mut executions = vec![execution("lead", SessionState::NeedsInput)];
+        let changed = reconcile_executions(&mut executions, |_| false);
+        assert_eq!(changed, 1);
+        assert_eq!(executions[0].state, SessionState::Interrupted);
     }
 
     /// Pins the exact wording -- a non-expert reason, no jargon like "orphaned

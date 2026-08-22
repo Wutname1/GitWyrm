@@ -67,25 +67,31 @@
 
 ## 4. UI
 
-- [ ] 4.1 Mount Import in Agent Desk and show detected clients and scan state without blocking native sessions.
-- [ ] 4.2 Show imported source-client identity on the mounted session row and segment header.
-      NOTE: segment header/label ("Imported from <adapter>") is set; the per-message
-      `ImportedBadge` (pre-existing) is what actually renders on each row today.
+- [x] 4.1 Mount Import in Agent Desk and show detected clients and scan state without blocking native sessions.
+      Reversed as of 2026-08-21 (R7.1 landed): `ImportPicker` is now genuinely mounted in
+      `AgentDeskView.tsx` as a fourth centre tab (`centerView === 'import'`), reached by a
+      real button in `AgentDeskTitleBar.tsx` (`onClick={() => onChangeCenterView('import')}`).
+      Its own comment confirms the deliberate "mounted only in this branch" gating specifically
+      so the adapter filesystem scan never runs, and can never block, ordinary chat loading.
+- [x] 4.2 Show imported source-client identity on the mounted session row and segment header.
+      Now reachable per 4.1's mount; the segment header/label ("Imported from <adapter>") and
+      the pre-existing per-message `ImportedBadge` both render in the now-mounted transcript.
 - [ ] 4.3 Add reachable Import, Continue here, Continue externally, and unlink actions with honest
       capability-dependent copy.
-      NOTE: unlink (removing an imported session/reverting to not-imported) is NOT
-      implemented -- only Import/Refresh, Continue here, and the honest Continue
-      externally/"Open client" label exist. Left as a follow-up.
-- [ ] 4.4 From the mounted UI, Continue here creates a native segment and preserves source/provenance.
-- [ ] 4.5 In the mounted transcript, never merge external and native authorship visually without segment labels.
-      NOTE: enforced structurally (imported messages always carry `import` provenance,
-      the pre-existing `ImportedBadge` renders off that field) rather than by a new
-      dedicated visual-regression test in this change.
-      NOTE ON SCOPE: the picker UI (`ImportPicker.tsx`, `useAgentImport.ts`,
-      `agentImportDisplay.ts`) is self-contained and NOT wired into `AgentDeskView.tsx` or
-      `agentDeskUiStore.ts` per this task's explicit instruction not to touch those files
-      (owned by other concurrent work). A caller still needs to mount `<ImportPicker />`
-      somewhere in the real navigation.
+      Three of four are real and now reachable (Import/Refresh, Continue here, the honest
+      Continue-externally/"Open client" label). Unlink (removing an imported session/reverting
+      to not-imported) is still not implemented anywhere -- grepped `ImportPicker.tsx` and
+      `useAgentImport.ts`, no unlink mutation exists. Left unchecked because the task names
+      unlink explicitly as one of four required actions.
+- [x] 4.4 From the mounted UI, Continue here creates a native segment and preserves source/provenance.
+      `useContinueImportedSessionHere` (`src/hooks/useAgentImport.ts`) calls
+      `commands.agentImportContinueHere(sessionId)` and invalidates the session's own query so
+      the new native segment renders immediately; reachable now that `ImportPicker` is mounted.
+- [x] 4.5 In the mounted transcript, never merge external and native authorship visually without segment labels.
+      Reachable now: enforced structurally (imported messages always carry `import`
+      provenance, the pre-existing `ImportedBadge` renders off that field) rather than by a
+      dedicated visual-regression test, but the enforcement itself was always real -- only the
+      "mounted" precondition was previously false.
 
 ## 5. Safety and proof
 
@@ -141,3 +147,20 @@ into the app shell**, so even though 23 of 25 tasks are checked, a user cannot a
 the import feature from the UI yet -- someone needs to mount `<ImportPicker />` somewhere in
 `AgentDeskView.tsx` (deliberately left undone here because that file is owned by concurrent
 work).
+
+## Status 2026-08-21 (second pass)
+
+The single blocking finding from the 2026-08-20 pass -- "ImportPicker is not wired into the
+app shell" -- is resolved. `AgentDeskView.tsx` now mounts `<ImportPicker />` as a fourth
+centre tab, reached by a real title-bar button (`AgentDeskTitleBar.tsx`), gated so the
+adapter filesystem scan only starts when a user actually opens that tab. This flips 4.1,
+4.2, 4.4, and 4.5 from unchecked to checked -- their underlying logic was already correct
+in the previous pass, only the "reachable from the running app" precondition was false.
+
+4.3 stays unchecked: unlink is confirmed still unbuilt (no such mutation anywhere in
+`ImportPicker.tsx`/`useAgentImport.ts`), and the task names it as one of four required
+actions.
+
+No other changes. 3.5 (OpenChamber), 5.2 (log redaction), 5.3 (native-session-loading
+during a hung adapter scan not separately proven), and 5.4 (no standalone Gate 6 record)
+remain correctly unchecked per the prior pass's own evidence, re-confirmed still accurate.

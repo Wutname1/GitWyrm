@@ -1158,17 +1158,87 @@ fn read_file_at_revision(worktree_path: &str, base_oid: &str, path: &str) -> Opt
     Some(String::from_utf8_lossy(blob.content()).into_owned())
 }
 
-/// R6.7's conflict-detection half: when a helper finishes cleanly, compare
-/// its own worktree's changed files against the lead's checkout (the
-/// integration target). A file changed by BOTH the helper and something
-/// already integrated (another finished sibling, or the lead's own edits) is
-/// reported as a typed [`IntegrationConflict`] via
-/// `agent_session_record_conflict`'s own write path -- both texts preserved,
-/// neither committed (tasks.md 5.3/5.4, `graph::detect_conflict`).
+/// What happened when trying to write `text` into the lead's checkout at
+/// `path`. Distinct from a bool so a failure can be reported in plain
+/// language (task requirement: "a failure must produce a typed outcome and
+/// leave the lead's tree untouched for that file").
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ApplyToLeadOutcome {
+    /// The file was written successfully.
+    Applied,
+    /// The write did not happen. `detail` is plain-language enough to show
+    /// the user; the file on disk is exactly as it was before this call --
+    /// `write_file_atomic` never leaves a half-written file, see its own doc
+    /// comment.
+    Failed { detail: String },
+}
+
+/// Writes `text` to `lead_repo_path.join(relative_path)`, creating parent
+/// directories as needed, via a temp-file-then-rename so a failure partway
+/// through (disk full, permission denied, path removed out from under us)
+/// never leaves a truncated or partially-written file sitting where the
+/// lead's real file used to be -- the write either lands whole or the
+/// original file is untouched.
+///
+/// This is the ONE place `integrate_helper_result` and `resolve_conflict_at`
+/// both route through to actually mutate the lead's working tree, so every
+/// caller gets the same atomicity and the same typed failure reporting.
+fn write_file_atomic(lead_repo_path: &str, relative_path: &str, text: &str) -> ApplyToLeadOutcome {
+    let target = std::path::Path::new(lead_repo_path).join(relative_path);
+    if let Some(parent) = target.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return ApplyToLeadOutcome::Failed {
+                detail: format!("could not create the folder for \"{relative_path}\": {e}"),
+            };
+        }
+    }
+    // Temp file lives next to the target (same filesystem, so the rename
+    // below is atomic rather than a cross-device copy) and is named after
+    // this process/thread so two concurrent applies for different files
+    // never collide on the same temp name.
+    let temp_name = format!(
+        ".gitwyrm-integrate-{}-{}.tmp",
+        std::process::id(),
+        target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    );
+    let temp_path = target.with_file_name(temp_name);
+    if let Err(e) = std::fs::write(&temp_path, text) {
+        return ApplyToLeadOutcome::Failed {
+            detail: format!("could not write \"{relative_path}\": {e}"),
+        };
+    }
+    if let Err(e) = std::fs::rename(&temp_path, &target) {
+        // Best-effort cleanup of the temp file -- a failure here is
+        // secondary to the rename failure already being reported, and
+        // leaving a stray `.gitwyrm-integrate-*.tmp` file is harmless (it is
+        // not the target path, so it cannot be mistaken for real content).
+        let _ = std::fs::remove_file(&temp_path);
+        return ApplyToLeadOutcome::Failed {
+            detail: format!("could not save \"{relative_path}\": {e}"),
+        };
+    }
+    ApplyToLeadOutcome::Applied
+}
+
+/// R6.7/R6.8: when a helper finishes cleanly, compare its own worktree's
+/// changed files against the lead's checkout (the integration target). A
+/// file that only the helper touched (`IntegrationState::Integrated`) is
+/// written straight into the lead's working tree via [`write_file_atomic`] --
+/// this is the actual "bring the helper's isolated work home" step; nothing
+/// else in this codebase performs that write. A file changed by BOTH the
+/// helper and something already integrated (another finished sibling, or the
+/// lead's own edits) is reported as a typed [`IntegrationConflict`] instead:
+/// both texts preserved, neither committed (tasks.md 5.3/5.4,
+/// `graph::detect_conflict`).
 ///
 /// A helper that did not finish cleanly (`Stopped`/`Failed`/`Interrupted`)
 /// has nothing to integrate -- its worktree stands as evidence of what it
 /// was doing, but nothing from it is folded into the lead's tree.
+///
+/// Deliberately never runs `git commit` -- applying to the working tree is
+/// this function's whole job; committing stays the user's own explicit
+/// action through the ordinary review/commit flow (see this module's own
+/// report on why "no automatic commit" is correct here).
 fn integrate_helper_result(
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
@@ -1194,7 +1264,7 @@ fn integrate_helper_result(
         // already shown in the inspector, rather than guessing at a base.
         return;
     };
-    let lead_path = &session.header.repo_path;
+    let lead_path = session.header.repo_path.clone();
 
     let changed = match changed_files_since(worktree_path, base_oid) {
         Ok(files) => files,
@@ -1204,7 +1274,7 @@ fn integrate_helper_result(
     for path in changed {
         let base_text = read_file_at_revision(worktree_path, base_oid, &path).unwrap_or_default();
         let helper_text = std::fs::read_to_string(std::path::Path::new(worktree_path).join(&path)).unwrap_or_default();
-        let integrated_text = std::fs::read_to_string(std::path::Path::new(lead_path).join(&path)).unwrap_or_default();
+        let integrated_text = std::fs::read_to_string(std::path::Path::new(&lead_path).join(&path)).unwrap_or_default();
 
         let sibling = session
             .executions
@@ -1214,21 +1284,54 @@ fn integrate_helper_result(
             .map(|s| s.execution_id.clone())
             .unwrap_or_else(|| "lead".to_string());
 
-        if let graph::IntegrationState::Conflicted { conflict } =
-            graph::detect_conflict(&path, &conflicting_with, &base_text, &helper_text, &integrated_text)
-        {
-            let _ = update_session_at(locks, root, session_id, |s| {
-                if let Some(exec) = s.executions.iter_mut().find(|e| e.execution_id == helper_execution_id) {
-                    exec.conflict = Some(conflict.clone());
-                    exec.state = SessionState::NeedsInput;
+        match graph::detect_conflict(&path, &conflicting_with, &base_text, &helper_text, &integrated_text) {
+            graph::IntegrationState::Conflicted { conflict } => {
+                let _ = update_session_at(locks, root, session_id, |s| {
+                    if let Some(exec) = s.executions.iter_mut().find(|e| e.execution_id == helper_execution_id) {
+                        exec.conflict = Some(conflict.clone());
+                        exec.state = SessionState::NeedsInput;
+                    }
+                });
+                // Only the first conflicted file for this helper is recorded
+                // per pass -- `agent_session_resolve_conflict` clears it and
+                // a later re-run of this function (triggered by the next
+                // graph event) will surface the next one, so nothing is
+                // lost, only shown one at a time. Files already applied
+                // above this one in the loop stay applied; the conflicted
+                // file itself is left exactly as `integrated_text` (nothing
+                // written) until a person resolves it.
+                return;
+            }
+            graph::IntegrationState::Integrated => {
+                if helper_text == integrated_text {
+                    // Either the helper made no real change to this file, or
+                    // its result is already sitting in the lead's tree (a
+                    // re-run of this function after a partial earlier
+                    // apply) -- nothing to write.
+                    continue;
                 }
-            });
-            // Only the first conflicted file for this helper is recorded per
-            // pass -- `agent_session_resolve_conflict` clears it and a later
-            // re-run of this function (triggered by the next graph event)
-            // will surface the next one, so nothing is lost, only shown one
-            // at a time.
-            return;
+                match write_file_atomic(&lead_path, &path, &helper_text) {
+                    ApplyToLeadOutcome::Applied => {}
+                    ApplyToLeadOutcome::Failed { detail } => {
+                        // Leave this one file's integration for a later
+                        // retry (the next completion event re-runs this same
+                        // function) rather than silently dropping the
+                        // helper's work or crashing the whole batch over one
+                        // unwritable file. Reported in this node's own
+                        // summary so the failure is visible, not smeared
+                        // across other files that may have already applied
+                        // cleanly above.
+                        let _ = update_session_at(locks, root, session_id, |s| {
+                            if let Some(exec) = s.executions.iter_mut().find(|e| e.execution_id == helper_execution_id) {
+                                exec.output_summary = Some(format!(
+                                    "Finished, but \"{path}\" could not be brought into your working files: {detail}"
+                                ));
+                            }
+                        });
+                    }
+                }
+            }
+            graph::IntegrationState::Pending => {}
         }
     }
 }
@@ -1439,21 +1542,84 @@ fn resolve_conflict_at(
     execution_id: &str,
     resolution: ConflictResolution,
 ) -> ResolveConflictOutcome {
+    // Step 1: locked read-modify-write to take the conflict off the record
+    // and compute what the resolution decided -- this is also where
+    // `found`/`NoConflict` is decided, unchanged from before. The actual
+    // filesystem write happens OUTSIDE this closure (see step 2's comment
+    // for why), so this first pass does not yet flip the node to `Finished`
+    // -- it stages the conflict's `path` and the resolved text, and restores
+    // the conflict onto the record if the write later fails, so a person
+    // never loses the choice they just made.
     let mut resolved_text = String::new();
+    let mut conflict_path = String::new();
     let mut found = false;
-    let outcome = update_session_at(locks, root, session_id, |s| {
+    let stage_outcome = update_session_at(locks, root, session_id, |s| {
         if let Some(exec) = s
             .executions
             .iter_mut()
             .find(|e| e.execution_id == execution_id)
         {
-            if let Some(conflict) = exec.conflict.take() {
+            if let Some(conflict) = &exec.conflict {
                 found = true;
+                conflict_path = conflict.path.clone();
                 resolved_text = match &resolution {
                     ConflictResolution::KeepHelper => conflict.helper_text.clone(),
                     ConflictResolution::KeepIntegrated => conflict.integrated_text.clone(),
                     ConflictResolution::UseMerged { text } => text.clone(),
                 };
+            }
+        }
+    });
+
+    if !found {
+        return ResolveConflictOutcome::NoConflict;
+    }
+
+    let lead_path = match &stage_outcome {
+        UpdateOutcome::Updated { session } => session.header.repo_path.clone(),
+        UpdateOutcome::NotFound => return ResolveConflictOutcome::NotFound,
+        UpdateOutcome::Damaged { reason } => {
+            return ResolveConflictOutcome::Damaged {
+                reason: reason.clone(),
+            }
+        }
+        UpdateOutcome::WriteFailed { detail } => {
+            return ResolveConflictOutcome::WriteFailed {
+                detail: detail.clone(),
+            }
+        }
+        UpdateOutcome::Unavailable { detail } => {
+            return ResolveConflictOutcome::Unavailable {
+                detail: detail.clone(),
+            }
+        }
+    };
+
+    // Step 2: the actual write into the lead's checkout -- the whole point
+    // of resolving a conflict is that the user's choice ends up in their
+    // working files, not just in the session record. Deliberately done
+    // OUTSIDE the session lock: filesystem I/O should never happen while
+    // holding a lock other mutating session calls are waiting on (see
+    // `locks.rs`'s own module doc and the house rule against holding a
+    // session lock across slow filesystem work).
+    let write_failed_detail = match write_file_atomic(&lead_path, &conflict_path, &resolved_text) {
+        ApplyToLeadOutcome::Applied => None,
+        ApplyToLeadOutcome::Failed { detail } => Some(detail),
+    };
+
+    // Step 3: only now, having confirmed whether the write actually landed,
+    // either clear the conflict and move the node to Finished, or leave the
+    // conflict exactly as it was (never taken off the record) so the user's
+    // choice is not silently discarded -- they see the same conflict again
+    // with a plain-language reason attached, and can retry.
+    let outcome = match &write_failed_detail {
+        None => update_session_at(locks, root, session_id, |s| {
+            if let Some(exec) = s
+                .executions
+                .iter_mut()
+                .find(|e| e.execution_id == execution_id)
+            {
+                exec.conflict = None;
                 // This node's own integration resumes -- its state moves
                 // out of the conflicted marker back toward Finished, which
                 // is what lets `schedule()`/`project_graph()` treat it as
@@ -1464,11 +1630,31 @@ fn resolve_conflict_at(
                 exec.state = SessionState::Finished;
                 exec.output_summary = Some("Resolved: conflict cleared".into());
             }
-        }
-    });
+        }),
+        Some(detail) => update_session_at(locks, root, session_id, |s| {
+            if let Some(exec) = s
+                .executions
+                .iter_mut()
+                .find(|e| e.execution_id == execution_id)
+            {
+                // Conflict stays set (never taken) -- the choice was
+                // computed but could not be saved, so it must still be
+                // resolvable again rather than lost.
+                exec.output_summary = Some(format!(
+                    "Your choice for \"{conflict_path}\" could not be saved: {detail}. Try resolving it again."
+                ));
+            }
+        }),
+    };
 
-    if !found {
-        return ResolveConflictOutcome::NoConflict;
+    if let Some(detail) = write_failed_detail {
+        return match outcome {
+            UpdateOutcome::Updated { .. } => ResolveConflictOutcome::WriteFailed { detail },
+            UpdateOutcome::NotFound => ResolveConflictOutcome::NotFound,
+            UpdateOutcome::Damaged { reason } => ResolveConflictOutcome::Damaged { reason },
+            UpdateOutcome::WriteFailed { detail } => ResolveConflictOutcome::WriteFailed { detail },
+            UpdateOutcome::Unavailable { detail } => ResolveConflictOutcome::Unavailable { detail },
+        };
     }
 
     match outcome {
@@ -1679,6 +1865,13 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = crate::agentdesk::SessionLocks::new();
         seed_session(&root, "sess-1");
+        // A real directory: resolving now writes the chosen text to disk, so
+        // the fake `C:/code/widgets` `seed_session` default cannot be used
+        // here.
+        let lead_dir = tempfile::tempdir().unwrap();
+        update_session_at(&locks, &root, "sess-1", |s| {
+            s.header.repo_path = lead_dir.path().to_string_lossy().into_owned();
+        });
 
         update_session_at(&locks, &root, "sess-1", |s| {
             s.executions.push(ExecutionRecord::minimal(
@@ -1747,6 +1940,11 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = crate::agentdesk::SessionLocks::new();
         seed_session(&root, "sess-1");
+        // Real directory -- resolving now writes to disk.
+        let lead_dir = tempfile::tempdir().unwrap();
+        update_session_at(&locks, &root, "sess-1", |s| {
+            s.header.repo_path = lead_dir.path().to_string_lossy().into_owned();
+        });
 
         update_session_at(&locks, &root, "sess-1", |s| {
             let mut a = ExecutionRecord::minimal(
@@ -2282,6 +2480,211 @@ mod tests {
         let helper = session.executions.iter().find(|e| e.execution_id == "helper-a").unwrap();
         assert_eq!(helper.state, SessionState::Finished, "no conflict means the node stays Finished");
         assert!(helper.conflict.is_none());
+        // The whole point of integration: the helper's isolated work must
+        // actually land in the lead's checkout, not just get marked clean.
+        assert_eq!(
+            std::fs::read_to_string(lead_dir.path().join("only_helper.txt")).unwrap(),
+            "helper wrote this",
+            "a clean helper change must be written into the lead's tree"
+        );
+    }
+
+    #[test]
+    fn a_conflicting_file_is_not_written_and_stays_conflicted() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+
+        let lead_dir = tempfile::tempdir().unwrap();
+        let (lead_repo, base_oid) = init_repo_with_commit(lead_dir.path(), &[("shared.txt", "base")]);
+        std::fs::write(lead_dir.path().join("shared.txt"), "lead changed it").unwrap();
+        commit_all(&lead_repo, "lead edit");
+
+        let helper_dir = tempfile::tempdir().unwrap();
+        let (helper_repo, _helper_base) = init_repo_with_commit(helper_dir.path(), &[("shared.txt", "base")]);
+        std::fs::write(helper_dir.path().join("shared.txt"), "helper changed it").unwrap();
+        commit_all(&helper_repo, "helper edit");
+
+        seed_session(&root, "sess-1");
+        update_session_at(&locks, &root, "sess-1", |s| {
+            s.header.repo_path = lead_dir.path().to_string_lossy().into_owned();
+            let mut helper = ExecutionRecord::minimal(
+                "helper-a".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::Finished,
+                now_rfc3339(),
+                None,
+                0,
+            );
+            helper.worktree_path = Some(helper_dir.path().to_string_lossy().into_owned());
+            helper.base_oid = Some(base_oid.clone());
+            s.executions.push(helper);
+        });
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        integrate_helper_result(&locks, &root, "sess-1", "helper-a", &session);
+
+        // The lead's file must be untouched by the conflicting write -- still
+        // exactly what the lead's own edit left it as.
+        assert_eq!(
+            std::fs::read_to_string(lead_dir.path().join("shared.txt")).unwrap(),
+            "lead changed it",
+            "a conflicting file must never be overwritten before the user resolves it"
+        );
+        let session = store::read_session(&root, "sess-1").unwrap();
+        let helper = session.executions.iter().find(|e| e.execution_id == "helper-a").unwrap();
+        assert_eq!(helper.state, SessionState::NeedsInput);
+        assert!(helper.conflict.is_some());
+    }
+
+    // -- resolve_conflict_at (R6.7/R6.8): the chosen resolution must actually
+    // land on disk in the lead's checkout, not merely clear the record. --
+
+    fn seed_conflicted_helper(
+        root: &SessionStoreRoot,
+        locks: &crate::agentdesk::SessionLocks,
+        lead_dir: &std::path::Path,
+        relative_path: &str,
+        base_text: &str,
+        helper_text: &str,
+        integrated_text: &str,
+    ) {
+        seed_session(root, "sess-1");
+        std::fs::write(lead_dir.join(relative_path), integrated_text).unwrap();
+        update_session_at(locks, root, "sess-1", |s| {
+            s.header.repo_path = lead_dir.to_string_lossy().into_owned();
+            let mut helper = ExecutionRecord::minimal(
+                "helper-a".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::NeedsInput,
+                now_rfc3339(),
+                None,
+                0,
+            );
+            helper.conflict = Some(IntegrationConflict {
+                path: relative_path.to_string(),
+                conflicting_with: "lead".into(),
+                base_text: base_text.to_string(),
+                helper_text: helper_text.to_string(),
+                integrated_text: integrated_text.to_string(),
+            });
+            s.executions.push(helper);
+        });
+    }
+
+    #[test]
+    fn resolving_keep_helper_writes_the_helper_text_into_the_leads_file() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        let lead_dir = tempfile::tempdir().unwrap();
+        seed_conflicted_helper(&root, &locks, lead_dir.path(), "shared.txt", "base", "helper version", "lead version");
+
+        let outcome = resolve_conflict_at(&locks, &root, "sess-1", "helper-a", ConflictResolution::KeepHelper);
+        assert!(matches!(outcome, ResolveConflictOutcome::Resolved { .. }), "{outcome:?}");
+
+        assert_eq!(
+            std::fs::read_to_string(lead_dir.path().join("shared.txt")).unwrap(),
+            "helper version"
+        );
+    }
+
+    #[test]
+    fn resolving_keep_integrated_writes_the_integrated_text_into_the_leads_file() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        let lead_dir = tempfile::tempdir().unwrap();
+        seed_conflicted_helper(&root, &locks, lead_dir.path(), "shared.txt", "base", "helper version", "lead version");
+
+        let outcome = resolve_conflict_at(&locks, &root, "sess-1", "helper-a", ConflictResolution::KeepIntegrated);
+        assert!(matches!(outcome, ResolveConflictOutcome::Resolved { .. }), "{outcome:?}");
+
+        assert_eq!(
+            std::fs::read_to_string(lead_dir.path().join("shared.txt")).unwrap(),
+            "lead version"
+        );
+    }
+
+    #[test]
+    fn resolving_use_merged_writes_the_supplied_text_into_the_leads_file() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        let lead_dir = tempfile::tempdir().unwrap();
+        seed_conflicted_helper(&root, &locks, lead_dir.path(), "shared.txt", "base", "helper version", "lead version");
+
+        let outcome = resolve_conflict_at(
+            &locks,
+            &root,
+            "sess-1",
+            "helper-a",
+            ConflictResolution::UseMerged {
+                text: "hand-merged result".into(),
+            },
+        );
+        assert!(matches!(outcome, ResolveConflictOutcome::Resolved { .. }), "{outcome:?}");
+
+        assert_eq!(
+            std::fs::read_to_string(lead_dir.path().join("shared.txt")).unwrap(),
+            "hand-merged result"
+        );
+    }
+
+    /// A write failure (here: the target directory itself does not exist and
+    /// cannot be created because a FILE sits where a parent directory would
+    /// need to go) must be reported as a typed `WriteFailed`, and the
+    /// conflict must stay on the record -- the user's choice is not silently
+    /// discarded, they can try again.
+    #[test]
+    fn a_failed_apply_reports_a_typed_outcome_and_leaves_the_conflict_in_place() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        let lead_dir = tempfile::tempdir().unwrap();
+
+        // "blocked" is a FILE, not a directory -- writing to
+        // "blocked/nested.txt" cannot succeed, simulating a real integration
+        // failure (permission denied, path removed, etc.) without relying on
+        // OS-specific permission APIs.
+        std::fs::write(lead_dir.path().join("blocked"), "not a directory").unwrap();
+
+        seed_session(&root, "sess-1");
+        update_session_at(&locks, &root, "sess-1", |s| {
+            s.header.repo_path = lead_dir.path().to_string_lossy().into_owned();
+            let mut helper = ExecutionRecord::minimal(
+                "helper-a".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::NeedsInput,
+                now_rfc3339(),
+                None,
+                0,
+            );
+            helper.conflict = Some(IntegrationConflict {
+                path: "blocked/nested.txt".into(),
+                conflicting_with: "lead".into(),
+                base_text: "base".into(),
+                helper_text: "helper version".into(),
+                integrated_text: "lead version".into(),
+            });
+            s.executions.push(helper);
+        });
+
+        let outcome = resolve_conflict_at(&locks, &root, "sess-1", "helper-a", ConflictResolution::KeepHelper);
+        match outcome {
+            ResolveConflictOutcome::WriteFailed { detail } => assert!(!detail.is_empty()),
+            other => panic!("expected WriteFailed, got {other:?}"),
+        }
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        let helper = session.executions.iter().find(|e| e.execution_id == "helper-a").unwrap();
+        assert!(
+            helper.conflict.is_some(),
+            "a failed write must leave the conflict in place, not silently drop the user's choice"
+        );
+        assert_eq!(
+            helper.state,
+            SessionState::NeedsInput,
+            "the node must stay conflicted, not jump to Finished, when the write failed"
+        );
     }
 
     // -- R6.1: a live Plan-mode turn's finished reply becomes a persisted

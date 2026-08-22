@@ -99,3 +99,28 @@
 - [ ] 9.9 Regenerate Specta bindings only if Rust window commands/types changed.
 - [ ] 9.10 Verify the complete flow in a native Tauri window, including restart.
 
+
+## Status 2026-08-21
+
+Reconciliation pass: no checkbox changes. This file's checked items were spot-verified
+against real code and found accurate, not aspirational:
+
+- 1.1/1.2: `AGENT_DESK_LABEL` is a single stable `"agent-desk"` constant in
+  `src-tauri/src/commands/spec_desk.rs`; `open_spec_desk` focuses the existing window
+  before ever considering creating one.
+- 1.3 correctly stays unchecked: the repo/change-only `SELECT_DESK_TARGET_EVENT` has no
+  session field, and the session-carrying `agent-desk://select-session` event (wired by
+  the source-kickoffs package) is only proven by a string-match test
+  (`select_session_event_name_matches_the_frontend_listener`), not by any test that
+  drives it through an already-open Desk window. The task's own text demands that native
+  proof; it does not exist yet.
+- 5.5: `agentDeskPaneTargeting.ts`/`.test.ts` covers "focus instead of duplicate" for both
+  panes, and is genuinely imported and used by `AgentDeskView.tsx`, not an orphaned helper.
+- 7.5/7.6: `useAgentDeskPanelDrag.ts` is real native HTML5 drag-and-drop wiring, not a stub;
+  its own comment honestly discloses that "full panel ghost" is the browser's default drag
+  image rather than a custom-rendered ghost, which is a disclosed simplification, not a
+  false claim.
+
+Remaining unchecked items (1.6, 4.7, 5.9, 6.8, 7.11, 9.2, 9.5, 9.6, 9.7, 9.9, 9.10) are all
+native-Tauri, display-scaling, high-volume-data, or cross-pane-leakage scenarios that no
+agent in this environment can execute or observe; leaving them unchecked is correct.

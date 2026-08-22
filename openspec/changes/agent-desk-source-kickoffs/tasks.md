@@ -5,9 +5,11 @@
 - [x] 1.1 Define `StartAgentSessionRequest`, typed source inputs, mode, team, and provider
       override in Rust/Specta. (`src-tauri/src/commands/agent_kickoff.rs`:
       `StartAgentSessionRequest`, `SessionSourceInput`.)
-- [ ] 1.2 Implement intent policy table and enforce refusal of writes at the live engine/tool
+- [x] 1.2 Implement intent policy table and enforce refusal of writes at the live engine/tool
       boundary for read-only intents.
-      (`src-tauri/src/agentdesk/policy.rs`: `for_intent`, `check_tool_capability`.)
+      (`src-tauri/src/agentdesk/policy.rs`: `for_intent`, `check_tool_capability`, called from
+      `src-tauri/src/airun/cli_run.rs` `handle()` at the `Incoming::PermissionRequest` match
+      arm, before any gate is shown or `answers` channel is touched.)
 - [x] 1.3 Add policy tests for all intent/mode/team combinations. (`policy.rs` `mod tests`,
       9 tests including the exhaustive read-only proof.)
 - [x] 1.4 Add duplicate-session lookup by repo/source identity/intent/active state.
@@ -23,9 +25,13 @@
       `LeftPanel.tsx`.)
 - [x] 2.2 Add source-row Starting state before awaiting a command. (`setStartingKey` runs
       synchronously before any `await` in `startSession`.)
-- [ ] 2.3 Open/focus Agent Desk and select the returned session immediately. (`openSpecDesk`
-      is called concurrently with session creation; `AgentDeskView`'s existing "land on
-      newest session" effect selects it once the list query invalidates.)
+- [x] 2.3 Open/focus Agent Desk and select the returned session immediately. R3.3 landed a
+      targeted event superseding the stale "relies on newest-session guess" note: backend
+      `emit_select_session` (`src-tauri/src/commands/agent_kickoff.rs`) fires
+      `agent-desk://select-session` with the exact `session_id` right after
+      `agent_session_start` resolves; `AgentDeskView.tsx` listens for it (`listen<SelectSessionTarget>(SELECT_SESSION_EVENT, ...)`)
+      and calls `setPaneSession(layout.activePane, ...)`, independent of the
+      "land on newest" fallback effect (which now only covers the zero-pane-selected case).
 - [ ] 2.4 Keep failed preparation as a session with typed retry/reconnect/fallback action.
       Kickoff's own `writeFailed` outcome is handled; the deeper provider/host recovery
       surfaces (`StartExecutionOutcome::ProviderReconnect`/`AdapterUnsupported`/
@@ -61,9 +67,14 @@
       `PrDetail` binding, so the snapshot text omits them honestly rather than fabricating.)
 - [ ] 4.4 Enrich commits/files/diffs/comments in Agent Desk using capability gates. Not
       built by this package -- native follow-up alongside 3.4.
-- [ ] 4.5 Prove the live Review/Summarize execution cannot call edit/worktree tools. (`policy.rs`:
+- [x] 4.5 Prove the live Review/Summarize execution cannot call edit/worktree tools. (`policy.rs`:
       `review_and_summarize_cannot_call_edit_or_worktree_tools`,
-      `read_only_intents_can_never_reach_a_write_or_worktree_tool`.)
+      `read_only_intents_can_never_reach_a_write_or_worktree_tool`; and, against the actual
+      production `handle()` in `cli_run.rs` rather than a mock,
+      `explain_review_and_summarize_also_refuse_writes_before_asking`, which drives a real
+      `Incoming::PermissionRequest{kind:"edit"}` through Explain/Review/Summarize policies and
+      asserts `RejectOnce` with no `Gate` ever shown. Still short of R1.8's byte-identical
+      dirty-checkout native proof -- that remains open, see 6.4.)
 - [ ] 4.6 Escalating a review into a requested fix creates a new isolated execution linked to
       the same session/source. Not built -- would live inside `ConversationPane.tsx`
       (owned by another in-flight package during this work); native follow-up.
@@ -101,3 +112,29 @@
 - [ ] 6.4 Native-test Fix isolation and read-only Review/Summarize. Native in-app item.
 - [ ] 6.5 Run typecheck, Rust tests, and record Gate 3 evidence. See verification output
       recorded in this change's implementation notes.
+
+## Status 2026-08-21
+
+Reconciliation pass ticked 1.2, 2.3, and 4.5 (all previously unchecked, all with real
+production wiring found on re-read):
+
+- 1.2: `check_tool_capability` is called from the real ACP `PermissionRequest` handler in
+  `cli_run.rs::handle()`, before any gate is shown to the user, not just tested in isolation.
+- 2.3: R3.3's targeted `agent-desk://select-session` event is emitted by
+  `agent_kickoff.rs::emit_select_session` right after `agent_session_start` resolves, and
+  consumed by a real listener in `AgentDeskView.tsx` that calls `setPaneSession`. This
+  supersedes the file's own stale note about depending on a "land on newest" guess.
+- 4.5: the policy unit tests already cited are joined by
+  `explain_review_and_summarize_also_refuse_writes_before_asking`, which drives a write
+  request through the actual production `handle()` function (not a mock) for
+  Explain/Review/Summarize and asserts refusal before any gate. Still short of R1.8's native
+  byte-identical dirty-checkout proof, which stays open under 6.4.
+
+Everything else in this file was re-verified and left as-is:
+- 2.4 and 5.3 correctly stay unchecked: `ProviderReconnect`/`AdapterUnsupported`/
+  `WorktreeFailed` outcomes are surfaced only as toast text (`SessionComposer.tsx`,
+  `AwaitingStartCard.tsx`), never as a retry/reconnect action control.
+- 3.4, 4.4, and 4.6 correctly stay unchecked: `ConversationPane.tsx` has no source
+  enrichment call and no escalate-review-to-fix path; grepped and confirmed absent.
+- 6.3 and 6.4 correctly stay unchecked (no RTL harness; native item).
+- No false-positive checkmarks were found in this file.

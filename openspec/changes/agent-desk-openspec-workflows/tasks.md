@@ -15,6 +15,15 @@
 - [x] 2.3 Include exact target task even when it is not the next open task.
 - [ ] 2.4 Wire context into live execution, rebuild it on file-watcher refresh, and mark
       launch-vs-live differences.
+      PARTIAL as of 2026-08-21: `start_execution_at` (`src-tauri/src/commands/agent_desk.rs`)
+      now genuinely folds `resolve_openspec_context` into the live prompt and persists a
+      `context_fingerprint` on the execution record, and `refresh_source_at`'s OpenSpec
+      branch calls the identical `resolve_openspec_context`/`resolve_change_status` builder,
+      so "live execution" and "refresh" share one code path (R5.1-R5.3 landed). Still
+      missing: nothing on the frontend reads `context_fingerprint` or shows the user that
+      the source has diverged since launch -- grepped `src/components/domain/agent-desk/*`
+      and `src/lib/agentDesk*.ts`, zero hits. Left unchecked because the task bundles three
+      things and the third (mark launch-vs-live differences) is not built.
 - [ ] 2.5 Render all repository markdown inertly.
 
 ## 3. Plan integration
@@ -27,6 +36,13 @@
 ## 4. File-backed completion
 
 - [ ] 4.1 Route accepted task completion from the mounted review flow through the existing task-line writer.
+      Confirmed orphan as of 2026-08-21: the backend command
+      `agent_session_complete_openspec_task` (`src-tauri/src/commands/agent_desk.rs`) genuinely
+      calls the shared `openspec::write::toggle_task_line` writer, and a frontend hook
+      (`useCompleteOpenSpecTask` in `src/hooks/useOpenspecSessionSource.ts`) genuinely calls
+      that command -- but grepping all of `src/**/*.tsx` for `useCompleteOpenSpecTask` finds
+      zero imports. No mounted component ever calls it. The command and hook are real and
+      correct in isolation; nothing in the rendered UI reaches them.
 - [ ] 4.2 Route accepted spec edits through existing draft/review writer.
 - [ ] 4.3 Refresh all main/Desk progress surfaces after writes from the production flow.
 - [x] 4.4 Never tick a task solely because an execution emitted Finished; require existing
@@ -74,3 +90,19 @@ test can satisfy — reverted to unticked.
 - 5.2, 5.4: native/manual test scenarios (repo without OpenSpec, repo without CLI, exact-task
   restart, file-watcher refresh) — these need a human running the real app against real repos,
   left unticked regardless of how the surrounding code looks.
+
+## Status 2026-08-21 (second pass)
+
+Re-audited against this session's R5 landing claims. One finding: 2.4 is now genuinely
+partial rather than fully missing -- `start_execution_at` folds OpenSpec context into the
+live prompt and persists `context_fingerprint`, and `refresh_source_at` shares the same
+context builder, confirming the "wire into live execution + rebuild on refresh" two-thirds
+of the task. It stays unchecked because the third requirement (mark launch-vs-live
+differences visibly) has no frontend consumer of `context_fingerprint` anywhere.
+
+Also confirmed by direct import-grep (not just plausibility) that 4.1 is a genuine orphan:
+the Rust command and the frontend hook that calls it are both correct, but no `.tsx`
+component imports the hook. Left unchecked, as it already was, with the specific evidence
+now recorded above rather than inferred.
+
+No other changes from the 2026-08-20 pass's conclusions.

@@ -14,10 +14,27 @@
 - [x] 2.1 Add inventory table/list with source, per-client state, and filters by item kind.
 - [ ] 2.2 Let the user choose one item and one or more destinations; batch actions must use
       the same explicit selection.
+      PARTIAL as of 2026-08-21: the single-item flow (`CopyPreviewDialog.tsx`'s
+      `DestinationPicker`) genuinely lets the user check/uncheck destinations. The batch flow
+      (`BatchReviewDialog.tsx`) does not -- `partitionBatchCandidates` (`src/lib/agentConfig.ts`)
+      auto-includes every eligible destination for every differing item with no per-item
+      destination checkboxes in the dialog. Left unchecked because the task explicitly
+      requires "batch actions must use the same explicit selection," which is not built.
 - [x] 2.3 Show exact destination files, semantic changes, warnings, and secret handling.
-- [ ] 2.4 Keep Match selected apps as a batch of visible per-item plans, not a hidden overwrite.
-- [ ] 2.5 Show immediate pending/success/failure and operation receipt with Undo for both
+- [x] 2.4 Keep Match selected apps as a batch of visible per-item plans, not a hidden overwrite.
+      Reversed from the 2026-08-20 pass's own note (which already flagged this as fixed,
+      inconsistent with its unticked checkbox -- resolved by re-reading the code): a new
+      `BatchReviewDialog.tsx` component replaces the old `AgentSetupView.handleMatchSelectedApps`,
+      whose own doc comment says the old handler "called `usePreviewAgentConfigCopy` and
+      `useApplyAgentConfigBatch` back-to-back... with no UI in between" -- a real prior bug.
+      The new dialog builds every candidate's plan via `PlanReview` and blocks on an explicit
+      Apply click before calling `agent_config_apply_batch`. Confirmed mounted in
+      `AgentSetupView.tsx`.
+- [x] 2.5 Show immediate pending/success/failure and operation receipt with Undo for both
       single-item and batch operations.
+      `BatchReviewDialog.tsx` wires `useUndoAgentConfigCopy` per outcome
+      (`onUndo={(operationId) => undo.mutate(operationId)}`), reusing `ApplyResults` from
+      `CopyPreviewDialog.tsx` so both flows render the same pending/success/failure/receipt UI.
 
 ## 3. Safe write framework
 
@@ -95,3 +112,23 @@ real app shell, not just built in isolation.
   failed targets untouched. Architecturally plausible, not proven — left unticked.
 - 5.5: "Record Gate 7 separately per client writer" is a process/evidence-recording task, not
   a code task — no such record found, and this can't be fabricated by reading code.
+
+## Status 2026-08-21 (second pass)
+
+Resolved an internal inconsistency in the 2026-08-20 pass: its prose described 2.2/2.4/2.5
+as fixed, but the checkboxes stayed unchecked -- the note was apparently written ahead of
+a fix that hadn't landed at commit time. Re-read the current code:
+
+- 2.4, 2.5: now genuinely true. `BatchReviewDialog.tsx` is new since the last pass, replacing
+  a real prior bug (`AgentSetupView.handleMatchSelectedApps` applied immediately with no
+  preview step, per that component's own disclosed doc comment) with a proper build-plans,
+  wait-for-Apply flow, wired with the same per-item Undo the single-item dialog uses.
+- 2.2 stays unchecked, more precisely than before: the single-item destination picker
+  (`DestinationPicker` in `CopyPreviewDialog.tsx`) is real, but the batch flow auto-selects
+  every eligible destination for every differing item (`partitionBatchCandidates`) with no
+  per-item destination checkboxes -- the task's explicit "batch actions must use the same
+  explicit selection" is not met.
+
+No other changes; 4.1/4.4/4.5/5.2/5.5 re-confirmed still missing per the prior pass's own
+evidence (no Codex/Copilot/OpenChamber writers, no partial-batch-failure test, no Gate 7
+record).
