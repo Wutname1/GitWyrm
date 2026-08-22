@@ -44,6 +44,19 @@ pub enum AgentSessionEventKind {
     /// A new message was appended to the transcript.
     #[serde(rename_all = "camelCase")]
     MessageAppended { message: SessionMessage },
+    /// An existing message's content was replaced in place, identified by
+    /// `message.message_id`. This is how consecutive streamed-text steps
+    /// within one execution ([`super::bridge::apply_run_event`]'s
+    /// coalescing) grow a single transcript row instead of appending a new
+    /// one per chunk -- the id, `segment_id`, `role`, `kind`, and `targets`
+    /// never change across an update, only `plain_content`,
+    /// `rendered_content`, `timestamp`, and `sequence` do. A listener that
+    /// only knows `MessageAppended` (e.g. one written before this variant
+    /// existed) would need to special-case this by id; see
+    /// `agentSessionStore.ts`'s handling for the frontend's version of that
+    /// same rule.
+    #[serde(rename_all = "camelCase")]
+    MessageUpdated { message: SessionMessage },
     /// The session (or one of its executions) changed state.
     #[serde(rename_all = "camelCase")]
     StateChanged { state: SessionState },

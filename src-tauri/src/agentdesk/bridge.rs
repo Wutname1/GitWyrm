@@ -206,8 +206,34 @@ pub fn apply_run_event(
 
     let kind = map_run_step(session, execution_id, sequence, occurred_at, event);
 
-    if let AgentSessionEventKind::MessageAppended { message } = &kind {
-        session.messages.push(message.clone());
+    match &kind {
+        AgentSessionEventKind::MessageAppended { message } => {
+            session.messages.push(message.clone());
+        }
+        // Coalescing (see `map_run_step`'s doc comment): the message already
+        // exists at this id, so it is replaced in place rather than pushed
+        // again -- this is what keeps one streaming reply as one transcript
+        // row. `map_run_step` only ever returns `MessageUpdated` for a
+        // `message_id` it already found at `session.messages.last()`, so
+        // this always finds a match; falling back to a push if it somehow
+        // did not would silently resurrect the exact per-chunk-message bug
+        // this feature exists to fix, so a missing match is a bug to see
+        // (debug_assert) rather than paper over.
+        AgentSessionEventKind::MessageUpdated { message } => {
+            match session.messages.last_mut() {
+                Some(last) if last.message_id == message.message_id => {
+                    *last = message.clone();
+                }
+                _ => {
+                    debug_assert!(
+                        false,
+                        "MessageUpdated for a message_id not at the end of session.messages"
+                    );
+                    session.messages.push(message.clone());
+                }
+            }
+        }
+        AgentSessionEventKind::StateChanged { .. } | AgentSessionEventKind::ExecutionSuperseded { .. } => {}
     }
     // The session's own state always tracks its active execution's state,
     // not only on the `Ended` step that produces an explicit `StateChanged`
@@ -370,6 +396,30 @@ fn map_run_state(state: AirunRunState) -> SessionState {
 /// display text: a reader that wants `added`/`removed` counts, a `GateRequest`,
 /// or a `PreflightItem` list back gets it by deserializing `rendered_content`,
 /// not by re-parsing a sentence.
+///
+/// Coalescing consecutive `Note` steps: `cli_run.rs::handle` turns every
+/// streamed text chunk from the provider CLI into its own `RunStep::Note`
+/// (`Incoming::TextChunk`), which used to mean one durable session message
+/// per chunk -- a chat reply of any length rendered as a wall of one-line
+/// messages, each its own JSON envelope. A `Note` step whose immediately
+/// preceding message (`session.messages.last()`) is itself an uncoalesced
+/// `Note` from the *same execution* is folded into that message instead of
+/// appended as a new one: `coalescing_note` decides eligibility, and this
+/// function returns `MessageUpdated` (not `MessageAppended`) in that case, so
+/// one streaming reply grows as one transcript row. Any other step kind --
+/// `Edit`, `Check`, `Gate`, `YouSaid`, `Activity`, `Adapted`, `Preflight`,
+/// `Ended` -- is never coalesced (`coalescing_note` only matches `Note`) and,
+/// once appended, ends the run: the next `Note` after it finds a non-`Note`
+/// last message and starts a fresh row. `Activity` (tool calls) is the
+/// concrete case this matters for: a tool call between two text chunks must
+/// not glue them into one message across it, and must not itself be treated
+/// as prose to fold into.
+///
+/// Deliberately decided here (not in `cli_run.rs`): `cli_run.rs`'s `Sink`
+/// also feeds the existing append-only AI-run console (`ai-run-event`),
+/// whose one-row-per-chunk behavior is unrelated to this bug and must not
+/// change. Folding happens only on the durable session path, which is what
+/// `apply_run_event`/`map_run_step` already exclusively own.
 fn map_run_step(
     session: &AgentSession,
     execution_id: &ExecutionId,
@@ -388,8 +438,74 @@ fn map_run_step(
         };
     }
 
+    if let RunStep::Note { text } = &event.step {
+        if let Some(previous) = coalescing_note(session, execution_id) {
+            let message = update_message_for_coalesced_note(previous, text, sequence, occurred_at);
+            return AgentSessionEventKind::MessageUpdated { message };
+        }
+    }
+
     let message = build_message(session, execution_id, sequence, occurred_at, event);
     AgentSessionEventKind::MessageAppended { message }
+}
+
+/// The session's last message, if it is eligible to have a new `Note` step
+/// folded into it: same execution, and itself an uncoalesced `Note` (never
+/// anything else -- an `Edit`/`Check`/`Gate`/etc. message is never a valid
+/// coalescing target even though some of those also render as
+/// `MessageKind::Assistant`).
+///
+/// Reads `rendered_content` back into a `RunStep` rather than adding a
+/// separate "this message is a coalescible Note" flag to `SessionMessage` or
+/// `ExecutionRecord`: `rendered_content` already carries the full step
+/// losslessly (see `map_run_step`'s doc comment), so this is the one place
+/// that needs to know "was the last step a Note" and it can answer that
+/// without a schema change or an extra piece of state to keep in sync.
+fn coalescing_note<'a>(session: &'a AgentSession, execution_id: &ExecutionId) -> Option<&'a SessionMessage> {
+    let last = session.messages.last()?;
+    if last.execution_id.as_ref() != Some(execution_id) {
+        return None;
+    }
+    let rendered = last.rendered_content.as_deref()?;
+    let step: RunStep = serde_json::from_str(rendered).ok()?;
+    if matches!(step, RunStep::Note { .. }) {
+        Some(last)
+    } else {
+        None
+    }
+}
+
+/// Builds the replacement for `previous` once a new `Note` chunk is folded
+/// into it: text is concatenated directly (the provider CLI's chunks already
+/// carry their own inter-word whitespace, so inserting a separator here would
+/// double it up), and `message_id`/`segment_id`/`role`/`kind`/`targets` are
+/// carried over unchanged -- only content, timestamp, and sequence advance,
+/// matching `AgentSessionEventKind::MessageUpdated`'s doc comment.
+fn update_message_for_coalesced_note(
+    previous: &SessionMessage,
+    new_text: &str,
+    sequence: u32,
+    occurred_at: &str,
+) -> SessionMessage {
+    let combined_text = format!("{}{}", previous.plain_content, new_text);
+    let combined_step = RunStep::Note {
+        text: combined_text.clone(),
+    };
+    SessionMessage {
+        message_id: previous.message_id.clone(),
+        segment_id: previous.segment_id.clone(),
+        role: previous.role,
+        timestamp: occurred_at.to_string(),
+        plain_content: combined_text,
+        rendered_content: serde_json::to_string(&combined_step).ok(),
+        provider: previous.provider.clone(),
+        model: previous.model.clone(),
+        kind: previous.kind,
+        execution_id: previous.execution_id.clone(),
+        sequence: Some(sequence),
+        import: previous.import.clone(),
+        targets: previous.targets.clone(),
+    }
 }
 
 fn build_message(
@@ -452,6 +568,12 @@ fn message_kind_for_step(step: &RunStep) -> MessageKind {
         RunStep::Gate { .. } => MessageKind::Approval,
         RunStep::YouSaid { .. } => MessageKind::User,
         RunStep::Note { .. } => MessageKind::Assistant,
+        // Tool activity, never assistant prose -- this is what keeps "Finding
+        // files matching **/tasks.md" out of the chat transcript and routes
+        // it to the compact activity feed instead (`EventStack`, grouped by
+        // `agentDeskEvents.ts::groupEventStacks`, which already groups every
+        // `MessageKind::Tool` message the same way `Edit`/`Check` are).
+        RunStep::Activity { .. } => MessageKind::Tool,
         RunStep::Adapted { .. } => MessageKind::Assistant,
         // Handled before this is reached (see `map_run_step`); kept here so
         // the match stays exhaustive against every `RunStep` variant rather
@@ -555,6 +677,9 @@ mod tests {
             },
             RunStep::Note {
                 text: "thinking".into(),
+            },
+            RunStep::Activity {
+                text: "Finding files matching **/tasks.md".into(),
             },
             RunStep::Adapted {
                 text: "did it another way".into(),
@@ -916,13 +1041,23 @@ mod tests {
         store::write_session(&root, &session).unwrap();
         links.link("repo-1", &session.header.session_id);
 
-        for i in 1..=3u32 {
-            let event = run_event(
-                AirunRunState::Working,
-                RunStep::Note {
-                    text: format!("step {i}"),
-                },
-            );
+        // Distinct step kinds (not three `Note`s -- see the coalescing tests
+        // below for that case): each is its own row, so this still checks
+        // that *non*-coalescing sequential events persist in order and keep
+        // advancing `last_sequence`.
+        let steps = vec![
+            RunStep::Plan {
+                text: "step 1".into(),
+            },
+            RunStep::Note {
+                text: "step 2".into(),
+            },
+            RunStep::YouSaid {
+                text: "step 3".into(),
+            },
+        ];
+        for step in steps {
+            let event = run_event(AirunRunState::Working, step);
             let seq = links.next_sequence(&event.session_id);
             let routed = route_run_event(&root, &links, &locks, seq, "2026-01-01T00:00:01Z", &event);
             assert!(matches!(routed, RunEventRouted::Persisted { .. }));
@@ -930,6 +1065,239 @@ mod tests {
 
         let reread = store::read_session(&root, &session.header.session_id).unwrap();
         assert_eq!(reread.messages.len(), 3);
+        assert_eq!(reread.executions[0].last_sequence, 3);
+    }
+
+    // -- Note coalescing (streamed-text chunks folding into one message) --
+
+    #[test]
+    fn consecutive_note_chunks_from_one_execution_coalesce_into_one_message() {
+        let mut session = session();
+        let exec = execution_id_for_run_session("run-1");
+
+        let first = run_event(AirunRunState::Working, RunStep::Note { text: "Hel".into() });
+        let outcome1 = apply_run_event(&mut session, &exec, 1, "2026-01-01T00:00:01Z", &first);
+        let BridgeOutcome::Applied { session: after1, event: e1 } = outcome1 else {
+            panic!("expected Applied");
+        };
+        session = after1;
+        assert!(matches!(e1.kind, AgentSessionEventKind::MessageAppended { .. }));
+        assert_eq!(session.messages.len(), 1);
+
+        let second = run_event(AirunRunState::Working, RunStep::Note { text: "lo, ".into() });
+        let outcome2 = apply_run_event(&mut session, &exec, 2, "2026-01-01T00:00:02Z", &second);
+        let BridgeOutcome::Applied { session: after2, event: e2 } = outcome2 else {
+            panic!("expected Applied");
+        };
+        session = after2;
+        let AgentSessionEventKind::MessageUpdated { message: m2 } = e2.kind else {
+            panic!("expected MessageUpdated for the second chunk");
+        };
+        assert_eq!(
+            session.messages.len(),
+            1,
+            "a coalesced chunk must not add a second message"
+        );
+        assert_eq!(m2.message_id, session.messages[0].message_id);
+        assert_eq!(m2.plain_content, "Hello, ");
+
+        let third = run_event(AirunRunState::Working, RunStep::Note { text: "world".into() });
+        let outcome3 = apply_run_event(&mut session, &exec, 3, "2026-01-01T00:00:03Z", &third);
+        let BridgeOutcome::Applied { session: after3, event: e3 } = outcome3 else {
+            panic!("expected Applied");
+        };
+        session = after3;
+        let AgentSessionEventKind::MessageUpdated { message: m3 } = e3.kind else {
+            panic!("expected MessageUpdated for the third chunk");
+        };
+
+        // ONE growing message, not three -- the whole point of coalescing.
+        assert_eq!(session.messages.len(), 1);
+        assert_eq!(m3.plain_content, "Hello, world");
+        assert_eq!(session.messages[0].plain_content, "Hello, world");
+        assert_eq!(
+            session.messages[0].message_id, m2.message_id,
+            "message id must stay stable across every coalesced chunk"
+        );
+        // Sequence numbering keeps advancing even though the row count does
+        // not -- the coalesced message's own `sequence` tracks the latest
+        // chunk, and the execution's `last_sequence` (dedup/gap tracking)
+        // still moves forward per chunk.
+        assert_eq!(session.messages[0].sequence, Some(3));
+        assert_eq!(session.executions[0].last_sequence, 3);
+    }
+
+    #[test]
+    fn a_non_note_step_between_chunks_ends_the_coalescing_run() {
+        let mut session = session();
+        let exec = execution_id_for_run_session("run-1");
+
+        let first = run_event(AirunRunState::Working, RunStep::Note { text: "part one".into() });
+        let BridgeOutcome::Applied { session: after1, .. } =
+            apply_run_event(&mut session, &exec, 1, "2026-01-01T00:00:01Z", &first)
+        else {
+            panic!("expected Applied");
+        };
+        session = after1;
+
+        // A non-Note step interrupts the run: e.g. a tool result summarized
+        // as a Check.
+        let check = run_event(
+            AirunRunState::Working,
+            RunStep::Check {
+                name: "typecheck".into(),
+                passed: true,
+                detail: "ok".into(),
+            },
+        );
+        let BridgeOutcome::Applied { session: after2, event: e2 } =
+            apply_run_event(&mut session, &exec, 2, "2026-01-01T00:00:02Z", &check)
+        else {
+            panic!("expected Applied");
+        };
+        session = after2;
+        assert!(matches!(e2.kind, AgentSessionEventKind::MessageAppended { .. }));
+        assert_eq!(session.messages.len(), 2, "the Check step is its own message");
+
+        // The next Note must start a NEW message, not fold into "part one"
+        // across the Check.
+        let second_note = run_event(AirunRunState::Working, RunStep::Note { text: "part two".into() });
+        let BridgeOutcome::Applied { session: after3, event: e3 } =
+            apply_run_event(&mut session, &exec, 3, "2026-01-01T00:00:03Z", &second_note)
+        else {
+            panic!("expected Applied");
+        };
+        session = after3;
+        assert!(
+            matches!(e3.kind, AgentSessionEventKind::MessageAppended { .. }),
+            "a Note after a non-Note step must append, not update"
+        );
+        assert_eq!(session.messages.len(), 3);
+        assert_eq!(session.messages[0].plain_content, "part one");
+        assert_eq!(session.messages[2].plain_content, "part two");
+        assert_ne!(session.messages[0].message_id, session.messages[2].message_id);
+    }
+
+    #[test]
+    fn a_tool_call_produces_a_tool_kind_message_never_assistant_prose() {
+        let mut session = session();
+        let exec = execution_id_for_run_session("run-1");
+        let activity = run_event(
+            AirunRunState::Working,
+            RunStep::Activity {
+                text: "Finding files matching **/tasks.md".into(),
+            },
+        );
+        let outcome = apply_run_event(&mut session, &exec, 1, "2026-01-01T00:00:01Z", &activity);
+        let BridgeOutcome::Applied { session: applied, event: durable } = outcome else {
+            panic!("expected Applied");
+        };
+        assert!(matches!(durable.kind, AgentSessionEventKind::MessageAppended { .. }));
+        assert_eq!(
+            applied.messages[0].kind,
+            MessageKind::Tool,
+            "a tool call must never be indistinguishable from the agent's own prose (MessageKind::Assistant)"
+        );
+    }
+
+    #[test]
+    fn a_tool_call_between_two_note_chunks_ends_the_coalescing_run() {
+        let mut session = session();
+        let exec = execution_id_for_run_session("run-1");
+
+        let first = run_event(AirunRunState::Working, RunStep::Note { text: "I'm not sure what".into() });
+        let BridgeOutcome::Applied { session: after1, .. } =
+            apply_run_event(&mut session, &exec, 1, "2026-01-01T00:00:01Z", &first)
+        else {
+            panic!("expected Applied");
+        };
+        session = after1;
+
+        // A tool call fires mid-reply, exactly like the screenshot's
+        // "Finding files matching **/tasks.md" wedged into the wall of text.
+        let activity = run_event(
+            AirunRunState::Working,
+            RunStep::Activity {
+                text: "Finding files matching **/tasks.md".into(),
+            },
+        );
+        let BridgeOutcome::Applied { session: after2, event: e2 } =
+            apply_run_event(&mut session, &exec, 2, "2026-01-01T00:00:02Z", &activity)
+        else {
+            panic!("expected Applied");
+        };
+        session = after2;
+        assert!(matches!(e2.kind, AgentSessionEventKind::MessageAppended { .. }));
+        assert_eq!(session.messages.len(), 2, "the tool call is its own message");
+
+        // The next Note must start a NEW message, not fold into the first
+        // chunk across the tool call.
+        let second = run_event(AirunRunState::Working, RunStep::Note { text: "\"that\" refers to.".into() });
+        let BridgeOutcome::Applied { session: after3, event: e3 } =
+            apply_run_event(&mut session, &exec, 3, "2026-01-01T00:00:03Z", &second)
+        else {
+            panic!("expected Applied");
+        };
+        session = after3;
+        assert!(
+            matches!(e3.kind, AgentSessionEventKind::MessageAppended { .. }),
+            "a Note after a tool call must append, not update"
+        );
+        assert_eq!(session.messages.len(), 3);
+        assert_eq!(session.messages[0].plain_content, "I'm not sure what");
+        assert_eq!(session.messages[1].kind, MessageKind::Tool);
+        assert_eq!(session.messages[2].plain_content, "\"that\" refers to.");
+        assert_ne!(session.messages[0].message_id, session.messages[2].message_id);
+    }
+
+    #[test]
+    fn a_note_chunk_for_a_different_execution_does_not_coalesce_into_the_previous_one() {
+        let mut session = session();
+        let exec1 = execution_id_for_run_session("run-1");
+        let exec2 = execution_id_for_run_session("run-2");
+
+        let first = run_event(AirunRunState::Working, RunStep::Note { text: "from exec1".into() });
+        let BridgeOutcome::Applied { session: after1, .. } =
+            apply_run_event(&mut session, &exec1, 1, "2026-01-01T00:00:01Z", &first)
+        else {
+            panic!("expected Applied");
+        };
+        session = after1;
+
+        // A helper/retry execution's own first Note must not fold into the
+        // lead's last message just because both happen to be Notes.
+        let second = run_event(AirunRunState::Working, RunStep::Note { text: "from exec2".into() });
+        let BridgeOutcome::Applied { event: e2, .. } =
+            apply_run_event(&mut session, &exec2, 1, "2026-01-01T00:00:02Z", &second)
+        else {
+            panic!("expected Applied");
+        };
+        assert!(matches!(e2.kind, AgentSessionEventKind::MessageAppended { .. }));
+    }
+
+    #[test]
+    fn a_coalesced_update_persists_by_replacing_not_appending() {
+        let (_dir, root) = temp_store();
+        let links = RunSessionLinks::new();
+        let locks = SessionLocks::new();
+        let session = session();
+        store::write_session(&root, &session).unwrap();
+        links.link("repo-1", &session.header.session_id);
+
+        for text in ["chunk one ", "chunk two ", "chunk three"] {
+            let event = run_event(AirunRunState::Working, RunStep::Note { text: text.into() });
+            let seq = links.next_sequence(&event.session_id);
+            let routed = route_run_event(&root, &links, &locks, seq, "2026-01-01T00:00:01Z", &event);
+            assert!(matches!(routed, RunEventRouted::Persisted { .. }));
+        }
+
+        let reread = store::read_session(&root, &session.header.session_id).unwrap();
+        assert_eq!(
+            reread.messages.len(),
+            1,
+            "coalescing must persist as one message on disk, not three"
+        );
+        assert_eq!(reread.messages[0].plain_content, "chunk one chunk two chunk three");
         assert_eq!(reread.executions[0].last_sequence, 3);
     }
 }

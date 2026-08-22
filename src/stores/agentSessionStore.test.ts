@@ -106,6 +106,78 @@ describe('agentSessionStore', () => {
     expect(entry?.messages.map((m) => m.messageId)).toEqual(['m1'])
   })
 
+  /**
+   * Regression coverage for backend coalescing (`agentdesk::bridge`'s
+   * `MessageUpdated`, for consecutive streamed-text `Note` chunks folded
+   * into one growing message): N chunks for one execution must render as
+   * ONE message whose text is the concatenation, not N separate rows.
+   */
+  it('folds consecutive messageUpdated events into one growing message, not N messages', () => {
+    const s = useAgentSessionStore.getState()
+    s.applyEvent(appended(1, 'm1'))
+
+    const chunk = (sequence: number, text: string): AgentSessionEvent => ({
+      sessionId: SESSION,
+      executionId: EXEC,
+      sequence,
+      occurredAt: '2026-08-19T00:00:00Z',
+      kind: {
+        kind: 'messageUpdated',
+        message: { ...message('m1'), plainContent: text, sequence },
+      },
+    })
+
+    s.applyEvent(chunk(2, 'content-m1 more'))
+    s.applyEvent(chunk(3, 'content-m1 more still'))
+
+    const entry = useAgentSessionStore.getState().bySession[SESSION]
+    expect(entry?.messages).toHaveLength(1)
+    expect(entry?.messages[0].messageId).toBe('m1')
+    expect(entry?.messages[0].plainContent).toBe('content-m1 more still')
+  })
+
+  it('a non-Note step (a fresh messageAppended) between updates starts a new row rather than folding', () => {
+    const s = useAgentSessionStore.getState()
+    s.applyEvent(appended(1, 'm1'))
+    s.applyEvent({
+      sessionId: SESSION,
+      executionId: EXEC,
+      sequence: 2,
+      occurredAt: '2026-08-19T00:00:00Z',
+      kind: { kind: 'messageUpdated', message: { ...message('m1'), plainContent: 'grown', sequence: 2 } },
+    })
+    // A distinct step (e.g. a Check) appends as its own message, matching
+    // the backend's rule that only Note chunks ever coalesce.
+    s.applyEvent(appended(3, 'm2'))
+
+    const entry = useAgentSessionStore.getState().bySession[SESSION]
+    expect(entry?.messages.map((m) => m.messageId)).toEqual(['m1', 'm2'])
+    expect(entry?.messages[0].plainContent).toBe('grown')
+  })
+
+  it('drops a stale messageUpdated whose sequence is not newer than what was already applied', () => {
+    const s = useAgentSessionStore.getState()
+    s.applyEvent(appended(1, 'm1'))
+    s.applyEvent({
+      sessionId: SESSION,
+      executionId: EXEC,
+      sequence: 5,
+      occurredAt: '2026-08-19T00:00:00Z',
+      kind: { kind: 'messageUpdated', message: { ...message('m1'), plainContent: 'latest', sequence: 5 } },
+    })
+    // A late/duplicate update at an older sequence must not overwrite the newer content.
+    s.applyEvent({
+      sessionId: SESSION,
+      executionId: EXEC,
+      sequence: 2,
+      occurredAt: '2026-08-19T00:00:00Z',
+      kind: { kind: 'messageUpdated', message: { ...message('m1'), plainContent: 'stale', sequence: 2 } },
+    })
+
+    const entry = useAgentSessionStore.getState().bySession[SESSION]
+    expect(entry?.messages[0].plainContent).toBe('latest')
+  })
+
   it('tracks state changes independently per session', () => {
     useAgentSessionStore.getState().applyEvent({
       sessionId: SESSION,
@@ -186,5 +258,28 @@ describe('mergeSessionMessages', () => {
 
   it('returns the live messages as-is when there is no session yet', () => {
     expect(mergeSessionMessages(null, [message('m1')]).map((m) => m.messageId)).toEqual(['m1'])
+  })
+
+  /**
+   * A coalesced live update to a message id that a stale query result still
+   * has the older content for must win by sequence, not be shadowed by
+   * "persisted wins by identity" -- otherwise a query refetch that raced a
+   * `messageUpdated` event would freeze the transcript on old text.
+   */
+  it('prefers the newer sequence when a message id exists on both sides', () => {
+    const stale = { ...message('m1'), plainContent: 'stale', sequence: 1 }
+    const fresh = { ...message('m1'), plainContent: 'fresh', sequence: 3 }
+    const s = session([stale])
+    const merged = mergeSessionMessages(s, [fresh])
+    expect(merged).toHaveLength(1)
+    expect(merged[0].plainContent).toBe('fresh')
+  })
+
+  it('does not regress a persisted message to older live content by mistake', () => {
+    const current = { ...message('m1'), plainContent: 'current', sequence: 5 }
+    const outdatedLive = { ...message('m1'), plainContent: 'outdated', sequence: 2 }
+    const s = session([current])
+    const merged = mergeSessionMessages(s, [outdatedLive])
+    expect(merged[0].plainContent).toBe('current')
   })
 })

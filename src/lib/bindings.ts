@@ -3574,6 +3574,20 @@ export type AgentSessionEventKind =
  */
 { kind: "messageAppended"; message: SessionMessage } | 
 /**
+ * An existing message's content was replaced in place, identified by
+ * `message.message_id`. This is how consecutive streamed-text steps
+ * within one execution ([`super::bridge::apply_run_event`]'s
+ * coalescing) grow a single transcript row instead of appending a new
+ * one per chunk -- the id, `segment_id`, `role`, `kind`, and `targets`
+ * never change across an update, only `plain_content`,
+ * `rendered_content`, `timestamp`, and `sequence` do. A listener that
+ * only knows `MessageAppended` (e.g. one written before this variant
+ * existed) would need to special-case this by id; see
+ * `agentSessionStore.ts`'s handling for the frontend's version of that
+ * same rule.
+ */
+{ kind: "messageUpdated"; message: SessionMessage } | 
+/**
  * The session (or one of its executions) changed state.
  */
 { kind: "stateChanged"; state: SessionState } | 
@@ -6055,6 +6069,16 @@ export type RunStep =
  * Anything the run wants to say that is not one of the above.
  */
 { kind: "note"; text: string } | 
+/**
+ * A tool the agent is running (searching, reading, editing files
+ * through its own tool calls) as opposed to something it is saying.
+ * Kept distinct from `Note` so tool activity never coalesces with, or
+ * reads as, the agent's own prose -- see `agentdesk::bridge::map_run_step`
+ * and `agentdesk::bridge::message_kind_for_step`, which route this to
+ * `MessageKind::Tool` (the compact activity feed) instead of the
+ * transcript's assistant messages.
+ */
+{ kind: "activity"; text: string } | 
 /**
  * It could not do something, and is adapting.
  */

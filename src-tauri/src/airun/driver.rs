@@ -141,6 +141,14 @@ pub enum RunStep {
     YouSaid { text: String },
     /// Anything the run wants to say that is not one of the above.
     Note { text: String },
+    /// A tool the agent is running (searching, reading, editing files
+    /// through its own tool calls) as opposed to something it is saying.
+    /// Kept distinct from `Note` so tool activity never coalesces with, or
+    /// reads as, the agent's own prose -- see `agentdesk::bridge::map_run_step`
+    /// and `agentdesk::bridge::message_kind_for_step`, which route this to
+    /// `MessageKind::Tool` (the compact activity feed) instead of the
+    /// transcript's assistant messages.
+    Activity { text: String },
     /// It could not do something, and is adapting.
     Adapted { text: String },
     /// The run ended.
@@ -217,6 +225,7 @@ pub fn summarize(step: &RunStep) -> String {
         RunStep::Gate { request } => request.title(),
         RunStep::YouSaid { text } => format!("You said: {text}"),
         RunStep::Note { text } => text.clone(),
+        RunStep::Activity { text } => text.clone(),
         RunStep::Adapted { text } => text.clone(),
         RunStep::Ended { detail, .. } => detail.clone(),
     }
@@ -286,6 +295,9 @@ mod tests {
             },
             RunStep::Note {
                 text: "thinking".into(),
+            },
+            RunStep::Activity {
+                text: "Finding files matching **/tasks.md".into(),
             },
             RunStep::Adapted {
                 text: "did it another way".into(),

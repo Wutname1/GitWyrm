@@ -10,7 +10,7 @@ import { resolveMessageTarget } from '@/lib/agentDeskTargets'
 import { computeRailTicks, userMessagesForRail } from '@/lib/agentDeskRail'
 import { groupEventStacks, type EventStackGroup } from '@/lib/agentDeskEvents'
 import { parsePlanChecklist } from '@/lib/agentDeskPlan'
-import { foldThoughtSummaries } from '@/lib/agentDeskTranscript'
+import { displayText, foldThoughtSummaries } from '@/lib/agentDeskTranscript'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { SessionSourceBanner } from './SessionSourceBanner'
 import { SessionComposer } from './SessionComposer'
@@ -180,11 +180,14 @@ function MessageRow({
           <ThoughtBlock text={thought.plainContent} variant={message.kind === 'result' ? 'reviewing' : 'thinking'} />
         )}
         <div className="text-xs leading-relaxed text-foreground">
-          {message.renderedContent ? (
-            <Markdown text={message.renderedContent} />
-          ) : (
-            <p className="select-text whitespace-pre-wrap">{message.plainContent}</p>
-          )}
+          {(() => {
+            const { text, isMarkdown } = displayText(message)
+            return isMarkdown ? (
+              <Markdown text={text} />
+            ) : (
+              <p className="select-text whitespace-pre-wrap">{text}</p>
+            )
+          })()}
         </div>
         {planRows.length > 0 && (
           <PlanChecklist rows={planRows} label={message.kind === 'result' ? 'Review findings' : 'Agent plan'} />

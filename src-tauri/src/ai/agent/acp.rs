@@ -507,11 +507,14 @@ fn classify_update(update: &Value) -> Option<Incoming> {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            let title = update
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or("working")
-                .to_string();
+            // No fallback to a made-up word like "working" here: a
+            // `tool_call_update` with no `title` is usually a bare
+            // status/progress ping (still `in_progress`, no new detail to
+            // show), and inventing text for it is how a literal "working"
+            // ends up wedged into the activity stream. Dropping the update
+            // when there is nothing real to say is correct -- the tool call
+            // that started this id already carried its own title.
+            let title = update.get("title").and_then(Value::as_str)?.to_string();
             Some(Incoming::ToolCall {
                 id,
                 title,
@@ -601,6 +604,19 @@ mod tests {
             }
             other => panic!("expected a tool call, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_tool_call_update_with_no_title_is_dropped_not_fabricated() {
+        // A `tool_call_update` progress ping with no `title` used to fall
+        // back to the literal word "working", which then leaked into the
+        // agent's own transcript as a bare status word. There is nothing
+        // real to say here, so the update must be dropped, not invented.
+        let update = json!({
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "t1"
+        });
+        assert!(classify_update(&update).is_none());
     }
 
     #[test]

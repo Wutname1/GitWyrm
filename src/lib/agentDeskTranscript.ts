@@ -25,6 +25,37 @@ export interface FoldedThoughts {
   folded: Set<string>
 }
 
+/**
+ * Decides what a message's body should render: the raw `plainContent`
+ * sentence, or `renderedContent` as markdown.
+ *
+ * `renderedContent` is not one thing across every `SessionMessage` producer.
+ * For a message the run bridge built (`agentdesk::bridge::build_message`,
+ * `src-tauri/src/agentdesk/bridge.rs`), it is the message's entire `RunStep`
+ * serialized to JSON -- a *data* field kept so a consumer can deserialize the
+ * full typed step back (see that file's `map_run_step` doc comment and the
+ * round-trip test in `bridge.rs`), never meant to be shown to a person. Every
+ * other producer of `SessionMessage` (`commands/agent_desk.rs`,
+ * `commands/agent_import.rs`) always sets `rendered_content: None`, so today
+ * nothing else populates it with real markdown -- but the rule below does not
+ * depend on that happening to be true; it depends on the one field the bridge
+ * always sets alongside its JSON dump.
+ *
+ * The bridge is also the only producer that sets `execution_id` on a
+ * message (see `SessionMessage.execution_id`'s own doc comment: "`None` for
+ * messages not produced by an execution"), which makes `execution_id` a
+ * reliable, already-existing discriminator: a message with an `executionId`
+ * came from a bridged run event and must display `plainContent`, no matter
+ * what `renderedContent` holds; a message with no `executionId` is free to
+ * use `renderedContent` as markdown when present.
+ */
+export function displayText(message: SessionMessage): { text: string; isMarkdown: boolean } {
+  if (message.renderedContent && message.executionId == null) {
+    return { text: message.renderedContent, isMarkdown: true }
+  }
+  return { text: message.plainContent, isMarkdown: false }
+}
+
 export function foldThoughtSummaries(messages: SessionMessage[]): FoldedThoughts {
   const thoughtFor = new Map<string, SessionMessage>()
   const folded = new Set<string>()

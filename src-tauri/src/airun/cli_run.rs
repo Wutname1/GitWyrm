@@ -114,7 +114,15 @@ fn handle(item: Incoming, sink: &Sink, answers: &mpsc::Receiver<GateAnswer>) {
             }
         }
         Incoming::ToolCall { title, .. } => {
-            sink(RunState::Working, RunStep::Note { text: title });
+            // `Activity`, never `Note`: tool calls are what the agent is
+            // *doing*, not what it is *saying*. Keeping them a distinct step
+            // kind is what lets `agentdesk::bridge` route them to
+            // `MessageKind::Tool` (the compact activity feed) instead of the
+            // prose transcript, and stops them from coalescing with -- and
+            // getting glued onto -- the agent's own streamed text chunks.
+            if !title.trim().is_empty() {
+                sink(RunState::Working, RunStep::Activity { text: title });
+            }
         }
         Incoming::PermissionRequest {
             tool_call,

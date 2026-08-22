@@ -1,4 +1,4 @@
-import { Check, FileDiff, ListChecks, MessageSquare, X } from 'lucide-react'
+import { Check, FileDiff, ListChecks, MessageSquare, Wrench, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { GateAnswer, RunStep } from '@/lib/bindings'
 import { GateCard } from './GateCard'
@@ -155,6 +155,13 @@ function StreamRow({
 
     case 'note':
       return <Row icon={null} text={step.text} muted />
+
+    case 'activity':
+      // A tool call, not the agent's own words -- kept visually distinct
+      // (icon + muted) from `note` so this console has the same
+      // prose-vs-activity separation the durable transcript's EventStack
+      // gets from `MessageKind::Tool`.
+      return <Row icon={<Wrench size={12} className="mt-0.5 flex-none text-muted-foreground" />} text={step.text} muted />
 
     case 'adapted':
       return <Row icon={null} text={step.text} />

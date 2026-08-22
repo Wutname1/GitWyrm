@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionMessage } from '@/lib/bindings'
-import { foldThoughtSummaries } from './agentDeskTranscript'
+import { displayText, foldThoughtSummaries } from './agentDeskTranscript'
 
 function msg(id: string, kind: SessionMessage['kind']): SessionMessage {
   return {
@@ -67,5 +67,50 @@ describe('foldThoughtSummaries', () => {
     expect(folded.has('t1')).toBe(false)
     expect(thoughtFor.get('r1')).toBe(t2)
     expect(folded.has('t2')).toBe(true)
+  })
+})
+
+describe('displayText', () => {
+  /**
+   * Regression test for the bug where a bridged run-event message (one the
+   * backend's `agentdesk::bridge::build_message` produced, carrying the
+   * step's entire `RunStep` as JSON in `renderedContent` alongside the
+   * plain-language sentence in `plainContent`) rendered its raw JSON
+   * envelope as markdown -- a "what folder are you in?" answer showed up as
+   * ~20 messages each printing a `{"kind":"note","text":"..."}` fragment.
+   * `executionId` is set if and only if the message came from the bridge
+   * (see `SessionMessage.execution_id`'s doc comment: "`None` for messages
+   * not produced by an execution"), so it is the discriminator: any message
+   * with an `executionId` must display `plainContent`, never
+   * `renderedContent`, no matter what JSON that field holds.
+   */
+  it('never displays renderedContent as markdown for a bridged run-event message', () => {
+    const bridged = msg('m1', 'assistant')
+    bridged.plainContent = 'C:\\code\\GitWyrm\\.claude\\worktrees\\agent-desk-docs-2f7a11'
+    bridged.renderedContent = '{"kind":"note","text":"C:\\\\code\\\\GitWyrm..."}'
+    bridged.executionId = 'exec-1'
+
+    const result = displayText(bridged)
+    expect(result.isMarkdown).toBe(false)
+    expect(result.text).toBe(bridged.plainContent)
+  })
+
+  it('renders renderedContent as markdown for a message with no executionId', () => {
+    const imported = msg('m2', 'assistant')
+    imported.executionId = null
+    imported.renderedContent = '**bold answer**'
+
+    const result = displayText(imported)
+    expect(result.isMarkdown).toBe(true)
+    expect(result.text).toBe('**bold answer**')
+  })
+
+  it('falls back to plainContent when renderedContent is absent, regardless of executionId', () => {
+    const noRendered = msg('m3', 'user')
+    noRendered.executionId = null
+    noRendered.renderedContent = null
+    noRendered.plainContent = 'hello'
+
+    expect(displayText(noRendered)).toEqual({ text: 'hello', isMarkdown: false })
   })
 })

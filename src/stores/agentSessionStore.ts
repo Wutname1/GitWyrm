@@ -95,6 +95,43 @@ export const useAgentSessionStore = create<AgentSessionStore>((set) => ({
         }
       }
 
+      // messageUpdated: an existing message's content was replaced in place
+      // (backend coalescing of consecutive streamed-text steps within one
+      // execution -- see `agentdesk::bridge::map_run_step`'s doc comment).
+      // This must NOT go through the messageAppended dedupe-by-messageId
+      // check below: that check exists to drop an exact repeat, but an
+      // update intentionally reuses the same `messageId` with new content,
+      // so "already have this id" is exactly the case this branch needs to
+      // handle by replacing, not the case to drop. Sequence still only
+      // advances (never goes backward), matching messageAppended's own rule,
+      // since an update still consumes a sequence number on the backend.
+      if (payload.kind === 'messageUpdated') {
+        const key = event.executionId ?? '__none__'
+        const seenSoFar = entry.lastSequenceByExecution[key] ?? 0
+        if (event.sequence !== 0 && event.sequence <= seenSoFar) {
+          return s
+        }
+        const targetId = payload.message.messageId
+        const index = entry.messages.findIndex((m) => m.messageId === targetId)
+        const messages =
+          index === -1
+            ? [...entry.messages, payload.message]
+            : entry.messages.map((m, i) => (i === index ? payload.message : m))
+        return {
+          bySession: {
+            ...s.bySession,
+            [event.sessionId]: {
+              ...entry,
+              messages,
+              lastSequenceByExecution: {
+                ...entry.lastSequenceByExecution,
+                [key]: Math.max(seenSoFar, event.sequence),
+              },
+            },
+          },
+        }
+      }
+
       // messageAppended: dedupe by sequence per execution. `sequence` is
       // monotonic per execution ID (see the `AgentSessionEvent` doc comment
       // in bindings.ts); a duplicate or out-of-order-old sequence is ignored,
@@ -150,18 +187,43 @@ export function selectLiveState(sessionId: string | null): SessionState | null {
  * Merges a query's persisted session with this store's live overlay into the
  * transcript a component should render.
  *
- * Persisted messages win by identity: a live message already present in
- * `session.messages` (folded in by the backend, then returned by a refetch)
- * is not appended twice. Ordering follows `sequence` when both sides have
- * one, falling back to arrival order for messages that predate sequencing.
+ * A message id present on both sides is resolved by `sequence`, not by
+ * "persisted always wins": persist-before-emit (design.md) means a live
+ * event's content is never older than what was on disk when it was emitted,
+ * but the *query* result being merged against can itself predate that emit
+ * (a refetch that raced the write, or one that simply has not happened
+ * since). Backend coalescing (`agentdesk::bridge`'s `MessageUpdated`, for
+ * streamed-text chunks folded into one growing message) makes this matter in
+ * practice: without a sequence comparison, a stale persisted copy of a
+ * message id would permanently shadow a newer live update to that same id,
+ * since the old "persisted wins by identity" rule filtered out any live
+ * message whose id merely already existed. Comparing `sequence` (`None`
+ * treated as older than any real sequence, since it means the message
+ * predates sequencing entirely) picks whichever side actually has the newest
+ * content, and a message id absent from `session.messages` is always new by
+ * definition.
  */
 export function mergeSessionMessages(
   session: AgentSession | null | undefined,
   liveMessages: SessionMessage[]
 ): SessionMessage[] {
   if (!session) return liveMessages
-  const persistedIds = new Set(session.messages.map((m) => m.messageId))
-  const extra = liveMessages.filter((m) => !persistedIds.has(m.messageId))
-  if (extra.length === 0) return session.messages
-  return [...session.messages, ...extra]
+  if (liveMessages.length === 0) return session.messages
+
+  const persistedIndexById = new Map(session.messages.map((m, i) => [m.messageId, i]))
+  const merged = [...session.messages]
+  const appended: SessionMessage[] = []
+
+  for (const live of liveMessages) {
+    const at = persistedIndexById.get(live.messageId)
+    if (at === undefined) {
+      appended.push(live)
+      continue
+    }
+    if ((live.sequence ?? 0) > (merged[at].sequence ?? 0)) {
+      merged[at] = live
+    }
+  }
+
+  return appended.length === 0 ? merged : [...merged, ...appended]
 }
