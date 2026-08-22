@@ -2535,13 +2535,18 @@ pub async fn agent_session_resolve_conflict(
 ) -> Result<ResolveConflictOutcome, AppError> {
     let root = resolve_root(&app)?;
     let locks_arc = locks.inner().clone();
-    Ok(resolve_conflict_at(
-        &locks_arc,
-        &root,
-        &session_id,
-        &execution_id,
-        resolution,
-    ))
+    let outcome = resolve_conflict_at(&locks_arc, &root, &session_id, &execution_id, resolution);
+
+    // Resolving a conflict is a TERMINAL transition for that helper -- and it
+    // can be the LAST one, since a conflicted helper is exactly the node
+    // everything else was waiting on. Every other completion path calls this;
+    // without it the graph sat in `Working` forever with every node showing
+    // done, no review turn, no result, and nothing polling to recover it.
+    if matches!(outcome, ResolveConflictOutcome::Resolved { .. }) {
+        advance_graph_after_helper_completion(&app, &locks_arc, &root, &session_id, &execution_id);
+    }
+
+    Ok(outcome)
 }
 
 fn resolve_conflict_at(
@@ -2584,8 +2589,21 @@ fn resolve_conflict_at(
         return ResolveConflictOutcome::NoConflict;
     }
 
+    // The conflict was DETECTED in the integration worktree and the combined
+    // result is BUILT from it, so the user's choice has to be written there
+    // too. Writing to `session.header.repo_path` -- the user's own live
+    // checkout -- put the resolved text somewhere the reviewed result never
+    // reads, so the choice silently vanished from the result while a stray
+    // write landed in the working copy. Falls back to `repo_path` only when
+    // no integration worktree exists (a solo run's conflict), which is the
+    // case that path was originally written for.
     let lead_path = match &stage_outcome {
-        UpdateOutcome::Updated { session } => session.header.repo_path.clone(),
+        UpdateOutcome::Updated { session } => session
+            .executions
+            .iter()
+            .find(|e| e.parent_execution_id.is_none())
+            .and_then(|lead| lead.integration_worktree_path.clone())
+            .unwrap_or_else(|| session.header.repo_path.clone()),
         UpdateOutcome::NotFound => return ResolveConflictOutcome::NotFound,
         UpdateOutcome::Damaged { reason } => {
             return ResolveConflictOutcome::Damaged {
@@ -4219,6 +4237,61 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(lead_dir.path().join("shared.txt")).unwrap(),
             "helper version"
+        );
+    }
+
+    /// Auditor finding: the conflict is DETECTED in the integration worktree
+    /// and the combined result is BUILT from it, so the resolution must land
+    /// there. Writing to `header.repo_path` instead put the user's choice
+    /// somewhere the reviewed result never reads -- the choice vanished from
+    /// the result and a stray write hit the live checkout. Fails against that.
+    #[test]
+    fn resolving_a_conflict_writes_into_the_integration_worktree_not_the_users_checkout() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        let users_checkout = tempfile::tempdir().unwrap();
+        let integration_dir = tempfile::tempdir().unwrap();
+
+        seed_conflicted_helper(
+            &root,
+            &locks,
+            users_checkout.path(),
+            "shared.txt",
+            "base",
+            "helper version",
+            "lead version",
+        );
+        // The graph's dedicated integration worktree, holding the conflicted
+        // file exactly as integration left it.
+        std::fs::write(integration_dir.path().join("shared.txt"), "lead version").unwrap();
+        // `seed_conflicted_helper` seeds only the helper; a real graph also has
+        // the lead record that owns the integration worktree.
+        update_session_at(&locks, &root, "sess-1", |s| {
+            let mut lead = ExecutionRecord::minimal(
+                "lead".into(),
+                s.header.session_id.clone(),
+                None,
+                SessionState::Working,
+                now_rfc3339(),
+                None,
+                0,
+            );
+            lead.integration_worktree_path = Some(integration_dir.path().to_string_lossy().into_owned());
+            s.executions.push(lead);
+        });
+
+        let outcome = resolve_conflict_at(&locks, &root, "sess-1", "helper-a", ConflictResolution::KeepHelper);
+        assert!(matches!(outcome, ResolveConflictOutcome::Resolved { .. }), "{outcome:?}");
+
+        assert_eq!(
+            std::fs::read_to_string(integration_dir.path().join("shared.txt")).unwrap(),
+            "helper version",
+            "the choice must land where the combined result is built from"
+        );
+        assert_eq!(
+            std::fs::read_to_string(users_checkout.path().join("shared.txt")).unwrap(),
+            "lead version",
+            "the user's own checkout must not be written to by resolving a conflict"
         );
     }
 
