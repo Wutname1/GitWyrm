@@ -207,6 +207,21 @@ export function formatCompactAge(iso: string, now: number = Date.now()): string 
   return `${Math.floor(months / 12)}y`
 }
 
+/**
+ * Resolves the `repoId` filter actually sent to `agent_session_list` from the
+ * sidebar's "This project only" toggle (R4.1: repository filtering is an
+ * *optional* filter, not the Desk's identity). `currentRepoId` is the main
+ * window's current target -- what "this project" means when the toggle is
+ * on -- and is deliberately allowed to be `null` (a window that has not
+ * finished opening its repo yet): in that case the toggle cannot be honoured,
+ * so the list falls back to app-wide rather than silently filtering to
+ * "nothing", which would look identical to an empty workspace.
+ */
+export function resolveSessionRepoFilter(scopeToCurrentRepo: boolean, currentRepoId: string | null): string | null {
+  if (!scopeToCurrentRepo) return null
+  return currentRepoId
+}
+
 /** Display label for a session's leading kind icon slot, keyed off `SessionSource.kind`. */
 export function sourceKindLabel(kind: string): string {
   switch (kind) {

@@ -674,6 +674,7 @@ pub fn run() {
         .manage(crate::airun::SessionRegistry::new())
         .manage(commands::airun::DriverRegistry::default())
         .manage(agentdesk::RunSessionLinks::new())
+        .manage(agentdesk::ExecutionRegistry::new())
         .manage(std::sync::Arc::new(agentdesk::SessionLocks::new()))
         .manage(RepoManager::default())
         .manage(WatcherRegistry::default())

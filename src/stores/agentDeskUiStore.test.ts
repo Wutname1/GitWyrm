@@ -186,6 +186,20 @@ describe('agentDeskUiStore: pane replacement and split view', () => {
     useAgentDeskUiStore.getState().restorePaneToFallback('primary', 'newest-valid-session')
     expect(useAgentDeskUiStore.getState().layout.primarySessionId).toBe('newest-valid-session')
   })
+
+  // R4.3: the layout has never stored a repo -- only a session ID per pane --
+  // so nothing here needs to change to let Split View show two different
+  // repositories at once. This test exists to make that guarantee explicit
+  // rather than only implied by the shape of `AgentWorkspaceLayout`.
+  it('holds one session per pane with no repo concept, so Split View can show sessions from different repos', () => {
+    useAgentDeskUiStore.getState().openSplit()
+    useAgentDeskUiStore.getState().setPaneSession('primary', 'repo-a-session')
+    useAgentDeskUiStore.getState().setPaneSession('secondary', 'repo-b-session')
+    const s = useAgentDeskUiStore.getState().layout
+    expect(s.primarySessionId).toBe('repo-a-session')
+    expect(s.secondarySessionId).toBe('repo-b-session')
+    expect(s).not.toHaveProperty('repoId')
+  })
 })
 
 describe('agentDeskUiStore: dock', () => {

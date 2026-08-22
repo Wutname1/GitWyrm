@@ -90,8 +90,23 @@ export function SessionComposer({ sessionId }: { sessionId: string | null }) {
           if (startOutcome.kind === 'started') {
             void qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
           } else if (startOutcome.kind === 'alreadyRunning') {
-            // Not an error: the message was appended into the run already
-            // in progress, which will pick it up.
+            // R3.6: this is the case the reset audit called out by name --
+            // "never claim the current run received a message when it did
+            // not." There is no real steering channel into a live ACP
+            // execution today (no queue the running process reads from
+            // mid-turn); `agentSessionAppendUserMessage` above only wrote the
+            // message into this session's own transcript file, and
+            // `agentSessionStartExecution` refused to start a second engine
+            // on top of the one already running. The message is saved and
+            // visible, but the running agent has not seen it and will not
+            // until its current turn ends and something starts a fresh
+            // execution (the user sending another message once it is idle,
+            // or the lead's own next turn picking it up if the provider
+            // happens to poll the transcript -- neither of which this call
+            // caused). Say exactly that, rather than implying delivery.
+            toast.info('Saved for the next turn. The agent is still finishing its current one.', {
+              description: 'It will see this message once it stops or you send it again after that.',
+            })
           } else if (startOutcome.kind === 'sourceMissing') {
             toast.error('This chat needs its repository open to run.', { description: startOutcome.detail })
           } else if (startOutcome.kind === 'adapterUnsupported') {

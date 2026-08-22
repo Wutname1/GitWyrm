@@ -5,6 +5,8 @@ import type {
   ResultChangedPath,
   ResultRecord,
   ResultState,
+  SessionState,
+  StartExecutionOutcome,
   UndoResultOutcome,
 } from '@/lib/bindings'
 
@@ -207,4 +209,69 @@ export function explainCommitOutcome(outcome: CommitResultOutcome): string | nul
 /** Sort results newest-first by `updatedAt`, for a review list. */
 export function sortResultsNewestFirst(records: ResultRecord[]): ResultRecord[] {
   return [...records].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
+/**
+ * R3.8: "Mount result review in the completed conversation." Whether
+ * `ResultReviewPanel` should render below a conversation's transcript right
+ * now.
+ *
+ * Deliberately keyed to `SessionState`, not `ResultState`: the result
+ * sidecar may not have a record yet the instant a session finishes (`agent_result_build`
+ * is a separate write from the state transition), and this function's job is
+ * "does this conversation currently have a finished run worth reviewing,"
+ * not "does a result record already exist" -- `ResultReviewPanel` itself
+ * already handles "no result yet for this execution" as a loading/empty
+ * state, so showing the panel a beat before its data lands is honest, not
+ * broken.
+ *
+ * `Working`/`Preparing`/`NeedsInput`/`Draft`/`Ready` all say no: a review
+ * surface for a run that has not stopped yet would invite Keep/Commit on
+ * changes that could still be rewritten by the next tool call.
+ */
+export function shouldShowResultPanel(state: SessionState, activeExecutionId: string | null): boolean {
+  if (activeExecutionId == null) return false
+  return state === 'finished' || state === 'failed' || state === 'stopped'
+}
+
+/**
+ * R3.2's auto-start toast, as plain-language explain-outcome text --
+ * `null` for the two cases that need no user-facing explanation
+ * (`started`, which gets a positive confirmation instead, and
+ * `alreadyRunning`, which is invisible by design: it means a near-
+ * simultaneous second kickoff found the engine already running, i.e.
+ * exactly the state this call would have produced anyway).
+ *
+ * Pulled out of `useStartAgentSession` so the mapping from every
+ * `StartExecutionOutcome` variant to its message is covered by a fast unit
+ * test rather than only by clicking Fix in the app -- same reasoning as
+ * `explainKeepOutcome`/`explainCommitOutcome`/`explainUndoOutcome` above.
+ */
+export function explainAutoStartOutcome(outcome: StartExecutionOutcome): string | null {
+  switch (outcome.kind) {
+    case 'started':
+    case 'alreadyRunning':
+      return null
+    case 'worktreeFailed':
+      return `Could not set up an isolated workspace to fix this in. ${outcome.detail}`
+    case 'sourceMissing':
+      return `This chat needs its repository open to run. ${outcome.detail}`
+    case 'adapterUnsupported':
+      return `That provider is not available right now. ${outcome.detail}`
+    case 'providerReconnect':
+      return `Reconnect the provider to continue. ${outcome.detail}`
+    case 'notFound':
+      return 'This chat is gone. It may have been archived elsewhere.'
+    case 'damaged':
+      return `This chat file is damaged and could not start. ${outcome.reason}`
+    case 'unavailable':
+      return `This chat could not be read right now. ${outcome.detail}`
+    case 'writeFailed':
+      return `Could not save: ${outcome.detail}`
+    case 'unsupportedProvider':
+      // R1.6: an override we cannot honour must say so, never quietly fall
+      // back to a different provider and let the user believe their choice
+      // was used.
+      return `GitWyrm cannot run ${outcome.requested} yet, so nothing was started. Pick a different assistant and try again.`
+  }
 }

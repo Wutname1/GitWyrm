@@ -8,6 +8,7 @@
 pub mod adapters;
 pub mod bridge;
 pub mod events;
+pub mod execution_registry;
 pub mod graph;
 pub mod import_store;
 pub mod locks;
@@ -28,11 +29,13 @@ pub use bridge::{
 pub use locks::SessionLocks;
 #[allow(unused_imports)]
 pub use policy::{
-    check_tool_capability, for_intent, ExecutionMode, ExecutionTeam, IntentPolicy, ToolCapability,
-    ToolRefusal, WorktreePolicy,
+    check_tool_capability, for_intent, ExecutionMode, ExecutionPolicy, ExecutionProvider,
+    ExecutionTeam, IntentPolicy, PolicyRefusal, ToolCapability, ToolRefusal, WorktreePolicy,
 };
 #[allow(unused_imports)]
 pub use events::{AgentSessionEvent, AgentSessionEventKind};
+#[allow(unused_imports)]
+pub use execution_registry::{ExecutionRegistry, StopOutcome};
 #[allow(unused_imports)]
 pub use graph::{
     detect_conflict, project_graph, schedule, validate_graph, BlockedNode, CompletionCondition,
@@ -48,10 +51,10 @@ pub use model::{
 };
 #[allow(unused_imports)]
 pub use openspec_context::{
-    context_for_change, context_for_task, is_draft_stale, locate_target_task,
-    resolve_change_status, validate_draft_acyclic, GraphDraftValidation, OpenSpecChangeStatus,
-    OpenSpecNodeRef, OpenSpecSourceContext, OpenSpecSourceStatus, ProposedGraphDraft,
-    ProposedGraphNode, TargetTaskContext,
+    context_changed_since, context_for_change, context_for_task, fingerprint, is_draft_stale,
+    locate_target_task, render_for_prompt, resolve_change_status, validate_draft_acyclic,
+    GraphDraftValidation, OpenSpecChangeStatus, OpenSpecNodeRef, OpenSpecSourceContext,
+    OpenSpecSourceStatus, ProposedGraphDraft, ProposedGraphNode, TargetTaskContext,
 };
 #[allow(unused_imports)]
 pub use result::{

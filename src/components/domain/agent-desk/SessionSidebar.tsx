@@ -5,6 +5,7 @@ import { useAgentSessionHeaders } from '@/hooks/useAgentSessions'
 import { useAgentSessionMutations } from '@/hooks/useAgentSessionMutations'
 import { NewSessionButton } from '@/components/domain/agent-desk/NewSessionButton'
 import { SessionGroups } from '@/components/domain/agent-desk/SessionGroups'
+import { resolveSessionRepoFilter } from '@/lib/agentSessionGrouping'
 import { cn } from '@/lib/utils'
 
 /** Below this width the sidebar becomes a drawer instead of a fixed column (design.md's "narrow widths" clause, tasks.md 3.1). */
@@ -14,8 +15,18 @@ const SIDEBAR_MIN_PX = 218
 const SIDEBAR_MAX_PX = 282
 
 interface SessionSidebarProps {
-  /** Repo to scope the list to, or null to show every repo's sessions. */
-  repoId: string | null
+  /**
+   * The main window's current repo, i.e. what "this project" means for the
+   * "This project only" toggle below (R4.1) -- `null` while that repo is
+   * still opening. Deliberately *not* the identity of the list: the list
+   * itself is app-wide by default (`resolveSessionRepoFilter`), so a chat
+   * from any project keeps showing here even before this resolves, and
+   * switching the main window's repo does not clear the list or the
+   * selection (R4.2).
+   */
+  currentRepoId: string | null
+  /** Shown on the "This project only" toggle so the user knows what it scopes to. */
+  currentRepoName: string | null
   selectedId: string | null
   /**
    * Selection is reported upward, never applied locally -- per the seam
@@ -40,16 +51,27 @@ interface SessionSidebarProps {
  * is picked or created -- both go out through injected callbacks so the
  * workspace-layout package (a different cluster) can route them to whichever
  * pane is active, per the shell-scaffold brief's seam contract.
+ *
+ * R4.1: lists sessions app-wide, grouped by project, by default -- the
+ * repository is an optional filter the user can turn on ("This project
+ * only"), not the identity of this window. The toggle defaults to off and is
+ * *not* persisted, matching this component's other view-only state (grouping
+ * mode, collapsed groups): the point of an app-wide Desk is that reopening it
+ * shows every project's chats again, not whatever repo happened to be
+ * current the last time someone scoped the list down.
  */
 export function SessionSidebar({
-  repoId,
+  currentRepoId,
+  currentRepoName,
   selectedId,
   onSelectSession,
   onNewSession,
   filter,
 }: SessionSidebarProps) {
+  const [scopeToCurrentRepo, setScopeToCurrentRepo] = useState(false)
+  const effectiveRepoId = resolveSessionRepoFilter(scopeToCurrentRepo, currentRepoId)
   const { headers, isLoading } = useAgentSessionHeaders({
-    repoId: repoId ?? null,
+    repoId: effectiveRepoId,
     projectPath: null,
     states: [],
     sourceKinds: [],
@@ -114,6 +136,36 @@ export function SessionSidebar({
       <div className="flex-none p-1.5 pb-1">
         <NewSessionButton onNewSession={handleNewSession} />
       </div>
+
+      {/* R4.1: repo filtering is an optional, visible narrowing of an
+          app-wide list -- never the list's identity. Disabled (not hidden)
+          while the main window's repo is still opening, with an honest
+          reason, rather than silently doing nothing on click. */}
+      <div className="flex-none px-1.5 pb-1.5">
+        <label
+          className={cn(
+            'flex items-center gap-1.5 rounded px-1.5 py-1 text-2xs text-muted-foreground',
+            currentRepoId ? 'cursor-pointer hover:bg-panel2 hover:text-foreground' : 'cursor-not-allowed opacity-60'
+          )}
+          title={
+            currentRepoId
+              ? `Only show chats from ${currentRepoName ?? 'this project'}`
+              : 'This project has not finished opening yet.'
+          }
+        >
+          <input
+            type="checkbox"
+            checked={scopeToCurrentRepo}
+            disabled={!currentRepoId}
+            onChange={(e) => setScopeToCurrentRepo(e.target.checked)}
+            className="h-3 w-3 flex-none accent-[var(--gw-accent)]"
+          />
+          <span className="truncate">
+            {scopeToCurrentRepo && currentRepoName ? `Only ${currentRepoName}` : 'This project only'}
+          </span>
+        </label>
+      </div>
+
       <SessionGroups
         headers={headers}
         selectedId={selectedId}

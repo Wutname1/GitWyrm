@@ -10,6 +10,7 @@ import { AgentDeskTitleBar } from '@/components/domain/agent-desk/AgentDeskTitle
 import { AgentWorkspaceToolbar } from '@/components/domain/agent-desk/AgentWorkspaceToolbar'
 import { SessionSidebar } from '@/components/domain/agent-desk/SessionSidebar'
 import { AgentSetupView } from '@/components/domain/agent-setup/AgentSetupView'
+import { ImportPicker } from '@/components/domain/agent-desk/ImportPicker'
 import { ConversationPane } from '@/components/domain/agent-desk/ConversationPane'
 import { PaneDetailPopover } from '@/components/domain/agent-desk/PaneDetailPopover'
 import { DockedDetailPanel } from '@/components/domain/agent-desk/DockedDetailPanel'
@@ -26,10 +27,26 @@ import { isRightDockSafeAtWidth, resolveDockVisibility, zoneToPlacement, type Do
 import type { DockKind } from '@/lib/agentWorkspaceLayout'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 
-type CenterView = 'conversation' | 'openspec' | 'setup'
+type CenterView = 'conversation' | 'openspec' | 'setup' | 'import'
 
 /** Matches the Rust side's `agent-desk://select-target` in `spec_desk.rs`. */
 const SELECT_DESK_TARGET_EVENT = 'agent-desk://select-target'
+
+/**
+ * Matches the Rust side's `agent-desk://select-session` in
+ * `agent_kickoff.rs` (`SELECT_SESSION_EVENT`) -- R3.3: a targeted
+ * select-session event fired right after `agent_session_start` resolves, so
+ * a Fix click lands on its own session instead of relying on
+ * `agentSessionsAll` invalidating and `AgentDeskView`'s "land on the most
+ * recent session" effect happening to guess right (that effect only runs
+ * when no pane has a session yet -- it does nothing once any chat has ever
+ * been opened, which is the common case a kickoff fires into).
+ */
+const SELECT_SESSION_EVENT = 'agent-desk://select-session'
+
+interface SelectSessionTarget {
+  sessionId: string
+}
 
 /**
  * The window's current target (repo, and optionally a change), kept live
@@ -311,30 +328,26 @@ export function AgentDeskView() {
   const { session: secondaryDetailSession } = useAgentSession(secondarySessionId)
   const activeDetailSession = activePane === 'secondary' ? secondaryDetailSession : primaryDetailSession
 
-  // Rule #1: a retarget must be visibly apparent, not silent. Clearing the
-  // selected session both (a) stops the previous repo's conversation from
-  // staying on screen under the new repo's title/sidebar -- which would look
-  // like data from two repositories got mixed together -- and (b) lets the
-  // "land on the most recent session" effect below pick the new repo's own
-  // most recent chat, the same way it already does on first paint.
-  //
-  // Two separate effects, deliberately: the first reacts to `mode.repoId`
-  // alone so the reset happens the instant a retarget is detected, without
-  // waiting on `useDeskRepo`'s async `openRepo` to resolve. The second reacts
-  // to `repo` (which briefly goes back to `null` while the new repo opens,
-  // then becomes the new `RepoInfo`) so the toast names the repo that was
-  // actually just switched to, not the one being left.
+  // R4.2: retargeting the main window's repo (a different kickoff fired
+  // "Open Agent Desk" for a different project) is announced, but it no
+  // longer clears either pane's selection. Panes resolve their own repo
+  // context per session (`useAgentSession` -> the session's own header),
+  // never from this window's target, so there is nothing here that would go
+  // stale -- a chat from the *previous* repo is exactly as valid to keep
+  // looking at as one from the new repo, since Agent Desk is one app-wide
+  // workspace, not a window bound to a single repository (R4.1/R4.3). The
+  // OpenSpec and Setup center views *are* bound to the window's current repo
+  // (they are not per-session panes), so a retarget does still leave those
+  // and return to the conversation view, which stays valid across the switch.
   const previousRepoId = useRef(mode.repoId)
   const announceNextRepo = useRef(false)
   useEffect(() => {
     if (previousRepoId.current !== mode.repoId) {
       previousRepoId.current = mode.repoId
       announceNextRepo.current = true
-      setPaneSession('primary', null)
-      setPaneSession('secondary', null)
       setCenterView('conversation')
     }
-  }, [mode.repoId, setPaneSession])
+  }, [mode.repoId])
 
   useEffect(() => {
     if (repo && announceNextRepo.current) {
@@ -343,25 +356,23 @@ export function AgentDeskView() {
     }
   }, [repo])
 
-  const filter = repoId
-    ? {
-        repoId,
-        projectPath: null,
-        states: [],
-        sourceKinds: [],
-        hasChangedFiles: null,
-        archived: false,
-        titleContains: null,
-      }
-    : {
-        repoId: null,
-        projectPath: null,
-        states: [],
-        sourceKinds: [],
-        hasChangedFiles: null,
-        archived: false,
-        titleContains: null,
-      }
+  // App-wide by default (R4.1): this powers the "empty workspace"/"land on
+  // most recent chat" logic below, so both must see every project's
+  // sessions, not just the main window's current one -- otherwise opening
+  // Agent Desk for a *second* repo that has no chats of its own would show
+  // the empty state even though other projects have plenty, and "most
+  // recent" would only ever mean "most recent in this one repo". The
+  // sidebar applies its own, separately-scoped "This project only" filter
+  // on top of this same app-wide list (`SessionSidebar`).
+  const filter = {
+    repoId: null,
+    projectPath: null,
+    states: [],
+    sourceKinds: [],
+    hasChangedFiles: null,
+    archived: false,
+    titleContains: null,
+  }
   const { headers, isLoading: sessionsLoading, isError: sessionsErrored } =
     useAgentSessionHeaders(filter)
 
@@ -422,6 +433,23 @@ export function AgentDeskView() {
     // not on a stale focus target.
     focusComposer()
   }
+
+  // R3.1/R3.3: a source kickoff (issue Fix, etc.) tells this window exactly
+  // which session to show the instant it exists, rather than this window
+  // having to guess from a query refetch. Routed through the same
+  // `onSelectSession` a sidebar click uses, so a kickoff and a manual click
+  // behave identically once the session id is known -- same pane-targeting,
+  // same focus-the-composer feedback.
+  const onSelectSessionRef = useRef(onSelectSession)
+  onSelectSessionRef.current = onSelectSession
+  useEffect(() => {
+    const unlisten = listen<SelectSessionTarget>(SELECT_SESSION_EVENT, (event) => {
+      onSelectSessionRef.current(event.payload.sessionId)
+    })
+    return () => {
+      void unlisten.then((fn) => fn())
+    }
+  }, [])
 
   const onNewChat = async () => {
     if (!repo || creating) return
@@ -585,10 +613,22 @@ export function AgentDeskView() {
               </p>
             </div>
           ) : (
-            <SessionSidebar repoId={repoId} selectedId={activePane === 'secondary' ? secondarySessionId : primarySessionId} onSelectSession={onSelectSession} onNewSession={() => void onNewChat()} />
+            <SessionSidebar
+              currentRepoId={repoId}
+              currentRepoName={repo?.name ?? null}
+              selectedId={activePane === 'secondary' ? secondarySessionId : primarySessionId}
+              onSelectSession={onSelectSession}
+              onNewSession={() => void onNewChat()}
+            />
           )}
 
-          {centerView === 'setup' ? (
+          {centerView === 'import' ? (
+            /* Mounted only in this branch, never alongside the sidebar: the
+               adapter scan starts when this component renders, so gating it
+               here keeps chat loading from ever waiting on a filesystem sweep
+               of other apps' session stores. */
+            <ImportPicker />
+          ) : centerView === 'setup' ? (
             /* Agent setup takes over the centre the way OpenSpec does: it is a
                whole workspace of its own, not a panel. Closing returns to the
                conversation rather than to wherever you were, because the setup

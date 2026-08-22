@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, ShieldAlert } from 'lucide-react'
-import type { ClientId, CopyPlan, DestinationApplyResult, InventoryEntry } from '@/lib/bindings'
+import type { ClientId, RedactedCopyPlan, DestinationApplyResult, InventoryEntry } from '@/lib/bindings'
 import { CLIENT_COLUMN_ORDER, clientLabel, eligibleDestinationsFor } from '@/lib/agentConfig'
 import { useApplyAgentConfigCopy, usePreviewAgentConfigCopy, useUndoAgentConfigCopy } from '@/hooks/useAgentConfig'
 import { Button } from '@/components/ui/button'
@@ -30,7 +30,7 @@ export function CopyPreviewDialog({
 }) {
   const eligible = eligibleDestinationsFor(entry)
   const [selected, setSelected] = useState<Set<ClientId>>(new Set(eligible))
-  const [plan, setPlan] = useState<CopyPlan | null>(null)
+  const [plan, setPlan] = useState<RedactedCopyPlan | null>(null)
   const [results, setResults] = useState<DestinationApplyResult[] | null>(null)
 
   const preview = usePreviewAgentConfigCopy()
@@ -158,7 +158,14 @@ function DestinationPicker({
   )
 }
 
-function PlanReview({ plan }: { plan: CopyPlan }) {
+/**
+ * Exported so `BatchReviewDialog` (the "Match selected apps" flow) can render
+ * the exact same per-destination preview card for every plan in a batch --
+ * there is no separate, lighter-weight preview rendering for the batch path
+ * (task R7.5/R7.6: the same per-item plan review gates a batch as gates a
+ * single copy).
+ */
+export function PlanReview({ plan }: { plan: RedactedCopyPlan }) {
   return (
     <div className="flex flex-col gap-3">
       {plan.destinations.length === 0 && (
@@ -223,7 +230,8 @@ function PlanReview({ plan }: { plan: CopyPlan }) {
   )
 }
 
-function ApplyResults({
+/** Exported for the same reason as `PlanReview` -- see its doc comment. */
+export function ApplyResults({
   results,
   onUndo,
   undoing,

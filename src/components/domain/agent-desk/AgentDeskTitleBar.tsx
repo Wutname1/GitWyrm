@@ -3,7 +3,7 @@ import { AiProviderChip } from '@/components/domain/spec-desk/AiProviderChip'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-type CenterView = 'conversation' | 'openspec' | 'setup'
+type CenterView = 'conversation' | 'openspec' | 'setup' | 'import'
 
 /**
  * Agent Desk's own titlebar. Window decorations are off app-wide, so this
@@ -73,6 +73,18 @@ export function AgentDeskTitleBar({
           )}
         >
           Agent setup
+        </button>
+        <button
+          type="button"
+          onClick={() => onChangeCenterView('import')}
+          className={cn(
+            'border-b-2 px-1 text-2xs font-semibold transition-colors',
+            centerView === 'import'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-sub hover:text-foreground'
+          )}
+        >
+          Import chats
         </button>
       </div>
 

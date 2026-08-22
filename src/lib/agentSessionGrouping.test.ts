@@ -6,6 +6,7 @@ import {
   formatCompactAge,
   normalizeRepoPath,
   recentBucket,
+  resolveSessionRepoFilter,
   sourceKindLabel,
 } from './agentSessionGrouping'
 
@@ -233,5 +234,20 @@ describe('buildSidebarRows', () => {
       expect(sessionIds).toHaveLength(1000)
       expect(new Set(sessionIds).size).toBe(1000)
     }
+  })
+})
+
+describe('resolveSessionRepoFilter', () => {
+  it('is app-wide (null) when the "This project only" toggle is off, regardless of the current repo', () => {
+    expect(resolveSessionRepoFilter(false, 'repo-1')).toBeNull()
+    expect(resolveSessionRepoFilter(false, null)).toBeNull()
+  })
+
+  it('scopes to the current repo when the toggle is on', () => {
+    expect(resolveSessionRepoFilter(true, 'repo-1')).toBe('repo-1')
+  })
+
+  it('falls back to app-wide when the toggle is on but no repo has resolved yet -- never filters to "nothing"', () => {
+    expect(resolveSessionRepoFilter(true, null)).toBeNull()
   })
 })

@@ -18,16 +18,56 @@
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use crate::agentdesk::model::{
     AgentSession, AgentSessionHeader, SessionIntent, SessionSource, SessionState,
 };
 use crate::agentdesk::policy::{self, ExecutionMode, ExecutionTeam};
 use crate::agentdesk::store::{self, SessionStoreRoot};
+use crate::commands::spec_desk::AGENT_DESK_LABEL;
 use crate::error::AppError;
 
 use super::agent_desk::CreateSessionRequest;
+
+/// Emitted at the Agent Desk window right after `agent_session_start`
+/// resolves, naming the exact session it should show -- R3.3: "Send a
+/// targeted select-session event after the session exists; do not depend on
+/// another window's query invalidation."
+///
+/// A sibling of `commands::spec_desk::SELECT_DESK_TARGET_EVENT`, not a
+/// replacement: that event answers "which repository/change" for the
+/// window's very first paint (URL-seeded) and any later repo switch. This
+/// one answers "which session, right now" for the far more common case
+/// where the Desk is already open on the right repository and kickoff just
+/// needs to land the click on the exact session it created or focused,
+/// without waiting on `agentSessionsAll` to invalidate, refetch, and have
+/// `AgentDeskView`'s "land on the most recent session" effect happen to
+/// guess correctly -- that effect only fires when NO pane has a session
+/// yet, so it does nothing at all once any chat has ever been opened.
+pub const SELECT_SESSION_EVENT: &str = "agent-desk://select-session";
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectSessionTarget {
+    pub session_id: String,
+}
+
+/// Best-effort: a Desk window that is not open yet has no listener, and
+/// `useStartAgentSession` already awaits `openSpecDesk` (which creates or
+/// focuses the window) before this fires, so the common race -- event
+/// arriving before the window has a subscriber -- is already covered by that
+/// ordering. A window that genuinely does not exist yet just does not
+/// receive this; kickoff does not fail because of it.
+fn emit_select_session(app: &AppHandle, session_id: &str) {
+    let _ = app.emit_to(
+        AGENT_DESK_LABEL,
+        SELECT_SESSION_EVENT,
+        &SelectSessionTarget {
+            session_id: session_id.to_string(),
+        },
+    );
+}
 
 /// Everything a source surface (issue row, PR row, OpenSpec task, ...) needs
 /// to say "start an Agent Desk session for this" -- architecture.md section
@@ -418,9 +458,22 @@ pub async fn agent_session_start(
     request: StartAgentSessionRequest,
 ) -> Result<StartAgentSessionOutcome, AppError> {
     let root = resolve_root(&app)?;
-    tauri::async_runtime::spawn_blocking(move || start_agent_session_at(&root, request))
+    let outcome = tauri::async_runtime::spawn_blocking(move || start_agent_session_at(&root, request))
         .await
-        .map_err(|e| AppError::Other(e.to_string()))
+        .map_err(|e| AppError::Other(e.to_string()))?;
+
+    // R3.3: tell the Desk window exactly which session to select, the moment
+    // it exists -- whether it was freshly created or an existing one was
+    // focused (double-Fix must land on the same session just as surely as a
+    // first Fix does).
+    match &outcome {
+        StartAgentSessionOutcome::Created { session } | StartAgentSessionOutcome::FocusedExisting { session } => {
+            emit_select_session(&app, &session.header.session_id);
+        }
+        StartAgentSessionOutcome::WriteFailed { .. } => {}
+    }
+
+    Ok(outcome)
 }
 
 /// The intent policy table (`agentdesk::policy::for_intent`), exposed to the
@@ -613,6 +666,15 @@ mod tests {
             team: None,
             provider_override: None,
         }
+    }
+
+    // R3.3: pins the event name the frontend listener in `AgentDeskView.tsx`
+    // matches against by hand (there is no shared codegen for event names,
+    // only for command/type shapes) -- mirrors `spec_desk.rs`'s own pin test
+    // for `SELECT_DESK_TARGET_EVENT`.
+    #[test]
+    fn select_session_event_name_matches_the_frontend_listener() {
+        assert_eq!(SELECT_SESSION_EVENT, "agent-desk://select-session");
     }
 
     #[test]

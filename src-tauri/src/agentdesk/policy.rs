@@ -146,6 +146,118 @@ pub fn for_intent(intent: SessionIntent) -> IntentPolicy {
     }
 }
 
+/// Which provider transport a session's execution is allowed to use.
+///
+/// Only one real transport exists today (the Copilot CLI, `ai::agent::cli_agent::CliAgent`) --
+/// this is not a routing table, it is the refusal boundary for task 6 ("Make
+/// unsupported provider overrides fail visibly instead of silently using
+/// Copilot"). `None` means "use the default," which resolves to `Copilot`.
+/// `Some(other)` that does not name a supported provider must be refused by
+/// [`ExecutionPolicy::resolve`] -- never silently downgraded to `Copilot`,
+/// which is exactly the bug this type exists to close.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ExecutionProvider {
+    Copilot,
+}
+
+impl ExecutionProvider {
+    /// Parses a provider override string as it arrives from the frontend
+    /// (`agent_session_start_execution`'s `provider_override: Option<String>`).
+    /// Case-insensitive on the one supported name; anything else is
+    /// `None` -- the caller (`ExecutionPolicy::resolve`) treats a `Some`
+    /// override that fails to parse as an unsupported-provider refusal, not
+    /// as "no override was given."
+    fn parse(name: &str) -> Option<Self> {
+        if name.eq_ignore_ascii_case("copilot") {
+            Some(ExecutionProvider::Copilot)
+        } else {
+            None
+        }
+    }
+}
+
+/// Why [`ExecutionPolicy::resolve`] refused to build a policy at all --
+/// distinct from [`ToolRefusal`], which gates a single tool call inside an
+/// already-running execution. This gates *starting* the execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PolicyRefusal {
+    /// `provider_override` named something other than a provider this build
+    /// actually supports. Task 1.6: this must surface as a typed outcome the
+    /// UI can show, never fall through to starting Copilot anyway.
+    UnsupportedProvider { requested: String },
+}
+
+/// The execution-wide authority for one running (or about-to-run) execution:
+/// intent policy, the concrete mode/team the caller asked for, whether the
+/// session has been explicitly started (only meaningful for Plan), and the
+/// resolved provider. Built exactly once per execution
+/// (`ExecutionPolicy::resolve`, called from `commands::agent_desk::start_execution_at`)
+/// and threaded into both provider discovery (provider selection) and tool
+/// dispatch (`cli_run::run_task`/`handle`) -- see task 1.1/1.2. No downstream
+/// code re-derives any part of this from UI state; everything after
+/// `resolve` reads fields off this struct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionPolicy {
+    pub intent: SessionIntent,
+    pub mode: ExecutionMode,
+    pub team: ExecutionTeam,
+    pub provider: ExecutionProvider,
+    /// The intent's static write/worktree table -- kept alongside rather
+    /// than re-derived at every call site.
+    pub intent_policy: IntentPolicy,
+}
+
+impl ExecutionPolicy {
+    /// Builds the policy for one execution, or refuses to start it at all.
+    ///
+    /// `mode`/`team` are accepted as explicit parameters (not silently
+    /// replaced by `intent_policy.default_mode`/`default_team`) because a
+    /// session may run with a caller-chosen mode/team that differs from the
+    /// intent's default -- but a mismatched mode/team can never widen what
+    /// the intent allows: [`Self::can_write`] and [`Self::check_tool_capability`]
+    /// consult `intent_policy` (and, for Plan, `started`), never `mode`/`team`
+    /// directly, which is what keeps Ask/Review/Summarize refused regardless
+    /// of what `mode` a caller passes in.
+    pub fn resolve(
+        intent: SessionIntent,
+        mode: ExecutionMode,
+        team: ExecutionTeam,
+        provider_override: Option<&str>,
+    ) -> Result<Self, PolicyRefusal> {
+        let provider = match provider_override {
+            None => ExecutionProvider::Copilot,
+            Some(name) => ExecutionProvider::parse(name).ok_or_else(|| {
+                PolicyRefusal::UnsupportedProvider {
+                    requested: name.to_string(),
+                }
+            })?,
+        };
+        Ok(Self {
+            intent,
+            mode,
+            team,
+            provider,
+            intent_policy: for_intent(intent),
+        })
+    }
+
+    /// Whether a tool call requesting `capability` may run right now.
+    /// `started` is the session's own "has Start been pressed" flag (only
+    /// changes the answer for Plan, see [`check_tool_capability`]'s doc
+    /// comment) -- kept as a parameter rather than a field on `Self` because
+    /// it can flip mid-execution (Plan -> Start) while everything else this
+    /// struct carries is fixed for the execution's lifetime.
+    pub fn check_tool_capability(
+        &self,
+        started: bool,
+        capability: ToolCapability,
+    ) -> Result<(), ToolRefusal> {
+        check_tool_capability(self.intent, started, capability)
+    }
+}
+
 /// A tool an execution might try to call, coarse enough to gate against
 /// [`IntentPolicy`] without depending on the full tool-call schema.
 ///
@@ -196,6 +308,34 @@ impl ToolCapability {
     /// use unconditionally.
     fn is_write(self) -> bool {
         !matches!(self, ToolCapability::Read | ToolCapability::Search)
+    }
+
+    /// Classifies an ACP `toolCall.kind` string (agentclientprotocol/agent-client-protocol:
+    /// `read | edit | delete | move | search | execute | think | fetch |
+    /// switch_mode | other`) into the coarse capability this policy table
+    /// gates on.
+    ///
+    /// Task 1.7's adversarial tests need this to fail CLOSED: an unknown or
+    /// missing `kind` is classified as [`ToolCapability::EditFile`] (a
+    /// write), not [`ToolCapability::Read`] -- a provider that omits `kind`,
+    /// or a future ACP kind this build has not seen yet, must be refused
+    /// under a read-only intent rather than waved through because this
+    /// function guessed "read." `execute` (arbitrary shell) is likewise
+    /// treated as a write: `cli_agent::DENIED_TOOLS` already blocks `shell`
+    /// at the CLI's own launch flags, but this classifier does not assume
+    /// that denial is in effect -- it gates on what the tool call itself
+    /// claims to be.
+    pub fn from_acp_kind(kind: Option<&str>) -> ToolCapability {
+        match kind {
+            Some("read") | Some("search") | Some("think") | Some("fetch") => ToolCapability::Read,
+            Some("delete") | Some("move") => ToolCapability::EditFile,
+            Some("execute") => ToolCapability::EditFile,
+            // "edit", "switch_mode", "other", anything unrecognised, or
+            // missing entirely: treated as a write. `switch_mode` changes
+            // what the agent is permitted to do next, which is not a
+            // passive read.
+            _ => ToolCapability::EditFile,
+        }
     }
 }
 
@@ -448,5 +588,117 @@ mod tests {
         assert!(json.contains("\"defaultMode\""), "got: {json}");
         assert!(json.contains("\"defaultTeam\""), "got: {json}");
         assert!(json.contains("\"canWrite\""), "got: {json}");
+    }
+
+    // -- ExecutionPolicy::resolve / provider override (task 1.1, 1.6) --
+
+    #[test]
+    fn no_override_resolves_to_the_default_copilot_provider() {
+        let policy =
+            ExecutionPolicy::resolve(SessionIntent::Fix, ExecutionMode::Auto, ExecutionTeam::Lead, None)
+                .expect("no override must always resolve");
+        assert_eq!(policy.provider, ExecutionProvider::Copilot);
+    }
+
+    #[test]
+    fn an_override_naming_the_supported_provider_resolves() {
+        for name in ["copilot", "Copilot", "COPILOT"] {
+            let policy = ExecutionPolicy::resolve(
+                SessionIntent::Fix,
+                ExecutionMode::Auto,
+                ExecutionTeam::Lead,
+                Some(name),
+            )
+            .unwrap_or_else(|e| panic!("{name:?} must resolve, got {e:?}"));
+            assert_eq!(policy.provider, ExecutionProvider::Copilot);
+        }
+    }
+
+    /// Task 1.6's core proof: an override naming something this build does
+    /// not support must be a typed refusal, never a silent fall-through to
+    /// Copilot.
+    #[test]
+    fn an_unsupported_override_is_refused_visibly_not_silently_downgraded() {
+        for name in ["claude", "gpt-4", "gemini", "", "cop1lot"] {
+            let outcome = ExecutionPolicy::resolve(
+                SessionIntent::Fix,
+                ExecutionMode::Auto,
+                ExecutionTeam::Lead,
+                Some(name),
+            );
+            assert!(
+                matches!(
+                    outcome,
+                    Err(PolicyRefusal::UnsupportedProvider { ref requested }) if requested == name
+                ),
+                "{name:?} must be refused, got {outcome:?}"
+            );
+        }
+    }
+
+    /// A read-only intent stays read-only through `ExecutionPolicy` no
+    /// matter what `mode`/`team` a caller passes -- those two never widen
+    /// what the intent allows (see `resolve`'s doc comment).
+    #[test]
+    fn execution_policy_never_lets_mode_or_team_widen_a_read_only_intent() {
+        for mode in [ExecutionMode::Ask, ExecutionMode::Plan, ExecutionMode::Auto] {
+            for team in [ExecutionTeam::Solo, ExecutionTeam::Lead] {
+                let policy =
+                    ExecutionPolicy::resolve(SessionIntent::Review, mode, team, None).unwrap();
+                assert!(matches!(
+                    policy.check_tool_capability(true, ToolCapability::EditFile),
+                    Err(ToolRefusal::ReadOnlyIntent { .. })
+                ));
+                assert!(matches!(
+                    policy.check_tool_capability(false, ToolCapability::EditFile),
+                    Err(ToolRefusal::ReadOnlyIntent { .. })
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn execution_policy_delegates_plan_started_gating() {
+        let policy =
+            ExecutionPolicy::resolve(SessionIntent::Plan, ExecutionMode::Plan, ExecutionTeam::Lead, None)
+                .unwrap();
+        assert!(matches!(
+            policy.check_tool_capability(false, ToolCapability::EditFile),
+            Err(ToolRefusal::NotStartedYet { .. })
+        ));
+        assert!(policy.check_tool_capability(true, ToolCapability::EditFile).is_ok());
+    }
+
+    // -- ToolCapability::from_acp_kind (task 1.7: fail closed on unknown ACP kinds) --
+
+    #[test]
+    fn known_read_only_acp_kinds_classify_as_read() {
+        for kind in ["read", "search", "think", "fetch"] {
+            assert_eq!(ToolCapability::from_acp_kind(Some(kind)), ToolCapability::Read);
+        }
+    }
+
+    #[test]
+    fn known_write_acp_kinds_classify_as_edit_file() {
+        for kind in ["edit", "delete", "move", "execute", "switch_mode", "other"] {
+            assert_eq!(
+                ToolCapability::from_acp_kind(Some(kind)),
+                ToolCapability::EditFile,
+                "{kind} must be treated as a write"
+            );
+        }
+    }
+
+    /// The exact adversarial case task 1.7 asks for: a tool call with no
+    /// `kind` at all, or a `kind` this build has never seen, must fail
+    /// closed as a write -- never fall back to "read" and slip past a
+    /// read-only intent's refusal.
+    #[test]
+    fn missing_or_unknown_acp_kind_fails_closed_as_a_write() {
+        assert_eq!(ToolCapability::from_acp_kind(None), ToolCapability::EditFile);
+        assert_eq!(
+            ToolCapability::from_acp_kind(Some("some_future_kind_this_build_has_never_seen")),
+            ToolCapability::EditFile
+        );
     }
 }

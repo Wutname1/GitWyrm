@@ -12,6 +12,17 @@
 //! (`agent-desk-openspec-workflows/design.md`): a session's cached
 //! [`crate::agentdesk::model::SourceSnapshot`] is provenance of what the user
 //! clicked, never a second source of truth for task/spec state.
+//!
+//! Implementation-reset R5 ("OpenSpec as execution context"): `context_for_change`/
+//! `context_for_task` are the "existing context builder" R5.1 says to call
+//! when starting an OpenSpec-sourced execution. [`render_for_prompt`] turns
+//! that context into the text handed to the provider (R5.2, with honest
+//! absence markers for missing documents), and [`fingerprint`] hashes that
+//! same rendered text so it can be persisted on the execution (R5.3) and
+//! compared later to detect drift (R5.4, via [`context_changed_since`]).
+//! `start_execution_at` in `commands/agent_desk.rs` (owned by another agent
+//! per the reset's file-ownership split) is the only place that still needs
+//! to call these -- see this module's tests for the exact rendered shape.
 
 use std::path::Path;
 
@@ -281,6 +292,166 @@ fn read_design(openspec_dir: &Path, change_id: &str, has_design: bool) -> Option
         return None;
     }
     std::fs::read_to_string(openspec_dir.join("changes").join(change_id).join("design.md")).ok()
+}
+
+// -- Prompt rendering + fingerprint (R5.1-R5.3) --
+//
+// `render_for_prompt` turns an `OpenSpecSourceContext` into the text handed to
+// the provider, and `fingerprint` hashes that same text. Keeping both in this
+// file (rather than splitting rendering into `commands/agent_desk.rs`) means
+// the fingerprint can never drift from what the agent actually read: it is
+// computed from the identical string, not from a second, hand-maintained
+// summary of the context's fields.
+//
+// R5.1/R5.2 asks the caller (whoever starts an OpenSpec-sourced execution) to
+// call `render_for_prompt` and fold its output into the prompt handed to the
+// engine, and to persist `fingerprint`'s return value on the execution
+// alongside it (R5.3) -- see this file's module doc and the doc comment on
+// `render_for_prompt` for exactly what to change in `start_execution_at`.
+
+/// Renders `ctx` as the block of prompt text a lead agent should read to
+/// understand the OpenSpec source it was started from (R5.1, R5.2). Every
+/// optional document is marked explicitly absent rather than omitted --
+/// `design.md` not existing renders as `(no design.md for this change)`, not
+/// silence, so the model cannot mistake "we never fetched it" for "there is
+/// no design" (R5.2's "honest missing-document markers").
+///
+/// This is pure text formatting: no I/O, no truncation of the caller's data.
+/// Very large proposals/deltas are the caller's concern (not addressed here,
+/// since no evidence yet shows real change folders reach a size where that
+/// matters -- tasks.md does not ask for truncation, only for honesty about
+/// absence).
+pub fn render_for_prompt(ctx: &OpenSpecSourceContext) -> String {
+    let mut out = String::new();
+
+    out.push_str(&format!("## OpenSpec change: {} ({})\n\n", ctx.title, ctx.change_id));
+
+    out.push_str("### Proposal: Why\n\n");
+    push_or_absent(&mut out, &ctx.proposal.why, "no `## Why` section in proposal.md");
+    out.push_str("\n### Proposal: What changes\n\n");
+    push_or_absent(
+        &mut out,
+        &ctx.proposal.what_changes,
+        "no `## What Changes` section in proposal.md",
+    );
+    out.push_str("\n### Proposal: Impact\n\n");
+    push_or_absent(&mut out, &ctx.proposal.impact, "no `## Impact` section in proposal.md");
+
+    out.push_str("\n### Design\n\n");
+    match &ctx.design {
+        Some(text) if !text.trim().is_empty() => out.push_str(text),
+        Some(_) => out.push_str("(design.md exists for this change but is empty)"),
+        None => out.push_str("(no design.md for this change -- this change has no recorded design)"),
+    }
+
+    out.push_str("\n\n### Spec deltas\n\n");
+    if ctx.deltas.is_empty() {
+        out.push_str("(no spec deltas in this change)");
+    } else {
+        for delta in &ctx.deltas {
+            out.push_str(&format!("- {:?} `{}` ({})\n", delta.kind, delta.capability, delta.file));
+            for req in &delta.requirements {
+                out.push_str(&format!("  - Requirement: {}\n", req.name));
+            }
+        }
+    }
+
+    out.push_str("\n### Tasks\n\n");
+    if ctx.tasks.is_empty() {
+        out.push_str("(no tasks.md entries -- this change is still a draft)\n");
+    } else {
+        for task in &ctx.tasks {
+            let mark = if task.done { "x" } else { " " };
+            out.push_str(&format!("- [{mark}] {}\n", task.text));
+        }
+    }
+    out.push_str(&format!(
+        "\nProgress: {}/{} tasks done ({}%){}\n",
+        ctx.progress.done,
+        ctx.progress.total,
+        ctx.progress.percent,
+        if ctx.progress.is_draft { ", draft (no tasks yet)" } else { "" }
+    ));
+
+    if let Some(target) = &ctx.target_task {
+        out.push_str("\n### The exact task this session targets\n\n");
+        out.push_str(&format!("Launched against: \"{}\"\n", target.launched_text));
+        match (&target.current_index, &target.current_text, target.current_done) {
+            (Some(_idx), Some(text), Some(done)) if !target.diverged => {
+                out.push_str(&format!(
+                    "This is the exact task to work on. Current state: {} -- \"{}\"\n",
+                    if done { "already checked off" } else { "open" },
+                    text
+                ));
+            }
+            (Some(_idx), Some(text), Some(done)) => {
+                out.push_str(&format!(
+                    "NOTE: tasks.md changed since this session started. The same task now reads \"{}\" ({}). Work on THIS task, not whatever is at its original position, and not the next unchecked task in the file.\n",
+                    text,
+                    if done { "already checked off" } else { "open" }
+                ));
+            }
+            _ => {
+                out.push_str(
+                    "WARNING: this exact task can no longer be found in tasks.md (it may have been edited, removed, or renumbered). Do not substitute the next open task -- stop and ask the user to confirm which task to work on.\n",
+                );
+            }
+        }
+    }
+
+    if !ctx.notes.is_empty() {
+        out.push_str("\n### Notes about this change's files\n\n");
+        for note in &ctx.notes {
+            out.push_str(&format!("- {note}\n"));
+        }
+    }
+
+    if let Some(branch) = &ctx.branch_link {
+        out.push_str(&format!("\nLinked branch: {branch}\n"));
+    }
+
+    out
+}
+
+fn push_or_absent(out: &mut String, text: &str, absent_note: &str) {
+    if text.trim().is_empty() {
+        out.push_str(&format!("({absent_note})"));
+    } else {
+        out.push_str(text);
+    }
+}
+
+/// A stable content fingerprint for `ctx`, persisted on the execution record
+/// so a later reader can tell exactly what the agent saw at launch, and so
+/// `context_changed_since` (below) can detect drift without re-diffing every
+/// field by hand (R5.3, R5.4).
+///
+/// Deliberately hashes the *rendered prompt text* (`render_for_prompt`'s
+/// output), not the struct: the fingerprint's whole purpose is "did the text
+/// the model actually read change", and hashing anything else risks the
+/// fingerprint and the prompt silently drifting apart if one is changed
+/// without the other.
+pub fn fingerprint(ctx: &OpenSpecSourceContext) -> String {
+    use sha2::{Digest, Sha256};
+    let rendered = render_for_prompt(ctx);
+    let mut hasher = Sha256::new();
+    hasher.update(rendered.as_bytes());
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(digest.len() * 2 + 7);
+    hex.push_str("sha256:");
+    for byte in digest {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
+
+/// Whether the OpenSpec source for `change` has changed since `fp` was
+/// computed, without needing to keep the original rendered context around --
+/// only the fingerprint. Used by "detect source changes before Plan Start"
+/// (R5.4): re-fetch the current context (`context_for_change`/
+/// `context_for_task`), fingerprint it, and compare.
+pub fn context_changed_since(current_fingerprint: &str, previous_fingerprint: &str) -> bool {
+    current_fingerprint != previous_fingerprint
 }
 
 // -- Plan-mode graph draft schema (tasks.md section 3) --
@@ -722,6 +893,126 @@ mod tests {
             ProposedGraphNode { node_id: "c".into(), label: "C".into(), source_ref: None, depends_on: vec!["a".into()] },
         ];
         assert!(matches!(validate_draft_acyclic(&nodes), GraphDraftValidation::Cycle { .. }));
+    }
+
+    // -- render_for_prompt / fingerprint (R5.1-R5.4) --
+
+    #[test]
+    fn render_for_prompt_marks_missing_design_honestly_rather_than_omitting_it() {
+        let dir = tempfile::tempdir().unwrap();
+        write_change(dir.path(), "add-thing", "## 1. Group\n\n- [ ] 1.1 Do it\n");
+        let openspec_dir = dir.path().join("openspec");
+        let change = parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing")).unwrap();
+        let ctx = context_for_change(dir.path(), &change, None).unwrap();
+        let rendered = render_for_prompt(&ctx);
+        assert!(
+            rendered.contains("no design.md for this change"),
+            "absent design.md must be marked, not silently dropped from the prompt: {rendered}"
+        );
+    }
+
+    #[test]
+    fn render_for_prompt_includes_design_text_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        write_change(dir.path(), "add-thing", "## 1. Group\n\n- [ ] 1.1 Do it\n");
+        fs::write(
+            dir.path().join("openspec/changes/add-thing/design.md"),
+            "# Design\n\nUse a widget registry.\n",
+        )
+        .unwrap();
+        let openspec_dir = dir.path().join("openspec");
+        let change = parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing")).unwrap();
+        let ctx = context_for_change(dir.path(), &change, None).unwrap();
+        let rendered = render_for_prompt(&ctx);
+        assert!(rendered.contains("Use a widget registry."));
+        assert!(!rendered.contains("no design.md for this change"));
+    }
+
+    #[test]
+    fn render_for_prompt_warns_when_the_target_task_diverged_and_never_substitutes_the_next_task() {
+        let dir = tempfile::tempdir().unwrap();
+        write_change(
+            dir.path(),
+            "add-thing",
+            "## 1. Group\n\n- [ ] 1.1 First\n- [ ] 1.2 Second\n- [ ] 1.3 Third\n",
+        );
+        let openspec_dir = dir.path().join("openspec");
+        let change = parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing")).unwrap();
+        // Task the session was launched against no longer exists.
+        let ctx = context_for_task(dir.path(), &change, 9, "9.9 Removed task", None).unwrap();
+        let rendered = render_for_prompt(&ctx);
+        assert!(rendered.contains("WARNING"));
+        assert!(rendered.contains("Do not substitute the next open task"));
+    }
+
+    #[test]
+    fn render_for_prompt_names_the_exact_non_diverged_target_task() {
+        let dir = tempfile::tempdir().unwrap();
+        write_change(
+            dir.path(),
+            "add-thing",
+            "## 1. Group\n\n- [ ] 1.1 First\n- [ ] 1.2 Second\n- [ ] 1.3 Third\n",
+        );
+        let openspec_dir = dir.path().join("openspec");
+        let change = parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing")).unwrap();
+        let ctx = context_for_task(dir.path(), &change, 2, "1.3 Third", None).unwrap();
+        let rendered = render_for_prompt(&ctx);
+        assert!(rendered.contains("This is the exact task to work on"));
+        assert!(rendered.contains("1.3 Third"));
+    }
+
+    #[test]
+    fn fingerprint_is_stable_for_the_same_context() {
+        let dir = tempfile::tempdir().unwrap();
+        write_change(dir.path(), "add-thing", "## 1. Group\n\n- [ ] 1.1 Do it\n");
+        let openspec_dir = dir.path().join("openspec");
+        let change = parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing")).unwrap();
+        let ctx = context_for_change(dir.path(), &change, None).unwrap();
+        assert_eq!(fingerprint(&ctx), fingerprint(&ctx));
+    }
+
+    #[test]
+    fn fingerprint_changes_when_a_task_is_added() {
+        let dir = tempfile::tempdir().unwrap();
+        write_change(dir.path(), "add-thing", "## 1. Group\n\n- [ ] 1.1 Do it\n");
+        let openspec_dir = dir.path().join("openspec");
+        let change = parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing")).unwrap();
+        let ctx_before = context_for_change(dir.path(), &change, None).unwrap();
+        let fp_before = fingerprint(&ctx_before);
+
+        fs::write(
+            dir.path().join("openspec/changes/add-thing/tasks.md"),
+            "## 1. Group\n\n- [ ] 1.1 Do it\n- [ ] 1.2 A new task\n",
+        )
+        .unwrap();
+        let change_after = parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing")).unwrap();
+        let ctx_after = context_for_change(dir.path(), &change_after, None).unwrap();
+        let fp_after = fingerprint(&ctx_after);
+
+        assert_ne!(fp_before, fp_after);
+        assert!(context_changed_since(&fp_after, &fp_before));
+    }
+
+    #[test]
+    fn fingerprint_does_not_change_when_nothing_relevant_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        write_change(dir.path(), "add-thing", "## 1. Group\n\n- [ ] 1.1 Do it\n");
+        let openspec_dir = dir.path().join("openspec");
+        let change = parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing")).unwrap();
+        let ctx1 = context_for_change(dir.path(), &change, None).unwrap();
+        let change_again = parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing")).unwrap();
+        let ctx2 = context_for_change(dir.path(), &change_again, None).unwrap();
+        assert!(!context_changed_since(&fingerprint(&ctx2), &fingerprint(&ctx1)));
+    }
+
+    #[test]
+    fn fingerprint_is_prefixed_so_the_stored_shape_is_self_describing() {
+        let dir = tempfile::tempdir().unwrap();
+        write_change(dir.path(), "add-thing", "## 1. Group\n\n- [ ] 1.1 Do it\n");
+        let openspec_dir = dir.path().join("openspec");
+        let change = parse::parse_change_dir(&openspec_dir.join("changes").join("add-thing")).unwrap();
+        let ctx = context_for_change(dir.path(), &change, None).unwrap();
+        assert!(fingerprint(&ctx).starts_with("sha256:"));
     }
 
     #[test]

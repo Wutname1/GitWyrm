@@ -5,6 +5,7 @@ import {
   formatSummaryLine,
   hasAnyDifference,
   isEligibleDestination,
+  partitionBatchCandidates,
   syncBadgeClass,
   syncBadgeLabel,
 } from './agentConfig'
@@ -130,5 +131,66 @@ describe('hasAnyDifference', () => {
     expect(hasAnyDifference(entry([status('codex', 'isSource'), status('claude-code', 'different')]))).toBe(true)
     expect(hasAnyDifference(entry([status('codex', 'isSource'), status('claude-code', 'missing')]))).toBe(true)
     expect(hasAnyDifference(entry([status('codex', 'isSource'), status('claude-code', 'outdated')]))).toBe(true)
+  })
+})
+
+describe('partitionBatchCandidates', () => {
+  // R7.5: "Match selected apps" must build one plan per differing item that
+  // has somewhere eligible to go, and skip the rest honestly (never silently
+  // drop them) -- this is the pure partition `BatchReviewDialog` drives its
+  // per-item preview loop from.
+  it('excludes entries that match everywhere or are the source everywhere', () => {
+    const matching = entry([status('codex', 'isSource'), status('claude-code', 'same')])
+    const { candidates, skipped } = partitionBatchCandidates([matching])
+    expect(candidates).toEqual([])
+    expect(skipped).toEqual([])
+  })
+
+  it('builds a candidate with its eligible destinations for a differing entry', () => {
+    const differing = entry([
+      status('codex', 'isSource'),
+      status('claude-code', 'different'),
+      status('open-code', 'same'),
+      status('vs-code-copilot', 'missing'),
+    ])
+    const { candidates, skipped } = partitionBatchCandidates([differing])
+    expect(skipped).toEqual([])
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0].entry).toBe(differing)
+    expect(candidates[0].destinations.sort()).toEqual(['claude-code', 'vs-code-copilot'].sort())
+  })
+
+  it('only lists the eligible destinations for a row, excluding ineligible clients even on a differing row', () => {
+    const row = entry([status('codex', 'isSource'), status('claude-code', 'missing'), status('open-code', 'unsupported')])
+    const { candidates, skipped } = partitionBatchCandidates([row])
+    expect(hasAnyDifference(row)).toBe(true) // driven by the 'missing' status alone
+    expect(candidates).toHaveLength(1)
+    // 'open-code' is unsupported (never a real destination) and must not
+    // appear even though the row as a whole differs.
+    expect(candidates[0].destinations).toEqual(['claude-code'])
+    expect(skipped).toEqual([])
+  })
+
+  it('does not even consider an entry with no difference at all -- it is neither a candidate nor skipped', () => {
+    const untouched = entry([status('codex', 'isSource'), status('claude-code', 'unsupported')])
+    expect(hasAnyDifference(untouched)).toBe(false)
+    const { candidates, skipped } = partitionBatchCandidates([untouched])
+    expect(candidates).toEqual([])
+    expect(skipped).toEqual([])
+  })
+
+  it('processes multiple differing entries independently, building a candidate for each', () => {
+    // Every state hasAnyDifference triggers on (different/outdated/missing)
+    // is itself also eligible per isEligibleDestination, so in practice a
+    // row that differs always has somewhere to go -- `skipped` exists for
+    // the async-failure path in BatchReviewDialog (a preview call that
+    // errors or comes back empty), not for this synchronous partition. This
+    // test documents that invariant rather than asserting a skip that this
+    // pure function cannot actually produce from static states alone.
+    const first = entry([status('codex', 'isSource'), status('claude-code', 'different')])
+    const second = entry([status('codex', 'isSource'), status('open-code', 'outdated')])
+    const { candidates, skipped } = partitionBatchCandidates([first, second])
+    expect(candidates.map((c) => c.entry)).toEqual([first, second])
+    expect(skipped).toEqual([])
   })
 })

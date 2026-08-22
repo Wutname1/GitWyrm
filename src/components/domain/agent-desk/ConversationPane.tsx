@@ -11,6 +11,7 @@ import { computeRailTicks, userMessagesForRail } from '@/lib/agentDeskRail'
 import { groupEventStacks, type EventStackGroup } from '@/lib/agentDeskEvents'
 import { parsePlanChecklist } from '@/lib/agentDeskPlan'
 import { displayText, foldThoughtSummaries } from '@/lib/agentDeskTranscript'
+import { shouldShowResultPanel } from '@/lib/agentDeskResult'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { SessionSourceBanner } from './SessionSourceBanner'
 import { SessionComposer } from './SessionComposer'
@@ -19,6 +20,7 @@ import { PlanChecklist } from './PlanChecklist'
 import { EventStack } from './EventStack'
 import { MessageHistoryRail } from './MessageHistoryRail'
 import { MessageActions } from './MessageActions'
+import { ResultReviewPanel } from './ResultReviewPanel'
 
 /** Plain-language label for each message kind, in the order they can appear. */
 function kindLabel(kind: SessionMessage['kind']): string {
@@ -568,6 +570,32 @@ export function ConversationPane({
           onJumpToMessage={jumpToMessage}
         />
       </div>
+
+      {/* R3.8: mount result review in the completed conversation.
+          `ResultReviewPanel` existed since the review-and-landing package
+          shipped but had zero importers anywhere in the app -- this is the
+          one production entry point that was missing. Shown once this
+          session's execution has actually stopped producing output
+          (Finished/Failed/Stopped -- `shouldShowResultPanel`), keyed
+          to `activeExecutionId` so it always reviews the run that just
+          ended, not a stale earlier one. Read-only intents (Ask/Explain/
+          Review/Summarize) still reach this: their result has no landable
+          changes (`ResultRecord.hasLandableChanges` is false, since
+          `worktreePath` is `None` for them -- policy.md's Never worktree
+          policy), so `ResultReviewPanel` renders its changed-files/checks
+          summary with no Keep/Commit actions rather than being hidden
+          outright -- the user still gets to see what happened. */}
+      {shouldShowResultPanel(state ?? session.header.state, session.header.activeExecutionId) && (
+        <div className="flex-none border-t border-border">
+          <ResultReviewPanel
+            sessionId={sessionId}
+            executionId={session.header.activeExecutionId!}
+            intent={session.header.intent}
+            taskText={session.header.title}
+            provider="copilot"
+          />
+        </div>
+      )}
 
       {/* Composer (tasks.md 6.x): mode/team controls, draft, and Send --
           extracted to `SessionComposer` so this file's section-4/5 work

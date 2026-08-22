@@ -90,7 +90,12 @@ export function isEligibleDestination(status: ClientSyncStatus): boolean {
     status.state !== 'isSource' &&
     status.state !== 'same' &&
     status.state !== 'keptSeparate' &&
-    status.state !== 'clientNotDetected'
+    status.state !== 'clientNotDetected' &&
+    // 'unsupported' means this client has no writer at all -- Codex, VS Code
+    // Copilot and OpenChamber are read-only today. Offering one as a
+    // destination would build a plan that can never be applied, which is
+    // exactly the kind of button-that-cannot-work this release is removing.
+    status.state !== 'unsupported'
   )
 }
 
@@ -102,4 +107,30 @@ export function eligibleDestinationsFor(entry: InventoryEntry): ClientId[] {
 /** Whether an entry needs attention at all -- used to build the "Match selected apps" default selection. */
 export function hasAnyDifference(entry: InventoryEntry): boolean {
   return entry.perClient.some((s) => s.state === 'different' || s.state === 'outdated' || s.state === 'missing')
+}
+
+/**
+ * Which entries `BatchReviewDialog` ("Match selected apps") should attempt to
+ * build a plan for, versus which have nothing eligible to copy to at all.
+ * Extracted as a pure function so the partition itself -- not just its
+ * downstream async preview calls -- is unit-testable without a DOM (R7.5:
+ * the batch flow must build one plan per differing item with an eligible
+ * destination, and skip the rest honestly rather than silently dropping
+ * them).
+ */
+export function partitionBatchCandidates(entries: InventoryEntry[]): {
+  candidates: { entry: InventoryEntry; destinations: ClientId[] }[]
+  skipped: InventoryEntry[]
+} {
+  const candidates: { entry: InventoryEntry; destinations: ClientId[] }[] = []
+  const skipped: InventoryEntry[] = []
+  for (const entry of entries.filter(hasAnyDifference)) {
+    const destinations = eligibleDestinationsFor(entry)
+    if (destinations.length === 0) {
+      skipped.push(entry)
+    } else {
+      candidates.push({ entry, destinations })
+    }
+  }
+  return { candidates, skipped }
 }

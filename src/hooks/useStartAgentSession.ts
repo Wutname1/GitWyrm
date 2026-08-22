@@ -11,6 +11,75 @@ import {
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { openSpecDesk } from '@/lib/specDesk'
+import { explainAutoStartOutcome } from '@/lib/agentDeskResult'
+
+/**
+ * R3.2: "After persistence and worktree provisioning, start execution
+ * automatically; no second user message is required."
+ *
+ * Fires the same `agentSessionStartExecution` call `SessionComposer`'s Send
+ * button makes, using the intent's own policy default mode/team
+ * (`commands::agentdesk::policy::for_intent`) rather than inventing a second
+ * default here. Only for a *freshly created* session -- `FocusedExisting`
+ * (R3.4's duplicate-source case) must never restart an execution the user
+ * may already be reviewing or mid-conversation with; the caller focuses that
+ * session and stops, exactly as before.
+ *
+ * Deliberately does not gate on `intent === 'fix'` by name: the correct test
+ * is "can this intent write at all" (`IntentPolicy.canWrite`), which is also
+ * true for Plan once a user has explicitly chosen Start (this hook is not
+ * that path) -- but false for Ask/Explain/Review/Summarize, which must show
+ * the user their new session and let *them* decide whether/how to run it
+ * (R1.3/R1.4: read-only intents are never executed without an explicit
+ * user action). Reading the real policy table over the wire, instead of
+ * hand-copying "fix" as a magic string, is what keeps this in sync with R1's
+ * enforcement rather than silently drifting from it.
+ */
+async function autoStartIfWriteCapable(session: AgentSession): Promise<void> {
+  let policy
+  try {
+    policy = await commands.agentIntentPolicy(session.header.intent)
+  } catch (e) {
+    // The policy lookup itself is read-only and side-effect-free; a failure
+    // here just means we cannot safely decide whether to auto-start, so we
+    // don't. The session is still visible and the user can send a message
+    // manually -- this is a degraded-but-safe fallback, not a hard failure.
+    log.error(`agent desk: could not resolve intent policy for auto-start: ${describeError(e)}`)
+    return
+  }
+  if (!policy.canWrite) return
+
+  try {
+    const outcome = unwrap(
+      await commands.agentSessionStartExecution(
+        session.header.sessionId,
+        policy.defaultMode,
+        policy.defaultTeam,
+        null
+      )
+    )
+    if (outcome.kind === 'started') {
+      // Rule #1: the session already shows "Preparing" the instant it was
+      // created (`record_execution_if_not_running` sets that state inside
+      // the same locked write `agentSessionStartExecution` performs) --
+      // this toast confirms the engine itself is now running, not just
+      // queued to.
+      toast.success('Started working on this.')
+      return
+    }
+    const explanation = explainAutoStartOutcome(outcome)
+    if (explanation) toast.error('Could not start working on this.', { description: explanation })
+    // `explanation === null` and `outcome.kind !== 'started'` only for
+    // `alreadyRunning`: an execution is already active on this session (a
+    // near-simultaneous second kickoff, most likely) -- it is already
+    // visibly Working, which is the same state this call would have
+    // produced, so nothing more to say.
+  } catch (e) {
+    const message = describeError(e)
+    log.error(`agent desk: auto-start execution failed: ${message}`)
+    toast.error('Could not start working on this.', { description: message })
+  }
+}
 
 export interface StartAgentSessionRequest {
   repoId: string
@@ -99,6 +168,14 @@ export function useStartAgentSession() {
 
       switch (outcome.kind) {
         case 'created':
+          // R3.2: no second user message required -- fire-and-forget so a
+          // slow provider/worktree provisioning never blocks this function
+          // from returning the session (which the caller uses to focus the
+          // Desk pane immediately, per R3.1). Errors are reported by
+          // `autoStartIfWriteCapable` itself via toast; nothing here awaits
+          // it or can regress the "session shows up in Preparing right away"
+          // guarantee into "session shows up only once the agent finishes."
+          void autoStartIfWriteCapable(outcome.session)
           return outcome.session
         case 'focusedExisting':
           toast.info('Already working on this. Focused the existing chat.')

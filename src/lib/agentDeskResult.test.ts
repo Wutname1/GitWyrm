@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { ResultChangedPath, ResultCheckOutcome, ResultRecord } from '@/lib/bindings'
+import type { ResultChangedPath, ResultCheckOutcome, ResultRecord, SessionState, StartExecutionOutcome } from '@/lib/bindings'
 import {
   changedPathsSummaryLine,
   checksSummaryLine,
+  explainAutoStartOutcome,
   explainCommitOutcome,
   explainKeepOutcome,
   explainUndoOutcome,
@@ -10,6 +11,7 @@ import {
   resultActionAvailability,
   resultNeedsReview,
   resultStateLabel,
+  shouldShowResultPanel,
   sortResultsNewestFirst,
   summarizeChangedPaths,
 } from './agentDeskResult'
@@ -198,5 +200,68 @@ describe('sortResultsNewestFirst', () => {
     const c = record({ executionId: 'c', updatedAt: '2026-01-02T00:00:00Z' })
     const sorted = sortResultsNewestFirst([a, b, c])
     expect(sorted.map((r) => r.executionId)).toEqual(['b', 'c', 'a'])
+  })
+})
+
+// -- R3.8: shouldShowResultPanel -- ResultReviewPanel had zero importers
+// anywhere in the app before this; these tests pin down exactly when its one
+// production entry point (ConversationPane) decides to mount it.
+describe('shouldShowResultPanel', () => {
+  const terminal: SessionState[] = ['finished', 'failed', 'stopped']
+  const nonTerminal: SessionState[] = ['draft', 'preparing', 'ready', 'working', 'needsInput', 'missingSource', 'interrupted']
+
+  it.each(terminal)('shows the panel once the session has %s with an active execution', (state) => {
+    expect(shouldShowResultPanel(state, 'exec-1')).toBe(true)
+  })
+
+  it.each(nonTerminal)('hides the panel while the session is %s, even with an active execution', (state) => {
+    expect(shouldShowResultPanel(state, 'exec-1')).toBe(false)
+  })
+
+  it('hides the panel when there is no active execution at all, regardless of state', () => {
+    expect(shouldShowResultPanel('finished', null)).toBe(false)
+  })
+})
+
+// -- R3.1/R3.2: explainAutoStartOutcome -- pins the toast text an automatic
+// Fix kickoff shows for every way `agentSessionStartExecution` can refuse,
+// so the mapping is exercised without driving the actual composer/kickoff
+// flow through a DOM this project's vitest setup cannot render.
+describe('explainAutoStartOutcome', () => {
+  // `started`/`alreadyRunning` only ever branch on `.kind` inside
+  // `explainAutoStartOutcome` -- their other fields (`session`/`executionId`)
+  // are irrelevant to what this function decides, so a minimal cast avoids
+  // pinning this test to `bindings.ts`'s exact field casing for those
+  // variants (which is inconsistent between generated types in this
+  // codebase; not something this test should be coupled to).
+  it('started needs no explanation -- the caller shows a positive confirmation instead', () => {
+    expect(explainAutoStartOutcome({ kind: 'started' } as unknown as StartExecutionOutcome)).toBeNull()
+  })
+
+  it('alreadyRunning needs no explanation -- it is the same visible state a fresh start would have produced', () => {
+    expect(explainAutoStartOutcome({ kind: 'alreadyRunning' } as unknown as StartExecutionOutcome)).toBeNull()
+  })
+
+  it('worktreeFailed names the isolation failure, matching R3.2\'s "worktree provisioning" gate', () => {
+    const msg = explainAutoStartOutcome({ kind: 'worktreeFailed', detail: 'disk full' })
+    expect(msg).toContain('isolated workspace')
+    expect(msg).toContain('disk full')
+  })
+
+  it('every refusal kind produces non-empty, distinct text', () => {
+    const outcomes: StartExecutionOutcome[] = [
+      { kind: 'sourceMissing', detail: 'repo not open' },
+      { kind: 'adapterUnsupported', detail: 'no CLI' },
+      { kind: 'providerReconnect', detail: 'token expired' },
+      { kind: 'notFound' },
+      { kind: 'damaged', reason: 'bad json' },
+      { kind: 'unavailable', detail: 'locked' },
+      { kind: 'writeFailed', detail: 'disk error' },
+    ]
+    const messages = outcomes.map((o) => explainAutoStartOutcome(o))
+    for (const m of messages) {
+      expect(m).toBeTruthy()
+    }
+    expect(new Set(messages).size).toBe(messages.length)
   })
 })

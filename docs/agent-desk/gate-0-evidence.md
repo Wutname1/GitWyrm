@@ -64,3 +64,86 @@ Two caveats carried forward rather than hidden:
 
 Sub-agents do not run `cargo` or `npm`. Several concurrent builds choke the machine.
 Agents write code; verification runs serially in the main session, one build at a time.
+
+---
+
+# Reset progress log
+
+## R4 - app-wide workspace (landed, unverified natively)
+
+The Desk's identity is no longer a repository. `SessionSidebar` defaults to app-wide
+(`scopeToCurrentRepo` starts false) with "This project only" as an optional narrowing, and
+the pane-clearing calls that fired on every main-window repo change are gone - pane
+selections, drafts and scroll positions now survive a repo switch. Per-pane repo context
+was already resolved per session from `header.repoId/repoPath/repoName`; that is now
+covered by tests rather than only by reading.
+
+R4.6's native scenario (two repos, two live sessions, cross-project Split View) is NOT
+verified. Unit-proven only.
+
+## R5 - OpenSpec as execution context (wired by the main session)
+
+The R5 agent built `render_for_prompt` (honest absent-document markers) and `fingerprint`,
+but was correctly barred from touching `start_execution_at`, so nothing called them - the
+exact "built but not wired" failure this reset exists to stop. The main session wired it:
+
+- `build_prompt`'s call site now resolves the OpenSpec context for the session's source and
+  prepends `render_for_prompt`'s text to the prompt actually handed to the engine.
+- `ExecutionRecord` gained `context_fingerprint: Option<String>` (`#[serde(default)]`, so
+  existing files load unchanged), stamped inside the SAME locked write that creates the
+  record - not a second acquisition.
+
+## R7 - imports and config sync (landed)
+
+Two real defects closed:
+
+1. **Secrets crossed IPC and hit disk in plaintext.** `PreviewOutcome::Ready` returned the
+   whole `CopyPlan`, including `source_item.extra` and every `proposed_content` - i.e. real
+   API keys - to the renderer. Now returns a `RedactedCopyPlan` that drops those fields
+   entirely. The unredacted plan is still written server-side for apply to read back, so
+   the apply path is unchanged and still tested end to end.
+2. **"Match selected apps" wrote a batch with no preview.** It previewed and applied in one
+   handler. A new `BatchReviewDialog` renders every per-item, per-destination plan first and
+   only then applies, through the same hash-gated path a single copy uses.
+
+`ImportPicker` is now reachable: a fourth centre tab ("Import chats"), mounted only in its
+own branch so the adapter scan never makes chat loading wait.
+
+## Still open at this point
+
+- R1/R2 (`ExecutionPolicy`, cancellation registry) in flight; two compile errors in
+  `agent_desk.rs:1327` and `airun.rs:782` belong to that work.
+- `src/lib/bindings.ts` is stale for `RedactedCopyPlan`/`RedactedDestinationPreview` until
+  Rust compiles and the exporter can run.
+- R3 in flight. R6 and R8 not started.
+
+## R3 - source-bound solo loop (landed, two follow-ups outstanding)
+
+The flagship loop is wired. Right-click an issue -> Fix now: creates/focuses the session,
+emits a targeted `agent-desk://select-session` so the Desk lands on that exact chat rather
+than relying on query invalidation, and then AUTO-STARTS the execution for write-capable
+intents. No second user message is required, which was R3.2's whole point.
+
+`ResultReviewPanel` - previously imported by zero files, the clearest example of the
+"built but unreachable" pattern - is now mounted in `ConversationPane` for terminal
+sessions, with Keep/Undo/Revise/Commit/PR-draft wired to their existing commands.
+
+R3.6 was handled honestly: there is no steering channel into a live ACP session, so a
+message sent mid-run is saved to the transcript and labelled "saved for the next turn"
+rather than pretending the running agent received it.
+
+**Two follow-ups the R3 agent could not reach** (both inside `start_execution_at`, owned by
+the concurrent R1/R2 agent at the time):
+
+1. R3.5 is half done - `ExecutionRecord` gained `base_oid`, `provider`, `mode`, `team`, but
+   nothing populates them yet.
+2. R3.7 - completion/failure/stop must AUTOMATICALLY build a durable result. Until it does,
+   the newly-mounted `ResultReviewPanel` will show "No result yet" even after a real run.
+   This is the difference between mounted and working, and it is not done.
+
+## Bindings owed
+
+`src/lib/bindings.ts` is stale for: `RedactedCopyPlan`, `RedactedDestinationPreview`,
+`PreviewOutcome::Ready`'s changed field type (R7), and `ExecutionRecord`'s new
+`baseOid`/`provider`/`mode`/`team`/`contextFingerprint` fields (R3/R5). Regenerate once
+Rust compiles - the frontend will not typecheck until then.

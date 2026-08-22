@@ -387,6 +387,12 @@ pub struct ExecutionRecord {
     pub started_at: String,
     /// RFC 3339 UTC timestamp. `None` while still running.
     pub ended_at: Option<String>,
+    /// Hash of the OpenSpec plan text this execution was actually given
+    /// (`openspec_context::fingerprint`), or `None` for a session that did not
+    /// start from OpenSpec. Lets a later reader tell whether the plan has moved
+    /// since the agent read it, rather than guessing from timestamps (R5.3).
+    #[serde(default)]
+    pub context_fingerprint: Option<String>,
     /// Highest sequence number persisted for this execution so far. Lets a
     /// late/duplicate event be recognized without rescanning `messages`.
     pub last_sequence: u32,
@@ -415,6 +421,32 @@ pub struct ExecutionRecord {
     /// Branch checked out in `worktree_path`.
     #[serde(default)]
     pub branch: Option<String>,
+    /// The commit `worktree_path`'s branch was created from -- R3.5:
+    /// "Persist worktree path, branch, base revision, provider, mode, and
+    /// policy on execution," so a restart (or a much later review) can tell
+    /// what this execution actually ran against without re-deriving it from
+    /// a worktree folder that may since have been cleaned up.
+    #[serde(default)]
+    pub base_oid: Option<String>,
+    /// Which provider transport ran this execution --
+    /// `agentdesk::policy::ExecutionProvider`'s name (e.g. `"copilot"`), not
+    /// the enum itself: that type is `Copy`/non-`Type` (never crosses the
+    /// IPC boundary), and this module has no dependency on `policy` today.
+    /// Stored as the plain string a provider override already travels as
+    /// everywhere else in this package (`StartAgentSessionRequest.provider_override`,
+    /// `ResultRecord`'s commit-message drafting).
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// `agentdesk::policy::ExecutionMode` as its serialized string (`"ask" |
+    /// "plan" | "auto"`) -- what this execution actually ran under, which
+    /// may differ from the intent's default when a caller passed an
+    /// explicit mode (`ExecutionPolicy::resolve`'s `mode` parameter).
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// `agentdesk::policy::ExecutionTeam` as its serialized string (`"solo"
+    /// | "lead"`) -- same reasoning as `mode`.
+    #[serde(default)]
+    pub team: Option<String>,
     /// Other execution IDs (within the same session) this node depends on --
     /// it will not be scheduled until all of them reach `Finished`.
     #[serde(default)]
@@ -459,12 +491,17 @@ impl ExecutionRecord {
             started_at,
             ended_at,
             last_sequence,
+            context_fingerprint: None,
             job_title: None,
             job_description: None,
             helper_role: None,
             allowed_paths: Vec::new(),
             worktree_path: None,
             branch: None,
+            base_oid: None,
+            provider: None,
+            mode: None,
+            team: None,
             depends_on: Vec::new(),
             changed_file_count: 0,
             output_summary: None,
@@ -1110,5 +1147,76 @@ mod tests {
                 source.kind_label()
             );
         }
+    }
+
+    // -- R3.5: base_oid/provider/mode/team on ExecutionRecord --
+
+    #[test]
+    fn minimal_execution_record_leaves_the_r3_5_fields_unset() {
+        // `::minimal` is what every non-execution-start call site in this
+        // codebase uses to build a record (tests, and the pre-existing
+        // `record_execution_if_not_running` scaffold before it is filled in
+        // by the execution-start path that owns populating these fields).
+        // Nothing here should silently default to `Some(...)`.
+        let record = ExecutionRecord::minimal(
+            "exec-1".into(),
+            "sess-1".into(),
+            None,
+            SessionState::Preparing,
+            "2026-01-01T00:00:00Z".into(),
+            None,
+            0,
+        );
+        assert_eq!(record.base_oid, None);
+        assert_eq!(record.provider, None);
+        assert_eq!(record.mode, None);
+        assert_eq!(record.team, None);
+    }
+
+    #[test]
+    fn execution_record_json_predating_r3_5_still_deserializes() {
+        // A session file written before this change has no `baseOid`/
+        // `provider`/`mode`/`team` keys at all. `#[serde(default)]` must
+        // keep those records loadable rather than turning every existing
+        // saved session into `SessionDamaged` on the next app open.
+        let legacy_json = serde_json::json!({
+            "executionId": "exec-1",
+            "sessionId": "sess-1",
+            "parentExecutionId": null,
+            "state": "finished",
+            "startedAt": "2026-01-01T00:00:00Z",
+            "endedAt": "2026-01-01T00:05:00Z",
+            "lastSequence": 3
+        });
+        let record: ExecutionRecord =
+            serde_json::from_value(legacy_json).expect("legacy execution JSON must still parse");
+        assert_eq!(record.base_oid, None);
+        assert_eq!(record.provider, None);
+        assert_eq!(record.mode, None);
+        assert_eq!(record.team, None);
+        assert_eq!(record.worktree_path, None, "other pre-existing optional fields must also default");
+    }
+
+    #[test]
+    fn execution_record_round_trips_the_r3_5_fields_through_json() {
+        let mut record = ExecutionRecord::minimal(
+            "exec-1".into(),
+            "sess-1".into(),
+            None,
+            SessionState::Working,
+            "2026-01-01T00:00:00Z".into(),
+            None,
+            0,
+        );
+        record.base_oid = Some("abc1234".into());
+        record.provider = Some("copilot".into());
+        record.mode = Some("auto".into());
+        record.team = Some("lead".into());
+        record.worktree_path = Some("C:/code/proj/.worktrees/gitwyrm-fix/thing".into());
+        record.branch = Some("gitwyrm-fix/thing".into());
+
+        let json = serde_json::to_string(&record).expect("serialize");
+        let round_tripped: ExecutionRecord = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round_tripped, record);
     }
 }

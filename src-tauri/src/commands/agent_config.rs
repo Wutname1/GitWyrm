@@ -21,7 +21,8 @@ use tauri::{AppHandle, State};
 use crate::agent_config::model::{
     ApplyOutcome, BatchApplyOutcome, BatchApplyRequest, ChangeSummaryLine, ClientDetection,
     ClientId, ConfigLocation, CopyPlan, DestinationApplyResult, DestinationPreview,
-    InventoryEntry, PlanWarning, PreviewOutcome, RawItem, UndoOutcome, WarningKind,
+    InventoryEntry, PlanWarning, PreviewOutcome, RawItem, RedactedCopyPlan, UndoOutcome,
+    WarningKind,
 };
 use crate::agent_config::plan::{self, SafeWriteRoot};
 use crate::agent_config::{locations, normalize, readers, redact, writers};
@@ -184,8 +185,15 @@ fn preview_copy_at(
         destinations: destination_previews,
         created_at: now_rfc3339(),
     };
+    // The full plan (including real, unredacted field values in
+    // `source_item.extra` and every `proposed_content`) is persisted here so
+    // `apply_copy_at`/`agent_config_apply_batch` can read it back and write
+    // the genuine content later. Only the redacted view crosses back to the
+    // frontend below -- see `RedactedCopyPlan`'s doc comment (task 1.5/5.4).
     write_plan(write_root, &plan)?;
-    Ok(PreviewOutcome::Ready { plan })
+    Ok(PreviewOutcome::Ready {
+        plan: RedactedCopyPlan::from(&plan),
+    })
 }
 
 /// Resolve `item_id` (the same `{kind:?}:{identity}` shape
@@ -551,5 +559,145 @@ mod tests {
         let (_dir, write_root) = write_root();
         let outcome = undo_at(&write_root, "nope");
         assert!(matches!(outcome, UndoOutcome::OperationNotFound));
+    }
+
+    #[test]
+    fn preview_copy_returns_the_redacted_view_never_the_raw_plan() {
+        // Task R7: a real API key must never cross the IPC boundary. This
+        // proves `agent_config_preview_copy`'s return value (what actually
+        // reaches the frontend) carries no field-value content at all --
+        // only `RedactedCopyPlan`'s narrowed shape.
+        let (dir, write_root) = write_root();
+        let dest_dir = dir.path().join("dest");
+        std::fs::create_dir_all(&dest_dir).unwrap();
+
+        let mut extra = std::collections::BTreeMap::new();
+        extra.insert("command".to_string(), JsonValue(serde_json::json!("npx")));
+        extra.insert(
+            "env".to_string(),
+            JsonValue(serde_json::json!({ "API_KEY": "sk-live-super-secret-value-12345" })),
+        );
+        let secret_fields = crate::agent_config::redact::find_secret_fields(&extra);
+        let source_item = RawItem {
+            location: ConfigLocation {
+                client: ClientId::OpenCode,
+                scope: ConfigScope::Personal,
+                path: "/fake/source".into(),
+            },
+            kind: ItemKind::McpConnector,
+            identity: "github".into(),
+            display_name: "github".into(),
+            description: None,
+            secret_fields,
+            extra,
+            content_hash: "h".into(),
+        };
+
+        let dest_preview = crate::agent_config::model::DestinationPreview {
+            client: ClientId::ClaudeCode,
+            destination_path: dest_dir.join("settings.json").to_string_lossy().into_owned(),
+            before_hash: None,
+            proposed_content: "{\"mcpServers\":{\"github\":{\"command\":\"npx\",\"env\":{\"API_KEY\":\"sk-live-super-secret-value-12345\"}}}}".into(),
+            redacted_diff_summary: vec![],
+            warnings: vec![],
+            write_supported: true,
+        };
+        let plan = CopyPlan {
+            plan_id: new_id(),
+            item_id: "McpConnector:github".into(),
+            source_item,
+            destinations: vec![dest_preview],
+            created_at: now_rfc3339(),
+        };
+
+        // The redacted view is what preview_copy_at actually returns to the
+        // command layer (and from there, over IPC).
+        let redacted = crate::agent_config::model::RedactedCopyPlan::from(&plan);
+        let serialized = serde_json::to_string(&redacted).unwrap();
+        assert!(
+            !serialized.contains("sk-live-super-secret-value-12345"),
+            "redacted plan must never carry the real secret value"
+        );
+        assert!(
+            !serialized.contains("npx"),
+            "redacted plan must not carry raw proposed_content at all, secret or not"
+        );
+
+        // But the full plan persisted to disk (what apply reads back) still
+        // has the genuine content -- apply must not be broken by redaction.
+        write_plan(&write_root, &plan).unwrap();
+        let read_back = read_plan(&write_root, &plan.plan_id).unwrap();
+        assert_eq!(read_back.destinations[0].proposed_content, plan.destinations[0].proposed_content);
+    }
+
+    #[test]
+    fn a_batch_with_one_stale_destination_still_applies_the_others_and_leaves_the_stale_one_untouched() {
+        // R7.8: concurrent edits + partial batch failure must not touch the
+        // destination that changed underneath us, while sibling plans in the
+        // same batch still succeed.
+        let (dir, write_root) = write_root();
+
+        let fresh_dest = dir.path().join("fresh.json");
+        std::fs::write(&fresh_dest, "{\"a\":1}").unwrap();
+        let fresh_before_hash = plan::hash_bytes(b"{\"a\":1}");
+
+        let stale_dest = dir.path().join("stale.json");
+        std::fs::write(&stale_dest, "{\"b\":1}").unwrap();
+        // Someone else edits this destination after preview was computed --
+        // the plan's before_hash below is deliberately stale.
+        std::fs::write(&stale_dest, "{\"b\":999}").unwrap();
+
+        let fresh_plan = CopyPlan {
+            plan_id: new_id(),
+            item_id: "McpConnector:fresh".into(),
+            source_item: sample_item(ClientId::OpenCode, "fresh"),
+            destinations: vec![DestinationPreview {
+                client: ClientId::ClaudeCode,
+                destination_path: fresh_dest.to_string_lossy().into_owned(),
+                before_hash: Some(fresh_before_hash),
+                proposed_content: "{\"a\":2}".into(),
+                redacted_diff_summary: vec![],
+                warnings: vec![],
+                write_supported: true,
+            }],
+            created_at: now_rfc3339(),
+        };
+        let stale_plan = CopyPlan {
+            plan_id: new_id(),
+            item_id: "McpConnector:stale".into(),
+            source_item: sample_item(ClientId::OpenCode, "stale"),
+            destinations: vec![DestinationPreview {
+                client: ClientId::ClaudeCode,
+                destination_path: stale_dest.to_string_lossy().into_owned(),
+                before_hash: Some(plan::hash_bytes(b"{\"b\":1}")), // stale on purpose
+                proposed_content: "{\"b\":2}".into(),
+                redacted_diff_summary: vec![],
+                warnings: vec![],
+                write_supported: true,
+            }],
+            created_at: now_rfc3339(),
+        };
+        write_plan(&write_root, &fresh_plan).unwrap();
+        write_plan(&write_root, &stale_plan).unwrap();
+
+        let batch_outcomes: Vec<ApplyOutcome> = [&fresh_plan.plan_id, &stale_plan.plan_id]
+            .iter()
+            .map(|id| apply_copy_at(&write_root, id))
+            .collect();
+
+        let fresh_outcome = batch_outcomes.iter().find(|o| o.plan_id == fresh_plan.plan_id).unwrap();
+        assert!(matches!(fresh_outcome.results[0], DestinationApplyResult::Applied { .. }));
+        assert_eq!(std::fs::read_to_string(&fresh_dest).unwrap(), "{\"a\":2}");
+
+        let stale_outcome = batch_outcomes.iter().find(|o| o.plan_id == stale_plan.plan_id).unwrap();
+        assert!(matches!(
+            stale_outcome.results[0],
+            DestinationApplyResult::ConcurrentChangeRefused { .. }
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&stale_dest).unwrap(),
+            "{\"b\":999}",
+            "the concurrently-edited destination must be left completely untouched"
+        );
     }
 }

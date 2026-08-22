@@ -762,8 +762,34 @@ The task:
         task_text
     );
 
+    // The legacy OpenSpec task-run console (`ai_run_start`) has no
+    // `SessionIntent` of its own -- it always ran fully permissive before
+    // `ExecutionPolicy` existed, driving an accepted task to completion the
+    // same way a Fix session does. Resolving a `Fix`-shaped policy here
+    // (rather than gating this console for the first time) keeps that
+    // existing, unrestricted behavior unchanged; `started: true` because
+    // this console has no Plan-before-Start concept -- it starts running
+    // immediately, same as it always has.
+    let policy = crate::agentdesk::policy::ExecutionPolicy::resolve(
+        crate::agentdesk::model::SessionIntent::Fix,
+        crate::agentdesk::policy::ExecutionMode::Auto,
+        crate::agentdesk::policy::ExecutionTeam::Solo,
+        None,
+    )
+    .expect("no provider override is passed here, so resolution cannot fail");
+
     let rt = tokio::runtime::Handle::current();
+    // The legacy OpenSpec task console has no Stop of its own -- it always ran
+    // to completion and still does. It gets a handle nothing ever signals
+    // rather than a special no-cancel code path, so `run_task` has exactly one
+    // shape and the console cannot drift from the real execution path.
     rt.block_on(crate::airun::cli_run::run_task(
-        &agent, &prompt, sink, answers,
+        &agent,
+        &prompt,
+        sink,
+        answers,
+        policy,
+        true,
+        crate::airun::cli_run::CancelHandle::new(),
     ));
 }

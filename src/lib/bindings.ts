@@ -4186,18 +4186,6 @@ export type CompletionCondition =
  * The listed repo-relative paths must all have been touched.
  */
 { kind: "filesChanged"; paths: string[] }
-/**
- * Where a discovered item's configuration file lives, on this machine, for
- * one client. `scope` distinguishes a personal (user-home) location from a
- * this-repository location so the same skill name can exist at both scopes
- * without colliding.
- */
-export type ConfigLocation = { client: ClientId; scope: ConfigScope; 
-/**
- * Absolute path to the file this item's configuration lives in (or would
- * be written to). Never a directory: writers always target one file.
- */
-path: string }
 export type ConfigScope = "personal" | "repo"
 /**
  * The three sides of a conflicted file, as full text.
@@ -4277,13 +4265,6 @@ export type ConversationSegment = { segmentId: string; label: string;
  */
 startedAt: string }
 /**
- * A reviewed, not-yet-applied plan: one item copied to one or more
- * destinations. Persisted so `agent_config_apply_copy(plan_id)` can look it
- * up, and so "Match selected apps" is built from the same plans as a
- * single-item copy (task 2.4).
- */
-export type CopyPlan = { planId: string; itemId: string; sourceItem: RawItem; destinations: DestinationPreview[]; createdAt: string }
-/**
  * A session was created, or the request could not produce one. Kept as an
  * enum (rather than a plain `AgentSession`) so a future validation refusal
  * has a variant to land in without becoming an `AppError`; today creation
@@ -4347,23 +4328,6 @@ export type DestinationApplyResult = { kind: "applied"; client: ClientId; operat
  * written; the caller should refresh the plan and try again.
  */
 { kind: "concurrentChangeRefused"; client: ClientId; expectedHash: string | null; actualHash: string | null } | { kind: "writeFailed"; client: ClientId; detail: string }
-/**
- * One destination's computed preview: the exact content GitWyrm proposes to
- * write, the current file hash it was computed against, and any warnings.
- * Nothing here is applied until [`ApplyRequest`] confirms this exact hash.
- */
-export type DestinationPreview = { client: ClientId; destinationPath: string; 
-/**
- * `None` when the destination file does not exist yet (a create, not a
- * merge).
- */
-beforeHash: string | null; proposedContent: string; 
-/**
- * Redacted rendering safe to show in the UI: secret values already
- * replaced with a marker before this ever reaches the frontend log or
- * the plan file (task 1.5, 5.4).
- */
-redactedDiffSummary: ChangeSummaryLine[]; warnings: PlanWarning[]; writeSupported: boolean }
 /**
  * What detecting one adapter found. Distinct from [`AdapterError`]: this is
  * the *registry's* view across every adapter (task 1.2), so a panic and a
@@ -4532,6 +4496,13 @@ startedAt: string;
  */
 endedAt: string | null; 
 /**
+ * Hash of the OpenSpec plan text this execution was actually given
+ * (`openspec_context::fingerprint`), or `None` for a session that did not
+ * start from OpenSpec. Lets a later reader tell whether the plan has moved
+ * since the agent read it, rather than guessing from timestamps (R5.3).
+ */
+contextFingerprint?: string | null; 
+/**
  * Highest sequence number persisted for this execution so far. Lets a
  * late/duplicate event be recognized without rescanning `messages`.
  */
@@ -4567,6 +4538,36 @@ worktreePath?: string | null;
  * Branch checked out in `worktree_path`.
  */
 branch?: string | null; 
+/**
+ * The commit `worktree_path`'s branch was created from -- R3.5:
+ * "Persist worktree path, branch, base revision, provider, mode, and
+ * policy on execution," so a restart (or a much later review) can tell
+ * what this execution actually ran against without re-deriving it from
+ * a worktree folder that may since have been cleaned up.
+ */
+baseOid?: string | null; 
+/**
+ * Which provider transport ran this execution --
+ * `agentdesk::policy::ExecutionProvider`'s name (e.g. `"copilot"`), not
+ * the enum itself: that type is `Copy`/non-`Type` (never crosses the
+ * IPC boundary), and this module has no dependency on `policy` today.
+ * Stored as the plain string a provider override already travels as
+ * everywhere else in this package (`StartAgentSessionRequest.provider_override`,
+ * `ResultRecord`'s commit-message drafting).
+ */
+provider?: string | null; 
+/**
+ * `agentdesk::policy::ExecutionMode` as its serialized string (`"ask" |
+ * "plan" | "auto"`) -- what this execution actually ran under, which
+ * may differ from the intent's default when a caller passed an
+ * explicit mode (`ExecutionPolicy::resolve`'s `mode` parameter).
+ */
+mode?: string | null; 
+/**
+ * `agentdesk::policy::ExecutionTeam` as its serialized string (`"solo"
+ * | "lead"`) -- same reasoning as `mode`.
+ */
+team?: string | null; 
 /**
  * Other execution IDs (within the same session) this node depends on --
  * it will not be scheduled until all of them reach `Finished`.
@@ -5351,9 +5352,12 @@ export type PreflightItem = { label: string;
  */
 done: boolean; detail: string }
 /**
- * Outcome of computing a preview.
+ * Outcome of computing a preview. Carries [`RedactedCopyPlan`], never the
+ * full [`CopyPlan`] -- see that type's doc comment for why (task 1.5/5.4:
+ * secret values must never cross the IPC boundary or be persisted to a
+ * frontend-visible log).
  */
-export type PreviewOutcome = { kind: "ready"; plan: CopyPlan } | { kind: "itemNotFound" } | { kind: "noDestinations" }
+export type PreviewOutcome = { kind: "ready"; plan: RedactedCopyPlan } | { kind: "itemNotFound" } | { kind: "noDestinations" }
 /**
  * One identity you commit under.
  */
@@ -5498,30 +5502,6 @@ upstream: string | null;
  */
 pushed: number }
 /**
- * One discovered item, normalized enough to compare across clients while
- * retaining the client's own raw fields and source path (task 1.3).
- */
-export type RawItem = { location: ConfigLocation; kind: ItemKind; 
-/**
- * Stable identity used to match the "same" item across clients: for a
- * skill this is its directory/file name; for an MCP connector, its
- * configured server name. Comparison is case-sensitive and exact --
- * fuzzy matching would risk merging two genuinely different items.
- */
-identity: string; displayName: string; description: string | null; 
-/**
- * Every field this client's schema defines, normalized keys where
- * GitWyrm understands them (`command`, `args`, `env`, `url`, `headers`)
- * plus anything else under its original key in `extra`.
- */
-extra: Partial<{ [key in string]: unknown }>; secretFields: SecretFieldRef[]; 
-/**
- * Content hash of this item's raw serialized form, used to detect when
- * an item has changed since it was last scanned (task 3.2 concurrent
- * edit detection operates on the *file*, this is for the item itself).
- */
-contentHash: string }
-/**
  * Outcome of a rebase. A clean rebase returns no conflicts; a paused rebase
  * (conflicts to resolve) lists the conflicted paths and leaves the repo in its
  * rebase-in-progress state.
@@ -5537,6 +5517,31 @@ conflicts: string[];
  */
 submodules: SubmoduleFollowed[] }
 export type RecentRepo = { name: string; path: string }
+/**
+ * The redacted view of a [`CopyPlan`] sent to the frontend. `CopyPlan`
+ * itself carries `source_item.extra` (every field GitWyrm does not
+ * understand, including secret values before redaction -- see
+ * [`RawItem::extra`]) and `DestinationPreview::proposed_content` (the exact
+ * bytes about to be written, which for a supported writer embed those same
+ * unredacted values). Neither may cross the IPC boundary or be shown to the
+ * UI: only [`DestinationPreview::redacted_diff_summary`] is redaction-safe.
+ * This type carries everything the UI needs to render [`super::super`]'s
+ * `PlanReview`/`CopyPreviewDialog` (destination, path, warnings, redacted
+ * diff, write support) and nothing else. The full [`CopyPlan`] stays on the
+ * backend, persisted by [`super::plan::SafeWriteRoot::plans_dir`] exactly as
+ * before, so `agent_config_apply_copy`/`agent_config_apply_batch` still read
+ * the real content to write -- only what leaves the process for display is
+ * narrowed here.
+ */
+export type RedactedCopyPlan = { planId: string; itemId: string; sourceClient: ClientId; sourceHasSecrets: boolean; destinations: RedactedDestinationPreview[]; createdAt: string }
+/**
+ * [`DestinationPreview`] with `proposed_content` (raw file bytes, potentially
+ * carrying real secret values) dropped. Every other field is already
+ * redaction-safe by construction: `redacted_diff_summary` is built from
+ * [`super::redact::redact_for_display`] output, and `warnings` messages are
+ * plain UI copy that never embeds a field value.
+ */
+export type RedactedDestinationPreview = { client: ClientId; destinationPath: string; hasBeforeContent: boolean; redactedDiffSummary: ChangeSummaryLine[]; warnings: PlanWarning[]; writeSupported: boolean }
 export type RefInfo = { name: string; type: RefKind }
 export type RefKind = "head" | "branch" | "remote" | "tag"
 /**
@@ -6117,24 +6122,6 @@ export type ScannedRepo = { name: string; path: string;
  * Current branch parsed from .git/HEAD as text (None when detached/unreadable).
  */
 head_branch: string | null }
-/**
- * One field that may carry a secret (a token, API key, header value, or
- * command argument that looks like a credential). The identity of the field
- * is kept; the value never is (task 1.5, spec "Secrets are not spread
- * silently").
- */
-export type SecretFieldRef = { 
-/**
- * Dotted path within the item's normalized fields, e.g. `env.API_KEY` or
- * `headers.Authorization`.
- */
-fieldPath: string; 
-/**
- * Why this field is treated as secret: env var, header, command arg, or
- * a field literally named token/key/secret/password.
- */
-reason: SecretReason }
-export type SecretReason = "environmentValue" | "headerValue" | "commandArgument" | "namedSecretField"
 /**
  * Payload of [`SELECT_DESK_TARGET_EVENT`].
  */
@@ -7035,7 +7022,13 @@ export type StartExecutionOutcome =
  * provisioning fails, do not fall back to the user's checkout" -- the
  * engine is never started against `open.path` when this is returned.
  */
-{ kind: "worktreeFailed"; detail: string }
+{ kind: "worktreeFailed"; detail: string } | 
+/**
+ * `provider_override` named a provider this build does not support.
+ * Task 1.6: this is a typed, visible refusal -- the execution is never
+ * started with the default provider as a silent substitute.
+ */
+{ kind: "unsupportedProvider"; requested: string }
 export type StartGraphOutcome = 
 /**
  * The lead's `NeedsInput` proposal became `Working`, and every
@@ -7111,11 +7104,16 @@ export type StashOutcome = "stashed" | "nothing_to_stash"
 export type StatusCode = "A" | "M" | "D" | "R" | "!"
 export type StopExecutionOutcome = 
 /**
- * `stopped` lists exactly which executions were told to stop -- empty
- * for `StopScope::One` naming an execution that was not active, which is
- * a no-op, not an error (it may have finished a moment earlier).
+ * `stopped` lists exactly which executions were told to stop and
+ * acknowledged it within the timeout -- empty for `StopScope::One`
+ * naming an execution that was not active, which is a no-op, not an
+ * error (it may have finished a moment earlier). `timed_out` lists any
+ * requested executions that did NOT acknowledge in time; those were
+ * still force-stopped (the CLI process is killed regardless, see
+ * `cli_run::run_task`'s `conn.shutdown()`), so their edits/worktree are
+ * preserved exactly like an acknowledged stop -- task 2.5/2.6.
  */
-{ kind: "stopped"; session: AgentSession; stopped: string[] } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string }
+{ kind: "stopped"; session: AgentSession; stopped: string[]; timed_out: string[] } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string }
 /**
  * Scope of a stop request: one execution, or every execution attached to the
  * session (spec `agent-desk-agent-graphs`: "Each helper SHALL have Stop for

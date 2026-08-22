@@ -391,11 +391,81 @@ pub struct CopyPlan {
     pub created_at: String,
 }
 
-/// Outcome of computing a preview.
+/// The redacted view of a [`CopyPlan`] sent to the frontend. `CopyPlan`
+/// itself carries `source_item.extra` (every field GitWyrm does not
+/// understand, including secret values before redaction -- see
+/// [`RawItem::extra`]) and `DestinationPreview::proposed_content` (the exact
+/// bytes about to be written, which for a supported writer embed those same
+/// unredacted values). Neither may cross the IPC boundary or be shown to the
+/// UI: only [`DestinationPreview::redacted_diff_summary`] is redaction-safe.
+/// This type carries everything the UI needs to render [`super::super`]'s
+/// `PlanReview`/`CopyPreviewDialog` (destination, path, warnings, redacted
+/// diff, write support) and nothing else. The full [`CopyPlan`] stays on the
+/// backend, persisted by [`super::plan::SafeWriteRoot::plans_dir`] exactly as
+/// before, so `agent_config_apply_copy`/`agent_config_apply_batch` still read
+/// the real content to write -- only what leaves the process for display is
+/// narrowed here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RedactedCopyPlan {
+    pub plan_id: String,
+    pub item_id: String,
+    pub source_client: ClientId,
+    pub source_has_secrets: bool,
+    pub destinations: Vec<RedactedDestinationPreview>,
+    pub created_at: String,
+}
+
+/// [`DestinationPreview`] with `proposed_content` (raw file bytes, potentially
+/// carrying real secret values) dropped. Every other field is already
+/// redaction-safe by construction: `redacted_diff_summary` is built from
+/// [`super::redact::redact_for_display`] output, and `warnings` messages are
+/// plain UI copy that never embeds a field value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RedactedDestinationPreview {
+    pub client: ClientId,
+    pub destination_path: String,
+    pub has_before_content: bool,
+    pub redacted_diff_summary: Vec<ChangeSummaryLine>,
+    pub warnings: Vec<PlanWarning>,
+    pub write_supported: bool,
+}
+
+impl From<&CopyPlan> for RedactedCopyPlan {
+    fn from(plan: &CopyPlan) -> Self {
+        RedactedCopyPlan {
+            plan_id: plan.plan_id.clone(),
+            item_id: plan.item_id.clone(),
+            source_client: plan.source_item.location.client,
+            source_has_secrets: !plan.source_item.secret_fields.is_empty(),
+            destinations: plan.destinations.iter().map(RedactedDestinationPreview::from).collect(),
+            created_at: plan.created_at.clone(),
+        }
+    }
+}
+
+impl From<&DestinationPreview> for RedactedDestinationPreview {
+    fn from(dest: &DestinationPreview) -> Self {
+        RedactedDestinationPreview {
+            client: dest.client,
+            destination_path: dest.destination_path.clone(),
+            has_before_content: dest.before_hash.is_some(),
+            redacted_diff_summary: dest.redacted_diff_summary.clone(),
+            warnings: dest.warnings.clone(),
+            write_supported: dest.write_supported,
+        }
+    }
+}
+
+/// Outcome of computing a preview. Carries [`RedactedCopyPlan`], never the
+/// full [`CopyPlan`] -- see that type's doc comment for why (task 1.5/5.4:
+/// secret values must never cross the IPC boundary or be persisted to a
+/// frontend-visible log).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PreviewOutcome {
-    Ready { plan: CopyPlan },
+    Ready { plan: RedactedCopyPlan },
     ItemNotFound,
     NoDestinations,
 }

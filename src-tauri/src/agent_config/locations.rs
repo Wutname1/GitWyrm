@@ -164,6 +164,9 @@ mod tests {
     struct HomeGuard {
         _dir: TempDir,
         prev: Option<std::ffi::OsString>,
+        /// Held until the guard drops, so the next home-swapping test cannot
+        /// start until this one has restored the env var.
+        _lock: std::sync::MutexGuard<'static, ()>,
     }
     impl Drop for HomeGuard {
         fn drop(&mut self) {
@@ -173,11 +176,26 @@ mod tests {
             }
         }
     }
+    /// Serializes the tests that repoint `GITWYRM_TEST_HOME`.
+    ///
+    /// The env var is process-wide and Rust runs tests as threads in ONE
+    /// process, so two of these running at once would each see the other's
+    /// home directory -- which is exactly why
+    /// `detect_clients_reports_present_only_when_a_file_actually_exists`
+    /// failed intermittently under `--test-threads=4` while passing alone.
+    /// The lock is held for the guard's whole lifetime, so only one home-
+    /// swapping test runs at a time; every other test is unaffected.
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn with_home() -> HomeGuard {
+        // A poisoned lock here just means an earlier home test panicked; the
+        // env var is still restored by that test's guard, so recovering is
+        // correct rather than cascading the failure.
+        let lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = TempDir::new().expect("temp home");
         let prev = std::env::var_os("GITWYRM_TEST_HOME");
         std::env::set_var("GITWYRM_TEST_HOME", dir.path());
-        HomeGuard { _dir: dir, prev }
+        HomeGuard { _dir: dir, prev, _lock: lock }
     }
 
     #[test]

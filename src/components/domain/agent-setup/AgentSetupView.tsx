@@ -1,13 +1,13 @@
 import { useState } from 'react'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 import type { InventoryEntry } from '@/lib/bindings'
-import { useAgentConfigDetectedClients, useAgentConfigInventory, useApplyAgentConfigBatch, usePreviewAgentConfigCopy } from '@/hooks/useAgentConfig'
-import { eligibleDestinationsFor, hasAnyDifference } from '@/lib/agentConfig'
+import { useAgentConfigDetectedClients, useAgentConfigInventory } from '@/hooks/useAgentConfig'
+import { hasAnyDifference } from '@/lib/agentConfig'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { log } from '@/lib/log'
 import { SyncSummaryLine, SyncTable } from './SyncTable'
 import { CopyPreviewDialog } from './CopyPreviewDialog'
+import { BatchReviewDialog } from './BatchReviewDialog'
 import { DetectedAppsTab } from './DetectedAppsTab'
 
 type SetupTab = 'skills' | 'connections' | 'providers' | 'detected'
@@ -34,39 +34,13 @@ const TABS: { id: SetupTab; label: string }[] = [
 export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onClose: () => void }) {
   const [tab, setTab] = useState<SetupTab>('skills')
   const [activeItem, setActiveItem] = useState<InventoryEntry | null>(null)
-  const [batchPending, setBatchPending] = useState(false)
+  const [batchOpen, setBatchOpen] = useState(false)
 
   const inventory = useAgentConfigInventory(repoId)
   const detections = useAgentConfigDetectedClients(repoId)
-  const preview = usePreviewAgentConfigCopy()
-  const applyBatch = useApplyAgentConfigBatch(repoId)
 
   const entries = inventory.data ?? []
-
-  const handleMatchSelectedApps = async () => {
-    // "Match selected apps" is built from the same per-item plans as a
-    // single-item copy (task 2.4) -- never a separate hidden overwrite path.
-    // It previews every differing item's eligible destinations, then applies
-    // every plan that could be previewed, in one batch.
-    setBatchPending(true)
-    try {
-      const differing = entries.filter(hasAnyDifference)
-      const planIds: string[] = []
-      for (const entry of differing) {
-        const destinations = eligibleDestinationsFor(entry)
-        if (destinations.length === 0) continue
-        const outcome = await preview.mutateAsync({ repoId, itemId: entry.itemId, destinations })
-        if (outcome.kind === 'ready') planIds.push(outcome.plan.planId)
-      }
-      if (planIds.length > 0) {
-        await applyBatch.mutateAsync(planIds)
-      }
-    } catch (e) {
-      log.error(`match selected apps failed: ${String(e)}`)
-    } finally {
-      setBatchPending(false)
-    }
-  }
+  const differingCount = entries.filter(hasAnyDifference).length
 
   return (
     <section aria-label="Agent setup manager" className="flex h-full min-h-0 flex-col bg-panel">
@@ -80,10 +54,10 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
         <Button
           size="sm"
           className="ml-auto"
-          onClick={handleMatchSelectedApps}
-          disabled={batchPending || entries.length === 0}
+          onClick={() => setBatchOpen(true)}
+          disabled={differingCount === 0}
         >
-          {batchPending ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+          <RefreshCw size={13} />
           Match selected apps
         </Button>
         <Button size="sm" variant="secondary" onClick={onClose}>
@@ -135,6 +109,9 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
 
       {activeItem && (
         <CopyPreviewDialog entry={activeItem} repoId={repoId} onClose={() => setActiveItem(null)} />
+      )}
+      {batchOpen && (
+        <BatchReviewDialog entries={entries} repoId={repoId} onClose={() => setBatchOpen(false)} />
       )}
     </section>
   )

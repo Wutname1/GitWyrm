@@ -369,6 +369,7 @@ pub enum GetSessionOutcome {
 fn get_session_at(
     locks: &crate::agentdesk::SessionLocks,
     links: &crate::agentdesk::RunSessionLinks,
+    executions: &crate::agentdesk::ExecutionRegistry,
     root: &SessionStoreRoot,
     session_id: &str,
 ) -> GetSessionOutcome {
@@ -388,12 +389,11 @@ fn get_session_at(
     };
     // `RunSessionLinks::get` answers "which durable SESSION is linked to this
     // repository's live run right now" -- it has no notion of individual
-    // execution IDs (a repository can only ever have one live run), so
-    // liveness here is session-granular: "is *this* session the one this
-    // process currently has a run attached to for its repo." When it is, no
-    // execution belonging to this session gets reconciled, lead or helper
-    // alike, since the running process could still be in the middle of any
-    // of them.
+    // execution IDs (a repository can only ever have one live run), so this
+    // is session-granular: "is *this* session the one this process currently
+    // has a run attached to for its repo." Used only for the header (task
+    // 2.7: "retain recovery information" -- the header's own state has no
+    // per-execution breakdown to be more precise than this with).
     let session_is_live = links.get(&repo_id).as_deref() == Some(session_id);
 
     // Second acquisition: re-read (the file may have changed since the first
@@ -412,7 +412,7 @@ fn get_session_at(
         };
 
         let header_changed = reconcile_session_header(&mut session.header, session_is_live);
-        let executions_changed = reconcile_session_executions(&mut session, session_is_live);
+        let executions_changed = reconcile_session_executions(&mut session, executions);
 
         if header_changed || executions_changed > 0 {
             session.header.updated_at = now_rfc3339();
@@ -444,17 +444,24 @@ fn reconcile_session_header(header: &mut AgentSessionHeader, session_is_live: bo
 /// (tasks.md 6.1, `agentGraphProjection.ts`), so a fix that stopped at the
 /// header would leave every helper showing "Working" forever.
 ///
-/// `session_is_live` gates every execution the same way: `RunSessionLinks`
-/// only tracks "which session is this repository's live run attached to,"
-/// with no visibility into which individual execution (lead or helper)
-/// within that session the process happens to be running at this instant --
-/// a repository has at most one live run at a time. So when the session
-/// itself is live, no execution belonging to it is touched (the running
-/// process could be mid-helper, mid-lead, or between the two); when it is
-/// not, every execution still claiming a live-process state is stale by the
-/// same reasoning that made the header stale.
-fn reconcile_session_executions(session: &mut AgentSession, session_is_live: bool) -> u32 {
-    crate::agentdesk::reconcile_executions(&mut session.executions, |_execution_id| session_is_live)
+/// Task 2.1/2.7: each execution is checked individually against
+/// `executions.is_live(session_id, execution_id)` -- the runtime registry
+/// knows exactly which (session, execution) pairs this process actually has
+/// something running for, unlike the header's own `RunSessionLinks`-derived
+/// answer (which is repo-granular and cannot distinguish a live lead from a
+/// live helper in the same session). A restart clears the registry (it is
+/// in-process state, `app.manage(ExecutionRegistry::new())`), so every
+/// execution reads as not-live and is correctly marked `Interrupted` --
+/// exactly the "on restart, mark lost processes Interrupted" behavior task
+/// 2.7 asks for, now precise per execution rather than per session.
+fn reconcile_session_executions(
+    session: &mut AgentSession,
+    executions: &crate::agentdesk::ExecutionRegistry,
+) -> u32 {
+    let session_id = session.header.session_id.clone();
+    crate::agentdesk::reconcile_executions(&mut session.executions, |execution_id| {
+        executions.is_live(&session_id, &execution_id.to_string())
+    })
 }
 
 #[tauri::command]
@@ -463,6 +470,7 @@ pub async fn agent_session_get(
     app: AppHandle,
     locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
     links: tauri::State<'_, crate::agentdesk::RunSessionLinks>,
+    executions: tauri::State<'_, crate::agentdesk::ExecutionRegistry>,
     session_id: SessionId,
 ) -> Result<GetSessionOutcome, AppError> {
     let root = resolve_root(&app)?;
@@ -474,9 +482,12 @@ pub async fn agent_session_get(
     // travels with the closure rather than the per-header answer being
     // pre-resolved on the async side.
     let links = links.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || get_session_at(&locks, &links, &root, &session_id))
-        .await
-        .map_err(|e| AppError::Other(e.to_string()))
+    let executions = executions.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        get_session_at(&locks, &links, &executions, &root, &session_id)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
 }
 
 /// The shared shape of every "load, mutate the header, write back" command:
@@ -922,6 +933,10 @@ pub enum StartExecutionOutcome {
     /// provisioning fails, do not fall back to the user's checkout" -- the
     /// engine is never started against `open.path` when this is returned.
     WorktreeFailed { detail: String },
+    /// `provider_override` named a provider this build does not support.
+    /// Task 1.6: this is a typed, visible refusal -- the execution is never
+    /// started with the default provider as a silent substitute.
+    UnsupportedProvider { requested: String },
 }
 
 /// Internal-only outcome of the atomic "re-check then write the
@@ -956,6 +971,11 @@ fn record_execution_if_not_running(
     root: &SessionStoreRoot,
     session_id: &str,
     execution_id: ExecutionId,
+    // R5.3: hash of the OpenSpec plan text this execution was handed, or
+    // `None` for a session that did not start from OpenSpec. Written inside the
+    // same locked write that creates the record, so the record and the context
+    // it was given can never disagree.
+    context_fingerprint: Option<String>,
 ) -> RecordOutcome {
     use crate::agentdesk::model::SessionLoadError as E;
     locks.with_session_lock(session_id, || {
@@ -985,7 +1005,7 @@ fn record_execution_if_not_running(
         }
 
         let now = now_rfc3339();
-        session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+        let mut record = crate::agentdesk::model::ExecutionRecord::minimal(
             execution_id.clone(),
             session.header.session_id.clone(),
             None,
@@ -993,7 +1013,9 @@ fn record_execution_if_not_running(
             now,
             None,
             0,
-        ));
+        );
+        record.context_fingerprint = context_fingerprint.clone();
+        session.executions.push(record);
         session.header.active_execution_id = Some(execution_id.clone());
         session.header.state = SessionState::Preparing;
         session.header.updated_at = now_rfc3339();
@@ -1016,18 +1038,49 @@ fn start_execution_at(
     root: &SessionStoreRoot,
     links: &crate::agentdesk::RunSessionLinks,
     manager: &crate::state::RepoManager,
+    executions: &crate::agentdesk::ExecutionRegistry,
     session_id: &str,
-    _mode: ExecutionMode,
-    _team: ExecutionTeam,
-    _provider_override: Option<String>,
+    mode: ExecutionMode,
+    team: ExecutionTeam,
+    provider_override: Option<String>,
 ) -> StartExecutionOutcome {
     use crate::agentdesk::model::SessionLoadError as E;
+
+    // Step 0: read the session's intent up front (a cheap, lock-free read of
+    // just the header would be nice, but `store::read_session` is the only
+    // reader today) so `ExecutionPolicy::resolve` -- and, in particular, an
+    // unsupported `provider_override` -- is checked before anything else
+    // this function does has a side effect (linking the repo, discovering
+    // the CLI, provisioning a worktree). Task 1.6: this must fail visibly as
+    // its own typed outcome, never fall through to starting the default
+    // provider anyway.
+    let intent = match locks.with_session_lock(session_id, || store::read_session(root, session_id)) {
+        Ok(s) => s.header.intent,
+        Err(E::NotFound) => return StartExecutionOutcome::NotFound,
+        Err(E::Io { detail }) => return StartExecutionOutcome::Unavailable { detail },
+        Err(reason) => {
+            return StartExecutionOutcome::Damaged {
+                reason: reason.to_string(),
+            }
+        }
+    };
+    let policy = match crate::agentdesk::policy::ExecutionPolicy::resolve(
+        intent,
+        mode,
+        team,
+        provider_override.as_deref(),
+    ) {
+        Ok(p) => p,
+        Err(crate::agentdesk::policy::PolicyRefusal::UnsupportedProvider { requested }) => {
+            return StartExecutionOutcome::UnsupportedProvider { requested };
+        }
+    };
 
     // Step 1: read the session and refuse a second concurrent execution, all
     // under the session lock so a racing start/stop cannot both pass the
     // "nothing running" check (the same race `agentdesk::locks` documents for
     // rename/archive/append).
-    let (session, repo_id, repo_path, prompt) = match locks.with_session_lock(session_id, || {
+    let (session, repo_id, repo_path, prompt, context_fingerprint) = match locks.with_session_lock(session_id, || {
         match store::read_session(root, session_id) {
             Ok(s) => {
                 if let Some(active) = &s.header.active_execution_id {
@@ -1045,8 +1098,30 @@ fn start_execution_at(
                 }
                 let repo_id = s.header.repo_id.clone();
                 let repo_path = s.header.repo_path.clone();
-                let prompt = build_prompt(&s);
-                Ok((s, repo_id, repo_path, prompt))
+                // R5.1/R5.2: a chat started from an OpenSpec change or task
+                // must hand the agent that plan -- proposal, design, deltas,
+                // the exact task and progress -- not just the source title.
+                // `render_for_prompt` marks absent documents explicitly, so a
+                // missing design.md reads as "there is none" rather than as
+                // silence the model can mistake for "it does not matter".
+                let openspec_context = openspec_target_of(&s.header.source)
+                    .and_then(|target| resolve_openspec_context(std::path::Path::new(&s.header.repo_path), &target));
+                let prompt = match &openspec_context {
+                    Some(ctx) => format!(
+                        "{}
+
+{}",
+                        crate::agentdesk::openspec_context::render_for_prompt(ctx),
+                        build_prompt(&s)
+                    ),
+                    None => build_prompt(&s),
+                };
+                // R5.3: hash the text the agent actually read, so a later
+                // reader can tell whether the plan has moved underneath it.
+                let context_fingerprint = openspec_context
+                    .as_ref()
+                    .map(crate::agentdesk::openspec_context::fingerprint);
+                Ok((s, repo_id, repo_path, prompt, context_fingerprint))
             }
             Err(E::NotFound) => Err(StartExecutionOutcome::NotFound),
             Err(E::Io { detail }) => Err(StartExecutionOutcome::Unavailable { detail }),
@@ -1088,8 +1163,8 @@ fn start_execution_at(
     // in whatever UI action transitions a Plan session out of
     // `AwaitingStart`, not inside `start_execution_at` itself). Once
     // started, Plan behaves like Fix and also gets a worktree.
-    let policy = crate::agentdesk::policy::for_intent(session.header.intent);
-    let engine_root = match policy.worktree {
+    let intent_policy = crate::agentdesk::policy::for_intent(session.header.intent);
+    let engine_root = match intent_policy.worktree {
         crate::agentdesk::policy::WorktreePolicy::Never => open.path.clone(),
         crate::agentdesk::policy::WorktreePolicy::Always
         | crate::agentdesk::policy::WorktreePolicy::NotUntilStart => {
@@ -1178,7 +1253,7 @@ fn start_execution_at(
     // lock rather than holding it across `discover` is deliberate: a slow
     // shell-out must never serialize behind a held session lock.
     let record_outcome =
-        record_execution_if_not_running(locks, root, session_id, execution_id.clone());
+        record_execution_if_not_running(locks, root, session_id, execution_id.clone(), context_fingerprint);
     let session_after = match record_outcome {
         RecordOutcome::Updated { session } => session,
         RecordOutcome::AlreadyRunning { execution_id } => {
@@ -1218,9 +1293,20 @@ fn start_execution_at(
     let (answer_tx, answer_rx) = std::sync::mpsc::channel::<crate::airun::driver::GateAnswer>();
     crate::commands::airun::gate_answers().lock().unwrap().insert(repo_id.clone(), answer_tx);
 
+    // Task 2.1/2.2: this execution's entry in the runtime registry -- keyed
+    // by the durable session and execution ID, not `repo_id` -- is created
+    // and holds the cancellation handle BEFORE the spawned task below can
+    // emit a single `Working` event. A Stop that lands in the window between
+    // `Started` returning and the first `Working` event must still find a
+    // live, cancellable execution here, not `StopOutcome::NotLive`.
+    let cancel_handle = crate::airun::cli_run::CancelHandle::new();
+    executions.register(session_id.to_string(), run_session_id.clone(), cancel_handle.clone());
+
     let app_for_task = app.clone();
     let repo_for_task = repo_id.clone();
     let run_session_id_for_task = run_session_id.clone();
+    let session_id_for_task = session_id.to_string();
+    let executions_for_task = executions.clone();
     let join_handle = tauri::async_runtime::spawn(async move {
         let sink: crate::airun::engine::Sink = {
             let app = app_for_task.clone();
@@ -1249,6 +1335,12 @@ fn start_execution_at(
             ),
             sink,
             answer_rx,
+            policy,
+            // A session that has reached `start_execution_at` has, by
+            // definition, been started -- see step 2b's doc comment on why
+            // `WorktreePolicy::NotUntilStart` is resolved as "started" here.
+            true,
+            cancel_handle,
         )
         .await;
 
@@ -1256,6 +1348,12 @@ fn start_execution_at(
             .lock()
             .unwrap()
             .remove(&repo_for_task);
+        // Task 2.5's other half: whatever called `ExecutionRegistry::stop`
+        // and is awaiting `wait_for_stop` needs to observe completion
+        // exactly once `run_task` has actually finished (including its own
+        // `conn.shutdown().await`) -- not merely once cancellation was
+        // requested.
+        executions_for_task.complete(&session_id_for_task, &run_session_id_for_task);
     });
 
     // No-silent-freeze safety net (House Rule #1: every action produces a
@@ -1274,6 +1372,7 @@ fn start_execution_at(
     let repo_for_watchdog = repo_id.clone();
     let run_session_id_for_watchdog = run_session_id.clone();
     let session_id_for_watchdog = session_id.to_string();
+    let executions_for_watchdog = executions.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(join_error) = join_handle.await {
             log::error!(
@@ -1295,6 +1394,15 @@ fn start_execution_at(
                 .lock()
                 .unwrap()
                 .remove(&repo_for_watchdog);
+            // A panic inside the spawned task skips the ordinary
+            // `executions_for_task.complete(...)` call above entirely (the
+            // panic unwinds out of that task, not into this watchdog's own
+            // future), so this is the only path left that will ever remove
+            // this registration -- without it, the execution would stay
+            // "live" in the registry forever despite having no process
+            // behind it, and a later Stop would report `Requested` for
+            // something that no longer exists.
+            executions_for_watchdog.complete(&session_id_for_watchdog, &run_session_id_for_watchdog);
         }
     });
 
@@ -1350,6 +1458,7 @@ pub async fn agent_session_start_execution(
     locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
     links: tauri::State<'_, crate::agentdesk::RunSessionLinks>,
     manager: tauri::State<'_, crate::state::RepoManager>,
+    executions: tauri::State<'_, crate::agentdesk::ExecutionRegistry>,
     session_id: SessionId,
     mode: ExecutionMode,
     team: ExecutionTeam,
@@ -1363,12 +1472,14 @@ pub async fn agent_session_start_execution(
     // reaches the same two pieces of state.
     let links_owned = links.inner();
     let manager_owned = manager.inner();
+    let executions_owned = executions.inner();
     let outcome = start_execution_at(
         &app,
         &locks_arc,
         &root,
         links_owned,
         manager_owned,
+        executions_owned,
         &session_id,
         mode,
         team,
@@ -1390,12 +1501,18 @@ pub enum StopScope {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum StopExecutionOutcome {
-    /// `stopped` lists exactly which executions were told to stop -- empty
-    /// for `StopScope::One` naming an execution that was not active, which is
-    /// a no-op, not an error (it may have finished a moment earlier).
+    /// `stopped` lists exactly which executions were told to stop and
+    /// acknowledged it within the timeout -- empty for `StopScope::One`
+    /// naming an execution that was not active, which is a no-op, not an
+    /// error (it may have finished a moment earlier). `timed_out` lists any
+    /// requested executions that did NOT acknowledge in time; those were
+    /// still force-stopped (the CLI process is killed regardless, see
+    /// `cli_run::run_task`'s `conn.shutdown()`), so their edits/worktree are
+    /// preserved exactly like an acknowledged stop -- task 2.5/2.6.
     Stopped {
         session: AgentSession,
         stopped: Vec<ExecutionId>,
+        timed_out: Vec<ExecutionId>,
     },
     NotFound,
     Damaged { reason: String },
@@ -1403,24 +1520,54 @@ pub enum StopExecutionOutcome {
     WriteFailed { detail: String },
 }
 
-fn stop_execution_at(
+/// How long [`stop_execution_at`] waits for each targeted execution to
+/// acknowledge cancellation before reporting it under `timed_out` rather
+/// than `stopped`. Slightly longer than `cli_run::CANCEL_ACK_TIMEOUT` so the
+/// CLI's own timeout branch (which still runs `conn.shutdown()` and reports
+/// a clean `Ended`) has a chance to win the race and land in `stopped`
+/// rather than this command's own, coarser timeout firing first.
+const STOP_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+async fn stop_execution_at(
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
     links: &crate::agentdesk::RunSessionLinks,
     drivers: &crate::commands::airun::DriverRegistry,
+    executions: &crate::agentdesk::ExecutionRegistry,
     session_id: &str,
     scope: StopScope,
 ) -> StopExecutionOutcome {
     use crate::agentdesk::model::SessionLoadError as E;
 
     // Read first (outside the lock used for the mutating half) only to learn
-    // the repository ID the stop signal has to reach -- `airun`'s stop path
-    // is keyed by `repo_id`, not by durable session/execution ID.
-    let repo_id = locks.with_session_lock(session_id, || {
-        store::read_session(root, session_id).map(|s| s.header.repo_id)
+    // the repository ID the legacy scripted-demo stop path needs, and the
+    // set of execution IDs this scope actually targets in the persisted
+    // record -- the runtime registry (task 2.1) is keyed by durable
+    // (session, execution) IDs, so this is what turns `scope` into the exact
+    // set of registry entries to signal.
+    let read = locks.with_session_lock(session_id, || {
+        store::read_session(root, session_id).map(|s| {
+            let repo_id = s.header.repo_id.clone();
+            let targeted: Vec<ExecutionId> = s
+                .executions
+                .iter()
+                .filter(|exec| match &scope {
+                    StopScope::All => true,
+                    StopScope::One { execution_id } => &exec.execution_id == execution_id,
+                })
+                .filter(|exec| {
+                    matches!(
+                        exec.state,
+                        SessionState::Preparing | SessionState::Working | SessionState::NeedsInput
+                    )
+                })
+                .map(|exec| exec.execution_id.clone())
+                .collect();
+            (repo_id, targeted)
+        })
     });
-    let repo_id = match repo_id {
-        Ok(id) => id,
+    let (repo_id, targeted) = match read {
+        Ok(v) => v,
         Err(E::NotFound) => return StopExecutionOutcome::NotFound,
         Err(E::Io { detail }) => return StopExecutionOutcome::Unavailable { detail },
         Err(reason) => {
@@ -1430,21 +1577,68 @@ fn stop_execution_at(
         }
     };
 
-    // Signal the live engine to stop. This never discards anything the engine
-    // already wrote to disk -- `ai_run_stop`'s own contract (edits already
-    // made to the repository or worktree are left as-is; only the run loop
-    // itself is told to end) is unchanged here, so recoverable edits survive
-    // exactly as they do for a task-run stop.
+    // Legacy path: the scripted-demo driver (`ai_run_start_demo`) is still
+    // keyed by `repo_id` and has no execution registry of its own -- this is
+    // the one caller that still needs it, kept unchanged from before this
+    // task so the demo console (used to build/check the UI without a real
+    // provider) is unaffected.
     if let Some(driver) = drivers.get_scripted(&repo_id) {
         use crate::airun::driver::RunDriver;
         driver.lock().unwrap().stop();
     }
 
+    // Task 2.1/2.3/2.4: signal every targeted execution through the runtime
+    // registry, keyed by (session, execution) -- never by `repo_id` -- so
+    // `StopScope::One` reaches exactly one execution and `StopScope::All`
+    // reaches every live execution in THIS session and no other, even if
+    // another session happens to share the same repository or reuse an
+    // execution ID (see `execution_registry`'s own tests for that exact
+    // cross-session case).
+    for execution_id in &targeted {
+        executions.stop(&session_id.to_string(), execution_id);
+    }
+
+    // Task 2.5: wait for acknowledgement (or a typed timeout) BEFORE
+    // persisting Stopped. Awaited directly (this function is `async`) rather
+    // than via `tauri::async_runtime::block_on` -- nesting a blocking wait
+    // for an async future inside a thread that may itself be a runtime
+    // worker thread risks a deadlock/starvation the runtime's own docs warn
+    // against, so this function is `async` end to end instead. Multiple
+    // targeted executions (Stop all) are awaited sequentially rather than
+    // concurrently: `STOP_ACK_TIMEOUT` bounds each one individually, so the
+    // worst case (every execution times out) is `targeted.len() *
+    // STOP_ACK_TIMEOUT`, which is an acceptable trade for keeping this loop
+    // simple -- a session rarely has more than a handful of concurrent
+    // executions (one lead plus a small number of helpers).
+    let mut stopped = Vec::new();
+    let mut timed_out = Vec::new();
+    for execution_id in &targeted {
+        let acknowledged = executions
+            .wait_for_stop(&session_id.to_string(), execution_id, STOP_ACK_TIMEOUT)
+            .await;
+        if acknowledged {
+            stopped.push(execution_id.clone());
+        } else {
+            timed_out.push(execution_id.clone());
+        }
+    }
+
     // Mark the targeted execution(s) Stopped in the durable record. The live
     // engine's own `Ended` event will also arrive through the bridge and is
     // idempotent with this (bridge.rs's `map_run_state`/`last_sequence`
-    // handling) -- this write exists so the UI reflects "stopping" without
+    // handling) -- this write exists so the UI reflects the outcome without
     // waiting on that event to round-trip through the engine first.
+    //
+    // A timed-out execution is still marked `Stopped`, not left running in
+    // the persisted record: the process was force-killed regardless (task
+    // 2.6's "preserve edits/worktrees" does not require the record to keep
+    // claiming the process is alive once this function has already given up
+    // waiting on it -- `conn.shutdown()`'s own hard-kill fallback guarantees
+    // the process is gone by the time `run_task` returns, whether or not
+    // this function's shorter wait observed that in time). The `timed_out`
+    // list on the returned outcome is what lets the caller show the visible
+    // distinction task 2.5 asks for; the persisted state does not need a
+    // parallel distinction to make that promise honest.
     //
     // Whether to unlink the repo afterwards is decided HERE, inside the same
     // closure that mutates the executions -- not from `stopped.is_empty()`
@@ -1457,15 +1651,11 @@ fn stop_execution_at(
     // be silently dropped as `NoLinkedSession` in `bridge::route_run_event`.
     // The correct condition is "no execution on this session is still active
     // after this mutation."
-    let mut stopped = Vec::new();
     let mut any_still_active = false;
     let outcome = update_session_at(locks, root, session_id, |s| {
         for exec in s.executions.iter_mut() {
-            let matches_scope = match &scope {
-                StopScope::All => true,
-                StopScope::One { execution_id } => &exec.execution_id == execution_id,
-            };
-            if !matches_scope {
+            let acted_on = stopped.contains(&exec.execution_id) || timed_out.contains(&exec.execution_id);
+            if !acted_on {
                 continue;
             }
             if matches!(
@@ -1474,7 +1664,6 @@ fn stop_execution_at(
             ) {
                 exec.state = SessionState::Stopped;
                 exec.ended_at = Some(now_rfc3339());
-                stopped.push(exec.execution_id.clone());
             }
         }
         any_still_active = s.executions.iter().any(|exec| {
@@ -1483,10 +1672,10 @@ fn stop_execution_at(
                 SessionState::Preparing | SessionState::Working | SessionState::NeedsInput
             )
         });
-        if !stopped.is_empty() {
+        if !stopped.is_empty() || !timed_out.is_empty() {
             s.header.state = SessionState::Stopped;
             if let Some(active) = &s.header.active_execution_id {
-                if stopped.contains(active) {
+                if stopped.contains(active) || timed_out.contains(active) {
                     // The active execution slot stays populated (last
                     // execution the session ran), matching architecture.md:
                     // `active_execution_id` names the current/most recent
@@ -1506,9 +1695,11 @@ fn stop_execution_at(
     }
 
     match outcome {
-        UpdateSessionOutcome::Updated { session } => {
-            StopExecutionOutcome::Stopped { session, stopped }
-        }
+        UpdateSessionOutcome::Updated { session } => StopExecutionOutcome::Stopped {
+            session,
+            stopped,
+            timed_out,
+        },
         UpdateSessionOutcome::NotFound => StopExecutionOutcome::NotFound,
         UpdateSessionOutcome::Damaged { reason } => StopExecutionOutcome::Damaged { reason },
         UpdateSessionOutcome::WriteFailed { detail } => {
@@ -1527,6 +1718,7 @@ pub async fn agent_session_stop_execution(
     locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
     links: tauri::State<'_, crate::agentdesk::RunSessionLinks>,
     drivers: tauri::State<'_, crate::commands::airun::DriverRegistry>,
+    executions: tauri::State<'_, crate::agentdesk::ExecutionRegistry>,
     session_id: SessionId,
     scope: StopScope,
 ) -> Result<StopExecutionOutcome, AppError> {
@@ -1534,14 +1726,24 @@ pub async fn agent_session_stop_execution(
     let locks_arc = locks.inner().clone();
     let links_owned = links.inner();
     let drivers_owned = drivers.inner();
+    let executions_owned = executions.inner();
+    // `stop_execution_at` is `async` end to end (task 2.5's wait for
+    // cancellation acknowledgement lives inside it) and is awaited directly
+    // here, the same way `start_execution_at` is called synchronously from
+    // its own command wrapper -- there is no `spawn_blocking` step because
+    // nothing in `stop_execution_at` blocks a thread; the only wait is the
+    // async `ExecutionRegistry::wait_for_stop`, which yields back to the
+    // runtime like any other `.await` rather than parking a worker thread.
     let outcome = stop_execution_at(
         &locks_arc,
         &root,
         links_owned,
         drivers_owned,
+        executions_owned,
         &session_id,
         scope,
-    );
+    )
+    .await;
     Ok(outcome)
 }
 
@@ -2414,7 +2616,8 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
-        let outcome = get_session_at(&locks, &links, &root, "does-not-exist");
+        let executions = crate::agentdesk::ExecutionRegistry::new();
+        let outcome = get_session_at(&locks, &links, &executions, &root, "does-not-exist");
         assert!(matches!(outcome, GetSessionOutcome::NotFound));
     }
 
@@ -2423,6 +2626,7 @@ mod tests {
         let (dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         let path = dir
             .path()
             .join("agent-desk")
@@ -2430,7 +2634,7 @@ mod tests {
             .join("sessions")
             .join("sess-bad.json");
         std::fs::write(&path, b"{ not json").unwrap();
-        let outcome = get_session_at(&locks, &links, &root, "sess-bad");
+        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-bad");
         assert!(matches!(outcome, GetSessionOutcome::Damaged { .. }));
     }
 
@@ -2439,12 +2643,13 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         let CreateSessionOutcome::Created { session } =
             create_session_at(&root, create_request("Findable"))
         else {
             panic!("expected Created");
         };
-        let outcome = get_session_at(&locks, &links, &root, &session.header.session_id);
+        let outcome = get_session_at(&locks, &links, &executions, &root, &session.header.session_id);
         let GetSessionOutcome::Found { session: found } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2497,9 +2702,10 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links(); // empty: nothing linked, exactly a fresh process
+        let executions = crate::agentdesk::ExecutionRegistry::new(); // empty: nothing registered either
         write_stuck_session(&root, "sess-stuck", SessionState::Preparing);
 
-        let outcome = get_session_at(&locks, &links, &root, "sess-stuck");
+        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-stuck");
         let GetSessionOutcome::Found { session } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2519,9 +2725,10 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         write_stuck_session(&root, "sess-stuck", SessionState::Working);
 
-        let outcome = get_session_at(&locks, &links, &root, "sess-stuck");
+        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-stuck");
         let GetSessionOutcome::Found { session } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2533,9 +2740,10 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         write_stuck_session(&root, "sess-stuck", SessionState::NeedsInput);
 
-        let outcome = get_session_at(&locks, &links, &root, "sess-stuck");
+        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-stuck");
         let GetSessionOutcome::Found { session } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2547,13 +2755,24 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         write_stuck_session(&root, "sess-live", SessionState::Working);
         // This is what a real in-process execution looks like: the repo is
         // linked to this exact session (`start_execution_at` calls
-        // `links.link` before the engine runs).
+        // `links.link` before the engine runs) AND the runtime registry has
+        // the execution registered (task 2.2: registered before `Working` is
+        // ever emitted) -- both are set here since `reconcile_session_header`
+        // still reads `links` (session-granular) while
+        // `reconcile_session_executions` now reads `executions`
+        // (execution-granular, task 2.7).
         links.link("repo-1", &"sess-live".to_string());
+        executions.register(
+            "sess-live".to_string(),
+            "exec-1".to_string(),
+            crate::airun::cli_run::CancelHandle::new(),
+        );
 
-        let outcome = get_session_at(&locks, &links, &root, "sess-live");
+        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-live");
         let GetSessionOutcome::Found { session } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2566,13 +2785,14 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         for (id, state) in [
             ("sess-finished", SessionState::Finished),
             ("sess-failed", SessionState::Failed),
             ("sess-stopped", SessionState::Stopped),
         ] {
             write_stuck_session(&root, id, state);
-            let outcome = get_session_at(&locks, &links, &root, id);
+            let outcome = get_session_at(&locks, &links, &executions, &root, id);
             let GetSessionOutcome::Found { session } = outcome else {
                 panic!("expected Found for {id}, got {outcome:?}");
             };
@@ -2585,6 +2805,7 @@ mod tests {
         let (dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
 
         // One corrupt file alongside the stuck session -- store::read_session
         // reports it as Damaged and never touches it, per store.rs's own
@@ -2595,10 +2816,10 @@ mod tests {
         std::fs::write(&bad_path, b"{ not json").unwrap();
         write_stuck_session(&root, "sess-stuck", SessionState::Working);
 
-        let bad_outcome = get_session_at(&locks, &links, &root, "sess-bad");
+        let bad_outcome = get_session_at(&locks, &links, &executions, &root, "sess-bad");
         assert!(matches!(bad_outcome, GetSessionOutcome::Damaged { .. }));
 
-        let good_outcome = get_session_at(&locks, &links, &root, "sess-stuck");
+        let good_outcome = get_session_at(&locks, &links, &executions, &root, "sess-stuck");
         let GetSessionOutcome::Found { session } = good_outcome else {
             panic!("expected Found, got {good_outcome:?}");
         };
@@ -2619,6 +2840,7 @@ mod tests {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         let mut session = write_stuck_session(&root, "sess-graph", SessionState::Working);
         session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
             "exec-helper".into(),
@@ -2640,7 +2862,7 @@ mod tests {
         ));
         store::write_session(&root, &session).unwrap();
 
-        let outcome = get_session_at(&locks, &links, &root, "sess-graph");
+        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-graph");
         let GetSessionOutcome::Found { session: reconciled } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
@@ -2648,6 +2870,48 @@ mod tests {
         assert_eq!(by_id("exec-1").state, SessionState::Interrupted, "lead");
         assert_eq!(by_id("exec-helper").state, SessionState::Interrupted, "needs-input helper");
         assert_eq!(by_id("exec-done").state, SessionState::Finished, "already-finished helper untouched");
+    }
+
+    /// Task 2.1/2.7's actual improvement over the old session-granular
+    /// check: a live LEAD must not resurrect a stuck HELPER that this
+    /// process has nothing registered for, and vice versa -- the previous
+    /// `RunSessionLinks`-only reconciliation could not tell the two apart
+    /// (see `a_session_whose_execution_is_genuinely_linked_is_left_running`'s
+    /// old body, which set the same liveness bool for the whole session).
+    #[test]
+    fn only_the_specific_registered_execution_is_left_running_not_its_siblings() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let links = test_links();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
+        let mut session = write_stuck_session(&root, "sess-mixed", SessionState::Working);
+        session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
+            "exec-helper".into(),
+            "sess-mixed".into(),
+            Some("exec-1".into()),
+            SessionState::Working,
+            "2026-01-01T00:00:00Z".into(),
+            None,
+            1,
+        ));
+        store::write_session(&root, &session).unwrap();
+
+        links.link("repo-1", &"sess-mixed".to_string());
+        // Only the lead ("exec-1") is registered as live -- the helper is
+        // not, simulating a crash that happened mid-helper.
+        executions.register(
+            "sess-mixed".to_string(),
+            "exec-1".to_string(),
+            crate::airun::cli_run::CancelHandle::new(),
+        );
+
+        let outcome = get_session_at(&locks, &links, &executions, &root, "sess-mixed");
+        let GetSessionOutcome::Found { session: reconciled } = outcome else {
+            panic!("expected Found, got {outcome:?}");
+        };
+        let by_id = |id: &str| reconciled.executions.iter().find(|e| e.execution_id == id).unwrap();
+        assert_eq!(by_id("exec-1").state, SessionState::Working, "the registered lead must stay running");
+        assert_eq!(by_id("exec-helper").state, SessionState::Interrupted, "the unregistered helper must be reconciled");
     }
 
     #[test]
@@ -3426,11 +3690,11 @@ mod tests {
         let (outcome_a, outcome_b) = std::thread::scope(|scope| {
             let a = scope.spawn(|| {
                 barrier.wait();
-                record_execution_if_not_running(locks_ref, root_ref, session_id_ref, exec_a.clone())
+                record_execution_if_not_running(locks_ref, root_ref, session_id_ref, exec_a.clone(), None)
             });
             let b = scope.spawn(|| {
                 barrier.wait();
-                record_execution_if_not_running(locks_ref, root_ref, session_id_ref, exec_b.clone())
+                record_execution_if_not_running(locks_ref, root_ref, session_id_ref, exec_b.clone(), None)
             });
             (a.join().unwrap(), b.join().unwrap())
         });
@@ -3455,12 +3719,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn stop_scope_one_stops_only_the_named_execution() {
+    #[tokio::test]
+    async fn stop_scope_one_stops_only_the_named_execution() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
         let drivers = crate::commands::airun::DriverRegistry::default();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         let CreateSessionOutcome::Created { session } =
             create_session_at(&root, create_request("Two executions"))
         else {
@@ -3492,13 +3757,16 @@ mod tests {
             &root,
             &links,
             &drivers,
+            &executions,
             &session_id,
             StopScope::One { execution_id: exec_b.clone() },
-        );
-        let StopExecutionOutcome::Stopped { session, stopped } = outcome else {
+        )
+        .await;
+        let StopExecutionOutcome::Stopped { session, stopped, timed_out } = outcome else {
             panic!("expected Stopped, got {outcome:?}");
         };
         assert_eq!(stopped, vec![exec_b.clone()]);
+        assert!(timed_out.is_empty(), "nothing was registered as live, so nothing can time out");
         let a = session.executions.iter().find(|e| e.execution_id == exec_a).unwrap();
         let b = session.executions.iter().find(|e| e.execution_id == exec_b).unwrap();
         assert_eq!(a.state, SessionState::Working, "the peer execution must keep running");
@@ -3519,12 +3787,13 @@ mod tests {
     /// a lead + a helper both `Working`, stop only the helper, assert the
     /// link survives, then route a real run event for the lead and assert it
     /// still lands as a persisted message instead of being dropped.
-    #[test]
-    fn stopping_one_helper_leaves_the_link_intact_for_the_still_running_lead() {
+    #[tokio::test]
+    async fn stopping_one_helper_leaves_the_link_intact_for_the_still_running_lead() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
         let drivers = crate::commands::airun::DriverRegistry::default();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         let CreateSessionOutcome::Created { session } =
             create_session_at(&root, create_request("Lead plus helper"))
         else {
@@ -3563,9 +3832,11 @@ mod tests {
             &root,
             &links,
             &drivers,
+            &executions,
             &session_id,
             StopScope::One { execution_id: helper.clone() },
-        );
+        )
+        .await;
         let StopExecutionOutcome::Stopped { stopped, .. } = outcome else {
             panic!("expected Stopped, got {outcome:?}");
         };
@@ -3597,12 +3868,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn stop_scope_all_stops_every_active_execution() {
+    #[tokio::test]
+    async fn stop_scope_all_stops_every_active_execution() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
         let drivers = crate::commands::airun::DriverRegistry::default();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         let CreateSessionOutcome::Created { session } =
             create_session_at(&root, create_request("Stop all"))
         else {
@@ -3626,21 +3898,24 @@ mod tests {
             s.header.active_execution_id = Some(exec_b.clone());
         });
 
-        let outcome = stop_execution_at(&locks, &root, &links, &drivers, &session_id, StopScope::All);
-        let StopExecutionOutcome::Stopped { session, stopped } = outcome else {
+        let outcome = stop_execution_at(&locks, &root, &links, &drivers, &executions, &session_id, StopScope::All)
+            .await;
+        let StopExecutionOutcome::Stopped { session, stopped, timed_out } = outcome else {
             panic!("expected Stopped, got {outcome:?}");
         };
         assert_eq!(stopped.len(), 2, "both executions must be stopped");
+        assert!(timed_out.is_empty());
         assert!(session.executions.iter().all(|e| e.state == SessionState::Stopped));
         assert_eq!(session.header.state, SessionState::Stopped);
     }
 
-    #[test]
-    fn stopping_an_already_finished_execution_is_a_harmless_no_op() {
+    #[tokio::test]
+    async fn stopping_an_already_finished_execution_is_a_harmless_no_op() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
         let drivers = crate::commands::airun::DriverRegistry::default();
+        let executions = crate::agentdesk::ExecutionRegistry::new();
         let CreateSessionOutcome::Created { session } =
             create_session_at(&root, create_request("Already done"))
         else {
@@ -3665,22 +3940,26 @@ mod tests {
             &root,
             &links,
             &drivers,
+            &executions,
             &session_id,
             StopScope::One { execution_id: exec_a },
-        );
+        )
+        .await;
         let StopExecutionOutcome::Stopped { stopped, .. } = outcome else {
             panic!("expected Stopped, got {outcome:?}");
         };
         assert!(stopped.is_empty(), "an execution that already finished has nothing to stop");
     }
 
-    #[test]
-    fn stop_of_an_unknown_session_is_not_found() {
+    #[tokio::test]
+    async fn stop_of_an_unknown_session_is_not_found() {
         let (_dir, root) = temp_root();
         let locks = test_locks();
         let links = test_links();
         let drivers = crate::commands::airun::DriverRegistry::default();
-        let outcome = stop_execution_at(&locks, &root, &links, &drivers, "ghost", StopScope::All);
+        let executions = crate::agentdesk::ExecutionRegistry::new();
+        let outcome = stop_execution_at(&locks, &root, &links, &drivers, &executions, "ghost", StopScope::All)
+            .await;
         assert!(matches!(outcome, StopExecutionOutcome::NotFound));
     }
 
@@ -3891,6 +4170,7 @@ mod tests {
             let (dir, root) = temp_root();
             let locks = test_locks();
             let links = test_links();
+            let executions = crate::agentdesk::ExecutionRegistry::new();
             let (manager, repo_id) = repo_with_change(dir.path());
 
             // Task 2.4 is index 6 in the flat, zero-based numbering the
@@ -3952,7 +4232,7 @@ mod tests {
             // the engine) and confirm the record is keyed to this session,
             // not a different task's.
             let record_outcome =
-                record_execution_if_not_running(&locks, &root, &session_id, "exec-1".to_string());
+                record_execution_if_not_running(&locks, &root, &session_id, "exec-1".to_string(), None);
             let RecordOutcome::Updated { session: after_start } = record_outcome else {
                 panic!("expected the execution to record");
             };
@@ -3979,7 +4259,7 @@ mod tests {
             drop(after_start);
             drop(after_message);
             let GetSessionOutcome::Found { session: reloaded } =
-                get_session_at(&locks, &links, &root, &session_id)
+                get_session_at(&locks, &links, &executions, &root, &session_id)
             else {
                 panic!("expected the session to survive a restart");
             };
@@ -4058,7 +4338,7 @@ mod tests {
             assert!(matches!(status_after, OpenSpecSessionStatus::Active));
 
             let GetSessionOutcome::Found { session: final_reload } =
-                get_session_at(&locks, &links, &root, &session_id)
+                get_session_at(&locks, &links, &executions, &root, &session_id)
             else {
                 panic!("expected the session to still be readable");
             };
