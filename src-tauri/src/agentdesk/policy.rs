@@ -279,6 +279,28 @@ impl ExecutionPolicy {
         }
     }
 
+    /// Builds the policy for the LEAD'S OWN REVIEW turn (P1 "Finished is not
+    /// a combined graph result"): a full-write `Fix`-shaped policy, exactly
+    /// like [`Self::resolve`] would hand a solo Fix session, but explicitly
+    /// tagged `ExecutionTeam::Lead` since this turn runs as part of a graph.
+    /// `allowed_paths: None` (unrestricted, matching `resolve`) rather than
+    /// `resolve_for_helper`'s `Some(vec![])` -- a helper's `Some(empty)`
+    /// means "path-scoped with no allowance" (refuses every write); the
+    /// lead's review turn is reviewing/finishing the WHOLE combined tree in
+    /// its own dedicated integration worktree, not one path-restricted
+    /// slice of it.
+    pub fn resolve_for_lead_review() -> Self {
+        let intent = SessionIntent::Fix;
+        Self {
+            intent,
+            mode: ExecutionMode::Auto,
+            team: ExecutionTeam::Lead,
+            provider: ExecutionProvider::Copilot,
+            intent_policy: for_intent(intent),
+            allowed_paths: None,
+        }
+    }
+
     /// Whether a tool call requesting `capability` may run right now.
     /// `started` is the session's own "has Start been pressed" flag (only
     /// changes the answer for Plan, see [`check_tool_capability`]'s doc

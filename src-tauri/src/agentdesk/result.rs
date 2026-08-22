@@ -176,6 +176,15 @@ pub struct ResultRecord {
     /// The OpenSpec change this result should be linked to via the `Spec:`
     /// trailer, when the session's source or an attached task names one.
     pub openspec_change_id: Option<String>,
+    /// For a COMBINED graph result only (`execution_id` is the lead's own):
+    /// every helper execution ID whose work is folded into this record's
+    /// `worktree_path` (P1 "Finished is not a combined graph result" --
+    /// "link helper-scoped results"). A reviewer can still open each
+    /// helper's own scoped `ResultRecord` (joined by these IDs) to see what
+    /// that one helper individually produced, alongside the combined view.
+    /// Empty for a solo or per-helper record.
+    #[serde(default)]
+    pub linked_execution_ids: Vec<ExecutionId>,
     /// RFC 3339 UTC timestamp this record was created or last updated.
     pub updated_at: String,
 }
@@ -197,6 +206,7 @@ impl ResultRecord {
             checks: Vec::new(),
             commit: None,
             openspec_change_id: None,
+            linked_execution_ids: Vec::new(),
             updated_at: now.to_string(),
         }
     }
@@ -310,6 +320,40 @@ pub fn upsert_result(records: &mut Vec<ResultRecord>, record: ResultRecord) {
 /// Find a session's result record for one execution, if any.
 pub fn find_result<'a>(records: &'a [ResultRecord], execution_id: &str) -> Option<&'a ResultRecord> {
     records.iter().find(|r| r.execution_id == execution_id)
+}
+
+/// P1 "link helper-scoped results": sets `linked_execution_ids` on the
+/// COMBINED result record named `combined_execution_id` (the lead's own) to
+/// `helper_execution_ids`, so a reviewer of the combined result can still
+/// open each individual helper's own scoped record.
+///
+/// Takes `locks` and holds this session's own read-modify-write lock for the
+/// full read-modify-write (matches `commands::agent_result::build_result_at`'s
+/// own locking shape, which this is meant to be called right after -- as two
+/// separate lock acquisitions, not one, since `build_result_at` already
+/// released its own lock by the time it returns `Built`).
+///
+/// A no-op (not an error) if the combined record does not exist yet -- the
+/// caller (`commands::agent_graph::finish_graph_with_combined_result`) only
+/// calls this once `build_result_at` has just confirmed it built one.
+pub fn link_helper_results(
+    locks: &super::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    combined_execution_id: &str,
+    helper_execution_ids: &[ExecutionId],
+) -> Result<(), String> {
+    locks.with_session_lock(session_id, || {
+        let mut records = match read_results(root, session_id) {
+            Ok(r) => r,
+            Err(e) => return Err(e.to_string()),
+        };
+        let Some(existing) = records.iter_mut().find(|r| r.execution_id == combined_execution_id) else {
+            return Ok(());
+        };
+        existing.linked_execution_ids = helper_execution_ids.to_vec();
+        write_results(root, session_id, &records).map_err(|e| e.to_string())
+    })
 }
 
 #[cfg(test)]

@@ -4745,7 +4745,18 @@ budget?: JobBudget | null;
  * which is the user's own open checkout. `None` for a helper record, and
  * for a lead that has not yet had a helper finish.
  */
-integrationWorktreePath?: string | null }
+integrationWorktreePath?: string | null; 
+/**
+ * Present only on the LEAD's own execution record once every helper has
+ * reached a terminal state and a lead REVIEW turn has been launched
+ * against the integration worktree (P1 "Finished is not a combined
+ * graph result"): the execution ID of that review turn. `Finished` is
+ * never set on the lead until this execution ID exists AND has itself
+ * reached a terminal state -- a completed-node COUNT is no longer what
+ * decides `Finished`, this is. `None` before every helper is terminal,
+ * or for a lead that never got any helper to finish.
+ */
+reviewExecutionId?: string | null }
 /**
  * `solo | lead`.
  */
@@ -6050,6 +6061,16 @@ commit: ResultCommitRef | null;
  * trailer, when the session's source or an attached task names one.
  */
 openspecChangeId: string | null; 
+/**
+ * For a COMBINED graph result only (`execution_id` is the lead's own):
+ * every helper execution ID whose work is folded into this record's
+ * `worktree_path` (P1 "Finished is not a combined graph result" --
+ * "link helper-scoped results"). A reviewer can still open each
+ * helper's own scoped `ResultRecord` (joined by these IDs) to see what
+ * that one helper individually produced, alongside the combined view.
+ * Empty for a solo or per-helper record.
+ */
+linkedExecutionIds?: string[]; 
 /**
  * RFC 3339 UTC timestamp this record was created or last updated.
  */

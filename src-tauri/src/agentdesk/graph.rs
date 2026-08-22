@@ -301,9 +301,19 @@ pub struct BlockedNode {
 /// *fourth* helper does not start just because one of the three active ones
 /// is momentarily blocked on a human answer.
 pub fn schedule(executions: &[ExecutionRecord]) -> ScheduleDecision {
+    // The lead's own review turn is a child record too (so its events land on
+    // it rather than creating a rival lead), but it is NOT a helper: counting
+    // it would spend one of the three concurrency slots and, worse, let a
+    // future caller mistake it for a schedulable node. Excluded explicitly
+    // rather than relying on review only ever starting after every helper is
+    // already terminal.
+    let review_ids: HashSet<&str> = executions
+        .iter()
+        .filter_map(|e| e.review_execution_id.as_deref())
+        .collect();
     let helpers: Vec<&ExecutionRecord> = executions
         .iter()
-        .filter(|e| e.parent_execution_id.is_some())
+        .filter(|e| e.parent_execution_id.is_some() && !review_ids.contains(e.execution_id.as_str()))
         .collect();
 
     let active_count = helpers

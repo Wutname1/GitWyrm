@@ -180,3 +180,36 @@ defense in depth.
 I had previously reported read-only as "enforced at the engine boundary". That was true of the
 code path I read and false as a security claim, because I only verified the path where the
 provider asks. The audit's word - advisory - was correct.
+
+## Step 4 - combined lead review and result (landed)
+
+The audit said graph completion "uses completed-node counts as a substitute for a lead
+review". Investigating found a second half it did not name: `maybe_finish_graph` ALSO called
+`cleanup_integration_worktree`. So a multi-helper graph combined every helper's work, marked
+itself Finished on a node count, DELETED the worktree holding that combined work, and showed
+a result panel resolving the lead's execution - commonly the earlier Plan run, which changed
+nothing. The user watched helpers work and got an empty result while the output was already
+gone.
+
+Now:
+- Integration is serialized per session under its own lock key, so two helpers finishing at
+  once cannot interleave against the same worktree.
+- Once every helper is terminal, a real lead review turn runs, scoped to the integration
+  worktree via `CliAgent::discover(integration_path)`, through the same
+  ExecutionPolicy/ExecutionRegistry/run_task path every other execution uses - so Stop,
+  cancellation and recovery work on it identically.
+- One combined `ResultRecord` is built from that worktree with `execution_id` = the lead's,
+  and every helper's execution id is linked onto it.
+- `cleanup_integration_worktree` is GONE from graph finish. The combined result's
+  `worktree_path` IS the integration worktree, so the existing landing flow
+  (`agent_result::cleanup_worktree_at`, gated on Committed/Discarded) already removes it at
+  the right time.
+- `Finished` now means reviewed, with a result to look at - never a node count.
+
+One catch the implementing agent found and fixed: a review execution seen for the first time
+by `bridge::find_or_start_execution` would have been created as a new TOP-LEVEL lead
+(`parent_execution_id: None`) and hijacked the session header away from the real lead. It is
+now pre-seeded as a child in the same locked write that records `review_execution_id`.
+
+I removed one stale rustdoc link left behind - a `[`cleanup_integration_worktree`]` reference
+to a function that no longer exists.

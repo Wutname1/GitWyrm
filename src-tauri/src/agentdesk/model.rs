@@ -508,6 +508,16 @@ pub struct ExecutionRecord {
     /// for a lead that has not yet had a helper finish.
     #[serde(default)]
     pub integration_worktree_path: Option<String>,
+    /// Present only on the LEAD's own execution record once every helper has
+    /// reached a terminal state and a lead REVIEW turn has been launched
+    /// against the integration worktree (P1 "Finished is not a combined
+    /// graph result"): the execution ID of that review turn. `Finished` is
+    /// never set on the lead until this execution ID exists AND has itself
+    /// reached a terminal state -- a completed-node COUNT is no longer what
+    /// decides `Finished`, this is. `None` before every helper is terminal,
+    /// or for a lead that never got any helper to finish.
+    #[serde(default)]
+    pub review_execution_id: Option<ExecutionId>,
 }
 
 impl ExecutionRecord {
@@ -549,6 +559,7 @@ impl ExecutionRecord {
             conflict: None,
             budget: None,
             integration_worktree_path: None,
+            review_execution_id: None,
         }
     }
 }

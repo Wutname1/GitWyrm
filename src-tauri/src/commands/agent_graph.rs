@@ -43,6 +43,40 @@ fn resolve_root(app: &AppHandle) -> Result<SessionStoreRoot, AppError> {
     SessionStoreRoot::resolve(app).map_err(|e| AppError::Other(e.to_string()))
 }
 
+/// Serializes every step that touches a session's dedicated integration
+/// worktree -- provisioning it, folding one helper's delta into it, and
+/// launching the lead review turn against it -- behind ONE lock per session
+/// (P1 "serialize helper integration").
+///
+/// Two helpers can legitimately finish within milliseconds of each other
+/// (`advance_graph_after_helper_completion` runs from each helper's own
+/// completion callback, independently, on whichever thread that helper's
+/// `run_task` happened to finish on). Before this lock, both completions
+/// could call `integrate_helper_result` concurrently against the SAME
+/// on-disk worktree -- reading its current file contents, computing a delta,
+/// and writing back -- with no ordering guarantee between them, which is
+/// exactly the kind of interleaved read-modify-write `agentdesk::SessionLocks`
+/// exists to prevent for the session file itself. Reuses that same lock
+/// registry under a distinct key namespace (`"integration:{session_id}"`)
+/// rather than a second lock type: the guarantee needed here -- one holder
+/// at a time per session, `SessionLock`'s own wait/hold logging for a stall
+/// -- is identical, and a session's ordinary read-modify-write lock (keyed by
+/// the bare `session_id`) is deliberately a DIFFERENT key so a slow
+/// integration pass (a large delta, a slow filesystem) never blocks an
+/// unrelated read/write of the session file itself (e.g. the UI polling
+/// `agent_session_get` while a helper's integration is still running).
+fn integration_lock_key(session_id: &str) -> String {
+    format!("integration:{session_id}")
+}
+
+/// Runs `f` while holding this session's integration lock -- see
+/// [`integration_lock_key`]'s doc comment for what this serializes and why
+/// it is a distinct key from the session's own read-modify-write lock.
+#[track_caller]
+fn with_integration_lock<T>(locks: &crate::agentdesk::SessionLocks, session_id: &str, f: impl FnOnce() -> T) -> T {
+    locks.with_session_lock(&integration_lock_key(session_id), f)
+}
+
 /// Mirrors `commands::agent_desk`'s own private `UpdateSessionOutcome` --
 /// duplicated rather than imported because that type is not `pub` and this
 /// module is deliberately not editing `agent_desk.rs` (see module doc).
@@ -1094,7 +1128,13 @@ fn advance_graph_after_helper_completion(
         Err(_) => return,
     };
 
-    integrate_helper_result(app, locks, root, session_id, finished_execution_id, &session);
+    // P1 "serialize helper integration": one integration pass for this
+    // session at a time, so two helpers finishing back-to-back cannot
+    // interleave their reads/writes of the same integration worktree. See
+    // `with_integration_lock`'s doc comment.
+    with_integration_lock(locks, session_id, || {
+        integrate_helper_result(app, locks, root, session_id, finished_execution_id, &session);
+    });
 
     // Re-read after integration may have changed this node's state.
     let session = match store::read_session(root, session_id) {
@@ -1103,7 +1143,7 @@ fn advance_graph_after_helper_completion(
     };
     let decision = graph::schedule(&session.executions);
     if decision.ready.is_empty() {
-        maybe_finish_graph(app, locks, root, session_id, &session);
+        maybe_start_review_or_finish_graph(app, locks, root, session_id, &session);
         return;
     }
 
@@ -1217,25 +1257,25 @@ fn ensure_integration_worktree(
     }
 }
 
-/// Removes a session's dedicated integration worktree (if it has one),
-/// discarding anything left in it -- called once the graph reaches
-/// `Finished` (`maybe_finish_graph`), since nothing further will ever
-/// integrate into it after that point. Best-effort: a cleanup failure here
-/// (the folder is locked, already gone, etc.) is not surfaced as a user
-/// error -- the graph's own completion already happened and is not
-/// contingent on this succeeding, matching how `start_graph_at`'s own
-/// losing-race cleanup is best-effort for the same reason.
-fn cleanup_integration_worktree(session: &AgentSession, main_workdir_str: &str) {
-    let Some(lead) = session.executions.iter().find(|e| e.parent_execution_id.is_none()) else {
-        return;
-    };
-    let Some(path) = &lead.integration_worktree_path else {
-        return;
-    };
-    if let Ok(repo) = git2::Repository::open(main_workdir_str) {
-        let _ = worktree::remove(&repo, main_workdir_str, path, worktree::DirtyChoice::Discard);
-    }
-}
+// P1 "do not destroy the evidence": earlier builds of this file removed the
+// session's dedicated integration worktree the moment the graph reached
+// `Finished` (a `cleanup_integration_worktree` call from what is now
+// `finish_graph_with_combined_result`). That destroyed the very evidence the
+// combined result needs to exist at all -- the worktree IS
+// `ResultRecord::worktree_path` for the combined result once `Finished`
+// actually means "reviewed and there is a result to look at" rather than
+// "the node count reached zero". Graph finish no longer touches this
+// worktree at all. Its cleanup now goes through the SAME path every other
+// result's worktree cleanup already goes through --
+// `commands::agent_result::agent_result_cleanup_worktree` /
+// `cleanup_worktree_at` -- which only removes a worktree once its result has
+// reached `Committed` or `Discarded` (task 5.1's "only after safe
+// integration or confirmed discard"), using `DirtyChoice::Refuse` rather
+// than the unconditional `Discard` this file used to reach for. No special
+// case was needed: `cleanup_worktree_at` keys off `ResultRecord.worktree_path`
+// alone, and the combined record's `worktree_path` is the integration
+// worktree, so the existing Keep/Undo/Commit/cleanup flow (`commands::agent_result`)
+// already covers it, unchanged.
 
 /// Reads `path` out of `repo` at `oid` as a typed [`FileContent`] -- the
 /// blob's raw bytes are never decoded as UTF-8 (P0-D: "cannot faithfully
@@ -1832,78 +1872,121 @@ fn as_text_of_operation(operation: &FileOperation) -> String {
     }
 }
 
-/// R6.9: once every node in the graph has reached a terminal state
-/// (`Finished`/`Stopped`/`Failed`/`Interrupted` -- nothing left `Ready`,
-/// `Draft`, `Preparing`, `Working`, or blocked-with-a-conflict
-/// `NeedsInput`), mark the LEAD's own record with a combined summary so the
-/// Graph panel and the session header both read as genuinely complete
-/// rather than silently going quiet once the last helper's process exits.
+/// P1 "Finished is not a combined graph result": once every helper node has
+/// reached a terminal state (`Finished`/`Stopped`/`Failed`/`Interrupted` --
+/// nothing left `Ready`, `Draft`, `Preparing`, `Working`, or blocked-with-a-
+/// conflict `NeedsInput`), this is the single entry point that turns "the
+/// helpers are done" into "the graph is Finished" -- and it now does that in
+/// three ordered steps, never by substituting a completed-node COUNT for any
+/// of them:
 ///
-/// This is a minimal, honest substitute for a full "lead re-reads every
-/// helper's output and writes a real review message" pass -- that requires
-/// handing the lead's own live conversation a fresh turn with every helper's
-/// `output_summary` as context, which is a second engine invocation this
-/// change does not yet wire (see this task cluster's report for what stays
-/// unwired). What this function DOES guarantee is that the graph is never
-/// left looking like it is still working once nothing is.
+/// 1. If no review turn has been launched yet for this lead
+///    (`ExecutionRecord::review_execution_id.is_none()`), launch one --
+///    [`launch_lead_review`] -- scoped to the session's own integration
+///    worktree (never `session.header.repo_path`), and return without
+///    touching `Finished` yet. The graph stays `Working` while this turn
+///    runs, exactly like it stays `Working` while any helper runs.
+/// 2. Once that review execution itself reaches a terminal state, build the
+///    ONE combined [`crate::agentdesk::result::ResultRecord`] from the
+///    integration worktree (`build_combined_result`), linking every helper's
+///    own execution ID onto it, and only THEN mark the lead (and the session
+///    header) `Finished`.
+/// 3. The integration worktree is deliberately left standing here. It IS the
+///    combined result's `worktree_path`, so destroying it at graph finish
+///    would delete the evidence the user is about to review. Cleanup belongs
+///    to the landing flow instead: `commands::agent_result::cleanup_worktree_at`
+///    runs it once the result is Kept-and-committed or Discarded.
 ///
-/// Also tears down this session's dedicated integration worktree
-/// (`cleanup_integration_worktree`), if one was ever provisioned -- nothing
-/// integrates into it after the graph is genuinely done, so leaving it on
-/// disk would only be a leaked folder.
-///
-/// A thin `AppHandle`-aware wrapper around [`mark_graph_finished_if_all_terminal`],
-/// which holds the actual state-transition rule and needs no `AppHandle` at
-/// all -- kept separate so that rule stays directly unit-testable without
-/// standing up Tauri's test harness just to exercise it.
-fn maybe_finish_graph(
+/// A thin `AppHandle`-aware wrapper around the state machine in
+/// [`start_or_check_lead_review`], which holds the actual transition rules
+/// and needs no `AppHandle` for the parts that do not launch an engine --
+/// kept separate so those rules stay directly unit-testable without standing
+/// up Tauri's test harness just to exercise them.
+fn maybe_start_review_or_finish_graph(
     app: &AppHandle,
-    locks: &crate::agentdesk::SessionLocks,
+    locks: &std::sync::Arc<crate::agentdesk::SessionLocks>,
     root: &SessionStoreRoot,
     session_id: &str,
     session: &AgentSession,
 ) {
-    let Some(finished_session) = mark_graph_finished_if_all_terminal(locks, root, session_id, session) else {
-        return;
-    };
-
-    if let Some(manager) = app.try_state::<RepoManager>() {
-        if let Ok(open) = manager.get(&finished_session.header.repo_id) {
-            let main_workdir = {
-                let repo = open.repo.lock().unwrap_or_else(|e| e.into_inner());
-                worktree::main_workdir(&repo)
-            };
-            if let Some(main_workdir) = main_workdir {
-                cleanup_integration_worktree(&finished_session, &main_workdir.to_string_lossy());
-            }
+    match start_or_check_lead_review(locks, root, session_id, session) {
+        LeadReviewStep::NotYetAllTerminal | LeadReviewStep::AlreadyFinished => {}
+        LeadReviewStep::NeedsReviewTurn { integration_path } => {
+            launch_lead_review(app, locks, root, session_id, &integration_path);
+        }
+        LeadReviewStep::ReviewStillRunning => {
+            // Nothing to do -- `advance_lead_review_after_completion` (the
+            // review turn's own completion callback, mirroring
+            // `advance_graph_after_helper_completion`) is what re-enters this
+            // function once the review execution itself finishes.
+        }
+        LeadReviewStep::ReviewFinishedBuildResultAndFinish { review_execution_id } => {
+            finish_graph_with_combined_result(locks, root, session_id, session, &review_execution_id);
         }
     }
 }
 
-/// The actual R6.9 state-transition rule, with no `AppHandle` dependency:
-/// once every helper is terminal, marks the lead (and the session header)
-/// `Finished` with a combined summary. Returns the freshly-written session
-/// when this call is what performed the transition, so a caller (like
-/// [`maybe_finish_graph`]) can act on exactly that session snapshot rather
-/// than re-reading; returns `None` when there was nothing to finish (already
-/// finished, no helpers, or a helper still active).
-fn mark_graph_finished_if_all_terminal(
+/// What [`start_or_check_lead_review`] found, and what its `AppHandle`-aware
+/// caller should do about it. A closed enum rather than an `Option` because
+/// "needs a review turn launched" and "the review turn already finished, go
+/// build the result" require entirely different follow-up actions -- folding
+/// them into one `Option<T>` would leave the caller re-deriving which case it
+/// is in anyway.
+#[derive(Debug)]
+enum LeadReviewStep {
+    /// Not every helper is terminal yet -- nothing to do.
+    NotYetAllTerminal,
+    /// The lead is not `Working`, or has no helpers -- already finished, or
+    /// this was never a graph session in the first place.
+    AlreadyFinished,
+    /// Every helper is terminal and no review turn has been launched yet.
+    /// The caller should launch one against `integration_path`.
+    NeedsReviewTurn { integration_path: String },
+    /// A review turn is already recorded and still running (or the write
+    /// that would have recorded a fresh one lost a race) -- nothing to do,
+    /// the review turn's own completion path re-enters this function.
+    ReviewStillRunning,
+    /// The review turn reached a terminal state -- the caller should build
+    /// the combined result and mark the graph `Finished`.
+    ReviewFinishedBuildResultAndFinish { review_execution_id: ExecutionId },
+}
+
+/// The actual P1 state-transition rule, with no `AppHandle` dependency for
+/// the two read-only branches (`NotYetAllTerminal`/`AlreadyFinished`) and a
+/// SINGLE locked write for the one branch that mutates anything
+/// (`NeedsReviewTurn`, which durably records `review_execution_id` before
+/// the caller ever launches an engine against it -- a launch failure or a
+/// crash between this write and the engine actually starting is recoverable
+/// the same way `record_helper_launch_failure` recovers a helper launch
+/// failure, rather than leaving `review_execution_id` unset and this
+/// function trying to launch a second review turn on the next completion
+/// event).
+fn start_or_check_lead_review(
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
     session_id: &str,
     session: &AgentSession,
-) -> Option<AgentSession> {
-    let lead = session.executions.iter().find(|e| e.parent_execution_id.is_none())?;
+) -> LeadReviewStep {
+    let Some(lead) = session.executions.iter().find(|e| e.parent_execution_id.is_none()) else {
+        return LeadReviewStep::AlreadyFinished;
+    };
     if lead.state != SessionState::Working {
-        return None;
+        return LeadReviewStep::AlreadyFinished;
     }
+    // The review execution itself is recorded with `parent_execution_id:
+    // Some(lead)` (see `start_or_check_lead_review`'s write below) so the
+    // bridge treats its events as a helper's for `active_execution_id`/
+    // `session.header.state` protection purposes -- but it is NOT one of
+    // the helpers this function is waiting on, and must never count toward
+    // `all_terminal`/`finished_count`/`linked_execution_ids` as if it were
+    // one. Excluded here by ID rather than by any state-based guess.
     let helpers: Vec<&ExecutionRecord> = session
         .executions
         .iter()
-        .filter(|e| e.parent_execution_id.is_some())
+        .filter(|e| e.parent_execution_id.is_some() && lead.review_execution_id.as_deref() != Some(e.execution_id.as_str()))
         .collect();
     if helpers.is_empty() {
-        return None;
+        return LeadReviewStep::AlreadyFinished;
     }
     let all_terminal = helpers.iter().all(|h| {
         matches!(
@@ -1912,21 +1995,408 @@ fn mark_graph_finished_if_all_terminal(
         )
     });
     if !all_terminal {
-        return None;
+        return LeadReviewStep::NotYetAllTerminal;
     }
-    let finished = helpers.iter().filter(|h| h.state == SessionState::Finished).count();
+
+    // A review turn is already recorded: either it is still running (its
+    // own completion path will re-enter this function) or it just reached a
+    // terminal state (go build the combined result).
+    if let Some(review_execution_id) = &lead.review_execution_id {
+        let review = session.executions.iter().find(|e| &e.execution_id == review_execution_id);
+        let review_terminal = review.is_some_and(|r| {
+            matches!(
+                r.state,
+                SessionState::Finished | SessionState::Stopped | SessionState::Failed | SessionState::Interrupted
+            )
+        });
+        return if review_terminal {
+            LeadReviewStep::ReviewFinishedBuildResultAndFinish {
+                review_execution_id: review_execution_id.clone(),
+            }
+        } else {
+            LeadReviewStep::ReviewStillRunning
+        };
+    }
+
+    // No review turn recorded yet: mint its execution ID and record it on
+    // the lead NOW, under this session's lock, before any engine has been
+    // asked to run it -- so a concurrent re-entry (a second helper's
+    // completion racing this one) sees `review_execution_id` already set and
+    // takes the `ReviewStillRunning` branch instead of also trying to launch
+    // one. This is the review-turn equivalent of `record_execution_if_not_running`'s
+    // own "record before launch" ordering.
+    let Some(integration_path) = lead.integration_worktree_path.clone() else {
+        // No helper ever finished cleanly enough to provision one -- nothing
+        // to review. Finish the graph directly with an honest summary
+        // instead of waiting forever for a review turn that has nothing to
+        // review.
+        let finished = helpers.iter().filter(|h| h.state == SessionState::Finished).count();
+        let _ = update_session_at(locks, root, session_id, |s| {
+            if let Some(lead) = s.executions.iter_mut().find(|e| e.parent_execution_id.is_none()) {
+                lead.state = SessionState::Finished;
+                lead.ended_at = Some(now_rfc3339());
+                lead.output_summary = Some(format!(
+                    "{finished} of {} helpers finished, but none produced anything to review.",
+                    helpers.len()
+                ));
+            }
+            s.header.state = SessionState::Finished;
+        });
+        return LeadReviewStep::AlreadyFinished;
+    };
+
+    let review_execution_id = crate::agentdesk::execution_id_for_run_session(&new_id());
+    let lead_execution_id = lead.execution_id.clone();
     let outcome = update_session_at(locks, root, session_id, |s| {
-        if let Some(lead) = s.executions.iter_mut().find(|e| e.parent_execution_id.is_none()) {
+        // Re-check inside the lock: another thread may have recorded one
+        // between the unlocked read above and this write.
+        let already = s
+            .executions
+            .iter()
+            .find(|e| e.parent_execution_id.is_none())
+            .and_then(|l| l.review_execution_id.clone());
+        if already.is_some() {
+            return;
+        }
+        if let Some(lead) = s.executions.iter_mut().find(|e| e.execution_id == lead_execution_id) {
+            lead.review_execution_id = Some(review_execution_id.clone());
+        }
+        // Pre-create the review's OWN `ExecutionRecord` here, with
+        // `parent_execution_id: Some(lead)`, exactly the way
+        // `commit_started_graph_if_still_proposed` pre-creates every
+        // helper's record before that helper's engine ever runs. This is
+        // load-bearing, not cosmetic: `agentdesk::bridge::apply_run_event`'s
+        // `find_or_start_execution` creates a BRAND-NEW record with
+        // `parent_execution_id: None` for any execution ID it has never seen
+        // before, and `active_execution_id`/`session.header.state` are only
+        // protected from a helper's own events by checking
+        // `parent_execution_id.is_some()` (`bridge.rs`'s own "Helper
+        // executions are exempt" comment). Without pre-creating this record,
+        // the review turn's first `Working` event would be indistinguishable
+        // from a brand-new LEAD execution to the bridge -- it would hijack
+        // `active_execution_id` away from the actual lead and flip
+        // `session.header.state` off of the review turn's own transient
+        // states, exactly the bug that guard exists to prevent for helpers.
+        // `Preparing`, not `Ready`/`Draft` -- `graph::schedule` treats any
+        // `parent_execution_id.is_some()` node in `Ready`/`Draft` as a
+        // launchable HELPER candidate. This record is never meant to be
+        // picked up by that scheduler at all (it is launched directly by
+        // `launch_lead_review`, immediately after this write, never via the
+        // ready-queue path `advance_graph_after_helper_completion` drives
+        // real helpers through), so it must never appear schedulable even
+        // for the brief window between this write and the engine's first
+        // event turning it `Working`. Matches
+        // `record_execution_if_not_running`'s own choice of `Preparing` as
+        // the seed state for a not-yet-launched execution.
+        let mut review_record = crate::agentdesk::model::ExecutionRecord::minimal(
+            review_execution_id.clone(),
+            s.header.session_id.clone(),
+            Some(lead_execution_id.clone()),
+            SessionState::Preparing,
+            now_rfc3339(),
+            None,
+            0,
+        );
+        // Cosmetic, but load-bearing for the Graph panel not showing this as
+        // an unlabeled "Helper" row: `AgentGraphPanel`/`agentGraphProjection.ts`
+        // both fall back to "Helper" only when `jobTitle` is `None`.
+        review_record.job_title = Some("Lead review".to_string());
+        review_record.job_description = Some(
+            "Reviewing every helper's combined result in a dedicated worktree before finishing.".to_string(),
+        );
+        s.executions.push(review_record);
+    });
+    match outcome {
+        UpdateOutcome::Updated { session } => {
+            let lead = session.executions.iter().find(|e| e.parent_execution_id.is_none());
+            match lead.and_then(|l| l.review_execution_id.clone()) {
+                // Either this call's write won, or a concurrent one did --
+                // either way SOME review execution id is now durably
+                // recorded. If it is not the one this call minted, another
+                // caller already owns launching it.
+                Some(recorded) if recorded == review_execution_id => LeadReviewStep::NeedsReviewTurn { integration_path },
+                Some(_) => LeadReviewStep::ReviewStillRunning,
+                None => LeadReviewStep::ReviewStillRunning,
+            }
+        }
+        _ => LeadReviewStep::ReviewStillRunning,
+    }
+}
+
+/// Launches the lead's own REVIEW turn against the session's integration
+/// worktree -- the same `ExecutionPolicy`/`ExecutionRegistry`/`run_task` path
+/// [`launch_helper`] and `commands::agent_desk::start_execution_at` both use,
+/// scoped by working directory rather than by a new mechanism.
+///
+/// Deliberately mirrors `launch_helper`'s own shape (register the link and
+/// the cancel handle BEFORE the first event, a watchdog task that turns a
+/// panic into a typed `Failed` event, remove the gate-answer channel and mark
+/// the execution complete in the SAME places) rather than importing it,
+/// because the two differ in exactly the same ways `launch_helper`'s own doc
+/// comment already explains a shared helper/solo function would not cleanly
+/// cover: different prompt source (every helper's own `output_summary`, not
+/// one job description), different working directory resolution (already
+/// known -- the integration worktree -- not derived from a `worktree_path`
+/// field lookup), and a different policy constructor
+/// (`ExecutionPolicy::resolve_for_lead_review`, unrestricted write, vs.
+/// `resolve_for_helper`'s path-scoped one).
+fn launch_lead_review(
+    app: &AppHandle,
+    locks: &std::sync::Arc<crate::agentdesk::SessionLocks>,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    integration_path: &str,
+) {
+    let Some(links) = app.try_state::<crate::agentdesk::RunSessionLinks>() else {
+        return;
+    };
+    let Some(executions) = app.try_state::<crate::agentdesk::ExecutionRegistry>() else {
+        return;
+    };
+
+    let session = match store::read_session(root, session_id) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let Some(lead) = session.executions.iter().find(|e| e.parent_execution_id.is_none()) else {
+        return;
+    };
+    let Some(review_execution_id) = lead.review_execution_id.clone() else {
+        return;
+    };
+
+    // Every helper's own report, so the review turn actually reads what was
+    // produced rather than re-discovering it from the diff alone -- "it
+    // reviews what the helpers produced; it is not a formatting pass over a
+    // count."
+    let mut helper_reports = String::new();
+    for helper in session.executions.iter().filter(|e| e.parent_execution_id.is_some()) {
+        let title = helper.job_title.as_deref().unwrap_or("Helper");
+        let state = format!("{:?}", helper.state);
+        let summary = helper.output_summary.as_deref().unwrap_or("(no summary)");
+        helper_reports.push_str(&format!("- {title} [{state}]: {summary}\n"));
+    }
+    let prompt = format!(
+        "Every helper in this task has finished. Their results have been integrated into \
+         your current working directory (a dedicated review worktree combining every helper's \
+         changes). Review the combined result: confirm it is coherent, run any checks that make \
+         sense, and fix anything that is broken or inconsistent across helpers' work. Report a \
+         short summary of what you found and did.\n\nHelper reports:\n{helper_reports}"
+    );
+
+    let policy = crate::agentdesk::policy::ExecutionPolicy::resolve_for_lead_review();
+
+    // Same execution-addressed link this whole package now requires (never
+    // the repository) -- see `RunSessionLinks`'s own doc comment.
+    links.link(&review_execution_id, &session_id.to_string());
+
+    let agent = match crate::ai::agent::cli_agent::CliAgent::discover(std::path::PathBuf::from(integration_path)) {
+        Ok(a) => a,
+        Err(e) => {
+            record_helper_launch_failure(
+                locks,
+                root,
+                session_id,
+                &review_execution_id,
+                &crate::ai::agent::select::plain_explanation(&e),
+            );
+            // The lead review turn could not even start -- finish the graph
+            // now with an honest summary rather than leaving it stuck
+            // waiting forever for a review execution that will never
+            // report in.
+            if let Ok(session) = store::read_session(root, session_id) {
+                finish_graph_with_combined_result(locks, root, session_id, &session, &review_execution_id);
+            }
+            return;
+        }
+    };
+
+    let repo_id = session.header.repo_id.clone();
+    let (answer_tx, answer_rx) = std::sync::mpsc::channel::<crate::airun::driver::GateAnswer>();
+    crate::commands::airun::gate_answers()
+        .lock()
+        .unwrap()
+        .insert((session_id.to_string(), review_execution_id.clone()), answer_tx);
+
+    let cancel_handle = crate::airun::cli_run::CancelHandle::new();
+    executions.register(session_id.to_string(), review_execution_id.clone(), cancel_handle.clone());
+
+    let app_for_task = app.clone();
+    let repo_for_task = repo_id.clone();
+    let session_id_for_task = session_id.to_string();
+    let review_execution_id_for_task = review_execution_id.clone();
+    let executions_for_task = executions.inner().clone();
+    let root_for_task = root.clone();
+    let locks_for_task = locks.clone();
+    let join_handle = tauri::async_runtime::spawn(async move {
+        let sink: crate::airun::engine::Sink = {
+            let app = app_for_task.clone();
+            let repo = repo_for_task.clone();
+            let sid = review_execution_id_for_task.clone();
+            std::sync::Arc::new(move |state, step| {
+                crate::commands::airun::emit_agent_desk_only(&app, &repo, &sid, state, step);
+            })
+        };
+
+        crate::airun::cli_run::run_task(&agent, &format!("{}\n\nThe task:\n{}", crate::ai::agent::run::SYSTEM_PROMPT, prompt), sink, answer_rx, policy, true, cancel_handle, None).await;
+
+        crate::commands::airun::gate_answers()
+            .lock()
+            .unwrap()
+            .remove(&(session_id_for_task.clone(), review_execution_id_for_task.clone()));
+        executions_for_task.complete(&session_id_for_task, &review_execution_id_for_task);
+
+        // The review turn's own completion: build the combined result and
+        // mark the graph Finished. Re-reads current state under the session
+        // lock rather than using anything captured before this task started.
+        if let Ok(session) = store::read_session(&root_for_task, &session_id_for_task) {
+            finish_graph_with_combined_result(&locks_for_task, &root_for_task, &session_id_for_task, &session, &review_execution_id_for_task);
+        }
+    });
+
+    let app_for_watchdog = app.clone();
+    let repo_for_watchdog = repo_id;
+    let session_id_for_watchdog = session_id.to_string();
+    let review_execution_id_for_watchdog = review_execution_id.clone();
+    let executions_for_watchdog = executions.inner().clone();
+    let locks_for_watchdog = locks.clone();
+    let root_for_watchdog = root.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(join_error) = join_handle.await {
+            log::error!(
+                "agent desk lead review {} for session {} panicked: {join_error}",
+                review_execution_id_for_watchdog,
+                session_id_for_watchdog
+            );
+            crate::commands::airun::emit_agent_desk_only(
+                &app_for_watchdog,
+                &repo_for_watchdog,
+                &review_execution_id_for_watchdog,
+                crate::airun::driver::RunState::Failed,
+                crate::airun::driver::RunStep::Ended {
+                    state: crate::airun::driver::RunState::Failed,
+                    detail: "Something went wrong while reviewing the combined result, and it never got to report why. The integration worktree is untouched.".into(),
+                },
+            );
+            crate::commands::airun::gate_answers()
+                .lock()
+                .unwrap()
+                .remove(&(session_id_for_watchdog.clone(), review_execution_id_for_watchdog.clone()));
+            executions_for_watchdog.complete(&session_id_for_watchdog, &review_execution_id_for_watchdog);
+            if let Ok(session) = store::read_session(&root_for_watchdog, &session_id_for_watchdog) {
+                finish_graph_with_combined_result(
+                    &locks_for_watchdog,
+                    &root_for_watchdog,
+                    &session_id_for_watchdog,
+                    &session,
+                    &review_execution_id_for_watchdog,
+                );
+            }
+        }
+    });
+}
+
+/// Builds the ONE combined [`crate::agentdesk::result::ResultRecord`] from
+/// the session's integration worktree, keyed to the LEAD's own execution ID
+/// (matching `ResultRecord`'s own doc comment: "a combined record whose
+/// `execution_id` is the lead's own"), links every helper's execution ID onto
+/// it (`linked_execution_ids`), and only then marks the lead (and the session
+/// header) `Finished` -- the last step in the P1 sequence: "serialize helper
+/// integration, run a lead review/check over the combined tree, build one
+/// primary result, link helper-scoped results, then and only then mark
+/// Finished."
+///
+/// Idempotent against being called twice for the same review execution (the
+/// ordinary completion path AND the watchdog's panic path both call this,
+/// and only one of them will find genuine work to do): `update_session_at`'s
+/// mutation only flips the lead to `Finished` if it is still `Working`, so a
+/// second call after the first already finished it is a harmless no-op
+/// write.
+fn finish_graph_with_combined_result(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    session: &AgentSession,
+    review_execution_id: &str,
+) {
+    let Some(lead) = session.executions.iter().find(|e| e.parent_execution_id.is_none()) else {
+        return;
+    };
+    if lead.state != SessionState::Working {
+        // Already finished (the other completion path won the race) or this
+        // session was never a graph in the first place.
+        return;
+    }
+    if lead.review_execution_id.as_deref() != Some(review_execution_id) {
+        // Not the review execution this lead is actually waiting on (a stale
+        // call, or one from a superseded attempt) -- do nothing rather than
+        // finishing the graph on the wrong execution's say-so.
+        return;
+    }
+
+    // Excludes the review execution itself -- see `start_or_check_lead_review`'s
+    // identical exclusion for why it carries `parent_execution_id: Some(lead)`
+    // without being one of the helpers being linked/counted here.
+    let helpers: Vec<&ExecutionRecord> = session
+        .executions
+        .iter()
+        .filter(|e| e.parent_execution_id.is_some() && e.execution_id != review_execution_id)
+        .collect();
+    let finished_count = helpers.iter().filter(|h| h.state == SessionState::Finished).count();
+    let linked_execution_ids: Vec<ExecutionId> = helpers.iter().map(|h| h.execution_id.clone()).collect();
+
+    let integration_path = lead.integration_worktree_path.clone();
+    let checks = crate::commands::agent_result::checks_for_execution(session, review_execution_id);
+    let openspec_change_id = crate::commands::agent_desk::openspec_change_id_of(&session.header.source);
+
+    // P1 "build one primary result": the combined record's `worktree_path`
+    // is the integration worktree itself -- the same tree the review turn
+    // just checked -- so the existing Keep/Undo/Commit/cleanup machinery
+    // (`commands::agent_result`) works on it completely unchanged; it has no
+    // idea this worktree came from a graph rather than a solo Fix run.
+    let build = crate::commands::agent_result::build_result_at(
+        locks,
+        root,
+        session_id,
+        lead.execution_id.clone(),
+        crate::agentdesk::result::ResultOutcomeKind::Finished,
+        integration_path,
+        None,
+        lead.base_oid.clone(),
+        checks,
+        openspec_change_id,
+    );
+    if let crate::commands::agent_result::BuildResultOutcome::Built { .. } = &build {
+        let _ = crate::agentdesk::result::link_helper_results(locks, root, session_id, &lead.execution_id, &linked_execution_ids);
+    }
+
+    let review_state = session
+        .executions
+        .iter()
+        .find(|e| e.execution_id == review_execution_id)
+        .map(|e| e.state);
+    let review_note = match review_state {
+        Some(SessionState::Finished) => "The lead reviewed the combined result.".to_string(),
+        Some(SessionState::Failed) => "The lead's review could not complete, but every helper's own work is still here to review.".to_string(),
+        Some(SessionState::Stopped) => "The lead's review was stopped before finishing; every helper's own work is still here to review.".to_string(),
+        _ => "The lead's review ended without a clear outcome; every helper's own work is still here to review.".to_string(),
+    };
+
+    let lead_execution_id = lead.execution_id.clone();
+    let _ = update_session_at(locks, root, session_id, |s| {
+        if let Some(lead) = s.executions.iter_mut().find(|e| e.execution_id == lead_execution_id) {
+            if lead.state != SessionState::Working {
+                return;
+            }
             lead.state = SessionState::Finished;
             lead.ended_at = Some(now_rfc3339());
-            lead.output_summary = Some(format!("{finished} of {} helpers finished.", helpers.len()));
+            lead.output_summary = Some(format!(
+                "{finished_count} of {} helpers finished. {review_note}",
+                helpers.len()
+            ));
         }
         s.header.state = SessionState::Finished;
     });
-    match outcome {
-        UpdateOutcome::Updated { session } => Some(session),
-        _ => None,
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3033,7 +3503,9 @@ mod tests {
         assert!(!dir.path().join("blocked/nested.txt").exists());
     }
 
-    // -- record_helper_launch_failure / maybe_finish_graph (R6.9) --
+    // -- record_helper_launch_failure / start_or_check_lead_review /
+    // finish_graph_with_combined_result (P1 "Finished is not a combined
+    // graph result") --
 
     #[test]
     fn record_helper_launch_failure_marks_only_the_named_execution_failed() {
@@ -3071,13 +3543,19 @@ mod tests {
         assert_eq!(b.state, SessionState::Ready, "a sibling helper must be untouched");
     }
 
+    /// P1 "a graph is NOT Finished until the lead review turn has run":
+    /// once every helper is terminal but no review turn has been launched
+    /// yet, `start_or_check_lead_review` must ask the caller to launch one
+    /// (`NeedsReviewTurn`) -- and the lead must stay `Working`, never jump
+    /// straight to `Finished` off the helper count alone the way the old
+    /// `mark_graph_finished_if_all_terminal` did.
     #[test]
-    fn maybe_finish_graph_marks_the_lead_finished_once_every_helper_is_terminal() {
+    fn start_or_check_lead_review_asks_for_a_review_turn_once_every_helper_is_terminal() {
         let (_dir, root) = temp_root();
         let locks = crate::agentdesk::SessionLocks::new();
         seed_session(&root, "sess-1");
         update_session_at(&locks, &root, "sess-1", |s| {
-            s.executions.push(ExecutionRecord::minimal(
+            let mut lead = ExecutionRecord::minimal(
                 "lead".into(),
                 s.header.session_id.clone(),
                 None,
@@ -3085,7 +3563,9 @@ mod tests {
                 now_rfc3339(),
                 None,
                 0,
-            ));
+            );
+            lead.integration_worktree_path = Some("C:/fake/integration".into());
+            s.executions.push(lead);
             s.executions.push(ExecutionRecord::minimal(
                 "helper-a".into(),
                 s.header.session_id.clone(),
@@ -3107,16 +3587,24 @@ mod tests {
         });
 
         let session = store::read_session(&root, "sess-1").unwrap();
-        mark_graph_finished_if_all_terminal(&locks, &root, "sess-1", &session);
+        let step = start_or_check_lead_review(&locks, &root, "sess-1", &session);
+        match step {
+            LeadReviewStep::NeedsReviewTurn { integration_path } => {
+                assert_eq!(integration_path, "C:/fake/integration");
+            }
+            other => panic!("expected NeedsReviewTurn, got {other:?}"),
+        }
 
+        // The lead must stay Working -- Finished is not decided by helper
+        // count alone anymore.
         let session = store::read_session(&root, "sess-1").unwrap();
         let lead = session.executions.iter().find(|e| e.execution_id == "lead").unwrap();
-        assert_eq!(lead.state, SessionState::Finished);
-        assert_eq!(session.header.state, SessionState::Finished);
+        assert_eq!(lead.state, SessionState::Working, "must not finish before a review turn has even run");
+        assert!(lead.review_execution_id.is_some(), "the review execution id must be durably recorded before launch");
     }
 
     #[test]
-    fn maybe_finish_graph_does_nothing_while_a_helper_is_still_active() {
+    fn start_or_check_lead_review_does_nothing_while_a_helper_is_still_active() {
         let (_dir, root) = temp_root();
         let locks = crate::agentdesk::SessionLocks::new();
         seed_session(&root, "sess-1");
@@ -3142,11 +3630,252 @@ mod tests {
         });
 
         let session = store::read_session(&root, "sess-1").unwrap();
-        mark_graph_finished_if_all_terminal(&locks, &root, "sess-1", &session);
+        let step = start_or_check_lead_review(&locks, &root, "sess-1", &session);
+        assert!(matches!(step, LeadReviewStep::NotYetAllTerminal));
 
         let session = store::read_session(&root, "sess-1").unwrap();
         let lead = session.executions.iter().find(|e| e.execution_id == "lead").unwrap();
         assert_eq!(lead.state, SessionState::Working, "must not finish while helper-a is still Working");
+    }
+
+    /// Once a review execution id is recorded and that execution has itself
+    /// reached a terminal state, `start_or_check_lead_review` must report
+    /// `ReviewFinishedBuildResultAndFinish` -- the caller
+    /// (`finish_graph_with_combined_result`) is what actually builds the
+    /// result and flips the lead to `Finished`.
+    #[test]
+    fn start_or_check_lead_review_reports_ready_to_finish_once_the_review_turn_is_terminal() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        update_session_at(&locks, &root, "sess-1", |s| {
+            let mut lead = ExecutionRecord::minimal(
+                "lead".into(),
+                s.header.session_id.clone(),
+                None,
+                SessionState::Working,
+                now_rfc3339(),
+                None,
+                0,
+            );
+            lead.integration_worktree_path = Some("C:/fake/integration".into());
+            lead.review_execution_id = Some("review-1".into());
+            s.executions.push(lead);
+            s.executions.push(ExecutionRecord::minimal(
+                "helper-a".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::Finished,
+                now_rfc3339(),
+                None,
+                0,
+            ));
+            s.executions.push(ExecutionRecord::minimal(
+                "review-1".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::Finished,
+                now_rfc3339(),
+                None,
+                0,
+            ));
+        });
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        let step = start_or_check_lead_review(&locks, &root, "sess-1", &session);
+        match step {
+            LeadReviewStep::ReviewFinishedBuildResultAndFinish { review_execution_id } => {
+                assert_eq!(review_execution_id, "review-1");
+            }
+            other => panic!("expected ReviewFinishedBuildResultAndFinish, got {other:?}"),
+        }
+    }
+
+    /// A review execution id recorded but still `Working` must report
+    /// `ReviewStillRunning` -- never re-launch a second review turn and
+    /// never finish early.
+    #[test]
+    fn start_or_check_lead_review_waits_while_the_review_turn_itself_is_still_running() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        update_session_at(&locks, &root, "sess-1", |s| {
+            let mut lead = ExecutionRecord::minimal(
+                "lead".into(),
+                s.header.session_id.clone(),
+                None,
+                SessionState::Working,
+                now_rfc3339(),
+                None,
+                0,
+            );
+            lead.integration_worktree_path = Some("C:/fake/integration".into());
+            lead.review_execution_id = Some("review-1".into());
+            s.executions.push(lead);
+            s.executions.push(ExecutionRecord::minimal(
+                "helper-a".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::Finished,
+                now_rfc3339(),
+                None,
+                0,
+            ));
+            s.executions.push(ExecutionRecord::minimal(
+                "review-1".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::Working,
+                now_rfc3339(),
+                None,
+                0,
+            ));
+        });
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        let step = start_or_check_lead_review(&locks, &root, "sess-1", &session);
+        assert!(matches!(step, LeadReviewStep::ReviewStillRunning));
+    }
+
+    /// `finish_graph_with_combined_result` is where the graph actually
+    /// becomes `Finished` -- and only once the combined `ResultRecord` has
+    /// been built from the integration worktree and every helper's execution
+    /// id is linked onto it (P1's whole required outcome, verbatim: "build
+    /// one primary result, link helper-scoped results, then and only then
+    /// mark Finished").
+    #[test]
+    fn finish_graph_with_combined_result_builds_the_result_and_links_every_helper() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+
+        // `changed_paths_for_worktree` (`commands::agent_result`) opens the
+        // worktree with git2 and walks its status -- a plain non-git
+        // tempdir would silently read back as zero changed paths
+        // (`unwrap_or_default()` at the call site), which would make this
+        // test pass even if the combined result never actually saw the
+        // file. Init a real repo so the assertion below is meaningful.
+        let integration_dir = tempfile::tempdir().unwrap();
+        let _ = git2::Repository::init(integration_dir.path()).unwrap();
+        std::fs::write(integration_dir.path().join("combined.txt"), "from the integration worktree").unwrap();
+        let integration_path = integration_dir.path().to_string_lossy().into_owned();
+
+        update_session_at(&locks, &root, "sess-1", |s| {
+            let mut lead = ExecutionRecord::minimal(
+                "lead".into(),
+                s.header.session_id.clone(),
+                None,
+                SessionState::Working,
+                now_rfc3339(),
+                None,
+                0,
+            );
+            lead.integration_worktree_path = Some(integration_path.clone());
+            lead.review_execution_id = Some("review-1".into());
+            s.executions.push(lead);
+            s.executions.push(ExecutionRecord::minimal(
+                "helper-a".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::Finished,
+                now_rfc3339(),
+                None,
+                0,
+            ));
+            s.executions.push(ExecutionRecord::minimal(
+                "helper-b".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::Finished,
+                now_rfc3339(),
+                None,
+                0,
+            ));
+            s.executions.push(ExecutionRecord::minimal(
+                "review-1".into(),
+                s.header.session_id.clone(),
+                Some("lead".into()),
+                SessionState::Finished,
+                now_rfc3339(),
+                None,
+                0,
+            ));
+        });
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        finish_graph_with_combined_result(&locks, &root, "sess-1", &session, "review-1");
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        let lead = session.executions.iter().find(|e| e.execution_id == "lead").unwrap();
+        assert_eq!(lead.state, SessionState::Finished, "Finished only after the combined result was built");
+        assert_eq!(session.header.state, SessionState::Finished);
+
+        let results = crate::agentdesk::result::read_results(&root, "sess-1").unwrap();
+        let combined = results.iter().find(|r| r.execution_id == "lead").expect("combined result must exist, keyed to the lead's own execution id");
+        assert_eq!(combined.worktree_path.as_deref(), Some(integration_path.as_str()), "the combined result must reference the integration worktree, not session.header.repo_path");
+        assert!(
+            combined.changed_paths.iter().any(|p| p.path == "combined.txt"),
+            "the combined result must list every helper's changes, read from the integration worktree"
+        );
+        let mut linked = combined.linked_execution_ids.clone();
+        linked.sort();
+        assert_eq!(linked, vec!["helper-a".to_string(), "helper-b".to_string()], "every helper's execution id must be linked onto the combined result");
+
+        // The integration worktree must NOT have been removed by finishing
+        // the graph -- P1 "do not destroy the evidence": cleanup belongs to
+        // the result landing flow (Keep/Commit/Undo -> cleanup), not to
+        // graph finish.
+        assert!(integration_dir.path().is_dir(), "the integration worktree must survive Finished");
+        assert!(integration_dir.path().join("combined.txt").exists());
+    }
+
+    /// Two helpers whose completion races land on the SAME integration
+    /// worktree must not interleave: `with_integration_lock` must serialize
+    /// them so the second call always sees the first's already-applied
+    /// change rather than a half-written intermediate state.
+    #[test]
+    fn helper_integration_is_serialized_per_session_not_interleaved() {
+        let locks = std::sync::Arc::new(crate::agentdesk::SessionLocks::new());
+        let integration_dir = tempfile::tempdir().unwrap();
+        let integration_path = integration_dir.path().to_string_lossy().into_owned();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+
+        let run = |tag: &'static str, locks: std::sync::Arc<crate::agentdesk::SessionLocks>, barrier: std::sync::Arc<std::sync::Barrier>, integration_path: String| {
+            // The barrier is OUTSIDE the lock on purpose. Inside it, the
+            // first thread to take the lock would wait for a peer that can
+            // never arrive -- it is blocked on the very lock being held --
+            // and the test deadlocks rather than proving anything. Out here
+            // it does its real job: both threads reach the lock at the same
+            // moment, so whichever loses genuinely contends for it.
+            barrier.wait();
+            with_integration_lock(&locks, "sess-1", || {
+                // Simulate a slow read-modify-write against the shared
+                // integration worktree: read current content, sleep (widen
+                // the interleave window if the lock did not hold), append,
+                // write back.
+                let marker = std::path::Path::new(&integration_path).join("order.txt");
+                let before = std::fs::read_to_string(&marker).unwrap_or_default();
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                std::fs::write(&marker, format!("{before}{tag}\n")).unwrap();
+            });
+        };
+
+        std::thread::scope(|scope| {
+            let l1 = locks.clone();
+            let b1 = barrier.clone();
+            let p1 = integration_path.clone();
+            let t1 = scope.spawn(move || run("A", l1, b1, p1));
+            let l2 = locks.clone();
+            let b2 = barrier.clone();
+            let p2 = integration_path.clone();
+            let t2 = scope.spawn(move || run("B", l2, b2, p2));
+            t1.join().unwrap();
+            t2.join().unwrap();
+        });
+
+        let contents = std::fs::read_to_string(integration_dir.path().join("order.txt")).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 2, "both writers must have run, in serial, with neither losing an update");
     }
 
     // -- integrate_helper_into (R6.7/R6.8, P0-C, P0-D): both sides of a real
@@ -3434,8 +4163,8 @@ mod tests {
         );
 
         // A graph whose only helper failed to integrate has no lead record
-        // in this fixture, so `mark_graph_finished_if_all_terminal` is a
-        // no-op here (proven by `maybe_finish_graph_*` tests elsewhere) --
+        // in this fixture, so `start_or_check_lead_review` is a no-op here
+        // (proven by the `start_or_check_lead_review_*` tests elsewhere) --
         // the point this test proves is narrower and already established
         // above: the failed write is visible on the helper's own record,
         // never silently reported as success.
