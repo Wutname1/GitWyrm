@@ -493,6 +493,44 @@ fn route_to_agent_desk(app: &tauri::AppHandle, event: &RunEventKind) {
 
     match route_run_event(&root, &links, &locks, sequence, &now, event) {
         RunEventRouted::Persisted { event: durable } => {
+            // R3.7/1.3: the moment an execution reaches a terminal state
+            // (Finished/Stopped/Failed -- a helper reaching a conflicted
+            // integration is handled separately by
+            // `commands::agent_graph::advance_graph_after_helper_completion`,
+            // which calls `agent_result::build_result_at` itself once it
+            // knows the conflict outcome), automatically build and persist
+            // its `ResultRecord` so the mounted `ResultReviewPanel` has
+            // something real to show instead of "No result yet" -- this is
+            // the ONLY place that call was previously missing from: nothing
+            // else in the completion path built one.
+            if let crate::agentdesk::events::AgentSessionEventKind::StateChanged { state } = &durable.kind {
+                if let Some(outcome) = terminal_result_outcome(*state) {
+                    let execution_id = durable.execution_id.clone().unwrap_or_default();
+                    build_result_for_completed_execution(
+                        &root,
+                        locks.inner(),
+                        &durable.session_id,
+                        &execution_id,
+                        outcome,
+                    );
+                    // R6.1: the OTHER half of a Plan-mode lead's turn -- once
+                    // it finishes cleanly, check whether it actually
+                    // produced a graph proposal and persist or visibly
+                    // refuse it. Only on `Finished` (a stopped/failed turn
+                    // has no complete reply to parse); `execution_id` empty
+                    // is defensive against a malformed durable event and
+                    // mirrors `build_result_for_completed_execution`'s own
+                    // early return.
+                    if matches!(state, crate::agentdesk::model::SessionState::Finished) && !execution_id.is_empty() {
+                        crate::commands::agent_graph::finish_plan_mode_proposal(
+                            &locks,
+                            &root,
+                            &durable.session_id,
+                            &execution_id,
+                        );
+                    }
+                }
+            }
             let _ = app.emit(crate::agentdesk::AGENT_SESSION_EVENT, durable);
         }
         // Ignored per design.md ("Duplicate event sequence: ignore it" /
@@ -523,6 +561,91 @@ fn route_to_agent_desk(app: &tauri::AppHandle, event: &RunEventKind) {
             log::warn!("agent desk durable write failed, event not persisted: {detail}");
         }
     }
+}
+
+/// Maps a durable [`crate::agentdesk::model::SessionState`] to the
+/// [`crate::agentdesk::result::ResultOutcomeKind`] a completed execution's
+/// result should carry, or `None` for every non-terminal state (Draft/Ready/
+/// Preparing/Working/NeedsInput never produce a result -- there is nothing to
+/// review yet).
+fn terminal_result_outcome(
+    state: crate::agentdesk::model::SessionState,
+) -> Option<crate::agentdesk::result::ResultOutcomeKind> {
+    use crate::agentdesk::model::SessionState;
+    use crate::agentdesk::result::ResultOutcomeKind;
+    match state {
+        SessionState::Finished => Some(ResultOutcomeKind::Finished),
+        SessionState::Stopped => Some(ResultOutcomeKind::Stopped),
+        SessionState::Failed => Some(ResultOutcomeKind::Failed),
+        // `Interrupted` is a restart-recovery state, not a live completion --
+        // `session_recovery`/`reconcile_executions` are what set it, never a
+        // live `RunStep::Ended`, so it never reaches this function via the
+        // durable event path in the first place. Every other state is
+        // ongoing.
+        _ => None,
+    }
+}
+
+/// R3.7's actual automatic-result-build step: reads the session this
+/// execution just reached a terminal state on, pulls the provenance
+/// (worktree/branch/base_oid) and OpenSpec change id `start_execution_at`
+/// already stamped onto the `ExecutionRecord` when the run began, and calls
+/// the same `agent_result::build_result_at` a user's own "refresh" action
+/// would -- so the very first time `ResultReviewPanel` queries
+/// `agent_result_list` after a run ends, there is already a `Reviewing`
+/// record waiting, not an empty list.
+///
+/// Best-effort by design, matching every other durable-path write in this
+/// file: a read/build failure here is logged, never surfaced as a run
+/// failure -- the run itself already finished and its outcome is already
+/// visible in the transcript via the `StateChanged` event this is called
+/// alongside. A missing result is a degraded review experience, not a lost
+/// run.
+fn build_result_for_completed_execution(
+    root: &crate::agentdesk::store::SessionStoreRoot,
+    locks: &Arc<crate::agentdesk::SessionLocks>,
+    session_id: &str,
+    execution_id: &str,
+    outcome: crate::agentdesk::result::ResultOutcomeKind,
+) {
+    if execution_id.is_empty() {
+        return;
+    }
+    let session = match crate::agentdesk::store::read_session(root, session_id) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("agent desk result build: could not read session {session_id}: {e}");
+            return;
+        }
+    };
+    let Some(record) = session.executions.iter().find(|e| e.execution_id == execution_id) else {
+        // The bridge always creates an `ExecutionRecord` before this fires
+        // (`apply_run_event`'s `find_or_start_execution` runs earlier in the
+        // very same `route_run_event` call), so this should not happen in
+        // practice -- logged rather than silently dropped so a future
+        // regression here is visible.
+        log::warn!("agent desk result build: no execution record for {execution_id} in session {session_id}");
+        return;
+    };
+
+    let worktree_path = record.worktree_path.clone();
+    let branch = record.branch.clone();
+    let base_oid = record.base_oid.clone();
+    let checks = crate::commands::agent_result::checks_for_execution(&session, execution_id);
+    let openspec_change_id = crate::commands::agent_desk::openspec_change_id_of(&session.header.source);
+
+    let _ = crate::commands::agent_result::build_result_at(
+        locks,
+        root,
+        session_id,
+        execution_id.to_string(),
+        outcome,
+        worktree_path,
+        branch,
+        base_oid,
+        checks,
+        openspec_change_id,
+    );
 }
 
 /// Make a disposable folder for a run to work in, on its own branch.
@@ -813,5 +936,7 @@ The task:
         policy,
         true,
         crate::airun::cli_run::CancelHandle::new(),
+        // No budget: this legacy console has no helper/graph concept at all.
+        None,
     ));
 }

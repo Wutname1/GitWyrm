@@ -121,7 +121,7 @@ pub async fn agent_session_propose_graph(
     Ok(propose_graph_at(&locks_arc, &root, &session_id, graph))
 }
 
-fn propose_graph_at(
+pub(crate) fn propose_graph_at(
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
     session_id: &str,
@@ -170,6 +170,222 @@ fn propose_graph_at(
         UpdateOutcome::Damaged { reason } => ProposeGraphOutcome::Damaged { reason },
         UpdateOutcome::WriteFailed { detail } => ProposeGraphOutcome::WriteFailed { detail },
         UpdateOutcome::Unavailable { detail } => ProposeGraphOutcome::Unavailable { detail },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// R6.1: turn a live Plan-mode turn's finished reply into a persisted
+// proposal, or a visible refusal -- the production entry point is
+// `commands::airun::route_to_agent_desk`'s completion hook, which calls this
+// once the lead's execution reaches `Finished`. See
+// `agentdesk::plan_proposal`'s module doc for why a fenced block (not a new
+// ACP tool) is the mechanism this reads back out of the transcript.
+// ---------------------------------------------------------------------------
+
+/// What happened when a just-finished Plan-mode lead turn was checked for a
+/// graph proposal. Internal (not `Type`/IPC) -- the caller
+/// (`finish_plan_mode_execution_at`, called only from the durable-event
+/// completion path) reports its own outcome via the ordinary transcript
+/// `Note` mechanism, never back across the IPC boundary; there is no command
+/// that returns this directly.
+#[derive(Debug)]
+enum PlanProposalCompletion {
+    /// Not a Plan-mode lead turn at all (Ask/Auto, a helper, a Plan-mode
+    /// Solo run) -- nothing to check.
+    NotApplicable,
+    /// A proposal was found, validated, and persisted as a fresh
+    /// `AwaitingStart` execution (`propose_graph_at`).
+    Proposed { execution_id: ExecutionId },
+    /// The lead's reply did not contain a usable proposal -- `outcome`
+    /// carries exactly why (`agentdesk::plan_proposal::ProposalOutcome`,
+    /// minus the `Found` case, which would have taken the `Proposed` branch
+    /// above instead).
+    Refused { outcome: crate::agentdesk::plan_proposal::ProposalOutcome },
+    /// The proposal was found and valid, but persisting it failed for an
+    /// ordinary session-store reason (session gone, damaged, write failed).
+    PersistFailed { outcome: ProposeGraphOutcome },
+}
+
+/// Reads `finished_execution_id`'s own accumulated transcript text and, if
+/// this was a Plan-mode lead turn, checks it for a graph proposal.
+///
+/// Deliberately reads the session itself (rather than accepting the text as
+/// a parameter) so the Plan-mode-lead check (`mode`/`team`/
+/// `parent_execution_id`) and the text-gathering both read the SAME
+/// snapshot -- an execution that raced from Plan into something else between
+/// two separate reads could otherwise be checked against stale mode/team
+/// while the text came from after the race.
+fn finish_plan_mode_execution_at(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    finished_execution_id: &str,
+) -> PlanProposalCompletion {
+    let session = match store::read_session(root, session_id) {
+        Ok(s) => s,
+        Err(_) => return PlanProposalCompletion::NotApplicable,
+    };
+    let Some(record) = session
+        .executions
+        .iter()
+        .find(|e| e.execution_id == finished_execution_id)
+    else {
+        return PlanProposalCompletion::NotApplicable;
+    };
+    // Only a LEAD's own Plan-mode turn ever proposes a graph -- a helper
+    // never does (`parent_execution_id.is_some()`), and only `mode ==
+    // "plan"` with `team == "lead"` was ever told to (see
+    // `commands::agent_desk::start_execution_at`'s prompt augmentation,
+    // gated on the exact same pair).
+    if record.parent_execution_id.is_some() {
+        return PlanProposalCompletion::NotApplicable;
+    }
+    if record.mode.as_deref() != Some("Plan") || record.team.as_deref() != Some("Lead") {
+        return PlanProposalCompletion::NotApplicable;
+    }
+
+    let text: String = session
+        .messages
+        .iter()
+        .filter(|m| m.execution_id.as_deref() == Some(finished_execution_id))
+        .map(|m| m.plain_content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    match crate::agentdesk::plan_proposal::extract_graph_proposal(&text) {
+        crate::agentdesk::plan_proposal::ProposalOutcome::Found { graph } => {
+            match propose_graph_at(locks, root, session_id, graph) {
+                ProposeGraphOutcome::AwaitingStart { execution_id, .. } => {
+                    PlanProposalCompletion::Proposed { execution_id }
+                }
+                other => PlanProposalCompletion::PersistFailed { outcome: other },
+            }
+        }
+        other => PlanProposalCompletion::Refused { outcome: other },
+    }
+}
+
+/// Plain-language explanation for every non-`Found` `ProposalOutcome`, shown
+/// as a system note in the transcript -- the reset doc's "fail visibly when
+/// the model returns something unparseable, never silently fall back to
+/// solo without telling the user."
+fn plain_proposal_refusal(outcome: &crate::agentdesk::plan_proposal::ProposalOutcome) -> Option<String> {
+    use crate::agentdesk::plan_proposal::ProposalOutcome;
+    match outcome {
+        // Not a refusal to report: the model was simply not asked to
+        // propose a graph, or (for `NoProposalFound`) chose not to per the
+        // prompt's own "say so in plain language" instruction, which it
+        // already did in its own reply -- adding a second note would be
+        // redundant, not clarifying.
+        ProposalOutcome::Found { .. } => None,
+        ProposalOutcome::NoProposalFound => None,
+        ProposalOutcome::MultipleProposalsFound { count } => Some(format!(
+            "This plan included {count} proposed graphs instead of one, so none of them could be started. Try asking again for a single plan."
+        )),
+        ProposalOutcome::MalformedJson { .. } => Some(
+            "This plan's proposal was not written in a format GitWyrm could read, so no graph was started. Try asking again, or start this task yourself.".to_string(),
+        ),
+        ProposalOutcome::SchemaMismatch { .. } => Some(
+            "This plan's proposal was missing something GitWyrm needs, so no graph was started. Try asking again, or start this task yourself.".to_string(),
+        ),
+        ProposalOutcome::Invalid { reason } => Some(format!(
+            "This plan's proposed graph could not be started: {}",
+            plain_validation_reason(reason)
+        )),
+    }
+}
+
+fn plain_validation_reason(reason: &GraphValidationError) -> String {
+    match reason {
+        GraphValidationError::TooManyHelpers { found, max } => {
+            format!("it proposed {found} helpers, more than the {max} allowed at once.")
+        }
+        GraphValidationError::DuplicateNodeId { node_id } => {
+            format!("two helpers were both named \"{node_id}\".")
+        }
+        GraphValidationError::EmptyJob { node_id, detail } => {
+            format!("the helper \"{node_id}\" was missing something: {detail}.")
+        }
+        GraphValidationError::MissingAllowedPaths { node_id } => {
+            format!("the helper \"{node_id}\" can write but was not given any files it may change.")
+        }
+        GraphValidationError::UnknownDependency { node_id, missing } => {
+            format!("the helper \"{node_id}\" depends on \"{missing}\", which does not exist in the plan.")
+        }
+        GraphValidationError::Cycle { node_ids } => {
+            format!("helpers {} depend on each other in a loop.", node_ids.join(", "))
+        }
+    }
+}
+
+/// Appends a plain system note to the session's transcript, outside the
+/// ordinary run-event/bridge path -- used only for the refusal message
+/// above, which has no `RunEventKind` of its own to ride in on (the lead's
+/// own turn already ended with its real `Ended` event by the time this
+/// runs). Mirrors `commands::agent_desk::append_user_message_at`'s
+/// segment-reuse shape, but writes a `System`-role/`System`-kind message
+/// with no `execution_id` -- it did not come from any execution's event
+/// stream.
+fn append_system_note(locks: &crate::agentdesk::SessionLocks, root: &SessionStoreRoot, session_id: &str, text: &str) {
+    let _ = update_session_at(locks, root, session_id, |s| {
+        let now = now_rfc3339();
+        let segment_id = match s.segments.last() {
+            Some(seg) => seg.segment_id.clone(),
+            None => {
+                let id = new_id();
+                s.segments.push(crate::agentdesk::model::ConversationSegment {
+                    segment_id: id.clone(),
+                    label: "Conversation".into(),
+                    started_at: now.clone(),
+                });
+                id
+            }
+        };
+        s.messages.push(crate::agentdesk::model::SessionMessage {
+            message_id: new_id(),
+            segment_id,
+            role: crate::agentdesk::model::MessageRole::System,
+            timestamp: now,
+            plain_content: text.to_string(),
+            rendered_content: None,
+            provider: None,
+            model: None,
+            kind: crate::agentdesk::model::MessageKind::System,
+            execution_id: None,
+            sequence: None,
+            import: None,
+            targets: Vec::new(),
+        });
+    });
+}
+
+/// Production entry point called from `commands::airun::route_to_agent_desk`
+/// once a durable execution reaches `Finished`: checks whether it was a
+/// Plan-mode lead turn and, if so, either persists its proposal or appends a
+/// visible refusal note explaining why none was started.
+pub(crate) fn finish_plan_mode_proposal(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    finished_execution_id: &str,
+) {
+    match finish_plan_mode_execution_at(locks, root, session_id, finished_execution_id) {
+        PlanProposalCompletion::NotApplicable | PlanProposalCompletion::Proposed { .. } => {}
+        PlanProposalCompletion::Refused { outcome } => {
+            if let Some(text) = plain_proposal_refusal(&outcome) {
+                append_system_note(locks, root, session_id, &text);
+            }
+        }
+        PlanProposalCompletion::PersistFailed { outcome } => {
+            let text = match outcome {
+                ProposeGraphOutcome::Invalid { reason } => format!(
+                    "This plan's proposed graph could not be started: {}",
+                    plain_validation_reason(&reason)
+                ),
+                _ => "This plan proposed a graph, but it could not be saved. Try asking again.".to_string(),
+            };
+            append_system_note(locks, root, session_id, &text);
+        }
     }
 }
 
@@ -541,6 +757,10 @@ fn commit_started_graph_if_still_proposed(
             // R6.7: the merge base `integrate_helper_result` diffs this
             // helper's worktree against once it finishes.
             record.base_oid = base_oid;
+            // R6.4: carried from the proposal so `launch_helper` can hand it
+            // to `cli_run::run_task` for actual enforcement -- see
+            // `ExecutionRecord::budget`'s own doc comment.
+            record.budget = Some(job.budget);
             // depends_on is stored by node_id at proposal time but the
             // schedulable field wants execution ids -- resolved by looking
             // up already-pushed records with a matching job_title is
@@ -673,6 +893,11 @@ fn launch_helper(
     let helper_execution_id = helper_execution_id.to_string();
     let job_title = helper.job_title.clone().unwrap_or_else(|| "Helper".to_string());
     let job_description = helper.job_description.clone().unwrap_or_default();
+    // R6.4: the actual enforcement handoff -- `budget` was copied onto this
+    // record from the proposal at graph-start time
+    // (`commit_started_graph_if_still_proposed`); `run_task` is what checks
+    // it turn-by-turn and against its own wall clock.
+    let budget = helper.budget;
     let allowed_paths = helper.allowed_paths.clone();
     // Builder always writes; a Researcher/Verifier writes only if it was
     // explicitly given an allowance -- the same rule `graph::validate_graph`
@@ -747,6 +972,7 @@ fn launch_helper(
             policy,
             true,
             cancel_handle,
+            budget,
         )
         .await;
 
@@ -2056,5 +2282,218 @@ mod tests {
         let helper = session.executions.iter().find(|e| e.execution_id == "helper-a").unwrap();
         assert_eq!(helper.state, SessionState::Finished, "no conflict means the node stays Finished");
         assert!(helper.conflict.is_none());
+    }
+
+    // -- R6.1: a live Plan-mode turn's finished reply becomes a persisted
+    // proposal, or a visible refusal -- `finish_plan_mode_execution_at` is
+    // the pure "read + decide" half `finish_plan_mode_proposal` (the actual
+    // production entry point, called from
+    // `commands::airun::route_to_agent_desk`) wraps with the transcript-note
+    // side effect. Tested directly here since it needs no live provider.
+
+    /// Seeds a lead `ExecutionRecord` with the given mode/team and a single
+    /// assistant message carrying `reply_text` as that execution's own final
+    /// content -- exactly what `finish_plan_mode_execution_at` reads back.
+    fn seed_lead_turn(root: &SessionStoreRoot, session_id: &str, mode: &str, team: &str, reply_text: &str) -> String {
+        let mut session = store::read_session(root, session_id).unwrap();
+        let execution_id = new_id();
+        let mut record = ExecutionRecord::minimal(
+            execution_id.clone(),
+            session_id.to_string(),
+            None,
+            SessionState::Finished,
+            now_rfc3339(),
+            Some(now_rfc3339()),
+            1,
+        );
+        record.mode = Some(mode.to_string());
+        record.team = Some(team.to_string());
+        session.executions.push(record);
+        session.messages.push(crate::agentdesk::model::SessionMessage {
+            message_id: new_id(),
+            segment_id: "seg-1".into(),
+            role: crate::agentdesk::model::MessageRole::Assistant,
+            timestamp: now_rfc3339(),
+            plain_content: reply_text.to_string(),
+            rendered_content: None,
+            provider: None,
+            model: None,
+            kind: crate::agentdesk::model::MessageKind::Assistant,
+            execution_id: Some(execution_id.clone()),
+            sequence: Some(1),
+            import: None,
+            targets: Vec::new(),
+        });
+        store::write_session(root, &session).unwrap();
+        execution_id
+    }
+
+    fn fenced_proposal() -> String {
+        "Here's my plan.\n\n```graph-proposal\n{ \"leadSummary\": \"Just going to look\", \"helpers\": [] }\n```\n"
+            .to_string()
+    }
+
+    #[test]
+    fn a_non_plan_mode_execution_is_not_applicable() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let exec = seed_lead_turn(&root, "sess-1", "Auto", "Lead", &fenced_proposal());
+
+        let outcome = finish_plan_mode_execution_at(&locks, &root, "sess-1", &exec);
+        assert!(matches!(outcome, PlanProposalCompletion::NotApplicable));
+    }
+
+    #[test]
+    fn a_plan_mode_solo_execution_is_not_applicable() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let exec = seed_lead_turn(&root, "sess-1", "Plan", "Solo", &fenced_proposal());
+
+        let outcome = finish_plan_mode_execution_at(&locks, &root, "sess-1", &exec);
+        assert!(matches!(outcome, PlanProposalCompletion::NotApplicable));
+    }
+
+    #[test]
+    fn a_helper_execution_is_never_checked_for_a_proposal_even_if_it_looks_like_one() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let mut session = store::read_session(&root, "sess-1").unwrap();
+        let helper_id = new_id();
+        let mut record = ExecutionRecord::minimal(
+            helper_id.clone(),
+            "sess-1".into(),
+            Some("lead-1".into()),
+            SessionState::Finished,
+            now_rfc3339(),
+            Some(now_rfc3339()),
+            1,
+        );
+        record.mode = Some("Plan".into());
+        record.team = Some("Lead".into());
+        session.executions.push(record);
+        store::write_session(&root, &session).unwrap();
+
+        let outcome = finish_plan_mode_execution_at(&locks, &root, "sess-1", &helper_id);
+        assert!(matches!(outcome, PlanProposalCompletion::NotApplicable));
+    }
+
+    #[test]
+    fn a_plan_mode_lead_reply_with_a_valid_proposal_is_persisted() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let exec = seed_lead_turn(&root, "sess-1", "Plan", "Lead", &fenced_proposal());
+
+        let outcome = finish_plan_mode_execution_at(&locks, &root, "sess-1", &exec);
+        match outcome {
+            PlanProposalCompletion::Proposed { execution_id } => {
+                let session = store::read_session(&root, "sess-1").unwrap();
+                let proposed = session
+                    .executions
+                    .iter()
+                    .find(|e| e.execution_id == execution_id)
+                    .unwrap();
+                assert!(proposed.proposed_graph.is_some());
+            }
+            other => panic!("expected Proposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_plan_mode_lead_reply_with_no_fence_is_refused_without_a_note() {
+        // No fence means the model chose (or was never able) to propose a
+        // graph -- `plain_proposal_refusal` returns `None` for this case
+        // specifically because an ordinary Ask-shaped reply is not an error.
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let exec = seed_lead_turn(&root, "sess-1", "Plan", "Lead", "Just an ordinary answer, no plan needed.");
+
+        let outcome = finish_plan_mode_execution_at(&locks, &root, "sess-1", &exec);
+        match outcome {
+            PlanProposalCompletion::Refused { outcome } => {
+                assert!(matches!(
+                    outcome,
+                    crate::agentdesk::plan_proposal::ProposalOutcome::NoProposalFound
+                ));
+                assert!(plain_proposal_refusal(&outcome).is_none());
+            }
+            other => panic!("expected Refused, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_plan_mode_lead_reply_with_malformed_json_fails_visibly() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let exec = seed_lead_turn(
+            &root,
+            "sess-1",
+            "Plan",
+            "Lead",
+            "Here's my plan.\n```graph-proposal\n{ not valid json\n```",
+        );
+
+        let outcome = finish_plan_mode_execution_at(&locks, &root, "sess-1", &exec);
+        match outcome {
+            PlanProposalCompletion::Refused { outcome } => {
+                let text = plain_proposal_refusal(&outcome).expect("a malformed proposal must produce a visible note");
+                assert!(!text.is_empty());
+            }
+            other => panic!("expected Refused, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn finish_plan_mode_proposal_appends_a_visible_note_for_a_refusal() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let exec = seed_lead_turn(
+            &root,
+            "sess-1",
+            "Plan",
+            "Lead",
+            "Here's my plan.\n```graph-proposal\n{ not valid json\n```",
+        );
+
+        finish_plan_mode_proposal(&locks, &root, "sess-1", &exec);
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        assert!(
+            session
+                .messages
+                .iter()
+                .any(|m| m.kind == crate::agentdesk::model::MessageKind::System && m.execution_id.is_none()),
+            "expected a system note explaining the refusal, transcript: {:?}",
+            session.messages
+        );
+    }
+
+    #[test]
+    fn finish_plan_mode_proposal_persists_silently_for_a_valid_proposal() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let exec = seed_lead_turn(&root, "sess-1", "Plan", "Lead", &fenced_proposal());
+
+        finish_plan_mode_proposal(&locks, &root, "sess-1", &exec);
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        assert!(
+            session.executions.iter().any(|e| e.proposed_graph.is_some()),
+            "expected a persisted proposal"
+        );
+        assert!(
+            !session
+                .messages
+                .iter()
+                .any(|m| m.kind == crate::agentdesk::model::MessageKind::System),
+            "a successful proposal should not also append a refusal note"
+        );
     }
 }

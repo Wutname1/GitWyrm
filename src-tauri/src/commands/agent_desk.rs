@@ -1130,7 +1130,7 @@ fn start_execution_at(
                 // silence the model can mistake for "it does not matter".
                 let openspec_context = openspec_target_of(&s.header.source)
                     .and_then(|target| resolve_openspec_context(std::path::Path::new(&s.header.repo_path), &target));
-                let prompt = match &openspec_context {
+                let mut prompt = match &openspec_context {
                     Some(ctx) => format!(
                         "{}
 
@@ -1140,6 +1140,24 @@ fn start_execution_at(
                     ),
                     None => build_prompt(&s),
                 };
+                // R6.1: a typed path from a live Plan-mode turn to a
+                // persisted `ProposedGraph` starts with telling the model,
+                // for THIS turn, to propose one -- see
+                // `agentdesk::plan_proposal`'s module doc for why a fenced
+                // block (not a new tool) is the mechanism, and
+                // `route_to_agent_desk`'s completion hook for the other
+                // half (parsing the reply back out once the run ends).
+                // Team::Lead only: a Plan-mode Solo run has no helpers to
+                // propose and stays an ordinary read/inspect turn.
+                if policy.mode == crate::agentdesk::policy::ExecutionMode::Plan
+                    && policy.team == crate::agentdesk::policy::ExecutionTeam::Lead
+                {
+                    prompt = format!(
+                        "{}\n\n{}",
+                        crate::agentdesk::plan_proposal::plan_mode_instruction(),
+                        prompt
+                    );
+                }
                 // R5.3: hash the text the agent actually read, so a later
                 // reader can tell whether the plan has moved underneath it.
                 let context_fingerprint = openspec_context
@@ -1405,6 +1423,11 @@ fn start_execution_at(
             // `WorktreePolicy::NotUntilStart` is resolved as "started" here.
             true,
             cancel_handle,
+            // R6.4: no budget applies to the lead/solo path -- only a
+            // proposed helper job carries one (`ExecutionRecord::budget`,
+            // set at graph-start time). This execution's own record is
+            // never a helper's, so it never has one to enforce.
+            None,
         )
         .await;
 
@@ -1512,6 +1535,22 @@ fn source_summary(source: &SessionSource) -> (String, String) {
         | SessionSource::CheckFailure { snapshot, .. } => {
             (snapshot.title.clone(), snapshot.summary.clone())
         }
+    }
+}
+
+/// The OpenSpec change this session's source names, if any -- what
+/// [`crate::commands::agent_result::agent_result_build`]'s `openspec_change_id`
+/// should carry so a result produced by an OpenSpec-sourced chat gets the
+/// `Spec:` trailer automatically (R3.7, R5). `Manual`/`Issue`/`PullRequest`/
+/// `Commit`/`Diff`/`WorkingChanges`/`CheckFailure` sources never name an
+/// OpenSpec change, so this is `None` for every source but the two OpenSpec
+/// ones.
+pub(crate) fn openspec_change_id_of(source: &SessionSource) -> Option<String> {
+    match source {
+        SessionSource::OpenSpecChange { change_id, .. } | SessionSource::OpenSpecTask { change_id, .. } => {
+            Some(change_id.clone())
+        }
+        _ => None,
     }
 }
 

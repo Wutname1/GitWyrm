@@ -14,6 +14,7 @@ pub mod import_store;
 pub mod locks;
 pub mod model;
 pub mod openspec_context;
+pub mod plan_proposal;
 pub mod policy;
 pub mod reconcile;
 pub mod result;
@@ -49,6 +50,8 @@ pub use model::{
     SegmentId, SessionId, SessionIntent, SessionLoadError, SessionMessage, SessionSource,
     SessionState, SourceSnapshot, CURRENT_SCHEMA_VERSION,
 };
+#[allow(unused_imports)]
+pub use plan_proposal::{extract_graph_proposal, plan_mode_instruction, ProposalOutcome, FENCE_LANGUAGE};
 #[allow(unused_imports)]
 pub use openspec_context::{
     context_changed_since, context_for_change, context_for_task, fingerprint, is_draft_stale,

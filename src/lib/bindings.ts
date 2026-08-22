@@ -4629,7 +4629,17 @@ proposedGraph?: ProposedGraph | null;
  * Present only while this node's result integration hit a conflict
  * (tasks.md 5.3). Cleared once a person resolves it.
  */
-conflict?: IntegrationConflict | null }
+conflict?: IntegrationConflict | null; 
+/**
+ * R6.4: the turn/time budget this execution must actually stop at, once
+ * it is running -- copied from the proposed helper job's own
+ * `JobBudget` when the graph starts (`commit_started_graph_if_still_proposed`
+ * in `commands::agent_graph`), so `cli_run::run_task` can enforce it
+ * without threading `ProposedGraph` through the whole launch path.
+ * `None` for the lead (no proposed budget applies to it) and for any
+ * helper launched before this field existed.
+ */
+budget?: JobBudget | null }
 /**
  * `solo | lead`.
  */

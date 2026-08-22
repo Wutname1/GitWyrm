@@ -1,0 +1,72 @@
+import type { GateRequest, RunStep, SessionMessage } from '@/lib/bindings'
+
+/**
+ * Pure display logic for an approval gate (`RunStep::Gate`), kept out of
+ * `ConversationPane` so it is testable under `vitest`'s Node environment --
+ * the same pattern `agentDeskResult.ts`/`agentDeskPlan.ts` use.
+ *
+ * Gap 4 of the 2026-08-21 implementation reset: `agent_session_answer_gate`
+ * (backend, `commands::agent_desk`) has existed with no caller anywhere in
+ * the frontend. A `RunStep::Gate` message reaches the transcript already
+ * (`agentdesk::bridge::message_kind_for_step` maps it to
+ * `MessageKind::Approval`, and `ConversationPane` already styles that kind
+ * amber), but nothing ever answered it -- an Auto run that hit a
+ * destructive-action approval just sat there with no visible way forward.
+ * This module turns the message's own `renderedContent` (the full `RunStep`,
+ * serialized losslessly -- see `agentdesk::bridge::map_run_step`'s doc
+ * comment) back into a `GateRequest` and a plain-language title/option pair,
+ * so the transcript row can render real buttons instead of dead amber text.
+ */
+
+/** The `RunStep::Gate` this message carries, or `null` if it is not a gate/cannot be parsed. */
+export function gateRequestOf(message: SessionMessage): GateRequest | null {
+  if (message.kind !== 'approval' || !message.renderedContent) return null
+  try {
+    const step = JSON.parse(message.renderedContent) as RunStep
+    if (step.kind === 'gate') return step.request
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** Plain-language, request-specific summary of what is being approved. */
+export function gateSummary(request: GateRequest): string {
+  switch (request.kind) {
+    case 'addDependency':
+      return `Add the "${request.name}" package to this project?`
+    case 'runInstall':
+      return `Run "${request.command}" to install something?`
+    case 'networkAccess':
+      return `Let it reach ${request.target} over the network?`
+    case 'deleteFiles':
+      return request.paths.length === 1
+        ? `Delete ${request.paths[0]}?`
+        : `Delete ${request.paths.length} files, including ${request.paths[0]}?`
+    case 'outsideRepo':
+      return `Change something outside this project, at ${request.path}?`
+    case 'unclassified':
+      return request.summary
+  }
+}
+
+/** One answer button: its label and the `GateAnswer` it sends. */
+export interface GateOption {
+  label: string
+  answer: 'allowOnce' | 'findAnotherWay' | 'stopRun'
+}
+
+/**
+ * The three answers every gate offers, in the order they should be shown.
+ * Always the same three -- `GateAnswer` has no request-specific variants --
+ * but `gateSummary` above is what keeps the wording specific to what is
+ * being approved, not a generic "Allow/Deny", per Rule #2 (plain language,
+ * consequence-focused).
+ */
+export function gateOptions(): GateOption[] {
+  return [
+    { label: 'Allow it', answer: 'allowOnce' },
+    { label: 'Find another way', answer: 'findAnotherWay' },
+    { label: 'Stop the run', answer: 'stopRun' },
+  ]
+}

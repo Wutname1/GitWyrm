@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::AppHandle;
 
-use crate::agentdesk::model::{ExecutionId, SessionId, SessionLoadError};
+use crate::agentdesk::model::{AgentSession, ExecutionId, SessionId, SessionLoadError};
 use crate::agentdesk::result::{
     self, ResultChangedPath, ResultCheckOutcome, ResultCommitRef, ResultOutcomeKind, ResultRecord,
     ResultState,
@@ -102,6 +102,38 @@ fn changed_paths_for_worktree(worktree_path: &Path) -> Result<Vec<ResultChangedP
     Ok(out)
 }
 
+/// Reads back every `RunStep::Check` this execution reported into the
+/// transcript, in order, as [`ResultCheckOutcome`]s -- R3.7's "changed files,
+/// checks, worktree path, base/head revisions" for the automatic result
+/// build. `SessionMessage.rendered_content` already carries the full step
+/// losslessly (see `agentdesk::bridge::map_run_step`'s doc comment), so this
+/// is a pure re-read of what the transcript already has, not a new source of
+/// truth -- exactly the "references into repository truth" stance this
+/// module's own doc comment describes for `changed_paths`/`checks`.
+pub(crate) fn checks_for_execution(session: &AgentSession, execution_id: &str) -> Vec<ResultCheckOutcome> {
+    session
+        .messages
+        .iter()
+        .filter(|m| m.execution_id.as_deref() == Some(execution_id))
+        .filter_map(|m| {
+            let rendered = m.rendered_content.as_deref()?;
+            let step: crate::airun::driver::RunStep = serde_json::from_str(rendered).ok()?;
+            match step {
+                crate::airun::driver::RunStep::Check { name, passed, detail } => Some(ResultCheckOutcome {
+                    command_name: name,
+                    outcome: if passed {
+                        crate::agentdesk::result::CheckRunOutcome::Passed
+                    } else {
+                        crate::agentdesk::result::CheckRunOutcome::Failed
+                    },
+                    summary: if detail.trim().is_empty() { None } else { Some(detail) },
+                }),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 /// What building/refreshing a result record found.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -127,7 +159,7 @@ pub enum BuildResultOutcome {
 /// passes `None` for `worktree_path`, which is exactly what
 /// `ResultRecord::has_landable_changes` keys off.
 #[allow(clippy::too_many_arguments)]
-fn build_result_at(
+pub(crate) fn build_result_at(
     locks: &SessionLocks,
     root: &SessionStoreRoot,
     session_id: &str,

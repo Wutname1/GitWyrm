@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Download, ExternalLink } from 'lucide-react'
-import type { MessageTarget, SessionMessage } from '@/lib/bindings'
+import { toast } from 'sonner'
+import { commands, type MessageTarget, type SessionMessage } from '@/lib/bindings'
 import { useAgentSession } from '@/hooks/useAgentSessions'
 import { cn } from '@/lib/utils'
 import { Markdown } from '@/components/ui/markdown'
@@ -12,6 +13,8 @@ import { groupEventStacks, type EventStackGroup } from '@/lib/agentDeskEvents'
 import { parsePlanChecklist } from '@/lib/agentDeskPlan'
 import { displayText, foldThoughtSummaries } from '@/lib/agentDeskTranscript'
 import { shouldShowResultPanel } from '@/lib/agentDeskResult'
+import { gateOptions, gateRequestOf, gateSummary, type GateOption } from '@/lib/agentDeskGate'
+import { log, describeError } from '@/lib/log'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { SessionSourceBanner } from './SessionSourceBanner'
 import { SessionComposer } from './SessionComposer'
@@ -112,13 +115,90 @@ function ImportedBadge({ adapterId }: { adapterId: string }) {
   )
 }
 
+/**
+ * Gap 4 of the 2026-08-21 implementation reset: `agent_session_answer_gate`
+ * existed with no caller anywhere in the frontend, so an Auto run that hit a
+ * destructive-action approval hung with no visible way forward -- the
+ * transcript showed the amber "Needs your approval" row but nothing on it
+ * could be clicked. This renders the three real answers (`gateOptions`) for
+ * the specific request (`gateSummary`), and calls
+ * `agent_session_answer_gate` with the message's own `executionId` -- R6.6's
+ * "keyed by session, execution, and gate ID" is why this reads
+ * `message.executionId` rather than the session's `activeExecutionId`: a
+ * helper's gate must be answered against the helper's own execution, not
+ * whichever execution happens to be the session's lead track right now.
+ *
+ * Every click gives visible feedback (Rule #1): a toast confirms the answer
+ * was sent, or explains why it could not be (the run may have already ended
+ * or been answered elsewhere -- `NoLiveGate` is not an error, just nothing
+ * left to answer). The three buttons disable together once any one is
+ * clicked, so a second click cannot send a second, conflicting answer to a
+ * gate that already got one -- there is no confirmation dialog and no
+ * type-to-confirm text box (Rule #3): the three labeled buttons already say
+ * exactly what each one does.
+ */
+function GateApprovalControls({ sessionId, message }: { sessionId: string; message: SessionMessage }) {
+  const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const request = useMemo(() => gateRequestOf(message), [message])
+  if (!request || !message.executionId) return null
+
+  async function answer(option: GateOption) {
+    setState('sending')
+    try {
+      const result = await commands.agentSessionAnswerGate(sessionId, message.executionId!, option.answer)
+      if (result.status !== 'ok') {
+        toast.error('Could not send that answer. Try again.')
+        setState('idle')
+        return
+      }
+      if (result.data.kind === 'noLiveGate') {
+        toast('This request is no longer waiting for an answer.', {
+          description: 'The run may have already finished, stopped, or been answered.',
+        })
+      } else {
+        toast.success('Sent.')
+      }
+      setState('sent')
+    } catch (e) {
+      log.error(`answer gate failed: ${describeError(e)}`)
+      toast.error('Something went wrong sending that answer.')
+      setState('idle')
+    }
+  }
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <p className="w-full text-2xs font-medium text-foreground">{gateSummary(request)}</p>
+      {gateOptions().map((option) => (
+        <button
+          key={option.answer}
+          type="button"
+          onClick={() => void answer(option)}
+          disabled={state !== 'idle'}
+          className={cn(
+            'rounded-md border px-2.5 py-1 text-2xs font-medium disabled:cursor-not-allowed disabled:opacity-50',
+            option.answer === 'allowOnce' && 'border-accent bg-accent text-accent-foreground hover:bg-accent/90',
+            option.answer === 'findAnotherWay' && 'border-border bg-panel2 text-foreground hover:bg-panel3',
+            option.answer === 'stopRun' && 'border-destructive/40 text-destructive hover:bg-destructive/10'
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+      {state === 'sent' && <span className="text-2xs text-muted-foreground">Answer sent.</span>}
+    </div>
+  )
+}
+
 function MessageRow({
+  sessionId,
   message,
   flash,
   onOpenSource,
   thought,
   onEdit,
 }: {
+  sessionId: string
   message: SessionMessage
   flash: boolean
   onOpenSource?: () => void
@@ -194,6 +274,7 @@ function MessageRow({
         {planRows.length > 0 && (
           <PlanChecklist rows={planRows} label={message.kind === 'result' ? 'Review findings' : 'Agent plan'} />
         )}
+        {isApproval && <GateApprovalControls sessionId={sessionId} message={message} />}
         {message.targets.length > 0 && (
           <div className="mt-1 flex flex-wrap items-center gap-1">
             {message.targets.map((target, i) => (
@@ -523,6 +604,7 @@ export function ConversationPane({
                 nodes.push(
                   <MessageRow
                     key={m.messageId}
+                    sessionId={sessionId}
                     message={m}
                     flash={flashId === m.messageId}
                     onOpenSource={onOpenSource}

@@ -17,6 +17,7 @@ use std::time::Duration;
 use crate::ai::agent::acp::{Incoming, PermissionDecision, StopReason};
 use crate::ai::agent::cli_agent::CliAgent;
 use crate::ai::agent::transport::AgentError;
+use crate::agentdesk::graph::JobBudget;
 use crate::agentdesk::policy::ExecutionPolicy;
 
 use super::driver::{GateAnswer, GateRequest, RunState, RunStep};
@@ -61,6 +62,51 @@ impl CancelHandle {
     }
 }
 
+/// R6.4: which of a helper's two budget limits actually caused `run_task` to
+/// self-cancel, so the reported detail names the real reason rather than
+/// reading like an ordinary user-initiated stop or an unexplained hang. Kept
+/// as a small internal (non-`Type`) enum -- it never crosses the IPC
+/// boundary; the plain sentence it produces is what reaches the transcript
+/// via the ordinary `RunStep::Ended { detail, .. }` path every other outcome
+/// already uses.
+#[derive(Debug, Clone, Copy)]
+enum BudgetExceeded {
+    Turns { limit: u32 },
+    Seconds { limit: u32 },
+}
+
+impl BudgetExceeded {
+    fn plain_reason(self) -> String {
+        match self {
+            BudgetExceeded::Turns { limit } => {
+                format!("This agent reached its limit of {limit} turns, so it stopped here. Any changes it already made are still there.")
+            }
+            BudgetExceeded::Seconds { limit } => {
+                format!(
+                    "This agent reached its time limit of {} minutes, so it stopped here. Any changes it already made are still there.",
+                    limit.div_ceil(60)
+                )
+            }
+        }
+    }
+}
+
+/// The turn-count half of R6.4's enforcement, pulled out of `run_task`'s
+/// `select!` body as a pure function so it is directly unit-testable without
+/// standing up a real `CliAgent` connection (which `run_task` itself
+/// requires and this crate has no mock transport for). `run_task`'s own loop
+/// calls this with exactly the values it already tracks (`turns` after
+/// incrementing, `budget`), so a change to the cutoff rule only has to be
+/// correct here to be correct there.
+fn turn_budget_exceeded(turns: u32, budget: Option<JobBudget>) -> Option<BudgetExceeded> {
+    let b = budget?;
+    if turns >= b.max_turns {
+        Some(BudgetExceeded::Turns { limit: b.max_turns })
+    } else {
+        None
+    }
+}
+
 /// Runs one task to completion, reporting as it goes.
 ///
 /// Blocking: the caller owns the thread. Gate answers arrive on `answers`, and
@@ -90,6 +136,18 @@ impl CancelHandle {
 /// `StopReason::Cancelled` afterward, so the same `prompt` future the select
 /// loop is already waiting on is what reports the acknowledgement; nothing
 /// here waits on a second, separate reply.
+///
+/// `budget` is R6.4's actual enforcement, not just the `ExecutionRecord`
+/// storing a number nobody reads: `None` (the lead, and any solo/Fix/Ask/
+/// Plan run -- none of those are helpers with a proposed budget) means no
+/// limit, exactly today's behavior. `Some(budget)` is checked on every
+/// `ToolCall` (the turn proxy at this boundary -- see this function's
+/// `handle` calls below) and via a wall-clock deadline armed once at the
+/// start of the loop; either one exceeded self-triggers the SAME `cancel`
+/// path a user's own Stop click uses, so a budget-exceeded helper stops
+/// exactly as cleanly (worktree preserved, process killed, `Ended` reported)
+/// as any other stop -- see `BudgetExceeded`'s doc comment for how the
+/// reported reason stays distinct from an ordinary user-initiated stop.
 pub async fn run_task(
     agent: &CliAgent,
     task: &str,
@@ -98,6 +156,7 @@ pub async fn run_task(
     policy: ExecutionPolicy,
     started: bool,
     cancel: CancelHandle,
+    budget: Option<JobBudget>,
 ) {
     let mut conn = match agent.connect().await {
         Ok(c) => c,
@@ -142,6 +201,18 @@ pub async fn run_task(
     // transport-closed message `prompt`'s own `Err` would otherwise produce
     // once `conn` is dropped out from under it.
     let mut cancel_timed_out = false;
+    // R6.4: which limit (if any) actually triggered the self-cancel below,
+    // so the final report says "reached its limit of N turns" / "ran out of
+    // time" rather than reading like an ordinary user Stop. `None` for every
+    // path that is not a budget cutoff (including an unbounded `budget:
+    // None` run, which never sets this at all).
+    let mut budget_exceeded: Option<BudgetExceeded> = None;
+    // R6.4: incremented on every `Incoming::ToolCall` -- the discrete unit of
+    // agent action visible at this boundary, since the CLI's own internal
+    // tool-call loop runs inside one continuous `session/prompt` and this
+    // client never sees turn boundaries any finer than that.
+    let mut turns: u32 = 0;
+    let run_started = tokio::time::Instant::now();
 
     let outcome: Result<StopReason, AgentError> = {
         let prompt = conn.prompt(task);
@@ -152,6 +223,11 @@ pub async fn run_task(
         // is actually requested (never armed at all otherwise, since a
         // never-cancelled run must be able to run indefinitely).
         let mut deadline: Option<tokio::time::Instant> = None;
+        // The budget's own wall-clock cutoff, armed once up front (not
+        // re-armed per iteration like `deadline` above, which times a
+        // cancel ACK rather than the run itself) -- `None` for an unbounded
+        // run, matching `deadline`'s "never resolves" inert branch.
+        let budget_deadline = budget.map(|b| run_started + Duration::from_secs(b.max_seconds as u64));
         loop {
             let timeout = async {
                 match deadline {
@@ -161,9 +237,40 @@ pub async fn run_task(
                     None => std::future::pending::<()>().await,
                 }
             };
+            let budget_timeout = async {
+                match budget_deadline {
+                    Some(d) if !cancel_requested => tokio::time::sleep_until(d).await,
+                    _ => std::future::pending::<()>().await,
+                }
+            };
             tokio::select! {
               result = &mut prompt => break result,
-              Some(item) = incoming.recv() => handle(item, &sink, &answers, &policy, started),
+              Some(item) = incoming.recv() => {
+                  if matches!(item, Incoming::ToolCall { .. }) {
+                      turns += 1;
+                  }
+                  handle(item, &sink, &answers, &policy, started);
+                  // R6.4: a turn-count cutoff is checked right after the turn
+                  // that crossed it, not on a timer -- the run must stop
+                  // BEFORE its next tool call is answered, not merely at some
+                  // point after the Nth one.
+                  if !cancel_requested {
+                      if let Some(reason) = turn_budget_exceeded(turns, budget) {
+                          budget_exceeded = Some(reason);
+                          cancel_requested = true;
+                          deadline = Some(tokio::time::Instant::now() + CANCEL_ACK_TIMEOUT);
+                          let _ = conn.cancel().await;
+                      }
+                  }
+              }
+              _ = budget_timeout, if budget_deadline.is_some() && !cancel_requested => {
+                  budget_exceeded = Some(BudgetExceeded::Seconds {
+                      limit: budget.expect("budget_deadline is only Some when budget is Some").max_seconds,
+                  });
+                  cancel_requested = true;
+                  deadline = Some(tokio::time::Instant::now() + CANCEL_ACK_TIMEOUT);
+                  let _ = conn.cancel().await;
+              }
               _ = cancel.notify.notified(), if !cancel_requested => {
                   cancel_requested = true;
                   deadline = Some(tokio::time::Instant::now() + CANCEL_ACK_TIMEOUT);
@@ -193,10 +300,19 @@ pub async fn run_task(
                 RunState::Finished,
                 "Finished. Your changes are ready to look over.".to_string(),
             ),
-            StopReason::Cancelled => (
-                RunState::Stopped,
-                "You stopped this run. Nothing was committed.".to_string(),
-            ),
+            StopReason::Cancelled => match budget_exceeded {
+                // R6.4: the CLI acknowledged the cancel cleanly (the common
+                // case -- `CANCEL_ACK_TIMEOUT` is the same 8s either way),
+                // but the REASON was this agent's own budget, not a user
+                // Stop click. Reported plainly, per the reset doc's "must
+                // report plainly why it stopped ... rather than looking like
+                // it failed or hung."
+                Some(reason) => (RunState::Stopped, reason.plain_reason()),
+                None => (
+                    RunState::Stopped,
+                    "You stopped this run. Nothing was committed.".to_string(),
+                ),
+            },
             other => (
                 RunState::Failed,
                 format!(
@@ -214,11 +330,23 @@ pub async fn run_task(
             // on disk or in the worktree are untouched by this -- stopping
             // the CLI process does not revert filesystem changes it already
             // made (task 2.6).
+            //
+            // R6.4: when the timeout was itself preceded by a budget cutoff
+            // (`budget_exceeded.is_some()`), the message still leads with
+            // WHY the stop was requested in the first place, not just that
+            // it was slow to happen -- a budget-exceeded helper that also
+            // failed to ACK in time must not read as an unexplained hang.
             RunState::Stopped,
-            format!(
-                "This didn't stop right away, so it was shut down directly. {} Any changes already made are still there.",
-                crate::ai::agent::select::plain_explanation(&e)
-            ),
+            match budget_exceeded {
+                Some(reason) => format!(
+                    "{} This didn't stop right away, so it was shut down directly. Any changes already made are still there.",
+                    reason.plain_reason()
+                ),
+                None => format!(
+                    "This didn't stop right away, so it was shut down directly. {} Any changes already made are still there.",
+                    crate::ai::agent::select::plain_explanation(&e)
+                ),
+            },
         ),
         Err(e) => (
             RunState::Failed,
@@ -767,5 +895,85 @@ mod tests {
         // No assertion beyond "did not panic" -- Notify::notify_one has no
         // observable state to inspect without a waiter attached, and the
         // actual wake behavior is covered by `cancel_wakes_a_waiter` above.
+    }
+
+    // -- R6.4: turn/time budget enforcement --
+    //
+    // `run_task` itself needs a real `CliAgent` connection to exercise end to
+    // end (no mock transport exists in this crate), so these tests cover the
+    // two pieces that are pure: the turn-cutoff decision (`turn_budget_exceeded`,
+    // which `run_task`'s own `select!` arm calls -- see that call site's own
+    // comment) and the plain-language report each cutoff produces
+    // (`BudgetExceeded::plain_reason`, which is exactly the string that ends
+    // up in the transcript's `RunStep::Ended { detail, .. }`).
+
+    fn budget(max_turns: u32, max_seconds: u32) -> JobBudget {
+        JobBudget { max_turns, max_seconds }
+    }
+
+    #[test]
+    fn no_budget_never_triggers_a_turn_cutoff() {
+        assert!(turn_budget_exceeded(0, None).is_none());
+        assert!(turn_budget_exceeded(1_000_000, None).is_none());
+    }
+
+    #[test]
+    fn a_turn_count_below_the_limit_does_not_trigger() {
+        assert!(turn_budget_exceeded(4, Some(budget(5, 900))).is_none());
+    }
+
+    #[test]
+    fn a_turn_count_at_the_limit_triggers() {
+        let reason = turn_budget_exceeded(5, Some(budget(5, 900)));
+        assert!(matches!(reason, Some(BudgetExceeded::Turns { limit: 5 })));
+    }
+
+    #[test]
+    fn a_turn_count_past_the_limit_still_triggers() {
+        // Defensive: the real call site only ever calls this right after
+        // incrementing by exactly one, so `turns` should never overshoot the
+        // limit by more than one in practice, but the check itself must not
+        // depend on that -- `>=`, not `==`.
+        let reason = turn_budget_exceeded(9, Some(budget(5, 900)));
+        assert!(matches!(reason, Some(BudgetExceeded::Turns { limit: 5 })));
+    }
+
+    #[test]
+    fn the_turns_exceeded_report_names_the_actual_limit_in_plain_language() {
+        let reason = BudgetExceeded::Turns { limit: 20 };
+        let text = reason.plain_reason();
+        assert!(text.contains("20 turns"), "expected the limit in the message, got: {text}");
+        assert!(
+            text.to_lowercase().contains("still there"),
+            "must reassure that existing changes were not reverted, got: {text}"
+        );
+    }
+
+    #[test]
+    fn the_seconds_exceeded_report_converts_to_minutes_and_rounds_up() {
+        // 901 seconds is just past 15 minutes -- rounding up (not down) means
+        // the report never claims a shorter wait than the run actually got.
+        let reason = BudgetExceeded::Seconds { limit: 901 };
+        let text = reason.plain_reason();
+        assert!(text.contains("16 minutes"), "expected a round-up to 16 minutes, got: {text}");
+    }
+
+    #[test]
+    fn a_budget_of_exactly_one_minute_reports_one_minute_not_zero() {
+        let reason = BudgetExceeded::Seconds { limit: 60 };
+        assert!(reason.plain_reason().contains("1 minutes"));
+    }
+
+    #[test]
+    fn the_two_budget_reasons_are_distinguishable_in_their_own_text() {
+        // Turns vs. seconds must read as different situations, not the same
+        // generic "you were stopped" sentence -- a helper that ran out of
+        // turns and one that ran out of time are different things for the
+        // user to react to (write a smaller job vs. give it more time).
+        let turns_text = BudgetExceeded::Turns { limit: 5 }.plain_reason();
+        let seconds_text = BudgetExceeded::Seconds { limit: 300 }.plain_reason();
+        assert_ne!(turns_text, seconds_text);
+        assert!(turns_text.contains("turns"));
+        assert!(seconds_text.contains("minutes"));
     }
 }

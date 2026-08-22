@@ -468,6 +468,15 @@ pub struct ExecutionRecord {
     /// (tasks.md 5.3). Cleared once a person resolves it.
     #[serde(default)]
     pub conflict: Option<crate::agentdesk::graph::IntegrationConflict>,
+    /// R6.4: the turn/time budget this execution must actually stop at, once
+    /// it is running -- copied from the proposed helper job's own
+    /// `JobBudget` when the graph starts (`commit_started_graph_if_still_proposed`
+    /// in `commands::agent_graph`), so `cli_run::run_task` can enforce it
+    /// without threading `ProposedGraph` through the whole launch path.
+    /// `None` for the lead (no proposed budget applies to it) and for any
+    /// helper launched before this field existed.
+    #[serde(default)]
+    pub budget: Option<crate::agentdesk::graph::JobBudget>,
 }
 
 impl ExecutionRecord {
@@ -507,6 +516,7 @@ impl ExecutionRecord {
             output_summary: None,
             proposed_graph: None,
             conflict: None,
+            budget: None,
         }
     }
 }
