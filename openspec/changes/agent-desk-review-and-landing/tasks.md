@@ -5,20 +5,21 @@
 - [x] 1.1 Define result references for execution/helper, worktree, base/head, changed paths,
       checks, commit, source, OpenSpec task, and cleanup state.
       (`src-tauri/src/agentdesk/result.rs`: `ResultRecord`)
-- [x] 1.2 Build result records from existing completion state; do not duplicate diff text.
+- [ ] 1.2 Build result records automatically from live completion state; do not duplicate diff text.
       (`commands::agent_result::agent_result_build` reads worktree status live via git2,
       never persists diff text)
-- [x] 1.3 Persist partial results for stopped/failed/conflicted executions.
+- [ ] 1.3 Persist partial results automatically for stopped/failed/conflicted executions.
       (`ResultOutcomeKind::{Stopped,Failed,Conflicted}`, accepted by `agent_result_build`)
 - [x] 1.4 Add typed states: reviewing, revision-requested, kept, committed, discarded,
       cleanup-needed, and cleanup-failed. (`ResultState` enum, all 7 variants)
 
 ## 2. Review UI
 
-- [x] 2.1 Add changed-file list and combined summary linked to existing diff view.
+- [ ] 2.1 Mount the changed-file list and combined summary in the production completion flow,
+      linked to the existing diff view.
       (`ResultReviewPanel.tsx`; "View diff" opens the real `DiffView` via the new
       main-window bridge, not a copy)
-- [x] 2.2 Let graph node Output/View diff open its helper-scoped result.
+- [ ] 2.2 Let graph node Output/View diff open its helper-scoped result.
       (`agent_result_open_diff` command + `useAgentResultDiffListener` bridge; wiring
       the graph node's own button is owned by whoever builds `AgentGraphPanel.tsx`,
       which I do not own -- see final report)
@@ -28,13 +29,13 @@
 - [x] 2.4 Show check outcomes and command names without raw terminal flood.
       (`ResultCheckOutcome{commandName, outcome, summary}` -- no raw stdout/stderr field
       exists on the type at all)
-- [x] 2.5 Add Review requested changes as a new lead message/execution step.
+- [ ] 2.5 Add Review requested changes as a new lead message and start a real execution step.
       (`agent_result_request_revision` flips state to `RevisionRequested`; appending the
       actual follow-up message reuses the existing `agent_session_append_user_message`)
 
 ## 3. Keep, undo, and commit
 
-- [x] 3.1 Route Keep/Undo through existing run completion commands/outcomes.
+- [ ] 3.1 Route the mounted Keep/Undo actions through existing run completion commands/outcomes.
       (`agent_result_keep`/`agent_result_undo` reuse `git::worktree::dirty_count`/`remove`,
       the same primitives `commands::airun`'s discard-plan uses)
 - [x] 3.2 Refuse Undo when hand edits would be destroyed; explain and preserve them.
@@ -53,7 +54,7 @@
 
 ## 4. Host handoff
 
-- [x] 4.1 Add Create pull request/Update pull request as a separate result action.
+- [ ] 4.1 Mount Create pull request/Update pull request as a separate result action.
       (`agent_result_draft_pull_request` + `PullRequestButton` in `ResultReviewPanel.tsx`;
       "Update" is out of scope -- no PR-creation host API exists anywhere in this
       codebase to update against, see final report)
@@ -77,7 +78,7 @@
 - [x] 5.2 Detect hand edits and keep the worktree with an Open action.
       (`CleanupWorktreeOutcome::KeptHandEdited`; frontend "Open" affordance is not yet
       wired -- the outcome exists, the button does not, flagged in final report)
-- [x] 5.3 Reconcile orphaned markers/worktrees at startup without deleting automatically.
+- [ ] 5.3 Reconcile orphaned markers/worktrees during real app startup without deleting automatically.
       (`agent_result_find_orphaned`; test: `find_orphaned_flags_a_kept_result_whose_worktree_is_gone`.
       Wiring this into actual app startup is not done -- the command exists, nothing calls
       it yet.)

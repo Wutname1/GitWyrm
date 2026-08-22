@@ -44,8 +44,8 @@
 
 ## 6. Composer and controls
 
-- [x] 6.1 Add Ask/Plan/Auto control with plain authority descriptions.
-- [x] 6.2 Add Solo/Lead + helpers control independent of operating mode.
+- [ ] 6.1 Wire Ask/Plan/Auto control to live authority and execution behavior, with plain descriptions.
+- [ ] 6.2 Wire Solo/Lead + helpers control to live execution behavior independent of operating mode.
 - [x] 6.3 Append sent user messages visibly before backend execution begins.
 - [x] 6.4 Prevent duplicate sends while accepting the message.
 - [x] 6.5 Put labeled Stop all in Graph header only; no ambiguous square beside Send.
@@ -63,7 +63,7 @@
 - [x] 8.1 Add component/store tests for grouping, selection, rendering, and controls.
 - [ ] 8.2 Verify 100%, 125%, and 150% Windows scaling in native Tauri.
 - [ ] 8.3 Verify keyboard-only path from session list through history jump and composer.
-- [x] 8.4 Run typecheck and relevant tests; record Gate 2 evidence.
+- [ ] 8.4 Run typecheck and relevant tests; record current Gate 2 evidence after all suites pass.
 
 ## Gate 2 evidence (automated portion)
 
@@ -83,4 +83,3 @@ Still requires a human at the keyboard, and NOT claimed here:
 - 8.3 keyboard-only path from session list through history jump to composer (native).
 - 4.4 stays open: message targets resolve honestly but no diff/worktree/graph
   destination is reachable yet, so nothing can be proven to navigate.
-

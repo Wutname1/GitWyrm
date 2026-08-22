@@ -103,7 +103,7 @@ than Copilot.
 
 ### Requirement: The engine uses the user's default provider
 
-**(Not implemented - see correction note.)** The engine was designed to resolve which
+**(Not implemented - see correction note.)** The engine MUST resolve which
 provider and model to use from the user's default in AI settings, through the same shared
 path every other AI feature uses, so it never carries its own provider selection. What
 ships instead: `run_engine` calls `CliAgent::discover` unconditionally, without reading
@@ -114,7 +114,7 @@ as a gap, not a design change - the desired behavior is still "one answer everyw
 #### Scenario: One answer everywhere (target, not current behavior)
 
 - WHEN a run starts
-- THEN it SHOULD use the same provider and model that commit-message generation would
+- THEN it SHALL use the same provider and model that commit-message generation would
   use. Today it always attempts the Copilot CLI instead
 
 #### Scenario: Default cannot run

@@ -62,7 +62,9 @@ src/components/_ds_barrel.ts
 # something - it fails the build outright when it matches nothing.
 src-tauri/resources/*
 !src-tauri/resources/README.md
-/docs/
+/docs/*
+!/docs/agent-desk/
+!/docs/agent-desk/**
 
 # Linux packages built locally for VM testing. Rebuild with
 # `npx tauri build --config src-tauri/tauri.linux.conf.json`.

@@ -1,0 +1,2625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Gitwyrm Agent Graph</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Gitwyrm Agent Graph" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Gitwyrm Agent Graph&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --blue: light-dark(rgb(51 156 255), rgb(51 156 255));
+  --orange: light-dark(rgb(226 85 7), rgb(251 106 34));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --red: light-dark(rgb(224 46 42), rgb(255 103 100));
+  --purple: light-dark(rgb(146 79 247), rgb(173 123 249));
+  --yellow: light-dark(rgb(255 195 0), rgb(255 210 64));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: var(--border-radius-lg, 12.5px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card, .progress) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress {
+  display: flex;
+  height: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+
+.progress-bar {
+  height: 100%;
+  flex-shrink: 0;
+  border: 0;
+  background: var(--viz-series-1);
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+  [aria-pressed=&quot;true&quot;],
+  [aria-selected=&quot;true&quot;],
+  .is-selected
+) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+/* Model-authored chart rules can otherwise stretch icons after these styles load. */
+svg.lucide {
+  display: block;
+  width: 16px !important;
+  height: 16px !important;
+  flex: none;
+  margin: 0 !important;
+  stroke-width: 1.6;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;gitwyrm-agent-graph-mockup&quot; class=&quot;is-split is-source-hidden&quot;&gt;
+  &lt;style&gt;
+    #gitwyrm-agent-graph-mockup {
+      --ag-bg: light-dark(#e5eaed, #0b0e12);
+      --ag-window: light-dark(#f8fafb, #11151a);
+      --ag-rail: light-dark(#edf1f3, #0d1116);
+      --ag-panel: light-dark(#ffffff, #151a20);
+      --ag-raised: light-dark(#f1f5f6, #1a2027);
+      --ag-hover: light-dark(#e6ecef, #202831);
+      --ag-border: light-dark(#cbd5da, #29323c);
+      --ag-border-strong: light-dark(#aebdc4, #3b4652);
+      --ag-text: light-dark(#172129, #edf3f5);
+      --ag-sub: light-dark(#52626b, #a7b2ba);
+      --ag-muted: light-dark(#72818a, #7d8993);
+      --ag-mint: light-dark(#08785d, #67ddb6);
+      --ag-mint-soft: light-dark(#d9f1e9, #14372e);
+      --ag-blue: light-dark(#286fa8, #78bdf0);
+      --ag-blue-soft: light-dark(#e0edf8, #172e43);
+      --ag-amber: light-dark(#98600d, #efb65f);
+      --ag-amber-soft: light-dark(#f7ead6, #3b2c18);
+      --ag-red: light-dark(#a33c48, #f08b95);
+      --ag-red-soft: light-dark(#f7e1e4, #3b2025);
+      --ag-purple: light-dark(#7356a2, #bd9aeb);
+      --ag-shadow: light-dark(rgba(31, 44, 52, .20), rgba(0, 0, 0, .46));
+      color-scheme: light dark;
+      width: 100%;
+      color: var(--ag-text);
+      font-family: &quot;Segoe UI Variable&quot;, &quot;Segoe UI&quot;, system-ui, sans-serif;
+      background: transparent;
+    }
+
+    #gitwyrm-agent-graph-mockup * { box-sizing: border-box; }
+    #gitwyrm-agent-graph-mockup button,
+    #gitwyrm-agent-graph-mockup input,
+    #gitwyrm-agent-graph-mockup textarea { font: inherit; }
+    #gitwyrm-agent-graph-mockup button { color: inherit; }
+    #gitwyrm-agent-graph-mockup svg { flex: none; }
+
+    #gitwyrm-agent-graph-mockup .ag-window {
+      min-height: 760px;
+      overflow: hidden;
+      background: var(--ag-window);
+      border: 1px solid var(--ag-border-strong);
+      border-radius: 9px;
+      box-shadow: 0 20px 52px var(--ag-shadow);
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-titlebar {
+      height: 42px;
+      display: grid;
+      grid-template-columns: 218px minmax(0, 1fr) auto;
+      align-items: center;
+      border-bottom: 1px solid var(--ag-border);
+      background: var(--ag-rail);
+      user-select: none;
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-brand {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 12px;
+      font-weight: 650;
+      letter-spacing: -.02em;
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-mark {
+      width: 20px;
+      height: 20px;
+      display: grid;
+      place-items: center;
+      color: var(--ag-mint);
+      border: 1px solid color-mix(in srgb, var(--ag-mint) 55%, var(--ag-border));
+      border-radius: 5px 9px 5px 9px;
+      font: 600 11px &quot;Cascadia Mono&quot;, Consolas, monospace;
+      transform: rotate(-5deg);
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-title-center {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: var(--ag-sub);
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-title-center strong {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--ag-text);
+      font-weight: 600;
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-title-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding-right: 8px;
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-icon-button,
+    #gitwyrm-agent-graph-mockup .ag-quiet-button,
+    #gitwyrm-agent-graph-mockup .ag-primary-button {
+      border: 0;
+      cursor: pointer;
+      border-radius: 5px;
+      transition: background .14s ease, color .14s ease, transform .14s ease;
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-icon-button {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      background: transparent;
+      color: var(--ag-sub);
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-icon-button:hover,
+    #gitwyrm-agent-graph-mockup .ag-icon-button:focus-visible,
+    #gitwyrm-agent-graph-mockup .ag-quiet-button:hover,
+    #gitwyrm-agent-graph-mockup .ag-quiet-button:focus-visible { background: var(--ag-hover); color: var(--ag-text); }
+
+    #gitwyrm-agent-graph-mockup .ag-quiet-button,
+    #gitwyrm-agent-graph-mockup .ag-primary-button {
+      min-height: 29px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-quiet-button { background: var(--ag-raised); border: 1px solid var(--ag-border); }
+    #gitwyrm-agent-graph-mockup .ag-primary-button { background: var(--ag-mint); color: #07130f; }
+    #gitwyrm-agent-graph-mockup .ag-primary-button:hover { transform: translateY(-1px); }
+
+    #gitwyrm-agent-graph-mockup .ag-shell {
+      min-height: 718px;
+      display: grid;
+      grid-template-columns: 218px minmax(370px, 1fr);
+    }
+    #gitwyrm-agent-graph-mockup.is-panel-right .ag-shell { grid-template-columns: 218px minmax(370px, 1fr) 322px; }
+
+    #gitwyrm-agent-graph-mockup .ag-sidebar {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--ag-rail);
+      border-right: 1px solid var(--ag-border);
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-sidebar-top { padding: 9px 9px 7px; }
+    #gitwyrm-agent-graph-mockup .ag-new-chat {
+      width: 100%;
+      height: 31px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border: 1px solid var(--ag-border);
+      border-radius: 6px;
+      background: var(--ag-panel);
+      color: var(--ag-text);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-sidebar-filters {
+      display: flex;
+      gap: 3px;
+      margin-top: 6px;
+    }
+    #gitwyrm-agent-graph-mockup .ag-sidebar-filter {
+      height: 24px;
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--ag-muted);
+      font-size: 9.5px;
+      cursor: pointer;
+    }
+    #gitwyrm-agent-graph-mockup .ag-sidebar-filter:hover,
+    #gitwyrm-agent-graph-mockup .ag-sidebar-filter.is-selected { background: var(--ag-hover); color: var(--ag-text); }
+
+    #gitwyrm-agent-graph-mockup .ag-section-label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 7px 11px 4px;
+      color: var(--ag-muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    #gitwyrm-agent-graph-mockup .ag-section-label.ag-project-label { padding-top: 9px; color: var(--ag-sub); }
+    #gitwyrm-agent-graph-mockup .ag-section-label.ag-project-label svg { color: var(--ag-mint); }
+    #gitwyrm-agent-graph-mockup .ag-section-count { margin-left: auto; color: var(--ag-muted); font: 9px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+
+    #gitwyrm-agent-graph-mockup .ag-thread-list { padding: 0 6px; }
+    #gitwyrm-agent-graph-mockup .ag-thread {
+      width: 100%;
+      height: 28px;
+      display: grid;
+      grid-template-columns: 15px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      padding: 0 6px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--ag-sub);
+      text-align: left;
+      font-size: 11.5px;
+      cursor: pointer;
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-thread:hover { background: var(--ag-hover); color: var(--ag-text); }
+    #gitwyrm-agent-graph-mockup .ag-thread.is-selected { background: var(--ag-mint-soft); color: var(--ag-text); }
+    #gitwyrm-agent-graph-mockup .ag-thread-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #gitwyrm-agent-graph-mockup .ag-thread-time { color: var(--ag-muted); font: 10px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-thread-icon { color: var(--ag-muted); }
+    #gitwyrm-agent-graph-mockup .ag-thread.is-selected .ag-thread-icon { color: var(--ag-mint); }
+    #gitwyrm-agent-graph-mockup .ag-busy-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--ag-blue);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--ag-blue) 15%, transparent);
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-sidebar-spacer { flex: 1; min-height: 22px; }
+    #gitwyrm-agent-graph-mockup .ag-sidebar-dock {
+      display: none;
+      margin: 6px;
+      min-height: 160px;
+      border: 1px solid var(--ag-border-strong);
+      border-radius: 6px;
+      background: var(--ag-panel);
+      overflow: hidden;
+    }
+    #gitwyrm-agent-graph-mockup.is-panel-left .ag-sidebar-dock { display: block; }
+    #gitwyrm-agent-graph-mockup .ag-dock-head { height: 31px; display: flex; align-items: center; gap: 6px; padding: 0 7px; border-bottom: 1px solid var(--ag-border); font-size: 10.5px; font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-dock-head span { margin-left: auto; color: var(--ag-muted); font: 9px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-dock-body { padding: 7px; }
+    #gitwyrm-agent-graph-mockup .ag-dock-line { display: flex; gap: 7px; padding: 5px 0; border-bottom: 1px solid var(--ag-border); color: var(--ag-sub); font-size: 10px; }
+    #gitwyrm-agent-graph-mockup .ag-dock-line:last-child { border-bottom: 0; }
+    #gitwyrm-agent-graph-mockup .ag-dock-line strong { margin-left: auto; max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-text); font-weight: 600; }
+    #gitwyrm-agent-graph-mockup .ag-sidebar-tools { border-top: 1px solid var(--ag-border); padding: 6px; }
+    #gitwyrm-agent-graph-mockup .ag-tool-link {
+      width: 100%;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 7px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--ag-sub);
+      font-size: 11.5px;
+      text-align: left;
+      cursor: pointer;
+    }
+    #gitwyrm-agent-graph-mockup .ag-tool-link:hover,
+    #gitwyrm-agent-graph-mockup .ag-tool-link.is-active { background: var(--ag-hover); color: var(--ag-text); }
+    #gitwyrm-agent-graph-mockup .ag-tool-count { margin-left: auto; font: 10px &quot;Cascadia Mono&quot;, Consolas, monospace; color: var(--ag-muted); }
+
+    #gitwyrm-agent-graph-mockup .ag-main {
+      min-width: 0;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      background: var(--ag-window);
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-workspace-bar {
+      height: 35px;
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0 7px 0 10px;
+      border-bottom: 1px solid var(--ag-border);
+      background: var(--ag-panel);
+    }
+    #gitwyrm-agent-graph-mockup .ag-workspace-label { color: var(--ag-muted); font-size: 10px; }
+    #gitwyrm-agent-graph-mockup .ag-workspace-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-sub); font-size: 10px; }
+    #gitwyrm-agent-graph-mockup .ag-workspace-spacer { flex: 1; }
+    #gitwyrm-agent-graph-mockup .ag-layout-button { height: 25px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--ag-sub); font-size: 10px; cursor: pointer; }
+    #gitwyrm-agent-graph-mockup .ag-layout-button:hover,
+    #gitwyrm-agent-graph-mockup .ag-layout-button.is-selected { border-color: var(--ag-border); background: var(--ag-hover); color: var(--ag-text); }
+
+    #gitwyrm-agent-graph-mockup .ag-pane-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+    #gitwyrm-agent-graph-mockup.is-split .ag-pane-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #gitwyrm-agent-graph-mockup .ag-pane { min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; background: var(--ag-window); }
+    #gitwyrm-agent-graph-mockup .ag-pane + .ag-pane { border-left: 1px solid var(--ag-border-strong); }
+    #gitwyrm-agent-graph-mockup .ag-pane-secondary { display: none; }
+    #gitwyrm-agent-graph-mockup.is-split .ag-pane-secondary { display: flex; }
+    #gitwyrm-agent-graph-mockup:not(.is-split) .ag-pane-primary:not(.is-active) { display: none; }
+    #gitwyrm-agent-graph-mockup:not(.is-split) .ag-pane-secondary.is-active { display: flex; }
+    #gitwyrm-agent-graph-mockup .ag-pane.is-active { box-shadow: inset 0 2px 0 var(--ag-mint); }
+    #gitwyrm-agent-graph-mockup .ag-pane-head { height: 38px; flex: none; position: relative; display: flex; align-items: center; gap: 6px; padding: 0 7px 0 10px; border-bottom: 1px solid var(--ag-border); background: var(--ag-panel); }
+    #gitwyrm-agent-graph-mockup .ag-pane-heading { min-width: 0; flex: 1; }
+    #gitwyrm-agent-graph-mockup .ag-pane-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-pane-source { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-muted); font: 9px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-pane-actions { display: flex; gap: 2px; }
+    #gitwyrm-agent-graph-mockup .ag-pane-action { width: 27px; height: 27px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--ag-muted); cursor: pointer; }
+    #gitwyrm-agent-graph-mockup .ag-pane-action:hover,
+    #gitwyrm-agent-graph-mockup .ag-pane-action.is-selected { border-color: var(--ag-border); background: var(--ag-hover); color: var(--ag-text); }
+    #gitwyrm-agent-graph-mockup .ag-pane-action svg { width: 14px; height: 14px; }
+
+    #gitwyrm-agent-graph-mockup .ag-detail-popover {
+      display: none;
+      position: absolute;
+      z-index: 18;
+      top: 33px;
+      right: 7px;
+      width: min(340px, calc(100% - 18px));
+      border: 1px solid var(--ag-border-strong);
+      border-radius: 7px;
+      background: var(--ag-panel);
+      box-shadow: 0 16px 42px var(--ag-shadow);
+      overflow: hidden;
+    }
+    #gitwyrm-agent-graph-mockup .ag-detail-popover.is-open { display: block; }
+    #gitwyrm-agent-graph-mockup .ag-popover-head { height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-bottom: 1px solid var(--ag-border); font-size: 10.5px; }
+    #gitwyrm-agent-graph-mockup .ag-popover-head strong { font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-popover-head span { margin-left: auto; color: var(--ag-muted); font: 9px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-popover-body { padding: 8px; }
+    #gitwyrm-agent-graph-mockup .ag-popover-meter { height: 5px; margin: 5px 0 9px; overflow: hidden; border-radius: 4px; background: var(--ag-raised); }
+    #gitwyrm-agent-graph-mockup .ag-popover-meter span { display: block; width: 17%; height: 100%; background: var(--ag-mint); }
+    #gitwyrm-agent-graph-mockup .ag-popover-row { min-height: 28px; display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--ag-border); color: var(--ag-sub); font-size: 10px; }
+    #gitwyrm-agent-graph-mockup .ag-popover-row strong { margin-left: auto; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-text); font-weight: 600; }
+    #gitwyrm-agent-graph-mockup .ag-popover-dock { display: flex; align-items: center; gap: 4px; padding: 7px 8px; border-top: 1px solid var(--ag-border); background: var(--ag-raised); }
+    #gitwyrm-agent-graph-mockup .ag-popover-dock &gt; span { margin-right: auto; color: var(--ag-muted); font-size: 9.5px; }
+    #gitwyrm-agent-graph-mockup .ag-dock-button { height: 25px; display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--ag-border); border-radius: 4px; background: var(--ag-panel); color: var(--ag-sub); font-size: 9px; cursor: pointer; }
+    #gitwyrm-agent-graph-mockup .ag-dock-button:hover { color: var(--ag-text); border-color: var(--ag-border-strong); }
+
+    #gitwyrm-agent-graph-mockup .ag-source {
+      min-height: 64px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 14px;
+      border-bottom: 1px solid color-mix(in srgb, var(--ag-mint) 30%, var(--ag-border));
+      background: linear-gradient(90deg, var(--ag-mint-soft), color-mix(in srgb, var(--ag-window) 86%, var(--ag-mint-soft)) 68%);
+    }
+    #gitwyrm-agent-graph-mockup.is-source-hidden .ag-source { display: none; }
+
+    #gitwyrm-agent-graph-mockup .ag-source-button {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-source-icon {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      color: var(--ag-mint);
+      background: color-mix(in srgb, var(--ag-mint) 13%, var(--ag-panel));
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-source-kicker { color: var(--ag-mint); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    #gitwyrm-agent-graph-mockup .ag-source-title { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-source-meta { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-sub); font: 10.5px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-source-state { display: flex; align-items: center; gap: 7px; }
+    #gitwyrm-agent-graph-mockup .ag-live {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: var(--ag-panel);
+      color: var(--ag-sub);
+      font-size: 10px;
+      border: 1px solid color-mix(in srgb, var(--ag-mint) 32%, var(--ag-border));
+    }
+    #gitwyrm-agent-graph-mockup .ag-live::before { content: &quot;&quot;; width: 6px; height: 6px; border-radius: 50%; background: var(--ag-mint); }
+
+    #gitwyrm-agent-graph-mockup .ag-conversation {
+      flex: 1;
+      min-height: 0;
+      padding: 18px clamp(14px, 3vw, 38px) 16px;
+    }
+
+    #gitwyrm-agent-graph-mockup .ag-chat-width { max-width: 760px; margin: 0 auto; }
+    #gitwyrm-agent-graph-mockup .ag-message { display: grid; grid-template-columns: 27px minmax(0, 1fr); gap: 10px; margin-bottom: 18px; }
+    #gitwyrm-agent-graph-mockup .ag-avatar {
+      width: 27px;
+      height: 27px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      background: var(--ag-raised);
+      color: var(--ag-sub);
+      font: 700 10px &quot;Cascadia Mono&quot;, Consolas, monospace;
+    }
+    #gitwyrm-agent-graph-mockup .ag-avatar.lead { color: var(--ag-mint); background: var(--ag-mint-soft); }
+    #gitwyrm-agent-graph-mockup .ag-message-label { display: flex; align-items: center; gap: 7px; margin: 1px 0 5px; font-size: 11px; font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-message-label span { color: var(--ag-muted); font-weight: 450; }
+    #gitwyrm-agent-graph-mockup .ag-message-body { color: var(--ag-text); font-size: 12.5px; line-height: 1.55; }
+
+    #gitwyrm-agent-graph-mockup .ag-thought {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 2px 0 10px;
+      padding: 7px 9px;
+      border-left: 2px solid var(--ag-purple);
+      background: color-mix(in srgb, var(--ag-purple) 7%, transparent);
+      color: var(--ag-sub);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    #gitwyrm-agent-graph-mockup .ag-thought strong { color: var(--ag-purple); font-weight: 650; }
+
+    #gitwyrm-agent-graph-mockup .ag-plan {
+      margin-top: 10px;
+      border-top: 1px solid var(--ag-border);
+      border-bottom: 1px solid var(--ag-border);
+    }
+    #gitwyrm-agent-graph-mockup .ag-plan-row {
+      min-height: 32px;
+      display: grid;
+      grid-template-columns: 17px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 2px;
+      border-bottom: 1px solid color-mix(in srgb, var(--ag-border) 62%, transparent);
+      font-size: 11px;
+    }
+    #gitwyrm-agent-graph-mockup .ag-plan-row:last-child { border-bottom: 0; }
+    #gitwyrm-agent-graph-mockup .ag-plan-state { color: var(--ag-muted); }
+    #gitwyrm-agent-graph-mockup .ag-plan-state.done { color: var(--ag-mint); }
+    #gitwyrm-agent-graph-mockup .ag-plan-state.working { color: var(--ag-blue); }
+    #gitwyrm-agent-graph-mockup .ag-plan-owner { color: var(--ag-muted); font: 10px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+
+    #gitwyrm-agent-graph-mockup .ag-event-stack { margin: 1px 0 17px 36px; }
+    #gitwyrm-agent-graph-mockup .ag-event {
+      min-height: 30px;
+      display: grid;
+      grid-template-columns: 17px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      padding: 4px 1px;
+      color: var(--ag-sub);
+      border-bottom: 1px solid color-mix(in srgb, var(--ag-border) 65%, transparent);
+      font-size: 11px;
+    }
+    #gitwyrm-agent-graph-mockup .ag-event:last-child { border-bottom: 0; }
+    #gitwyrm-agent-graph-mockup .ag-event strong { color: var(--ag-text); font-weight: 600; }
+    #gitwyrm-agent-graph-mockup .ag-event-link { border: 0; background: transparent; color: var(--ag-blue); cursor: pointer; font-size: 10.5px; }
+
+    #gitwyrm-agent-graph-mockup .ag-composer-wrap { padding: 8px 12px 12px; }
+    #gitwyrm-agent-graph-mockup .ag-composer-wrap { position: relative; }
+    #gitwyrm-agent-graph-mockup .ag-composer {
+      max-width: 760px;
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid var(--ag-border-strong);
+      border-radius: 8px;
+      background: var(--ag-panel);
+      box-shadow: 0 8px 24px color-mix(in srgb, var(--ag-shadow) 50%, transparent);
+    }
+    #gitwyrm-agent-graph-mockup .ag-mode-row {
+      min-height: 31px;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--ag-border);
+    }
+    #gitwyrm-agent-graph-mockup .ag-mode-label { margin-right: 3px; color: var(--ag-muted); font-size: 10px; }
+    #gitwyrm-agent-graph-mockup .ag-mode {
+      height: 22px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--ag-sub);
+      font-size: 10.5px;
+      cursor: pointer;
+    }
+    #gitwyrm-agent-graph-mockup .ag-mode:hover { background: var(--ag-hover); }
+    #gitwyrm-agent-graph-mockup .ag-mode.is-selected { background: var(--ag-mint-soft); color: var(--ag-mint); font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-mode-note { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-muted); font-size: 10px; }
+    #gitwyrm-agent-graph-mockup .ag-composer textarea {
+      width: 100%;
+      height: 50px;
+      resize: none;
+      padding: 10px 12px 4px;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--ag-text);
+      font-size: 12px;
+    }
+    #gitwyrm-agent-graph-mockup .ag-composer textarea::placeholder { color: var(--ag-muted); }
+    #gitwyrm-agent-graph-mockup .ag-composer-tools {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0 6px 5px;
+    }
+    #gitwyrm-agent-graph-mockup .ag-model { display: inline-flex; align-items: center; gap: 5px; color: var(--ag-sub); font-size: 10.5px; }
+    #gitwyrm-agent-graph-mockup .ag-model strong { color: var(--ag-text); font-weight: 600; }
+    #gitwyrm-agent-graph-mockup .ag-composer-spacer { flex: 1; }
+    #gitwyrm-agent-graph-mockup .ag-team-trigger { white-space: nowrap; }
+    #gitwyrm-agent-graph-mockup .ag-team-popover {
+      display: none;
+      position: absolute;
+      left: 50%;
+      bottom: 84px;
+      z-index: 16;
+      width: min(420px, calc(100% - 24px));
+      transform: translateX(-50%);
+      padding: 10px;
+      border: 1px solid var(--ag-border-strong);
+      border-radius: 8px;
+      background: var(--ag-panel);
+      box-shadow: 0 16px 42px var(--ag-shadow);
+    }
+    #gitwyrm-agent-graph-mockup .ag-team-popover.is-open { display: block; }
+    #gitwyrm-agent-graph-mockup .ag-team-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    #gitwyrm-agent-graph-mockup .ag-team-head strong { font-size: 12px; }
+    #gitwyrm-agent-graph-mockup .ag-team-head span { color: var(--ag-muted); font-size: 9.5px; }
+    #gitwyrm-agent-graph-mockup .ag-team-choice {
+      width: 100%; min-height: 39px; display: grid; grid-template-columns: 19px minmax(0,1fr) auto; align-items: center; gap: 7px;
+      margin-top: 4px; padding: 6px 7px; border: 1px solid transparent; border-radius: 6px; background: var(--ag-raised); color: var(--ag-text); text-align: left; cursor: pointer;
+    }
+    #gitwyrm-agent-graph-mockup .ag-team-choice:hover,
+    #gitwyrm-agent-graph-mockup .ag-team-choice.is-selected { border-color: color-mix(in srgb, var(--ag-mint) 55%, var(--ag-border)); background: var(--ag-mint-soft); }
+    #gitwyrm-agent-graph-mockup .ag-team-choice strong { display: block; font-size: 10.5px; }
+    #gitwyrm-agent-graph-mockup .ag-team-choice small { display: block; margin-top: 2px; color: var(--ag-muted); font-size: 9.5px; line-height: 1.3; }
+    #gitwyrm-agent-graph-mockup .ag-team-choice &gt; span:last-child { color: var(--ag-muted); font: 9px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+
+    #gitwyrm-agent-graph-mockup .ag-history-rail {
+      position: absolute;
+      z-index: 12;
+      top: 105px;
+      right: 4px;
+      width: 14px;
+      height: 305px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
+      padding: 5px 0;
+    }
+    #gitwyrm-agent-graph-mockup .ag-history-tick { width: 7px; height: 1px; margin-left: auto; border: 0; background: var(--ag-muted); opacity: .65; cursor: pointer; }
+    #gitwyrm-agent-graph-mockup .ag-history-tick:nth-child(3n) { width: 11px; }
+    #gitwyrm-agent-graph-mockup .ag-history-tick.is-current { width: 12px; height: 2px; background: var(--ag-mint); opacity: 1; }
+    #gitwyrm-agent-graph-mockup .ag-history-popup {
+      pointer-events: none;
+      opacity: 0;
+      position: absolute;
+      top: 0;
+      right: 17px;
+      width: clamp(360px, 36vw, 460px);
+      padding: 8px;
+      border: 1px solid var(--ag-border-strong);
+      border-radius: 7px;
+      background: var(--ag-panel);
+      box-shadow: 0 14px 38px var(--ag-shadow);
+      transform: translateX(5px);
+      transition: opacity .12s ease, transform .12s ease;
+    }
+    #gitwyrm-agent-graph-mockup .ag-history-rail:hover .ag-history-popup,
+    #gitwyrm-agent-graph-mockup .ag-history-rail:focus-within .ag-history-popup { pointer-events: auto; opacity: 1; transform: translateX(0); }
+    #gitwyrm-agent-graph-mockup .ag-history-jump { width: 100%; min-height: 46px; padding: 9px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--ag-sub); text-align: left; font-size: 11.5px; line-height: 1.4; cursor: pointer; }
+    #gitwyrm-agent-graph-mockup .ag-history-jump:hover { background: var(--ag-hover); color: var(--ag-text); }
+    #gitwyrm-agent-graph-mockup .ag-history-jump.is-current { background: var(--ag-mint-soft); color: var(--ag-text); }
+    #gitwyrm-agent-graph-mockup .ag-history-jump time { display: block; margin-top: 3px; color: var(--ag-muted); font: 10px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-jump-highlight { animation: ag-jump 1.4s ease; }
+    @keyframes ag-jump { 0%, 45% { outline: 1px solid var(--ag-mint); outline-offset: 5px; background: var(--ag-mint-soft); } 100% { outline-color: transparent; background: transparent; } }
+
+    #gitwyrm-agent-graph-mockup .ag-graph-panel {
+      min-width: 0;
+      display: none;
+      flex-direction: column;
+      border-left: 1px solid var(--ag-border);
+      background: var(--ag-panel);
+    }
+    #gitwyrm-agent-graph-mockup.is-panel-right .ag-graph-panel { display: flex; }
+    #gitwyrm-agent-graph-mockup .ag-panel-head {
+      height: 43px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 11px;
+      border-bottom: 1px solid var(--ag-border);
+    }
+    #gitwyrm-agent-graph-mockup .ag-panel-tabs { display: flex; align-self: stretch; gap: 2px; }
+    #gitwyrm-agent-graph-mockup .ag-panel-tab { display: inline-flex; align-items: center; gap: 5px; padding: 0 5px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--ag-muted); font-size: 10.5px; cursor: pointer; }
+    #gitwyrm-agent-graph-mockup .ag-panel-tab.is-selected { color: var(--ag-text); border-bottom-color: var(--ag-mint); }
+    #gitwyrm-agent-graph-mockup .ag-panel-tab span { min-width: 16px; padding: 1px 4px; border-radius: 8px; background: var(--ag-raised); color: var(--ag-muted); font: 8.5px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-panel-summary { margin-left: auto; color: var(--ag-muted); font: 9px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-stop-all { height: 24px; padding: 0 6px; border: 1px solid var(--ag-border); border-radius: 4px; background: var(--ag-raised); color: var(--ag-sub); font-size: 9.5px; cursor: pointer; }
+    #gitwyrm-agent-graph-mockup .ag-graph-scroll { flex: 1; min-height: 0; padding: 11px 10px; }
+    #gitwyrm-agent-graph-mockup .ag-context-view { display: none; flex: 1; min-height: 0; overflow: auto; padding: 11px; }
+    #gitwyrm-agent-graph-mockup .ag-graph-panel.is-context .ag-context-view { display: block; }
+    #gitwyrm-agent-graph-mockup .ag-graph-panel.is-context .ag-graph-scroll { display: none; }
+    #gitwyrm-agent-graph-mockup .ag-graph-panel.is-context .ag-stop-all,
+    #gitwyrm-agent-graph-mockup .ag-graph-panel.is-context .ag-panel-summary { display: none; }
+    #gitwyrm-agent-graph-mockup .ag-context-card { margin-bottom: 9px; border: 1px solid var(--ag-border); border-radius: 7px; background: var(--ag-window); }
+    #gitwyrm-agent-graph-mockup .ag-context-card-head { min-height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 9px; color: var(--ag-sub); font-size: 10px; }
+    #gitwyrm-agent-graph-mockup .ag-context-card-head strong { color: var(--ag-text); font-size: 10.5px; }
+    #gitwyrm-agent-graph-mockup .ag-context-card-head span { margin-left: auto; color: var(--ag-muted); font: 9px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-context-meter { height: 5px; margin: 0 9px 9px; overflow: hidden; border-radius: 4px; background: var(--ag-raised); }
+    #gitwyrm-agent-graph-mockup .ag-context-meter span { display: block; width: 17%; height: 100%; border-radius: inherit; background: var(--ag-mint); }
+    #gitwyrm-agent-graph-mockup .ag-context-row { min-height: 31px; display: grid; grid-template-columns: 17px minmax(0,1fr) auto; align-items: center; gap: 6px; padding: 0 9px; border-top: 1px solid var(--ag-border); color: var(--ag-sub); font-size: 9.5px; }
+    #gitwyrm-agent-graph-mockup .ag-context-row strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-text); font-weight: 550; }
+    #gitwyrm-agent-graph-mockup .ag-context-row span:last-child { color: var(--ag-muted); font: 9px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-usage-toggle { width: 100%; min-height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 9px; border: 0; background: transparent; color: var(--ag-text); font-size: 10.5px; cursor: pointer; }
+    #gitwyrm-agent-graph-mockup .ag-usage-toggle span { margin-left: auto; color: var(--ag-muted); font-size: 9px; }
+    #gitwyrm-agent-graph-mockup .ag-usage-toggle svg:last-child { transition: transform .12s ease; }
+    #gitwyrm-agent-graph-mockup .ag-usage-card.is-collapsed .ag-usage-body { display: none; }
+    #gitwyrm-agent-graph-mockup .ag-usage-card.is-collapsed .ag-usage-toggle svg:last-child { transform: rotate(-90deg); }
+    #gitwyrm-agent-graph-mockup .ag-usage-provider { padding: 7px 9px; border-top: 1px solid var(--ag-border); color: var(--ag-muted); font-size: 9.5px; }
+    #gitwyrm-agent-graph-mockup .ag-usage-provider strong { color: var(--ag-text); font-weight: 600; }
+    #gitwyrm-agent-graph-mockup .ag-usage-row { min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 9px; border-top: 1px solid var(--ag-border); color: var(--ag-sub); font-size: 9.5px; }
+    #gitwyrm-agent-graph-mockup .ag-usage-row strong { margin-left: auto; color: var(--ag-text); font: 9px &quot;Cascadia Mono&quot;, Consolas, monospace; font-weight: 500; }
+    #gitwyrm-agent-graph-mockup .ag-graph-empty { display: none; padding: 28px 16px; color: var(--ag-sub); text-align: center; font-size: 10.5px; line-height: 1.5; }
+    #gitwyrm-agent-graph-mockup .ag-graph-empty svg { display: block; width: 26px; height: 26px; margin: 0 auto 9px; color: var(--ag-muted); }
+    #gitwyrm-agent-graph-mockup.is-solo .ag-graph-tree,
+    #gitwyrm-agent-graph-mockup.is-solo .ag-inspector { display: none; }
+    #gitwyrm-agent-graph-mockup.is-solo .ag-graph-empty { display: block; }
+
+    #gitwyrm-agent-graph-mockup .ag-bottom-dock {
+      display: none;
+      height: 152px;
+      flex: none;
+      border-top: 1px solid var(--ag-border-strong);
+      background: var(--ag-panel);
+    }
+    #gitwyrm-agent-graph-mockup.is-panel-bottom .ag-bottom-dock { display: block; }
+    #gitwyrm-agent-graph-mockup .ag-bottom-dock .ag-dock-head { padding: 0 10px; }
+    #gitwyrm-agent-graph-mockup .ag-bottom-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; padding: 9px 11px; }
+    #gitwyrm-agent-graph-mockup .ag-bottom-item { min-width: 0; color: var(--ag-sub); font-size: 10px; }
+    #gitwyrm-agent-graph-mockup .ag-bottom-item strong { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-text); font-size: 11px; }
+
+    /* The Desk is dense, but its working text must remain comfortable for long sessions. */
+    #gitwyrm-agent-graph-mockup .ag-thread,
+    #gitwyrm-agent-graph-mockup .ag-tool-link { font-size: 12.5px; }
+    #gitwyrm-agent-graph-mockup .ag-section-label,
+    #gitwyrm-agent-graph-mockup .ag-source-kicker,
+    #gitwyrm-agent-graph-mockup .ag-source-meta,
+    #gitwyrm-agent-graph-mockup .ag-mode-label,
+    #gitwyrm-agent-graph-mockup .ag-mode-note { font-size: 11px; }
+    #gitwyrm-agent-graph-mockup .ag-message-label,
+    #gitwyrm-agent-graph-mockup .ag-thought,
+    #gitwyrm-agent-graph-mockup .ag-plan-row,
+    #gitwyrm-agent-graph-mockup .ag-event { font-size: 12px; }
+    #gitwyrm-agent-graph-mockup .ag-message-body { font-size: 13.5px; }
+    #gitwyrm-agent-graph-mockup .ag-mode,
+    #gitwyrm-agent-graph-mockup .ag-model,
+    #gitwyrm-agent-graph-mockup .ag-panel-tab,
+    #gitwyrm-agent-graph-mockup .ag-context-card-head,
+    #gitwyrm-agent-graph-mockup .ag-context-row,
+    #gitwyrm-agent-graph-mockup .ag-usage-toggle,
+    #gitwyrm-agent-graph-mockup .ag-usage-provider,
+    #gitwyrm-agent-graph-mockup .ag-usage-row,
+    #gitwyrm-agent-graph-mockup .ag-node-title,
+    #gitwyrm-agent-graph-mockup .ag-inspector-copy { font-size: 11.5px; }
+
+    #gitwyrm-agent-graph-mockup .ag-graph-tree { position: relative; padding-left: 4px; }
+    #gitwyrm-agent-graph-mockup .ag-node-wrap { position: relative; }
+    #gitwyrm-agent-graph-mockup .ag-node-wrap.is-child { padding-left: 25px; }
+    #gitwyrm-agent-graph-mockup .ag-node-wrap.is-child::before {
+      content: &quot;&quot;;
+      position: absolute;
+      left: 10px;
+      top: -12px;
+      bottom: 18px;
+      width: 1px;
+      background: var(--ag-border-strong);
+    }
+    #gitwyrm-agent-graph-mockup .ag-node-wrap.is-child::after {
+      content: &quot;&quot;;
+      position: absolute;
+      left: 10px;
+      top: 25px;
+      width: 15px;
+      height: 1px;
+      background: var(--ag-border-strong);
+    }
+    #gitwyrm-agent-graph-mockup .ag-node-wrap.is-child:last-child::before { bottom: calc(100% - 26px); }
+
+    #gitwyrm-agent-graph-mockup .ag-node {
+      position: relative;
+      width: 100%;
+      min-height: 51px;
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 6px;
+      padding: 6px 58px 6px 7px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: var(--ag-raised);
+      text-align: left;
+      cursor: pointer;
+    }
+    #gitwyrm-agent-graph-mockup .ag-node:hover { background: var(--ag-hover); }
+    #gitwyrm-agent-graph-mockup .ag-node.is-selected { border-color: color-mix(in srgb, var(--ag-mint) 58%, var(--ag-border)); background: var(--ag-mint-soft); }
+    #gitwyrm-agent-graph-mockup .ag-node-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ag-muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ag-muted) 14%, transparent); }
+    #gitwyrm-agent-graph-mockup .ag-node-dot.lead { width: 12px; height: 12px; background: var(--ag-mint); border-radius: 4px 7px 4px 7px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ag-mint) 14%, transparent); }
+    #gitwyrm-agent-graph-mockup .ag-node-dot.done { background: var(--ag-mint); }
+    #gitwyrm-agent-graph-mockup .ag-node-dot.working { background: var(--ag-blue); }
+    #gitwyrm-agent-graph-mockup .ag-node-dot.waiting { background: var(--ag-amber); }
+    #gitwyrm-agent-graph-mockup .ag-node-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-node-meta { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-muted); font: 9.5px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-node-status { position: absolute; top: 8px; right: 7px; color: var(--ag-muted); font-size: 9.5px; }
+    #gitwyrm-agent-graph-mockup .ag-node-status.done { color: var(--ag-mint); }
+    #gitwyrm-agent-graph-mockup .ag-node-status.working { color: var(--ag-blue); }
+    #gitwyrm-agent-graph-mockup .ag-node-status.waiting { color: var(--ag-amber); }
+
+    #gitwyrm-agent-graph-mockup .ag-inspector {
+      border-top: 1px solid var(--ag-border);
+      padding: 10px 11px 11px;
+      background: var(--ag-window);
+    }
+    #gitwyrm-agent-graph-mockup .ag-inspector-kicker { color: var(--ag-muted); font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+    #gitwyrm-agent-graph-mockup .ag-inspector-title { margin-top: 4px; font-size: 12px; font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-inspector-copy { margin-top: 5px; color: var(--ag-sub); font-size: 10.5px; line-height: 1.45; }
+    #gitwyrm-agent-graph-mockup .ag-inspector-files { margin-top: 7px; color: var(--ag-muted); font: 9.5px &quot;Cascadia Mono&quot;, Consolas, monospace; }
+    #gitwyrm-agent-graph-mockup .ag-inspector-actions { display: flex; gap: 6px; margin-top: 9px; }
+
+    #gitwyrm-agent-graph-mockup .ag-drawer-backdrop,
+    #gitwyrm-agent-graph-mockup .ag-setup-backdrop {
+      display: none;
+      position: absolute;
+      inset: 42px 0 0;
+      z-index: 20;
+      background: color-mix(in srgb, var(--ag-bg) 38%, transparent);
+      backdrop-filter: blur(2px);
+    }
+    #gitwyrm-agent-graph-mockup .ag-window { position: relative; }
+    #gitwyrm-agent-graph-mockup .ag-drawer-backdrop.is-open { display: flex; justify-content: flex-end; }
+    #gitwyrm-agent-graph-mockup .ag-drawer {
+      width: min(430px, 92%);
+      height: 100%;
+      background: var(--ag-panel);
+      border-left: 1px solid var(--ag-border-strong);
+      box-shadow: -18px 0 42px var(--ag-shadow);
+    }
+    #gitwyrm-agent-graph-mockup .ag-drawer-head {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--ag-border);
+    }
+    #gitwyrm-agent-graph-mockup .ag-drawer-head strong { font-size: 13px; font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-drawer-body { padding: 14px; }
+    #gitwyrm-agent-graph-mockup .ag-source-block { margin-bottom: 17px; }
+    #gitwyrm-agent-graph-mockup .ag-source-block h3 { margin: 0 0 6px; color: var(--ag-muted); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+    #gitwyrm-agent-graph-mockup .ag-source-block p { margin: 0; color: var(--ag-sub); font-size: 11.5px; line-height: 1.5; }
+    #gitwyrm-agent-graph-mockup .ag-source-line { min-height: 31px; display: grid; grid-template-columns: 92px minmax(0,1fr); align-items: center; gap: 8px; border-bottom: 1px solid var(--ag-border); font-size: 10.5px; }
+    #gitwyrm-agent-graph-mockup .ag-source-line span:first-child { color: var(--ag-muted); }
+    #gitwyrm-agent-graph-mockup .ag-source-line code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ag-text); font-family: &quot;Cascadia Mono&quot;, Consolas, monospace; }
+
+    #gitwyrm-agent-graph-mockup .ag-setup-view {
+      display: none;
+      grid-column: 2 / 4;
+      min-width: 0;
+      background: var(--ag-window);
+    }
+    #gitwyrm-agent-graph-mockup.is-setup .ag-main,
+    #gitwyrm-agent-graph-mockup.is-setup .ag-graph-panel { display: none; }
+    #gitwyrm-agent-graph-mockup.is-setup .ag-setup-view { display: block; }
+    #gitwyrm-agent-graph-mockup .ag-setup-head {
+      min-height: 82px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--ag-border);
+    }
+    #gitwyrm-agent-graph-mockup .ag-setup-title { font-size: 16px; font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-setup-subtitle { margin-top: 3px; color: var(--ag-sub); font-size: 11px; }
+    #gitwyrm-agent-graph-mockup .ag-setup-head .ag-primary-button { margin-left: auto; }
+    #gitwyrm-agent-graph-mockup .ag-setup-tabs { display: flex; gap: 2px; padding: 8px 18px 0; border-bottom: 1px solid var(--ag-border); }
+    #gitwyrm-agent-graph-mockup .ag-setup-tab { height: 30px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--ag-sub); font-size: 11px; cursor: pointer; }
+    #gitwyrm-agent-graph-mockup .ag-setup-tab.is-selected { color: var(--ag-text); border-bottom-color: var(--ag-mint); }
+    #gitwyrm-agent-graph-mockup .ag-setup-content { padding: 14px 18px; }
+    #gitwyrm-agent-graph-mockup .ag-setup-summary { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; color: var(--ag-sub); font-size: 10.5px; }
+    #gitwyrm-agent-graph-mockup .ag-setup-summary strong { color: var(--ag-text); font-weight: 650; }
+    #gitwyrm-agent-graph-mockup .ag-sync-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10.5px; }
+    #gitwyrm-agent-graph-mockup .ag-sync-table th { height: 29px; padding: 0 7px; color: var(--ag-muted); border-bottom: 1px solid var(--ag-border-strong); text-align: left; font-weight: 600; }
+    #gitwyrm-agent-graph-mockup .ag-sync-table th:not(:first-child),
+    #gitwyrm-agent-graph-mockup .ag-sync-table td:not(:first-child) { text-align: center; }
+    #gitwyrm-agent-graph-mockup .ag-sync-table td { height: 38px; padding: 0 7px; border-bottom: 1px solid var(--ag-border); }
+    #gitwyrm-agent-graph-mockup .ag-sync-name { text-align: left !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    #gitwyrm-agent-graph-mockup .ag-sync-name span { display: block; margin-top: 2px; color: var(--ag-muted); font: 9px &quot;Cascadia Mono&quot;, Consolas, monospace; font-weight: 400; }
+    #gitwyrm-agent-graph-mockup .ag-sync-state { display: inline-flex; align-items: center; gap: 4px; padding: 2px 5px; border-radius: 4px; color: var(--ag-sub); background: var(--ag-raised); }
+    #gitwyrm-agent-graph-mockup .ag-sync-state.good { color: var(--ag-mint); background: var(--ag-mint-soft); }
+    #gitwyrm-agent-graph-mockup .ag-sync-state.warn { color: var(--ag-amber); background: var(--ag-amber-soft); }
+    #gitwyrm-agent-graph-mockup .ag-sync-state.missing { color: var(--ag-muted); }
+
+    #gitwyrm-agent-graph-mockup .ag-toast {
+      position: absolute;
+      right: 14px;
+      bottom: 14px;
+      z-index: 40;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      max-width: 340px;
+      padding: 9px 11px;
+      border: 1px solid var(--ag-border-strong);
+      border-radius: 7px;
+      background: var(--ag-panel);
+      color: var(--ag-text);
+      box-shadow: 0 12px 34px var(--ag-shadow);
+      font-size: 11px;
+    }
+    #gitwyrm-agent-graph-mockup .ag-toast.is-visible { display: flex; }
+    #gitwyrm-agent-graph-mockup .ag-toast svg { color: var(--ag-mint); }
+
+    @media (max-width: 900px) {
+      #gitwyrm-agent-graph-mockup .ag-titlebar { grid-template-columns: 176px minmax(0, 1fr) auto; }
+      #gitwyrm-agent-graph-mockup .ag-shell { grid-template-columns: 176px minmax(0, 1fr); }
+      #gitwyrm-agent-graph-mockup .ag-graph-panel { grid-column: 2; border-left: 0; border-top: 1px solid var(--ag-border); }
+      #gitwyrm-agent-graph-mockup .ag-graph-scroll { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .8fr); gap: 12px; }
+      #gitwyrm-agent-graph-mockup .ag-inspector { border-top: 0; border-left: 1px solid var(--ag-border); }
+      #gitwyrm-agent-graph-mockup .ag-setup-view { grid-column: 2; }
+    }
+
+    @media (max-width: 760px) {
+      #gitwyrm-agent-graph-mockup.is-split .ag-pane-grid { grid-template-columns: minmax(0, 1fr); }
+      #gitwyrm-agent-graph-mockup.is-split .ag-pane { min-height: 480px; }
+      #gitwyrm-agent-graph-mockup .ag-workspace-note { display: none; }
+      #gitwyrm-agent-graph-mockup .ag-layout-button span { display: none; }
+    }
+
+    @media (max-width: 620px) {
+      #gitwyrm-agent-graph-mockup .ag-window { min-height: 720px; border-radius: 6px; }
+      #gitwyrm-agent-graph-mockup .ag-titlebar { grid-template-columns: minmax(0, 1fr) auto; }
+      #gitwyrm-agent-graph-mockup .ag-title-center { display: none; }
+      #gitwyrm-agent-graph-mockup .ag-shell { min-height: 678px; display: block; }
+      #gitwyrm-agent-graph-mockup .ag-sidebar { display: none; }
+      #gitwyrm-agent-graph-mockup .ag-source { grid-template-columns: minmax(0, 1fr); }
+      #gitwyrm-agent-graph-mockup .ag-source-state { display: none; }
+      #gitwyrm-agent-graph-mockup .ag-conversation { padding: 14px 12px; }
+      #gitwyrm-agent-graph-mockup .ag-event-stack { margin-left: 0; }
+      #gitwyrm-agent-graph-mockup .ag-mode-note { display: none; }
+      #gitwyrm-agent-graph-mockup .ag-history-popup { width: min(360px, calc(100vw - 48px)); }
+      #gitwyrm-agent-graph-mockup .ag-graph-scroll { display: block; }
+      #gitwyrm-agent-graph-mockup .ag-inspector { border-top: 1px solid var(--ag-border); border-left: 0; }
+      #gitwyrm-agent-graph-mockup .ag-setup-view { min-height: 678px; }
+      #gitwyrm-agent-graph-mockup .ag-setup-head { align-items: flex-start; flex-wrap: wrap; }
+      #gitwyrm-agent-graph-mockup .ag-setup-head .ag-primary-button { margin-left: 0; }
+      #gitwyrm-agent-graph-mockup .ag-setup-content { overflow-x: auto; padding: 10px; }
+      #gitwyrm-agent-graph-mockup .ag-sync-table { min-width: 690px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #gitwyrm-agent-graph-mockup * { transition: none !important; }
+    }
+  &lt;/style&gt;
+
+  &lt;section class=&quot;ag-window&quot; aria-label=&quot;GitWyrm Agent Desk mockup&quot;&gt;
+    &lt;header class=&quot;ag-titlebar&quot;&gt;
+      &lt;div class=&quot;ag-brand&quot;&gt;&lt;span class=&quot;ag-mark&quot;&gt;G&lt;/span&gt;&lt;span&gt;Agent Desk&lt;/span&gt;&lt;/div&gt;
+      &lt;div class=&quot;ag-title-center&quot;&gt;&lt;i data-lucide=&quot;columns-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;Agent workspace&lt;/strong&gt;&lt;span&gt;·&lt;/span&gt;&lt;span&gt;2 chats&lt;/span&gt;&lt;/div&gt;
+      &lt;div class=&quot;ag-title-actions&quot;&gt;
+        &lt;button class=&quot;ag-icon-button&quot; type=&quot;button&quot; aria-label=&quot;Show main GitWyrm window&quot; data-toast=&quot;Main GitWyrm window focused&quot;&gt;&lt;i data-lucide=&quot;panels-top-left&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+        &lt;button class=&quot;ag-icon-button&quot; type=&quot;button&quot; aria-label=&quot;Keep Agent Desk on top&quot; data-toggle-pin&gt;&lt;i data-lucide=&quot;pin&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+        &lt;button class=&quot;ag-icon-button&quot; type=&quot;button&quot; aria-label=&quot;More options&quot; data-toast=&quot;More Agent Desk options&quot;&gt;&lt;i data-lucide=&quot;ellipsis&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/header&gt;
+
+    &lt;div class=&quot;ag-shell&quot;&gt;
+      &lt;aside class=&quot;ag-sidebar&quot; aria-label=&quot;Chats&quot;&gt;
+        &lt;div class=&quot;ag-sidebar-top&quot;&gt;
+          &lt;button class=&quot;ag-new-chat&quot; type=&quot;button&quot; data-new-chat&gt;&lt;i data-lucide=&quot;square-pen&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;New chat&lt;/span&gt;&lt;/button&gt;
+          &lt;div class=&quot;ag-sidebar-filters&quot; aria-label=&quot;Arrange chats&quot;&gt;
+            &lt;button class=&quot;ag-sidebar-filter is-selected&quot; type=&quot;button&quot; data-toast=&quot;Showing recent chats first&quot;&gt;&lt;i data-lucide=&quot;clock-3&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Recent&lt;/button&gt;
+            &lt;button class=&quot;ag-sidebar-filter&quot; type=&quot;button&quot; data-toast=&quot;Chats grouped by project&quot;&gt;&lt;i data-lucide=&quot;folders&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Project&lt;/button&gt;
+            &lt;button class=&quot;ag-sidebar-filter&quot; type=&quot;button&quot; data-toast=&quot;Chats grouped by changed files&quot;&gt;&lt;i data-lucide=&quot;file-diff&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Diff&lt;/button&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;ag-section-label&quot;&gt;&lt;span&gt;Recent&lt;/span&gt;&lt;span class=&quot;ag-section-count&quot;&gt;12 today&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;ag-thread-list&quot;&gt;
+          &lt;button class=&quot;ag-thread is-selected&quot; type=&quot;button&quot; data-session-title=&quot;Settings crash after switching branches&quot; data-session-source=&quot;Issue #482 · GitWyrm&quot;&gt;&lt;i class=&quot;ag-thread-icon&quot; data-lucide=&quot;circle-dot&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span class=&quot;ag-thread-title&quot;&gt;Settings crash after switching&lt;/span&gt;&lt;span class=&quot;ag-busy-dot&quot; aria-label=&quot;Working&quot;&gt;&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-thread&quot; type=&quot;button&quot; data-session-title=&quot;Review PR 318&quot; data-session-source=&quot;Pull request #318 · GitWyrm&quot;&gt;&lt;i class=&quot;ag-thread-icon&quot; data-lucide=&quot;git-pull-request&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span class=&quot;ag-thread-title&quot;&gt;Review PR 318&lt;/span&gt;&lt;span class=&quot;ag-thread-time&quot;&gt;9m&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-thread&quot; type=&quot;button&quot; data-session-title=&quot;Draft release notes&quot; data-session-source=&quot;Manual chat · GitWyrm&quot;&gt;&lt;i class=&quot;ag-thread-icon&quot; data-lucide=&quot;message-square-text&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span class=&quot;ag-thread-title&quot;&gt;Draft release notes&lt;/span&gt;&lt;span class=&quot;ag-thread-time&quot;&gt;24m&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-thread&quot; type=&quot;button&quot; data-session-title=&quot;Fix failed Windows build&quot; data-session-source=&quot;Failed check · GitWyrm&quot;&gt;&lt;i class=&quot;ag-thread-icon&quot; data-lucide=&quot;circle-alert&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span class=&quot;ag-thread-title&quot;&gt;Fix failed Windows build&lt;/span&gt;&lt;span class=&quot;ag-thread-time&quot;&gt;1h&lt;/span&gt;&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;ag-section-label ag-project-label&quot;&gt;&lt;i data-lucide=&quot;folder-git-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;GitWyrm&lt;/span&gt;&lt;span class=&quot;ag-section-count&quot;&gt;8&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;ag-thread-list&quot;&gt;
+          &lt;button class=&quot;ag-thread&quot; type=&quot;button&quot; data-session-title=&quot;Plan updater handoff&quot; data-session-source=&quot;OpenSpec task · GitWyrm&quot;&gt;&lt;i class=&quot;ag-thread-icon&quot; data-lucide=&quot;list-tree&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span class=&quot;ag-thread-title&quot;&gt;Plan updater handoff&lt;/span&gt;&lt;span class=&quot;ag-thread-time&quot;&gt;2h&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-thread&quot; type=&quot;button&quot; data-session-title=&quot;Review OpenSpec change&quot; data-session-source=&quot;OpenSpec change · GitWyrm&quot;&gt;&lt;i class=&quot;ag-thread-icon&quot; data-lucide=&quot;file-check-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span class=&quot;ag-thread-title&quot;&gt;Review OpenSpec change&lt;/span&gt;&lt;span class=&quot;ag-thread-time&quot;&gt;16h&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-thread&quot; type=&quot;button&quot; data-session-title=&quot;Fix issue 477&quot; data-session-source=&quot;Issue #477 · GitWyrm&quot;&gt;&lt;i class=&quot;ag-thread-icon&quot; data-lucide=&quot;circle-dot&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span class=&quot;ag-thread-title&quot;&gt;Fix issue 477&lt;/span&gt;&lt;span class=&quot;ag-thread-time&quot;&gt;1d&lt;/span&gt;&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;ag-section-label ag-project-label&quot;&gt;&lt;i data-lucide=&quot;folder&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;HearthShelf&lt;/span&gt;&lt;span class=&quot;ag-section-count&quot;&gt;5&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;ag-thread-list&quot;&gt;
+          &lt;button class=&quot;ag-thread&quot; type=&quot;button&quot; data-session-title=&quot;Fix mobile player resume&quot; data-session-source=&quot;Issue #611 · HearthShelf&quot;&gt;&lt;i class=&quot;ag-thread-icon&quot; data-lucide=&quot;message-square-text&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span class=&quot;ag-thread-title&quot;&gt;Fix mobile player resume&lt;/span&gt;&lt;span class=&quot;ag-thread-time&quot;&gt;1d&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-thread&quot; type=&quot;button&quot; data-session-title=&quot;Summarize web PR 804&quot; data-session-source=&quot;Pull request #804 · HearthShelf&quot;&gt;&lt;i class=&quot;ag-thread-icon&quot; data-lucide=&quot;git-pull-request&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span class=&quot;ag-thread-title&quot;&gt;Summarize web PR 804&lt;/span&gt;&lt;span class=&quot;ag-thread-time&quot;&gt;2d&lt;/span&gt;&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;ag-section-label ag-project-label&quot;&gt;&lt;i data-lucide=&quot;folder&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;SpartanUI&lt;/span&gt;&lt;span class=&quot;ag-section-count&quot;&gt;3&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;ag-thread-list&quot;&gt;
+          &lt;button class=&quot;ag-thread&quot; type=&quot;button&quot; data-session-title=&quot;Review addon issue 129&quot; data-session-source=&quot;Issue #129 · SpartanUI&quot;&gt;&lt;i class=&quot;ag-thread-icon&quot; data-lucide=&quot;circle-dot&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span class=&quot;ag-thread-title&quot;&gt;Review addon issue 129&lt;/span&gt;&lt;span class=&quot;ag-thread-time&quot;&gt;3d&lt;/span&gt;&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;section class=&quot;ag-sidebar-dock&quot; aria-label=&quot;Pinned context panel&quot;&gt;
+          &lt;div class=&quot;ag-dock-head&quot;&gt;&lt;i data-lucide=&quot;panel-left&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Context &lt;span&gt;active chat&lt;/span&gt;&lt;button class=&quot;ag-icon-button&quot; type=&quot;button&quot; aria-label=&quot;Unpin panel&quot; data-dock-panel=&quot;popover&quot;&gt;&lt;i data-lucide=&quot;x&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;
+          &lt;div class=&quot;ag-dock-body&quot;&gt;&lt;div class=&quot;ag-dock-line&quot;&gt;Project&lt;strong data-dock-project&gt;GitWyrm&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-dock-line&quot;&gt;Source&lt;strong data-dock-source&gt;Issue #482&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-dock-line&quot;&gt;Context&lt;strong&gt;17%&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-dock-line&quot;&gt;Helpers&lt;strong&gt;3 active&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;/section&gt;
+        &lt;div class=&quot;ag-sidebar-spacer&quot;&gt;&lt;/div&gt;
+        &lt;nav class=&quot;ag-sidebar-tools&quot; aria-label=&quot;Agent Desk tools&quot;&gt;
+          &lt;button class=&quot;ag-tool-link&quot; type=&quot;button&quot; data-open-setup&gt;&lt;i data-lucide=&quot;blocks&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Agent setup&lt;/span&gt;&lt;span class=&quot;ag-tool-count&quot;&gt;3 differ&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-tool-link&quot; type=&quot;button&quot; data-toast=&quot;Archive opened&quot;&gt;&lt;i data-lucide=&quot;archive&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Archive&lt;/span&gt;&lt;span class=&quot;ag-tool-count&quot;&gt;28&lt;/span&gt;&lt;/button&gt;
+        &lt;/nav&gt;
+      &lt;/aside&gt;
+
+      &lt;main class=&quot;ag-main&quot;&gt;
+        &lt;div class=&quot;ag-workspace-bar&quot;&gt;
+          &lt;span class=&quot;ag-workspace-label&quot;&gt;Workspace&lt;/span&gt;
+          &lt;span class=&quot;ag-workspace-note&quot;&gt;Chat clicks replace the active pane&lt;/span&gt;
+          &lt;span class=&quot;ag-workspace-spacer&quot;&gt;&lt;/span&gt;
+          &lt;button class=&quot;ag-layout-button is-selected&quot; type=&quot;button&quot; data-toggle-split aria-pressed=&quot;true&quot;&gt;&lt;i data-lucide=&quot;columns-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Split view&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-layout-button is-selected&quot; type=&quot;button&quot; data-toggle-source aria-pressed=&quot;true&quot;&gt;&lt;i data-lucide=&quot;panel-top-close&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Source bars hidden&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-layout-button&quot; type=&quot;button&quot; data-dock-panel=&quot;popover&quot;&gt;&lt;i data-lucide=&quot;panels-top-left&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Panels&lt;/span&gt;&lt;/button&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;ag-pane-grid&quot;&gt;
+        &lt;section class=&quot;ag-pane ag-pane-primary is-active&quot; data-pane=&quot;primary&quot; aria-label=&quot;Settings crash conversation&quot;&gt;
+          &lt;div class=&quot;ag-pane-head&quot;&gt;
+            &lt;div class=&quot;ag-pane-heading&quot;&gt;&lt;span class=&quot;ag-pane-title&quot; data-pane-title&gt;Settings crash after switching branches&lt;/span&gt;&lt;span class=&quot;ag-pane-source&quot; data-pane-source&gt;Issue #482 · GitWyrm&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;ag-pane-actions&quot; aria-label=&quot;Chat panels&quot;&gt;
+              &lt;button class=&quot;ag-pane-action&quot; type=&quot;button&quot; aria-label=&quot;Show source&quot; data-detail-kind=&quot;source&quot;&gt;&lt;i data-lucide=&quot;link-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+              &lt;button class=&quot;ag-pane-action is-selected&quot; type=&quot;button&quot; aria-label=&quot;Show context&quot; data-detail-kind=&quot;context&quot;&gt;&lt;i data-lucide=&quot;gauge&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+              &lt;button class=&quot;ag-pane-action&quot; type=&quot;button&quot; aria-label=&quot;Show agent graph&quot; data-detail-kind=&quot;graph&quot;&gt;&lt;i data-lucide=&quot;git-fork&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;ag-detail-popover is-open&quot; data-detail-popover&gt;
+              &lt;div class=&quot;ag-popover-head&quot;&gt;&lt;i data-lucide=&quot;grip-vertical&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong data-popover-title&gt;Context&lt;/strong&gt;&lt;span&gt;active chat&lt;/span&gt;&lt;button class=&quot;ag-icon-button&quot; type=&quot;button&quot; aria-label=&quot;Close panel&quot; data-close-detail&gt;&lt;i data-lucide=&quot;x&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;
+              &lt;div class=&quot;ag-popover-body&quot; data-popover-context&gt;&lt;div style=&quot;display:flex;align-items:center;gap:7px;font-size:10.5px&quot;&gt;&lt;strong&gt;Session context&lt;/strong&gt;&lt;span style=&quot;margin-left:auto;color:var(--ag-muted);font-family:&#x27;Cascadia Mono&#x27;,Consolas,monospace&quot;&gt;17% · 31k / 184k&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-meter&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Project&lt;strong data-popover-project&gt;GitWyrm&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Source&lt;strong data-popover-source&gt;Issue #482 + task 2&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Usage remaining&lt;strong&gt;2,409 / 15,000&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Helpers&lt;strong&gt;3 active&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
+              &lt;div class=&quot;ag-popover-dock&quot;&gt;&lt;span&gt;Pin panel&lt;/span&gt;&lt;button class=&quot;ag-dock-button&quot; type=&quot;button&quot; data-dock-panel=&quot;left&quot;&gt;&lt;i data-lucide=&quot;panel-left&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Left&lt;/button&gt;&lt;button class=&quot;ag-dock-button&quot; type=&quot;button&quot; data-dock-panel=&quot;bottom&quot;&gt;&lt;i data-lucide=&quot;panel-bottom&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Bottom&lt;/button&gt;&lt;button class=&quot;ag-dock-button&quot; type=&quot;button&quot; data-dock-panel=&quot;right&quot;&gt;&lt;i data-lucide=&quot;panel-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Right&lt;/button&gt;&lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+
+        &lt;div class=&quot;ag-source&quot;&gt;
+          &lt;button class=&quot;ag-source-button&quot; type=&quot;button&quot; data-open-source aria-label=&quot;Open the source for this chat&quot;&gt;
+            &lt;span class=&quot;ag-source-icon&quot;&gt;&lt;i data-lucide=&quot;circle-dot&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
+            &lt;span&gt;
+              &lt;span class=&quot;ag-source-kicker&quot;&gt;Started from Issue #482&lt;/span&gt;
+              &lt;span class=&quot;ag-source-title&quot;&gt;Settings crash after switching branches&lt;/span&gt;
+              &lt;span class=&quot;ag-source-meta&quot;&gt;OpenSpec fix-settings-switch · task 2 · source is current&lt;/span&gt;
+            &lt;/span&gt;
+          &lt;/button&gt;
+          &lt;div class=&quot;ag-source-state&quot;&gt;&lt;span class=&quot;ag-live&quot;&gt;Live source&lt;/span&gt;&lt;button class=&quot;ag-quiet-button&quot; type=&quot;button&quot; data-open-source&gt;View source &lt;i data-lucide=&quot;chevron-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;ag-conversation&quot;&gt;
+          &lt;div class=&quot;ag-chat-width&quot;&gt;
+            &lt;article class=&quot;ag-message&quot; id=&quot;message-request&quot;&gt;
+              &lt;div class=&quot;ag-avatar&quot;&gt;You&lt;/div&gt;
+              &lt;div&gt;
+                &lt;div class=&quot;ag-message-label&quot;&gt;You &lt;span&gt;10:42&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;ag-message-body&quot;&gt;Fix this. Keep the current branch switching behavior, and make sure a failed settings read cannot take down the whole window.&lt;/div&gt;
+              &lt;/div&gt;
+            &lt;/article&gt;
+
+            &lt;article class=&quot;ag-message&quot; id=&quot;message-plan&quot;&gt;
+              &lt;div class=&quot;ag-avatar lead&quot;&gt;Lead&lt;/div&gt;
+              &lt;div&gt;
+                &lt;div class=&quot;ag-message-label&quot;&gt;Sol · Lead &lt;span&gt;Auto&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;ag-thought&quot;&gt;&lt;i data-lucide=&quot;brain&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;div&gt;&lt;strong&gt;Thinking&lt;/strong&gt; The issue and OpenSpec task agree on the failure state. I can investigate the Rust read path while a UI worker checks the recovery boundary, then verify both together.&lt;/div&gt;&lt;/div&gt;
+                &lt;div class=&quot;ag-message-body&quot;&gt;I found the crash path and made a four-step plan. Two helpers can work at the same time without touching the same files.&lt;/div&gt;
+                &lt;div class=&quot;ag-plan&quot; aria-label=&quot;Lead agent plan&quot;&gt;
+                  &lt;div class=&quot;ag-plan-row&quot;&gt;&lt;i class=&quot;ag-plan-state done&quot; data-lucide=&quot;circle-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Trace the failed settings read&lt;/span&gt;&lt;span class=&quot;ag-plan-owner&quot;&gt;Luna · done&lt;/span&gt;&lt;/div&gt;
+                  &lt;div class=&quot;ag-plan-row&quot;&gt;&lt;i class=&quot;ag-plan-state working&quot; data-lucide=&quot;loader-circle&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Add a safe recovery state&lt;/span&gt;&lt;span class=&quot;ag-plan-owner&quot;&gt;Fable · working&lt;/span&gt;&lt;/div&gt;
+                  &lt;div class=&quot;ag-plan-row&quot;&gt;&lt;i class=&quot;ag-plan-state&quot; data-lucide=&quot;circle&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Run settings and branch checks&lt;/span&gt;&lt;span class=&quot;ag-plan-owner&quot;&gt;Luna · waiting&lt;/span&gt;&lt;/div&gt;
+                  &lt;div class=&quot;ag-plan-row&quot;&gt;&lt;i class=&quot;ag-plan-state&quot; data-lucide=&quot;circle&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Review the combined change&lt;/span&gt;&lt;span class=&quot;ag-plan-owner&quot;&gt;Sol · queued&lt;/span&gt;&lt;/div&gt;
+                &lt;/div&gt;
+              &lt;/div&gt;
+            &lt;/article&gt;
+
+            &lt;div class=&quot;ag-event-stack&quot; aria-label=&quot;Recent agent activity&quot;&gt;
+              &lt;div class=&quot;ag-event&quot;&gt;&lt;i data-lucide=&quot;search-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;&lt;strong&gt;Research finished&lt;/strong&gt; · the panic starts in &lt;code&gt;settings.rs&lt;/code&gt; when the repo path changes&lt;/span&gt;&lt;button class=&quot;ag-event-link&quot; type=&quot;button&quot; data-select-node=&quot;research&quot;&gt;Output&lt;/button&gt;&lt;/div&gt;
+              &lt;div class=&quot;ag-event&quot;&gt;&lt;i data-lucide=&quot;file-pen-line&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;&lt;strong&gt;UI worker changed 2 files&lt;/strong&gt; · adding an inline recovery state&lt;/span&gt;&lt;button class=&quot;ag-event-link&quot; type=&quot;button&quot; data-select-node=&quot;ui&quot;&gt;View diff&lt;/button&gt;&lt;/div&gt;
+              &lt;div class=&quot;ag-event&quot;&gt;&lt;i data-lucide=&quot;shield-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;&lt;strong&gt;Your files are untouched&lt;/strong&gt; · changes are isolated in the issue worktree&lt;/span&gt;&lt;button class=&quot;ag-event-link&quot; type=&quot;button&quot; data-toast=&quot;Worktree agent/482-settings-crash opened&quot;&gt;Worktree&lt;/button&gt;&lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;ag-history-rail&quot; aria-label=&quot;Jump to your earlier messages&quot;&gt;
+          &lt;button class=&quot;ag-history-tick&quot; type=&quot;button&quot; aria-label=&quot;Show earlier messages&quot;&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-history-tick&quot; type=&quot;button&quot; aria-label=&quot;Show earlier messages&quot;&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-history-tick&quot; type=&quot;button&quot; aria-label=&quot;Show earlier messages&quot;&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-history-tick&quot; type=&quot;button&quot; aria-label=&quot;Show earlier messages&quot;&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-history-tick is-current&quot; type=&quot;button&quot; aria-label=&quot;Current message&quot;&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-history-tick&quot; type=&quot;button&quot; aria-label=&quot;Show earlier messages&quot;&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-history-tick&quot; type=&quot;button&quot; aria-label=&quot;Show earlier messages&quot;&gt;&lt;/button&gt;
+          &lt;div class=&quot;ag-history-popup&quot;&gt;
+            &lt;button class=&quot;ag-history-jump&quot; type=&quot;button&quot; data-jump=&quot;message-request&quot;&gt;Keep the branch switching behavior exactly as it is.&lt;time&gt;10:31 · you&lt;/time&gt;&lt;/button&gt;
+            &lt;button class=&quot;ag-history-jump&quot; type=&quot;button&quot; data-jump=&quot;message-plan&quot;&gt;Use the existing recovery copy if there is one.&lt;time&gt;10:36 · you&lt;/time&gt;&lt;/button&gt;
+            &lt;button class=&quot;ag-history-jump is-current&quot; type=&quot;button&quot; data-jump=&quot;message-request&quot;&gt;Fix this. A failed settings read cannot take down the window.&lt;time&gt;10:42 · you&lt;/time&gt;&lt;/button&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;ag-composer-wrap&quot;&gt;
+          &lt;div class=&quot;ag-team-popover&quot; data-team-popover&gt;
+            &lt;div class=&quot;ag-team-head&quot;&gt;&lt;i data-lucide=&quot;network&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;Who works on this chat?&lt;/strong&gt;&lt;span&gt;Change at any time&lt;/span&gt;&lt;/div&gt;
+            &lt;button class=&quot;ag-team-choice&quot; type=&quot;button&quot; data-team=&quot;solo&quot;&gt;&lt;i data-lucide=&quot;user&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;&lt;strong&gt;Solo agent&lt;/strong&gt;&lt;small&gt;One agent owns the chat. No graph is created.&lt;/small&gt;&lt;/span&gt;&lt;span&gt;1 agent&lt;/span&gt;&lt;/button&gt;
+            &lt;button class=&quot;ag-team-choice is-selected&quot; type=&quot;button&quot; data-team=&quot;helpers&quot;&gt;&lt;i data-lucide=&quot;git-fork&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;&lt;strong&gt;Lead + helpers&lt;/strong&gt;&lt;small&gt;Sol splits safe work into a graph. Plan lets you approve it first; Auto starts it when useful.&lt;/small&gt;&lt;/span&gt;&lt;span&gt;up to 3&lt;/span&gt;&lt;/button&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;ag-composer&quot;&gt;
+            &lt;div class=&quot;ag-mode-row&quot; role=&quot;group&quot; aria-label=&quot;Agent operating mode&quot;&gt;
+              &lt;span class=&quot;ag-mode-label&quot;&gt;Mode&lt;/span&gt;
+              &lt;button class=&quot;ag-mode&quot; type=&quot;button&quot; data-mode=&quot;Ask&quot;&gt;Ask&lt;/button&gt;
+              &lt;button class=&quot;ag-mode&quot; type=&quot;button&quot; data-mode=&quot;Plan&quot;&gt;Plan&lt;/button&gt;
+              &lt;button class=&quot;ag-mode is-selected&quot; type=&quot;button&quot; data-mode=&quot;Auto&quot;&gt;Auto&lt;/button&gt;
+              &lt;span class=&quot;ag-mode-note&quot; data-mode-note&gt;Lead may use up to 3 helpers and asks before risky actions&lt;/span&gt;
+            &lt;/div&gt;
+            &lt;textarea aria-label=&quot;Message the lead agent&quot; placeholder=&quot;Steer the lead or ask about the work…&quot;&gt;&lt;/textarea&gt;
+            &lt;div class=&quot;ag-composer-tools&quot;&gt;
+              &lt;button class=&quot;ag-icon-button&quot; type=&quot;button&quot; aria-label=&quot;Attach context&quot; data-toast=&quot;Choose context to attach&quot;&gt;&lt;i data-lucide=&quot;paperclip&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+              &lt;span class=&quot;ag-model&quot;&gt;&lt;i data-lucide=&quot;sparkles&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;Sol&lt;/strong&gt; lead · 3 helpers max&lt;/span&gt;
+              &lt;button class=&quot;ag-quiet-button ag-team-trigger&quot; type=&quot;button&quot; data-team-trigger&gt;&lt;i data-lucide=&quot;git-fork&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span data-team-label&gt;Lead + helpers&lt;/span&gt;&lt;i data-lucide=&quot;chevron-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+              &lt;span class=&quot;ag-composer-spacer&quot;&gt;&lt;/span&gt;
+              &lt;button class=&quot;ag-primary-button&quot; type=&quot;button&quot; data-toast=&quot;Message sent to the lead agent&quot;&gt;Send &lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;/section&gt;
+
+        &lt;section class=&quot;ag-pane ag-pane-secondary&quot; data-pane=&quot;secondary&quot; aria-label=&quot;Pull request review conversation&quot;&gt;
+          &lt;div class=&quot;ag-pane-head&quot;&gt;
+            &lt;div class=&quot;ag-pane-heading&quot;&gt;&lt;span class=&quot;ag-pane-title&quot; data-pane-title&gt;Review PR 318&lt;/span&gt;&lt;span class=&quot;ag-pane-source&quot; data-pane-source&gt;Pull request #318 · GitWyrm&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;ag-pane-actions&quot; aria-label=&quot;Chat panels&quot;&gt;
+              &lt;button class=&quot;ag-pane-action&quot; type=&quot;button&quot; aria-label=&quot;Show source&quot; data-detail-kind=&quot;source&quot;&gt;&lt;i data-lucide=&quot;link-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+              &lt;button class=&quot;ag-pane-action&quot; type=&quot;button&quot; aria-label=&quot;Show context&quot; data-detail-kind=&quot;context&quot;&gt;&lt;i data-lucide=&quot;gauge&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+              &lt;button class=&quot;ag-pane-action&quot; type=&quot;button&quot; aria-label=&quot;Show agent graph&quot; data-detail-kind=&quot;graph&quot;&gt;&lt;i data-lucide=&quot;git-fork&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;ag-detail-popover&quot; data-detail-popover&gt;
+              &lt;div class=&quot;ag-popover-head&quot;&gt;&lt;i data-lucide=&quot;grip-vertical&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong data-popover-title&gt;Context&lt;/strong&gt;&lt;span&gt;active chat&lt;/span&gt;&lt;button class=&quot;ag-icon-button&quot; type=&quot;button&quot; aria-label=&quot;Close panel&quot; data-close-detail&gt;&lt;i data-lucide=&quot;x&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;
+              &lt;div class=&quot;ag-popover-body&quot;&gt;&lt;div style=&quot;display:flex;align-items:center;gap:7px;font-size:10.5px&quot;&gt;&lt;strong&gt;Session context&lt;/strong&gt;&lt;span style=&quot;margin-left:auto;color:var(--ag-muted);font-family:&#x27;Cascadia Mono&#x27;,Consolas,monospace&quot;&gt;8% · read-only&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-meter&quot;&gt;&lt;span style=&quot;width:8%&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Project&lt;strong&gt;GitWyrm&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Source&lt;strong&gt;Pull request #318&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Mode&lt;strong&gt;Review · Solo&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Changed files&lt;strong&gt;12&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
+              &lt;div class=&quot;ag-popover-dock&quot;&gt;&lt;span&gt;Pin panel&lt;/span&gt;&lt;button class=&quot;ag-dock-button&quot; type=&quot;button&quot; data-dock-panel=&quot;left&quot;&gt;&lt;i data-lucide=&quot;panel-left&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Left&lt;/button&gt;&lt;button class=&quot;ag-dock-button&quot; type=&quot;button&quot; data-dock-panel=&quot;bottom&quot;&gt;&lt;i data-lucide=&quot;panel-bottom&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Bottom&lt;/button&gt;&lt;button class=&quot;ag-dock-button&quot; type=&quot;button&quot; data-dock-panel=&quot;right&quot;&gt;&lt;i data-lucide=&quot;panel-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Right&lt;/button&gt;&lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;ag-source&quot;&gt;
+            &lt;button class=&quot;ag-source-button&quot; type=&quot;button&quot; data-open-source aria-label=&quot;Open the source for this chat&quot;&gt;&lt;span class=&quot;ag-source-icon&quot;&gt;&lt;i data-lucide=&quot;git-pull-request&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;ag-source-kicker&quot;&gt;Started from Pull request #318&lt;/span&gt;&lt;span class=&quot;ag-source-title&quot;&gt;Keep settings recovery local to the active repository&lt;/span&gt;&lt;span class=&quot;ag-source-meta&quot;&gt;12 files · 3 checks passed · source is current&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+            &lt;div class=&quot;ag-source-state&quot;&gt;&lt;span class=&quot;ag-live&quot;&gt;Read-only review&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;ag-conversation&quot;&gt;
+            &lt;div class=&quot;ag-chat-width&quot;&gt;
+              &lt;article class=&quot;ag-message&quot;&gt;&lt;div class=&quot;ag-avatar&quot;&gt;You&lt;/div&gt;&lt;div&gt;&lt;div class=&quot;ag-message-label&quot;&gt;You &lt;span&gt;10:51&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;ag-message-body&quot;&gt;Review this pull request. Focus on whether switching repositories can still leak settings state.&lt;/div&gt;&lt;/div&gt;&lt;/article&gt;
+              &lt;article class=&quot;ag-message&quot;&gt;&lt;div class=&quot;ag-avatar lead&quot;&gt;AI&lt;/div&gt;&lt;div&gt;&lt;div class=&quot;ag-message-label&quot;&gt;Sol · Reviewer &lt;span&gt;Ask · Solo&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;ag-thought&quot;&gt;&lt;i data-lucide=&quot;search-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;div&gt;&lt;strong&gt;Reviewing&lt;/strong&gt; 12 changed files, 4 commits, and the three reported checks. This review cannot edit or create a worktree.&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;ag-message-body&quot;&gt;I found one state-lifetime risk in the repository switch handler. The recovery UI is scoped correctly, but the cached settings request can still finish after the active repository changes.&lt;/div&gt;&lt;div class=&quot;ag-plan&quot;&gt;&lt;div class=&quot;ag-plan-row&quot;&gt;&lt;i class=&quot;ag-plan-state working&quot; data-lucide=&quot;circle-alert&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Repository switch race&lt;/span&gt;&lt;span class=&quot;ag-plan-owner&quot;&gt;high confidence&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;ag-plan-row&quot;&gt;&lt;i class=&quot;ag-plan-state done&quot; data-lucide=&quot;circle-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Recovery copy and focus behavior&lt;/span&gt;&lt;span class=&quot;ag-plan-owner&quot;&gt;looks good&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;/article&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;ag-composer-wrap&quot;&gt;&lt;div class=&quot;ag-composer&quot;&gt;&lt;textarea aria-label=&quot;Message the review agent&quot; placeholder=&quot;Ask about the review…&quot;&gt;&lt;/textarea&gt;&lt;div class=&quot;ag-composer-tools&quot;&gt;&lt;span class=&quot;ag-model&quot;&gt;&lt;i data-lucide=&quot;sparkles&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;Sol&lt;/strong&gt; reviewer · read-only&lt;/span&gt;&lt;span class=&quot;ag-composer-spacer&quot;&gt;&lt;/span&gt;&lt;button class=&quot;ag-primary-button&quot; type=&quot;button&quot; data-toast=&quot;Message sent to the review chat&quot;&gt;Send &lt;i data-lucide=&quot;arrow-up&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;/section&gt;
+        &lt;/div&gt;
+
+        &lt;section class=&quot;ag-bottom-dock&quot; aria-label=&quot;Pinned context panel&quot;&gt;
+          &lt;div class=&quot;ag-dock-head&quot;&gt;&lt;i data-lucide=&quot;panel-bottom&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Context &lt;span&gt;follows active chat&lt;/span&gt;&lt;button class=&quot;ag-icon-button&quot; type=&quot;button&quot; aria-label=&quot;Unpin panel&quot; data-dock-panel=&quot;popover&quot;&gt;&lt;i data-lucide=&quot;x&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;
+          &lt;div class=&quot;ag-bottom-grid&quot;&gt;&lt;div class=&quot;ag-bottom-item&quot;&gt;Project&lt;strong data-dock-project&gt;GitWyrm&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-bottom-item&quot;&gt;Source&lt;strong data-dock-source&gt;Issue #482&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-bottom-item&quot;&gt;Session usage&lt;strong&gt;17% · 31k / 184k&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;/section&gt;
+      &lt;/main&gt;
+
+      &lt;aside class=&quot;ag-graph-panel&quot; aria-label=&quot;Session context and agent graph&quot;&gt;
+        &lt;div class=&quot;ag-panel-head&quot;&gt;
+          &lt;div class=&quot;ag-panel-tabs&quot; role=&quot;tablist&quot; aria-label=&quot;Session details&quot;&gt;
+            &lt;button class=&quot;ag-panel-tab&quot; type=&quot;button&quot; role=&quot;tab&quot; data-panel-tab=&quot;context&quot;&gt;&lt;i data-lucide=&quot;gauge&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Context&lt;/button&gt;
+            &lt;button class=&quot;ag-panel-tab is-selected&quot; type=&quot;button&quot; role=&quot;tab&quot; data-panel-tab=&quot;graph&quot;&gt;&lt;i data-lucide=&quot;git-fork&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Graph &lt;span&gt;4&lt;/span&gt;&lt;/button&gt;
+          &lt;/div&gt;
+          &lt;span class=&quot;ag-panel-summary&quot;&gt;2 working · 1 waiting&lt;/span&gt;
+          &lt;button class=&quot;ag-stop-all&quot; type=&quot;button&quot; data-toast=&quot;All agents stopped; their work was kept&quot;&gt;Stop all&lt;/button&gt;
+          &lt;button class=&quot;ag-icon-button&quot; type=&quot;button&quot; aria-label=&quot;Unpin panel&quot; data-dock-panel=&quot;popover&quot;&gt;&lt;i data-lucide=&quot;x&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;ag-context-view&quot;&gt;
+          &lt;section class=&quot;ag-context-card&quot;&gt;
+            &lt;div class=&quot;ag-context-card-head&quot;&gt;&lt;i data-lucide=&quot;circle-gauge&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;Session context&lt;/strong&gt;&lt;span&gt;17% · 31k / 184k&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;ag-context-meter&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;ag-context-row&quot;&gt;&lt;i data-lucide=&quot;folder-git-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;GitWyrm&lt;/strong&gt;&lt;span&gt;project&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;ag-context-row&quot;&gt;&lt;i data-lucide=&quot;git-branch&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;agent/482-settings-crash&lt;/strong&gt;&lt;span&gt;worktree&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;ag-context-row&quot;&gt;&lt;i data-lucide=&quot;link-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;Issue #482 + OpenSpec task 2&lt;/strong&gt;&lt;span&gt;source&lt;/span&gt;&lt;/div&gt;
+          &lt;/section&gt;
+          &lt;section class=&quot;ag-context-card ag-usage-card&quot;&gt;
+            &lt;button class=&quot;ag-usage-toggle&quot; type=&quot;button&quot; data-usage-toggle&gt;&lt;i data-lucide=&quot;timer-reset&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;Usage&lt;/strong&gt;&lt;span&gt;session + overall&lt;/span&gt;&lt;i data-lucide=&quot;chevron-down&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+            &lt;div class=&quot;ag-usage-body&quot;&gt;
+              &lt;div class=&quot;ag-usage-provider&quot;&gt;Lead plan · &lt;strong&gt;Sol&lt;/strong&gt;&lt;/div&gt;
+              &lt;div class=&quot;ag-usage-row&quot;&gt;&lt;span&gt;Current session&lt;/span&gt;&lt;strong&gt;31k tokens · 7 turns&lt;/strong&gt;&lt;/div&gt;
+              &lt;div class=&quot;ag-usage-row&quot;&gt;&lt;span&gt;Premium interactions&lt;/span&gt;&lt;strong&gt;2,409 / 15,000 left&lt;/strong&gt;&lt;/div&gt;
+              &lt;div class=&quot;ag-usage-row&quot;&gt;&lt;span&gt;Helpers active&lt;/span&gt;&lt;strong&gt;3 / 3&lt;/strong&gt;&lt;/div&gt;
+              &lt;div class=&quot;ag-usage-row&quot;&gt;&lt;span&gt;Resets&lt;/span&gt;&lt;strong&gt;Mon, Sep 1&lt;/strong&gt;&lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/section&gt;
+          &lt;section class=&quot;ag-context-card&quot;&gt;
+            &lt;div class=&quot;ag-context-row&quot; style=&quot;border-top:0&quot;&gt;&lt;i data-lucide=&quot;layers-3&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;Context sources&lt;/strong&gt;&lt;span&gt;6&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;ag-context-row&quot;&gt;&lt;i data-lucide=&quot;blocks&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;Skills and connectors&lt;/strong&gt;&lt;span&gt;15&lt;/span&gt;&lt;/div&gt;
+          &lt;/section&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;ag-graph-scroll&quot;&gt;
+          &lt;div class=&quot;ag-graph-empty&quot;&gt;&lt;i data-lucide=&quot;git-fork&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;strong&gt;No graph in a solo chat.&lt;/strong&gt;&lt;br&gt;Choose Lead + helpers below the composer. In Plan, review the graph before it starts. In Auto, Sol starts helpers when the work splits safely.&lt;/div&gt;
+          &lt;div class=&quot;ag-graph-tree&quot;&gt;
+            &lt;div class=&quot;ag-node-wrap&quot;&gt;
+              &lt;button class=&quot;ag-node is-selected&quot; type=&quot;button&quot; data-node=&quot;lead&quot; data-title=&quot;Lead agent&quot; data-copy=&quot;Owns Issue #482, keeps the OpenSpec task and the live repository state aligned, and reviews every worker result.&quot; data-files=&quot;Sol · Auto · 3 helpers allowed&quot;&gt;
+                &lt;span class=&quot;ag-node-dot lead&quot;&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;ag-node-title&quot;&gt;Sol · Lead agent&lt;/span&gt;&lt;span class=&quot;ag-node-meta&quot;&gt;owns source + integration&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ag-node-status working&quot;&gt;working&lt;/span&gt;
+              &lt;/button&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;ag-node-wrap is-child&quot;&gt;
+              &lt;button class=&quot;ag-node&quot; type=&quot;button&quot; data-node=&quot;research&quot; data-title=&quot;Trace the crash&quot; data-copy=&quot;Found the failed read in settings.rs and explained why switching repositories reaches it with an empty path.&quot; data-files=&quot;Read-only · 6 files read · no changes&quot;&gt;
+                &lt;span class=&quot;ag-node-dot done&quot;&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;ag-node-title&quot;&gt;Trace the crash&lt;/span&gt;&lt;span class=&quot;ag-node-meta&quot;&gt;Luna · researcher · read-only&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ag-node-status done&quot;&gt;done&lt;/span&gt;
+              &lt;/button&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;ag-node-wrap is-child&quot;&gt;
+              &lt;button class=&quot;ag-node&quot; type=&quot;button&quot; data-node=&quot;ui&quot; data-title=&quot;Add safe recovery&quot; data-copy=&quot;Adding a visible recovery state so a failed settings read does not close the window. The worker is editing only the isolated issue worktree.&quot; data-files=&quot;Fable · 2 files changed · +38 -9&quot;&gt;
+                &lt;span class=&quot;ag-node-dot working&quot;&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;ag-node-title&quot;&gt;Add safe recovery&lt;/span&gt;&lt;span class=&quot;ag-node-meta&quot;&gt;Fable · builder · worktree&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ag-node-status working&quot;&gt;working&lt;/span&gt;
+              &lt;/button&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;ag-node-wrap is-child&quot;&gt;
+              &lt;button class=&quot;ag-node&quot; type=&quot;button&quot; data-node=&quot;tests&quot; data-title=&quot;Run focused checks&quot; data-copy=&quot;Waiting for the recovery change. It will run the settings tests, branch switching tests, and the repository type check.&quot; data-files=&quot;Luna · waits for Add safe recovery&quot;&gt;
+                &lt;span class=&quot;ag-node-dot waiting&quot;&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;ag-node-title&quot;&gt;Run focused checks&lt;/span&gt;&lt;span class=&quot;ag-node-meta&quot;&gt;Luna · verifier · same worktree&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ag-node-status waiting&quot;&gt;waiting&lt;/span&gt;
+              &lt;/button&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;ag-node-wrap is-child&quot;&gt;
+              &lt;button class=&quot;ag-node&quot; type=&quot;button&quot; data-node=&quot;review&quot; data-title=&quot;Review combined change&quot; data-copy=&quot;The lead will inspect the final diff, check the OpenSpec requirement, and send weak work back before asking you to review.&quot; data-files=&quot;Sol · starts after checks pass&quot;&gt;
+                &lt;span class=&quot;ag-node-dot&quot;&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;ag-node-title&quot;&gt;Review combined change&lt;/span&gt;&lt;span class=&quot;ag-node-meta&quot;&gt;Sol · lead review&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ag-node-status&quot;&gt;queued&lt;/span&gt;
+              &lt;/button&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;ag-inspector&quot; aria-live=&quot;polite&quot;&gt;
+            &lt;div class=&quot;ag-inspector-kicker&quot;&gt;Selected agent&lt;/div&gt;
+            &lt;div class=&quot;ag-inspector-title&quot; data-inspector-title&gt;Lead agent&lt;/div&gt;
+            &lt;div class=&quot;ag-inspector-copy&quot; data-inspector-copy&gt;Owns Issue #482, keeps the OpenSpec task and the live repository state aligned, and reviews every worker result.&lt;/div&gt;
+            &lt;div class=&quot;ag-inspector-files&quot; data-inspector-files&gt;Sol · Auto · 3 helpers allowed&lt;/div&gt;
+            &lt;div class=&quot;ag-inspector-actions&quot;&gt;&lt;button class=&quot;ag-quiet-button&quot; type=&quot;button&quot; data-toast=&quot;Agent conversation opened&quot;&gt;Open conversation&lt;/button&gt;&lt;button class=&quot;ag-quiet-button&quot; type=&quot;button&quot; data-toast=&quot;Selected agent stopped; other work continues&quot;&gt;Stop agent&lt;/button&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/aside&gt;
+
+      &lt;section class=&quot;ag-setup-view&quot; aria-label=&quot;Agent setup manager&quot;&gt;
+        &lt;div class=&quot;ag-setup-head&quot;&gt;
+          &lt;div&gt;&lt;div class=&quot;ag-setup-title&quot;&gt;Agent setup&lt;/div&gt;&lt;div class=&quot;ag-setup-subtitle&quot;&gt;Keep the tools you choose aligned across your agent apps.&lt;/div&gt;&lt;/div&gt;
+          &lt;button class=&quot;ag-primary-button&quot; type=&quot;button&quot; data-toast=&quot;Selected apps now match the chosen source&quot;&gt;Match selected apps &lt;i data-lucide=&quot;refresh-cw&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+          &lt;button class=&quot;ag-quiet-button&quot; type=&quot;button&quot; data-close-setup&gt;Back to chat&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;ag-setup-tabs&quot; role=&quot;tablist&quot;&gt;
+          &lt;button class=&quot;ag-setup-tab is-selected&quot; type=&quot;button&quot; role=&quot;tab&quot; aria-selected=&quot;true&quot;&gt;Skills&lt;/button&gt;
+          &lt;button class=&quot;ag-setup-tab&quot; type=&quot;button&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot; data-toast=&quot;Connections view selected&quot;&gt;Connections&lt;/button&gt;
+          &lt;button class=&quot;ag-setup-tab&quot; type=&quot;button&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot; data-toast=&quot;Providers view selected&quot;&gt;Providers&lt;/button&gt;
+          &lt;button class=&quot;ag-setup-tab&quot; type=&quot;button&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot; data-toast=&quot;Detected apps view selected&quot;&gt;Detected apps&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;ag-setup-content&quot;&gt;
+          &lt;div class=&quot;ag-setup-summary&quot;&gt;&lt;strong&gt;18 skills found&lt;/strong&gt;&lt;span&gt;11 match&lt;/span&gt;&lt;span&gt;3 differ&lt;/span&gt;&lt;span&gt;4 exist in one app&lt;/span&gt;&lt;/div&gt;
+          &lt;table class=&quot;ag-sync-table&quot;&gt;
+            &lt;thead&gt;&lt;tr&gt;&lt;th style=&quot;width:31%&quot;&gt;Skill&lt;/th&gt;&lt;th&gt;Codex&lt;/th&gt;&lt;th&gt;Claude&lt;/th&gt;&lt;th&gt;OpenCode&lt;/th&gt;&lt;th&gt;Copilot&lt;/th&gt;&lt;th&gt;Scope&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+            &lt;tbody&gt;
+              &lt;tr&gt;&lt;td class=&quot;ag-sync-name&quot;&gt;frontend-design&lt;span&gt;source: Codex&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;&lt;i data-lucide=&quot;check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Synced&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state warn&quot;&gt;&lt;i data-lucide=&quot;triangle-alert&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Different&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;&lt;i data-lucide=&quot;check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Synced&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state missing&quot;&gt;Missing&lt;/span&gt;&lt;/td&gt;&lt;td&gt;Personal&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;ag-sync-name&quot;&gt;gitwyrm-release&lt;span&gt;source: this repository&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;&lt;i data-lucide=&quot;check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Synced&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;&lt;i data-lucide=&quot;check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Synced&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state missing&quot;&gt;Missing&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state missing&quot;&gt;Missing&lt;/span&gt;&lt;/td&gt;&lt;td&gt;This repo&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;ag-sync-name&quot;&gt;github-review&lt;span&gt;source: Claude&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state warn&quot;&gt;Older&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;&lt;i data-lucide=&quot;check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Source&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;&lt;i data-lucide=&quot;check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Synced&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state missing&quot;&gt;Unsupported&lt;/span&gt;&lt;/td&gt;&lt;td&gt;Personal&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;ag-sync-name&quot;&gt;openspec-workflow&lt;span&gt;source: .agents&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;&lt;i data-lucide=&quot;check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Synced&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;&lt;i data-lucide=&quot;check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Synced&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;&lt;i data-lucide=&quot;check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Synced&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state warn&quot;&gt;Needs setup&lt;/span&gt;&lt;/td&gt;&lt;td&gt;This repo&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;ag-sync-name&quot;&gt;windows-tauri&lt;span&gt;kept separate by design&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;Own copy&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state good&quot;&gt;Own copy&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state missing&quot;&gt;Off&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;ag-sync-state missing&quot;&gt;Off&lt;/span&gt;&lt;/td&gt;&lt;td&gt;Personal&lt;/td&gt;&lt;/tr&gt;
+            &lt;/tbody&gt;
+          &lt;/table&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+    &lt;/div&gt;
+
+    &lt;div class=&quot;ag-drawer-backdrop&quot; data-source-drawer&gt;
+      &lt;aside class=&quot;ag-drawer&quot; aria-label=&quot;Chat source details&quot;&gt;
+        &lt;div class=&quot;ag-drawer-head&quot;&gt;&lt;span class=&quot;ag-source-icon&quot;&gt;&lt;i data-lucide=&quot;circle-dot&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;strong&gt;Issue #482&lt;/strong&gt;&lt;span style=&quot;flex:1&quot;&gt;&lt;/span&gt;&lt;button class=&quot;ag-icon-button&quot; type=&quot;button&quot; aria-label=&quot;Close source&quot; data-close-source&gt;&lt;i data-lucide=&quot;x&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;
+        &lt;div class=&quot;ag-drawer-body&quot;&gt;
+          &lt;div class=&quot;ag-source-block&quot;&gt;&lt;h3&gt;What started this chat&lt;/h3&gt;&lt;p&gt;&lt;strong&gt;Settings crash after switching branches&lt;/strong&gt;&lt;/p&gt;&lt;p style=&quot;margin-top:7px&quot;&gt;Switching from a repository with saved settings to a newly added repository can close the window when the settings path is not ready.&lt;/p&gt;&lt;/div&gt;
+          &lt;div class=&quot;ag-source-block&quot;&gt;&lt;h3&gt;Live links&lt;/h3&gt;&lt;div class=&quot;ag-source-line&quot;&gt;&lt;span&gt;Host&lt;/span&gt;&lt;code&gt;Issue #482 · open&lt;/code&gt;&lt;/div&gt;&lt;div class=&quot;ag-source-line&quot;&gt;&lt;span&gt;OpenSpec&lt;/span&gt;&lt;code&gt;fix-settings-switch · task 2&lt;/code&gt;&lt;/div&gt;&lt;div class=&quot;ag-source-line&quot;&gt;&lt;span&gt;Work branch&lt;/span&gt;&lt;code&gt;agent/482-settings-crash&lt;/code&gt;&lt;/div&gt;&lt;div class=&quot;ag-source-line&quot;&gt;&lt;span&gt;Base&lt;/span&gt;&lt;code&gt;main · current&lt;/code&gt;&lt;/div&gt;&lt;div class=&quot;ag-source-line&quot;&gt;&lt;span&gt;Last checked&lt;/span&gt;&lt;code&gt;just now · no source changes&lt;/code&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;ag-source-block&quot;&gt;&lt;h3&gt;Done means&lt;/h3&gt;&lt;p&gt;The window stays open, the failed read is explained in plain language, switching repositories still works, and the settings and branch checks pass.&lt;/p&gt;&lt;/div&gt;
+          &lt;button class=&quot;ag-primary-button&quot; type=&quot;button&quot; data-toast=&quot;Issue opened in the main GitWyrm window&quot;&gt;Show in main window&lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/aside&gt;
+    &lt;/div&gt;
+
+    &lt;div class=&quot;ag-toast&quot; role=&quot;status&quot; aria-live=&quot;polite&quot;&gt;&lt;i data-lucide=&quot;circle-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span data-toast-text&gt;Done&lt;/span&gt;&lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;script&gt;
+    (() =&gt; {
+      const root = document.getElementById(&#x27;gitwyrm-agent-graph-mockup&#x27;);
+      if (!root) return;
+      const sourceDrawer = root.querySelector(&#x27;[data-source-drawer]&#x27;);
+      const toast = root.querySelector(&#x27;.ag-toast&#x27;);
+      const toastText = root.querySelector(&#x27;[data-toast-text]&#x27;);
+      let toastTimer = 0;
+
+      const showToast = (message) =&gt; {
+        if (!toast || !toastText) return;
+        toastText.textContent = message;
+        toast.classList.add(&#x27;is-visible&#x27;);
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() =&gt; toast.classList.remove(&#x27;is-visible&#x27;), 2300);
+      };
+
+      root.querySelectorAll(&#x27;[data-toast]&#x27;).forEach((control) =&gt; {
+        control.addEventListener(&#x27;click&#x27;, () =&gt; showToast(control.getAttribute(&#x27;data-toast&#x27;) || &#x27;Done&#x27;));
+      });
+
+      root.querySelectorAll(&#x27;.ag-sidebar-filter&#x27;).forEach((button) =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; {
+          root.querySelectorAll(&#x27;.ag-sidebar-filter&#x27;).forEach((peer) =&gt; peer.classList.remove(&#x27;is-selected&#x27;));
+          button.classList.add(&#x27;is-selected&#x27;);
+        });
+      });
+
+      const panes = Array.from(root.querySelectorAll(&#x27;[data-pane]&#x27;));
+      let activePane = root.querySelector(&#x27;[data-pane].is-active&#x27;) || panes[0] || null;
+      let activeDetailKind = &#x27;context&#x27;;
+
+      const paneSide = (pane) =&gt; pane?.getAttribute(&#x27;data-pane&#x27;) === &#x27;secondary&#x27; ? &#x27;right&#x27; : &#x27;left&#x27;;
+      const setActivePane = (pane) =&gt; {
+        if (!pane) return;
+        panes.forEach((peer) =&gt; peer.classList.toggle(&#x27;is-active&#x27;, peer === pane));
+        activePane = pane;
+        const title = pane.querySelector(&#x27;[data-pane-title]&#x27;)?.textContent || &#x27;active chat&#x27;;
+        const source = pane.querySelector(&#x27;[data-pane-source]&#x27;)?.textContent || &#x27;Manual chat&#x27;;
+        root.querySelectorAll(&#x27;[data-dock-project]&#x27;).forEach((el) =&gt; { el.textContent = source.split(&#x27;·&#x27;).pop()?.trim() || &#x27;Project&#x27;; });
+        root.querySelectorAll(&#x27;[data-dock-source]&#x27;).forEach((el) =&gt; { el.textContent = source.split(&#x27;·&#x27;)[0]?.trim() || source; });
+        showToast(`${title} is now the active ${paneSide(pane)} pane`);
+      };
+      panes.forEach((pane) =&gt; pane.addEventListener(&#x27;pointerdown&#x27;, (event) =&gt; {
+        if (event.target.closest(&#x27;button, textarea&#x27;)) return;
+        if (activePane !== pane) setActivePane(pane);
+      }));
+
+      root.querySelector(&#x27;[data-toggle-split]&#x27;)?.addEventListener(&#x27;click&#x27;, (event) =&gt; {
+        const enabled = root.classList.toggle(&#x27;is-split&#x27;);
+        const button = event.currentTarget;
+        button.classList.toggle(&#x27;is-selected&#x27;, enabled);
+        button.setAttribute(&#x27;aria-pressed&#x27;, String(enabled));
+        showToast(enabled ? &#x27;Split view opened; chat clicks replace the active pane&#x27; : &#x27;Single view restored; chat clicks replace this chat&#x27;);
+      });
+
+      root.querySelector(&#x27;[data-toggle-source]&#x27;)?.addEventListener(&#x27;click&#x27;, (event) =&gt; {
+        const hidden = root.classList.toggle(&#x27;is-source-hidden&#x27;);
+        const button = event.currentTarget;
+        button.classList.toggle(&#x27;is-selected&#x27;, hidden);
+        button.setAttribute(&#x27;aria-pressed&#x27;, String(hidden));
+        const label = button.querySelector(&#x27;span&#x27;);
+        if (label) label.textContent = hidden ? &#x27;Source bars hidden&#x27; : &#x27;Source bars shown&#x27;;
+        showToast(hidden ? &#x27;Top source bars hidden; use the link button in each chat&#x27; : &#x27;Top source bars shown&#x27;);
+      });
+
+      const closeDetailPopovers = () =&gt; root.querySelectorAll(&#x27;[data-detail-popover]&#x27;).forEach((popover) =&gt; popover.classList.remove(&#x27;is-open&#x27;));
+      const detailMarkup = (kind, pane) =&gt; {
+        const source = pane.querySelector(&#x27;[data-pane-source]&#x27;)?.textContent || &#x27;Manual chat&#x27;;
+        const project = source.split(&#x27;·&#x27;).pop()?.trim() || &#x27;Project&#x27;;
+        if (kind === &#x27;source&#x27;) return `&lt;div class=&quot;ag-popover-row&quot;&gt;What started this chat&lt;strong&gt;${source.split(&#x27;·&#x27;)[0]?.trim() || source}&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Project&lt;strong&gt;${project}&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Launch snapshot&lt;strong&gt;kept&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Live source&lt;strong&gt;current&lt;/strong&gt;&lt;/div&gt;`;
+        if (kind === &#x27;graph&#x27;) return `&lt;div class=&quot;ag-popover-row&quot;&gt;Lead&lt;strong&gt;Sol · working&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Helpers&lt;strong&gt;2 working · 1 waiting&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Integration&lt;strong&gt;queued&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Worktrees&lt;strong&gt;3 isolated&lt;/strong&gt;&lt;/div&gt;`;
+        return `&lt;div style=&quot;display:flex;align-items:center;gap:7px;font-size:10.5px&quot;&gt;&lt;strong&gt;Session context&lt;/strong&gt;&lt;span style=&quot;margin-left:auto;color:var(--ag-muted);font-family:&#x27;Cascadia Mono&#x27;,Consolas,monospace&quot;&gt;17% · 31k / 184k&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-meter&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Project&lt;strong&gt;${project}&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Source&lt;strong&gt;${source.split(&#x27;·&#x27;)[0]?.trim() || source}&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Usage remaining&lt;strong&gt;2,409 / 15,000&lt;/strong&gt;&lt;/div&gt;&lt;div class=&quot;ag-popover-row&quot;&gt;Context sources&lt;strong&gt;6&lt;/strong&gt;&lt;/div&gt;`;
+      };
+      root.querySelectorAll(&#x27;[data-detail-kind]&#x27;).forEach((button) =&gt; {
+        button.addEventListener(&#x27;click&#x27;, (event) =&gt; {
+          event.stopPropagation();
+          const pane = button.closest(&#x27;[data-pane]&#x27;);
+          if (!pane) return;
+          if (activePane !== pane) setActivePane(pane);
+          const kind = button.getAttribute(&#x27;data-detail-kind&#x27;) || &#x27;context&#x27;;
+          activeDetailKind = kind;
+          const popover = pane.querySelector(&#x27;[data-detail-popover]&#x27;);
+          const wasOpen = popover?.classList.contains(&#x27;is-open&#x27;) &amp;&amp; button.classList.contains(&#x27;is-selected&#x27;);
+          closeDetailPopovers();
+          pane.querySelectorAll(&#x27;[data-detail-kind]&#x27;).forEach((peer) =&gt; peer.classList.toggle(&#x27;is-selected&#x27;, peer === button &amp;&amp; !wasOpen));
+          if (!wasOpen &amp;&amp; popover) {
+            const title = popover.querySelector(&#x27;[data-popover-title]&#x27;);
+            const body = popover.querySelector(&#x27;.ag-popover-body&#x27;);
+            if (title) title.textContent = kind === &#x27;source&#x27; ? &#x27;Source&#x27; : kind === &#x27;graph&#x27; ? &#x27;Agent graph&#x27; : &#x27;Context&#x27;;
+            if (body) body.innerHTML = detailMarkup(kind, pane);
+            popover.classList.add(&#x27;is-open&#x27;);
+          }
+        });
+      });
+      root.querySelectorAll(&#x27;[data-detail-popover]&#x27;).forEach((popover) =&gt; popover.addEventListener(&#x27;click&#x27;, (event) =&gt; event.stopPropagation()));
+      document.addEventListener(&#x27;click&#x27;, () =&gt; closeDetailPopovers());
+      root.querySelectorAll(&#x27;[data-close-detail]&#x27;).forEach((button) =&gt; button.addEventListener(&#x27;click&#x27;, () =&gt; {
+        const pane = button.closest(&#x27;[data-pane]&#x27;);
+        pane?.querySelector(&#x27;[data-detail-popover]&#x27;)?.classList.remove(&#x27;is-open&#x27;);
+        pane?.querySelectorAll(&#x27;[data-detail-kind]&#x27;).forEach((peer) =&gt; peer.classList.remove(&#x27;is-selected&#x27;));
+      }));
+
+      const dockPanel = (place) =&gt; {
+        root.classList.remove(&#x27;is-panel-left&#x27;, &#x27;is-panel-bottom&#x27;, &#x27;is-panel-right&#x27;);
+        closeDetailPopovers();
+        if (place === &#x27;left&#x27;) root.classList.add(&#x27;is-panel-left&#x27;);
+        if (place === &#x27;bottom&#x27;) root.classList.add(&#x27;is-panel-bottom&#x27;);
+        if (place === &#x27;right&#x27;) {
+          root.classList.add(&#x27;is-panel-right&#x27;);
+          switchPanel(activeDetailKind === &#x27;graph&#x27; ? &#x27;graph&#x27; : &#x27;context&#x27;);
+        }
+        if (place === &#x27;popover&#x27; &amp;&amp; activePane) {
+          const popover = activePane.querySelector(&#x27;[data-detail-popover]&#x27;);
+          popover?.classList.add(&#x27;is-open&#x27;);
+        }
+        showToast(place === &#x27;popover&#x27; ? &#x27;Panel unpinned; it now opens from this chat&#x27; : `Panel pinned to the ${place} and follows the active chat`);
+      };
+      root.querySelectorAll(&#x27;[data-dock-panel]&#x27;).forEach((button) =&gt; button.addEventListener(&#x27;click&#x27;, (event) =&gt; {
+        event.stopPropagation();
+        dockPanel(button.getAttribute(&#x27;data-dock-panel&#x27;) || &#x27;popover&#x27;);
+      }));
+
+      root.querySelectorAll(&#x27;[data-session-title]&#x27;).forEach((thread) =&gt; {
+        thread.addEventListener(&#x27;click&#x27;, () =&gt; {
+          if (!activePane) return;
+          root.querySelectorAll(&#x27;[data-session-title]&#x27;).forEach((peer) =&gt; peer.classList.remove(&#x27;is-selected&#x27;));
+          thread.classList.add(&#x27;is-selected&#x27;);
+          const title = thread.getAttribute(&#x27;data-session-title&#x27;) || &#x27;New chat&#x27;;
+          const source = thread.getAttribute(&#x27;data-session-source&#x27;) || &#x27;Manual chat&#x27;;
+          const paneTitle = activePane.querySelector(&#x27;[data-pane-title]&#x27;);
+          const paneSource = activePane.querySelector(&#x27;[data-pane-source]&#x27;);
+          if (paneTitle) paneTitle.textContent = title;
+          if (paneSource) paneSource.textContent = source;
+          setActivePane(activePane);
+          showToast(`${title} replaced the chat in the active ${paneSide(activePane)} pane`);
+        });
+      });
+
+      root.querySelector(&#x27;[data-new-chat]&#x27;)?.addEventListener(&#x27;click&#x27;, () =&gt; {
+        if (!activePane) return;
+        root.querySelectorAll(&#x27;[data-session-title]&#x27;).forEach((peer) =&gt; peer.classList.remove(&#x27;is-selected&#x27;));
+        const paneTitle = activePane.querySelector(&#x27;[data-pane-title]&#x27;);
+        const paneSource = activePane.querySelector(&#x27;[data-pane-source]&#x27;);
+        if (paneTitle) paneTitle.textContent = &#x27;New chat&#x27;;
+        if (paneSource) paneSource.textContent = &#x27;Manual chat · current project&#x27;;
+        setActivePane(activePane);
+        activePane.querySelector(&#x27;textarea&#x27;)?.focus();
+        showToast(`New chat replaced the active ${paneSide(activePane)} pane; its draft is kept with this chat`);
+      });
+
+      root.querySelectorAll(&#x27;[data-open-source]&#x27;).forEach((control) =&gt; {
+        control.addEventListener(&#x27;click&#x27;, () =&gt; sourceDrawer?.classList.add(&#x27;is-open&#x27;));
+      });
+      root.querySelector(&#x27;[data-close-source]&#x27;)?.addEventListener(&#x27;click&#x27;, () =&gt; sourceDrawer?.classList.remove(&#x27;is-open&#x27;));
+      sourceDrawer?.addEventListener(&#x27;click&#x27;, (event) =&gt; {
+        if (event.target === sourceDrawer) sourceDrawer.classList.remove(&#x27;is-open&#x27;);
+      });
+
+      root.querySelector(&#x27;[data-open-setup]&#x27;)?.addEventListener(&#x27;click&#x27;, () =&gt; {
+        root.classList.add(&#x27;is-setup&#x27;);
+        root.querySelector(&#x27;[data-open-setup]&#x27;)?.classList.add(&#x27;is-active&#x27;);
+        showToast(&#x27;Agent setup opened&#x27;);
+      });
+      root.querySelector(&#x27;[data-close-setup]&#x27;)?.addEventListener(&#x27;click&#x27;, () =&gt; {
+        root.classList.remove(&#x27;is-setup&#x27;);
+        root.querySelector(&#x27;[data-open-setup]&#x27;)?.classList.remove(&#x27;is-active&#x27;);
+        showToast(&#x27;Returned to the active chat&#x27;);
+      });
+
+      const modeNotes = {
+        Ask: &#x27;Read and answer only; no helpers or file changes&#x27;,
+        Plan: &#x27;Lead may inspect and draft a graph; you start it&#x27;,
+        Auto: &#x27;Lead may use up to 3 helpers and asks before risky actions&#x27;
+      };
+      root.querySelectorAll(&#x27;[data-mode]&#x27;).forEach((button) =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; {
+          root.querySelectorAll(&#x27;[data-mode]&#x27;).forEach((peer) =&gt; peer.classList.remove(&#x27;is-selected&#x27;));
+          button.classList.add(&#x27;is-selected&#x27;);
+          const mode = button.getAttribute(&#x27;data-mode&#x27;) || &#x27;Auto&#x27;;
+          const note = root.querySelector(&#x27;[data-mode-note]&#x27;);
+          if (note) note.textContent = modeNotes[mode];
+          showToast(`${mode} mode selected`);
+        });
+      });
+
+      const teamPopover = root.querySelector(&#x27;[data-team-popover]&#x27;);
+      root.querySelector(&#x27;[data-team-trigger]&#x27;)?.addEventListener(&#x27;click&#x27;, (event) =&gt; {
+        event.stopPropagation();
+        teamPopover?.classList.toggle(&#x27;is-open&#x27;);
+      });
+      teamPopover?.addEventListener(&#x27;click&#x27;, (event) =&gt; event.stopPropagation());
+      document.addEventListener(&#x27;click&#x27;, () =&gt; teamPopover?.classList.remove(&#x27;is-open&#x27;));
+
+      const switchPanel = (name) =&gt; {
+        const panel = root.querySelector(&#x27;.ag-graph-panel&#x27;);
+        if (!panel) return;
+        panel.classList.toggle(&#x27;is-context&#x27;, name === &#x27;context&#x27;);
+        root.querySelectorAll(&#x27;[data-panel-tab]&#x27;).forEach((tab) =&gt; tab.classList.toggle(&#x27;is-selected&#x27;, tab.getAttribute(&#x27;data-panel-tab&#x27;) === name));
+      };
+      root.querySelectorAll(&#x27;[data-panel-tab]&#x27;).forEach((tab) =&gt; {
+        tab.addEventListener(&#x27;click&#x27;, () =&gt; {
+          const panelName = tab.getAttribute(&#x27;data-panel-tab&#x27;) || &#x27;graph&#x27;;
+          switchPanel(panelName);
+          showToast(panelName === &#x27;graph&#x27; ? &#x27;Agent graph shown&#x27; : &#x27;Session context shown&#x27;);
+        });
+      });
+
+      root.querySelectorAll(&#x27;[data-team]&#x27;).forEach((button) =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; {
+          const team = button.getAttribute(&#x27;data-team&#x27;) || &#x27;helpers&#x27;;
+          root.querySelectorAll(&#x27;[data-team]&#x27;).forEach((peer) =&gt; peer.classList.remove(&#x27;is-selected&#x27;));
+          button.classList.add(&#x27;is-selected&#x27;);
+          root.classList.toggle(&#x27;is-solo&#x27;, team === &#x27;solo&#x27;);
+          const label = root.querySelector(&#x27;[data-team-label]&#x27;);
+          if (label) label.textContent = team === &#x27;solo&#x27; ? &#x27;Solo agent&#x27; : &#x27;Lead + helpers&#x27;;
+          if (team === &#x27;solo&#x27;) switchPanel(&#x27;context&#x27;);
+          teamPopover?.classList.remove(&#x27;is-open&#x27;);
+          showToast(team === &#x27;solo&#x27; ? &#x27;Solo chat selected; no graph will start&#x27; : &#x27;Lead + helpers selected; Sol may build a graph&#x27;);
+        });
+      });
+
+      root.querySelector(&#x27;[data-usage-toggle]&#x27;)?.addEventListener(&#x27;click&#x27;, () =&gt; {
+        const card = root.querySelector(&#x27;.ag-usage-card&#x27;);
+        card?.classList.toggle(&#x27;is-collapsed&#x27;);
+        showToast(card?.classList.contains(&#x27;is-collapsed&#x27;) ? &#x27;Usage details collapsed&#x27; : &#x27;Usage details expanded&#x27;);
+      });
+
+      root.querySelectorAll(&#x27;[data-jump]&#x27;).forEach((button) =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; {
+          const target = document.getElementById(button.getAttribute(&#x27;data-jump&#x27;) || &#x27;&#x27;);
+          if (!target) return;
+          target.scrollIntoView({ behavior: &#x27;smooth&#x27;, block: &#x27;center&#x27; });
+          target.classList.remove(&#x27;ag-jump-highlight&#x27;);
+          window.requestAnimationFrame(() =&gt; target.classList.add(&#x27;ag-jump-highlight&#x27;));
+          window.setTimeout(() =&gt; target.classList.remove(&#x27;ag-jump-highlight&#x27;), 1450);
+          showToast(&#x27;Jumped to your earlier message&#x27;);
+        });
+      });
+
+      const selectNode = (nodeName) =&gt; {
+        const node = root.querySelector(`[data-node=&quot;${nodeName}&quot;]`);
+        if (!node) return;
+        root.querySelectorAll(&#x27;[data-node]&#x27;).forEach((peer) =&gt; peer.classList.remove(&#x27;is-selected&#x27;));
+        node.classList.add(&#x27;is-selected&#x27;);
+        const title = root.querySelector(&#x27;[data-inspector-title]&#x27;);
+        const copy = root.querySelector(&#x27;[data-inspector-copy]&#x27;);
+        const files = root.querySelector(&#x27;[data-inspector-files]&#x27;);
+        if (title) title.textContent = node.getAttribute(&#x27;data-title&#x27;) || &#x27;&#x27;;
+        if (copy) copy.textContent = node.getAttribute(&#x27;data-copy&#x27;) || &#x27;&#x27;;
+        if (files) files.textContent = node.getAttribute(&#x27;data-files&#x27;) || &#x27;&#x27;;
+        root.classList.remove(&#x27;is-panel-left&#x27;, &#x27;is-panel-bottom&#x27;);
+        root.classList.add(&#x27;is-panel-right&#x27;);
+        closeDetailPopovers();
+        switchPanel(&#x27;graph&#x27;);
+        showToast(&#x27;Agent output opened in the right panel&#x27;);
+      };
+      root.querySelectorAll(&#x27;[data-node]&#x27;).forEach((node) =&gt; node.addEventListener(&#x27;click&#x27;, () =&gt; selectNode(node.getAttribute(&#x27;data-node&#x27;))));
+      root.querySelectorAll(&#x27;[data-select-node]&#x27;).forEach((button) =&gt; button.addEventListener(&#x27;click&#x27;, () =&gt; selectNode(button.getAttribute(&#x27;data-select-node&#x27;))));
+
+      root.querySelector(&#x27;[data-toggle-pin]&#x27;)?.addEventListener(&#x27;click&#x27;, (event) =&gt; {
+        const button = event.currentTarget;
+        button.classList.toggle(&#x27;is-selected&#x27;);
+        showToast(button.classList.contains(&#x27;is-selected&#x27;) ? &#x27;Agent Desk will stay on top&#x27; : &#x27;Agent Desk will no longer stay on top&#x27;);
+      });
+    })();
+  &lt;/script&gt;
+&lt;/div&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>

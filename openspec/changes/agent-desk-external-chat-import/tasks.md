@@ -67,17 +67,17 @@
 
 ## 4. UI
 
-- [x] 4.1 Show detected clients and scan state without blocking native sessions.
-- [x] 4.2 Show imported source-client identity on session row and segment header.
+- [ ] 4.1 Mount Import in Agent Desk and show detected clients and scan state without blocking native sessions.
+- [ ] 4.2 Show imported source-client identity on the mounted session row and segment header.
       NOTE: segment header/label ("Imported from <adapter>") is set; the per-message
       `ImportedBadge` (pre-existing) is what actually renders on each row today.
-- [x] 4.3 Add Import, Continue here, Continue externally, and unlink actions with honest
+- [ ] 4.3 Add reachable Import, Continue here, Continue externally, and unlink actions with honest
       capability-dependent copy.
       NOTE: unlink (removing an imported session/reverting to not-imported) is NOT
       implemented -- only Import/Refresh, Continue here, and the honest Continue
       externally/"Open client" label exist. Left as a follow-up.
-- [x] 4.4 Continue here creates a native segment and preserves source/provenance.
-- [x] 4.5 Never merge external and native authorship visually without segment labels.
+- [ ] 4.4 From the mounted UI, Continue here creates a native segment and preserves source/provenance.
+- [ ] 4.5 In the mounted transcript, never merge external and native authorship visually without segment labels.
       NOTE: enforced structurally (imported messages always carry `import` provenance,
       the pre-existing `ImportedBadge` renders off that field) rather than by a new
       dedicated visual-regression test in this change.

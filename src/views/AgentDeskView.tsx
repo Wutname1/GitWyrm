@@ -387,6 +387,23 @@ export function AgentDeskView() {
     }
   }, [hydrated, headers, primarySessionId, secondarySessionId, layout.split, restorePaneToFallback])
 
+  /**
+   * Put the caret in the composer's textarea, not the box around it.
+   *
+   * The pane re-renders when its session changes, so the textarea for a
+   * brand-new chat does not exist yet at the moment "New chat" resolves --
+   * hence the rAF, which lets that render land first. Falls back to the pane
+   * wrapper if the textarea is somehow absent, so focus still moves somewhere
+   * sensible rather than nowhere.
+   */
+  const focusComposer = () => {
+    requestAnimationFrame(() => {
+      const box = document.querySelector<HTMLTextAreaElement>('[data-agent-desk-composer]')
+      if (box) box.focus()
+      else composerFocusRef.current?.focus()
+    })
+  }
+
   const onSelectSession = (sessionId: string) => {
     const target = resolvePaneTarget({
       split: layout.split,
@@ -401,9 +418,9 @@ export function AgentDeskView() {
     setActivePane(target.pane)
     // Rule #1: a click always produces a visible response. Selecting (or
     // refocusing) a session both highlights its pane (via `activePane`) and
-    // moves focus into the conversation so a keyboard user lands somewhere
-    // useful, not on a stale focus target.
-    composerFocusRef.current?.focus()
+    // moves focus into the composer so a keyboard user lands somewhere useful,
+    // not on a stale focus target.
+    focusComposer()
   }
 
   const onNewChat = async () => {
@@ -424,7 +441,7 @@ export function AgentDeskView() {
         setPaneSession(layout.activePane, outcome.session.header.sessionId)
         void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
         toast.success('New chat started.')
-        composerFocusRef.current?.focus()
+        focusComposer()
       } else {
         toast.error('Could not start a new chat.', { description: outcome.kind })
       }

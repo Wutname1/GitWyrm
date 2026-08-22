@@ -13,7 +13,8 @@
 - [x] 2.1 Load proposal, design, every delta, tasks, progress, branch link, and history.
 - [x] 2.2 Record honest absence for optional documents.
 - [x] 2.3 Include exact target task even when it is not the next open task.
-- [x] 2.4 Rebuild context on file-watcher refresh and mark launch-vs-live differences.
+- [ ] 2.4 Wire context into live execution, rebuild it on file-watcher refresh, and mark
+      launch-vs-live differences.
 - [ ] 2.5 Render all repository markdown inertly.
 
 ## 3. Plan integration
@@ -25,9 +26,9 @@
 
 ## 4. File-backed completion
 
-- [x] 4.1 Route accepted task completion through existing task-line writer.
+- [ ] 4.1 Route accepted task completion from the mounted review flow through the existing task-line writer.
 - [ ] 4.2 Route accepted spec edits through existing draft/review writer.
-- [x] 4.3 Refresh all main/Desk progress surfaces after writes.
+- [ ] 4.3 Refresh all main/Desk progress surfaces after writes from the production flow.
 - [x] 4.4 Never tick a task solely because an execution emitted Finished; require existing
       review/completion policy.
 - [x] 4.5 Handle archived/deleted/moved changes without losing session history.

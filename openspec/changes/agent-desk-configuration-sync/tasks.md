@@ -12,10 +12,12 @@
 ## 2. Agent Setup UI
 
 - [x] 2.1 Add inventory table/list with source, per-client state, and filters by item kind.
-- [x] 2.2 Let the user choose one item and one or more destinations.
+- [ ] 2.2 Let the user choose one item and one or more destinations; batch actions must use
+      the same explicit selection.
 - [x] 2.3 Show exact destination files, semantic changes, warnings, and secret handling.
-- [x] 2.4 Keep Match selected apps as a batch of visible per-item plans, not a hidden overwrite.
-- [x] 2.5 Show immediate pending/success/failure and operation receipt with Undo.
+- [ ] 2.4 Keep Match selected apps as a batch of visible per-item plans, not a hidden overwrite.
+- [ ] 2.5 Show immediate pending/success/failure and operation receipt with Undo for both
+      single-item and batch operations.
 
 ## 3. Safe write framework
 

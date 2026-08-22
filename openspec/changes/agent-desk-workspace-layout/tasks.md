@@ -2,7 +2,8 @@
 
 - [x] 1.1 Change Agent Desk routing to one stable app-wide window label.
 - [x] 1.2 Make every repo/source kickoff focus the existing Agent Desk window.
-- [x] 1.3 Pass the target repo and session through a select-session event after focus.
+- [ ] 1.3 Pass the target repo and session through a select-session event after focus, and
+      prove an already-open Desk selects it after creation.
 - [x] 1.4 Translate legacy per-repo Spec Desk labels and URLs without opening duplicates.
 - [x] 1.5 Migrate the most recently used legacy Desk placement to the app-wide label once.
 - [ ] 1.6 Test two repo kickoffs, legacy/new entry points, and repeated focus natively.

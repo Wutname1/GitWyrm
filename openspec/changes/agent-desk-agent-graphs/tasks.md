@@ -19,15 +19,16 @@
 
 - [x] 3.1 Create a unique execution ID, branch, and marked worktree for each helper.
 - [ ] 3.2 Give helpers bounded prompt/context, path allowance, turn budget, and done check.
-- [x] 3.3 Schedule dependency-ready helpers with max concurrency three.
+- [ ] 3.3 Execute dependency-ready helpers with max concurrency three; a pure scheduler
+      result or persisted Ready record is not execution.
 - [ ] 3.4 Persist every helper event before broadcasting.
 - [ ] 3.5 Reject stale/duplicate helper events by execution/sequence.
 - [ ] 3.6 Keep lead and peers responsive when one helper waits at a gate.
 
 ## 4. Controls and approvals
 
-- [x] 4.1 Add per-helper Stop that cancels only that execution.
-- [x] 4.2 Add labeled Stop all in Graph header; cancel lead/helpers promptly.
+- [ ] 4.1 Add per-helper Stop that cancels only that live execution.
+- [ ] 4.2 Add labeled Stop all in Graph header; cancel live lead/helpers promptly.
 - [ ] 4.3 Preserve uncommitted recoverable work on stop/failure.
 - [ ] 4.4 Key approval cards/answers to helper execution and gate ID.
 - [ ] 4.5 Show all waiting approvals in one queue without answering peers.
@@ -36,8 +37,9 @@
 
 - [ ] 5.1 Queue completed helper results in completion order.
 - [ ] 5.2 Review/apply each result through existing completion/commit plumbing.
-- [x] 5.3 Detect conflicts as a typed state; preserve base/helper/integration copies.
-- [x] 5.4 Let conflict resolution resume only that node's integration.
+- [ ] 5.3 Detect conflicts in the live integration path as a typed state; preserve
+      base/helper/integration copies.
+- [ ] 5.4 Let conflict resolution resume only that node's live integration.
 - [ ] 5.5 Run lead combined review/check step before final session completion.
 
 ## 6. UI and recovery

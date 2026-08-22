@@ -5,7 +5,8 @@
 - [x] 1.1 Define `StartAgentSessionRequest`, typed source inputs, mode, team, and provider
       override in Rust/Specta. (`src-tauri/src/commands/agent_kickoff.rs`:
       `StartAgentSessionRequest`, `SessionSourceInput`.)
-- [x] 1.2 Implement intent policy table and refusal of writes for read-only intents.
+- [ ] 1.2 Implement intent policy table and enforce refusal of writes at the live engine/tool
+      boundary for read-only intents.
       (`src-tauri/src/agentdesk/policy.rs`: `for_intent`, `check_tool_capability`.)
 - [x] 1.3 Add policy tests for all intent/mode/team combinations. (`policy.rs` `mod tests`,
       9 tests including the exhaustive read-only proof.)
@@ -22,7 +23,7 @@
       `LeftPanel.tsx`.)
 - [x] 2.2 Add source-row Starting state before awaiting a command. (`setStartingKey` runs
       synchronously before any `await` in `startSession`.)
-- [x] 2.3 Open/focus Agent Desk and select the returned session immediately. (`openSpecDesk`
+- [ ] 2.3 Open/focus Agent Desk and select the returned session immediately. (`openSpecDesk`
       is called concurrently with session creation; `AgentDeskView`'s existing "land on
       newest session" effect selects it once the list query invalidates.)
 - [ ] 2.4 Keep failed preparation as a session with typed retry/reconnect/fallback action.
@@ -60,7 +61,7 @@
       `PrDetail` binding, so the snapshot text omits them honestly rather than fabricating.)
 - [ ] 4.4 Enrich commits/files/diffs/comments in Agent Desk using capability gates. Not
       built by this package -- native follow-up alongside 3.4.
-- [x] 4.5 Prove Review/Summarize cannot call edit/worktree tools. (`policy.rs`:
+- [ ] 4.5 Prove the live Review/Summarize execution cannot call edit/worktree tools. (`policy.rs`:
       `review_and_summarize_cannot_call_edit_or_worktree_tools`,
       `read_only_intents_can_never_reach_a_write_or_worktree_tool`.)
 - [ ] 4.6 Escalating a review into a requested fix creates a new isolated execution linked to
@@ -98,5 +99,5 @@
       synchronously before any `await`) is structural in the hook's source, not test-proven
       here -- native follow-up (Gate 3's own native verification step).
 - [ ] 6.4 Native-test Fix isolation and read-only Review/Summarize. Native in-app item.
-- [x] 6.5 Run typecheck, Rust tests, and record Gate 3 evidence. See verification output
+- [ ] 6.5 Run typecheck, Rust tests, and record Gate 3 evidence. See verification output
       recorded in this change's implementation notes.

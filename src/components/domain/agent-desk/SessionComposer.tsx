@@ -134,6 +134,11 @@ export function SessionComposer({ sessionId }: { sessionId: string | null }) {
         <OperatingModeControl mode={mode} onChange={setMode} />
 
         <Textarea
+          // Stable id so "New chat" can put the caret straight in here.
+          // Focusing the surrounding wrapper only moved focus near the box,
+          // leaving the user to click before typing.
+          id={`agent-desk-composer-${sessionId ?? 'none'}`}
+          data-agent-desk-composer
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Steer the lead or ask about the work…"

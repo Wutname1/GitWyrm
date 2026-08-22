@@ -621,6 +621,42 @@ pub enum AppendUserMessageOutcome {
     },
 }
 
+/// A short chat name taken from the first message.
+///
+/// One line, trimmed, and cut at a word boundary so a long first message does
+/// not produce a sidebar row of run-on text. Markdown and code fences are left
+/// alone deliberately -- stripping them well is a bigger job than a title
+/// needs, and the raw first line reads fine at this length.
+fn title_from_first_message(content: &str) -> String {
+    const MAX: usize = 60;
+
+    let first_line = content.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    if first_line.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    for word in first_line.split_whitespace() {
+        // `chars().count()`, not `len()`: a title is measured in what the user
+        // sees, and a byte length would cut a multi-byte character short.
+        let projected = if out.is_empty() { word.chars().count() } else { out.chars().count() + 1 + word.chars().count() };
+        if projected > MAX {
+            break;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
+    }
+
+    // A single word longer than the whole budget leaves `out` empty; take a
+    // hard prefix of it rather than returning nothing.
+    if out.is_empty() {
+        out = first_line.chars().take(MAX).collect();
+    }
+    out
+}
+
 fn append_user_message_at(
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
@@ -682,6 +718,16 @@ fn append_user_message_at(
     };
 
     session.messages.push(message.clone());
+
+    // Name the chat after the first thing said in it, so the sidebar does not
+    // fill up with rows all reading "Untitled chat". Only ever fills a blank
+    // title -- a title the user set, or one set by a source kickoff, is never
+    // overwritten. This runs inside the same lock as the append above, so the
+    // title and the message it came from are written together or not at all.
+    if session.header.title.trim().is_empty() {
+        session.header.title = title_from_first_message(&message.plain_content);
+    }
+
     session.header.updated_at = now;
     // A session with a message in it is no longer an empty draft. Any state
     // beyond Draft (Working, NeedsInput, ...) is set by the run bridge (task
@@ -3045,6 +3091,62 @@ mod tests {
             summary: summarize(&step),
             step,
         }
+    }
+
+    /// Creates a session through the real command path and returns its id.
+    fn seeded_session(root: &SessionStoreRoot, title: &str) -> String {
+        match create_session_at(root, create_request(title)) {
+            CreateSessionOutcome::Created { session } => session.header.session_id,
+            other => panic!("expected Created, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_blank_chat_is_named_after_its_first_message() {
+        let (_tmp, root) = temp_root();
+        let locks = test_locks();
+        let id = seeded_session(&root, "");
+        match append_user_message_at(&locks, &root, &id, "What folder are we in?".into(), vec![]) {
+            AppendUserMessageOutcome::Appended { session, .. } => {
+                assert_eq!(session.header.title, "What folder are we in?");
+            }
+            other => panic!("expected Appended, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_title_that_was_already_set_is_never_overwritten() {
+        let (_tmp, root) = temp_root();
+        let locks = test_locks();
+        let id = seeded_session(&root, "Mine");
+        match append_user_message_at(&locks, &root, &id, "something else entirely".into(), vec![]) {
+            AppendUserMessageOutcome::Appended { session, .. } => {
+                assert_eq!(session.header.title, "Mine");
+            }
+            other => panic!("expected Appended, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_long_first_message_is_cut_at_a_word_boundary() {
+        let long = "This is a deliberately long opening message that runs well past the sixty character budget a sidebar row can show";
+        let title = title_from_first_message(long);
+        assert!(title.chars().count() <= 60, "got {} chars: {title}", title.chars().count());
+        assert!(!title.ends_with(' '));
+        assert!(long.starts_with(&title), "title must be a prefix of the message");
+        assert!(long[title.len()..].starts_with(' '), "cut landed mid-word");
+    }
+
+    #[test]
+    fn a_first_message_with_no_spaces_still_produces_a_title() {
+        assert_eq!(title_from_first_message(&"x".repeat(200)).chars().count(), 60);
+    }
+
+    #[test]
+    fn a_blank_first_message_leaves_the_title_blank() {
+        assert_eq!(title_from_first_message("   
+  
+ "), "");
     }
 
     /// The test this task explicitly asks for: after the linking + execution

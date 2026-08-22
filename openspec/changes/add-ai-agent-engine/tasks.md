@@ -52,17 +52,18 @@ prompt/act/observe driver GitWyrm implements.
       Protocol over NDJSON); connecting opens a real session, since that is the only thing
       that proves a sign-in has the scope it needs. Version floor: 1.0.0, measured against
       a real install (1.0.76)
-- [x] 2.3 ~~API-key transport against a documented API (OpenAI, Anthropic).~~ **Not
+- [ ] 2.3 API-key transport against a documented API (OpenAI, Anthropic). **Not
       built.** No dialect/driver exists for calling a provider's HTTP API directly with a
       multi-turn tool-using loop. `ai::client` remains the single-shot `chat()` used for
       commit messages; it is not a task-run transport
-- [x] 2.4 ~~OpenAI-compatible endpoint transport.~~ **Not built**, for the same reason as
+- [ ] 2.4 OpenAI-compatible endpoint transport. **Not built**, for the same reason as
       2.3: there is no code path that speaks the OpenAI dialect for task runs
 - [x] 2.5 Anthropic has no CLI path - this still holds and needs no code, since the CLI
       transport is Copilot-only in the first place. `run_engine` in
       `commands/airun.rs` calls `CliAgent::discover` directly; it never routes by provider
       ID, so there is no branch that could reach for a Claude subprocess
-- [x] 2.6 A default provider that cannot run reports which piece is missing and what to
+- [ ] 2.6 Route task runs through the configured default provider. When that provider cannot
+      run, report which piece is missing and what to
       do, without implying GitWyrm is broken. `CliAgent::discover` distinguishes "not
       installed" from "too old" from (via `connect()`) "installed but not signed in
       correctly"; `select::plain_explanation` turns each into a sentence that never blames
