@@ -1442,8 +1442,8 @@ export const SETTINGS_DEFAULTS = {
   conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
   verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
   changesViewMode: "tree",
-  showTabPrCount: false,
-  showTabIssueCount: false,
+  showTabPrCount: true,
+  showTabIssueCount: true,
 } satisfies Partial<WorkspaceState>;
 
 /** A resettable preference key. */
@@ -1573,8 +1573,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   repoIconRevisions: {},
   tabLayout: "vertical",
   horizontalTabRow: false,
-  showTabPrCount: false,
-  showTabIssueCount: false,
+  showTabPrCount: true,
+  showTabIssueCount: true,
   tabGroups: [],
   tabOrder: [],
   tabSort: "manual",
