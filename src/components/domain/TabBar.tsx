@@ -31,6 +31,7 @@ import {
   useWyrmEasterEgg,
 } from "@/components/domain/WyrmEasterEgg";
 import logoUrl from "@/assets/logo.png";
+import { useIsBetaBuild } from "@/hooks/useIsBetaBuild";
 import { useOpenRepo } from "@/hooks/useRepoActions";
 import { useUpdater } from "@/hooks/useUpdater";
 import { measureToPaint } from "@/lib/perf";
@@ -68,16 +69,49 @@ import {
 
 const DOCS_URL = "https://docs.gitwyrm.com/";
 
-function Wordmark() {
+const WORDMARK_FONT = {
+  fontFamily: "var(--font-wordmark)",
+  fontWeight: 600,
+  letterSpacing: "-0.035em",
+} as const;
+
+/**
+ * On a beta build the mark stacks "Wyrm" over "BETA" beside a full-height
+ * "Git", so the channel is legible in the app bar without stealing width from
+ * the tabs. The stacked half is sized so both lines together match the height of
+ * the "Git" beside them, keeping the mark inside the app bar.
+ */
+function Wordmark({ beta }: { beta: boolean }) {
+  if (beta) {
+    return (
+      <span
+        data-tauri-drag-region
+        className="wyrm-spring flex origin-left items-center gap-[4px] text-[1rem] leading-none"
+        style={WORDMARK_FONT}
+      >
+        <span data-tauri-drag-region style={{ color: "var(--gw-text)" }}>
+          Git
+        </span>
+        <span
+          data-tauri-drag-region
+          className="flex flex-col text-[0.6875rem] leading-[1.15]"
+        >
+          <span data-tauri-drag-region style={{ color: "var(--gw-accent)" }}>
+            Wyrm
+          </span>
+          <span data-tauri-drag-region style={{ color: "var(--gw-red)" }}>
+            BETA
+          </span>
+        </span>
+      </span>
+    );
+  }
+
   return (
     <span
       data-tauri-drag-region
-      className="text-[0.84375rem] leading-none"
-      style={{
-        fontFamily: "var(--font-wordmark)",
-        fontWeight: 600,
-        letterSpacing: "-0.035em",
-      }}
+      className="wyrm-spring origin-left text-[0.84375rem] leading-none"
+      style={WORDMARK_FONT}
     >
       <span data-tauri-drag-region style={{ color: "var(--gw-text)" }}>
         Git
@@ -99,6 +133,7 @@ function BrandMark() {
   const showSettings = useUiStore((state) => state.showSettings);
   const checkAndInstall = useUpdater((s) => s.checkAndInstall);
   const { onLogoClick, bounceNonce, blast } = useWyrmEasterEgg();
+  const isBeta = useIsBetaBuild();
 
   return (
     <>
@@ -111,15 +146,20 @@ function BrandMark() {
             data-tauri-drag-region
             className="flex items-center gap-[7px] rounded-[5px] px-1 -mx-1 outline-none transition-[background-color,opacity] hover:bg-panel2 active:bg-panel3 active:opacity-80"
           >
-            <img
+            <span
               key={bounceNonce}
-              src={logoUrl}
-              alt=""
-              draggable={false}
               data-tauri-drag-region
-              className="size-[18px] flex-none wyrm-spring"
-            />
-            <Wordmark />
+              className="flex items-center gap-[7px]"
+            >
+              <img
+                src={logoUrl}
+                alt=""
+                draggable={false}
+                data-tauri-drag-region
+                className="size-[25px] flex-none wyrm-spring"
+              />
+              <Wordmark beta={isBeta} />
+            </span>
           </button>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48">
@@ -233,7 +273,8 @@ function TabSortPicker() {
         {TAB_SORT_OPTIONS.map((option) => {
           const selected = tabSort === option.value;
           const canReverse = option.reverseHint != null;
-          const reversed = selected && canReverse && tabSortDirection === "reverse";
+          const reversed =
+            selected && canReverse && tabSortDirection === "reverse";
           const hint = reversed ? option.reverseHint! : option.hint;
           return (
             <button
@@ -287,15 +328,17 @@ function TabSortPicker() {
                   {selected && canReverse && " · click to reverse"}
                 </span>
               </span>
-              {selected && <Check size={13} strokeWidth={2.4} className="flex-none" />}
+              {selected && (
+                <Check size={13} strokeWidth={2.4} className="flex-none" />
+              )}
             </button>
           );
         })}
       </div>
       {pinnedCount > 0 && (
         <p className="px-1.5 pt-1 text-2xs text-muted-foreground">
-          {pinnedCount} pinned {pinnedCount === 1 ? "tab stays" : "tabs stay"} at
-          the front. Right-click a tab to pin or unpin it.
+          {pinnedCount} pinned {pinnedCount === 1 ? "tab stays" : "tabs stay"}{" "}
+          at the front. Right-click a tab to pin or unpin it.
         </p>
       )}
     </div>
@@ -441,7 +484,9 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
 function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
   const showRepoPicker = useUiStore((state) => state.showRepoPicker);
   const closeRepoPicker = useUiStore((state) => state.closeRepoPicker);
-  const pickerShowing = useUiStore((state) => state.centerView === "repoPicker");
+  const pickerShowing = useUiStore(
+    (state) => state.centerView === "repoPicker",
+  );
   const openRepo = useOpenRepo();
   return (
     <TooltipButton

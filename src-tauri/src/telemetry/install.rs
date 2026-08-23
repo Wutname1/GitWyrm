@@ -37,7 +37,10 @@
 //!   failure swallowed at debug level. A telemetry endpoint being down must
 //!   never be something the user can perceive.
 //! - **Never in development.** Debug builds return before doing anything, so
-//!   local runs stay out of the counts.
+//!   local runs stay out of the counts. Release-mode builds made outside CI are
+//!   caught too: only the release workflow stamps a real version over the
+//!   committed `0.0.0` placeholder, so that value means "nobody shipped this"
+//!   and is never reported.
 
 use crate::settings::{self, TelemetryLevel, UpdateChannel};
 use serde::Serialize;
@@ -45,6 +48,11 @@ use std::path::{Path, PathBuf};
 
 /// Where the ping goes. Same host as the changelog API the app already reads.
 const ENDPOINT: &str = "https://gitwyrm.com/api/v1/installs";
+
+/// The version committed to `Cargo.toml`. The release workflow overwrites it
+/// with the tag before building, so a binary still carrying it was built
+/// locally in release mode and is not a deployed build.
+const UNSTAMPED_VERSION: &str = "0.0.0";
 
 /// How long to wait before giving up. Short: nothing depends on the result, and
 /// a hung request should not keep a task alive across a whole session.
@@ -218,6 +226,16 @@ async fn send_if_due(dir: &Path, level: TelemetryLevel, channel: &str) {
 
     let today = today();
     let version = env!("CARGO_PKG_VERSION");
+
+    // A release-mode build from a working tree never had the tag stamped over
+    // the placeholder, so it is a developer's own build rather than something
+    // anyone installed. Counting it puts a version nobody can download at the
+    // top of the public tracker. `debug_assertions` does not cover this: the
+    // build that produces it is a release build.
+    if version == UNSTAMPED_VERSION {
+        return;
+    }
+
     let mut state = read_state(dir).unwrap_or_else(|| InstallState {
         id: new_id(),
         last_ping: None,
@@ -287,6 +305,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_committed_version_is_the_placeholder_the_gate_checks() {
+        // The gate below is only meaningful while the working tree still carries
+        // the placeholder. If a real version is ever committed to Cargo.toml,
+        // this fails rather than letting the check quietly stop matching.
+        assert_eq!(
+            env!("CARGO_PKG_VERSION"),
+            UNSTAMPED_VERSION,
+            "Cargo.toml should hold the placeholder; the release workflow stamps the tag"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unstamped_build_does_not_report() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        // Reporting is fully on: the version is the only thing stopping this.
+        send_if_due(dir.path(), TelemetryLevel::Reports, "stable").await;
+        assert!(
+            read_state(dir.path()).is_none(),
+            "a build with no stamped version was never shipped and must not be counted"
+        );
+    }
+
     /// State that looks like a successful ping earlier today on this build.
     fn pinged_today(channel: &str) -> InstallState {
         InstallState {
@@ -305,7 +346,7 @@ mod tests {
 
         // No network in tests: what is being asserted is that this returns without
         // attempting one, leaving the stored state untouched.
-        send_if_due(dir.path(), TelemetryLevel::Full, "stable").await;
+        send_if_due(dir.path(), TelemetryLevel::Reports, "stable").await;
 
         let after = read_state(dir.path()).expect("state should survive");
         assert_eq!(after.id, "fixed-id");
