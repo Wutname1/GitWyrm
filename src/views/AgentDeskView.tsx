@@ -459,6 +459,38 @@ export function AgentDeskView() {
     }
   }, [])
 
+  // tasks.md 2.4 ("rebuild [the OpenSpec context] on file-watcher refresh"):
+  // the backend's watcher (`src-tauri/src/watcher.rs`) already emits
+  // `repo-changed` whenever a tracked repository's files change (editor
+  // save, terminal git command, an agent's own file writes) -- `App.tsx`
+  // already listens for it via `useRepoWatcher`, but that hook is only ever
+  // mounted in the MAIN window (grepped `src/views/*`: zero other mounters),
+  // so an Agent Desk window never reacted to it at all before this. Each
+  // pane's session carries its own `repoId` (R4.4: "resolve repo context per
+  // session"), so this compares the event against each pane's session
+  // rather than the window's own `mode.repoId` -- a pane can be showing a
+  // chat from a different repo than the one this window was opened for.
+  const primaryRepoId = primaryDetailSession?.header.repoId ?? null
+  const secondaryRepoId = secondaryDetailSession?.header.repoId ?? null
+  useEffect(() => {
+    const unlisten = listen<{ repo_id: string }>('repo-changed', (event) => {
+      const changedRepoId = event.payload.repo_id
+      if (primarySessionId && primaryRepoId === changedRepoId) {
+        void qc.invalidateQueries({ queryKey: keys.agentSessionOpenspecContext(primarySessionId) })
+        void qc.invalidateQueries({ queryKey: keys.agentSessionOpenspecContextDrift(primarySessionId) })
+        void qc.invalidateQueries({ queryKey: keys.agentSessionOpenspecStatus(primarySessionId) })
+      }
+      if (secondarySessionId && secondaryRepoId === changedRepoId) {
+        void qc.invalidateQueries({ queryKey: keys.agentSessionOpenspecContext(secondarySessionId) })
+        void qc.invalidateQueries({ queryKey: keys.agentSessionOpenspecContextDrift(secondarySessionId) })
+        void qc.invalidateQueries({ queryKey: keys.agentSessionOpenspecStatus(secondarySessionId) })
+      }
+    })
+    return () => {
+      void unlisten.then((fn) => fn())
+    }
+  }, [qc, primarySessionId, secondarySessionId, primaryRepoId, secondaryRepoId])
+
   const onNewChat = async () => {
     if (!repo || creating) return
     setCreating(true)

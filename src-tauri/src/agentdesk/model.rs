@@ -518,6 +518,17 @@ pub struct ExecutionRecord {
     /// or for a lead that never got any helper to finish.
     #[serde(default)]
     pub review_execution_id: Option<ExecutionId>,
+    /// Task 3.3 ("block Start until refreshed/accepted"): set only on a
+    /// LEAD's own execution record, and only once the user explicitly chose
+    /// "Start anyway" in front of a staleness warning
+    /// (`commands::agent_graph::agent_session_accept_stale_openspec_context`).
+    /// Holds the exact current OpenSpec context fingerprint that was accepted
+    /// (not a bare bool), so a *further* drift after acceptance -- the source
+    /// changing again before Start actually runs -- is still caught: Start
+    /// re-fingerprints and compares against THIS value, not against whatever
+    /// `context_fingerprint` the proposal was originally drafted from.
+    #[serde(default)]
+    pub accepted_stale_context_fingerprint: Option<String>,
 }
 
 impl ExecutionRecord {
@@ -560,6 +571,7 @@ impl ExecutionRecord {
             budget: None,
             integration_worktree_path: None,
             review_execution_id: None,
+            accepted_stale_context_fingerprint: None,
         }
     }
 }

@@ -3194,6 +3194,14 @@ async agentSessionOpenspecContext(sessionId: string) : Promise<Result<OpenSpecSo
     else return { status: "error", error: e  as any };
 }
 },
+async agentSessionOpenspecContextDrift(sessionId: string) : Promise<Result<OpenSpecContextDriftOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_openspec_context_drift", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async agentSessionOpenspecStatus(sessionId: string) : Promise<Result<OpenSpecSessionStatus, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_openspec_status", { sessionId }) };
@@ -3221,6 +3229,23 @@ async agentSessionProposeGraph(sessionId: string, graph: ProposedGraph) : Promis
 async agentSessionStartGraph(sessionId: string) : Promise<Result<StartGraphOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_start_graph", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Production entry point for the "Start anyway" choice on a
+ * `StartGraphOutcome::Stale` refusal. The frontend calls this, then retries
+ * `agent_session_start_graph` -- kept as two separate calls (rather than one
+ * combined "accept and start") so the retry goes through the exact same
+ * Start path and re-validation everything else in this file already trusts,
+ * instead of a parallel "start after accepting" branch that could drift from
+ * it.
+ */
+async agentSessionAcceptStaleOpenspecContext(sessionId: string) : Promise<Result<AcceptStaleOpenSpecContextOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_accept_stale_openspec_context", { sessionId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -3616,6 +3641,21 @@ async agentImportContinueHere(sessionId: string) : Promise<Result<ContinueHereOu
 
 /** user-defined types **/
 
+export type AcceptStaleOpenSpecContextOutcome = 
+/**
+ * The lead's record now carries `current_fingerprint` as accepted --
+ * calling `agent_session_start_graph` again will not refuse for THIS
+ * drift again (though a further change after acceptance still will,
+ * since `start_graph_at` compares against the freshly recomputed
+ * fingerprint every time, not against `launched_fingerprint`).
+ */
+{ kind: "accepted"; session: AgentSession } | 
+/**
+ * No `NeedsInput` proposal with a fingerprint was found to accept
+ * against -- nothing to do (Start was never blocked, or already
+ * resolved by a concurrent call).
+ */
+{ kind: "noProposal" } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string }
 /**
  * Why an adapter could not do what was asked. Every variant here is a real,
  * distinguishable next action -- never a bare string the UI has to sniff.
@@ -4756,7 +4796,19 @@ integrationWorktreePath?: string | null;
  * decides `Finished`, this is. `None` before every helper is terminal,
  * or for a lead that never got any helper to finish.
  */
-reviewExecutionId?: string | null }
+reviewExecutionId?: string | null; 
+/**
+ * Task 3.3 ("block Start until refreshed/accepted"): set only on a
+ * LEAD's own execution record, and only once the user explicitly chose
+ * "Start anyway" in front of a staleness warning
+ * (`commands::agent_graph::agent_session_accept_stale_openspec_context`).
+ * Holds the exact current OpenSpec context fingerprint that was accepted
+ * (not a bare bool), so a *further* drift after acceptance -- the source
+ * changing again before Start actually runs -- is still caught: Start
+ * re-fingerprints and compares against THIS value, not against whatever
+ * `context_fingerprint` the proposal was originally drafted from.
+ */
+acceptedStaleContextFingerprint?: string | null }
 /**
  * `solo | lead`.
  */
@@ -5297,6 +5349,36 @@ export type OpenSourceOutcome =
  * `agent_result::OpenResultDiffOutcome::MainWindowNotOpen`.
  */
 { kind: "mainWindowNotOpen" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string }
+/**
+ * tasks.md 2.4, third of three: "mark launch-vs-live differences." Wiring
+ * the OpenSpec context into the live prompt (`start_execution_at`) and
+ * rebuilding it on a file-watcher refresh (`refresh_source_at`'s OpenSpec
+ * branch) both existed already; this is the piece that was missing --
+ * nothing told the USER when the source they are looking at has moved since
+ * the agent last read it.
+ * 
+ * Compares the most recent execution's stamped `context_fingerprint`
+ * (R5.3 -- what the agent actually saw) against a fingerprint recomputed
+ * from the CURRENT live files right now, using the identical
+ * `resolve_openspec_context` + `fingerprint` pair `start_execution_at`
+ * itself uses, so this can never disagree with what a fresh execution would
+ * actually be handed. Deliberately its own tiny read command (not folded
+ * into `agent_session_openspec_context`, which returns the context itself
+ * and is polled/rendered separately) so `SessionContextPanel` can show this
+ * as a lightweight banner without re-fetching or re-rendering the whole
+ * proposal/design/deltas/tasks body on every poll.
+ */
+export type OpenSpecContextDriftOutcome = 
+/**
+ * This session has at least one execution with a stamped
+ * `context_fingerprint`, and the comparison ran cleanly.
+ */
+{ kind: "checked"; diverged: boolean; launched_at: string } | 
+/**
+ * This session's source is not OpenSpec, or no execution has run yet
+ * (nothing to compare against) -- not an error, just nothing to report.
+ */
+{ kind: "nothingToCompare" } | { kind: "repoNotOpen" } | { kind: "noOpenSpecFolder" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string }
 /**
  * tasks.md 4.5 / section 7: archived/deleted/moved change states, each
  * honest and typed, with a real next action -- independent of whether a
@@ -7263,7 +7345,19 @@ export type StartGraphOutcome =
  * re-check `agent_session_graph_view` for whatever the winning call
  * actually started.
  */
-{ kind: "alreadyStarted" }
+{ kind: "alreadyStarted" } | 
+/**
+ * Task 3.3 ("detect task/spec changes after draft and block Start until
+ * refreshed or explicitly accepted"): this lead's proposal was drafted
+ * from an OpenSpec context (`ExecutionRecord::context_fingerprint`) that
+ * no longer matches the change's current files. Start refuses outright
+ * -- no worktree is provisioned, nothing is written -- until the user
+ * either accepts the drift via `agent_session_accept_stale_openspec_context`
+ * or asks the lead to re-plan. `current_fingerprint` lets the caller
+ * persist acceptance against the exact drift being accepted, so a
+ * second, later change cannot ride through on an old acceptance.
+ */
+{ kind: "stale"; lead_execution_id: string; current_fingerprint: string }
 /**
  * Starting a run either gives you the session or says why not.
  */

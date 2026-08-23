@@ -1,6 +1,7 @@
-import { Blocks, FolderGit2, GitBranch, Layers3, Link2 } from 'lucide-react'
+import { Blocks, FolderGit2, GitBranch, Layers3, Link2, TriangleAlert } from 'lucide-react'
 import type { AgentSession } from '@/lib/bindings'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
+import { useOpenSpecContextDrift } from '@/hooks/useOpenspecSessionSource'
 import { SessionUsageCard } from './SessionUsageCard'
 
 /** One "label / value" row, matching the mockup's `.ag-context-row`. */
@@ -61,9 +62,27 @@ function sourceSummary(session: AgentSession): string {
  */
 export function SessionContextPanel({ session }: { session: AgentSession }) {
   const contextSourceCount = session.attachments.length
+  const isOpenSpecSource =
+    session.header.source.kind === 'openSpecChange' || session.header.source.kind === 'openSpecTask'
+  // tasks.md 2.4, third of three ("mark launch-vs-live differences"): a
+  // session started from OpenSpec is compared against the CURRENT change
+  // files on every poll -- see `useOpenSpecContextDrift`'s own doc comment
+  // for why polling rather than the file watcher today.
+  const drift = useOpenSpecContextDrift(session.header.sessionId, isOpenSpecSource)
+  const diverged = drift.data?.kind === 'checked' && drift.data.diverged
 
   return (
     <div className="flex flex-col gap-2">
+      {diverged && (
+        <div className="flex items-start gap-1.5 rounded-md border border-amber-600/40 bg-amber-500/10 px-2 py-1.5 text-2xs leading-relaxed text-amber-700 dark:text-amber-400">
+          <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
+          <span>
+            The OpenSpec source changed since the last time an agent read it. Refresh the source,
+            or send a message so the next turn reads the current files.
+          </span>
+        </div>
+      )}
+
       <section className="rounded-md border border-border bg-panel2">
         <ContextRow icon={FolderGit2} label="project" value={session.header.repoName} />
         <ContextRow icon={GitBranch} label="repository" value={session.header.repoPath} />

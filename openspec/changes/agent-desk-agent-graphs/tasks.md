@@ -17,6 +17,14 @@
 - [ ] 2.5 Run the lead's Plan proposal with `started=false` and provider-level writes denied.
       Start is the only transition that may provision write-capable graph worktrees or launch
       helpers. Test the proposal turn against an attempted write and a dirty checkout.
+      PARTIAL, closer than it looks: the mechanism itself is real and tested at the unit level
+      (see `agent-desk-conversation-shell` tasks.md 6.1, reversed this pass) --
+      `started_for_execution` returns `false` for a Plan session until `graph_started_at` is
+      set by `start_graph_at`'s own Start handler (`agent_graph.rs:986`, "never cleared once
+      set -- Start is a one-way transition"), and `false` reaches a hard `--deny-tool=write`
+      at process launch. What is missing is the specific test this task asks for: an actual
+      attempted-write-during-a-Plan-proposal-turn assertion against a dirty checkout. No such
+      test exists under this name or shape. Left unchecked for that missing test.
 
 ## 3. Helper runtime
 
@@ -107,44 +115,133 @@ The following tasks define the actual release boundary.
 
 - [ ] 5.1 Add a serialized integration queue with durable operation IDs and deterministic
       completion order. A restart must resume the next unapplied operation exactly once.
-- [ ] 5.2 Provision a dedicated lead integration worktree from the recorded base before any
+      Confirmed NOT DONE: grepped `commands/agent_graph.rs` for `operation_id`/`OperationId`/
+      a queue type and found none. Retries today happen only because `integrate_helper_into`
+      is idempotent and re-runs whole on the next completion event -- there is no durable,
+      ID-addressed operation queue or explicit completion ordering.
+- [x] 5.2 Provision a dedicated lead integration worktree from the recorded base before any
       helper starts. Never use `session.header.repo_path` or another user-open checkout as
       the integration target.
-- [ ] 5.3 Compute each helper's real delta from its worktree and recorded base, including
+      `ensure_integration_worktree` (`agent_graph.rs:1190`) provisions a dedicated worktree
+      from `HEAD` via `worktree::add`/`mark_as_run_worktree`, persists its path on the lead's
+      own `ExecutionRecord`, and is proven by
+      `integration_never_writes_into_the_sessions_repo_path`, which sets `header.repo_path`
+      to a stand-in "user's open checkout" containing a same-named file and asserts it is
+      byte-untouched after integration while the dedicated worktree receives the write.
+- [x] 5.3 Compute each helper's real delta from its worktree and recorded base, including
       staged, unstaged, and committed changes. Do not require or simulate a helper commit.
-- [ ] 5.4 Apply repository operations without lossy text conversion: add, modify, delete,
+      `helper_delta` (`agent_graph.rs:1413`) uses `diff_tree_to_workdir_with_index`, proven by
+      four direct tests: `helper_delta_sees_an_unstaged_uncommitted_edit`,
+      `_sees_a_staged_uncommitted_edit`, `_sees_committed_work_too`, and
+      `_reports_nothing_when_workdir_equals_base`. This corrects the file's own prior
+      "SECOND AUDIT 2026-08-22" note, which claimed the delta was base-tree-to-HEAD only --
+      that note is stale against the code in the same commit (`21bdb3e`) that added it.
+- [x] 5.4 Apply repository operations without lossy text conversion: add, modify, delete,
       rename, binary bytes, symlink target/type, executable bit, and file mode. Distinguish a
       missing path from an empty file and turn read/write failures into typed paused states.
+      `read_content_at`/`apply_operation`/`write_content_atomic` (`agent_graph.rs:1285,1500,1558`)
+      read blobs as raw bytes (never UTF-8-decoded when `blob.is_binary()`), handle
+      `Add/Modify/Delete/Rename` with real content, and set the executable bit and create
+      symlinks natively. Tests cover delete, rename, binary bytes, and executable-bit change
+      (`apply_operation_delete_removes_the_file`,
+      `helper_delta_represents_binary_content_as_raw_bytes_never_utf8_decoded`, etc.) and
+      write failures return a typed `ApplyOperationOutcome::Failed`, never a silent success.
+      Symlink target/type has code (`create_symlink`, `read_symlink_target`) but no dedicated
+      test -- noted under 5.10, not blocking this task's core claim.
 - [ ] 5.5 Make one integration operation atomic or durably resumable. A mid-operation failure
       must not produce a partial change that is later reported as integrated or Finished.
-- [ ] 5.6 Detect conflicts against the live integration worktree and preserve base, helper,
+      PARTIAL: per-file writes are atomic (temp-write-then-rename in `write_content_atomic`),
+      and `integrate_helper_into` is designed to be idempotently re-run in full on the next
+      completion event (it compares `helper_text == integrated_text` before writing, so a
+      re-run skips already-applied operations) -- a real, reasoned resumability story, and a
+      failed operation is reported on the helper's own `output_summary` without flipping its
+      state to a false "Finished/integrated". But there is no test that actually simulates a
+      crash mid-batch (kill after operation 2 of 5, restart, verify completion) -- the
+      resumability claim rests on code inspection, not a proof. Left unchecked pending that
+      test, called for explicitly in 5.10.
+- [x] 5.6 Detect conflicts against the live integration worktree and preserve base, helper,
       and integrated versions plus operation metadata. Conflict refresh/restart must not
       reclassify the node as Interrupted.
-- [ ] 5.7 Apply Keep Helper, Keep Integrated, or merged content to the integration worktree,
+      `detect_conflict`/`IntegrationConflict` preserve all three texts (proven by
+      `record_conflict_then_resolve_keep_helper_preserves_both_texts_until_resolved`), and
+      `reconcile_executions` (`session_recovery.rs:121`) has an explicit
+      `if execution.conflict.is_some() { continue; }` carve-out with its own test,
+      `a_conflicted_helper_survives_reconciliation_without_becoming_interrupted`. This
+      corrects the file's own prior finding (from the 2026-08-20/21 passes and repeated in
+      6.3 below) that a conflicted helper is wrongly reclassified `Interrupted` on reload --
+      that bug is fixed as of `41a1fe6`, with a test naming the exact scenario.
+- [x] 5.7 Apply Keep Helper, Keep Integrated, or merged content to the integration worktree,
       then resume only that operation and leave peer helpers untouched.
-- [ ] 5.8 Build helper-scoped results from helper worktrees and one primary graph result from
+      `resolve_conflict_at` (`agent_graph.rs:2552`) writes the chosen text via
+      `write_content_atomic` into the integration worktree specifically (proven by
+      `resolving_a_conflict_writes_into_the_integration_worktree_not_the_users_checkout`),
+      supports `KeepHelper`/`KeepIntegrated`/`UseMerged`, and
+      `resolving_one_nodes_conflict_never_touches_a_sibling_node` proves isolation.
+- [x] 5.8 Build helper-scoped results from helper worktrees and one primary graph result from
       the lead integration worktree. The combined result must link back to every helper.
-- [ ] 5.9 Run a real lead combined-review/check turn after integration. Only a successful,
+      `finish_graph_with_combined_result` (`agent_graph.rs:2315`) builds one `ResultRecord`
+      keyed to the lead's execution ID from the integration worktree and calls
+      `link_helper_results` with every helper's execution ID, proven by
+      `finish_graph_with_combined_result_builds_the_result_and_links_every_helper`.
+- [x] 5.9 Run a real lead combined-review/check turn after integration. Only a successful,
       persisted combined result may move the graph to Finished; a node counter is not review.
+      `start_or_check_lead_review`/`launch_lead_review` (`agent_graph.rs:1964,2143`) launch a
+      genuine `CliAgent::discover` + `cli_run::run_task` process turn (identical launch
+      pattern to solo/helper executions) with a prompt summarizing every helper's report and
+      asking the lead to review, check, and fix the combined tree. The graph only reaches
+      `Finished` once this review execution itself reaches a terminal state
+      (`ReviewFinishedBuildResultAndFinish`), proven by four state-machine tests including
+      `start_or_check_lead_review_does_nothing_while_a_helper_is_still_active` (graph stays
+      `Working`, not flipped by a node count). This directly contradicts the file's own
+      "SECOND AUDIT 2026-08-22" summary, which is stale against the code landed in the same
+      commit.
 - [ ] 5.10 Add real-repository tests for uncommitted edits, staged edits, delete, rename,
       binary content, symlink/mode where supported, same-line conflict, restart during
       integration, and proof that the user's checkout remains byte-identical.
+      PARTIAL: uncommitted/staged/committed edits, delete, rename, binary content,
+      executable-bit, same-line conflict, and byte-identical-checkout are all covered by real
+      tests (see 5.3/5.4/5.6 evidence above). Missing: a symlink-specific integration test
+      (code exists, untested) and a restart-during-integration test (kill mid-batch, restart,
+      verify exactly-once completion) -- left unchecked for those two gaps specifically.
 
 ## 6. UI and recovery
 
 - [x] 6.1 Project graph nodes from backend records; no separate frontend graph truth.
 - [ ] 6.2 Show node state, role/model, current action, dependency, files, and output link.
-- [ ] 6.3 Reconstruct running/waiting/conflicted graph after window/app restart.
-      Confirmed still incomplete, worse than the 2026-08-20 pass found: `reconcile_session_executions`
-      is real and does run on every `agent_session_get` (not just app boot), correctly marking
-      genuinely-orphaned live-state executions `Interrupted` (proven for ordinary
-      Working/Preparing helpers). But per the 5.3 finding, it also wrongly reclassifies a
-      *conflicted* helper as Interrupted, because conflict-wait and gate-wait are both
-      `NeedsInput` and the registry has already forgotten the helper's process by the time the
-      conflict is recorded. "Reconstruct... conflicted" specifically fails.
+      PARTIAL: `AgentGraphPanel.tsx` genuinely renders state (`nodeStatusLabel`, live status
+      word + dot), role (`execution.helperRole`), dependency (`blockedOn`/`waitingForSlot`
+      from `buildGraphTree`), and files (`changedFileCount`). Missing: no "current action"
+      field anywhere (only the coarse status word -- no "reading file X"/step-level text), no
+      model display, and the "output link" is explicitly a disabled button --
+      `<button disabled title="A helper's own conversation cannot be opened yet">Open
+      conversation</button>` (line ~226-233). Three of six sub-fields are not shown.
+- [x] 6.3 Reconstruct running/waiting/conflicted graph after window/app restart.
+      Reversed from the 2026-08-20/21/22 passes' repeated finding: `reconcile_executions`
+      (`session_recovery.rs:112`) now has an explicit `if execution.conflict.is_some() {
+      continue; }` carve-out (added in `41a1fe6`, same session as the prior finding), proven
+      by `a_conflicted_helper_survives_reconciliation_without_becoming_interrupted`, which
+      asserts a conflicted node's state stays `NeedsInput` (not `Interrupted`) and both
+      preserved texts survive the reload. Running/waiting executions genuinely alive in the
+      registry are left alone; genuinely-dead ones are correctly marked `Interrupted`
+      (`reconcile_session_executions`, called on every `agent_session_get`). All three
+      required states -- running, waiting, conflicted -- are now provably reconstructed.
 - [ ] 6.4 Recover orphaned worktrees and never delete the only copy of work.
+      PARTIAL: real, wired orphan-worktree recovery exists --
+      `agent_result_find_orphaned`/`agent_result_find_orphaned_all` (`agent_result.rs:1174`)
+      is called from `useOrphanResultReconciliation.ts`, itself used in `AgentDeskView.tsx`
+      (confirmed live, not dead code), and only removes a worktree once its `ResultRecord`
+      reaches `Committed`/`Discarded` (`DirtyChoice::Refuse` elsewhere in the same file
+      protects dirty trees). But this is scoped to `ResultRecord` worktrees (solo results and
+      the one combined graph result once built) -- it does not cover a helper worktree that
+      crashes or is abandoned before any result/conflict is ever recorded on it. Left
+      unchecked because that specific graph-helper-worktree gap is real, not because nothing
+      was built.
 - [ ] 6.5 Test two independent edits, stopped peer, simultaneous gates, conflict, crash.
+      NATIVE: requires a running multi-agent app session to exercise real concurrent
+      scenarios (simultaneous gates, a live crash) -- no automated harness for this exists or
+      reasonably could without standing up real provider processes. Left unchecked.
 - [ ] 6.6 Record Gate 5 evidence.
+      NATIVE: an evidence-gate record from an actual run; nothing to verify in code.
 
 ## Status 2026-08-22 second audit
 

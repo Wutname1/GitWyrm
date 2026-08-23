@@ -2410,12 +2410,19 @@ fn openspec_dir_for(root: &Path) -> Option<PathBuf> {
 /// What the session's `SessionSource` names, extracted once so every OpenSpec
 /// command below shares the same "this session is not an OpenSpec source at
 /// all" branch instead of three copies of the same match.
-enum OpenSpecTarget {
+///
+/// `pub(crate)`: `commands::agent_graph::start_graph_at` (task 3.3, "detect
+/// task/spec changes after draft and block Start until refreshed/accepted")
+/// needs the same target resolution to recompute the current OpenSpec context
+/// fingerprint before honoring Start -- reusing this rather than a second copy
+/// of the `SessionSource` match keeps both call sites reading the exact same
+/// "what does this session point at" answer.
+pub(crate) enum OpenSpecTarget {
     Change { change_id: String, snapshot_title: String },
     Task { change_id: String, task_index: u32, task_text: String, snapshot_title: String },
 }
 
-fn openspec_target_of(source: &SessionSource) -> Option<OpenSpecTarget> {
+pub(crate) fn openspec_target_of(source: &SessionSource) -> Option<OpenSpecTarget> {
     match source {
         SessionSource::OpenSpecChange { change_id, snapshot } => Some(OpenSpecTarget::Change {
             change_id: change_id.clone(),
@@ -2517,7 +2524,7 @@ fn openspec_context_at(
 /// one from -- no `openspec/` folder at all, or the change is `Moved`/
 /// `Deleted` (that case gets its own typed, actionable answer from
 /// [`agent_session_openspec_status`] instead of a context here).
-fn resolve_openspec_context(
+pub(crate) fn resolve_openspec_context(
     repo_path: &Path,
     target: &OpenSpecTarget,
 ) -> Option<crate::agentdesk::openspec_context::OpenSpecSourceContext> {
@@ -2556,6 +2563,108 @@ pub async fn agent_session_openspec_context(
     // `Clone`, and this command's I/O (parsing a handful of small markdown
     // files) is the same order of magnitude as that command's own work.
     Ok(openspec_context_at(&root, manager.inner(), &session_id))
+}
+
+/// tasks.md 2.4, third of three: "mark launch-vs-live differences." Wiring
+/// the OpenSpec context into the live prompt (`start_execution_at`) and
+/// rebuilding it on a file-watcher refresh (`refresh_source_at`'s OpenSpec
+/// branch) both existed already; this is the piece that was missing --
+/// nothing told the USER when the source they are looking at has moved since
+/// the agent last read it.
+///
+/// Compares the most recent execution's stamped `context_fingerprint`
+/// (R5.3 -- what the agent actually saw) against a fingerprint recomputed
+/// from the CURRENT live files right now, using the identical
+/// `resolve_openspec_context` + `fingerprint` pair `start_execution_at`
+/// itself uses, so this can never disagree with what a fresh execution would
+/// actually be handed. Deliberately its own tiny read command (not folded
+/// into `agent_session_openspec_context`, which returns the context itself
+/// and is polled/rendered separately) so `SessionContextPanel` can show this
+/// as a lightweight banner without re-fetching or re-rendering the whole
+/// proposal/design/deltas/tasks body on every poll.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum OpenSpecContextDriftOutcome {
+    /// This session has at least one execution with a stamped
+    /// `context_fingerprint`, and the comparison ran cleanly.
+    Checked {
+        /// True when the live files no longer match what the most recent
+        /// execution was launched against.
+        diverged: bool,
+        /// RFC 3339 timestamp of the execution the comparison was made
+        /// against, so the banner can say "since it started" plainly.
+        launched_at: String,
+    },
+    /// This session's source is not OpenSpec, or no execution has run yet
+    /// (nothing to compare against) -- not an error, just nothing to report.
+    NothingToCompare,
+    RepoNotOpen,
+    NoOpenSpecFolder,
+    SessionNotFound,
+    SessionDamaged { reason: String },
+    SessionUnavailable { detail: String },
+}
+
+fn openspec_context_drift_at(
+    root: &SessionStoreRoot,
+    manager: &crate::state::RepoManager,
+    session_id: &str,
+) -> OpenSpecContextDriftOutcome {
+    use crate::agentdesk::model::SessionLoadError as E;
+    let session = match store::read_session(root, session_id) {
+        Ok(s) => s,
+        Err(E::NotFound) => return OpenSpecContextDriftOutcome::SessionNotFound,
+        Err(E::Io { detail }) => return OpenSpecContextDriftOutcome::SessionUnavailable { detail },
+        Err(reason) => {
+            return OpenSpecContextDriftOutcome::SessionDamaged {
+                reason: reason.to_string(),
+            }
+        }
+    };
+    let Some(target) = openspec_target_of(&session.header.source) else {
+        return OpenSpecContextDriftOutcome::NothingToCompare;
+    };
+    // The most recently STARTED execution that actually carries a
+    // fingerprint -- a session can accumulate executions that predate R5.3
+    // (fingerprint added later) or that were never OpenSpec-sourced at the
+    // time (should not happen for a session whose CURRENT source is OpenSpec,
+    // but a defensive `filter_map` costs nothing and avoids a false
+    // "NothingToCompare" if a caller somehow reaches this before any launch).
+    let Some(most_recent) = session
+        .executions
+        .iter()
+        .filter(|e| e.context_fingerprint.is_some())
+        .max_by(|a, b| a.started_at.cmp(&b.started_at))
+    else {
+        return OpenSpecContextDriftOutcome::NothingToCompare;
+    };
+    let launched_fingerprint = most_recent.context_fingerprint.clone().expect("filtered above");
+    let launched_at = most_recent.started_at.clone();
+
+    if manager.get(&session.header.repo_id).is_err() {
+        return OpenSpecContextDriftOutcome::RepoNotOpen;
+    }
+    let repo_path = PathBuf::from(&session.header.repo_path);
+    let Some(ctx) = resolve_openspec_context(&repo_path, &target) else {
+        return OpenSpecContextDriftOutcome::NoOpenSpecFolder;
+    };
+    let current_fingerprint = crate::agentdesk::openspec_context::fingerprint(&ctx);
+    let diverged = crate::agentdesk::openspec_context::context_changed_since(
+        &current_fingerprint,
+        &launched_fingerprint,
+    );
+    OpenSpecContextDriftOutcome::Checked { diverged, launched_at }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_openspec_context_drift(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::state::RepoManager>,
+    session_id: SessionId,
+) -> Result<OpenSpecContextDriftOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    Ok(openspec_context_drift_at(&root, manager.inner(), &session_id))
 }
 
 /// tasks.md 4.5 / section 7: archived/deleted/moved change states, each
@@ -4624,6 +4733,169 @@ mod tests {
         // confirm the still-unreachable path does not spuriously flip a flag
         // that already matched (checked structurally above: no panic, same
         // snapshot text).
+    }
+
+    // -- Task 2.4, third of three: "mark launch-vs-live differences." --
+    // `openspec_context_drift_at` is the read side of this: given a session
+    // whose most recent execution stamped a `context_fingerprint`, does the
+    // live OpenSpec source still match what that execution actually saw.
+
+    mod openspec_context_drift {
+        use super::*;
+        use std::fs;
+
+        fn repo_with_change(root: &std::path::Path) -> (crate::state::RepoManager, String) {
+            git2::Repository::init(root).expect("init repo");
+            let change_dir = root.join("openspec").join("changes").join("add-thing");
+            fs::create_dir_all(&change_dir).unwrap();
+            fs::write(
+                change_dir.join("proposal.md"),
+                "# Change: Add thing\n\n## Why\n\nBecause.\n",
+            )
+            .unwrap();
+            fs::write(change_dir.join("tasks.md"), "## 1. Group\n\n- [ ] 1.1 Do it\n").unwrap();
+
+            let manager = crate::state::RepoManager::default();
+            let (repo_id, _open, _reused) =
+                manager.open(root.to_str().expect("utf8 path")).expect("open repo");
+            (manager, repo_id)
+        }
+
+        fn session_with_fingerprint(root: &SessionStoreRoot, repo_id: &str, repo_path: &std::path::Path, launched_fingerprint: &str) -> String {
+            let req = CreateSessionRequest {
+                repo_id: repo_id.to_string(),
+                repo_path: repo_path.to_string_lossy().into_owned(),
+                repo_name: "widgets".into(),
+                title: "Add thing".into(),
+                source: SessionSource::OpenSpecTask {
+                    change_id: "add-thing".into(),
+                    task_index: 0,
+                    task_text: "1.1 Do it".into(),
+                    snapshot: SourceSnapshot {
+                        title: "Add thing".into(),
+                        summary: "1.1 Do it".into(),
+                        captured_at: "2026-01-01T00:00:00Z".into(),
+                        live_unavailable: false,
+                    },
+                },
+                intent: SessionIntent::Fix,
+            };
+            let CreateSessionOutcome::Created { session } = create_session_at(root, req) else {
+                panic!("expected Created");
+            };
+            let session_id = session.header.session_id.clone();
+
+            update_session_at(&test_locks(), root, &session_id, |s| {
+                let mut exec = crate::agentdesk::model::ExecutionRecord::minimal(
+                    "exec-1".into(),
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::Finished,
+                    "2026-01-01T00:00:00Z".into(),
+                    Some("2026-01-01T00:01:00Z".into()),
+                    0,
+                );
+                exec.context_fingerprint = Some(launched_fingerprint.to_string());
+                s.executions.push(exec);
+            });
+
+            session_id
+        }
+
+        fn fingerprint_for(root: &std::path::Path) -> String {
+            let target = OpenSpecTarget::Task {
+                change_id: "add-thing".into(),
+                task_index: 0,
+                task_text: "1.1 Do it".into(),
+                snapshot_title: "Add thing".into(),
+            };
+            let ctx = resolve_openspec_context(root, &target).expect("context builds");
+            crate::agentdesk::openspec_context::fingerprint(&ctx)
+        }
+
+        #[test]
+        fn reports_diverged_when_tasks_md_changed_since_the_execution_ran() {
+            let (dir, root) = temp_root();
+            let (manager, repo_id) = repo_with_change(dir.path());
+            let launched_fingerprint = fingerprint_for(dir.path());
+            let session_id = session_with_fingerprint(&root, &repo_id, dir.path(), &launched_fingerprint);
+
+            fs::write(
+                dir.path().join("openspec/changes/add-thing/tasks.md"),
+                "## 1. Group\n\n- [ ] 1.1 Do it\n- [ ] 1.2 Added after the run\n",
+            )
+            .unwrap();
+
+            let outcome = openspec_context_drift_at(&root, &manager, &session_id);
+            match outcome {
+                OpenSpecContextDriftOutcome::Checked { diverged, .. } => {
+                    assert!(diverged, "tasks.md changed, so this must report diverged");
+                }
+                other => panic!("expected Checked, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn reports_not_diverged_when_nothing_changed() {
+            let (dir, root) = temp_root();
+            let (manager, repo_id) = repo_with_change(dir.path());
+            let launched_fingerprint = fingerprint_for(dir.path());
+            let session_id = session_with_fingerprint(&root, &repo_id, dir.path(), &launched_fingerprint);
+
+            let outcome = openspec_context_drift_at(&root, &manager, &session_id);
+            match outcome {
+                OpenSpecContextDriftOutcome::Checked { diverged, .. } => {
+                    assert!(!diverged, "nothing changed, so this must not report diverged");
+                }
+                other => panic!("expected Checked, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn a_manual_session_with_no_openspec_source_has_nothing_to_compare() {
+            let (_dir, root) = temp_root();
+            let manager = crate::state::RepoManager::default();
+            let CreateSessionOutcome::Created { session } =
+                create_session_at(&root, create_request("Manual chat"))
+            else {
+                panic!("expected Created");
+            };
+
+            let outcome = openspec_context_drift_at(&root, &manager, &session.header.session_id);
+            assert!(matches!(outcome, OpenSpecContextDriftOutcome::NothingToCompare));
+        }
+
+        #[test]
+        fn an_openspec_session_with_no_execution_yet_has_nothing_to_compare() {
+            let (dir, root) = temp_root();
+            let (_manager, repo_id) = repo_with_change(dir.path());
+            let req = CreateSessionRequest {
+                repo_id,
+                repo_path: dir.path().to_string_lossy().into_owned(),
+                repo_name: "widgets".into(),
+                title: "Add thing".into(),
+                source: SessionSource::OpenSpecTask {
+                    change_id: "add-thing".into(),
+                    task_index: 0,
+                    task_text: "1.1 Do it".into(),
+                    snapshot: SourceSnapshot {
+                        title: "Add thing".into(),
+                        summary: "1.1 Do it".into(),
+                        captured_at: "2026-01-01T00:00:00Z".into(),
+                        live_unavailable: false,
+                    },
+                },
+                intent: SessionIntent::Fix,
+            };
+            let CreateSessionOutcome::Created { session } = create_session_at(&root, req) else {
+                panic!("expected Created");
+            };
+            let manager = crate::state::RepoManager::default();
+
+            // Never launched -- no execution carries a fingerprint yet.
+            let outcome = openspec_context_drift_at(&root, &manager, &session.header.session_id);
+            assert!(matches!(outcome, OpenSpecContextDriftOutcome::NothingToCompare));
+        }
     }
 
     #[test]

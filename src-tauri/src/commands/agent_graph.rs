@@ -25,6 +25,7 @@ use crate::agentdesk::model::{
     AgentSession, ExecutionId, ExecutionRecord, SessionId, SessionLoadError, SessionState,
 };
 use crate::agentdesk::store::{self, SessionStoreRoot};
+use crate::commands::agent_desk::{openspec_target_of, resolve_openspec_context};
 use crate::error::AppError;
 use crate::git::worktree;
 use crate::state::RepoManager;
@@ -462,6 +463,19 @@ pub enum StartGraphOutcome {
     /// re-check `agent_session_graph_view` for whatever the winning call
     /// actually started.
     AlreadyStarted,
+    /// Task 3.3 ("detect task/spec changes after draft and block Start until
+    /// refreshed or explicitly accepted"): this lead's proposal was drafted
+    /// from an OpenSpec context (`ExecutionRecord::context_fingerprint`) that
+    /// no longer matches the change's current files. Start refuses outright
+    /// -- no worktree is provisioned, nothing is written -- until the user
+    /// either accepts the drift via `agent_session_accept_stale_openspec_context`
+    /// or asks the lead to re-plan. `current_fingerprint` lets the caller
+    /// persist acceptance against the exact drift being accepted, so a
+    /// second, later change cannot ride through on an old acceptance.
+    Stale {
+        lead_execution_id: ExecutionId,
+        current_fingerprint: String,
+    },
 }
 
 #[tauri::command]
@@ -536,6 +550,43 @@ fn start_graph_at(
 
     if let Err(reason) = graph::validate_graph(&proposed) {
         return StartGraphOutcome::Invalid { reason };
+    }
+
+    // Task 3.3 ("detect task/spec changes after draft and block Start until
+    // refreshed/accepted"): a Plan-mode lead drafted this graph from an
+    // OpenSpec context whose fingerprint is stamped on the lead's own
+    // execution record (`start_execution_at`, R5.3). If the session's source
+    // is an OpenSpec change/task, recompute that fingerprint from the LIVE
+    // files right now and compare -- if it moved, and the user has not
+    // already accepted this exact drift via
+    // `agent_session_accept_stale_openspec_context`, refuse before a single
+    // worktree is provisioned or a single helper is minted. A session with no
+    // OpenSpec source (`openspec_target_of` returns `None`) or a lead that
+    // never had a fingerprint (drafted before this ran, or not OpenSpec at
+    // all) has nothing to compare and proceeds exactly as before.
+    if let Some(launched_fingerprint) = &lead.context_fingerprint {
+        if let Some(target) = openspec_target_of(&session.header.source) {
+            let repo_path = std::path::Path::new(&session.header.repo_path);
+            if let Some(ctx) = resolve_openspec_context(repo_path, &target) {
+                let current_fingerprint = crate::agentdesk::openspec_context::fingerprint(&ctx);
+                let drifted = crate::agentdesk::openspec_context::context_changed_since(
+                    &current_fingerprint,
+                    launched_fingerprint,
+                );
+                if drifted {
+                    let accepted = lead
+                        .accepted_stale_context_fingerprint
+                        .as_deref()
+                        == Some(current_fingerprint.as_str());
+                    if !accepted {
+                        return StartGraphOutcome::Stale {
+                            lead_execution_id,
+                            current_fingerprint,
+                        };
+                    }
+                }
+            }
+        }
     }
 
     // Step 2: the repository must actually be open here, and worktrees are
@@ -678,6 +729,96 @@ fn start_graph_at(
         CommitGraphOutcome::WriteFailed { detail } => StartGraphOutcome::WriteFailed { detail },
         CommitGraphOutcome::Unavailable { detail } => StartGraphOutcome::Unavailable { detail },
     }
+}
+
+// ---------------------------------------------------------------------------
+// Task 3.3: accept a stale OpenSpec context (the other half of
+// `StartGraphOutcome::Stale` -- refresh is just calling
+// `agent_session_start_graph` again after the source stopped drifting;
+// this is the explicit "start anyway" path).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum AcceptStaleOpenSpecContextOutcome {
+    /// The lead's record now carries `current_fingerprint` as accepted --
+    /// calling `agent_session_start_graph` again will not refuse for THIS
+    /// drift again (though a further change after acceptance still will,
+    /// since `start_graph_at` compares against the freshly recomputed
+    /// fingerprint every time, not against `launched_fingerprint`).
+    Accepted { session: AgentSession },
+    /// No `NeedsInput` proposal with a fingerprint was found to accept
+    /// against -- nothing to do (Start was never blocked, or already
+    /// resolved by a concurrent call).
+    NoProposal,
+    NotFound,
+    Damaged { reason: String },
+    Unavailable { detail: String },
+    WriteFailed { detail: String },
+}
+
+fn accept_stale_openspec_context_at(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+) -> AcceptStaleOpenSpecContextOutcome {
+    let mut found = false;
+    let outcome = update_session_at(locks, root, session_id, |session| {
+        // Recompute the current fingerprint from inside the lock, from the
+        // session's own recorded source/repo path -- never trust a
+        // caller-supplied fingerprint string, which could be stale by the
+        // time this write lands (the same "never trust the client's copy"
+        // reasoning every other mutating command here follows).
+        let repo_path = std::path::PathBuf::from(&session.header.repo_path);
+        let Some(target) = openspec_target_of(&session.header.source) else {
+            return;
+        };
+        let Some(ctx) = resolve_openspec_context(&repo_path, &target) else {
+            return;
+        };
+        let current_fingerprint = crate::agentdesk::openspec_context::fingerprint(&ctx);
+        if let Some(lead) = session
+            .executions
+            .iter_mut()
+            .find(|e| e.parent_execution_id.is_none() && e.proposed_graph.is_some())
+        {
+            lead.accepted_stale_context_fingerprint = Some(current_fingerprint);
+            found = true;
+        }
+    });
+    match outcome {
+        UpdateOutcome::Updated { session } if found => {
+            AcceptStaleOpenSpecContextOutcome::Accepted { session }
+        }
+        UpdateOutcome::Updated { .. } => AcceptStaleOpenSpecContextOutcome::NoProposal,
+        UpdateOutcome::NotFound => AcceptStaleOpenSpecContextOutcome::NotFound,
+        UpdateOutcome::Damaged { reason } => AcceptStaleOpenSpecContextOutcome::Damaged { reason },
+        UpdateOutcome::WriteFailed { detail } => {
+            AcceptStaleOpenSpecContextOutcome::WriteFailed { detail }
+        }
+        UpdateOutcome::Unavailable { detail } => {
+            AcceptStaleOpenSpecContextOutcome::Unavailable { detail }
+        }
+    }
+}
+
+/// Production entry point for the "Start anyway" choice on a
+/// `StartGraphOutcome::Stale` refusal. The frontend calls this, then retries
+/// `agent_session_start_graph` -- kept as two separate calls (rather than one
+/// combined "accept and start") so the retry goes through the exact same
+/// Start path and re-validation everything else in this file already trusts,
+/// instead of a parallel "start after accepting" branch that could drift from
+/// it.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_accept_stale_openspec_context(
+    app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
+    session_id: SessionId,
+) -> Result<AcceptStaleOpenSpecContextOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    let locks_arc = locks.inner().clone();
+    Ok(accept_stale_openspec_context_at(&locks_arc, &root, &session_id))
 }
 
 /// A worktree `start_graph_at` already provisioned on disk (unlocked,
@@ -2894,6 +3035,268 @@ mod tests {
                 assert_eq!(session.header.state, SessionState::Ready);
             }
             other => panic!("expected Updated, got {other:?}"),
+        }
+    }
+
+    // -- Task 3.3: "detect task/spec changes after draft and block Start
+    // until refreshed or explicitly accepted." --
+
+    mod stale_openspec_context {
+        use super::*;
+        use crate::agentdesk::model::SourceSnapshot;
+        use std::fs;
+
+        /// A real git repo (`start_graph_at` needs `RepoManager::open` to
+        /// succeed) with a single-task OpenSpec change, and a session whose
+        /// source is `OpenSpecTask` pointed at that task -- the shape
+        /// `start_graph_at`'s new staleness check reads via
+        /// `openspec_target_of`/`resolve_openspec_context`.
+        fn repo_with_change_and_session(root: &std::path::Path, session_root: &SessionStoreRoot) -> (crate::state::RepoManager, String) {
+            let repo = git2::Repository::init(root).expect("init repo");
+            let change_dir = root.join("openspec").join("changes").join("add-thing");
+            fs::create_dir_all(&change_dir).unwrap();
+            fs::write(
+                change_dir.join("proposal.md"),
+                "# Change: Add thing\n\n## Why\n\nBecause.\n",
+            )
+            .unwrap();
+            fs::write(change_dir.join("tasks.md"), "## 1. Group\n\n- [ ] 1.1 Do it\n").unwrap();
+
+            // `start_graph_at` provisions a helper worktree from `HEAD` --
+            // an unborn HEAD (no commits yet) makes `git worktree add` fail,
+            // which is not what these tests are about, so give the repo one
+            // real commit exactly like `Gate 4`'s own fixture pattern implies
+            // a real repo needs (`commands::agent_desk`'s `repo_with_change`
+            // never exercises `start_graph_at`, so it gets away without one --
+            // this fixture does need it).
+            {
+                let mut index = repo.index().expect("repo index");
+                index.add_path(std::path::Path::new("openspec/changes/add-thing/proposal.md")).unwrap();
+                index.add_path(std::path::Path::new("openspec/changes/add-thing/tasks.md")).unwrap();
+                index.write().unwrap();
+                let tree_id = index.write_tree().unwrap();
+                let tree = repo.find_tree(tree_id).unwrap();
+                let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+                repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[]).unwrap();
+            }
+
+            let manager = crate::state::RepoManager::default();
+            let (repo_id, _open, _reused) =
+                manager.open(root.to_str().expect("utf8 path")).expect("open repo");
+
+            let header = AgentSessionHeader {
+                schema_version: CURRENT_SCHEMA_VERSION,
+                session_id: "sess-1".into(),
+                repo_id: repo_id.clone(),
+                repo_path: root.to_string_lossy().into_owned(),
+                repo_name: "widgets".into(),
+                title: "Add thing".into(),
+                source: SessionSource::OpenSpecTask {
+                    change_id: "add-thing".into(),
+                    task_index: 0,
+                    task_text: "1.1 Do it".into(),
+                    snapshot: SourceSnapshot {
+                        title: "Add thing".into(),
+                        summary: "1.1 Do it".into(),
+                        captured_at: now_rfc3339(),
+                        live_unavailable: false,
+                    },
+                },
+                intent: SessionIntent::Fix,
+                state: SessionState::Ready,
+                created_at: now_rfc3339(),
+                updated_at: now_rfc3339(),
+                unread: false,
+                changed_file_count: 0,
+                active_execution_id: None,
+                archived: false,
+                graph_started_at: None,
+            };
+            store::write_session(session_root, &AgentSession::new(header)).unwrap();
+
+            (manager, repo_id)
+        }
+
+        /// Computes the context fingerprint for the seeded change exactly the
+        /// way `start_execution_at` would have when the lead was launched --
+        /// shared by both tests below so "matches current" and "does not
+        /// match current" are unambiguous relative to the same computation.
+        fn fingerprint_for(root: &std::path::Path) -> String {
+            let target = crate::commands::agent_desk::OpenSpecTarget::Task {
+                change_id: "add-thing".into(),
+                task_index: 0,
+                task_text: "1.1 Do it".into(),
+                snapshot_title: "Add thing".into(),
+            };
+            let ctx = resolve_openspec_context(root, &target).expect("context builds");
+            crate::agentdesk::openspec_context::fingerprint(&ctx)
+        }
+
+        #[test]
+        fn start_refuses_with_stale_when_tasks_md_changed_since_the_lead_was_launched() {
+            let (dir, root) = temp_root();
+            let locks = crate::agentdesk::SessionLocks::new();
+            let (manager, _repo_id) = repo_with_change_and_session(dir.path(), &root);
+
+            let launched_fingerprint = fingerprint_for(dir.path());
+
+            // Persist a lead execution stamped with the ORIGINAL fingerprint,
+            // then change tasks.md -- the file the fingerprint was built
+            // from -- so the live fingerprint no longer matches.
+            update_session_at(&locks, &root, "sess-1", |s| {
+                let mut lead = ExecutionRecord::minimal(
+                    "lead-1".into(),
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::NeedsInput,
+                    now_rfc3339(),
+                    None,
+                    0,
+                );
+                lead.context_fingerprint = Some(launched_fingerprint.clone());
+                lead.proposed_graph = Some(sample_graph());
+                s.executions.push(lead);
+            });
+            fs::write(
+                dir.path().join("openspec/changes/add-thing/tasks.md"),
+                "## 1. Group\n\n- [ ] 1.1 Do it\n- [ ] 1.2 A new task inserted after drafting\n",
+            )
+            .unwrap();
+
+            let outcome = start_graph_at(&locks, &root, &manager, "sess-1");
+            match outcome {
+                StartGraphOutcome::Stale { lead_execution_id, current_fingerprint } => {
+                    assert_eq!(lead_execution_id, "lead-1");
+                    assert_ne!(current_fingerprint, launched_fingerprint, "the whole point: they must differ");
+                }
+                other => panic!("expected Stale, got {other:?}"),
+            }
+
+            // Nothing was provisioned or written -- no helper worktree, no
+            // state change on the session.
+            let session = store::read_session(&root, "sess-1").unwrap();
+            assert_eq!(session.header.state, SessionState::Ready);
+            assert!(session.executions.iter().all(|e| e.worktree_path.is_none()));
+        }
+
+        #[test]
+        fn start_proceeds_when_nothing_changed_since_the_lead_was_launched() {
+            let (dir, root) = temp_root();
+            let locks = crate::agentdesk::SessionLocks::new();
+            let (manager, _repo_id) = repo_with_change_and_session(dir.path(), &root);
+
+            let launched_fingerprint = fingerprint_for(dir.path());
+            update_session_at(&locks, &root, "sess-1", |s| {
+                let mut lead = ExecutionRecord::minimal(
+                    "lead-1".into(),
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::NeedsInput,
+                    now_rfc3339(),
+                    None,
+                    0,
+                );
+                lead.context_fingerprint = Some(launched_fingerprint);
+                lead.proposed_graph = Some(sample_graph());
+                s.executions.push(lead);
+            });
+
+            let outcome = start_graph_at(&locks, &root, &manager, "sess-1");
+            assert!(
+                matches!(outcome, StartGraphOutcome::Started { .. }),
+                "nothing changed, so Start must not refuse: {outcome:?}"
+            );
+        }
+
+        #[test]
+        fn start_proceeds_once_the_user_has_accepted_the_exact_current_drift() {
+            let (dir, root) = temp_root();
+            let locks = crate::agentdesk::SessionLocks::new();
+            let (manager, _repo_id) = repo_with_change_and_session(dir.path(), &root);
+
+            let launched_fingerprint = fingerprint_for(dir.path());
+            update_session_at(&locks, &root, "sess-1", |s| {
+                let mut lead = ExecutionRecord::minimal(
+                    "lead-1".into(),
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::NeedsInput,
+                    now_rfc3339(),
+                    None,
+                    0,
+                );
+                lead.context_fingerprint = Some(launched_fingerprint.clone());
+                lead.proposed_graph = Some(sample_graph());
+                s.executions.push(lead);
+            });
+            fs::write(
+                dir.path().join("openspec/changes/add-thing/tasks.md"),
+                "## 1. Group\n\n- [ ] 1.1 Do it\n- [ ] 1.2 A new task inserted after drafting\n",
+            )
+            .unwrap();
+
+            // First call still refuses -- acceptance has not happened yet.
+            assert!(matches!(
+                start_graph_at(&locks, &root, &manager, "sess-1"),
+                StartGraphOutcome::Stale { .. }
+            ));
+
+            let accept_outcome = accept_stale_openspec_context_at(&locks, &root, "sess-1");
+            assert!(
+                matches!(accept_outcome, AcceptStaleOpenSpecContextOutcome::Accepted { .. }),
+                "expected Accepted, got {accept_outcome:?}"
+            );
+
+            let outcome = start_graph_at(&locks, &root, &manager, "sess-1");
+            assert!(
+                matches!(outcome, StartGraphOutcome::Started { .. }),
+                "the accepted drift must not refuse Start again: {outcome:?}"
+            );
+        }
+
+        #[test]
+        fn a_further_change_after_acceptance_refuses_again() {
+            let (dir, root) = temp_root();
+            let locks = crate::agentdesk::SessionLocks::new();
+            let (manager, _repo_id) = repo_with_change_and_session(dir.path(), &root);
+
+            let launched_fingerprint = fingerprint_for(dir.path());
+            update_session_at(&locks, &root, "sess-1", |s| {
+                let mut lead = ExecutionRecord::minimal(
+                    "lead-1".into(),
+                    s.header.session_id.clone(),
+                    None,
+                    SessionState::NeedsInput,
+                    now_rfc3339(),
+                    None,
+                    0,
+                );
+                lead.context_fingerprint = Some(launched_fingerprint);
+                lead.proposed_graph = Some(sample_graph());
+                s.executions.push(lead);
+            });
+            fs::write(
+                dir.path().join("openspec/changes/add-thing/tasks.md"),
+                "## 1. Group\n\n- [ ] 1.1 Do it\n- [ ] 1.2 First drift\n",
+            )
+            .unwrap();
+            accept_stale_openspec_context_at(&locks, &root, "sess-1");
+
+            // A SECOND, later change after acceptance -- the accepted
+            // fingerprint no longer matches the (now different again)
+            // current one, so Start must refuse once more rather than
+            // treating the earlier acceptance as a blanket waiver.
+            fs::write(
+                dir.path().join("openspec/changes/add-thing/tasks.md"),
+                "## 1. Group\n\n- [ ] 1.1 Do it\n- [ ] 1.2 First drift\n- [ ] 1.3 Second drift\n",
+            )
+            .unwrap();
+
+            let outcome = start_graph_at(&locks, &root, &manager, "sess-1");
+            assert!(
+                matches!(outcome, StartGraphOutcome::Stale { .. }),
+                "a further drift after acceptance must refuse again: {outcome:?}"
+            );
         }
     }
 

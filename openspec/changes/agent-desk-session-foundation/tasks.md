@@ -38,11 +38,30 @@
 - [x] 4.3 Save the mapped event before emitting `agent-session-event`.
 - [x] 4.4 Reject stale execution events and duplicate sequences in Rust tests.
 - [x] 4.5 Keep `ai-run-event` unchanged until all current consumers migrate.
-- [ ] 4.6 Replace repository-keyed run links with execution-ID-to-session links. Repository
+- [x] 4.6 Replace repository-keyed run links with execution-ID-to-session links. Repository
       identity may resolve context but must never choose an event's destination session.
+      `RunSessionLinks` (`agentdesk/bridge.rs:65`) is keyed `execution_id -> session_id`, not
+      by repository -- its own doc comment names this exact fix ("the P0 fix for 'an event
+      can reach the wrong chat'... the previous `HashMap<repo_id, SessionId>` shape meant
+      linking session B's execution silently stole routing for every future event that
+      happened to name the same `repo_id`"). `route_run_event` consults only this map.
+      Proven by `linking_a_second_execution_does_not_overwrite_the_first` and the
+      cross-contamination tests cited under 4.7.
 - [ ] 4.7 Test two concurrent lead/helper executions in separate sessions for the same repo,
       including duplicate, late, terminal, unlink, and unknown execution events. Prove no
       transcript, result, gate, or graph state crosses sessions.
+      PARTIAL: the core cross-contamination claim IS proven by two real tests --
+      `an_event_for_execution_a_lands_in_session_a_only_when_two_sessions_share_a_repository`
+      (also proves unlink isolation: unlinking A's execution leaves B's mapping intact) and
+      `a_helper_and_its_lead_in_different_sessions_of_the_same_repo_do_not_cross_contaminate`
+      (interleaved lead+helper events, same repo, different sessions, each lands only in its
+      own session). Duplicate/late/unknown-execution handling is separately tested elsewhere
+      in the same file (`a_duplicate_sequence_is_ignored`,
+      `an_earlier_sequence_arriving_late_is_also_a_duplicate`,
+      `an_unlinked_repository_routes_to_nothing`) but as single-session cases, not combined
+      into the two-concurrent-session scenario this task asks for. No test exercises
+      duplicate/late/terminal/unknown events specifically WITHIN the concurrent lead+helper
+      cross-session setup. Left unchecked for that missing combination.
 
 ## 5. Frontend data layer
 

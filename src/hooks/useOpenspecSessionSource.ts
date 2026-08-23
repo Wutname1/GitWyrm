@@ -37,6 +37,29 @@ export function useOpenSpecSessionStatus(sessionId: string | null, enabled = tru
 }
 
 /**
+ * tasks.md 2.4, third of three ("mark launch-vs-live differences"): whether
+ * the OpenSpec source has changed since the most recent execution actually
+ * read it. `SessionContextPanel` renders this as a small "source changed"
+ * banner -- distinct from `useOpenSpecSessionStatus` above, which answers
+ * "does the change still exist at all" (moved/archived/deleted), not "did
+ * its content change under a still-live execution".
+ *
+ * Polled at a light interval (not `useRepoWatcher`-driven): Agent Desk is a
+ * separate window from the one that owns the file watcher today (`App.tsx`
+ * is the only mounter of `useRepoWatcher`), so a light poll here is what
+ * currently gets a stale OpenSpec source noticed inside this window without
+ * duplicating that watcher's whole event plumbing for one banner.
+ */
+export function useOpenSpecContextDrift(sessionId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: keys.agentSessionOpenspecContextDrift(sessionId ?? 'none'),
+    enabled: sessionId != null && enabled,
+    queryFn: async () => unwrap(await commands.agentSessionOpenspecContextDrift(sessionId!)),
+    refetchInterval: 15_000,
+  })
+}
+
+/**
  * Routes an accepted execution's task completion through the same checkbox
  * writer Spec Desk's own toggle uses (`crate::openspec::write::toggle_task_line`),
  * then refreshes every surface that shows this session or this repo's

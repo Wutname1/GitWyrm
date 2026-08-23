@@ -44,9 +44,20 @@
 
 ## 6. Composer and controls
 
-- [ ] 6.1 Wire Ask/Plan/Auto to hard execution authority, not only policy metadata. Ask and
+- [x] 6.1 Wire Ask/Plan/Auto to hard execution authority, not only policy metadata. Ask and
       the Plan proposal turn must launch with writes disabled. Pass `started=false` while
       drafting; only the visible Start transition may enable graph/helper writes.
+      Reversed from the "second audit" note below, which is stale against code in the same
+      commit (`21bdb3e`) it should have accounted for: `started_for_execution`
+      (`agent_desk.rs:1644`, labeled "P1-B fix: no longer unconditionally true") returns
+      `header.graph_started_at.is_some()` for Plan intent and `true` for every other intent,
+      proven by three tests including `plan_without_graph_started_at_is_not_started`. Its
+      result is passed as the real `started` argument into `cli_run::run_task` ->
+      `CliAgent::connect` -> `denied_tools_for`, which (per source-kickoffs 1.2) puts a hard
+      `--deny-tool=write` on the spawned process command line. `graph_started_at` is set
+      exactly once, inside `start_graph_at`'s handler for the visible Start action
+      (`agent_graph.rs:986`), documented as "never cleared once set -- Start is a one-way
+      transition." This is precisely the wiring the task asks for, not just policy metadata.
 - [x] 6.2 Wire Solo/Lead + helpers control to live execution behavior independent of operating mode.
 - [x] 6.3 Append sent user messages visibly before backend execution begins.
 - [x] 6.4 Prevent duplicate sends while accepting the message.
@@ -86,11 +97,21 @@ Still requires a human at the keyboard, and NOT claimed here:
 - 4.4 stays open: message targets resolve honestly but no diff/worktree/graph
   destination is reachable yet, so nothing can be proven to navigate.
 
-## Status 2026-08-22 second audit
+## Status 2026-08-22 second audit (superseded)
 
-Task 6.1 is reopened. The controls reach policy resolution, but production currently passes
-`started=true` to every run, so Plan can write before the user chooses Start. The execution
-launch must carry proposal-state authority and hard provider write denial.
+This note claimed task 6.1 should be reopened because production always passes
+`started=true`. Re-verified in the third audit below: that is no longer true (and the
+`started_for_execution`/`graph_started_at` mechanism it describes as missing is present in
+the same commit, `21bdb3e`, this note is dated after). 6.1 is ticked again.
+
+## Status 2026-08-22 third audit
+
+Re-ticked 6.1: `started_for_execution` (`agent_desk.rs:1644`) computes a real `false` for a
+Plan session's proposal turn from durable `header.graph_started_at`, feeding
+`cli_run::run_task`'s `started` parameter, which reaches a hard `--deny-tool=write` at
+process launch (see task's own note for the call chain and tests). This is the same
+mechanism `agent-desk-source-kickoffs` tasks.md 1.2 and `agent-desk-agent-graphs` tasks.md
+2.5's own read of `denied_tools_for` independently confirm.
 
 ## Prior status 2026-08-21 (historical)
 

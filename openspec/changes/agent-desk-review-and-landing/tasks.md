@@ -47,15 +47,45 @@
 - [x] 2.4 Show check outcomes and command names without raw terminal flood.
       (`ResultCheckOutcome{commandName, outcome, summary}` -- no raw stdout/stderr field
       exists on the type at all)
-- [ ] 2.5 Add Review requested changes as a new lead message and start a real execution step.
-      (`agent_result_request_revision` flips state to `RevisionRequested`; appending the
-      actual follow-up message reuses the existing `agent_session_append_user_message`)
+- [x] 2.5 Add Review requested changes as a new lead message and start a real execution step.
+      Reversed: `ResultReviewPanel.tsx`'s `handleSubmitRevision` (labeled "P1-C wiring 2" in
+      its own doc comment, directly naming the gap this task's prior note described) does all
+      three steps in order: (1) `agentResultRequestRevision` flips state to
+      `RevisionRequested`, (2) `agentSessionAppendUserMessage` appends the user's guidance as
+      a real transcript message, (3) `agentSessionStartExecution` starts a genuine new
+      execution on the session's policy-default mode/team. A failure at step 2/3 still leaves
+      step 1 committed and says so honestly, rather than claiming a turn started when it
+      did not.
 - [ ] 2.6 Mount a graph's primary result from the lead integration worktree, not the lead's
       earlier Plan execution. Show the combined diff/checks and make each helper result
       reachable from the same review surface.
+      PARTIAL: the first half is genuinely done -- `agent_graph.rs:974` sets
+      `header.active_execution_id` to the lead's own execution id when the graph starts, and
+      (per the `agent-desk-agent-graphs` audit's 5.8/5.9) `finish_graph_with_combined_result`
+      builds the combined `ResultRecord` keyed to that same lead execution id from the
+      integration worktree specifically -- so `ConversationPane.tsx`'s existing
+      `shouldShowResultPanel`/`activeExecutionId` wiring genuinely surfaces the combined
+      diff/checks once the graph finishes, with no separate mounting needed. The second half
+      is not built: `ResultReviewPanel` supports being pointed at a helper's own `executionId`
+      in principle, but nothing in the UI lets a user navigate to a helper's own result --
+      `AgentGraphPanel.tsx`'s per-node "Open conversation" button is `disabled` with the
+      title "A helper's own conversation cannot be opened yet." Left unchecked for that gap.
 - [ ] 2.7 Wire accepted OpenSpec results to the existing completion writer using the exact
       source task ID, then invalidate session source, OpenSpec detail, task list, and progress
       queries. Do not infer a task when provenance is missing.
+      PARTIAL: the write half is genuinely correct -- `ResultReviewPanel.tsx`'s `handleKeep`
+      calls `agentSessionCompleteOpenspecTask` when `isOpenSpecTask`, and the backend
+      (`complete_openspec_task_at`, `agent_desk.rs:2784`) reads the exact
+      `change_id`/`task_index`/`task_text` from `SessionSource::OpenSpecTask` provenance,
+      refusing with `NotAnOpenSpecTaskSource` for any other source rather than inferring one.
+      But the invalidation half is missing from this exact call path: a separate, correctly-
+      built hook exists for this (`useCompleteOpenSpecTask` in
+      `hooks/useOpenspecSessionSource.ts`, which does invalidate session/sessions-list/
+      OpenSpec-context/status/repo-wide progress, per its own doc comment naming this task),
+      but `handleKeep` calls `commands.agentSessionCompleteOpenspecTask` directly, not through
+      that hook, and only invalidates its own `agentResults` query afterward. Spec Desk's task
+      list/progress bars stay stale after a Keep until something else refreshes them. Left
+      unchecked for this specific gap.
 
 ## 3. Keep, undo, and commit
 
@@ -105,10 +135,14 @@
 - [x] 5.2 Detect hand edits and keep the worktree with an Open action.
       (`CleanupWorktreeOutcome::KeptHandEdited`; frontend "Open" affordance is not yet
       wired -- the outcome exists, the button does not, flagged in final report)
-- [ ] 5.3 Reconcile orphaned markers/worktrees during real app startup without deleting automatically.
-      (`agent_result_find_orphaned`; test: `find_orphaned_flags_a_kept_result_whose_worktree_is_gone`.
-      Wiring this into actual app startup is not done -- the command exists, nothing calls
-      it yet.)
+- [x] 5.3 Reconcile orphaned markers/worktrees during real app startup without deleting automatically.
+      Reversed: `useOrphanResultReconciliation.ts` (its own doc comment names this exact gap,
+      "P1-C wiring 3") calls `agentResultFindOrphanedAll` once on window mount (`useRef` guard,
+      StrictMode-safe), and is genuinely mounted in `AgentDeskView.tsx:443`
+      (`useOrphanResultReconciliation(onSelectSession)`) -- confirmed by direct read, not
+      inferred. It surfaces a plain-language toast naming how many orphaned results were
+      found and lets the user open the affected session; it deliberately never deletes or
+      auto-repairs anything itself, matching the task's "without deleting automatically."
 - [x] 5.4 Archive sessions without deleting result provenance or external imports.
       (results live in a separate sidecar file from the session transcript
       `agentdesk::store::write_session`/archive never touches; nothing in this package

@@ -29,20 +29,35 @@
 ## 3. Plan integration
 
 - [x] 3.1 Define proposed graph nodes with requirement/scenario/task references.
-- [ ] 3.2 Persist plan draft as an execution record in AwaitingStart state.
+- [x] 3.2 Persist plan draft as an execution record in AwaitingStart state.
+      Reversed: the 2026-08-20 note treated this as blocked on the agent-graphs engine-tool
+      gap, but that gap closed (per `agent-desk-agent-graphs` tasks.md 2.1, reversed
+      2026-08-21). `finish_plan_mode_execution_at` (`agent_graph.rs`) is genuinely called from
+      the production event-routing path on a finished lead Plan turn, parses the proposal via
+      `extract_graph_proposal`, and calls `propose_graph_at` (`agent_graph.rs:159`), which
+      durably persists a new `ExecutionRecord` with `proposed_graph` set and
+      `SessionState::NeedsInput` (the enum's own doc comment: "...or awaiting a plan-mode
+      start decision" -- there is no separate literal `AwaitingStart` variant; this
+      NeedsInput-plus-proposed_graph combination IS that state) via a real locked
+      `update_session_at` write, not a transient/in-memory value.
 - [ ] 3.3 Detect task/spec changes after draft and block Start until refreshed/accepted.
 - [ ] 3.4 Add Revise plan, Start, and Use solo actions with immediate visible state.
 
 ## 4. File-backed completion
 
-- [ ] 4.1 Route accepted task completion from the mounted review flow through the existing task-line writer.
-      Confirmed orphan as of 2026-08-21: the backend command
-      `agent_session_complete_openspec_task` (`src-tauri/src/commands/agent_desk.rs`) genuinely
-      calls the shared `openspec::write::toggle_task_line` writer, and a frontend hook
-      (`useCompleteOpenSpecTask` in `src/hooks/useOpenspecSessionSource.ts`) genuinely calls
-      that command -- but grepping all of `src/**/*.tsx` for `useCompleteOpenSpecTask` finds
-      zero imports. No mounted component ever calls it. The command and hook are real and
-      correct in isolation; nothing in the rendered UI reaches them.
+- [x] 4.1 Route accepted task completion from the mounted review flow through the existing task-line writer.
+      Reversed from the 2026-08-21 orphan finding, which is now stale: that finding is still
+      literally true of the `useCompleteOpenSpecTask` hook specifically (still zero `.tsx`
+      importers, re-confirmed by grep), but the task asks whether the MOUNTED REVIEW FLOW
+      reaches the writer, and it now does via a different path -- `ResultReviewPanel.tsx`'s
+      `handleKeep` (confirmed mounted in `ConversationPane.tsx`, per the
+      `agent-desk-review-and-landing` audit's 2.1) calls
+      `commands.agentSessionCompleteOpenspecTask` directly when `isOpenSpecTask`, which hits
+      the same `complete_openspec_task_at` -> `toggle_task_line` writer the hook would have.
+      The unused hook is a parallel, better-invalidating implementation that got bypassed --
+      see `agent-desk-review-and-landing` tasks.md 2.7 for that specific, separate gap
+      (invalidation, not the write itself) -- but this task's own text ("route ... through the
+      existing task-line writer") is satisfied by the write path that ships.
 - [ ] 4.2 Route accepted spec edits through existing draft/review writer.
 - [ ] 4.3 Refresh all main/Desk progress surfaces after writes from the production flow.
 - [x] 4.4 Never tick a task solely because an execution emitted Finished; require existing

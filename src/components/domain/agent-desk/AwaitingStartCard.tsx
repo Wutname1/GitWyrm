@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
-import { ListTodo } from 'lucide-react'
+import { ListTodo, TriangleAlert } from 'lucide-react'
 import { commands, type AgentSession, type ExecutionRecord } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
@@ -44,7 +44,13 @@ export function AwaitingStartCard({
   onRevise: () => void
 }) {
   const qc = useQueryClient()
-  const [busy, setBusy] = useState<'start' | 'solo' | null>(null)
+  const [busy, setBusy] = useState<'start' | 'solo' | 'accepting' | null>(null)
+  // Task 3.3 ("detect task/spec changes after draft and block Start until
+  // refreshed or explicitly accepted"): when Start refuses with `stale`, this
+  // card shows a warning and an explicit "Start anyway" action instead of the
+  // ordinary Start button. Cleared on refresh (a fresh mount re-fetches the
+  // lead, which no longer carries this outcome) and on a fresh Start attempt.
+  const [stale, setStale] = useState<{ currentFingerprint: string } | null>(null)
   const proposal = lead.proposedGraph
   if (!proposal) return null
 
@@ -56,12 +62,21 @@ export function AwaitingStartCard({
     try {
       const outcome = unwrap(await commands.agentSessionStartGraph(session.header.sessionId))
       if (outcome.kind === 'started') {
+        setStale(null)
         refreshSession()
         toast.success(
           outcome.started_helpers.length > 0
             ? `Started the lead and ${outcome.started_helpers.length} helper${outcome.started_helpers.length === 1 ? '' : 's'}.`
             : 'Started the lead agent.'
         )
+      } else if (outcome.kind === 'stale') {
+        // Refuses outright: no worktree was provisioned, nothing was
+        // written. The user must refresh (re-plan) or explicitly accept the
+        // drift before Start will proceed -- see the warning banner below.
+        setStale({ currentFingerprint: outcome.current_fingerprint })
+        toast.warning('The OpenSpec source changed since this plan was drafted.', {
+          description: 'Review what changed, then start anyway or ask for a fresh plan.',
+        })
       } else if (outcome.kind === 'noProposal') {
         toast.error('There is no plan waiting to start.')
       } else if (outcome.kind === 'invalid') {
@@ -82,6 +97,35 @@ export function AwaitingStartCard({
       log.error(`agent desk: could not start graph: ${message}`)
       toast.error('Could not start the plan.', { description: message })
     } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * "Start anyway": records explicit acceptance of the exact current drift
+   * (`agent_session_accept_stale_openspec_context` re-fingerprints from the
+   * live files itself -- it never trusts a fingerprint string round-tripped
+   * through the frontend), then retries Start through the ordinary `start()`
+   * path so the retry gets the exact same validation and worktree/helper
+   * launch every other Start does.
+   */
+  const startAnyway = async () => {
+    if (busy) return
+    setBusy('accepting')
+    try {
+      const outcome = unwrap(await commands.agentSessionAcceptStaleOpenspecContext(session.header.sessionId))
+      if (outcome.kind !== 'accepted') {
+        toast.error('Could not accept the source change.', { description: outcome.kind })
+        setBusy(null)
+        return
+      }
+      setStale(null)
+      setBusy(null)
+      await start()
+    } catch (e) {
+      const message = describeError(e)
+      log.error(`agent desk: could not accept stale openspec context: ${message}`)
+      toast.error('Could not accept the source change.', { description: message })
       setBusy(null)
     }
   }
@@ -127,22 +171,47 @@ export function AwaitingStartCard({
           </li>
         ))}
       </ul>
+      {stale && (
+        // R5.4/tasks.md 3.3: Start already refused once for this exact
+        // drift -- this banner is why, and it stays visible (rather than a
+        // one-shot toast) until the user either revises or explicitly
+        // starts anyway, since a toast alone would be gone before someone
+        // reads it if they stepped away from the window.
+        <div className="mt-2 flex items-start gap-1.5 rounded border border-amber-600/40 bg-amber-500/10 px-2 py-1.5 text-2xs leading-relaxed text-amber-700 dark:text-amber-400">
+          <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
+          <span>
+            The OpenSpec change changed since this plan was drafted. Revise the plan for a fresh
+            read, or start anyway using this plan as drafted.
+          </span>
+        </div>
+      )}
       <div className="mt-2 flex gap-1.5">
-        <button
-          type="button"
-          onClick={() => void start()}
-          disabled={busy !== null}
-          className="rounded bg-primary px-2 py-1 text-[10px] font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy === 'start' ? 'Starting…' : 'Start'}
-        </button>
+        {stale ? (
+          <button
+            type="button"
+            onClick={() => void startAnyway()}
+            disabled={busy !== null}
+            className="rounded bg-primary px-2 py-1 text-[10px] font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy === 'accepting' || busy === 'start' ? 'Starting…' : 'Start anyway'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void start()}
+            disabled={busy !== null}
+            className="rounded bg-primary px-2 py-1 text-[10px] font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy === 'start' ? 'Starting…' : 'Start'}
+          </button>
+        )}
         <button
           type="button"
           onClick={onRevise}
           disabled={busy !== null}
           className="rounded border border-border bg-panel2 px-2 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Revise
+          {stale ? 'Revise plan' : 'Revise'}
         </button>
         <button
           type="button"

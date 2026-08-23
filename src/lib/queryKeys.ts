@@ -45,6 +45,8 @@ export const keys = {
   agentSessionOpenspecContext: (sessionId: string) => ['agentSessionOpenspecContext', sessionId] as const,
   /** Active/archived/moved/deleted status of an `openSpecChange`/`openSpecTask` session source. */
   agentSessionOpenspecStatus: (sessionId: string) => ['agentSessionOpenspecStatus', sessionId] as const,
+  /** tasks.md 2.4: whether the OpenSpec source changed since the most recent execution read it. */
+  agentSessionOpenspecContextDrift: (sessionId: string) => ['agentSessionOpenspecContextDrift', sessionId] as const,
   /** Review/landing: every result record for one session (agent-desk-review-and-landing). */
   agentResults: (sessionId: string) => ['agentResults', sessionId] as const,
 

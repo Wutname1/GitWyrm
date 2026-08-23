@@ -5,11 +5,20 @@
 - [x] 1.1 Define `StartAgentSessionRequest`, typed source inputs, mode, team, and provider
       override in Rust/Specta. (`src-tauri/src/commands/agent_kickoff.rs`:
       `StartAgentSessionRequest`, `SessionSourceInput`.)
-- [ ] 1.2 Enforce read-only intent at provider launch and again at the runtime permission
+- [x] 1.2 Enforce read-only intent at provider launch and again at the runtime permission
       boundary. The provider process must start with write disabled (for Copilot ACP,
       `--deny-tool=write` or the version-gated equivalent), so remembered/global allow rules
       cannot bypass GitWyrm when no `PermissionRequest` is emitted. The existing
       `check_tool_capability` handler remains defense in depth, not the sole boundary.
+      Reversed from the "second audit" note below, which is stale: `denied_tools_for`
+      (`ai/agent/cli_agent.rs:65`) computes the deny set from policy/started, and
+      `CliAgent::connect` (line 123) passes it straight into `AcpConnection::spawn`
+      (`ai/agent/acp.rs:157`), which puts `--deny-tool={tool}` on the actual spawned process
+      command line -- not merely a post-hoc `PermissionRequest` check. The code's own doc
+      comment on `spawn` quotes `copilot help permissions`: "denial rules always take
+      precedence over allow rules, even --allow-all-tools" -- this is precisely the hard
+      boundary the "second audit" claims is missing. `shell_and_network_access_are_always_denied`
+      and sibling tests in `cli_agent.rs` prove the set for every intent/started combination.
 - [x] 1.3 Add policy tests for all intent/mode/team combinations. (`policy.rs` `mod tests`,
       9 tests including the exhaustive read-only proof.)
 - [x] 1.4 Add duplicate-session lookup by repo/source identity/intent/active state.
@@ -38,12 +47,28 @@
       `WorktreeFailed`) exist as typed backend outcomes but have no dedicated retry UI card
       yet -- native follow-up.
 - [x] 2.5 Clear Starting on all success/failure/unmount paths. (`finally` block.)
-- [ ] 2.6 Start every explicit source operation after session creation. Fix, Plan, Explain,
+- [x] 2.6 Start every explicit source operation after session creation. Fix, Plan, Explain,
       Review, and Summarize must not require a second composer Send; read-only intents run
       immediately with read-only authority.
-- [ ] 2.7 Persist and carry the kickoff intent, mode, team, and provider override into the
+      `agent_session_start` (`agent_kickoff.rs:557`) unconditionally calls
+      `start_execution_at` for every `Created` session regardless of intent -- there is no
+      per-intent gate left. Its own doc comment names the exact prior bug this replaced: the
+      old frontend `IntentPolicy.canWrite` check skipped starting for Review/Summarize/Ask/
+      Explain, leaving a Draft session that never ran. Read-only intents still cannot write
+      (enforced by `check_tool_capability` and, per 1.2, `--deny-tool` at launch) but they do
+      now run immediately, matching `useStartAgentSession.ts`'s own doc comment describing
+      the same removal from the frontend side.
+- [x] 2.7 Persist and carry the kickoff intent, mode, team, and provider override into the
       first execution. With no override, use the configured default provider; show an
       unsupported/unavailable choice instead of silently falling back.
+      `resolve_kickoff_execution_params` (`agent_kickoff.rs:450`) resolves
+      `request.mode.unwrap_or(intent_default)`/`request.team.unwrap_or(intent_default)`, and
+      `request.provider_override` is passed verbatim into the same `start_execution_at` call
+      that creates the session -- proven by `explicit_mode_override_is_not_replaced_by_the_intent_default`,
+      `_team_override_...`, and `both_overrides_together_survive_independently`. The doc
+      comment on `agent_session_start` names the exact prior bug: overrides used to be
+      accepted into the request and then silently dropped before the old frontend auto-start
+      call, which always passed the intent's plain default.
 
 ## 3. Issue actions
 
@@ -76,6 +101,15 @@
 - [ ] 4.5 Prove live Review/Summarize cannot edit even when the provider has a remembered or
       global allow rule and never asks GitWyrm for permission. Assert the provider launch
       contains a hard write denial and native-test a dirty checkout byte-for-byte.
+      PARTIAL, closer than the "second audit" note below suggests: the launch-time hard
+      denial itself is proven (see 1.2 -- `--deny-tool=write` reaches the actual spawned
+      process command line for Review/Summarize, per Copilot's own "denial always wins over
+      allow rules" contract), and `explain_review_and_summarize_also_refuse_writes_before_asking`
+      (`cli_run.rs:679`) drives a write request through the real production `handle()`
+      function for these intents and asserts refusal before any gate is shown. What remains
+      is specifically the native, real-repo, byte-for-byte dirty-checkout proof against a
+      live provider process with a remembered allow rule -- that cannot be simulated in a
+      unit test and needs an actual running app. Left unchecked for that native gap only.
 - [ ] 4.6 Escalating a review into a requested fix creates a new isolated execution linked to
       the same session/source. Not built -- would live inside `ConversationPane.tsx`
       (owned by another in-flight package during this work); native follow-up.
@@ -99,6 +133,17 @@
 - [ ] 5.5 Make concurrent start preparation transactional. If a final locked check finds a
       winner after this request provisioned a worktree, remove the unused worktree and branch
       unless they contain unique work; test the losing race leaves no orphan.
+      PARTIAL, closer than the "second audit" note suggests: `cleanup_unused_worktree`
+      (`agent_desk.rs:1058`) is real and wired at all 6 early-return points in
+      `start_execution_at` between "worktree provisioned" and "engine launched" (including
+      the exact re-checked-lock loss the task describes), proven in isolation by
+      `cleanup_unused_worktree_removes_a_freshly_provisioned_worktree` and
+      `cleanup_unused_worktree_refuses_the_main_checkout`. Separately,
+      `concurrent_start_attempts_yield_exactly_one_started_and_one_already_running` proves the
+      locking picks exactly one winner under real thread contention. But no single test
+      connects the two -- an actual concurrent-start race that provisions a worktree, loses,
+      and asserts the worktree is gone -- so "test the losing race leaves no orphan" is not
+      literally met. Left unchecked for that missing end-to-end test.
 
 ## 6. Host coverage and proof
 
@@ -117,14 +162,30 @@
 - [ ] 6.5 Run typecheck, Rust tests, and record Gate 3 evidence. See verification output
       recorded in this change's implementation notes.
 
-## Status 2026-08-22 second audit
+## Status 2026-08-22 third audit
 
-The earlier 2026-08-21 status below is superseded where it claimed 1.2 and 4.5 complete.
-Runtime `PermissionRequest` refusal is useful but is not a hard read-only boundary because
-provider allow rules can suppress the request. The second audit also found source actions
-do not all start their selected operation, kickoff overrides are discarded before the first
-run, and a losing concurrent start can leak its prepared worktree. Tasks 1.2, 2.6, 2.7,
-4.5, and 5.5 are release blockers.
+The "second audit" note below (2026-08-22) is itself stale/wrong on 1.2, 2.6, and 2.7,
+re-verified against current code in this pass:
+
+- 1.2: it claimed the runtime `PermissionRequest` refusal was the only boundary and provider
+  allow rules could suppress it. That undersells the code: `denied_tools_for` /
+  `AcpConnection::spawn` puts `--deny-tool=write` directly on the spawned process command
+  line, which per Copilot's own documented contract (quoted in the code) takes precedence
+  over every allow rule including `--allow-all-tools`. This is a hard launch-time boundary,
+  not just a software permission check. Ticked.
+- 2.6: it claimed source actions do not all start their selected operation. `agent_session_start`
+  unconditionally starts every created session's execution regardless of intent -- the old
+  frontend gate this concern describes was already removed, and the removal is documented in
+  both `agent_kickoff.rs` and `useStartAgentSession.ts`'s own comments. Ticked.
+- 2.7: it claimed kickoff overrides are discarded before the first run.
+  `resolve_kickoff_execution_params` carries `request.mode`/`.team`/`.provider_override`
+  verbatim into the same `start_execution_at` call, with three direct tests proving
+  survival. Ticked.
+- 4.5 and 5.5 are genuinely still open, but narrower than this note claimed: the *code*
+  parts of both (hard deny-tool boundary; concurrent-start worktree cleanup) exist and are
+  tested in isolation. What remains for each is a specific missing test/proof (a native
+  dirty-checkout run for 4.5; an end-to-end losing-race-leaves-no-orphan test for 5.5), not
+  an absent mechanism. See their own notes above.
 
 ## Prior status 2026-08-21 (historical)
 
