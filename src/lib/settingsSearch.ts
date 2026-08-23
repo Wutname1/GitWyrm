@@ -448,6 +448,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['lines changed', 'diff size', 'bar', 'insertions', 'deletions'],
   },
   {
+    id: 'graph-avatars',
+    section: 'appearance',
+    label: 'Commit author pictures',
+    hint: 'Show who wrote each commit as a picture in the graph.',
+    keywords: ['avatar', 'gravatar', 'photo', 'face', 'author', 'graph', 'dots', 'profile'],
+  },
+  {
     id: 'changes-view',
     section: 'appearance',
     label: 'Changed files',

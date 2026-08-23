@@ -299,6 +299,9 @@ pub struct Settings {
     /// Show exact added and removed line counts beside the size bar.
     #[serde(default)]
     pub show_change_line_counts: bool,
+    /// Draw each commit's author picture as its node in the commit graph.
+    #[serde(default)]
+    pub show_graph_avatars: bool,
     /// Default action for the commit button: "commit" or "commit_push". None
     /// falls back to plain commit. Validated on the frontend.
     #[serde(default)]
@@ -717,6 +720,7 @@ impl Default for Settings {
             change_size_display: default_change_size_display(),
             show_change_indicator: default_show_change_indicator(),
             show_change_line_counts: false,
+            show_graph_avatars: false,
             commit_button_mode: None,
             default_editor: None,
             enable_worktrees: false,
@@ -1562,6 +1566,23 @@ mod tests {
         assert_eq!(restored.change_size_display, ChangeSizeDisplay::Row);
         assert!(!restored.show_change_indicator);
         assert!(restored.show_change_line_counts);
+    }
+
+    #[test]
+    fn graph_avatars_round_trip_through_settings_json() {
+        let settings = Settings {
+            show_graph_avatars: true,
+            ..Settings::default()
+        };
+
+        let json = serde_json::to_string(&settings).expect("settings should serialize");
+        let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
+
+        assert!(restored.show_graph_avatars);
+        assert!(
+            !Settings::default().show_graph_avatars,
+            "avatars stay off until the user turns them on"
+        );
     }
 
     #[test]

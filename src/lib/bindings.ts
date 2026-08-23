@@ -4676,6 +4676,10 @@ show_change_indicator?: boolean;
  */
 show_change_line_counts?: boolean; 
 /**
+ * Draw each commit's author picture as its node in the commit graph.
+ */
+show_graph_avatars?: boolean; 
+/**
  * Default action for the commit button: "commit" or "commit_push". None
  * falls back to plain commit. Validated on the frontend.
  */

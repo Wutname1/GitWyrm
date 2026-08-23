@@ -25,11 +25,18 @@ export interface LaneGeometry {
   isOverflow: (lane: number) => boolean
 }
 
-export function laneGeometry(width: number): LaneGeometry {
-  const lastVisibleLane = Math.max(0, Math.floor((width - LANE_X0 * 2) / LANE_WIDTH))
+/**
+ * @param width Pixel width of the graph column.
+ * @param laneWidth Pitch between lanes. Defaults to [`LANE_WIDTH`]; avatar
+ *   nodes are wider than that and pass their own so adjacent lanes do not
+ *   overlap. A wider pitch fits fewer lanes before the overflow fold, which is
+ *   the trade for a readable node.
+ */
+export function laneGeometry(width: number, laneWidth: number = LANE_WIDTH): LaneGeometry {
+  const lastVisibleLane = Math.max(0, Math.floor((width - LANE_X0 * 2) / laneWidth))
   return {
     lastVisibleLane,
-    laneX: (lane) => LANE_X0 + Math.min(lane, lastVisibleLane) * LANE_WIDTH,
+    laneX: (lane) => LANE_X0 + Math.min(lane, lastVisibleLane) * laneWidth,
     isOverflow: (lane) => lane > lastVisibleLane,
   }
 }

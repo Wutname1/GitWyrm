@@ -1,8 +1,28 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useId, useMemo } from 'react'
 import type { CommitEntry, StashInfo } from '@/lib/bindings'
 import { laneColor } from '@/lib/gitDisplay'
 import { laneGeometry } from '@/lib/graphLanes'
+import { useAvatarUrls } from '@/lib/useAvatarUrls'
 import { useUiStore } from '@/stores/uiStore'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
+
+/**
+ * Geometry of an avatar node: a 22px node made of an 18px picture inside a 2px
+ * ring, which is the size a face stays recognisable at.
+ *
+ * The ring sits flush on the picture rather than separated from it. A gap was
+ * tried and cost 6px of face to buy separation the extra size provides anyway.
+ *
+ * 22px is wider than the 20px lane pitch, so `AVATAR_LANE_WIDTH` widens the
+ * pitch whenever avatars are on -- otherwise adjacent lanes would overlap.
+ */
+const AVATAR_OUTER_R = 11
+/** Width of the lane-colored ring. */
+const AVATAR_RING = 2
+/** Radius of the picture itself. */
+const AVATAR_R = AVATAR_OUTER_R - AVATAR_RING
+/** Lane pitch while avatars are on: the node's width plus breathing room. */
+const AVATAR_LANE_WIDTH = AVATAR_OUTER_R * 2 + 2
 
 /**
  * Route an edge like a rail line: change lanes close to an endpoint, then run
@@ -185,13 +205,47 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
     setStashTracks(Object.fromEntries(stashTrackBySha))
   }, [stashTrackBySha, setStashTracks])
 
+  const showAvatars = useWorkspaceStore((s) => s.showGraphAvatars)
+
+  // Only the authors actually on screen are resolved. Walking every loaded row
+  // would fire hundreds of lookups the moment a large repo finishes paging,
+  // for faces that are nowhere near the viewport.
+  const visibleEmails = useMemo(() => {
+    if (!showAvatars) return []
+    const out: string[] = []
+    const lo = Math.max(0, startIndex - 30)
+    const hi = Math.min(rows.length - 1, endIndex + 30)
+    for (let i = lo; i <= hi; i++) {
+      const r = rows[i]
+      if (r.kind === 'commit') out.push(r.commit.author_email)
+    }
+    return out
+  }, [showAvatars, rows, startIndex, endIndex])
+
+  // Doubled for crisp rendering on high-DPI displays, the same trade `Avatar`
+  // makes for the author column.
+  const avatarUrls = useAvatarUrls(visibleEmails, Math.round(AVATAR_R * 4))
+
+  // Clip paths are referenced by id, so two graphs on screen at once (a diff
+  // view beside the log) must not collide on the same names. React's ids are
+  // wrapped in colons, which are legal in an id but not in the `url(#...)`
+  // reference that reads it back, so they are stripped.
+  const clipPrefix = useId().replace(/:/g, '')
+
   // Lanes keep a fixed width so a branch sits in the same column no matter how
   // wide the graph is, and widening the column reveals more lanes instead of
   // re-spacing the ones already drawn. Lanes that do not fit are folded onto
   // the last visible column rather than compressing every lane to fit; that
   // column then reads as "and more branches out here", which stays legible
   // where 20-odd hairline rails would not.
-  const { laneX, isOverflow } = useMemo(() => laneGeometry(width), [width])
+  // Avatar nodes are wider than the default pitch, so the pitch widens with
+  // them. Turning avatars on therefore folds a few more lanes into the
+  // overflow column at the same graph width, which is the trade for a node big
+  // enough to recognise a face in.
+  const { laneX, isOverflow } = useMemo(
+    () => laneGeometry(width, showAvatars ? AVATAR_LANE_WIDTH : undefined),
+    [width, showAvatars],
+  )
 
   // Rows occupied by each lane, ascending, so a lane running off the loaded
   // region can stop before reaching a commit that is not its parent. Built once
@@ -461,11 +515,58 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
         // and hollow, so a stack of them reads as "more branches out here"
         // rather than as several unrelated branches sharing one column.
         const overflow = isOverflow(c.lane)
+        const x = laneX(c.lane)
+        const y = rowCenterY(i)
+
+        // A picture only replaces the dot once it has actually resolved.
+        // Swapping in an empty disc first would flash a hole in the lane on
+        // every scroll, and authors with no picture anywhere never resolve at
+        // all -- they keep the plain dot for good.
+        //
+        // Overflow commits stay dots regardless: at 3.5px a face is a smudge,
+        // and shrinking that column is what makes it read as "more out here".
+        const avatar = showAvatars && !overflow ? avatarUrls.get(c.author_email.trim().toLowerCase()) : undefined
+        if (avatar) {
+          const clipId = `${clipPrefix}-${c.sha}`
+          // The stroke straddles its path, so the ring is centred half a width
+          // inside the outer edge to keep the node at its stated size.
+          const ringR = AVATAR_OUTER_R - AVATAR_RING / 2
+          return (
+            <g key={c.sha}>
+              <defs>
+                <clipPath id={clipId}>
+                  <circle cx={x} cy={y} r={AVATAR_R} />
+                </clipPath>
+              </defs>
+              {/* A transparent PNG lands on the app background rather than on
+                  whatever rail runs behind the node. */}
+              <circle cx={x} cy={y} r={AVATAR_OUTER_R} fill="var(--gw-bg)" />
+              <image
+                href={avatar}
+                x={x - AVATAR_R}
+                y={y - AVATAR_R}
+                width={AVATAR_R * 2}
+                height={AVATAR_R * 2}
+                clipPath={`url(#${clipId})`}
+                preserveAspectRatio="xMidYMid slice"
+              />
+              <circle
+                cx={x}
+                cy={y}
+                r={ringR}
+                fill="none"
+                stroke={sel ? 'var(--gw-text)' : col}
+                strokeWidth={AVATAR_RING}
+              />
+            </g>
+          )
+        }
+
         return (
           <circle
             key={c.sha}
-            cx={laneX(c.lane)}
-            cy={rowCenterY(i)}
+            cx={x}
+            cy={y}
             r={sel ? 7.5 : overflow ? 3.5 : 6}
             fill={c.is_merge || overflow ? 'var(--gw-bg)' : col}
             stroke={sel ? 'var(--gw-text)' : c.is_merge || overflow ? col : 'var(--gw-bg)'}

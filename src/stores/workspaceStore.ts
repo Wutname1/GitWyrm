@@ -641,6 +641,13 @@ interface WorkspaceState {
   showChangeIndicator: boolean;
   /** Whether the change-size indicator includes exact line counts (persisted). */
   showChangeLineCounts: boolean;
+  /**
+   * Whether commit graph nodes are drawn as the author's picture (persisted).
+   *
+   * The lane color does not go away when this is on: it becomes the ring around
+   * the picture, so a branch is still identifiable at a glance.
+   */
+  showGraphAvatars: boolean;
   /** Default action for the commit button (persisted). */
   commitButtonMode: CommitButtonMode;
   /** Editor the open-in-editor actions launch (persisted). */
@@ -1008,6 +1015,7 @@ interface WorkspaceState {
   resetWorkspaceLayout: () => void;
   setChangeSizeDisplay: (display: ChangeSizeDisplay) => void;
   setShowChangeIndicator: (enabled: boolean) => void;
+  setShowGraphAvatars: (enabled: boolean) => void;
   setShowChangeLineCounts: (enabled: boolean) => void;
   /** Reads settings.json once and hydrates the store; returns the raw settings for launch-time restore. */
   hydrate: () => Promise<Settings>;
@@ -1070,6 +1078,7 @@ function toSettings(s: WorkspaceState): Settings {
     change_size_display: s.changeSizeDisplay,
     show_change_indicator: s.showChangeIndicator,
     show_change_line_counts: s.showChangeLineCounts,
+    show_graph_avatars: s.showGraphAvatars,
     commit_button_mode: s.commitButtonMode,
     default_editor: s.defaultEditor,
     tag_push_default: s.tagPushDefault,
@@ -1422,6 +1431,7 @@ export const SETTINGS_DEFAULTS = {
   changeSizeDisplay: "column",
   showChangeIndicator: false,
   showChangeLineCounts: false,
+  showGraphAvatars: false,
   uiScale: DEFAULT_UI_SCALE,
   fontFamily: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
@@ -1483,6 +1493,7 @@ export const SETTINGS_GROUPS = {
     "changeSizeDisplay",
     "showChangeIndicator",
     "showChangeLineCounts",
+    "showGraphAvatars",
     "uiScale",
     "fontFamily",
     "fontSize",
@@ -1537,6 +1548,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   changeSizeDisplay: "column",
   showChangeIndicator: false,
   showChangeLineCounts: false,
+  showGraphAvatars: false,
   commitButtonMode: "commit",
   defaultEditor: DEFAULT_EDITOR,
   tagPushDefault: "ask",
@@ -2823,6 +2835,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ showChangeLineCounts: enabled });
     schedulePersist();
   },
+  setShowGraphAvatars: (enabled) => {
+    set({ showGraphAvatars: enabled });
+    schedulePersist();
+  },
 
   hydrate: async () => {
     const settings = unwrap(await commands.getSettings());
@@ -2902,6 +2918,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.change_size_display === "row" ? "row" : "column",
         showChangeIndicator: settings.show_change_indicator ?? true,
         showChangeLineCounts: settings.show_change_line_counts ?? false,
+        showGraphAvatars: settings.show_graph_avatars ?? false,
         commitButtonMode:
           settings.commit_button_mode === "commit_push"
             ? "commit_push"
