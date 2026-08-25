@@ -1938,9 +1938,17 @@ async repairWorktree(repoId: string, newPath: string | null) : Promise<Result<nu
     else return { status: "error", error: e  as any };
 }
 },
-async gitFetch(repoId: string) : Promise<Result<null, string>> {
+/**
+ * Fetch every remote.
+ * 
+ * `background` is true when a timer started this rather than the user. It keeps
+ * the auto-fetch sweep from opening a credential window over whatever they are
+ * doing: an unauthenticated background fetch fails silently and is logged,
+ * while a fetch the user asked for may still prompt.
+ */
+async gitFetch(repoId: string, background: boolean) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_fetch", { repoId }) };
+    return { status: "ok", data: await TAURI_INVOKE("git_fetch", { repoId, background }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

@@ -20,6 +20,7 @@ import {
 } from '@/lib/bindings'
 import { beginGitOperation, keys, trimLogToFirstPage, unwrap } from '@/lib/queryKeys'
 import { useHostResolver } from '@/hooks/useGitQueries'
+import { timed } from '@/lib/perfTrail'
 import { noteManualFetch } from '@/hooks/useAutoFetch'
 import { classifyError } from '@/lib/errorClass'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -934,7 +935,7 @@ export function useGitMutations(repoId: string | null) {
   const fetch = useMutation({
     mutationKey: syncKey(id, 'fetch'),
     mutationFn: async (options: { silent?: boolean } | undefined) => {
-      await unwrap(await commands.gitFetch(id))
+      await timed('git.fetch', async () => unwrap(await commands.gitFetch(id, false)))
       return options
     },
     onSuccess: (options) => {
@@ -1007,7 +1008,7 @@ export function useGitMutations(repoId: string | null) {
 
   const pull = useMutation({
     mutationKey: syncKey(id, 'pull'),
-    mutationFn: async () => unwrap(await commands.gitPull(id)),
+    mutationFn: async () => timed('git.pull', async () => unwrap(await commands.gitPull(id))),
     onSuccess: (result) => {
       // A pull just fetched, so the auto-fetch clock restarts here too.
       noteManualFetch(id)
@@ -1030,7 +1031,7 @@ export function useGitMutations(repoId: string | null) {
 
   const push = useMutation({
     mutationKey: syncKey(id, 'push'),
-    mutationFn: async () => unwrap(await commands.gitPush(id)),
+    mutationFn: async () => timed('git.push', async () => unwrap(await commands.gitPush(id))),
     onSuccess: (result) => {
       // REMOTE_REFS, not REFS: a first push publishes the branch, so the
       // sidebar's Remotes section has a new remote branch to show. That list
@@ -1046,7 +1047,8 @@ export function useGitMutations(repoId: string | null) {
   // no upstream gets published and tracked in the same step.
   const pushBranch = useMutation({
     mutationKey: syncKey(id, 'pushBranch'),
-    mutationFn: async (branch: string) => unwrap(await commands.gitPushBranch(id, branch)),
+    mutationFn: async (branch: string) =>
+      timed('git.pushBranch', async () => unwrap(await commands.gitPushBranch(id, branch))),
     onSuccess: (result) => {
       // See `push`: publishing a branch adds a remote branch the sidebar reads
       // from the remotes query.
@@ -1102,7 +1104,7 @@ export function useGitMutations(repoId: string | null) {
 
   const pushForce = useMutation({
     mutationKey: syncKey(id, 'pushForce'),
-    mutationFn: async () => unwrap(await commands.gitPushForce(id)),
+    mutationFn: async () => timed('git.pushForce', async () => unwrap(await commands.gitPushForce(id))),
     onSuccess: (result) => {
       // See `push`: a force-push moves the remote branch tip the sidebar shows.
       invalidate(qc, id, REMOTE_REFS)

@@ -51,6 +51,134 @@ pub fn git_source() -> super::bundled::ToolSource {
     super::bundled::resolve_git(configured.as_deref()).source
 }
 
+/// Environment every git child gets, whatever the call site.
+///
+/// Children are spawned with `CREATE_NO_WINDOW` and no console attached, so an
+/// interactive prompt has nowhere to draw. Git still tries, then fails with
+/// `could not read Username ... No such file or directory` - an error naming a
+/// missing *file* when the real cause is a missing *terminal*. Setting this
+/// makes git say `terminal prompts disabled` and fail at once instead of
+/// hanging until the operation is killed.
+///
+/// Note this does not stop a credential *helper* from opening its own window;
+/// GCM is a separate process with its own UI. `apply_background_env` is what
+/// silences that.
+pub fn prepare_git_env(cmd: &mut Command) {
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+}
+
+/// Config overrides that collapse the credential helper list to a single entry.
+///
+/// The bundled MinGit tree ships an `etc/gitconfig` that sets
+/// `credential.helper = manager` and then `include`s the system Git for Windows
+/// config, which sets it again. `credential.helper` is multi-valued and git runs
+/// *every* entry it finds, so a machine with both installs launches Credential
+/// Manager twice for one authentication - two login windows, one action.
+///
+/// The empty value is the load-bearing part: for a multi-valued config key git
+/// treats `key=` as a reset that discards everything accumulated so far, so the
+/// name immediately after it becomes the only helper. Confirmed against a live
+/// client with `GIT_TRACE=1`, which showed `run_command: 'git credential-manager
+/// get'` twice before this and once after.
+///
+/// Deliberately *not* `GIT_CONFIG_NOSYSTEM`, which would also fix the duplicate:
+/// the same system config carries `core.autocrlf`, `core.symlinks`,
+/// `http.sslbackend=schannel` and the git-lfs filter chain. Dropping that tier
+/// to remove one duplicated line would change line endings and checkout
+/// behaviour, and would put us in the business of re-supplying Git for Windows'
+/// defaults by hand.
+pub fn credential_args() -> Vec<String> {
+    vec![
+        "-c".into(),
+        "credential.helper=".into(),
+        "-c".into(),
+        "credential.helper=manager".into(),
+    ]
+}
+
+/// The environment variable that stops Git Credential Manager opening a window.
+///
+/// `credential.interactive=false` looks like the setting for this and is not:
+/// verified against a live client with `GIT_TRACE=1`, GCM is still launched and
+/// still prompts. GCM reads its own `GCM_INTERACTIVE`, and with `never` it
+/// refuses at once - "Cannot prompt because user interactivity has been
+/// disabled" - which is what an unattended fetch needs.
+///
+/// Applied by `apply_background_env` rather than passed as `-c`, because it is
+/// the helper's variable, not one of git's config keys.
+const GCM_NON_INTERACTIVE: (&str, &str) = ("GCM_INTERACTIVE", "never");
+
+/// Mark a command as unattended: no credential window, whatever the helper.
+///
+/// For work the user did not ask for - the auto-fetch sweep wakes every open
+/// repo every 15 minutes. A background operation must never pop a login window:
+/// the user is typing somewhere else with no idea what asked. With this an
+/// unauthenticated background fetch fails immediately and is logged, while the
+/// next fetch the user actually initiates is still free to prompt.
+pub fn apply_background_env(cmd: &mut Command) {
+    cmd.env(GCM_NON_INTERACTIVE.0, GCM_NON_INTERACTIVE.1);
+}
+
+/// Every credential helper git would run, and which config set it.
+///
+/// The whole point of the Credential Manager investigation is a question we
+/// cannot answer from our own machine: on the system that actually prompts, how
+/// many helpers does git invoke, and where do they come from? A duplicate is
+/// invisible in normal use - it just looks like an extra login window - and it
+/// depends entirely on which gits are installed, so it cannot be reproduced by
+/// guessing.
+///
+/// Runs `config --show-origin --get-all credential.helper`, which prints one
+/// line per configured helper with its source file. Two lines here means two
+/// windows for one authentication.
+///
+/// Returns entries like `manager <- C:/Program Files/Git/etc/gitconfig`. Safe to
+/// log: a helper *name* and the config file that set it are not secrets, and no
+/// credential is ever read by this call.
+///
+/// Failure is reported rather than swallowed - "we could not tell" is a
+/// materially different diagnosis from "there were none", and silently
+/// returning an empty list would make an unreadable config look like a clean
+/// one.
+pub fn describe_credential_helpers(repo_path: Option<&str>) -> Vec<String> {
+    let out = match run_git(
+        repo_path,
+        &["config", "--show-origin", "--get-all", "credential.helper"],
+    ) {
+        Ok(out) => out,
+        // Exit 1 with no output is git's way of saying the key is unset, which
+        // is a real answer and not a failure.
+        Err(_) => return vec!["<none configured>".to_string()],
+    };
+
+    let helpers: Vec<String> = out
+        .stdout
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            // `--show-origin` prints "<origin>	<value>". Keep both, reversed so
+            // the helper reads first: the name is what matters, the file is why.
+            match line.split_once('\t') {
+                Some((origin, value)) => Some(format!(
+                    "{} <- {}",
+                    value.trim(),
+                    origin.trim().trim_start_matches("file:")
+                )),
+                None => Some(line.to_string()),
+            }
+        })
+        .collect();
+
+    if helpers.is_empty() {
+        vec!["<none configured>".to_string()]
+    } else {
+        helpers
+    }
+}
+
 pub struct GitOutput {
     pub stdout: String,
     /// Git's diagnostics from a SUCCESSFUL run. Callers take `.stdout` and drop
@@ -90,6 +218,7 @@ pub fn run_git(repo_path: Option<&str>, args: &[&str]) -> Result<GitOutput, AppE
 
     // Hand this child the system's libraries, not the AppImage's.
     crate::process_env::scrub_bundled_env(&mut cmd);
+    prepare_git_env(&mut cmd);
 
     #[cfg(windows)]
     {
@@ -148,6 +277,7 @@ pub fn run_git_stdin(
 
     // Hand this child the system's libraries, not the AppImage's.
     crate::process_env::scrub_bundled_env(&mut cmd);
+    prepare_git_env(&mut cmd);
 
     #[cfg(windows)]
     {
@@ -190,4 +320,53 @@ pub fn run_git_stdin(
     let out = GitOutput { stdout, stderr };
     log_stderr(args, &out);
     Ok(out)
+}
+
+#[cfg(test)]
+mod credential_trace_tests {
+    use super::*;
+
+    /// The reset must come before the name, or git keeps what it already had and
+    /// the duplicate survives. Order is the whole fix, so pin it.
+    #[test]
+    fn the_helper_reset_precedes_the_helper_name() {
+        let args = credential_args();
+        let reset = args.iter().position(|a| a == "credential.helper=");
+        let set = args.iter().position(|a| a == "credential.helper=manager");
+        assert!(reset.is_some() && set.is_some(), "{args:?}");
+        assert!(reset < set, "reset must come first: {args:?}");
+    }
+
+    /// These are passed to git as global options, so each value needs its own
+    /// `-c`. A pair that lost its flag would be read as a subcommand.
+    #[test]
+    fn every_override_is_introduced_by_its_own_c_flag() {
+        let args = credential_args();
+        assert_eq!(args.len() % 2, 0, "{args:?}");
+        for pair in args.chunks(2) {
+            assert_eq!(pair[0], "-c", "{args:?}");
+        }
+    }
+
+    /// Runs the real thing against the real client. The value of this trace is
+    /// entirely in whether it reports the true helper list on a machine we
+    /// cannot inspect, so a mocked version would test nothing that matters.
+    ///
+    /// Asserts shape, not contents: how many helpers this machine has is its own
+    /// business, but every line must name one and never come back empty.
+    #[test]
+    fn the_helper_description_is_never_empty_and_names_a_helper() {
+        let helpers = describe_credential_helpers(None);
+        assert!(!helpers.is_empty(), "must always report something");
+        for line in &helpers {
+            assert!(!line.trim().is_empty(), "blank entry in {helpers:?}");
+        }
+    }
+
+    /// The variable is GCM's, not git's. Naming it wrong fails open - the helper
+    /// prompts anyway - which is exactly the bug this guards.
+    #[test]
+    fn background_suppression_uses_the_helpers_own_variable() {
+        assert_eq!(GCM_NON_INTERACTIVE, ("GCM_INTERACTIVE", "never"));
+    }
 }

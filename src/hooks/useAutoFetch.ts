@@ -95,7 +95,9 @@ async function fetchIfDue(qc: QueryClient, repoId: string, minAgeMs: number) {
 
   inFlight.add(repoId)
   try {
-    const res = await commands.gitFetch(repoId)
+    // background: true -- a credential helper must not open a login window
+    // over whatever the user is doing. An unauthenticated sweep fails silently.
+    const res = await commands.gitFetch(repoId, true)
     if (res.status === 'error') {
       // Expected and common: no remote, offline, or credentials not set up.
       // A background fetch the user did not ask for must stay silent -- it is

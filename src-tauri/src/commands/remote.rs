@@ -182,6 +182,36 @@ fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
         .unwrap_or_else(|| stdout.trim().to_string())
 }
 
+/// Rewrite git's credential failures into something a person can act on.
+///
+/// When git needs a username and has no terminal it says `could not read
+/// Username for 'https://github.com': No such file or directory`. The trailing
+/// errno is the real message's whole problem: it names a missing *file*, so the
+/// user goes looking for one, and every report of it arrived as a filesystem
+/// bug. With `GIT_TERMINAL_PROMPT=0` set the same condition reads `terminal
+/// prompts disabled`, which is accurate but describes our own setting rather
+/// than anything they can fix.
+///
+/// Both mean one thing: this remote needs a sign-in that did not happen.
+fn humanize_credential_failure(detail: &str) -> Option<String> {
+    let low = detail.to_lowercase();
+    if !low.contains("could not read username") && !low.contains("could not read password") {
+        return None;
+    }
+
+    // Keep the host: with several remotes configured, which one refused is the
+    // only part of the original worth saying back.
+    let host = detail
+        .split_once(" for '")
+        .and_then(|(_, rest)| rest.split_once('\''))
+        .map(|(h, _)| h);
+
+    Some(match host {
+        Some(host) => format!("Sign-in needed for {host}. Connect the account, then try again."),
+        None => "Sign-in needed for this remote. Connect the account, then try again.".to_string(),
+    })
+}
+
 fn run_streaming(
     app: &AppHandle,
     repo_id: &str,
@@ -189,22 +219,76 @@ fn run_streaming(
     operation: &str,
     args: &[&str],
 ) -> Result<String, AppError> {
+    run_streaming_with(app, repo_id, repo_path, operation, args, Attended::User)
+}
+
+/// Whether a user is watching this operation, which decides if a credential
+/// helper may open a window. Background work must fail silently instead.
+#[derive(Clone, Copy, PartialEq)]
+enum Attended {
+    /// The user pressed something and is waiting; prompting is expected.
+    User,
+    /// A timer started this. Never prompt.
+    Background,
+}
+
+fn run_streaming_with(
+    app: &AppHandle,
+    repo_id: &str,
+    repo_path: Option<&str>,
+    operation: &str,
+    args: &[&str],
+    attended: Attended,
+) -> Result<String, AppError> {
+    let cred_args = crate::git::shell::credential_args();
     // Honor the user's configured git.exe, same as git::shell::run_git. Without
     // this, network operations ignore the Settings override that local ops respect.
     let mut cmd = Command::new(crate::git::shell::git_program_name());
     if let Some(path) = repo_path {
         cmd.arg("-C").arg(path);
     }
+    // Before the subcommand: `-c` overrides are global options and git rejects
+    // them after the verb. Collapses the doubled credential helper that makes a
+    // machine with both a system and a bundled git show two login windows.
+    cmd.args(cred_args);
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
 
     // Hand this child the system's libraries, not the AppImage's.
     crate::process_env::scrub_bundled_env(&mut cmd);
+    crate::git::shell::prepare_git_env(&mut cmd);
+    if attended == Attended::Background {
+        crate::git::shell::apply_background_env(&mut cmd);
+    }
 
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
+
+    // ---------------------------------------------------------------- tracing
+    // Credential diagnostics for a machine we cannot reach.
+    //
+    // The Credential Manager prompt storm only reproduces on someone else's
+    // system, so the only way to see it is to have the app describe its own
+    // setup at the moment it authenticates and carry that back in a report.
+    // `info!` deliberately, not `debug!`: debug records are compiled out of
+    // release builds, which is precisely where this has to work.
+    //
+    // Nothing here can carry a secret. Which git, which helper binary, and
+    // whether a prompt was permitted are all facts about configuration, and the
+    // credential itself never enters this process.
+    log::info!(
+        "git {operation}: program={} source={:?} attended={} helpers=[{}]",
+        crate::git::shell::git_program_name(),
+        crate::git::shell::git_source(),
+        if attended == Attended::Background {
+            "background"
+        } else {
+            "user"
+        },
+        crate::git::shell::describe_credential_helpers(repo_path).join(", "),
+    );
 
     let mut child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -244,23 +328,34 @@ fn run_streaming(
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
 
     if !output.status.success() {
-        return Err(AppError::Other(format!(
-            "git {operation} failed: {}",
-            failure_detail(&stderr_lines, &stdout)
-        )));
+        let detail = failure_detail(&stderr_lines, &stdout);
+        let detail = humanize_credential_failure(&detail).unwrap_or(detail);
+        return Err(AppError::Other(format!("git {operation} failed: {detail}")));
     }
     Ok(stdout)
 }
 
+/// Fetch every remote.
+///
+/// `background` is true when a timer started this rather than the user. It keeps
+/// the auto-fetch sweep from opening a credential window over whatever they are
+/// doing: an unauthenticated background fetch fails silently and is logged,
+/// while a fetch the user asked for may still prompt.
 #[tauri::command]
 #[specta::specta]
 pub async fn git_fetch(
     app: AppHandle,
     manager: State<'_, RepoManager>,
     repo_id: String,
+    background: bool,
 ) -> Result<(), AppError> {
     let open = manager.get(&repo_id)?;
     let path = open.path.to_string_lossy().into_owned();
+    let attended = if background {
+        Attended::Background
+    } else {
+        Attended::User
+    };
     tauri::async_runtime::spawn_blocking(move || {
         run_with_stale_ref_retry(
             &app,
@@ -268,6 +363,7 @@ pub async fn git_fetch(
             &path,
             "fetch",
             &["fetch", "--all", "--prune", "--progress"],
+            attended,
         )?;
         Ok(())
     })
@@ -305,8 +401,9 @@ fn run_with_stale_ref_retry(
     repo_path: &str,
     operation: &str,
     args: &[&str],
+    attended: Attended,
 ) -> Result<String, AppError> {
-    match run_streaming(app, repo_id, Some(repo_path), operation, args) {
+    match run_streaming_with(app, repo_id, Some(repo_path), operation, args, attended) {
         Ok(out) => Ok(out),
         Err(e) => {
             let Some(stale) = stale_remote_ref(&e.to_string()) else {
@@ -314,7 +411,7 @@ fn run_with_stale_ref_retry(
             };
             log::warn!("{operation} blocked by stale tracking ref {stale}; clearing it and retrying");
             crate::git::shell::run_git(Some(repo_path), &["update-ref", "-d", &stale])?;
-            run_streaming(app, repo_id, Some(repo_path), operation, args)
+            run_streaming_with(app, repo_id, Some(repo_path), operation, args, attended)
         }
     }
 }
@@ -347,6 +444,7 @@ pub async fn git_pull(
             &path,
             "pull",
             &["pull", "--progress", "--autostash"],
+            Attended::User,
         )?;
 
         // A pulled commit can change which version of a submodule the project
@@ -685,7 +783,14 @@ pub async fn git_pull_branch(
     // `<branch>:<branch>` updates the local ref directly. git refuses this
     // when it would not be a fast-forward, which is the guard we want.
     let refspec = format!("{branch}:{branch}");
-    run_with_stale_ref_retry(&app, &repo_id, &path, "fetch", &["fetch", "--progress", &remote, &refspec])?;
+    run_with_stale_ref_retry(
+        &app,
+        &repo_id,
+        &path,
+        "fetch",
+        &["fetch", "--progress", &remote, &refspec],
+        Attended::User,
+    )?;
 
     let after = { branch_tracking_state(&open.repo.lock().unwrap(), Some(&branch)) };
     Ok(PullResult {
@@ -1747,5 +1852,64 @@ mod tests {
         let state = tracking_state(&repo);
         let err = publish_args(&state, &repo).expect_err("no remote");
         assert!(err.to_string().contains("no remote"), "got: {err}");
+    }
+}
+
+#[cfg(test)]
+mod credential_message_tests {
+    use super::humanize_credential_failure;
+
+    /// The message users actually reported, verbatim from Sentry
+    /// (GITWYRM-BACKEND-2). The errno is the part that misleads.
+    #[test]
+    fn the_reported_errno_message_is_rewritten() {
+        let got = humanize_credential_failure(
+            "fatal: could not read Username for 'https://github.com': No such file or directory",
+        )
+        .expect("should be recognised");
+        assert!(got.contains("Sign-in needed"), "{got}");
+        assert!(got.contains("https://github.com"), "{got}");
+        // The misleading half must not survive into what the user sees.
+        assert!(!got.contains("No such file or directory"), "{got}");
+    }
+
+    /// With GIT_TERMINAL_PROMPT=0 git words the same condition differently.
+    #[test]
+    fn the_prompts_disabled_wording_is_also_rewritten() {
+        let got = humanize_credential_failure(
+            "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+        )
+        .expect("should be recognised");
+        assert!(got.contains("Sign-in needed"), "{got}");
+        assert!(!got.contains("terminal prompts disabled"), "{got}");
+    }
+
+    #[test]
+    fn a_password_prompt_counts_too() {
+        assert!(humanize_credential_failure(
+            "fatal: could not read Password for 'https://git.example.com': terminal prompts disabled"
+        )
+        .is_some());
+    }
+
+    /// Without a host the message still has to make sense.
+    #[test]
+    fn a_missing_host_still_produces_advice() {
+        let got = humanize_credential_failure("fatal: could not read Username")
+            .expect("should be recognised");
+        assert!(got.contains("Sign-in needed"), "{got}");
+    }
+
+    /// Everything else must pass through untouched -- rewriting an unrelated
+    /// failure would hide the only detail that explains it.
+    #[test]
+    fn unrelated_failures_are_left_alone() {
+        for other in [
+            "fatal: repository 'https://github.com/x/y.git' not found",
+            "error: failed to push some refs",
+            "fatal: Authentication failed for 'https://github.com'",
+        ] {
+            assert!(humanize_credential_failure(other).is_none(), "{other}");
+        }
     }
 }
