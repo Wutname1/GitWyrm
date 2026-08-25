@@ -135,11 +135,6 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          key: ${{ matrix.arch }}
-
       # The updater compares the manifest version against the version compiled
       # into the running app, so these must match or a beta re-offers itself
       # forever. Mirrors the release workflow's step; there is no tag to read
@@ -217,6 +212,15 @@ jobs:
           PY
 
           npm version "$version" --no-git-tag-version --allow-same-version
+
+      # AFTER both version syncs -- see the same step in release.yml. rust-cache
+      # keys on Cargo.toml/Cargo.lock at restore time, and the syncs above
+      # rewrite both, so restoring first produced a cache that was saved under a
+      # key no later run could reproduce and was therefore never read.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.arch }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -379,7 +383,6 @@ jobs:
 
           upload_signed '*.AppImage' 'GitWyrm-x86_64.AppImage'
           upload_signed '*.deb' 'GitWyrm-amd64.deb'
-          upload_signed '*.rpm' 'GitWyrm-x86_64.rpm'
 
   # Moves the beta channel pointer only after every production target is signed
   # and uploaded. A partial beta is not published.

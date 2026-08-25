@@ -77,9 +77,9 @@ jobs:
             tauri_args: "--target aarch64-pc-windows-msvc"
             bundle_base: src-tauri/target/aarch64-pc-windows-msvc/release/bundle
             portable_suffix: "-arm64"
-          # Linux ships the AppImage, deb and rpm. The bundle targets come from
+          # Linux ships the AppImage and deb. The bundle targets come from
           # a separate config because the Tauri CLI filters --bundles by host:
-          # naming deb/rpm/appimage in the shared tauri.conf.json risks the
+          # naming deb/appimage in the shared tauri.conf.json risks the
           # Windows legs above rejecting them.
           - arch: x86_64-linux
             os: ubuntu-22.04
@@ -115,11 +115,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust_target }}
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          key: ${{ matrix.arch }}
 
       # Asset filenames and the in-app version come from these manifests, not
       # from the tag. Without this the release for tag 1.2.3 ships files named
@@ -208,6 +203,21 @@ jobs:
           PY
 
           npm version "$version" --no-git-tag-version --allow-same-version
+
+      # AFTER both version syncs, deliberately. rust-cache hashes Cargo.toml and
+      # Cargo.lock into its key when it RESTORES, and the sync steps above
+      # rewrite both with the tag version. Restoring first meant every release
+      # saved under a key derived from manifests no later run could reproduce --
+      # the cache was written and never read, so every release compiled the full
+      # tree from cold (927 crates on Windows x86_64, 466 on Linux).
+      #
+      # With the manifests already final, rust-cache's restore-key fallback can
+      # find the previous release's cache and recompile only this crate and what
+      # depends on it.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.arch }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -416,7 +426,6 @@ jobs:
           require_signed "$appimage"
           upload "$appimage" "GitWyrm-x86_64.AppImage"
           upload "$(find "$base/deb" -name '*.deb' -type f | head -1)" "GitWyrm-amd64.deb"
-          upload "$(find "$base/rpm" -name '*.rpm' -type f | head -1)" "GitWyrm-x86_64.rpm"
 
       # Only the version-pinned copy is written here. The "latest" path a user
       # actually downloads from is published by the promote-cdn-latest job, which
@@ -503,7 +512,7 @@ jobs:
             fi
           done
 
-          for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb GitWyrm-x86_64.rpm; do
+          for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb; do
             if ! aws s3 ls "${SRC}/${file}" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
               echo "::error::Missing ${SRC}/${file} - refusing to move the latest pointers."
               exit 1
@@ -520,7 +529,7 @@ jobs:
             echo "Promoted GitWyrm-Setup${suffix}.exe from ${TAG}"
           done
 
-          for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb GitWyrm-x86_64.rpm; do
+          for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb; do
             aws s3 cp "${SRC}/${file}" \
               "s3://gitwyrm-cdn/installers/latest/${file}" \
               --endpoint-url "$R2_ENDPOINT" \
@@ -705,7 +714,7 @@ jobs:
           # Refuse to publish a half-built release. latest.json is what the
           # in-app updater reads; without it clients silently stop updating.
           missing=0
-          for required in latest.json x64-setup.exe arm64-setup.exe .AppImage .deb .rpm; do
+          for required in latest.json x64-setup.exe arm64-setup.exe .AppImage .deb; do
             if ! echo "$assets" | grep -q -- "$required"; then
               echo "::error::Missing required asset matching '$required'"
               missing=1
@@ -792,8 +801,7 @@ jobs:
           installs the newest version and keeps itself up to date.
 
           **Linux:** [AppImage](https://cdn.gitwyrm.com/installers/latest/GitWyrm-x86_64.AppImage) ·
-          [Ubuntu / Debian / Mint](https://cdn.gitwyrm.com/installers/latest/GitWyrm-amd64.deb) ·
-          [Fedora / openSUSE](https://cdn.gitwyrm.com/installers/latest/GitWyrm-x86_64.rpm)
+          [Ubuntu / Debian / Mint](https://cdn.gitwyrm.com/installers/latest/GitWyrm-amd64.deb)
 
           The installers attached below are pinned to this specific version. `gitwyrm-portable.exe`
           needs no install but does not auto-update.
