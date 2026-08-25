@@ -4,50 +4,39 @@ import { commands } from '@/lib/bindings'
 import { keys } from '@/lib/queryKeys'
 import { log } from '@/lib/log'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import {
+  BACKGROUND_FETCH_INTERVAL_MS,
+  FOREGROUND_FETCH_INTERVAL_MS,
+  isAuthFailure,
+  staggerFor,
+} from '@/lib/autoFetchPolicy'
 
-/** How often the repo you are looking at is fetched. */
-export const FOREGROUND_FETCH_INTERVAL_MS = 3 * 60_000
-/**
- * How often each background tab is fetched. Deliberately much less frequent
- * than the foreground: a tab you are not looking at only needs to be roughly
- * current by the time you click it.
- */
-export const BACKGROUND_FETCH_INTERVAL_MS = 15 * 60_000
-/**
- * Preferred gap between background tabs in one sweep. Ten open repos firing
- * `git fetch` at the same instant is ten processes and ten network connections
- * at once, which stalls the machine and can trip host rate limits.
- *
- * This is an upper bound, not a guarantee -- see `staggerFor`.
- */
-export const BACKGROUND_FETCH_STAGGER_MS = 20_000
+export {
+  FOREGROUND_FETCH_INTERVAL_MS,
+  BACKGROUND_FETCH_INTERVAL_MS,
+  BACKGROUND_FETCH_STAGGER_MS,
+  staggerFor,
+  isAuthFailure,
+} from '@/lib/autoFetchPolicy'
 
 /**
- * Share of the interval a sweep is allowed to occupy. The remainder is
- * headroom, so the last repo's fetch has time to finish before the next sweep
- * begins.
+ * Remotes whose last background fetch failed on authentication.
+ *
+ * A repo in here is skipped by the sweep until the user does something about
+ * it. See `isAuthFailure` for why retrying is actively harmful rather than
+ * merely wasteful.
+ *
+ * Cleared by `noteManualFetch`, so any deliberate fetch, pull or push gives a
+ * repo another chance: that is the moment the user has plausibly just fixed
+ * their access, and it means the pause can never become permanent.
  */
-const SWEEP_BUDGET = 0.8
+const authBlocked = new Set<string>()
 
-/**
- * Gap to use for a sweep of `count` repos.
- *
- * At the preferred 20s gap a sweep only fits about 36 repos inside its 15
- * minute interval. Beyond that a fixed gap would schedule the tail past the
- * next sweep, so sweeps would overlap and pile up: the repos at the end of the
- * list would be re-queued before they were ever reached, and would never be
- * fetched at all while the ones at the front were fetched repeatedly.
- *
- * Compressing the gap keeps every sweep inside its own interval no matter how
- * many tabs are open. With very many tabs the fetches do land closer together
- * than we would like -- but `fetchIfDue` still bounds each repo to one fetch
- * per interval, and every repo gets its turn, which matters more.
- */
-export function staggerFor(count: number): number {
-  if (count <= 1) return BACKGROUND_FETCH_STAGGER_MS
-  const budget = BACKGROUND_FETCH_INTERVAL_MS * SWEEP_BUDGET
-  return Math.min(BACKGROUND_FETCH_STAGGER_MS, Math.floor(budget / (count - 1)))
+/** Repos currently skipped by the sweep, for tests and diagnostics. */
+export function authBlockedCount(): number {
+  return authBlocked.size
 }
+
 /**
  * Delay before a newly-opened or newly-focused repo is fetched. Opening a repo
  * already triggers a burst of local git work to draw the graph; a fetch in the
@@ -71,10 +60,15 @@ const scheduled = new Set<string>()
 /** Records a fetch the user started, so the timers here do not repeat it. */
 export function noteManualFetch(repoId: string) {
   lastFetchedAt.set(repoId, Date.now())
+  // A deliberate fetch, pull or push is the moment the user has plausibly just
+  // sorted out their access, so give the sweep another chance at this repo.
+  // Without this the pause would outlive the problem for the whole session.
+  authBlocked.delete(repoId)
 }
 
 /** Forgets a closed repo so its ids do not accumulate for the session. */
 function forget(repoId: string) {
+  authBlocked.delete(repoId)
   inFlight.delete(repoId)
   lastFetchedAt.delete(repoId)
   scheduled.delete(repoId)
@@ -89,6 +83,9 @@ function forget(repoId: string) {
  */
 async function fetchIfDue(qc: QueryClient, repoId: string, minAgeMs: number) {
   if (inFlight.has(repoId)) return
+  // Auth failed here last time and nothing has changed since. Retrying would
+  // run the credential helper again for a credential that cannot work.
+  if (authBlocked.has(repoId)) return
 
   const last = lastFetchedAt.get(repoId)
   if (last !== undefined && Date.now() - last < minAgeMs) return
@@ -102,9 +99,16 @@ async function fetchIfDue(qc: QueryClient, repoId: string, minAgeMs: number) {
       // Expected and common: no remote, offline, or credentials not set up.
       // A background fetch the user did not ask for must stay silent -- it is
       // logged for diagnosis and otherwise ignored.
-      log.info(`auto-fetch skipped for ${repoId}: ${res.error}`)
+      if (isAuthFailure(res.error)) {
+        authBlocked.add(repoId)
+        log.info(`auto-fetch paused for ${repoId} until you fetch by hand: ${res.error}`)
+      } else {
+        log.info(`auto-fetch skipped for ${repoId}: ${res.error}`)
+      }
       return
     }
+    // A success clears any earlier block: access evidently works again.
+    authBlocked.delete(repoId)
 
     // Remote-tracking refs only. A background fetch must not call
     // trimLogToFirstPage: that would snap a scrolled graph back to the top

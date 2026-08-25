@@ -78,10 +78,14 @@ sentry = { version = "0.49.1", default-features = false, features = [
   "panic",
   "reqwest",
   "rustls",
+  # Structured logs. Without this feature `capture_log` compiles to a no-op and
+  # every forwarded log is dropped inside the SDK -- which is exactly what hid
+  # the credential tracing added for the Credential Manager investigation.
+  "logs",
 ] }
 # Bridges `log::error!`/`warn!` into Sentry events. Without this the backend
 # only ever reports panics, so command failures stayed local to gitwyrm.log.
-sentry-log = "0.49.1"
+sentry-log = { version = "0.49.1", features = ["logs"] }
 # Reopens the folder in the running app when Explorer's "Open with GitWyrm"
 # launches a second process, instead of starting a duplicate window.
 tauri-plugin-single-instance = "2"

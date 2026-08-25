@@ -394,6 +394,33 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
         options
     };
 
+    // Structured logs, so a forwarded `log::info!` is queryable in Sentry rather
+    // than only reaching gitwyrm.log on the user's disk.
+    //
+    // This was added after diagnostic tracing for the Credential Manager
+    // investigation turned out to be unreachable: `SentryLogger` maps info! to a
+    // breadcrumb, breadcrumbs only ride along on an error event from the same
+    // process, and the user's bug report is submitted by the FRONTEND SDK -- so
+    // the backend's diagnostics never travelled with it. Two gates were off at
+    // once: the `logs` cargo feature, and this option. With either missing,
+    // `Client::capture_log` returns early and the record is dropped, not queued.
+    //
+    // Gated on `reports_diagnostics` (Full), not on error reporting: logs are a
+    // per-record stream far chattier than events, and someone who opted into
+    // "report errors" did not ask to ship their activity. `before_send_log`
+    // scrubs on the way out, exactly as `before_send` does for events -- a log
+    // line embeds repo paths and provider error bodies just as readily.
+    let options = if level.reports_diagnostics() {
+        options
+            .enable_logs(true)
+            .before_send_log(|mut log: sentry::protocol::Log| {
+                log.body = scrub::scrub_text(&log.body);
+                Some(log)
+            })
+    } else {
+        options
+    };
+
     Some(sentry::init((SENTRY_DSN, options)))
 }
 
