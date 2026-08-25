@@ -528,28 +528,66 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
         const avatar = showAvatars && !overflow ? avatarUrls.get(c.author_email.trim().toLowerCase()) : undefined
         if (avatar) {
           const clipId = `${clipPrefix}-${c.sha}`
+          const maskId = `${clipPrefix}-m${c.sha}`
           // The stroke straddles its path, so the ring is centred half a width
           // inside the outer edge to keep the node at its stated size.
           const ringR = AVATAR_OUTER_R - AVATAR_RING / 2
+          // A tool mark is a flat glyph, not a photo: it has no background of
+          // its own and does not fill a circle. It gets a dark disc to sit on
+          // -- the same treatment the author column gives it -- and is inset so
+          // the glyph is not cropped by the round clip.
+          const glyphR = avatar.bot ? AVATAR_R * 0.62 : AVATAR_R
           return (
             <g key={c.sha}>
               <defs>
                 <clipPath id={clipId}>
                   <circle cx={x} cy={y} r={AVATAR_R} />
                 </clipPath>
+                {avatar.mono && (
+                  // A silhouette is drawn as `currentColor`, which inside an
+                  // <image> resolves against that image's own document and
+                  // comes out black -- invisible here. Used as a mask instead,
+                  // the art is only a stencil and the fill is ours.
+                  <mask id={maskId}>
+                    <image
+                      href={avatar.url}
+                      x={x - glyphR}
+                      y={y - glyphR}
+                      width={glyphR * 2}
+                      height={glyphR * 2}
+                      preserveAspectRatio="xMidYMid meet"
+                    />
+                  </mask>
+                )}
               </defs>
-              {/* A transparent PNG lands on the app background rather than on
-                  whatever rail runs behind the node. */}
-              <circle cx={x} cy={y} r={AVATAR_OUTER_R} fill="var(--gw-bg)" />
-              <image
-                href={avatar}
-                x={x - AVATAR_R}
-                y={y - AVATAR_R}
-                width={AVATAR_R * 2}
-                height={AVATAR_R * 2}
-                clipPath={`url(#${clipId})`}
-                preserveAspectRatio="xMidYMid slice"
+              {/* A transparent PNG, or a glyph narrower than its box, lands on
+                  a solid ground rather than on whatever rail runs behind. */}
+              <circle
+                cx={x}
+                cy={y}
+                r={AVATAR_OUTER_R}
+                fill={avatar.bot ? '#000' : 'var(--gw-bg)'}
               />
+              {avatar.mono ? (
+                <rect
+                  x={x - glyphR}
+                  y={y - glyphR}
+                  width={glyphR * 2}
+                  height={glyphR * 2}
+                  fill="#fff"
+                  mask={`url(#${maskId})`}
+                />
+              ) : (
+                <image
+                  href={avatar.url}
+                  x={x - glyphR}
+                  y={y - glyphR}
+                  width={glyphR * 2}
+                  height={glyphR * 2}
+                  clipPath={avatar.bot ? undefined : `url(#${clipId})`}
+                  preserveAspectRatio={avatar.bot ? 'xMidYMid meet' : 'xMidYMid slice'}
+                />
+              )}
               <circle
                 cx={x}
                 cy={y}
