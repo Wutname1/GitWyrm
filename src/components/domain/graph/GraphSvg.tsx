@@ -548,7 +548,20 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
                   // <image> resolves against that image's own document and
                   // comes out black -- invisible here. Used as a mask instead,
                   // the art is only a stencil and the fill is ours.
-                  <mask id={maskId}>
+                  //
+                  // `mask-type="alpha"` is what makes that work. An SVG mask
+                  // defaults to *luminance*, so it weighs how bright the art is
+                  // -- and this art is solid black, luminance zero, which masks
+                  // everything away and leaves an empty dark disc. The shape we
+                  // want is carried entirely by the alpha channel: opaque where
+                  // the glyph is, transparent everywhere else. Reading alpha
+                  // instead makes the black paint irrelevant, which is the whole
+                  // point of using it as a stencil.
+                  //
+                  // The CSS `mask-image` in `MonoMark` is alpha-based already,
+                  // which is why the same icon renders correctly in the author
+                  // column and only the graph came out black on black.
+                  <mask id={maskId} maskUnits="userSpaceOnUse" style={{ maskType: 'alpha' }}>
                     <image
                       href={avatar.url}
                       x={x - glyphR}
