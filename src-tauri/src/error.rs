@@ -70,6 +70,17 @@ fn is_expected(message: &str) -> bool {
     EXPECTED.iter().any(|needle| lowered.contains(needle))
 }
 
+/// The classifier, for tests in modules that build these messages.
+///
+/// Every transport that phrases a host refusal has to be able to prove its
+/// wording still lands in [`EXPECTED`]. Without this the check lives only here,
+/// and a module can change its phrasing into a Sentry flood with all its own
+/// tests green -- which is exactly how the CLI's 404 wording escaped.
+#[cfg(test)]
+pub fn is_expected_for_tests(message: &str) -> bool {
+    is_expected(message)
+}
+
 impl Serialize for AppError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let message = self.to_string();

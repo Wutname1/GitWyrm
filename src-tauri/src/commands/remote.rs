@@ -232,6 +232,34 @@ enum Attended {
     Background,
 }
 
+/// The host name a repo authenticates against, for the refusal check.
+///
+/// Reads `origin`'s URL and routes it through the same provider table the rest
+/// of the app uses, then returns the host's *display* name -- "GitHub", not
+/// "github". That spelling is load-bearing: the cooldown map is keyed by
+/// `display_name()`, so the `ProviderId::as_str` form ("github") would look up
+/// nothing and silently disable the whole check.
+///
+/// `origin` specifically, rather than every remote: it is the remote a push
+/// goes to unless the user says otherwise, and a repo whose origin is fine
+/// should not be silenced because some other remote refused.
+///
+/// None whenever anything is unknown -- no repo path, no origin, an unroutable
+/// URL. The caller treats that as "do not suppress", which keeps the failure
+/// mode on the side of still letting the user sign in.
+fn refusing_host(repo_path: &str) -> Option<String> {
+    let out = crate::git::shell::run_git(
+        Some(repo_path),
+        &["config", "--get", "remote.origin.url"],
+    )
+    .ok()?;
+    let url = out.stdout.trim();
+    if url.is_empty() {
+        return None;
+    }
+    crate::hosting::registry::provider_for(url).map(|p| p.display_name().to_string())
+}
+
 fn run_streaming_with(
     app: &AppHandle,
     repo_id: &str,
@@ -256,7 +284,30 @@ fn run_streaming_with(
     // Hand this child the system's libraries, not the AppImage's.
     crate::process_env::scrub_bundled_env(&mut cmd);
     crate::git::shell::prepare_git_env(&mut cmd);
-    if attended == Attended::Background {
+
+    // Suppress the credential window when a prompt cannot possibly succeed.
+    //
+    // Background work never prompts, which is the original rule. The second case
+    // is the one users reported as "random Git Credential Manager spam": the host
+    // has already refused this account on permissions -- an org with OAuth app
+    // restrictions on, a token missing a scope -- and that refusal is not
+    // something signing in again can change. Git does not know that. It hands
+    // authentication to Credential Manager, which opens a window, takes a
+    // successful sign-in, and hands back a credential the host still rejects. The
+    // user signs in, the push fails, they push again, and it asks again forever.
+    // One report showed a single push sitting for 90 seconds on that dialog.
+    //
+    // Letting it fail immediately is the kinder outcome: the error already says
+    // what is wrong and who can fix it, whereas the prompt implies the user's
+    // password is the problem when it never was. Reconnecting an account clears
+    // the cooldown, so the next push after the user actually acts is free to
+    // prompt again.
+    let blocked_by_refusal = attended == Attended::User
+        && repo_path
+            .and_then(refusing_host)
+            .is_some_and(|host| crate::hosting::http::refused_recently(&host));
+
+    if attended == Attended::Background || blocked_by_refusal {
         crate::git::shell::apply_background_env(&mut cmd);
     }
 
@@ -284,6 +335,10 @@ fn run_streaming_with(
         crate::git::shell::git_source(),
         if attended == Attended::Background {
             "background"
+        } else if blocked_by_refusal {
+            // Distinct from "background": the user did ask, and we still refused
+            // to prompt. Without its own word this looks like a lost click.
+            "user (prompt suppressed: host already refused)"
         } else {
             "user"
         },

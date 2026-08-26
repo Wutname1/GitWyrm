@@ -203,6 +203,21 @@ fn remember_refusal(host: &str, message: &str) {
         .insert(host.to_string(), (Instant::now(), message.to_string()));
 }
 
+/// Whether `host` refused us on permissions recently enough to still matter.
+///
+/// The credential-window equivalent of [`cooled_down`], for callers outside the
+/// HTTP client. A push is run by shelling out to git, which hands authentication
+/// to Git Credential Manager -- a separate process this code cannot inspect. So
+/// the git path has no way of its own to know the sign-in it is about to demand
+/// is one the host has already rejected, and it asks again on every push.
+///
+/// Exposed as a bare bool rather than the message because the caller only needs
+/// the decision; the message has already been shown by whatever API call earned
+/// the cooldown.
+pub fn refused_recently(host: &str) -> bool {
+    cooled_down(host).is_some()
+}
+
 /// Drops a host's cooldown so the next call goes out for real.
 ///
 /// Called when the user connects or signs out of an account: they have just

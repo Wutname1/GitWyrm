@@ -223,7 +223,51 @@ fn finish(out: std::process::Output) -> Result<String, AppError> {
     // text. The API message is the useful half, so prefer it when present.
     let message = extract_api_message(&stderr)
         .unwrap_or_else(|| stderr.trim().chars().take(200).collect::<String>());
-    Err(AppError::Other(format!("GitHub CLI said: {message}")))
+    Err(AppError::Other(describe_cli_failure(
+        extract_status(&stderr),
+        &message,
+    )))
+}
+
+/// The HTTP status `gh` printed in its own wrapper line, e.g. `(HTTP 404)`.
+///
+/// `gh` reports the status only in its prose wrapper -- the JSON body it echoes
+/// carries the API's `message` but not reliably a numeric status -- so this is
+/// the only place the code can be recovered from a CLI run.
+fn extract_status(stderr: &str) -> Option<u16> {
+    let start = stderr.find("(HTTP ")? + "(HTTP ".len();
+    let rest = &stderr[start..];
+    let end = rest.find(')')?;
+    rest[..end].trim().parse().ok()
+}
+
+/// Phrase a CLI failure exactly as the HTTP client phrases the same status.
+///
+/// The two transports reach the same API and must fail in the same words. They
+/// did not: the HTTP path turned a 404 into "GitHub could not find that...",
+/// while the CLI path reported the API's bare `"Not Found"`. That divergence is
+/// not only a user-facing inconsistency -- `error.rs` classifies expected
+/// refusals by matching on the message, so the CLI's wording matched no needle
+/// and every 404 was logged as `error!`, which turned routine "this repo is
+/// private" answers into 352 Sentry issues in a week.
+///
+/// Keeping the wording identical means one needle covers both transports, and a
+/// fallback still names the CLI so an unrecognised failure stays diagnosable.
+fn describe_cli_failure(status: Option<u16>, message: &str) -> String {
+    let host = "GitHub";
+    match status {
+        Some(401 | 403) if message.to_lowercase().contains("rate limit") => {
+            format!("{host} rate limit reached; try again in a few minutes")
+        }
+        Some(401) => format!("{host} sign-in is no longer valid; connect {host} again"),
+        Some(403) => format!(
+            "{host} refused: {message}. Check the token has the permissions {host} needs."
+        ),
+        Some(404) => format!(
+            "{host} could not find that. It may be private, renamed, or your token may not cover it."
+        ),
+        _ => format!("{host} CLI said: {message}"),
+    }
 }
 
 /// Digs the `"message"` out of an API error `gh` echoed into its stderr.
@@ -259,6 +303,54 @@ mod tests {
     fn reads_the_api_message_out_of_gh_stderr() {
         let stderr = "gh: Not Found (HTTP 404)\n{\"message\":\"Not Found\",\"status\":\"404\"}\n";
         assert_eq!(extract_api_message(stderr).as_deref(), Some("Not Found"));
+    }
+
+    #[test]
+    fn reads_the_status_out_of_ghs_wrapper_line() {
+        assert_eq!(extract_status("gh: Not Found (HTTP 404)
+{}"), Some(404));
+        assert_eq!(extract_status("gh: Forbidden (HTTP 403)"), Some(403));
+        assert_eq!(extract_status("could not connect to github.com"), None);
+        // A malformed wrapper must not panic or invent a status.
+        assert_eq!(extract_status("gh: broken (HTTP )"), None);
+        assert_eq!(extract_status("gh: broken (HTTP abc)"), None);
+    }
+
+    /// The bug that produced 352 Sentry issues in a week: a CLI 404 has to read
+    /// the same as an HTTP 404, because `error.rs` classifies on the wording.
+    #[test]
+    fn a_cli_404_is_worded_like_an_http_404() {
+        let got = describe_cli_failure(Some(404), "Not Found");
+        assert_eq!(
+            got,
+            "GitHub could not find that. It may be private, renamed, or your token may not cover it."
+        );
+        assert!(crate::error::is_expected_for_tests(&got));
+    }
+
+    /// The other statuses must match the HTTP client too, or they flood next.
+    #[test]
+    fn other_statuses_match_the_http_wording() {
+        assert!(crate::error::is_expected_for_tests(&describe_cli_failure(
+            Some(401),
+            "Bad credentials"
+        )));
+        assert!(crate::error::is_expected_for_tests(&describe_cli_failure(
+            Some(403),
+            "Although you appear to have the correct authorization credentials, the `some-org` organization has enabled OAuth App access restrictions"
+        )));
+        assert!(crate::error::is_expected_for_tests(&describe_cli_failure(
+            Some(403),
+            "API rate limit reached"
+        )));
+    }
+
+    /// An unrecognised failure still names the CLI, so it stays diagnosable and
+    /// is NOT silently classified as expected.
+    #[test]
+    fn an_unknown_failure_keeps_naming_the_cli() {
+        let got = describe_cli_failure(None, "could not connect to github.com");
+        assert_eq!(got, "GitHub CLI said: could not connect to github.com");
     }
 
     /// `gh` also fails for reasons that produce no JSON at all (no network, bad
