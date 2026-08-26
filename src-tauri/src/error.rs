@@ -43,6 +43,11 @@ const EXPECTED: &[&str] = &[
     "[remote rejected]",
     "non-fast-forward",
     "(fetch first)",
+    // Pulling a branch that has no upstream, or one that diverged with no
+    // reconcile strategy set. Both are ordinary local state the user resolves by
+    // choosing a remote branch or a merge/rebase preference -- nothing to fix.
+    "there is no tracking information for the current branch",
+    "you have divergent branches and need to specify how to reconcile them",
     // The network being unavailable is not an application error.
     "could not resolve host",
     "failed to connect",

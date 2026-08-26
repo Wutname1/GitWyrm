@@ -174,6 +174,27 @@ fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
         return strip_remote(line).to_string();
     }
 
+    // Some git advisories carry no tag at all, so the fallback below would pick
+    // their last line - which for these is the *example command* git suggests,
+    // not the problem. A pull on a branch with no upstream prints:
+    //
+    //     There is no tracking information for the current branch.
+    //     Please specify which branch you want to merge with.
+    //     ...
+    //         git branch --set-upstream-to=<remote>/<branch> my-branch
+    //
+    // Reporting that trailing line gave users a command with literal `<remote>`
+    // in it and gave the classifier none of the words it matches on, so routine
+    // "this branch has no upstream" was filed as a crash.
+    //
+    // Matching the first line keeps the sentence that states the condition.
+    if let Some(line) = stderr_lines
+        .iter()
+        .find(|l| UNTAGGED_CAUSES.iter().any(|c| l.to_lowercase().contains(c)))
+    {
+        return strip_remote(line).to_string();
+    }
+
     stderr_lines
         .iter()
         .rev()
@@ -181,6 +202,16 @@ fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
         .map(|l| strip_remote(l).to_string())
         .unwrap_or_else(|| stdout.trim().to_string())
 }
+
+/// Opening lines of git advisories that state a cause but carry no `error:` or
+/// `fatal:` tag, so ranking alone would miss them and report a trailing example
+/// command instead.
+const UNTAGGED_CAUSES: &[&str] = &[
+    "there is no tracking information for the current branch",
+    "you have divergent branches and need to specify how to reconcile them",
+    "you have not concluded your merge",
+    "not possible to fast-forward, aborting",
+];
 
 /// Rewrite git's credential failures into something a person can act on.
 ///
@@ -1907,6 +1938,52 @@ mod tests {
         let state = tracking_state(&repo);
         let err = publish_args(&state, &repo).expect_err("no remote");
         assert!(err.to_string().contains("no remote"), "got: {err}");
+    }
+}
+
+#[cfg(test)]
+mod advisory_detail_tests {
+    use super::failure_detail;
+
+    /// Git's no-upstream advisory carries no error:/fatal:/hint: tag, so the
+    /// old "last non-noise line" fallback reported the example command --
+    /// literal `<remote>/<branch>` and all. The cause is the first line.
+    #[test]
+    fn a_pull_with_no_upstream_reports_the_cause_not_the_example() {
+        let lines: Vec<String> = [
+            "There is no tracking information for the current branch.",
+            "Please specify which branch you want to merge with.",
+            "See git-pull(1) for details.",
+            "",
+            "    git pull <remote> <branch>",
+            "",
+            "If you wish to set tracking information for this branch you can do so with:",
+            "",
+            "    git branch --set-upstream-to=origin/<branch> agent-desk-docs-2f7a11",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let got = failure_detail(&lines, "");
+        assert_eq!(got, "There is no tracking information for the current branch.");
+        assert!(crate::error::is_expected_for_tests(&got));
+    }
+
+    /// A tagged line still wins: the untagged scan must not outrank real errors.
+    #[test]
+    fn a_tagged_error_still_wins() {
+        let lines: Vec<String> = [
+            "There is no tracking information for the current branch.",
+            "fatal: could not read from remote repository",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            failure_detail(&lines, ""),
+            "fatal: could not read from remote repository"
+        );
     }
 }
 
