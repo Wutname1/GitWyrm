@@ -49,6 +49,38 @@ pub fn credential(
     Ok(Some(parse_credential(&raw)))
 }
 
+/// Reads a credential straight from an app data directory, with no `AppHandle`.
+///
+/// For the credential-helper process, which git spawns outside Tauri entirely:
+/// there is no app, no plugins, and no window, so [`credential`] cannot be
+/// used. The store is a plain JSON file, so reading it needs only its path.
+///
+/// Kept beside [`credential`] rather than in the helper module so both routes
+/// share one parser -- a second implementation of the stored-credential format
+/// would be free to drift, and the drift would look like a token that suddenly
+/// stopped working.
+pub fn credential_from_dir(
+    dir: &std::path::Path,
+    provider: ProviderId,
+) -> Result<Option<StoredCredential>, AppError> {
+    let raw = match std::fs::read_to_string(dir.join("auth.json")) {
+        Ok(raw) => raw,
+        // No store yet is not an error: it means no account is connected, and
+        // the helper answers that with silence.
+        Err(_) => return Ok(None),
+    };
+    let all: std::collections::BTreeMap<String, crate::ai::auth::AuthInfo> =
+        serde_json::from_str(&raw).unwrap_or_default();
+    let Some(info) = all.get(provider.as_str()) else {
+        return Ok(None);
+    };
+    let stored = match info {
+        crate::ai::auth::AuthInfo::Api { key } => key.clone(),
+        crate::ai::auth::AuthInfo::Oauth { access, .. } => access.clone(),
+    };
+    Ok(Some(parse_credential(&stored)))
+}
+
 /// Packs the parts into the single string `auth.json` stores.
 pub fn pack_credential(token: &str, email: Option<&str>, base_url: Option<&str>) -> String {
     if email.is_none() && base_url.is_none() {
@@ -183,6 +215,36 @@ fn is_permission_refusal(message: &str) -> bool {
         || low.contains("refused:")
 }
 
+/// Whether a refusal is one that a *credential prompt* could never fix.
+///
+/// Narrower than [`is_permission_refusal`] on purpose, and the difference
+/// matters. That predicate governs two forgiving actions -- caching an API
+/// error for an hour, and retrying through `gh` -- where casting wide costs a
+/// stale message or one extra process. This one governs [`refused_recently`],
+/// which suppresses the Git Credential Manager window entirely, and a false
+/// positive there is the worst outcome the auth path has: the user is told to
+/// connect an account and then given no way to do it.
+///
+/// The generic `refused:` marker cannot be used here. Every 403 is formatted as
+/// `"{host} refused: {message}"` by [`check`], so a private repo, an unrelated
+/// call missing a scope, or a host returning 403 where it means 404 would all
+/// bench the sign-in window for an hour on a push that had nothing to do with
+/// them. Reported as "why am i not getting prompted?" by a user whose `gh`
+/// token was valid the whole time.
+///
+/// So this matches only the two conditions that are genuinely about *this
+/// account's standing with the host*, where signing in again provably cannot
+/// change the answer:
+///   - an org with OAuth app restrictions that has not approved us
+///   - a token the host has declared no longer valid
+fn blocks_credential_prompt(message: &str) -> bool {
+    let low = message.to_lowercase();
+    if low.contains("rate limit") {
+        return false;
+    }
+    low.contains("oauth app access restrictions") || low.contains("sign-in is no longer valid")
+}
+
 /// The remembered refusal for `host`, if one is still within its cooldown.
 fn cooled_down(host: &str) -> Option<String> {
     PERMISSION_COOLDOWNS
@@ -214,8 +276,12 @@ fn remember_refusal(host: &str, message: &str) {
 /// Exposed as a bare bool rather than the message because the caller only needs
 /// the decision; the message has already been shown by whatever API call earned
 /// the cooldown.
+///
+/// Gated on [`blocks_credential_prompt`], not on the mere existence of a
+/// cooldown: an entry is stored for any refusal worth caching, but only a
+/// standing-with-the-host refusal justifies taking the sign-in window away.
 pub fn refused_recently(host: &str) -> bool {
-    cooled_down(host).is_some()
+    cooled_down(host).is_some_and(|m| blocks_credential_prompt(&m))
 }
 
 /// Drops a host's cooldown so the next call goes out for real.
@@ -512,6 +578,66 @@ mod tests {
         assert!(!is_permission_refusal(
             "GitHub said: Pull Request has merge conflicts"
         ));
+    }
+
+    /// The credential window may only be taken away for a refusal about this
+    /// account's standing with the host, where signing in again cannot help.
+    #[test]
+    fn only_standing_refusals_block_the_sign_in_window() {
+        assert!(blocks_credential_prompt(
+      "GitHub refused: Although you appear to have the correct authorization credentials, the `some-org` organization has enabled OAuth App access restrictions."
+    ));
+        assert!(blocks_credential_prompt(
+            "GitHub sign-in is no longer valid; connect GitHub again"
+        ));
+    }
+
+    /// The regression this split exists for. `check` formats every 403 as
+    /// "{host} refused: ...", so the generic marker matched failures that have
+    /// nothing to do with the account's standing -- and suppressed the sign-in
+    /// window on the next push for an hour. These must still be cached and may
+    /// still reroute to `gh`, but must never cost the user their prompt.
+    #[test]
+    fn an_ordinary_403_still_allows_the_sign_in_window() {
+        let private_repo =
+            "GitHub refused: Must have admin rights to Repository. Check the token has the permissions GitHub needs.";
+        assert!(
+            is_permission_refusal(private_repo),
+            "still worth caching and rerouting"
+        );
+        assert!(
+            !blocks_credential_prompt(private_repo),
+            "but must not take the credential window away"
+        );
+
+        assert!(!blocks_credential_prompt(
+            "GitHub rate limit reached; try again in a few minutes"
+        ));
+        assert!(!blocks_credential_prompt("could not reach GitHub: timed out"));
+        assert!(!blocks_credential_prompt(
+      "GitHub could not find that. It may be private, renamed, or your token may not cover it."
+    ));
+    }
+
+    /// `refused_recently` reads the stored message, so a cached ordinary 403
+    /// must not read back as a reason to skip the prompt.
+    #[test]
+    fn a_cached_ordinary_refusal_does_not_suppress_the_prompt() {
+        let host = "PromptGateTestHost";
+        remember_refusal(
+            host,
+            "PromptGateTestHost refused: Must have admin rights to Repository.",
+        );
+        assert!(cooled_down(host).is_some(), "cached for the API path");
+        assert!(
+            !refused_recently(host),
+            "an ordinary 403 must leave the sign-in window available"
+        );
+
+        let blocked = "PromptGateTestHost sign-in is no longer valid; connect PromptGateTestHost again";
+        remember_refusal(host, blocked);
+        assert!(refused_recently(host), "a standing refusal still suppresses");
+        clear_cooldown(host);
     }
 
     /// Remembering must be per-host: one org's restriction cannot silence a
