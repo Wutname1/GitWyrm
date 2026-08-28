@@ -131,6 +131,16 @@ fn answer(protocol: Option<&str>, host: Option<&str>, data_dir: &std::path::Path
         return None;
     }
     let provider = provider_for_host(host?)?;
+    // The host has already told the running app this token is no good for a
+    // reason signing in again cannot fix (an org's OAuth App restriction, or a
+    // token it declared invalid). Offering it here would win the credential
+    // race every time -- git stops asking helpers once one supplies a full
+    // credential -- and lock out Credential Manager's own, separately valid
+    // credential for the rest of the cooldown. Staying silent instead lets git
+    // fall through to it exactly as if we were never in the list.
+    if crate::hosting::http::credential_recently_refused(data_dir, provider) {
+        return None;
+    }
     let stored = crate::hosting::http::credential_from_dir(data_dir, provider).ok()??;
     if stored.token.is_empty() {
         return None;
@@ -278,6 +288,32 @@ mod tests {
         .unwrap();
 
         assert!(answer(Some("https"), Some("gitlab.com"), &dir).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The regression this exists for: a token the running app already knows
+    /// is refused for a standing-with-the-host reason (an org's OAuth App
+    /// restriction, say) must not be offered here. Offering it would win the
+    /// credential race every time -- git stops asking helpers once one
+    /// supplies a full credential -- pre-empting Credential Manager's own,
+    /// separately valid credential and turning a push that used to succeed
+    /// through Credential Manager alone into a hard failure.
+    #[test]
+    fn a_token_the_host_already_refused_is_not_offered() {
+        let dir = std::env::temp_dir().join("gitwyrm-helper-refused");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("auth.json"),
+            r#"{"github":{"type":"api","key":"gho_exampletoken"}}"#,
+        )
+        .unwrap();
+        crate::hosting::http::persist_credential_refusal(
+            &dir,
+            crate::hosting::registry::ProviderId::Github,
+        );
+
+        assert!(answer(Some("https"), Some("github.com"), &dir).is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

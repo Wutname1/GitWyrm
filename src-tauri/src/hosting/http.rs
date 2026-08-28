@@ -263,6 +263,81 @@ fn remember_refusal(host: &str, message: &str) {
         .unwrap_or_else(|e| e.into_inner())
         .get_or_insert_with(HashMap::new)
         .insert(host.to_string(), (Instant::now(), message.to_string()));
+
+    // The git credential-helper subprocess cannot see the map above: git
+    // spawns it fresh for every fetch, pull, and push, so nothing survives
+    // between one invocation and the next. When the refusal is one a
+    // credential prompt could never fix, persist it where that subprocess
+    // will look, so it stops re-offering the same doomed token and lets
+    // Credential Manager try whatever it has instead. Without this, the
+    // helper's own token pre-empts Git Credential Manager on every call (git
+    // stops asking helpers once one supplies a full credential), so an
+    // account with an org-restricted token turns pushes that used to work
+    // through Credential Manager alone into hard failures.
+    if blocks_credential_prompt(message) {
+        if let Some(provider) = provider_for_display_name(host) {
+            persist_credential_refusal(&crate::helper_data_dir(), provider);
+        }
+    }
+}
+
+/// Reverse of [`HostProvider::display_name`]: which provider `send` and
+/// `check` meant by the plain string they format into every message.
+///
+/// `PERMISSION_COOLDOWNS` and the messages built by [`check`] key on that
+/// display string ("GitHub"), not [`ProviderId::as_str`] ("github"), so
+/// anything that needs to go from one to the other -- like writing the
+/// on-disk marker below -- has to look it up.
+fn provider_for_display_name(host: &str) -> Option<ProviderId> {
+    crate::hosting::registry::ALL_PROVIDERS
+        .iter()
+        .find(|p| p.display_name() == host)
+        .map(|p| p.id())
+}
+
+/// The on-disk marker recording that `provider`'s credential was refused for
+/// a reason a fresh prompt can never fix.
+///
+/// Named for the provider rather than the host string `remember_refusal`
+/// receives, so the credential-helper subprocess -- which only ever knows a
+/// [`ProviderId`], resolved from the git host it was asked about -- can find
+/// it without needing the display-name mapping this process uses.
+fn credential_refusal_marker(data_dir: &std::path::Path, provider: ProviderId) -> std::path::PathBuf {
+    data_dir.join(format!("credential-refused-{}", provider.as_str()))
+}
+
+pub(crate) fn persist_credential_refusal(data_dir: &std::path::Path, provider: ProviderId) {
+    let path = credential_refusal_marker(data_dir, provider);
+    let until = std::time::SystemTime::now() + PERMISSION_COOLDOWN;
+    let epoch = until
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // Best-effort: a write failure here just means the helper keeps offering
+    // the token it would have offered anyway, which is the behaviour before
+    // this existed.
+    let _ = std::fs::write(path, epoch.to_string());
+}
+
+/// Whether the on-disk marker for `provider` is still within its cooldown.
+///
+/// Used by [`crate::git::credential_helper`], which runs as a separate
+/// process with no access to [`PERMISSION_COOLDOWNS`]. Any error reading the
+/// marker (missing, unreadable, corrupt) is treated as "no refusal on
+/// record" -- staying silent is this module's job only when it is sure, and
+/// the credential helper already answers nothing on any other kind of doubt.
+pub fn credential_recently_refused(data_dir: &std::path::Path, provider: ProviderId) -> bool {
+    let Ok(raw) = std::fs::read_to_string(credential_refusal_marker(data_dir, provider)) else {
+        return false;
+    };
+    let Ok(until_epoch) = raw.trim().parse::<u64>() else {
+        return false;
+    };
+    let now_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    now_epoch < until_epoch
 }
 
 /// Whether `host` refused us on permissions recently enough to still matter.
@@ -300,6 +375,9 @@ pub fn clear_cooldown(host: &str) {
         .as_mut()
     {
         map.remove(host);
+    }
+    if let Some(provider) = provider_for_display_name(host) {
+        let _ = std::fs::remove_file(credential_refusal_marker(&crate::helper_data_dir(), provider));
     }
 }
 
@@ -664,6 +742,71 @@ mod tests {
             cooled_down(host).is_none(),
             "reconnecting must lift the bench immediately"
         );
+    }
+
+    /// The credential-helper subprocess reads this marker with no access to
+    /// `PERMISSION_COOLDOWNS`, so its round trip is tested directly against a
+    /// throwaway directory rather than the real app data dir `remember_refusal`
+    /// writes to -- sharing that path with whatever this machine's actual
+    /// GitWyrm instance has cached would make the test flaky.
+    #[test]
+    fn a_persisted_refusal_round_trips_and_expires() {
+        let dir = std::env::temp_dir().join("gitwyrm-http-refusal-marker");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert!(
+            !credential_recently_refused(&dir, ProviderId::Github),
+            "nothing persisted yet"
+        );
+
+        persist_credential_refusal(&dir, ProviderId::Github);
+        assert!(credential_recently_refused(&dir, ProviderId::Github));
+        assert!(
+            !credential_recently_refused(&dir, ProviderId::Gitlab),
+            "a marker must not leak to a different provider"
+        );
+
+        // An expired marker (written directly, bypassing the real TTL) must
+        // read back as no refusal on record.
+        let expired = std::time::SystemTime::now() - std::time::Duration::from_secs(1);
+        let epoch = expired
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        std::fs::write(
+            credential_refusal_marker(&dir, ProviderId::Github),
+            epoch.to_string(),
+        )
+        .unwrap();
+        assert!(!credential_recently_refused(&dir, ProviderId::Github));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `remember_refusal` and `clear_cooldown` key their in-memory cooldown on
+    /// the display string ("GitHub"); the on-disk marker has to resolve that
+    /// same string back to a `ProviderId` correctly, or it silently writes
+    /// nothing and the credential-helper regression this exists for comes back.
+    #[test]
+    fn display_names_resolve_to_the_provider_that_uses_them() {
+        assert_eq!(
+            provider_for_display_name("GitHub"),
+            Some(ProviderId::Github)
+        );
+        assert_eq!(
+            provider_for_display_name("GitLab"),
+            Some(ProviderId::Gitlab)
+        );
+        assert_eq!(
+            provider_for_display_name("Bitbucket"),
+            Some(ProviderId::Bitbucket)
+        );
+        assert_eq!(
+            provider_for_display_name("Azure DevOps"),
+            Some(ProviderId::AzureDevops)
+        );
+        assert_eq!(provider_for_display_name("Some Enterprise Host"), None);
     }
 
     /// The exact set of failures that reroute to `gh`.

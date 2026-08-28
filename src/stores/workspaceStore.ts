@@ -832,6 +832,15 @@ interface WorkspaceState {
   /** Opens several repos as tabs at once without changing which tab is active. */
   addReposInBackground: (repos: RepoInfo[]) => void;
   removeRepo: (id: string) => void;
+  /**
+   * Drop one entry from the recent list.
+   *
+   * Only the list is touched. A recent row is a bookmark, not the repo, so this
+   * never deletes anything on disk - and it stays useful for the case it was
+   * added for, where the folder is already gone and the row is the last thing
+   * pointing at it.
+   */
+  removeRecent: (path: string) => void;
   setActiveRepo: (id: string) => void;
   /** Save the in-progress commit message for a repo. */
   setCommitDraft: (repoId: string, draft: Partial<CommitDraft>) => void;
@@ -1745,6 +1754,16 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         recents: recents.slice(0, 10),
         tabOrder,
       };
+    });
+    schedulePersist();
+  },
+  removeRecent: (path) => {
+    set((s) => {
+      const recents = s.recents.filter((r) => !samePath(r.path, path));
+      // Nothing matched, so skip the write rather than persisting an identical
+      // list and re-rendering every consumer of `recents`.
+      if (recents.length === s.recents.length) return s;
+      return { recents };
     });
     schedulePersist();
   },

@@ -308,6 +308,7 @@ function RepoLibraryRow({
   onTogglePin,
   onOpen,
   onJump,
+  onForget,
   reorder,
 }: {
   repo: LibraryRepo;
@@ -322,6 +323,12 @@ function RepoLibraryRow({
   onTogglePin: () => void;
   onOpen: () => void;
   onJump: () => void;
+  /**
+   * Drop this row from the recent list. Only passed for rows that came from
+   * recents: a pinned or scanned repo is not the list's to remove, and an X on
+   * one would read as "delete this repository".
+   */
+  onForget?: () => void;
   reorder?: PinnedReorderRow;
 }) {
   return (
@@ -414,6 +421,15 @@ function RepoLibraryRow({
         >
           <Pin size={12} fill={pinned ? "currentColor" : "none"} />
         </TooltipButton>
+        {onForget && (
+          <TooltipButton
+            tooltip={`Remove ${repo.name} from Recent`}
+            onClick={onForget}
+            className="grid size-7 place-items-center rounded-[5px] text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground group-hover/repo:opacity-100 focus:opacity-100"
+          >
+            <X size={12} />
+          </TooltipButton>
+        )}
         <Button
           variant={selected ? "secondary" : "ghost"}
           size="sm"
@@ -917,6 +933,7 @@ function RepoPickerPanel({
   wiggleNonce?: number;
 }) {
   const recents = useWorkspaceStore((state) => state.recents);
+  const removeRecent = useWorkspaceStore((state) => state.removeRecent);
   const openRepos = useWorkspaceStore((state) => state.openRepos);
   const codeFolders = useWorkspaceStore((state) => state.codeFolders);
   const primaryCodeFolder = usePrimaryCodeFolder();
@@ -1573,12 +1590,16 @@ function RepoPickerPanel({
     }
   };
 
-  const renderRepoRow = (repo: LibraryRepo) => {
+  // `fromRecent` rather than deriving it from the path: the same repo can also
+  // be pinned or scanned, and only the row drawn under RECENT should offer to
+  // remove it from that list.
+  const renderRepoRow = (repo: LibraryRepo, fromRecent = false) => {
     const key = pathKey(repo.path);
     const open = openByPath.get(key);
     return (
       <RepoLibraryRow
         key={key}
+        onForget={fromRecent ? () => removeRecent(repo.path) : undefined}
         reorder={pinnedReorder(repo)}
         repo={repo}
         iconUrl={iconsByPath.get(key)}
@@ -1754,7 +1775,7 @@ function RepoPickerPanel({
               </SectionHeading>
               {!isSectionCollapsed("pinned_repositories") && (
                 <div className="grid gap-0.5">
-                  {pinnedRepos.map(renderRepoRow)}
+                  {pinnedRepos.map((repo) => renderRepoRow(repo))}
                 </div>
               )}
             </section>
@@ -1782,7 +1803,7 @@ function RepoPickerPanel({
             </SectionHeading>
             {!isSectionCollapsed("recent") && (
               <div className="grid gap-0.5">
-                {recentRepos.map(renderRepoRow)}
+                {recentRepos.map((repo) => renderRepoRow(repo, true))}
               </div>
             )}
           </section>
@@ -1918,7 +1939,7 @@ function RepoPickerPanel({
                         </div>
                       ) : (
                         <div className="grid gap-0.5">
-                          {repos.map(renderRepoRow)}
+                          {repos.map((repo) => renderRepoRow(repo))}
                         </div>
                       )}
                     </div>
