@@ -18,7 +18,8 @@
 
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -149,18 +150,61 @@ fn base_command(exe: &PathBuf) -> Command {
     cmd
 }
 
+/// How long a *successful* probe is trusted without re-running `gh`.
+///
+/// Only the success is cached. A failure must not be, for the reason
+/// [`find_executable`] is not cached either: installing `gh` or signing into it
+/// is exactly what a user does after reading a hint saying it is missing, and a
+/// remembered "no" would keep the fallback off until they restarted the app.
+///
+/// A cached "yes" carries no such risk. The worst case is one `gh api` call
+/// against a login that was revoked within the window, which fails the same way
+/// an expired token does and is reported the same way.
+const AVAILABILITY_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// The last successful probe and when it was taken.
+static LAST_AVAILABLE: Mutex<Option<(Instant, PathBuf)>> = Mutex::new(None);
+
+/// Forget the cached probe, so the next call re-runs `gh auth status`.
+///
+/// Signing in or out of `gh` happens outside this process and produces no event
+/// we can see, so the settings row calls this before reporting status.
+pub fn invalidate_availability() {
+    *LAST_AVAILABLE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
 /// True when `gh` is installed and has a usable login.
 ///
 /// Checked before falling back rather than inferring it from a failed call: a
 /// signed-out `gh` fails in a way that looks like a permissions problem, and
 /// reporting that as "GitHub refused" would send the user to fix the wrong
 /// thing.
+///
+/// A successful probe is cached for [`AVAILABILITY_TTL`]. The probe is a PATH
+/// walk plus a `gh auth status` that makes its own network call -- around
+/// 350ms measured -- and the fallback ran it before *every* request, on top of
+/// the `gh api` call itself. Two spawns and two round trips per request is what
+/// made a fallback that fires often feel like the whole app had slowed down.
 pub fn availability() -> Result<PathBuf, Unavailable> {
+    if let Some((at, exe)) = LAST_AVAILABLE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        // A `gh` uninstalled mid-window would otherwise be reported as signed in.
+        if at.elapsed() < AVAILABILITY_TTL && exe.is_file() {
+            return Ok(exe.clone());
+        }
+    }
     let exe = find_executable().ok_or(Unavailable::NotInstalled)?;
     let mut cmd = base_command(&exe);
     cmd.args(["auth", "status"]);
     match output_with_timeout(cmd, PROBE_TIMEOUT) {
-        Ok(out) if out.status.success() => Ok(exe),
+        Ok(out) if out.status.success() => {
+            *LAST_AVAILABLE.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some((Instant::now(), exe.clone()));
+            Ok(exe)
+        }
         _ => Err(Unavailable::NotSignedIn),
     }
 }

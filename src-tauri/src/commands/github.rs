@@ -256,7 +256,11 @@ pub struct GhCliStatus {
 pub async fn gh_cli_status() -> Result<GhCliStatus, AppError> {
     // A PATH walk plus `gh auth status`, both of which touch the filesystem and
     // spawn a process; neither belongs on the IPC thread.
-    tauri::async_runtime::spawn_blocking(|| match crate::hosting::gh_cli::availability() {
+    tauri::async_runtime::spawn_blocking(|| {
+        // Signing into or out of `gh` happens outside this process, so the
+        // settings row must probe for real rather than read a cached answer.
+        crate::hosting::gh_cli::invalidate_availability();
+        match crate::hosting::gh_cli::availability() {
         Ok(_) => GhCliStatus {
             installed: true,
             signed_in: true,
@@ -269,6 +273,7 @@ pub async fn gh_cli_status() -> Result<GhCliStatus, AppError> {
             installed: false,
             signed_in: false,
         },
+        }
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))
