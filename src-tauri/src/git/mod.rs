@@ -1,5 +1,6 @@
 pub mod bundled;
 pub mod commit_write;
+pub mod credential_helper;
 pub mod graph;
 pub mod history;
 pub mod identity;

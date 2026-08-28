@@ -1,5 +1,10 @@
 //! Runs git.exe for network operations (fetch/pull/push/clone).
-//! Git Credential Manager handles auth; we never touch credentials.
+//!
+//! Authentication has two routes. When the user has connected the host in
+//! Settings, `git::credential_helper` answers git's request with that token over
+//! a pipe. For every other host it stays silent and Git Credential Manager takes
+//! over as it always has. A credential never enters this module's memory, its
+//! arguments, or its environment either way.
 //!
 //! Which git runs is decided in `super::bundled`: the path set in Settings, the
 //! system git on PATH, then the copy bundled with GitWyrm. The bundled tree is
@@ -67,7 +72,13 @@ pub fn prepare_git_env(cmd: &mut Command) {
     cmd.env("GIT_TERMINAL_PROMPT", "0");
 }
 
-/// Config overrides that collapse the credential helper list to a single entry.
+/// The credential helper list git should use: ours, then Credential Manager.
+///
+/// Two jobs in one list. The first is collapsing duplicates, described below.
+/// The second is putting `git::credential_helper` ahead of GCM so an account
+/// already connected in Settings authenticates without a second sign-in window
+/// -- our helper stays silent for any host it holds no token for, so GCM still
+/// handles everything it used to.
 ///
 /// The bundled MinGit tree ships an `etc/gitconfig` that sets
 /// `credential.helper = manager` and then `include`s the system Git for Windows
@@ -88,12 +99,44 @@ pub fn prepare_git_env(cmd: &mut Command) {
 /// behaviour, and would put us in the business of re-supplying Git for Windows'
 /// defaults by hand.
 pub fn credential_args() -> Vec<String> {
-    vec![
-        "-c".into(),
-        "credential.helper=".into(),
-        "-c".into(),
-        "credential.helper=manager".into(),
-    ]
+    let mut args = vec!["-c".into(), "credential.helper=".into()];
+
+    // Ours first, so the account the user connected in-app is tried before
+    // Credential Manager opens a window for the same account. It stays silent
+    // for any host we hold no token for, and git then falls through to the
+    // next entry exactly as it always did -- so this adds a path and removes
+    // none. See git::credential_helper.
+    if let Some(helper) = own_credential_helper() {
+        args.push("-c".into());
+        args.push(format!("credential.helper={helper}"));
+    }
+
+    args.push("-c".into());
+    args.push("credential.helper=manager".into());
+    args
+}
+
+/// The `credential.helper` value that points git back at this binary.
+///
+/// Git treats a value containing a space or starting with `!` as a shell
+/// command, so the executable path is quoted: a default Windows install lives
+/// under `C:\Program Files\`, and unquoted that parses as the program
+/// `C:\Program` with an argument. Confirmed by the quoting rule in
+/// git-credential(1).
+///
+/// None when the current executable cannot be located -- the helper could not
+/// be spawned anyway, and omitting the entry leaves the previous behaviour
+/// (Credential Manager alone) intact rather than registering a broken helper
+/// that makes every authentication print an error.
+fn own_credential_helper() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let path = exe.to_str()?;
+    // `!` marks the value as a shell command, which is what allows an absolute
+    // path with an argument. Without it git would look for `git-credential-<value>`.
+    Some(format!(
+        "!\"{path}\" {}",
+        crate::git::credential_helper::HELPER_FLAG
+    ))
 }
 
 /// The environment variable that stops Git Credential Manager opening a window.
@@ -325,6 +368,7 @@ pub fn run_git_stdin(
 #[cfg(test)]
 mod credential_trace_tests {
     use super::*;
+    use crate::git::credential_helper::HELPER_FLAG;
 
     /// The reset must come before the name, or git keeps what it already had and
     /// the duplicate survives. Order is the whole fix, so pin it.
@@ -335,6 +379,46 @@ mod credential_trace_tests {
         let set = args.iter().position(|a| a == "credential.helper=manager");
         assert!(reset.is_some() && set.is_some(), "{args:?}");
         assert!(reset < set, "reset must come first: {args:?}");
+    }
+
+    /// Our helper must be tried before Credential Manager, or GCM opens a window
+    /// for an account we could have authenticated silently -- which is the whole
+    /// complaint this exists to answer.
+    #[test]
+    fn our_helper_is_offered_before_credential_manager() {
+        let args = credential_args();
+        let Some(ours) = args.iter().position(|a| a.contains(HELPER_FLAG)) else {
+            // current_exe() failed, so no helper was registered. Falling back to
+            // manager alone is the documented behaviour, not a failure.
+            return;
+        };
+        let manager = args
+            .iter()
+            .position(|a| a == "credential.helper=manager")
+            .expect("manager must remain as the fallback");
+        assert!(ours < manager, "ours must be tried first: {args:?}");
+
+        let reset = args
+            .iter()
+            .position(|a| a == "credential.helper=")
+            .expect("reset must survive");
+        assert!(reset < ours, "reset still leads: {args:?}");
+    }
+
+    /// The path is quoted because a default Windows install sits under
+    /// `C:\Program Files\`, which unquoted parses as the program `C:\Program`.
+    #[test]
+    fn the_helper_path_is_quoted_and_marked_as_a_command() {
+        let Some(helper) = own_credential_helper() else {
+            return;
+        };
+        assert!(helper.starts_with("!\""), "must be a quoted command: {helper}");
+        assert!(helper.contains(HELPER_FLAG), "must pass the flag: {helper}");
+        // The closing quote has to land before the flag, or the flag is inside
+        // the program name.
+        let close = helper.rfind('"').expect("closing quote");
+        let flag = helper.find(HELPER_FLAG).expect("flag");
+        assert!(close < flag, "flag must sit outside the quotes: {helper}");
     }
 
     /// These are passed to git as global options, so each value needs its own
