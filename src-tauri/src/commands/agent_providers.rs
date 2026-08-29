@@ -59,8 +59,8 @@ fn list() -> Vec<AgentProvider> {
 fn row(spec: &'static registry::AgentSpec) -> AgentProvider {
     let probe = detect_agent(spec);
     let (installed, version, too_old) = match &probe.state {
-        CliState::Ready { version, .. } => (true, Some(version.clone()), false),
-        CliState::TooOld { version, .. } => (false, Some(version.clone()), true),
+        CliState::Ready { version, .. } => (true, Some(short_version(version)), false),
+        CliState::TooOld { version, .. } => (false, Some(short_version(version)), true),
         CliState::NotFound => (false, None, false),
     };
 
@@ -74,6 +74,28 @@ fn row(spec: &'static registry::AgentSpec) -> AgentProvider {
         can_do_read_only_work: spec.can_guarantee_read_only(),
         read_only_limit: read_only_limit(spec),
     }
+}
+
+/// The first line of whatever the tool printed, trimmed.
+///
+/// These tools do not agree on how much to say. `opencode --version` prints
+/// `1.18.10` and nothing else, while `copilot version` prints its name, its
+/// version, a blank line, and a sentence about whether an update is available.
+/// The picker shows this in a small monospace note beside the tool's name, so
+/// the whole answer would wrap into a paragraph there.
+///
+/// Only the first line is kept, and only up to a sane width: everything after
+/// it is advice for a terminal, not an identity. Nothing is parsed out of it
+/// -- the string is the tool's to format, and guessing at a version number
+/// inside it would break the moment one of them reworded its output.
+fn short_version(raw: &str) -> String {
+    let first = raw.lines().next().unwrap_or("").trim();
+    const MAX: usize = 40;
+    if first.chars().count() <= MAX {
+        return first.to_string();
+    }
+    let cut: String = first.chars().take(MAX - 1).collect();
+    format!("{}…", cut.trim_end())
 }
 
 /// The sentence explaining a read-only limit, or `None` when there is none.
@@ -144,6 +166,41 @@ mod tests {
     }
 
     #[test]
+    fn a_chatty_version_string_is_cut_down_to_one_line() {
+        // Copilot really does answer with three lines, the last of which is
+        // advice about updating. The picker shows this in a small monospace
+        // note, so the whole thing would wrap into a paragraph there.
+        let raw = "GitHub Copilot CLI 1.0.81\n\nYou are running the latest version.";
+        let short = short_version(raw);
+        assert_eq!(short, "GitHub Copilot CLI 1.0.81");
+        assert!(!short.contains('\n'));
+    }
+
+    #[test]
+    fn a_short_version_is_left_exactly_as_the_tool_wrote_it() {
+        // opencode answers with a bare number. Nothing is parsed or
+        // reformatted: the string belongs to the tool.
+        assert_eq!(short_version("1.18.10"), "1.18.10");
+        assert_eq!(short_version("  1.18.10  "), "1.18.10");
+    }
+
+    #[test]
+    fn a_very_long_first_line_is_truncated_rather_than_wrapped() {
+        let long = "x".repeat(200);
+        let short = short_version(&long);
+        assert!(short.chars().count() <= 40, "got {} chars", short.chars().count());
+        assert!(short.ends_with('…'));
+    }
+
+    #[test]
+    fn a_tool_that_printed_nothing_does_not_panic() {
+        assert_eq!(short_version(""), "");
+        assert_eq!(short_version("
+
+"), "");
+    }
+
+    #[test]
     fn a_missing_tool_is_reported_as_not_installed_rather_than_too_old() {
         // The two states need different words -- one asks for an install, the
         // other for an update -- so they must never collapse into each other.
@@ -157,6 +214,27 @@ mod tests {
             if row.too_old {
                 assert!(row.version.is_some(), "{} must report what it found", row.id);
             }
+        }
+    }
+}
+
+/// Prints the real picker rows for this machine.
+///
+/// Ignored by default because it spawns every installed tool and its answer
+/// depends on what is on the box. Run it deliberately with
+/// `cargo test --lib real_picker_rows -- --ignored --nocapture` to see exactly
+/// what the picker will show before trusting a screenshot.
+#[cfg(test)]
+#[test]
+#[ignore]
+fn real_picker_rows_on_this_machine() {
+    for row in list() {
+        println!(
+            "{:<16} installed={:<5} tooOld={:<5} readOnlyOk={:<5} version={:?}",
+            row.id, row.installed, row.too_old, row.can_do_read_only_work, row.version
+        );
+        if let Some(limit) = &row.read_only_limit {
+            println!("{:<16}   limit: {limit}", "");
         }
     }
 }
