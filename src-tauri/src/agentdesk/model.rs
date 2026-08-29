@@ -395,6 +395,113 @@ pub struct ImportProvenance {
     pub imported_at: String,
 }
 
+/// What one execution cost, accumulated over its turns.
+///
+/// Every field is optional for the same reason the IPC-facing `SessionUsage`
+/// is: a provider that reports prompt tokens but not cost must not be turned
+/// into a zero-dollar run. `None` means "not reported", never "zero".
+///
+/// Counts are `u64` because they are whole tokens; cost is `f64` because it is
+/// money and arrives from the provider already divided.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionUsage {
+    /// Tokens sent to the model, summed over this execution's turns.
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    /// Tokens the model produced, summed over this execution's turns.
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
+    /// Input tokens served from the provider's prompt cache. A subset of
+    /// `input_tokens`, not an addition to it -- kept separate because it is
+    /// the number that explains a surprisingly small bill.
+    #[serde(default)]
+    pub cached_input_tokens: Option<u64>,
+    /// What the provider said this cost, in MICRO-USD (millionths of a
+    /// dollar). Only ever set from a provider-reported figure; GitWyrm never
+    /// multiplies tokens by a price table of its own, because that table goes
+    /// stale silently and a wrong dollar figure is worse than none.
+    ///
+    /// An integer rather than an `f64` for two reasons: money should not
+    /// accumulate rounding error across dozens of turns, and `RunStep` (which
+    /// carries a `TurnUsage`) derives `Eq`, which `f64` cannot satisfy.
+    /// Micro-USD because per-turn costs are routinely below a cent.
+    #[serde(default)]
+    pub cost_micro_usd: Option<u64>,
+    /// How many model turns this execution took. Always known, because
+    /// GitWyrm counts them itself rather than asking the provider.
+    #[serde(default)]
+    pub turns: u32,
+}
+
+impl ExecutionUsage {
+    /// Folds one turn's reported numbers into the running total.
+    ///
+    /// Addition is saturating: a provider that reports a nonsense figure
+    /// should not panic a release build or wrap to a small number in a debug
+    /// one. `turns` increments on every call, including one that reports no
+    /// numbers at all -- a turn happened whether or not it was measured.
+    pub fn accumulate(&mut self, turn: &TurnUsage) {
+        fn add(slot: &mut Option<u64>, v: Option<u64>) {
+            if let Some(v) = v {
+                *slot = Some(slot.unwrap_or(0).saturating_add(v));
+            }
+        }
+        add(&mut self.input_tokens, turn.input_tokens);
+        add(&mut self.output_tokens, turn.output_tokens);
+        add(&mut self.cached_input_tokens, turn.cached_input_tokens);
+        add(&mut self.cost_micro_usd, turn.cost_micro_usd);
+        self.turns = self.turns.saturating_add(1);
+    }
+
+    /// True when nothing but the turn count is known -- the case the UI must
+    /// render as "not reported" rather than as a row of zeroes.
+    pub fn is_unreported(&self) -> bool {
+        self.input_tokens.is_none()
+            && self.output_tokens.is_none()
+            && self.cached_input_tokens.is_none()
+            && self.cost_micro_usd.is_none()
+    }
+
+    /// The accumulated cost in whole USD, for display. `None` when no cost
+    /// was ever reported.
+    pub fn cost_usd(&self) -> Option<f64> {
+        self.cost_micro_usd.map(|m| m as f64 / 1_000_000.0)
+    }
+}
+
+/// One turn's worth of provider-reported usage, before accumulation.
+///
+/// Separate from [`ExecutionUsage`] because a turn reports a delta while the
+/// record holds a total, and conflating the two is how double-counting
+/// happens.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnUsage {
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
+    #[serde(default)]
+    pub cached_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub cost_micro_usd: Option<u64>,
+}
+
+impl TurnUsage {
+    /// True when the provider reported no numbers at all for this turn.
+    ///
+    /// Used to decide whether a turn is worth persisting: a run whose
+    /// provider never reports usage should not rewrite the session file once
+    /// per turn to record nothing.
+    pub fn is_empty(&self) -> bool {
+        self.input_tokens.is_none()
+            && self.output_tokens.is_none()
+            && self.cached_input_tokens.is_none()
+            && self.cost_micro_usd.is_none()
+    }
+}
+
 /// One run attached to a session. A session can accumulate more than one
 /// execution over its lifetime (retries, follow-ups, helper runs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -518,6 +625,15 @@ pub struct ExecutionRecord {
     /// or for a lead that never got any helper to finish.
     #[serde(default)]
     pub review_execution_id: Option<ExecutionId>,
+    /// What this execution actually cost, as the provider reported it.
+    ///
+    /// `None` for an execution whose provider reported nothing -- which is a
+    /// different fact from "it cost zero" and is why this is an `Option`
+    /// rather than a defaulted-to-0 struct. Accumulated across the turns of
+    /// one execution by `bridge::apply_run_event`; summed across executions
+    /// by `commands::agent_desk::session_usage_at`.
+    #[serde(default)]
+    pub usage: Option<ExecutionUsage>,
     /// Task 3.3 ("block Start until refreshed/accepted"): set only on a
     /// LEAD's own execution record, and only once the user explicitly chose
     /// "Start anyway" in front of a staleness warning
@@ -571,6 +687,7 @@ impl ExecutionRecord {
             budget: None,
             integration_worktree_path: None,
             review_execution_id: None,
+            usage: None,
             accepted_stale_context_fingerprint: None,
         }
     }
@@ -676,6 +793,94 @@ pub fn migrate_header(raw: serde_json::Value) -> Result<AgentSessionHeader, Sess
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_accumulates_across_turns() {
+        let mut total = ExecutionUsage::default();
+        total.accumulate(&TurnUsage {
+            input_tokens: Some(100),
+            output_tokens: Some(20),
+            cached_input_tokens: Some(60),
+            cost_micro_usd: Some(1_500),
+        });
+        total.accumulate(&TurnUsage {
+            input_tokens: Some(50),
+            output_tokens: Some(5),
+            cached_input_tokens: None,
+            cost_micro_usd: Some(500),
+        });
+        assert_eq!(total.input_tokens, Some(150));
+        assert_eq!(total.output_tokens, Some(25));
+        // The second turn reported no cache figure; that must not reset the
+        // first turn's.
+        assert_eq!(total.cached_input_tokens, Some(60));
+        assert_eq!(total.cost_micro_usd, Some(2_000));
+        assert_eq!(total.turns, 2);
+    }
+
+    #[test]
+    fn a_turn_that_reports_nothing_still_counts_as_a_turn() {
+        let mut total = ExecutionUsage::default();
+        total.accumulate(&TurnUsage::default());
+        assert_eq!(total.turns, 1);
+        assert!(
+            total.is_unreported(),
+            "a turn with no numbers must not fabricate zeroes"
+        );
+        assert_eq!(
+            total.cost_usd(),
+            None,
+            "an unreported cost is not a free one"
+        );
+    }
+
+    #[test]
+    fn unreported_is_distinguishable_from_measured_zero() {
+        let mut zero = ExecutionUsage::default();
+        zero.accumulate(&TurnUsage {
+            input_tokens: Some(0),
+            ..Default::default()
+        });
+        assert!(
+            !zero.is_unreported(),
+            "a provider that reported 0 did report something"
+        );
+        assert_eq!(zero.input_tokens, Some(0));
+    }
+
+    #[test]
+    fn cost_converts_micro_usd_to_dollars() {
+        let mut total = ExecutionUsage::default();
+        total.accumulate(&TurnUsage {
+            cost_micro_usd: Some(2_500_000),
+            ..Default::default()
+        });
+        assert_eq!(total.cost_usd(), Some(2.5));
+    }
+
+    #[test]
+    fn accumulation_saturates_rather_than_overflowing() {
+        let mut total = ExecutionUsage {
+            input_tokens: Some(u64::MAX),
+            ..Default::default()
+        };
+        total.accumulate(&TurnUsage {
+            input_tokens: Some(10),
+            ..Default::default()
+        });
+        assert_eq!(total.input_tokens, Some(u64::MAX));
+    }
+
+    #[test]
+    fn an_execution_record_round_trips_without_usage() {
+        // Sessions written before this field existed must still load.
+        let json = r#"{"executionId":"e1","sessionId":"s1","parentExecutionId":null,
+            "state":"working","startedAt":"2026-01-01T00:00:00Z","endedAt":null,
+            "lastSequence":0}"#;
+        let record: ExecutionRecord =
+            serde_json::from_str(json).expect("older records must still deserialize");
+        assert_eq!(record.usage, None);
+    }
 
     fn snapshot(title: &str) -> SourceSnapshot {
         SourceSnapshot {

@@ -90,6 +90,89 @@ pub enum StopReason {
     Unknown,
 }
 
+/// What one `session/prompt` turn produced: why it stopped, and what it cost.
+///
+/// Exists because `prompt` used to return only the stop reason and drop the
+/// rest of the response on the floor -- including any usage the agent
+/// reported, which is the only place a token count is ever offered.
+#[derive(Debug, Clone, Default)]
+pub struct TurnOutcome {
+    pub stop_reason: StopReason,
+    /// `None` when the agent reported no usage for this turn. Distinct from
+    /// zero: most ACP agents report nothing at all, and inventing a zero
+    /// would make an unmeasured run look free.
+    pub usage: Option<crate::agentdesk::model::TurnUsage>,
+}
+
+/// Pulls whatever usage an agent chose to report out of a `session/prompt`
+/// response.
+///
+/// ACP does not standardise usage reporting, so this is deliberately
+/// permissive rather than a typed deserialize: it looks in the places agents
+/// actually put it (`usage`, or `_meta.usage`, the protocol's own extension
+/// slot) and accepts any of the field spellings in common use. A response
+/// with none of them yields `None`, which is the honest answer for the
+/// majority of agents.
+///
+/// Unknown shapes are ignored rather than erroring: a usage figure is a
+/// nice-to-have, and failing a turn because an agent added a field would be
+/// a bad trade.
+fn parse_turn_usage(res: &Value) -> Option<crate::agentdesk::model::TurnUsage> {
+    let node = res
+        .get("usage")
+        .or_else(|| res.get("_meta").and_then(|m| m.get("usage")))
+        .or_else(|| res.get("meta").and_then(|m| m.get("usage")))?;
+
+    /// Reads the first present spelling of a count, as a whole number.
+    fn count(node: &Value, names: &[&str]) -> Option<u64> {
+        names.iter().find_map(|n| node.get(*n)?.as_u64())
+    }
+
+    let usage = crate::agentdesk::model::TurnUsage {
+        input_tokens: count(node, &["inputTokens", "input_tokens", "promptTokens", "prompt_tokens"]),
+        output_tokens: count(
+            node,
+            &["outputTokens", "output_tokens", "completionTokens", "completion_tokens"],
+        ),
+        // `cachedReadTokens` is Copilot CLI 1.0.80's own spelling (verified
+        // against its bundled schema); the others are the spellings used by
+        // agents that follow Anthropic's or OpenAI's naming.
+        cached_input_tokens: count(
+            node,
+            &[
+                "cachedReadTokens",
+                "cached_read_tokens",
+                "cachedInputTokens",
+                "cached_input_tokens",
+                "cacheReadInputTokens",
+                "cache_read_input_tokens",
+            ],
+        ),
+        // Converted to micro-USD at the boundary so nothing downstream holds
+        // money in a float. Negative or non-finite figures are dropped rather
+        // than cast (a cast would saturate to 0 and read as "free").
+        cost_micro_usd: ["costUsd", "cost_usd", "totalCostUsd", "total_cost_usd"]
+            .iter()
+            .find_map(|n| node.get(*n)?.as_f64())
+            .filter(|c| c.is_finite() && *c >= 0.0)
+            .map(|c| (c * 1_000_000.0).round() as u64),
+    };
+
+    // An empty object is the same as no object: report nothing rather than a
+    // row of `None`s that reads as a measured result.
+    if usage.is_empty() {
+        None
+    } else {
+        Some(usage)
+    }
+}
+
+impl Default for StopReason {
+    fn default() -> Self {
+        StopReason::Unknown
+    }
+}
+
 impl StopReason {
     /// Whether this is a turn that did its work, as opposed to one cut short.
     pub fn is_success(self) -> bool {
@@ -277,7 +360,7 @@ impl AcpConnection {
     /// Streaming and permission requests arrive on [`Self::incoming`] while this
     /// is outstanding, so the caller must be draining that concurrently -- a
     /// permission request left unanswered blocks the turn from ever returning.
-    pub async fn prompt(&self, text: &str) -> Result<StopReason, AgentError> {
+    pub async fn prompt(&self, text: &str) -> Result<TurnOutcome, AgentError> {
         let session_id = self.session_id.as_ref().ok_or_else(|| AgentError::Failed {
             detail: "no session started".into(),
         })?;
@@ -293,7 +376,11 @@ impl AcpConnection {
             .await?;
 
         let stop = res.get("stopReason").cloned().unwrap_or(Value::Null);
-        Ok(serde_json::from_value(stop).unwrap_or(StopReason::Unknown))
+        let stop_reason = serde_json::from_value(stop).unwrap_or(StopReason::Unknown);
+        Ok(TurnOutcome {
+            stop_reason,
+            usage: parse_turn_usage(&res),
+        })
     }
 
     /// Asks the agent to stop the current turn.
@@ -552,6 +639,85 @@ fn rpc_error(err: &Value) -> AgentError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copilot_cli_usage_shape_is_understood() {
+        // The shape Copilot CLI 1.0.80 puts on its `session/prompt` response,
+        // verified against its own bundled schema.
+        let res = serde_json::json!({
+            "stopReason": "end_turn",
+            "usage": {
+                "inputTokens": 1200,
+                "outputTokens": 340,
+                "totalTokens": 1540,
+                "cachedReadTokens": 900
+            }
+        });
+        let usage = parse_turn_usage(&res).expect("Copilot's usage must be recognised");
+        assert_eq!(usage.input_tokens, Some(1200));
+        assert_eq!(usage.output_tokens, Some(340));
+        assert_eq!(usage.cached_input_tokens, Some(900));
+        assert_eq!(usage.cost_micro_usd, None, "Copilot reports no cost");
+    }
+
+    #[test]
+    fn usage_is_none_when_the_agent_reports_none() {
+        // The common case: ACP does not require usage, and most agents omit
+        // it entirely. That must read as "not reported", not as zero.
+        let res = serde_json::json!({ "stopReason": "end_turn" });
+        assert!(parse_turn_usage(&res).is_none());
+    }
+
+    #[test]
+    fn an_empty_usage_object_reports_nothing() {
+        let res = serde_json::json!({ "stopReason": "end_turn", "usage": {} });
+        assert!(
+            parse_turn_usage(&res).is_none(),
+            "an empty object is not a measurement"
+        );
+    }
+
+    #[test]
+    fn usage_is_read_from_the_meta_extension_slot() {
+        // `_meta` is ACP's sanctioned extension point, so an agent may put
+        // usage there instead of at the top level.
+        let res = serde_json::json!({
+            "stopReason": "end_turn",
+            "_meta": { "usage": { "input_tokens": 7 } }
+        });
+        let usage = parse_turn_usage(&res).expect("_meta.usage must be found");
+        assert_eq!(usage.input_tokens, Some(7));
+    }
+
+    #[test]
+    fn cost_becomes_micro_usd() {
+        let res = serde_json::json!({ "usage": { "costUsd": 0.0125 } });
+        let usage = parse_turn_usage(&res).expect("a cost is a measurement");
+        assert_eq!(usage.cost_micro_usd, Some(12_500));
+    }
+
+    #[test]
+    fn a_nonsense_cost_is_dropped_rather_than_cast() {
+        // A negative or non-finite cost would saturate to 0 on cast and then
+        // read as a measured "free" run, which is worse than reporting
+        // nothing.
+        for bad in [-1.0f64, f64::NAN, f64::INFINITY] {
+            let res = serde_json::json!({ "usage": { "costUsd": bad } });
+            let parsed = parse_turn_usage(&res).and_then(|u| u.cost_micro_usd);
+            assert_eq!(parsed, None, "{bad} must not become a cost");
+        }
+    }
+
+    #[test]
+    fn a_prompt_response_with_no_usage_still_yields_its_stop_reason() {
+        // Guards the ordering assumption in `prompt`: usage is additive, and
+        // its absence must never cost us the stop reason.
+        let res = serde_json::json!({ "stopReason": "refusal" });
+        let stop: StopReason =
+            serde_json::from_value(res.get("stopReason").cloned().unwrap()).unwrap();
+        assert_eq!(stop, StopReason::Refusal);
+        assert!(parse_turn_usage(&res).is_none());
+    }
 
     #[test]
     fn stop_reason_uses_end_turn_not_completed() {

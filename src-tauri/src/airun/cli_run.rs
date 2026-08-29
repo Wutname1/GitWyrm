@@ -214,7 +214,7 @@ pub async fn run_task(
     let mut turns: u32 = 0;
     let run_started = tokio::time::Instant::now();
 
-    let outcome: Result<StopReason, AgentError> = {
+    let outcome: Result<crate::ai::agent::acp::TurnOutcome, AgentError> = {
         let prompt = conn.prompt(task);
         tokio::pin!(prompt);
         // `tokio::time::sleep` needs a fixed deadline to `select!` against
@@ -294,7 +294,22 @@ pub async fn run_task(
         }
     };
 
-    let (state, detail) = match outcome {
+    // Emitted before the run's terminal step so the durable record carries
+    // the cost even for a run that ends as Failed or Stopped -- a cancelled
+    // turn still spent tokens, and dropping its usage would quietly
+    // under-report what the session actually cost.
+    if let Ok(o) = &outcome {
+        if let Some(usage) = &o.usage {
+            sink(
+                RunState::Working,
+                RunStep::Usage {
+                    usage: usage.clone(),
+                },
+            );
+        }
+    }
+
+    let (state, detail) = match outcome.map(|o| o.stop_reason) {
         Ok(stop) => match stop {
             StopReason::EndTurn => (
                 RunState::Finished,

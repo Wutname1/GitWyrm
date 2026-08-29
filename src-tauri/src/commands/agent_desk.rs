@@ -2042,11 +2042,13 @@ pub enum SessionUsageOutcome {
 }
 
 /// Counts what the session's own persisted messages measure directly
-/// (`source: measured`) and reports nothing else. No token/cost accounting
-/// exists yet anywhere in `airun`/`ai::agent` (verified: neither module has a
-/// usage or token-count type), so every provider-reported or estimated field
-/// stays `None` rather than inventing a number -- architecture.md section 12:
-/// "It never turns unknown into zero and never invents a dollar estimate."
+/// (`source: measured`) and sums whatever token/cost figures the provider
+/// reported into `ExecutionRecord::usage` (`source: providerReported`).
+///
+/// A field stays `None` unless something actually reported it -- most ACP
+/// agents report no usage at all, and `plan_limit`/`plan_reset_at` have no
+/// source yet. architecture.md section 12: "It never turns unknown into zero
+/// and never invents a dollar estimate."
 fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOutcome {
     use crate::agentdesk::model::SessionLoadError as E;
     let session = match store::read_session(root, session_id) {
@@ -2098,11 +2100,44 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
         }
     };
 
+    // Summed across every execution on the session -- helpers included, since
+    // a lead that spent its budget on five helpers cost the user all five.
+    // Left `None` unless at least one execution actually reported a figure:
+    // summing a session whose provider reports nothing must stay "not
+    // reported", never a measured zero.
+    let (session_tokens, session_cost_usd) = {
+        let mut tokens: Option<u64> = None;
+        let mut micro_usd: Option<u64> = None;
+        for usage in session.executions.iter().filter_map(|e| e.usage.as_ref()) {
+            for part in [usage.input_tokens, usage.output_tokens] {
+                if let Some(v) = part {
+                    tokens = Some(tokens.unwrap_or(0).saturating_add(v));
+                }
+            }
+            if let Some(c) = usage.cost_micro_usd {
+                micro_usd = Some(micro_usd.unwrap_or(0).saturating_add(c));
+            }
+        }
+        (
+            tokens.map(|t| UsageValue {
+                value: t as f64,
+                // The provider counted these, not us -- `Measured` is
+                // reserved for what GitWyrm can verify itself (message
+                // counts, helper counts).
+                source: UsageSource::ProviderReported,
+            }),
+            micro_usd.map(|m| UsageValue {
+                value: m as f64 / 1_000_000.0,
+                source: UsageSource::ProviderReported,
+            }),
+        )
+    };
+
     SessionUsageOutcome::Available {
         usage: SessionUsage {
-            session_tokens: None,
+            session_tokens,
             session_requests,
-            session_cost_usd: None,
+            session_cost_usd,
             plan_limit: None,
             plan_reset_at: None,
             active_helper_count,

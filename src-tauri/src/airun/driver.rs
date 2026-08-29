@@ -151,6 +151,16 @@ pub enum RunStep {
     Activity { text: String },
     /// It could not do something, and is adapting.
     Adapted { text: String },
+    /// What the turn cost, as the provider reported it.
+    ///
+    /// Not a transcript message: it updates the execution's usage total and
+    /// is never shown as a row in the conversation. Emitted at most once per
+    /// turn, and only when the provider actually reported numbers -- a
+    /// provider that reports nothing produces no `Usage` step at all, which
+    /// is what keeps "not measured" distinguishable from "cost zero".
+    Usage {
+        usage: crate::agentdesk::model::TurnUsage,
+    },
     /// The run ended.
     Ended { state: RunState, detail: String },
 }
@@ -227,6 +237,10 @@ pub fn summarize(step: &RunStep) -> String {
         RunStep::Note { text } => text.clone(),
         RunStep::Activity { text } => text.clone(),
         RunStep::Adapted { text } => text.clone(),
+        // Never rendered as a transcript row (see `RunStep::Usage`), so this
+        // sentence exists only for logs and for the exhaustiveness this match
+        // enforces.
+        RunStep::Usage { .. } => "Recorded what the turn cost".to_string(),
         RunStep::Ended { detail, .. } => detail.clone(),
     }
 }

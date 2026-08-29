@@ -243,6 +243,16 @@ pub fn apply_run_event(
         record.ended_at = Some(occurred_at.to_string());
     }
 
+    // Usage folds into the execution's running total and produces no
+    // transcript row -- see `RunStep::Usage`. Done here, while the record is
+    // still borrowed, so the accumulated figure is written by the same
+    // persist-then-emit path as everything else: a usage number that reached
+    // the UI but not the disk would reappear as a smaller total after a
+    // restart.
+    if let RunStep::Usage { usage } = &event.step {
+        record.usage.get_or_insert_with(Default::default).accumulate(usage);
+    }
+
     let kind = map_run_step(session, execution_id, sequence, occurred_at, event);
 
     match &kind {
@@ -497,6 +507,17 @@ fn map_run_step(
         };
     }
 
+    // Usage is bookkeeping, not conversation: it has already been folded into
+    // the execution record by `apply_run_event`, and appending a transcript
+    // row for it would put "Recorded what the turn cost" in the user's chat.
+    // Reported as a state change so a listener still refreshes the usage
+    // card without a message appearing.
+    if let RunStep::Usage { .. } = &event.step {
+        return AgentSessionEventKind::StateChanged {
+            state: map_run_state(event.state),
+        };
+    }
+
     if let RunStep::Note { text } = &event.step {
         if let Some(previous) = coalescing_note(session, execution_id) {
             let message = update_message_for_coalesced_note(previous, text, sequence, occurred_at);
@@ -640,6 +661,10 @@ fn message_kind_for_step(step: &RunStep) -> MessageKind {
         // stop being exhaustive if `map_run_step`'s early return were ever
         // removed.
         RunStep::Ended { .. } => MessageKind::System,
+        // Also handled before this is reached (see `map_run_step`), for the
+        // same reason `Ended` is: kept here only to keep the match
+        // exhaustive.
+        RunStep::Usage { .. } => MessageKind::System,
     }
 }
 
