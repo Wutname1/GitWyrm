@@ -66,8 +66,17 @@ export function buildUsageRows(usage: SessionUsage): UsageRow[] {
   if (usage.sessionCostUsd) {
     rows.push({
       key: 'cost',
-      label: 'Estimated cost',
-      value: `$${usage.sessionCostUsd.value.toFixed(2)}`,
+      // "Estimated cost" only when it actually is one. A figure the provider
+      // reported is not an estimate, and calling it one would undersell a
+      // real number the same way inventing one would oversell an absent one.
+      label: isEstimate(usage.sessionCostUsd) ? 'Estimated cost' : 'Cost',
+      // Sub-cent runs are the common case for a single turn, so two decimal
+      // places alone would show a real cost as "$0.00". Widen only when the
+      // figure is genuinely small rather than padding every row.
+      value:
+        usage.sessionCostUsd.value > 0 && usage.sessionCostUsd.value < 0.01
+          ? `$${usage.sessionCostUsd.value.toFixed(4)}`
+          : `$${usage.sessionCostUsd.value.toFixed(2)}`,
       isEstimate: isEstimate(usage.sessionCostUsd),
     })
   }

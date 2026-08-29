@@ -69,6 +69,46 @@ describe('buildUsageRows', () => {
     expect(rows[0].isEstimate).toBe(false)
   })
 
+  it('calls a provider-reported cost a cost, not an estimate', () => {
+    const usage: SessionUsage = {
+      ...EMPTY,
+      sessionCostUsd: { value: 0.42, source: 'providerReported' },
+    }
+    const rows = buildUsageRows(usage)
+    expect(rows[0].label).toBe('Cost')
+    expect(rows[0].isEstimate).toBe(false)
+  })
+
+  it('shows a sub-cent cost instead of rounding it away to $0.00', () => {
+    // A single turn routinely costs well under a cent. Two decimal places
+    // would render a real, provider-reported figure as free.
+    const usage: SessionUsage = {
+      ...EMPTY,
+      sessionCostUsd: { value: 0.0034, source: 'providerReported' },
+    }
+    expect(buildUsageRows(usage)[0].value).toBe('$0.0034')
+  })
+
+  it('shows a genuine zero cost as $0.00 rather than padding it', () => {
+    const usage: SessionUsage = {
+      ...EMPTY,
+      sessionCostUsd: { value: 0, source: 'providerReported' },
+    }
+    expect(buildUsageRows(usage)[0].value).toBe('$0.00')
+  })
+
+  it('reports session tokens the provider counted', () => {
+    const usage: SessionUsage = {
+      ...EMPTY,
+      sessionTokens: { value: 31_400, source: 'providerReported' },
+      sessionRequests: { value: 7, source: 'measured' },
+    }
+    const rows = buildUsageRows(usage)
+    expect(rows[0].label).toBe('Current session')
+    expect(rows[0].value).toBe('31k tokens · 7 turns')
+    expect(rows[0].isEstimate).toBe(false)
+  })
+
   it('formats the reset date without inventing a time-of-day claim', () => {
     const usage: SessionUsage = { ...EMPTY, planResetAt: '2026-09-01T00:00:00Z' }
     const rows = buildUsageRows(usage)
