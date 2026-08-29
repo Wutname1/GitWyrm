@@ -26,6 +26,7 @@ describe('isAuthFailure', () => {
       'GitHub refused: the `comcast-mgee` organization has enabled OAuth App access restrictions',
       'gh: Resource protected by organization SAML enforcement. (HTTP 403)',
       "fatal: Authentication failed for 'https://github.com'",
+      'git fetch failed: Could not find https://github.com/org/OldName.git with your sign-in. It may have been moved or renamed, or your account may not have access to it.',
     ]) {
       expect(isAuthFailure(message), message).toBe(true)
     }

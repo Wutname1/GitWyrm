@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
 use crate::git::refs;
+use crate::git::shell::Attended;
 use crate::git::submodule::follow_and_report;
 use crate::git::types::{
     PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo, RemoteTagInfo, UnpushedTag,
@@ -224,8 +225,36 @@ const UNTAGGED_CAUSES: &[&str] = &[
 /// than anything they can fix.
 ///
 /// Both mean one thing: this remote needs a sign-in that did not happen.
-fn humanize_credential_failure(detail: &str) -> Option<String> {
+///
+/// The other shape is `Authentication failed for '<url>'` right after the
+/// server said `remote: Repository not found.` GitHub answers that way for a
+/// repository that was renamed or deleted, and for one the signed-in account
+/// cannot see -- with a sign-in that is perfectly good. Read literally, the
+/// user goes and signs in again, which changes nothing; and since git reacts
+/// to that answer by erasing the stored sign-in, they then have to. Naming the
+/// repository as the likely problem is what lets them fix the right thing.
+fn humanize_credential_failure(detail: &str, stderr_lines: &[String]) -> Option<String> {
     let low = detail.to_lowercase();
+
+    if low.contains("authentication failed") {
+        let not_found = stderr_lines
+            .iter()
+            .any(|l| l.to_lowercase().contains("repository not found"));
+        if !not_found {
+            return None;
+        }
+        let url = detail
+            .split_once(" for '")
+            .and_then(|(_, rest)| rest.split_once('\''))
+            .map(|(u, _)| u.trim_end_matches('/'));
+        return Some(match url {
+            Some(url) => format!(
+                "Could not find {url} with your sign-in. It may have been moved or renamed, or your account may not have access to it."
+            ),
+            None => "Could not find this repository with your sign-in. It may have been moved or renamed, or your account may not have access to it.".to_string(),
+        });
+    }
+
     if !low.contains("could not read username") && !low.contains("could not read password") {
         return None;
     }
@@ -253,44 +282,6 @@ fn run_streaming(
     run_streaming_with(app, repo_id, repo_path, operation, args, Attended::User)
 }
 
-/// Whether a user is watching this operation, which decides if a credential
-/// helper may open a window. Background work must fail silently instead.
-#[derive(Clone, Copy, PartialEq)]
-enum Attended {
-    /// The user pressed something and is waiting; prompting is expected.
-    User,
-    /// A timer started this. Never prompt.
-    Background,
-}
-
-/// The host name a repo authenticates against, for the refusal check.
-///
-/// Reads `origin`'s URL and routes it through the same provider table the rest
-/// of the app uses, then returns the host's *display* name -- "GitHub", not
-/// "github". That spelling is load-bearing: the cooldown map is keyed by
-/// `display_name()`, so the `ProviderId::as_str` form ("github") would look up
-/// nothing and silently disable the whole check.
-///
-/// `origin` specifically, rather than every remote: it is the remote a push
-/// goes to unless the user says otherwise, and a repo whose origin is fine
-/// should not be silenced because some other remote refused.
-///
-/// None whenever anything is unknown -- no repo path, no origin, an unroutable
-/// URL. The caller treats that as "do not suppress", which keeps the failure
-/// mode on the side of still letting the user sign in.
-fn refusing_host(repo_path: &str) -> Option<String> {
-    let out = crate::git::shell::run_git(
-        Some(repo_path),
-        &["config", "--get", "remote.origin.url"],
-    )
-    .ok()?;
-    let url = out.stdout.trim();
-    if url.is_empty() {
-        return None;
-    }
-    crate::hosting::registry::provider_for(url).map(|p| p.display_name().to_string())
-}
-
 fn run_streaming_with(
     app: &AppHandle,
     repo_id: &str,
@@ -299,7 +290,7 @@ fn run_streaming_with(
     args: &[&str],
     attended: Attended,
 ) -> Result<String, AppError> {
-    let cred_args = crate::git::shell::credential_args();
+    let cred_args = crate::git::shell::credential_args(attended);
     // Honor the user's configured git.exe, same as git::shell::run_git. Without
     // this, network operations ignore the Settings override that local ops respect.
     let mut cmd = Command::new(crate::git::shell::git_program_name());
@@ -316,29 +307,9 @@ fn run_streaming_with(
     crate::process_env::scrub_bundled_env(&mut cmd);
     crate::git::shell::prepare_git_env(&mut cmd);
 
-    // Suppress the credential window when a prompt cannot possibly succeed.
-    //
-    // Background work never prompts, which is the original rule. The second case
-    // is the one users reported as "random Git Credential Manager spam": the host
-    // has already refused this account on permissions -- an org with OAuth app
-    // restrictions on, a token missing a scope -- and that refusal is not
-    // something signing in again can change. Git does not know that. It hands
-    // authentication to Credential Manager, which opens a window, takes a
-    // successful sign-in, and hands back a credential the host still rejects. The
-    // user signs in, the push fails, they push again, and it asks again forever.
-    // One report showed a single push sitting for 90 seconds on that dialog.
-    //
-    // Letting it fail immediately is the kinder outcome: the error already says
-    // what is wrong and who can fix it, whereas the prompt implies the user's
-    // password is the problem when it never was. Reconnecting an account clears
-    // the cooldown, so the next push after the user actually acts is free to
-    // prompt again.
-    let blocked_by_refusal = attended == Attended::User
-        && repo_path
-            .and_then(refusing_host)
-            .is_some_and(|host| crate::hosting::http::refused_recently(&host));
-
-    if attended == Attended::Background || blocked_by_refusal {
+    // Background work never opens a login window: the user is typing somewhere
+    // else with no idea what asked. It fails at once and is logged instead.
+    if attended == Attended::Background {
         crate::git::shell::apply_background_env(&mut cmd);
     }
 
@@ -366,10 +337,6 @@ fn run_streaming_with(
         crate::git::shell::git_source(),
         if attended == Attended::Background {
             "background"
-        } else if blocked_by_refusal {
-            // Distinct from "background": the user did ask, and we still refused
-            // to prompt. Without its own word this looks like a lost click.
-            "user (prompt suppressed: host already refused)"
         } else {
             "user"
         },
@@ -415,7 +382,7 @@ fn run_streaming_with(
 
     if !output.status.success() {
         let detail = failure_detail(&stderr_lines, &stdout);
-        let detail = humanize_credential_failure(&detail).unwrap_or(detail);
+        let detail = humanize_credential_failure(&detail, &stderr_lines).unwrap_or(detail);
         return Err(AppError::Other(format!("git {operation} failed: {detail}")));
     }
     Ok(stdout)
@@ -495,7 +462,9 @@ fn run_with_stale_ref_retry(
             let Some(stale) = stale_remote_ref(&e.to_string()) else {
                 return Err(e);
             };
-            log::warn!("{operation} blocked by stale tracking ref {stale}; clearing it and retrying");
+            log::warn!(
+                "{operation} blocked by stale tracking ref {stale}; clearing it and retrying"
+            );
             crate::git::shell::run_git(Some(repo_path), &["update-ref", "-d", &stale])?;
             run_streaming_with(app, repo_id, Some(repo_path), operation, args, attended)
         }
@@ -1634,7 +1603,10 @@ mod tests {
             None
         );
         // A malformed message must not yield a half-parsed ref name.
-        assert_eq!(stale_remote_ref("cannot lock ref 'refs/remotes/origin/main"), None);
+        assert_eq!(
+            stale_remote_ref("cannot lock ref 'refs/remotes/origin/main"),
+            None
+        );
     }
 
     /// Git's real stderr for a push refused because the remote moved on. The
@@ -1966,7 +1938,10 @@ mod advisory_detail_tests {
         .collect();
 
         let got = failure_detail(&lines, "");
-        assert_eq!(got, "There is no tracking information for the current branch.");
+        assert_eq!(
+            got,
+            "There is no tracking information for the current branch."
+        );
         assert!(crate::error::is_expected_for_tests(&got));
     }
 
@@ -1997,6 +1972,7 @@ mod credential_message_tests {
     fn the_reported_errno_message_is_rewritten() {
         let got = humanize_credential_failure(
             "fatal: could not read Username for 'https://github.com': No such file or directory",
+            &[],
         )
         .expect("should be recognised");
         assert!(got.contains("Sign-in needed"), "{got}");
@@ -2010,6 +1986,7 @@ mod credential_message_tests {
     fn the_prompts_disabled_wording_is_also_rewritten() {
         let got = humanize_credential_failure(
             "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+            &[],
         )
         .expect("should be recognised");
         assert!(got.contains("Sign-in needed"), "{got}");
@@ -2019,7 +1996,8 @@ mod credential_message_tests {
     #[test]
     fn a_password_prompt_counts_too() {
         assert!(humanize_credential_failure(
-            "fatal: could not read Password for 'https://git.example.com': terminal prompts disabled"
+            "fatal: could not read Password for 'https://git.example.com': terminal prompts disabled",
+            &[],
         )
         .is_some());
     }
@@ -2027,7 +2005,7 @@ mod credential_message_tests {
     /// Without a host the message still has to make sense.
     #[test]
     fn a_missing_host_still_produces_advice() {
-        let got = humanize_credential_failure("fatal: could not read Username")
+        let got = humanize_credential_failure("fatal: could not read Username", &[])
             .expect("should be recognised");
         assert!(got.contains("Sign-in needed"), "{got}");
     }
@@ -2039,9 +2017,34 @@ mod credential_message_tests {
         for other in [
             "fatal: repository 'https://github.com/x/y.git' not found",
             "error: failed to push some refs",
+            // A bare authentication failure with no "not found" from the server
+            // really is a bad credential, and must say so.
             "fatal: Authentication failed for 'https://github.com'",
         ] {
-            assert!(humanize_credential_failure(other).is_none(), "{other}");
+            assert!(humanize_credential_failure(other, &[]).is_none(), "{other}");
         }
+    }
+
+    /// The exact pair of lines GitHub sends for a renamed repository (traced on
+    /// a live machine, where it was fetched by the background sweep for days).
+    /// The sign-in was fine; the repository name was not. Saying "authentication
+    /// failed" sent the user to sign in again, which fixed nothing.
+    #[test]
+    fn a_missing_repository_is_named_instead_of_blamed_on_the_sign_in() {
+        let stderr = vec![
+            "remote: Repository not found.".to_string(),
+            "fatal: Authentication failed for 'https://github.com/org/OldName.git/'".to_string(),
+        ];
+        let got = humanize_credential_failure(
+            "fatal: Authentication failed for 'https://github.com/org/OldName.git/'",
+            &stderr,
+        )
+        .expect("should be recognised");
+        assert!(got.contains("https://github.com/org/OldName.git"), "{got}");
+        assert!(got.contains("moved or renamed"), "{got}");
+        assert!(
+            !got.to_lowercase().contains("authentication failed"),
+            "{got}"
+        );
     }
 }

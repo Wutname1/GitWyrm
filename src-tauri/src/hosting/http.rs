@@ -49,38 +49,6 @@ pub fn credential(
     Ok(Some(parse_credential(&raw)))
 }
 
-/// Reads a credential straight from an app data directory, with no `AppHandle`.
-///
-/// For the credential-helper process, which git spawns outside Tauri entirely:
-/// there is no app, no plugins, and no window, so [`credential`] cannot be
-/// used. The store is a plain JSON file, so reading it needs only its path.
-///
-/// Kept beside [`credential`] rather than in the helper module so both routes
-/// share one parser -- a second implementation of the stored-credential format
-/// would be free to drift, and the drift would look like a token that suddenly
-/// stopped working.
-pub fn credential_from_dir(
-    dir: &std::path::Path,
-    provider: ProviderId,
-) -> Result<Option<StoredCredential>, AppError> {
-    let raw = match std::fs::read_to_string(dir.join("auth.json")) {
-        Ok(raw) => raw,
-        // No store yet is not an error: it means no account is connected, and
-        // the helper answers that with silence.
-        Err(_) => return Ok(None),
-    };
-    let all: std::collections::BTreeMap<String, crate::ai::auth::AuthInfo> =
-        serde_json::from_str(&raw).unwrap_or_default();
-    let Some(info) = all.get(provider.as_str()) else {
-        return Ok(None);
-    };
-    let stored = match info {
-        crate::ai::auth::AuthInfo::Api { key } => key.clone(),
-        crate::ai::auth::AuthInfo::Oauth { access, .. } => access.clone(),
-    };
-    Ok(Some(parse_credential(&stored)))
-}
-
 /// Packs the parts into the single string `auth.json` stores.
 pub fn pack_credential(token: &str, email: Option<&str>, base_url: Option<&str>) -> String {
     if email.is_none() && base_url.is_none() {
@@ -271,36 +239,6 @@ fn is_permission_refusal(message: &str) -> bool {
         || low.contains("refused:")
 }
 
-/// Whether a refusal is one that a *credential prompt* could never fix.
-///
-/// Narrower than [`is_permission_refusal`] on purpose, and the difference
-/// matters. That predicate governs two forgiving actions -- caching an API
-/// error for an hour, and retrying through `gh` -- where casting wide costs a
-/// stale message or one extra process. This one governs [`refused_recently`],
-/// which suppresses the Git Credential Manager window entirely, and a false
-/// positive there is the worst outcome the auth path has: the user is told to
-/// connect an account and then given no way to do it.
-///
-/// The generic `refused:` marker cannot be used here. Every 403 is formatted as
-/// `"{host} refused: {message}"` by [`check`], so a private repo, an unrelated
-/// call missing a scope, or a host returning 403 where it means 404 would all
-/// bench the sign-in window for an hour on a push that had nothing to do with
-/// them. Reported as "why am i not getting prompted?" by a user whose `gh`
-/// token was valid the whole time.
-///
-/// So this matches only the two conditions that are genuinely about *this
-/// account's standing with the host*, where signing in again provably cannot
-/// change the answer:
-///   - an org with OAuth app restrictions that has not approved us
-///   - a token the host has declared no longer valid
-fn blocks_credential_prompt(message: &str) -> bool {
-    let low = message.to_lowercase();
-    if low.contains("rate limit") {
-        return false;
-    }
-    low.contains("oauth app access restrictions") || low.contains("sign-in is no longer valid")
-}
-
 /// The remembered refusal for `key`, if one is still within its cooldown.
 ///
 /// `key` comes from [`cooldown_key`], so it names a repository's resource kind
@@ -322,100 +260,6 @@ fn remember_refusal(host: &str, key: &str, message: &str) {
         .unwrap_or_else(|e| e.into_inner())
         .get_or_insert_with(HashMap::new)
         .insert(key.to_string(), (Instant::now(), message.to_string()));
-
-    // The git credential-helper subprocess cannot see the map above: git
-    // spawns it fresh for every fetch, pull, and push, so nothing survives
-    // between one invocation and the next. When the refusal is one a
-    // credential prompt could never fix, persist it where that subprocess
-    // will look, so it stops re-offering the same doomed token and lets
-    // Credential Manager try whatever it has instead. Without this, the
-    // helper's own token pre-empts Git Credential Manager on every call (git
-    // stops asking helpers once one supplies a full credential), so an
-    // account with an org-restricted token turns pushes that used to work
-    // through Credential Manager alone into hard failures.
-    if blocks_credential_prompt(message) {
-        if let Some(provider) = provider_for_display_name(host) {
-            persist_credential_refusal(&crate::helper_data_dir(), provider);
-        }
-    }
-}
-
-/// Reverse of [`HostProvider::display_name`]: which provider `send` and
-/// `check` meant by the plain string they format into every message.
-///
-/// `PERMISSION_COOLDOWNS` and the messages built by [`check`] key on that
-/// display string ("GitHub"), not [`ProviderId::as_str`] ("github"), so
-/// anything that needs to go from one to the other -- like writing the
-/// on-disk marker below -- has to look it up.
-fn provider_for_display_name(host: &str) -> Option<ProviderId> {
-    crate::hosting::registry::ALL_PROVIDERS
-        .iter()
-        .find(|p| p.display_name() == host)
-        .map(|p| p.id())
-}
-
-/// The on-disk marker recording that `provider`'s credential was refused for
-/// a reason a fresh prompt can never fix.
-///
-/// Named for the provider rather than the host string `remember_refusal`
-/// receives, so the credential-helper subprocess -- which only ever knows a
-/// [`ProviderId`], resolved from the git host it was asked about -- can find
-/// it without needing the display-name mapping this process uses.
-fn credential_refusal_marker(data_dir: &std::path::Path, provider: ProviderId) -> std::path::PathBuf {
-    data_dir.join(format!("credential-refused-{}", provider.as_str()))
-}
-
-pub(crate) fn persist_credential_refusal(data_dir: &std::path::Path, provider: ProviderId) {
-    let path = credential_refusal_marker(data_dir, provider);
-    let until = std::time::SystemTime::now() + PERMISSION_COOLDOWN;
-    let epoch = until
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // Best-effort: a write failure here just means the helper keeps offering
-    // the token it would have offered anyway, which is the behaviour before
-    // this existed.
-    let _ = std::fs::write(path, epoch.to_string());
-}
-
-/// Whether the on-disk marker for `provider` is still within its cooldown.
-///
-/// Used by [`crate::git::credential_helper`], which runs as a separate
-/// process with no access to [`PERMISSION_COOLDOWNS`]. Any error reading the
-/// marker (missing, unreadable, corrupt) is treated as "no refusal on
-/// record" -- staying silent is this module's job only when it is sure, and
-/// the credential helper already answers nothing on any other kind of doubt.
-pub fn credential_recently_refused(data_dir: &std::path::Path, provider: ProviderId) -> bool {
-    let Ok(raw) = std::fs::read_to_string(credential_refusal_marker(data_dir, provider)) else {
-        return false;
-    };
-    let Ok(until_epoch) = raw.trim().parse::<u64>() else {
-        return false;
-    };
-    let now_epoch = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    now_epoch < until_epoch
-}
-
-/// Whether `host` refused us on permissions recently enough to still matter.
-///
-/// The credential-window equivalent of [`cooled_down`], for callers outside the
-/// HTTP client. A push is run by shelling out to git, which hands authentication
-/// to Git Credential Manager -- a separate process this code cannot inspect. So
-/// the git path has no way of its own to know the sign-in it is about to demand
-/// is one the host has already rejected, and it asks again on every push.
-///
-/// Exposed as a bare bool rather than the message because the caller only needs
-/// the decision; the message has already been shown by whatever API call earned
-/// the cooldown.
-///
-/// Gated on [`blocks_credential_prompt`], not on the mere existence of a
-/// cooldown: an entry is stored for any refusal worth caching, but only a
-/// standing-with-the-host refusal justifies taking the sign-in window away.
-pub fn refused_recently(host: &str) -> bool {
-    cooled_down(host).is_some_and(|m| blocks_credential_prompt(&m))
 }
 
 /// Drops a host's cooldown so the next call goes out for real.
@@ -434,9 +278,6 @@ pub fn clear_cooldown(host: &str) {
         .as_mut()
     {
         map.remove(host);
-    }
-    if let Some(provider) = provider_for_display_name(host) {
-        let _ = std::fs::remove_file(credential_refusal_marker(&crate::helper_data_dir(), provider));
     }
 }
 
@@ -762,67 +603,6 @@ mod tests {
         ));
     }
 
-    /// The credential window may only be taken away for a refusal about this
-    /// account's standing with the host, where signing in again cannot help.
-    #[test]
-    fn only_standing_refusals_block_the_sign_in_window() {
-        assert!(blocks_credential_prompt(
-      "GitHub refused: Although you appear to have the correct authorization credentials, the `some-org` organization has enabled OAuth App access restrictions."
-    ));
-        assert!(blocks_credential_prompt(
-            "GitHub sign-in is no longer valid; connect GitHub again"
-        ));
-    }
-
-    /// The regression this split exists for. `check` formats every 403 as
-    /// "{host} refused: ...", so the generic marker matched failures that have
-    /// nothing to do with the account's standing -- and suppressed the sign-in
-    /// window on the next push for an hour. These must still be cached and may
-    /// still reroute to `gh`, but must never cost the user their prompt.
-    #[test]
-    fn an_ordinary_403_still_allows_the_sign_in_window() {
-        let private_repo =
-            "GitHub refused: Must have admin rights to Repository. Check the token has the permissions GitHub needs.";
-        assert!(
-            is_permission_refusal(private_repo),
-            "still worth caching and rerouting"
-        );
-        assert!(
-            !blocks_credential_prompt(private_repo),
-            "but must not take the credential window away"
-        );
-
-        assert!(!blocks_credential_prompt(
-            "GitHub rate limit reached; try again in a few minutes"
-        ));
-        assert!(!blocks_credential_prompt("could not reach GitHub: timed out"));
-        assert!(!blocks_credential_prompt(
-      "GitHub could not find that. It may be private, renamed, or your token may not cover it."
-    ));
-    }
-
-    /// `refused_recently` reads the stored message, so a cached ordinary 403
-    /// must not read back as a reason to skip the prompt.
-    #[test]
-    fn a_cached_ordinary_refusal_does_not_suppress_the_prompt() {
-        let host = "PromptGateTestHost";
-        remember_refusal(
-            host,
-            host,
-            "PromptGateTestHost refused: Must have admin rights to Repository.",
-        );
-        assert!(cooled_down(host).is_some(), "cached for the API path");
-        assert!(
-            !refused_recently(host),
-            "an ordinary 403 must leave the sign-in window available"
-        );
-
-        let blocked = "PromptGateTestHost sign-in is no longer valid; connect PromptGateTestHost again";
-        remember_refusal(host, host, blocked);
-        assert!(refused_recently(host), "a standing refusal still suppresses");
-        clear_cooldown(host);
-    }
-
     /// The bug this scoping fixes: a work org blocks issues and pull requests
     /// on its repos while every other call on the very same repo keeps working.
     /// Keyed by host alone, one refused PR list sent the entire workspace --
@@ -838,8 +618,15 @@ mod tests {
         // Pull requests and issues share a bucket: a PR *is* an issue here.
         assert_eq!(prs, issues, "issues and pulls must share one bucket");
 
-        remember_refusal(host, &prs, "ScopeTestHost refused: OAuth App access restrictions");
-        assert!(cooled_down(&prs).is_some(), "the refused resource is benched");
+        remember_refusal(
+            host,
+            &prs,
+            "ScopeTestHost refused: OAuth App access restrictions",
+        );
+        assert!(
+            cooled_down(&prs).is_some(),
+            "the refused resource is benched"
+        );
         assert!(
             cooled_down(&commits).is_none(),
             "contents on the same repo must keep using the working HTTP path"
@@ -893,71 +680,6 @@ mod tests {
             cooled_down(host).is_none(),
             "reconnecting must lift the bench immediately"
         );
-    }
-
-    /// The credential-helper subprocess reads this marker with no access to
-    /// `PERMISSION_COOLDOWNS`, so its round trip is tested directly against a
-    /// throwaway directory rather than the real app data dir `remember_refusal`
-    /// writes to -- sharing that path with whatever this machine's actual
-    /// GitWyrm instance has cached would make the test flaky.
-    #[test]
-    fn a_persisted_refusal_round_trips_and_expires() {
-        let dir = std::env::temp_dir().join("gitwyrm-http-refusal-marker");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-
-        assert!(
-            !credential_recently_refused(&dir, ProviderId::Github),
-            "nothing persisted yet"
-        );
-
-        persist_credential_refusal(&dir, ProviderId::Github);
-        assert!(credential_recently_refused(&dir, ProviderId::Github));
-        assert!(
-            !credential_recently_refused(&dir, ProviderId::Gitlab),
-            "a marker must not leak to a different provider"
-        );
-
-        // An expired marker (written directly, bypassing the real TTL) must
-        // read back as no refusal on record.
-        let expired = std::time::SystemTime::now() - std::time::Duration::from_secs(1);
-        let epoch = expired
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        std::fs::write(
-            credential_refusal_marker(&dir, ProviderId::Github),
-            epoch.to_string(),
-        )
-        .unwrap();
-        assert!(!credential_recently_refused(&dir, ProviderId::Github));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// `remember_refusal` and `clear_cooldown` key their in-memory cooldown on
-    /// the display string ("GitHub"); the on-disk marker has to resolve that
-    /// same string back to a `ProviderId` correctly, or it silently writes
-    /// nothing and the credential-helper regression this exists for comes back.
-    #[test]
-    fn display_names_resolve_to_the_provider_that_uses_them() {
-        assert_eq!(
-            provider_for_display_name("GitHub"),
-            Some(ProviderId::Github)
-        );
-        assert_eq!(
-            provider_for_display_name("GitLab"),
-            Some(ProviderId::Gitlab)
-        );
-        assert_eq!(
-            provider_for_display_name("Bitbucket"),
-            Some(ProviderId::Bitbucket)
-        );
-        assert_eq!(
-            provider_for_display_name("Azure DevOps"),
-            Some(ProviderId::AzureDevops)
-        );
-        assert_eq!(provider_for_display_name("Some Enterprise Host"), None);
     }
 
     /// The exact set of failures that reroute to `gh`.

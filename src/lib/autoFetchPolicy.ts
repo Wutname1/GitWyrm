@@ -76,6 +76,11 @@ export function isAuthFailure(message: string): boolean {
     m.includes('could not read username') ||
     m.includes('could not read password') ||
     m.includes('authentication failed') ||
+    // The app's own wording for GitHub's 401 on a renamed or deleted repository
+    // (see humanize_credential_failure in commands/remote.rs). Retrying it is
+    // pointless for the same reason: nothing changes until the user fixes the
+    // remote's address.
+    m.includes('moved or renamed') ||
     m.includes('oauth app access restrictions') ||
     m.includes('saml enforcement') ||
     // Only the parenthesised form git and gh actually print. A bare "403" would

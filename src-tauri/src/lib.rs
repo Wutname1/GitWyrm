@@ -464,45 +464,6 @@ pub fn is_credential_helper(args: &[String]) -> bool {
     git::credential_helper::requested(args)
 }
 
-/// The app data directory, resolved without a Tauri `AppHandle`.
-///
-/// The helper runs before (and instead of) any Tauri app, so `app.path()` is
-/// unavailable. Tauri derives this path from the bundle identifier, and this
-/// mirrors that derivation for the platforms we ship. Kept next to the helper
-/// entry point so the two can only ever disagree in one place.
-fn helper_data_dir() -> std::path::PathBuf {
-    const IDENTIFIER: &str = "dev.gitwyrm.app";
-
-    #[cfg(target_os = "windows")]
-    {
-        // %APPDATA%\dev.gitwyrm.app
-        let base = std::env::var_os("APPDATA")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default();
-        base.join(IDENTIFIER)
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let home = std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default();
-        home.join("Library/Application Support").join(IDENTIFIER)
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        // $XDG_CONFIG_HOME, else ~/.config -- matching Tauri's Linux resolution.
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME")
-                    .map(std::path::PathBuf::from)
-                    .map(|h| h.join(".config"))
-            })
-            .unwrap_or_default();
-        base.join(IDENTIFIER)
-    }
-}
-
 /// Answer one git credential request and return the process exit code.
 ///
 /// On Windows the GUI binary is built with `windows_subsystem = "windows"`, so
@@ -512,7 +473,7 @@ fn helper_data_dir() -> std::path::PathBuf {
 /// same binary is launched from Explorer. Nothing extra is needed for it to
 /// work, but the reason is worth stating: it looks like it should not.
 pub fn run_credential_helper(args: &[String]) -> i32 {
-    git::credential_helper::run(args, helper_data_dir())
+    git::credential_helper::run(args)
 }
 
 pub fn run() {
