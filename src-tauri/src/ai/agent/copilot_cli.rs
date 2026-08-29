@@ -1,21 +1,32 @@
-//! Finding the Copilot CLI, and deciding whether it can be driven.
+//! Finding an agent's command-line tool, and deciding whether it can be
+//! driven.
 //!
 //! Discovery only. Running a task through it is the ACP transport's job; this
-//! module answers "is there a usable `copilot` on this machine", which is what
-//! the settings surface and the pre-run check need.
+//! module answers "is there a usable tool on this machine", which is what the
+//! settings surface and the pre-run check need.
+//!
+//! Nothing here names a tool any more. Which binaries to look for, what to ask
+//! for a version, and how a tool can be told to refuse something all live in
+//! [`super::registry`]; this module walks PATH and the known install locations
+//! with whatever names that table hands it. The module keeps its old name and
+//! its `detect()` entry point because Copilot is still the default and both
+//! the settings command and the end-to-end test call them.
 //!
 //! Verified against GitHub's own CLI command reference (2026-07-30): `copilot
 //! version` reports the installed version, `copilot login` uses the OAuth
 //! device flow and stores its token in the system credential store, and
 //! `copilot --acp --stdio` starts the Agent Client Protocol server we drive.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
+
+use super::registry::{self, AgentSpec};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -33,6 +44,10 @@ use crate::git::shell::CREATE_NO_WINDOW;
 /// first real install available), and nothing older has been tested. Set no
 /// higher than the version actually confirmed: a floor above what we know
 /// would refuse installs that may well work.
+///
+/// Applied to Copilot only. The other tools in the registry have no measured
+/// floor, so refusing a version of one of them would be refusing on a guess --
+/// see [`floor_for`].
 pub const MIN_VERSION: (u32, u32, u32) = (1, 0, 0);
 
 /// What discovery found.
@@ -48,37 +63,103 @@ pub enum CliState {
     NotFound,
 }
 
-/// Result of probing the CLI once.
+impl CliState {
+    /// Whether this tool can actually be used right now.
+    fn is_usable(&self) -> bool {
+        matches!(self, CliState::Ready { .. })
+    }
+}
+
+/// Result of probing one tool.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct CopilotCli {
     pub state: CliState,
 }
 
-/// Probing spawns a process, so the answer is cached for the process lifetime.
+/// Probing spawns a process, so a FOUND tool is remembered for the rest of the
+/// run. A "not found" answer is never remembered.
 ///
-/// Learned the hard way on the OpenSpec CLI: probing per call fired `npx`
-/// repeatedly and froze both windows. A user who installs the CLI mid-session
-/// restarts, which is a far better trade than a probe on every status read.
-static CACHE: OnceLock<CopilotCli> = OnceLock::new();
+/// The asymmetry is the whole point, and it is a fix rather than a style
+/// choice. The cache used to be a bare `OnceLock` holding whatever the first
+/// probe said, including "not installed" -- so a user who read "GitHub Copilot
+/// is not installed", installed it, and came back was still told it was
+/// missing until they restarted the app. With one tool that was merely
+/// annoying. With four it is much worse: the natural thing to do after seeing
+/// "Gemini is not installed" is to install Gemini, and being told the same
+/// thing afterwards reads as the install having failed.
+///
+/// Re-probing a negative costs one process spawn that immediately fails to
+/// find a file, which is cheap. Re-probing a positive would cost a real
+/// subprocess launch on every status read -- the mistake made once on the
+/// OpenSpec CLI, where probing per call fired `npx` repeatedly and froze both
+/// windows. So: remember success, always re-check failure.
+static CACHE: OnceLock<Mutex<HashMap<&'static str, CopilotCli>>> = OnceLock::new();
+
+fn cache() -> &'static Mutex<HashMap<&'static str, CopilotCli>> {
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// Guards against a hung or non-responding binary blocking the caller.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub fn detect() -> &'static CopilotCli {
-    CACHE.get_or_init(probe)
+/// Finds the default agent's tool. Kept as-is so existing callers and the
+/// end-to-end test read the same as before.
+pub fn detect() -> CopilotCli {
+    detect_agent(registry::default_agent())
 }
 
-fn probe() -> CopilotCli {
-    let Some(path) = find_executable() else {
-        log::info!("Copilot CLI: not found on PATH or in known locations");
+/// Finds one specific agent's tool.
+///
+/// Returns an owned value rather than a `&'static` reference: a negative
+/// result is deliberately not stored (see [`CACHE`]), so there is nothing
+/// static to borrow from.
+pub fn detect_agent(spec: &'static AgentSpec) -> CopilotCli {
+    if let Ok(found) = cache().lock() {
+        if let Some(hit) = found.get(spec.id) {
+            return hit.clone();
+        }
+    }
+
+    let result = probe(spec);
+
+    // Only a usable answer is worth keeping. A miss is re-checked next time,
+    // so installing the tool mid-session works without a restart.
+    if result.state.is_usable() {
+        if let Ok(mut found) = cache().lock() {
+            found.insert(spec.id, result.clone());
+        }
+    }
+
+    result
+}
+
+/// The version floor for one agent, if there is a measured one.
+///
+/// Only Copilot has been tested against a known-good version, so it is the
+/// only row with a floor. Applying its number to the others would be refusing
+/// an install on a guess, which is worse than accepting one that turns out to
+/// be too old -- a too-old tool fails at the handshake with the tool's own
+/// message, while a wrong floor refuses a working install with ours.
+fn floor_for(spec: &AgentSpec) -> Option<(u32, u32, u32)> {
+    if spec.id == "copilot" {
+        Some(MIN_VERSION)
+    } else {
+        None
+    }
+}
+
+fn probe(spec: &AgentSpec) -> CopilotCli {
+    let Some(path) = find_executable(spec) else {
+        log::info!("{}: not found on PATH or in known locations", spec.display_name);
         return CopilotCli {
             state: CliState::NotFound,
         };
     };
 
-    let Some(raw) = run_version(&path) else {
+    let Some(raw) = run_version(spec, &path) else {
         log::info!(
-            "Copilot CLI: found at {} but `version` did not answer",
+            "{}: found at {} but the version probe did not answer",
+            spec.display_name,
             path.display()
         );
         return CopilotCli {
@@ -86,31 +167,29 @@ fn probe() -> CopilotCli {
         };
     };
 
-    let state = match parse_version(&raw) {
-        Some(v) if v >= MIN_VERSION => {
-            log::info!("Copilot CLI: {} at {}", raw.trim(), path.display());
+    let floor = floor_for(spec);
+    let state = match (parse_version(&raw), floor) {
+        (Some(v), Some(min)) if v < min => {
+            log::info!("{}: {} is below the {:?} floor", spec.display_name, raw.trim(), min);
+            CliState::TooOld {
+                version: raw.trim().to_string(),
+                minimum: format!("{}.{}.{}", min.0, min.1, min.2),
+            }
+        }
+        (Some(_), _) => {
+            log::info!("{}: {} at {}", spec.display_name, raw.trim(), path.display());
             CliState::Ready {
                 version: raw.trim().to_string(),
                 path: path.display().to_string(),
             }
         }
-        Some(_) => {
-            log::info!(
-                "Copilot CLI: {} is below the {:?} floor",
-                raw.trim(),
-                MIN_VERSION
-            );
-            CliState::TooOld {
-                version: raw.trim().to_string(),
-                minimum: format!("{}.{}.{}", MIN_VERSION.0, MIN_VERSION.1, MIN_VERSION.2),
-            }
-        }
         // An unreadable version string is treated as present-and-usable rather
-        // than refused: the format is the CLI's to change, and refusing on a
+        // than refused: the format is the tool's to change, and refusing on a
         // parse failure would break users whose install is actually fine.
-        None => {
+        (None, _) => {
             log::info!(
-                "Copilot CLI: version string {:?} not understood, treating as usable",
+                "{}: version string {:?} not understood, treating as usable",
+                spec.display_name,
                 raw.trim()
             );
             CliState::Ready {
@@ -123,29 +202,11 @@ fn probe() -> CopilotCli {
     CopilotCli { state }
 }
 
-/// Names the CLI can have, in the order worth trying.
-///
-/// `npm install -g @github/copilot` -- the install method GitHub documents
-/// first -- writes `copilot.cmd` and `copilot.ps1` on Windows and no `.exe` at
-/// all. Looking only for `copilot.exe` reported "not installed" on a machine
-/// where the CLI was on PATH and working, which would have been every Windows
-/// user who followed the npm instructions.
-///
-/// `.cmd` before the bare name because a bare `copilot` on Windows is the
-/// shell script for Git Bash, which `Command::new` cannot execute directly.
-fn candidate_names() -> &'static [&'static str] {
-    if cfg!(windows) {
-        &["copilot.exe", "copilot.cmd", "copilot.bat", "copilot"]
-    } else {
-        &["copilot"]
-    }
-}
-
 /// PATH first, then the places the installers put it.
-fn find_executable() -> Option<PathBuf> {
+fn find_executable(spec: &AgentSpec) -> Option<PathBuf> {
     if let Some(paths) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&paths) {
-            for name in candidate_names() {
+            for name in spec.candidate_names() {
                 let candidate = dir.join(name);
                 if candidate.is_file() {
                     return Some(candidate);
@@ -154,8 +215,8 @@ fn find_executable() -> Option<PathBuf> {
         }
     }
 
-    for dir in known_locations() {
-        for name in candidate_names() {
+    for dir in registry::known_locations() {
+        for name in spec.candidate_names() {
             let candidate = dir.join(name);
             if candidate.is_file() {
                 return Some(candidate);
@@ -166,41 +227,9 @@ fn find_executable() -> Option<PathBuf> {
     None
 }
 
-/// `USERPROFILE` then `HOME`, matching how the rest of the codebase resolves it
-/// (see `git::ssh` and `git::identity`).
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-}
-
-/// Where the npm and native installers place it when PATH has not been
-/// refreshed -- common right after an install, before a new shell.
-fn known_locations() -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    if let Some(home) = home_dir() {
-        out.push(home.join(".copilot").join("bin"));
-        out.push(home.join(".local").join("bin"));
-        if cfg!(windows) {
-            out.push(
-                home.join("AppData")
-                    .join("Local")
-                    .join("Programs")
-                    .join("copilot"),
-            );
-            out.push(home.join("AppData").join("Roaming").join("npm"));
-        }
-    }
-    if !cfg!(windows) {
-        out.push(PathBuf::from("/usr/local/bin"));
-        out.push(PathBuf::from("/opt/homebrew/bin"));
-    }
-    out
-}
-
-fn run_version(path: &PathBuf) -> Option<String> {
+fn run_version(spec: &AgentSpec, path: &PathBuf) -> Option<String> {
     let mut cmd = Command::new(path);
-    cmd.arg("version");
+    cmd.args(spec.version_args);
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
 
@@ -211,26 +240,27 @@ fn run_version(path: &PathBuf) -> Option<String> {
         let _ = tx.send(cmd.output());
     });
 
+    let name = spec.display_name;
     match rx.recv_timeout(PROBE_TIMEOUT) {
-        Ok(Ok(out)) if out.status.success() => {
-            Some(String::from_utf8_lossy(&out.stdout).into_owned())
-        }
+        Ok(Ok(out)) if out.status.success() => Some(String::from_utf8_lossy(&out.stdout).into_owned()),
         Ok(Ok(_)) => None,
         Ok(Err(e)) => {
-            log::info!("Copilot CLI: version probe failed: {e}");
+            log::info!("{name}: version probe failed: {e}");
             None
         }
         Err(_) => {
-            log::info!("Copilot CLI: version probe timed out after {PROBE_TIMEOUT:?}");
+            log::info!("{name}: version probe timed out after {PROBE_TIMEOUT:?}");
             None
         }
     }
 }
 
-/// Pulls the first `major.minor.patch` out of whatever the CLI printed.
+/// Pulls the first `major.minor.patch` out of whatever the tool printed.
 ///
 /// Deliberately loose: the output carries a product name and an update notice
-/// around the number, and both are the CLI's to reword.
+/// around the number, and both are the tool's to reword. The four tools in the
+/// registry each print a different shape -- `GitHub Copilot CLI 1.0.80.`,
+/// `2.1.220 (Claude Code)`, a bare `1.18.10` -- and this reads all of them.
 fn parse_version(raw: &str) -> Option<(u32, u32, u32)> {
     let bytes = raw.as_bytes();
     let mut i = 0;
@@ -286,16 +316,12 @@ mod tests {
         // only for copilot.exe reported "not installed" on a machine where the CLI
         // was on PATH and working -- which would have been every Windows user who
         // followed GitHub's own first-listed install instructions.
-        let names = candidate_names();
+        let names = registry::default_agent().candidate_names();
         if cfg!(windows) {
-            assert!(
-                names.contains(&"copilot.cmd"),
-                "the npm shim must be searched for"
-            );
+            assert!(names.contains(&"copilot.cmd"), "the npm shim must be searched for");
             assert!(names.contains(&"copilot.exe"));
             assert!(
-                names.iter().position(|n| *n == "copilot.cmd")
-                    < names.iter().position(|n| *n == "copilot"),
+                names.iter().position(|n| *n == "copilot.cmd") < names.iter().position(|n| *n == "copilot"),
                 "the .cmd shim must be preferred over the bare shell script"
             );
         } else {
@@ -304,11 +330,12 @@ mod tests {
     }
 
     #[test]
-    fn parses_a_real_cli_version_string() {
-        // Verbatim from an installed Claude Code CLI (`claude --version`), kept as
-        // a fixture because it is the shape these tools actually print: a version
-        // followed by a parenthesised product name.
+    fn parses_the_real_version_strings_every_supported_tool_prints() {
+        // Verbatim from real installs. Each tool has its own shape, and the
+        // parser has to read all of them.
+        assert_eq!(parse_version("GitHub Copilot CLI 1.0.80."), Some((1, 0, 80)));
         assert_eq!(parse_version("2.1.220 (Claude Code)"), Some((2, 1, 220)));
+        assert_eq!(parse_version("1.18.10"), Some((1, 18, 10)));
     }
 
     #[test]
@@ -328,5 +355,53 @@ mod tests {
         let parsed = parse_version(raw).expect("the real version string must parse");
         assert_eq!(parsed, (1, 0, 76));
         assert!(parsed >= MIN_VERSION);
+    }
+
+    /// Only Copilot has a measured floor. Refusing another tool's version
+    /// would be refusing on a guess -- a too-old tool fails at the handshake
+    /// with its own message, which is better than ours refusing a working
+    /// install.
+    #[test]
+    fn only_copilot_has_a_version_floor() {
+        assert_eq!(floor_for(registry::find("copilot").unwrap()), Some(MIN_VERSION));
+        for id in ["gemini", "claude", "opencode"] {
+            assert_eq!(floor_for(registry::find(id).unwrap()), None, "{id} must have no floor");
+        }
+    }
+
+    /// The caching fix, proven at the level the bug actually bit: a "not
+    /// found" answer must never be remembered, or a user who installs the
+    /// tool and comes back is still told it is missing until they restart.
+    #[test]
+    fn a_not_found_answer_is_never_cached() {
+        // A row that cannot exist on disk, so the probe reliably misses.
+        static MISSING: AgentSpec = AgentSpec {
+            id: "gitwyrm-test-agent-that-is-not-installed",
+            display_name: "A tool nobody has",
+            windows_names: &["gitwyrm-no-such-tool.exe", "gitwyrm-no-such-tool.cmd"],
+            unix_names: &["gitwyrm-no-such-tool"],
+            acp_args: &["--acp"],
+            version_args: &["--version"],
+            denial: registry::Denial::None,
+            tool_names: registry::DeniableTools {
+                shell: None,
+                network: None,
+                write: None,
+            },
+        };
+
+        let first = detect_agent(&MISSING);
+        assert!(matches!(first.state, CliState::NotFound));
+
+        // The cache must hold nothing for it, so the next call probes again
+        // rather than replaying the miss.
+        let cached = cache().lock().expect("the cache lock").get(MISSING.id).cloned();
+        assert!(
+            cached.is_none(),
+            "a missing tool must not be remembered as missing, got {cached:?}"
+        );
+
+        let second = detect_agent(&MISSING);
+        assert!(matches!(second.state, CliState::NotFound));
     }
 }

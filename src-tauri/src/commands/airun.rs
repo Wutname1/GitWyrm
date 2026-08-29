@@ -886,7 +886,27 @@ fn run_engine(
 ) {
     use crate::ai::agent::cli_agent::CliAgent;
 
-    let agent = match CliAgent::discover(root) {
+    // The legacy OpenSpec task-run console (`ai_run_start`) has no
+    // `SessionIntent` of its own -- it always ran fully permissive before
+    // `ExecutionPolicy` existed, driving an accepted task to completion the
+    // same way a Fix session does. Resolving a `Fix`-shaped policy here
+    // (rather than gating this console for the first time) keeps that
+    // existing, unrestricted behavior unchanged; `started: true` because
+    // this console has no Plan-before-Start concept -- it starts running
+    // immediately, same as it always has.
+    //
+    // Built before discovery rather than after, because discovery now reads
+    // it: the policy names the tool, and refuses one that cannot hold a
+    // read-only promise for work that must not change anything.
+    let policy = crate::agentdesk::policy::ExecutionPolicy::resolve(
+        crate::agentdesk::model::SessionIntent::Fix,
+        crate::agentdesk::policy::ExecutionMode::Auto,
+        crate::agentdesk::policy::ExecutionTeam::Solo,
+        None,
+    )
+    .expect("no provider override is passed here, so resolution cannot fail");
+
+    let agent = match CliAgent::discover_for(&policy, true, root) {
         Ok(a) => a,
         Err(e) => {
             let detail = crate::ai::agent::select::plain_explanation(&e);
@@ -909,22 +929,6 @@ The task:
         crate::ai::agent::run::SYSTEM_PROMPT,
         task_text
     );
-
-    // The legacy OpenSpec task-run console (`ai_run_start`) has no
-    // `SessionIntent` of its own -- it always ran fully permissive before
-    // `ExecutionPolicy` existed, driving an accepted task to completion the
-    // same way a Fix session does. Resolving a `Fix`-shaped policy here
-    // (rather than gating this console for the first time) keeps that
-    // existing, unrestricted behavior unchanged; `started: true` because
-    // this console has no Plan-before-Start concept -- it starts running
-    // immediately, same as it always has.
-    let policy = crate::agentdesk::policy::ExecutionPolicy::resolve(
-        crate::agentdesk::model::SessionIntent::Fix,
-        crate::agentdesk::policy::ExecutionMode::Auto,
-        crate::agentdesk::policy::ExecutionTeam::Solo,
-        None,
-    )
-    .expect("no provider override is passed here, so resolution cannot fail");
 
     let rt = tokio::runtime::Handle::current();
     // The legacy OpenSpec task console has no Stop of its own -- it always ran

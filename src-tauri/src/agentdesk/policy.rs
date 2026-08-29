@@ -146,33 +146,65 @@ pub fn for_intent(intent: SessionIntent) -> IntentPolicy {
     }
 }
 
-/// Which provider transport a session's execution is allowed to use.
+/// Which AI command-line tool a session's execution is allowed to use.
 ///
-/// Only one real transport exists today (the Copilot CLI, `ai::agent::cli_agent::CliAgent`) --
-/// this is not a routing table, it is the refusal boundary for task 6 ("Make
-/// unsupported provider overrides fail visibly instead of silently using
-/// Copilot"). `None` means "use the default," which resolves to `Copilot`.
-/// `Some(other)` that does not name a supported provider must be refused by
+/// This is the refusal boundary for task 6 ("Make unsupported provider
+/// overrides fail visibly instead of silently using Copilot"). `None` means
+/// "use the default," which resolves to `Copilot`. `Some(other)` that does not
+/// name a tool this build knows must be refused by
 /// [`ExecutionPolicy::resolve`] -- never silently downgraded to `Copilot`,
 /// which is exactly the bug this type exists to close.
+///
+/// The variants mirror `ai::agent::registry::AGENTS` one for one. That table
+/// is the authority on how each tool is found and started; this enum only
+/// exists so a policy can be a plain `Copy` value the frontend can also see
+/// (`specta::Type`), which a `&'static AgentSpec` cannot be. The two are kept
+/// in step by [`Self::agent_id`] plus a test in the registry module that
+/// checks every id here resolves there.
+///
+/// Naming a tool here does NOT mean it may run anything. Whether it may run a
+/// particular piece of work depends on whether it can be told to refuse a
+/// tool at all -- see `ai::agent::select::choose`, which turns down a tool
+/// that cannot guarantee read-only for read-only work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum ExecutionProvider {
     Copilot,
+    Gemini,
+    Claude,
+    OpenCode,
 }
 
 impl ExecutionProvider {
     /// Parses a provider override string as it arrives from the frontend
     /// (`agent_session_start_execution`'s `provider_override: Option<String>`).
-    /// Case-insensitive on the one supported name; anything else is
-    /// `None` -- the caller (`ExecutionPolicy::resolve`) treats a `Some`
-    /// override that fails to parse as an unsupported-provider refusal, not
-    /// as "no override was given."
+    /// Case-insensitive on the supported names; anything else is `None` -- the
+    /// caller (`ExecutionPolicy::resolve`) treats a `Some` override that fails
+    /// to parse as an unsupported-provider refusal, not as "no override was
+    /// given."
     fn parse(name: &str) -> Option<Self> {
-        if name.eq_ignore_ascii_case("copilot") {
-            Some(ExecutionProvider::Copilot)
-        } else {
-            None
+        // Matched against the same ids the agent registry uses, so a name
+        // that works in settings works here and vice versa.
+        for candidate in [
+            ExecutionProvider::Copilot,
+            ExecutionProvider::Gemini,
+            ExecutionProvider::Claude,
+            ExecutionProvider::OpenCode,
+        ] {
+            if name.eq_ignore_ascii_case(candidate.agent_id()) {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+
+    /// The registry id for this tool. The one place the two vocabularies meet.
+    pub fn agent_id(self) -> &'static str {
+        match self {
+            ExecutionProvider::Copilot => "copilot",
+            ExecutionProvider::Gemini => "gemini",
+            ExecutionProvider::Claude => "claude",
+            ExecutionProvider::OpenCode => "opencode",
         }
     }
 }
@@ -299,6 +331,15 @@ impl ExecutionPolicy {
             intent_policy: for_intent(intent),
             allowed_paths: None,
         }
+    }
+
+    /// The agent-registry id of the tool this execution runs on.
+    ///
+    /// Convenience over `self.provider.agent_id()`, so provider selection
+    /// (`ai::agent::select::choose`) reads the policy and nothing else --
+    /// there is no second place that decides which tool an execution uses.
+    pub fn agent_id(&self) -> &'static str {
+        self.provider.agent_id()
     }
 
     /// Whether a tool call requesting `capability` may run right now.
@@ -733,12 +774,54 @@ mod tests {
         }
     }
 
+    /// Every tool the agent registry knows is nameable as an override, and
+    /// each resolves to its own provider rather than quietly to the default.
+    #[test]
+    fn every_supported_tool_can_be_named_as_an_override() {
+        let cases = [
+            ("copilot", ExecutionProvider::Copilot),
+            ("gemini", ExecutionProvider::Gemini),
+            ("Claude", ExecutionProvider::Claude),
+            ("OPENCODE", ExecutionProvider::OpenCode),
+        ];
+        for (name, expected) in cases {
+            let policy = ExecutionPolicy::resolve(
+                SessionIntent::Fix,
+                ExecutionMode::Auto,
+                ExecutionTeam::Lead,
+                Some(name),
+            )
+            .unwrap_or_else(|e| panic!("{name:?} must resolve, got {e:?}"));
+            assert_eq!(policy.provider, expected, "{name:?}");
+        }
+    }
+
+    /// The two vocabularies -- this enum and the agent registry's ids -- must
+    /// agree. A provider whose id is not in the registry would resolve here
+    /// and then fail to launch with a confusing message instead of being
+    /// refused up front.
+    #[test]
+    fn every_provider_id_names_a_tool_the_registry_knows() {
+        for provider in [
+            ExecutionProvider::Copilot,
+            ExecutionProvider::Gemini,
+            ExecutionProvider::Claude,
+            ExecutionProvider::OpenCode,
+        ] {
+            let id = provider.agent_id();
+            assert!(
+                crate::ai::agent::registry::find(id).is_some(),
+                "{provider:?} names {id:?}, which the registry does not have"
+            );
+        }
+    }
+
     /// Task 1.6's core proof: an override naming something this build does
     /// not support must be a typed refusal, never a silent fall-through to
     /// Copilot.
     #[test]
     fn an_unsupported_override_is_refused_visibly_not_silently_downgraded() {
-        for name in ["claude", "gpt-4", "gemini", "", "cop1lot"] {
+        for name in ["gpt-4", "cop1lot", "", "claude-code", "chatgpt"] {
             let outcome = ExecutionPolicy::resolve(
                 SessionIntent::Fix,
                 ExecutionMode::Auto,

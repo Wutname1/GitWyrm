@@ -12,6 +12,7 @@
 pub mod acp;
 pub mod cli_agent;
 pub mod copilot_cli;
+pub mod registry;
 pub mod run;
 pub mod select;
 pub mod transport;

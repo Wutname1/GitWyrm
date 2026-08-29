@@ -225,28 +225,62 @@ pub struct AcpConnection {
     /// borrowing both at once is both impossible and the wrong shape.
     incoming: Option<mpsc::UnboundedReceiver<Incoming>>,
     session_id: Option<String>,
+    /// Which tool this connection is talking to.
+    ///
+    /// Held because two things still depend on it after launch: the wording of
+    /// a failure (naming the wrong tool sends the user to fix something that
+    /// is not broken), and the `_meta` denial some tools take in
+    /// `session/new` rather than on the command line.
+    spec: &'static super::registry::AgentSpec,
+    /// What this run may not use, in GitWyrm's own vocabulary. Kept so
+    /// `session/new` can carry the denial for a tool whose restriction travels
+    /// in the protocol.
+    denied_tools: Vec<String>,
 }
 
 impl AcpConnection {
-    /// Spawns the CLI in ACP stdio mode and starts reading its output.
+    /// Spawns the default agent's CLI in ACP stdio mode.
     ///
-    /// `denied_tools` is applied at start because ACP fixes tool filtering at
-    /// server launch: a client cannot narrow it per session, so the bounded set
-    /// has to be a launch argument.
-    ///
-    /// Denial rather than an allow-list because, per `copilot help permissions`,
-    /// "denial rules always take precedence over allow rules, even
-    /// --allow-all-tools" -- so this cannot be widened by anything later.
+    /// Kept for callers that only ever drive the default tool, including the
+    /// end-to-end test. [`Self::spawn_agent`] is the general form.
     pub async fn spawn(
         program: &std::path::Path,
         cwd: &std::path::Path,
         denied_tools: &[&str],
     ) -> Result<Self, AgentError> {
+        Self::spawn_agent(
+            super::registry::default_agent(),
+            program,
+            cwd,
+            denied_tools,
+        )
+        .await
+    }
+
+    /// Spawns one agent's CLI in ACP stdio mode and starts reading its output.
+    ///
+    /// `denied_tools` names what this run may not use, in GitWyrm's own
+    /// vocabulary (`shell`, `url`, `write`). The spec turns that into whatever
+    /// this tool understands -- a repeated launch flag, a whole-session
+    /// read-only mode, or nothing on the command line at all when the denial
+    /// travels inside the protocol instead (see
+    /// [`super::registry::AgentSpec::launch_args`]).
+    ///
+    /// Applied at start, where the tool supports it, because ACP fixes tool
+    /// filtering at server launch: a client cannot narrow it per session, so
+    /// the bounded set has to be a launch argument.
+    ///
+    /// Denial rather than an allow-list because, per `copilot help permissions`,
+    /// "denial rules always take precedence over allow rules, even
+    /// --allow-all-tools" -- so this cannot be widened by anything later.
+    pub async fn spawn_agent(
+        spec: &'static super::registry::AgentSpec,
+        program: &std::path::Path,
+        cwd: &std::path::Path,
+        denied_tools: &[&str],
+    ) -> Result<Self, AgentError> {
         let mut cmd = Command::new(program);
-        cmd.arg("--acp").arg("--stdio");
-        for tool in denied_tools {
-            cmd.arg(format!("--deny-tool={tool}"));
-        }
+        cmd.args(spec.launch_args(denied_tools));
         cmd.current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -261,15 +295,16 @@ impl AcpConnection {
         #[cfg(windows)]
         cmd.creation_flags(crate::git::shell::CREATE_NO_WINDOW);
 
+        let name = spec.display_name;
         let mut child = cmd.spawn().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 AgentError::TransportUnavailable {
                     transport: super::transport::Transport::Cli,
-                    detail: "the Copilot command-line tool is not installed".into(),
+                    detail: format!("the {name} command-line tool is not installed"),
                 }
             } else {
                 AgentError::Failed {
-                    detail: format!("could not start the Copilot CLI: {e}"),
+                    detail: format!("could not start the {name} command-line tool: {e}"),
                 }
             }
         })?;
@@ -288,7 +323,7 @@ impl AcpConnection {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                log::debug!("copilot acp stderr: {line}");
+                log::debug!("{name} acp stderr: {line}");
             }
         });
 
@@ -299,6 +334,8 @@ impl AcpConnection {
             pending,
             incoming: Some(incoming),
             session_id: None,
+            spec,
+            denied_tools: denied_tools.iter().map(|t| (*t).to_string()).collect(),
         })
     }
 
@@ -326,12 +363,22 @@ impl AcpConnection {
         // CLI's own auth messages to NeedsReconnect; anything else really is a
         // failure, and calling it a sign-in problem would send the user to fix
         // something that is not broken.
-        let session = self
-            .request(
-                "session/new",
-                json!({ "cwd": cwd.to_string_lossy(), "mcpServers": [] }),
-            )
-            .await?;
+        let mut params = json!({ "cwd": cwd.to_string_lossy(), "mcpServers": [] });
+
+        // Some tools take their tool denial here rather than on the command
+        // line. `_meta` is ACP's own extension slot, and a tool that does not
+        // recognise the contents ignores them -- so this is only added when
+        // this tool is one that reads it, and never as a blind extra field.
+        let denied: Vec<&str> = self.denied_tools.iter().map(String::as_str).collect();
+        if let Some(meta) = self.spec.session_meta(&denied) {
+            log::info!(
+                "{}: sending its tool denial in the session request",
+                self.spec.display_name
+            );
+            params["_meta"] = meta;
+        }
+
+        let session = self.request("session/new", params).await?;
 
         // A reply that arrived but carries no session is the one case where the
         // CLI is up and talking yet cannot open a session -- the shape a

@@ -1101,7 +1101,14 @@ fn launch_helper(
     // happen to share this repository -- each keep their own entry.
     links.link(&helper_execution_id, &session_id);
 
-    let agent = match crate::ai::agent::cli_agent::CliAgent::discover(std::path::PathBuf::from(&worktree_path)) {
+    // `discover_for` so a read-only helper (Researcher, Verifier) cannot be
+    // handed a tool that has no way to refuse a write -- the helper's own
+    // policy already knows whether it may change anything.
+    let agent = match crate::ai::agent::cli_agent::CliAgent::discover_for(
+        &policy,
+        true,
+        std::path::PathBuf::from(&worktree_path),
+    ) {
         Ok(a) => a,
         Err(e) => {
             record_helper_launch_failure(
@@ -2331,7 +2338,14 @@ fn launch_lead_review(
     // the repository) -- see `RunSessionLinks`'s own doc comment.
     links.link(&review_execution_id, &session_id.to_string());
 
-    let agent = match crate::ai::agent::cli_agent::CliAgent::discover(std::path::PathBuf::from(integration_path)) {
+    // The lead's review turn is a writing one, but it goes through the same
+    // policy-aware discovery as every other launch so there is one path, not
+    // a special case that could drift.
+    let agent = match crate::ai::agent::cli_agent::CliAgent::discover_for(
+        &policy,
+        true,
+        std::path::PathBuf::from(integration_path),
+    ) {
         Ok(a) => a,
         Err(e) => {
             record_helper_launch_failure(

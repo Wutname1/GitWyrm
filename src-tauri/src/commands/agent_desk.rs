@@ -1301,7 +1301,14 @@ pub(crate) fn start_execution_at(
     // opaque failed run. `engine_root` (not `open.path`) is the working
     // directory handed to the engine -- see step 2b: this is what makes
     // isolation for Fix actually load-bearing rather than advisory.
-    let agent = match crate::ai::agent::cli_agent::CliAgent::discover(engine_root.clone()) {
+    // `discover_for`, not `discover`: the policy decides WHICH tool runs this,
+    // and refuses one that cannot be told to leave the files alone when this
+    // job is not supposed to change anything (see `agent::select::choose`).
+    let agent = match crate::ai::agent::cli_agent::CliAgent::discover_for(
+        &policy,
+        started,
+        engine_root.clone(),
+    ) {
         Ok(a) => a,
         Err(e) => {
             links.unlink(&execution_id);

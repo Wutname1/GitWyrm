@@ -1,10 +1,15 @@
-//! The CLI transport: a [`ProviderAgent`] backed by the Copilot CLI's ACP
-//! server.
+//! The CLI transport: an agent connection backed by a command-line tool's own
+//! ACP server.
 //!
 //! Exists so a subscription-only user is not shut out. GitWyrm never reads the
-//! CLI's stored credentials -- it asks the tool whether it can work and
+//! tool's stored credentials -- it asks the tool whether it can work and
 //! believes the answer, which is the whole difference between driving a tool
 //! and impersonating one.
+//!
+//! Nothing here names a particular tool. Which one to use comes from the
+//! execution's own policy, and how to find and start it comes from
+//! [`super::registry`]. Copilot is still the default, and the path it takes
+//! through this module is unchanged.
 
 use std::path::PathBuf;
 
@@ -12,6 +17,8 @@ use crate::agentdesk::policy::ExecutionPolicy;
 
 use super::acp::AcpConnection;
 use super::copilot_cli::{self, CliState};
+use super::registry::AgentSpec;
+use super::select;
 use super::transport::{AgentError, Transport};
 
 /// Permission kinds denied to the CLI's own agent for the whole run,
@@ -76,32 +83,64 @@ pub fn denied_tools_for(policy: &ExecutionPolicy, started: bool) -> Vec<&'static
 pub struct CliAgent {
     program: PathBuf,
     cwd: PathBuf,
+    /// Which tool this is. Carried so [`Self::connect`] starts it the way that
+    /// tool expects and words a failure with that tool's name.
+    spec: &'static AgentSpec,
 }
 
 impl CliAgent {
-    /// Builds the transport if a usable CLI is installed.
+    /// Builds the transport for the tool this execution's policy chose, or
+    /// refuses.
+    ///
+    /// Two different refusals can come out of this, and they are different on
+    /// purpose. One is "the tool you picked is not installed", which the user
+    /// fixes by installing it. The other is "the tool you picked cannot be
+    /// told to leave your files alone, and this job must not change anything"
+    /// -- see [`select::choose`], which is where the read-only guarantee is
+    /// actually held. Checking that BEFORE looking for the binary means a
+    /// user who picks an unsuitable tool is told why it is unsuitable rather
+    /// than being sent to install it first and refused afterwards.
+    pub fn discover_for(policy: &ExecutionPolicy, started: bool, cwd: PathBuf) -> Result<Self, AgentError> {
+        let spec = select::choose(policy, started)?;
+        Self::discover_agent(spec, cwd)
+    }
+
+    /// Builds the transport if a usable copy of `spec`'s tool is installed.
     ///
     /// The version floor and the "not installed" case produce different
     /// sentences, because they need different actions from the user.
-    pub fn discover(cwd: PathBuf) -> Result<Self, AgentError> {
-        match &copilot_cli::detect().state {
+    pub fn discover_agent(spec: &'static AgentSpec, cwd: PathBuf) -> Result<Self, AgentError> {
+        let name = spec.display_name;
+        match &copilot_cli::detect_agent(spec).state {
             CliState::Ready { path, version } => {
-                log::info!("Copilot CLI transport ready: {version}");
+                log::info!("{name} command-line tool ready: {version}");
                 Ok(Self {
                     program: PathBuf::from(path),
                     cwd,
+                    spec,
                 })
             }
             CliState::TooOld { version, minimum } => Err(AgentError::TransportUnavailable {
                 transport: Transport::Cli,
-                detail: format!(
-          "the Copilot command-line tool is version {version}, but {minimum} or newer is needed. \
-           Running `copilot update` will bring it up to date"
-        ),
+                // Copilot keeps its own update command in the message, because
+                // naming the exact command is the fastest fix for the one
+                // tool we know that command for. The others get the general
+                // sentence rather than a guess at their update command.
+                detail: if spec.id == "copilot" {
+                    format!(
+                        "the {name} command-line tool is version {version}, but {minimum} or newer is \
+                         needed. Running `copilot update` will bring it up to date"
+                    )
+                } else {
+                    format!(
+                        "the {name} command-line tool is version {version}, but {minimum} or newer is \
+                         needed. Updating it will fix this"
+                    )
+                },
             }),
             CliState::NotFound => Err(AgentError::TransportUnavailable {
                 transport: Transport::Cli,
-                detail: "the Copilot command-line tool is not installed".into(),
+                detail: format!("the {name} command-line tool is not installed"),
             }),
         }
     }
@@ -121,8 +160,15 @@ impl CliAgent {
     /// here (denial takes precedence over every allow rule -- see
     /// `denied_tools_for`'s own doc comment).
     pub async fn connect(&self, policy: &ExecutionPolicy, started: bool) -> Result<AcpConnection, AgentError> {
+        // Checked again here, not only in `discover_for`. A `CliAgent` can be
+        // built for the default tool by a caller that had no policy yet
+        // (`discover`), so this is the last point before a process starts
+        // where the read-only promise can still be kept.
+        if select::must_not_change_anything(policy, started) && !self.spec.can_guarantee_read_only() {
+            return Err(select::refuse_read_only(self.spec));
+        }
         let denied = denied_tools_for(policy, started);
-        let mut conn = AcpConnection::spawn(&self.program, &self.cwd, &denied).await?;
+        let mut conn = AcpConnection::spawn_agent(self.spec, &self.program, &self.cwd, &denied).await?;
         conn.start_session(&self.cwd).await?;
         Ok(conn)
     }
@@ -233,5 +279,82 @@ mod tests {
         let policy = ExecutionPolicy::resolve_for_helper(true, vec!["src/**".into()]);
         let denied = denied_tools_for(&policy, true);
         assert!(!denied.contains(&"write"));
+    }
+
+    /// The denials this function produces are GitWyrm's own words, and every
+    /// tool that denies by name must have a word of its own for each of them
+    /// -- otherwise a denial is silently dropped at launch and the run is
+    /// less restricted than the policy said.
+    #[test]
+    fn every_denial_this_produces_is_one_the_tools_can_actually_express() {
+        use super::super::registry::{self, Denial};
+        for intent in [SessionIntent::Review, SessionIntent::Fix, SessionIntent::Plan] {
+            for started in [false, true] {
+                let denied = denied_tools_for(&policy_for(intent), started);
+                for spec in registry::AGENTS {
+                    if !matches!(spec.denial, Denial::LaunchFlags { .. } | Denial::SessionMeta) {
+                        continue;
+                    }
+                    // Every denial has to survive the translation into this
+                    // tool's own vocabulary. A dropped one would leave the
+                    // launched tool holding a capability the policy refused.
+                    let on_command_line = spec
+                        .launch_args(&denied)
+                        .len()
+                        .saturating_sub(spec.acp_args.len());
+                    let in_session_meta = spec
+                        .session_meta(&denied)
+                        .and_then(|m| {
+                            m["claudeCode"]["options"]["disallowedTools"]
+                                .as_array()
+                                .map(Vec::len)
+                        })
+                        .unwrap_or(0);
+                    let expressed = on_command_line + in_session_meta;
+                    assert_eq!(
+                        expressed,
+                        denied.len(),
+                        "{} dropped a denial from {denied:?} ({intent:?}, started={started})",
+                        spec.id
+                    );
+                }
+            }
+        }
+    }
+
+    /// THE safety rule, at the launch boundary: a tool with no way to refuse
+    /// anything must be turned down for every piece of read-only work, before
+    /// any process starts.
+    ///
+    /// `discover_for` refuses before it even looks for the binary, so this
+    /// holds on a machine where the tool is not installed too -- which is what
+    /// makes it a test rather than a manual check.
+    #[test]
+    fn a_tool_that_cannot_refuse_anything_is_turned_down_for_read_only_work() {
+        let read_only: &[(SessionIntent, bool)] = &[
+            (SessionIntent::Ask, false),
+            (SessionIntent::Ask, true),
+            (SessionIntent::Explain, false),
+            (SessionIntent::Explain, true),
+            (SessionIntent::Review, false),
+            (SessionIntent::Review, true),
+            (SessionIntent::Summarize, false),
+            (SessionIntent::Summarize, true),
+            (SessionIntent::Plan, false),
+        ];
+        for (intent, started) in read_only.iter().copied() {
+            let policy = ExecutionPolicy::resolve(
+                intent,
+                ExecutionMode::Auto,
+                ExecutionTeam::Lead,
+                Some("opencode"),
+            )
+            .expect("opencode is a tool this build knows");
+            let outcome = CliAgent::discover_for(&policy, started, std::env::temp_dir());
+            assert!(
+                outcome.is_err(),
+                "{intent:?} (started={started}) must not launch on a tool that cannot be told to leave files alone"
+            );
+        }
     }
 }

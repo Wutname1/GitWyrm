@@ -19,15 +19,29 @@ use crate::error::AppError;
 
 /// Which way a provider is reached.
 ///
-/// Currently the only variant is the CLI subprocess path -- see
-/// [`super::cli_agent`]. Kept as an enum rather than inlined so a future
-/// transport has somewhere to attach without reshaping every caller.
+/// Still one variant, deliberately, even now that GitWyrm drives four
+/// different tools. They are all the same transport: a command-line tool
+/// spawned as a subprocess, spoken to over ACP on its stdin and stdout. What
+/// differs between them -- the binary's name, the arguments that start its ACP
+/// server, how it can be told to refuse a tool -- is data, and lives in
+/// [`super::registry`] where a new tool is a new row rather than a new variant
+/// here.
+///
+/// Adding a variant would mean a genuinely different way of reaching a
+/// provider (an HTTP API, say), and the rule this module already stated stands:
+/// add one only alongside the driver that implements it. Two earlier variants,
+/// `ApiKey` and `OpenAiCompatible`, were removed in 2026-08 precisely because
+/// they never had one.
+///
+/// Which tool a run uses is carried by the execution's policy
+/// (`agentdesk::policy::ExecutionProvider`), not by this enum, so the two do
+/// not have to be kept in step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
-    /// The user's own installed CLI, driven as a subprocess. Exists so a
-    /// subscription-only user is not shut out. GitWyrm never reads the CLI's
-    /// credential files -- it asks the tool and believes its answer.
+    /// The user's own installed command-line tool, driven as a subprocess.
+    /// Exists so a subscription-only user is not shut out. GitWyrm never reads
+    /// the tool's credential files -- it asks the tool and believes its answer.
     Cli,
 }
 
