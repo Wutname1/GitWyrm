@@ -84,8 +84,11 @@ tool gate uses, so the two cannot drift, and it runs again at `connect`.
 
 Still open here:
 
-- **No picker.** Nothing in the UI selects a provider, so every run resolves to Copilot
-  unless a caller passes `providerOverride` -- which `bindings.ts` does expose.
+- ~~**No picker.**~~ Closed 2026-08-28. `ProviderControl` sits beside the mode and team
+  controls, backed by `agent_providers_list`. It shows every known tool with its real
+  install state, and disables the ones that cannot run the current chat with the reason
+  attached rather than hiding them. Leaving it on "Default AI" stores no choice at all, so
+  a chat nobody had an opinion about keeps following the default.
 - **`Denial::ReadOnlyMode` is weaker than the other two and is currently treated as equal.**
   Gemini's plan mode is genuinely enforced by its own policy engine, but its
   `exit_plan_mode` tool is auto-allowed when running non-interactively, which is how
@@ -121,12 +124,27 @@ model writes prose instead.
 `snip_detect` and `snip_gain` exist and are in the bindings, but nothing in the UI calls
 them, so there is no user-walkable path yet.
 
-Worth being clear about what Snip can and cannot do here. Its value is wrapping a shell
-command so its output costs fewer tokens -- but GitWyrm spawns only the provider CLI, the
-agent's own shell calls happen inside that process where GitWyrm cannot reach them, and
-`shell` is denied at launch anyway. So this reports on Snip usage from the user's terminal;
-it does not reduce Agent Desk's own token use. The lever that does apply to Agent Desk is
-the usage tracking in item 2: measuring cost is what makes any reduction provable.
+**Corrected 2026-08-28.** An earlier revision of this note said Snip could not reduce Agent
+Desk's token use at all, because the agent's shell calls happen inside the provider CLI.
+That was wrong about the mechanism. Snip integrates by rewriting the command *inside* the
+agent process, through config the agent loads itself: a `preToolUse` hook returning
+`modifiedArgs` for Copilot, and a third-party plugin (`opencode-snip`) hooking
+`tool.execute.before` for opencode. A host app installs nothing and wraps nothing -- its
+only lever is keeping `snip` on the spawned process's PATH.
+
+Three things still qualify that:
+
+- Whether Copilot's hooks fire under `--acp --stdio` is **undocumented**. "ACP" appears
+  nowhere in GitHub's hooks reference, and there is precedent for hooks being inert in a
+  non-interactive runtime (for the cloud agent, tool calls are pre-approved so the hook
+  "does not fire or has no effect"). This needs a real test, not more reading.
+- GitWyrm denies `shell` at launch for its own runs, so on the default path there are no
+  shell calls to compress regardless.
+- Snip passes pipes, redirects, heredocs and command substitution through unfiltered, so
+  real savings land well below its headline numbers.
+
+The lever that certainly applies to Agent Desk is the usage tracking in item 2: measuring
+cost is what makes any reduction provable.
 
 Two facts in `snip/gain.rs` are inferred from Go's naming defaults rather than a published
 schema, and want one capture from a real `snip gain --json` to confirm: the `TotalTimeMs`
@@ -141,8 +159,7 @@ files and its uninstall matches a substring that would strip unrelated hooks.
 2. Verify the two live-behaviour unknowns: the Claude adapter's `_meta` denial actually
    refusing an `Edit`, and Gemini's plan mode holding across a non-interactive
    `exit_plan_mode`.
-3. A provider picker, or the transports stay unreachable.
-4. Resolve or remove the plan-checklist parser.
+3. Resolve or remove the plan-checklist parser.
 
 Usage in the durable model is done.
 
