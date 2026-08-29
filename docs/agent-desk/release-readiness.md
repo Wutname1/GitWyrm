@@ -45,13 +45,23 @@ keyboard/screen-reader use, and performance.
 No unit fixture that manually commits helper work may substitute for the production
 uncommitted-helper scenario.
 
-### 2. Usage and cost are absent from the durable model
+### 2. ~~Usage and cost are absent from the durable model~~ Closed 2026-08-28
 
-`agent_session_usage` reports `session_requests` and `active_helper_count` and leaves
-tokens and cost as `None`, which is honest but empty. For a feature whose premise is
-running budgeted parallel helpers, not recording what a run cost is a correctness gap
-rather than a missing convenience. Tracked separately; see the usage work in
-`openspec/changes/`.
+`ExecutionRecord::usage` now accumulates per-turn figures from the provider, and
+`agent_session_usage` sums them across every execution (helpers included) as
+`providerReported`. The numbers come from the `session/prompt` response, which
+`AcpConnection::prompt` previously discarded except for `stopReason`.
+
+Two things remain true about this and are deliberate:
+
+- **Only what the provider reports is recorded.** ACP does not standardise usage.
+  Copilot CLI 1.0.80 reports `inputTokens`/`outputTokens`/`cachedReadTokens` but no
+  cost; an agent that reports nothing produces no rows at all. GitWyrm never multiplies
+  tokens by a price table of its own, so a cost figure appears only when a provider
+  states one.
+- **`plan_limit` and `plan_reset_at` still have no source.** Provider plan quotas are
+  not exposed over ACP, so those two fields stay `None` until something else supplies
+  them.
 
 ### 3. One transport, one provider
 
@@ -60,19 +70,33 @@ single `Cli` variant and discovery hardcodes `copilot` binary names. The ACP lay
 is protocol-generic, so this is a discovery-layer limit rather than a protocol one.
 Tracked separately.
 
-### 4. `agentDeskPlan.ts` parses a format nothing produces
+### 4. `agentDeskPlan.ts` renders opportunistically, and nothing asks for what it reads
 
-`parsePlanChecklist` expects `- [x] Step (Owner - status)` Markdown. Plan proposals travel
-as JSON in a fenced block, and `RunStep::Plan` is free-form prose. The parser returns an
-empty list and `PlanChecklist` mounts nothing. It fails safely, but it is dead code
-pretending to be a feature: either wire it to the real proposal or delete it.
+Re-examined 2026-08-28. The earlier note called this "a format nothing produces", which
+overstates it: `parsePlanChecklist` reads ordinary CommonMark task lists (`- [x] Step`),
+optionally with a trailing `(Owner - status)`. Models write that shape unprompted often
+enough that the checklist does sometimes render.
+
+What is true is that nothing *guarantees* it. No prompt asks for the convention -- the
+structured plan proposal travels as JSON in a fenced block
+(`plan_proposal::plan_mode_instruction`), and `RunStep::Plan` is free-form prose. So the
+same plan renders as a tidy checklist or as a paragraph depending on how the model felt.
+
+That is a coherent thing to be (progressive enhancement of a common Markdown shape), but
+it is not currently a decision anyone made. Either ask for the convention in the Plan
+prompt so it is reliable, or drive the checklist from the JSON proposal that already
+exists. Leaving it undecided means the feature works by luck.
+
+Not urgent, and explicitly not "delete it": it fails safe, and it costs nothing when a
+model writes prose instead.
 
 ## Release order
 
 1. Native acceptance run against a real provider.
-2. Usage in the durable model.
-3. Additional ACP transports.
-4. Resolve or remove the plan-checklist parser.
+2. Additional ACP transports.
+3. Resolve or remove the plan-checklist parser.
+
+Usage in the durable model was item 2 and is done.
 
 ## Meaning of "ready"
 
