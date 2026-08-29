@@ -10,8 +10,11 @@ historical: read it for the reasoning, not for current status.
 ## Verdict
 
 **Code-level release blockers are closed. The remaining gate is native acceptance, plus
-three product gaps that are not safety issues but do affect whether the feature is worth
-shipping.**
+two live-behaviour questions about the newly added providers and a few product gaps.**
+
+Note the shape of the risk has changed. The old blockers were about GitWyrm's own logic;
+what is left is mostly about whether other people's tools behave the way their
+documentation says. Those cannot be closed by reading code.
 
 The automated baseline is healthy: TypeScript, the frontend test suite, the Rust test
 suite, and the strict OpenSpec validations all pass. The end-to-end safety boundary that
@@ -63,12 +66,35 @@ Two things remain true about this and are deliberate:
   not exposed over ACP, so those two fields stay `None` until something else supplies
   them.
 
-### 3. One transport, one provider
+### 3. ~~One transport, one provider~~ Partly closed 2026-08-28
 
-The engine reaches exactly one runtime: the GitHub Copilot CLI over ACP. `Transport` has a
-single `Cli` variant and discovery hardcodes `copilot` binary names. The ACP layer itself
-is protocol-generic, so this is a discovery-layer limit rather than a protocol one.
-Tracked separately.
+Discovery is now a registry (`ai/agent/registry.rs`) describing four tools: Copilot
+(default, unchanged), Gemini CLI, Claude Code via the `@agentclientprotocol/claude-agent-acp`
+adapter, and opencode. `Transport` deliberately keeps its single `Cli` variant: all four
+are the same transport (a subprocess speaking ACP over stdio) and what differs is data.
+
+**The safety rule, and why it matters more than the count.** ACP standardises no tool
+denial at all, so each tool differs: Copilot takes `--deny-tool` (which outranks every
+allow rule), the Claude adapter takes `_meta.claudeCode.options.disallowedTools` on
+`session/new`, Gemini has only the whole-session `--approval-mode=plan`, and **opencode has
+no mechanism whatsoever**. `select::choose` refuses any tool that cannot enforce read-only
+for a read-only intent or a Plan before Start, so opencode cannot run Ask, Explain, Review
+or Summarize. The check reads the same `policy::check_tool_capability` the engine's own
+tool gate uses, so the two cannot drift, and it runs again at `connect`.
+
+Still open here:
+
+- **No picker.** Nothing in the UI selects a provider, so every run resolves to Copilot
+  unless a caller passes `providerOverride` -- which `bindings.ts` does expose.
+- **`Denial::ReadOnlyMode` is weaker than the other two and is currently treated as equal.**
+  Gemini's plan mode is genuinely enforced by its own policy engine, but its
+  `exit_plan_mode` tool is auto-allowed when running non-interactively, which is how
+  GitWyrm drives it. A Gemini read-only session could in principle leave plan mode without
+  ever raising a permission request. Either downgrade Gemini to `Denial::None` for
+  read-only work or watch for `switch_mode`.
+- **The Claude adapter's `_meta` key is unverified against a live adapter.** A wrong key
+  fails *open* (the adapter ignores unknown `_meta` and denies nothing), so this needs one
+  empirical check: attempt an `Edit` in a read-only Claude session and confirm refusal.
 
 ### 4. `agentDeskPlan.ts` renders opportunistically, and nothing asks for what it reads
 
@@ -90,13 +116,35 @@ exists. Leaving it undecided means the feature works by luck.
 Not urgent, and explicitly not "delete it": it fails safe, and it costs nothing when a
 model writes prose instead.
 
+### 5. Snip is backend-only
+
+`snip_detect` and `snip_gain` exist and are in the bindings, but nothing in the UI calls
+them, so there is no user-walkable path yet.
+
+Worth being clear about what Snip can and cannot do here. Its value is wrapping a shell
+command so its output costs fewer tokens -- but GitWyrm spawns only the provider CLI, the
+agent's own shell calls happen inside that process where GitWyrm cannot reach them, and
+`shell` is denied at launch anyway. So this reports on Snip usage from the user's terminal;
+it does not reduce Agent Desk's own token use. The lever that does apply to Agent Desk is
+the usage tracking in item 2: measuring cost is what makes any reduction provable.
+
+Two facts in `snip/gain.rs` are inferred from Go's naming defaults rather than a published
+schema, and want one capture from a real `snip gain --json` to confirm: the `TotalTimeMs`
+spelling (an alias for `TotalTimeMS` is already in place) and the lite-build marker text.
+
+`snip init --agent` is deliberately not implemented: it merges into other tools' config
+files and its uninstall matches a substring that would strip unrelated hooks.
+
 ## Release order
 
 1. Native acceptance run against a real provider.
-2. Additional ACP transports.
-3. Resolve or remove the plan-checklist parser.
+2. Verify the two live-behaviour unknowns: the Claude adapter's `_meta` denial actually
+   refusing an `Edit`, and Gemini's plan mode holding across a non-interactive
+   `exit_plan_mode`.
+3. A provider picker, or the transports stay unreachable.
+4. Resolve or remove the plan-checklist parser.
 
-Usage in the durable model was item 2 and is done.
+Usage in the durable model is done.
 
 ## Meaning of "ready"
 
