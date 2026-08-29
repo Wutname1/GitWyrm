@@ -4,6 +4,11 @@ Recorded 2026-08-20 from a full cross-reference of the unescaped mockup, all nin
 OpenSpec packages, and the shipped code. `docs/` is gitignored, so this file lives
 alongside the other Agent Desk docs and is not tracked.
 
+**Status 2026-08-28.** The mockup-vs-spec analysis (G*/C* items) still stands - it is
+design reasoning, not a status report. The "load-bearing facts" section was re-verified
+against code; item 3 is closed and struck through. The plan-checklist section at the end
+is still accurate and still open.
+
 ## How to read the mockup at all
 
 `agent-desk-mockup.html` has `<title>Gitwyrm Agent Graph</title>` and keeps the real
@@ -60,8 +65,9 @@ Numbered G1-G30 in the source analysis. The ones that change what we build:
    **zero consumers**. Workspace-layout groups 2-3 are done; 4-9 are wiring.
 2. The graph panel's blocker is the **model**, not the renderer: `ExecutionRecord`
    carries no title, role, agent name, file summary or dependency.
-3. `ConversationPane`'s `onOpenSource` prop is passed by nobody, which disables the
-   source banner button, "View source" and every `source`-kind message target at once.
+3. ~~`ConversationPane`'s `onOpenSource` prop is passed by nobody~~ **Closed 2026-08-28.**
+   It is now passed at `AgentDeskView.tsx:234`, re-enabling the source banner button,
+   "View source" and `source`-kind message targets.
 
 ## Plan checklist rendering rests on an invented convention (2026-08-20)
 
