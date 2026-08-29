@@ -210,6 +210,21 @@ async openspecRecheckCli() : Promise<Result<CliInfo, string>> {
 }
 },
 /**
+ * Every tool this build knows how to drive, with its current install state.
+ * 
+ * Probing is per-tool and cached only when a tool is found, so a user who
+ * installs one while the picker is open sees it appear on the next open
+ * rather than after a restart.
+ */
+async agentProvidersList() : Promise<Result<AgentProvider[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_providers_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether `snip` is installed, and which version answered.
  * 
  * Safe to call repeatedly: a found result is cached, and a "not found" is
@@ -3699,6 +3714,46 @@ export type AdapterError = { kind: "clientNotDetected" } | { kind: "unsupportedV
  * client was found.
  */
 export type AdapterListEntry = { adapterId: string; displayName: string; enabled: boolean; supportedVersionRange: string; detection: DetectionOutcome }
+/**
+ * One row in the provider picker.
+ */
+export type AgentProvider = { 
+/**
+ * Stable id, the value to pass back as a provider override.
+ */
+id: string; 
+/**
+ * What to show the user. The tool's own spelling of its name.
+ */
+displayName: string; 
+/**
+ * Whether this is the tool used when nothing is chosen.
+ */
+isDefault: boolean; 
+/**
+ * Installed and new enough to drive right now.
+ */
+installed: boolean; 
+/**
+ * The version string the tool reported, when it is installed.
+ */
+version: string | null; 
+/**
+ * Set when the tool was found but is older than the floor GitWyrm has
+ * checked against. Distinct from not installed: updating fixes it.
+ */
+tooOld: boolean; 
+/**
+ * Whether this tool can be told to leave files alone, which decides
+ * whether it may run Ask, Explain, Review, Summarize, or a Plan before
+ * Start.
+ */
+canDoReadOnlyWork: boolean; 
+/**
+ * Why it cannot, in words the picker can show directly. `None` when it
+ * can.
+ */
+readOnlyLimit: string | null }
 /**
  * The full session file on disk: the header plus everything the transcript,
  * executions list, and context panel need.

@@ -3,6 +3,7 @@ pub mod agent_desk;
 pub mod agent_graph;
 pub mod agent_import;
 pub mod agent_kickoff;
+pub mod agent_providers;
 pub mod agent_result;
 pub mod ai;
 pub mod ai_commits;

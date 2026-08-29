@@ -15,6 +15,7 @@ import {
   type ComposerTeam,
 } from '@/lib/agentDeskComposer'
 import { OperatingModeControl } from './OperatingModeControl'
+import { ProviderControl } from './ProviderControl'
 import { TeamShapeControl } from './TeamShapeControl'
 
 /**
@@ -59,6 +60,11 @@ export function SessionComposer({ sessionId }: { sessionId: string | null }) {
   const [mode, setMode] = useState<ComposerMode>('Auto')
   const [team, setTeam] = useState<ComposerTeam>('helpers')
   const [teamOpen, setTeamOpen] = useState(false)
+  // `null` means "whatever the default is" -- deliberately not resolved to the
+  // default tool's id, so a chat nobody gave a preference keeps following the
+  // default if it ever changes.
+  const [provider, setProvider] = useState<string | null>(null)
+  const [providerOpen, setProviderOpen] = useState(false)
 
   const canSend = canSendComposerDraft({ draft, sessionId, sending })
 
@@ -84,7 +90,7 @@ export function SessionComposer({ sessionId }: { sessionId: string | null }) {
               sessionId,
               modeToExecutionMode(mode),
               teamToExecutionTeam(team),
-              null
+              provider
             )
           )
           if (startOutcome.kind === 'started') {
@@ -191,6 +197,20 @@ export function SessionComposer({ sessionId }: { sessionId: string | null }) {
           </span>
 
           <TeamShapeControl team={team} onChange={setTeam} open={teamOpen} onOpenChange={setTeamOpen} />
+
+          {/* Ask never changes files, so a tool that cannot be told to leave
+              them alone cannot run it. The picker needs to know that to
+              explain why an option is unavailable rather than letting the
+              user choose one that then refuses at launch. Plan is not
+              read-only here: this only covers what the tool may do once
+              started, and a started Plan writes. */}
+          <ProviderControl
+            provider={provider}
+            onChange={setProvider}
+            open={providerOpen}
+            onOpenChange={setProviderOpen}
+            readOnly={mode === 'Ask'}
+          />
 
           <span className="flex-1" />
 

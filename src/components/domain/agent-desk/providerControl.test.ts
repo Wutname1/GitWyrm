@@ -1,0 +1,75 @@
+import { describe, expect, it } from 'vitest'
+import { blockedReason, detailFor } from './ProviderControl'
+import type { AgentProvider } from '@/lib/bindings'
+
+const READY: AgentProvider = {
+  id: 'copilot',
+  displayName: 'GitHub Copilot',
+  isDefault: true,
+  installed: true,
+  version: '1.0.80',
+  tooOld: false,
+  canDoReadOnlyWork: true,
+  readOnlyLimit: null,
+}
+
+describe('blockedReason', () => {
+  it('lets an installed, capable tool through', () => {
+    expect(blockedReason(READY, true)).toBeUndefined()
+    expect(blockedReason(READY, false)).toBeUndefined()
+  })
+
+  it('says a missing tool is not installed, not that it is broken', () => {
+    const reason = blockedReason({ ...READY, installed: false, version: null }, false)
+    expect(reason).toBe('Not installed on this computer.')
+  })
+
+  it('tells the user an old tool can be fixed by updating it', () => {
+    // "Too old" and "not installed" need different words: one asks for an
+    // install, the other for an update. Collapsing them sends the user to do
+    // the wrong thing.
+    const reason = blockedReason({ ...READY, installed: false, tooOld: true, version: '0.9.0' }, false)
+    expect(reason).toContain('0.9.0')
+    expect(reason).toContain('Updating')
+  })
+
+  it('blocks a tool that cannot promise read-only, but only for read-only work', () => {
+    const opencode: AgentProvider = {
+      ...READY,
+      id: 'opencode',
+      displayName: 'opencode',
+      isDefault: false,
+      canDoReadOnlyWork: false,
+      readOnlyLimit: 'opencode has no way to be told to leave your files alone.',
+    }
+    expect(blockedReason(opencode, true)).toContain('opencode')
+    // The same tool is perfectly usable where writing is the point.
+    expect(blockedReason(opencode, false)).toBeUndefined()
+  })
+
+  it('reports a missing install before a read-only limit', () => {
+    // Both are true at once for an uninstalled tool that also cannot promise
+    // read-only. Installing it is the actionable step, so that is the one to
+    // name; leading with the capability limit would read as "do not bother".
+    const both: AgentProvider = {
+      ...READY,
+      installed: false,
+      version: null,
+      canDoReadOnlyWork: false,
+      readOnlyLimit: 'cannot be told to leave your files alone',
+    }
+    expect(blockedReason(both, true)).toBe('Not installed on this computer.')
+  })
+
+  it('falls back to its own words when the backend sent no explanation', () => {
+    const noText: AgentProvider = { ...READY, canDoReadOnlyWork: false, readOnlyLimit: null }
+    expect(blockedReason(noText, true)).toBeTruthy()
+  })
+})
+
+describe('detailFor', () => {
+  it('distinguishes a tool usable anywhere from one limited to write work', () => {
+    expect(detailFor(READY)).toContain('any kind of chat')
+    expect(detailFor({ ...READY, canDoReadOnlyWork: false })).toContain('allowed to change files')
+  })
+})
