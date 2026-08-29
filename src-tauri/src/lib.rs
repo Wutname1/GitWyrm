@@ -13,6 +13,7 @@ mod perf;
 mod scrub;
 mod settings;
 mod snap_layouts;
+mod snip;
 mod state;
 mod telemetry;
 mod watcher;
@@ -73,6 +74,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::external::open_in_opencode,
             commands::opencode::opencode_available,
             commands::openspec::openspec_recheck_cli,
+            commands::snip::snip_detect,
+            commands::snip::snip_gain,
             commands::openspec::openspec_draft_change,
             commands::openspec::openspec_create_drafted_change,
             commands::openspec::openspec_ask,

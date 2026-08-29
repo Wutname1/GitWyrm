@@ -28,6 +28,7 @@ pub mod repo_icon;
 pub mod scan;
 pub mod shell_integration;
 pub mod signing;
+pub mod snip;
 pub mod spec_desk;
 pub mod spec_link;
 pub mod staging;
