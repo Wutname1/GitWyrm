@@ -198,18 +198,16 @@ export function SessionComposer({ sessionId }: { sessionId: string | null }) {
 
           <TeamShapeControl team={team} onChange={setTeam} open={teamOpen} onOpenChange={setTeamOpen} />
 
-          {/* Ask never changes files, so a tool that cannot be told to leave
-              them alone cannot run it. The picker needs to know that to
-              explain why an option is unavailable rather than letting the
-              user choose one that then refuses at launch. Plan is not
-              read-only here: this only covers what the tool may do once
-              started, and a started Plan writes. */}
+          {/* Whether this chat is read-only is answered by the backend, not
+              worked out here: the rule depends on the session's intent and
+              whether a Plan has started, and an earlier version derived it
+              from the mode pill and disagreed with the engine's own gate. */}
           <ProviderControl
+            sessionId={sessionId}
             provider={provider}
             onChange={setProvider}
             open={providerOpen}
             onOpenChange={setProviderOpen}
-            readOnly={mode === 'Ask'}
           />
 
           <span className="flex-1" />

@@ -68,8 +68,18 @@ describe('blockedReason', () => {
 })
 
 describe('detailFor', () => {
-  it('distinguishes a tool usable anywhere from one limited to write work', () => {
-    expect(detailFor(READY)).toContain('any kind of chat')
-    expect(detailFor({ ...READY, canDoReadOnlyWork: false })).toContain('allowed to change files')
+  it('says a fully capable tool can be used anywhere', () => {
+    expect(detailFor(READY, true)).toContain('any kind of chat')
+    expect(detailFor(READY, false)).toContain('any kind of chat')
+  })
+
+  it('names the limit only on a chat where it actually bites', () => {
+    const limited = { ...READY, canDoReadOnlyWork: false }
+    // On a read-only chat the limit is the reason the row is disabled.
+    expect(detailFor(limited, true)).toContain('allowed to change files')
+    // On a chat that may write, this tool is an ordinary choice. Printing
+    // its limitation under an enabled row reads as a warning against
+    // picking something that is perfectly fine here.
+    expect(detailFor(limited, false)).not.toContain('only')
   })
 })

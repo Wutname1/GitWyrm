@@ -210,15 +210,21 @@ async openspecRecheckCli() : Promise<Result<CliInfo, string>> {
 }
 },
 /**
- * Every tool this build knows how to drive, with its current install state.
+ * Every tool this build knows how to drive, with its current install state,
+ * plus whether the given chat is read-only.
  * 
  * Probing is per-tool and cached only when a tool is found, so a user who
  * installs one while the picker is open sees it appear on the next open
  * rather than after a restart.
+ * 
+ * A `session_id` that cannot be read falls back to `read_only: true`. That is
+ * the safe direction: it may grey out a tool that would have worked, which is
+ * visible and recoverable, rather than offering one that fails at launch
+ * after the user's message has already been sent.
  */
-async agentProvidersList() : Promise<Result<AgentProvider[], string>> {
+async agentProvidersList(sessionId: string | null) : Promise<Result<AgentProviderChoices, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("agent_providers_list") };
+    return { status: "ok", data: await TAURI_INVOKE("agent_providers_list", { sessionId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -3754,6 +3760,22 @@ canDoReadOnlyWork: boolean;
  * can.
  */
 readOnlyLimit: string | null }
+/**
+ * What the picker needs to render itself for one chat.
+ */
+export type AgentProviderChoices = { providers: AgentProvider[]; 
+/**
+ * Whether this chat may never change files, as the engine's own tool
+ * gate decides it.
+ * 
+ * Answered here rather than in the frontend on purpose. The rule is
+ * `check_tool_capability(intent, started, EditFile)`, which depends on
+ * the session's INTENT and whether a Plan has been started -- not on the
+ * composer's mode. A first attempt derived it from the mode pill and got
+ * a different answer, so the picker offered a tool for a Review chat
+ * that the launch then refused. One authority, asked once.
+ */
+readOnly: boolean }
 /**
  * The full session file on disk: the header plus everything the transcript,
  * executions list, and context panel need.

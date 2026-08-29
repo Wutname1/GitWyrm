@@ -39,17 +39,64 @@ pub struct AgentProvider {
     pub read_only_limit: Option<String>,
 }
 
-/// Every tool this build knows how to drive, with its current install state.
+/// What the picker needs to render itself for one chat.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProviderChoices {
+    pub providers: Vec<AgentProvider>,
+    /// Whether this chat may never change files, as the engine's own tool
+    /// gate decides it.
+    ///
+    /// Answered here rather than in the frontend on purpose. The rule is
+    /// `check_tool_capability(intent, started, EditFile)`, which depends on
+    /// the session's INTENT and whether a Plan has been started -- not on the
+    /// composer's mode. A first attempt derived it from the mode pill and got
+    /// a different answer, so the picker offered a tool for a Review chat
+    /// that the launch then refused. One authority, asked once.
+    pub read_only: bool,
+}
+
+/// Every tool this build knows how to drive, with its current install state,
+/// plus whether the given chat is read-only.
 ///
 /// Probing is per-tool and cached only when a tool is found, so a user who
 /// installs one while the picker is open sees it appear on the next open
 /// rather than after a restart.
+///
+/// A `session_id` that cannot be read falls back to `read_only: true`. That is
+/// the safe direction: it may grey out a tool that would have worked, which is
+/// visible and recoverable, rather than offering one that fails at launch
+/// after the user's message has already been sent.
 #[tauri::command]
 #[specta::specta]
-pub async fn agent_providers_list() -> Result<Vec<AgentProvider>, crate::error::AppError> {
-    tauri::async_runtime::spawn_blocking(list)
-        .await
-        .map_err(|e| crate::error::AppError::Other(e.to_string()))
+pub async fn agent_providers_list(
+    app: tauri::AppHandle,
+    session_id: Option<String>,
+) -> Result<AgentProviderChoices, crate::error::AppError> {
+    let root = crate::agentdesk::store::SessionStoreRoot::resolve(&app)
+        .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
+    tauri::async_runtime::spawn_blocking(move || AgentProviderChoices {
+        providers: list(),
+        read_only: session_id
+            .map(|id| session_is_read_only(&root, &id))
+            .unwrap_or(false),
+    })
+    .await
+    .map_err(|e| crate::error::AppError::Other(e.to_string()))
+}
+
+/// Whether this session can never call a write tool, in either start state.
+///
+/// Mirrors `select::must_not_change_anything` by calling the same gate. A Plan
+/// counts as read-only only until Start: after it, writing is the point, and
+/// greying a tool out there would refuse a usable option.
+fn session_is_read_only(root: &crate::agentdesk::store::SessionStoreRoot, session_id: &str) -> bool {
+    use crate::agentdesk::policy::{check_tool_capability, ToolCapability};
+    let Ok(session) = crate::agentdesk::store::read_session(root, session_id) else {
+        return true;
+    };
+    let started = session.header.graph_started_at.is_some();
+    check_tool_capability(session.header.intent, started, ToolCapability::EditFile).is_err()
 }
 
 fn list() -> Vec<AgentProvider> {
@@ -118,6 +165,84 @@ fn read_only_limit(spec: &registry::AgentSpec) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agentdesk::model::{
+        AgentSession, AgentSessionHeader, SessionIntent, SessionSource, SessionState,
+        CURRENT_SCHEMA_VERSION,
+    };
+    use crate::agentdesk::store::{write_session, SessionStoreRoot};
+
+    fn stored_session(intent: SessionIntent, started: bool) -> (tempfile::TempDir, SessionStoreRoot, String) {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = SessionStoreRoot::at(dir.path().join("agent-desk").join("v1")).expect("root");
+        let header = AgentSessionHeader {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            session_id: "s-1".into(),
+            repo_id: "r".into(),
+            repo_path: "C:/code/p".into(),
+            repo_name: "p".into(),
+            title: "t".into(),
+            source: SessionSource::Manual { repo_id: "r".into() },
+            intent,
+            state: SessionState::Ready,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            unread: false,
+            changed_file_count: 0,
+            active_execution_id: None,
+            archived: false,
+            graph_started_at: started.then(|| "2026-01-01T00:00:00Z".to_string()),
+        };
+        write_session(&root, &AgentSession::new(header)).expect("write");
+        (dir, root, "s-1".to_string())
+    }
+
+    #[test]
+    fn a_review_chat_is_reported_read_only() {
+        // The bug this replaced: the frontend derived read-only from the
+        // composer's mode pill, which defaults to Auto regardless of intent.
+        // A Review chat therefore looked writable, the picker offered a tool
+        // that cannot promise read-only, and the launch refused it after the
+        // user's message had already been sent.
+        for intent in [
+            SessionIntent::Ask,
+            SessionIntent::Explain,
+            SessionIntent::Review,
+            SessionIntent::Summarize,
+        ] {
+            let (_d, root, id) = stored_session(intent, false);
+            assert!(
+                session_is_read_only(&root, &id),
+                "{intent:?} must be read-only whatever the composer shows"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plan_is_read_only_only_until_it_is_started() {
+        let (_d, root, id) = stored_session(SessionIntent::Plan, false);
+        assert!(session_is_read_only(&root, &id), "a plan cannot write before Start");
+
+        let (_d2, root2, id2) = stored_session(SessionIntent::Plan, true);
+        assert!(
+            !session_is_read_only(&root2, &id2),
+            "a started plan writes, so greying a tool out there would refuse a usable option"
+        );
+    }
+
+    #[test]
+    fn a_fix_chat_is_not_read_only() {
+        let (_d, root, id) = stored_session(SessionIntent::Fix, false);
+        assert!(!session_is_read_only(&root, &id));
+    }
+
+    #[test]
+    fn an_unreadable_session_is_treated_as_read_only() {
+        // Fail safe: greying out a tool that would have worked is visible and
+        // recoverable; offering one that then fails is not.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = SessionStoreRoot::at(dir.path().join("agent-desk").join("v1")).expect("root");
+        assert!(session_is_read_only(&root, "does-not-exist"));
+    }
 
     #[test]
     fn every_registered_tool_appears_once() {
@@ -198,6 +323,61 @@ mod tests {
         assert_eq!(short_version("
 
 "), "");
+    }
+
+    /// Which intents can never write, in either start state.
+    ///
+    /// Pins the set the picker greys a tool out for. Checked against
+    /// `check_tool_capability` -- the function the engine's own tool gate
+    /// calls -- rather than `for_intent(..).can_write`, because those two
+    /// disagree for Plan on purpose: the static table says `false` since a
+    /// Plan cannot write *before Start*, while a started Plan may. Reading
+    /// the wrong one of the two would grey out a usable tool for every
+    /// started Plan chat.
+    #[test]
+    fn only_intents_that_never_write_are_treated_as_read_only() {
+        use crate::agentdesk::model::SessionIntent;
+        use crate::agentdesk::policy::{check_tool_capability, ToolCapability};
+
+        let never_writes = |intent: SessionIntent| {
+            [false, true].into_iter().all(|started| {
+                check_tool_capability(intent, started, ToolCapability::EditFile).is_err()
+            })
+        };
+
+        let read_only: Vec<&str> = [
+            (SessionIntent::Ask, "ask"),
+            (SessionIntent::Explain, "explain"),
+            (SessionIntent::Plan, "plan"),
+            (SessionIntent::Fix, "fix"),
+            (SessionIntent::Review, "review"),
+            (SessionIntent::Summarize, "summarize"),
+        ]
+        .into_iter()
+        .filter(|(i, _)| never_writes(*i))
+        .map(|(_, name)| name)
+        .collect();
+
+        assert_eq!(
+            read_only,
+            vec!["ask", "explain", "review", "summarize"],
+            "the picker greys a tool out for exactly these"
+        );
+    }
+
+    /// The half of the Plan contract the list above depends on.
+    #[test]
+    fn plan_is_read_only_before_start_and_writable_after() {
+        use crate::agentdesk::model::SessionIntent;
+        use crate::agentdesk::policy::{check_tool_capability, ToolCapability};
+        assert!(
+            check_tool_capability(SessionIntent::Plan, false, ToolCapability::EditFile).is_err(),
+            "a plan must not write before Start"
+        );
+        assert!(
+            check_tool_capability(SessionIntent::Plan, true, ToolCapability::EditFile).is_ok(),
+            "a started plan writes, which is why plan is not in READ_ONLY_INTENTS"
+        );
     }
 
     #[test]

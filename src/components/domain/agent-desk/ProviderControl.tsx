@@ -28,28 +28,32 @@ import { cn } from '@/lib/utils'
  * probe caches a found tool but never a missing one, so this stays cheap.
  */
 export function ProviderControl({
+  sessionId,
   provider,
   onChange,
   open,
   onOpenChange,
-  /** True while this chat may only look, never change files. */
-  readOnly,
 }: {
+  sessionId: string | null
   provider: string | null
   onChange: (provider: string | null) => void
   open: boolean
   onOpenChange: (open: boolean) => void
-  readOnly: boolean
 }) {
   const query = useQuery({
-    queryKey: keys.agentProviders,
-    queryFn: async () => unwrap(await commands.agentProvidersList()),
+    queryKey: keys.agentProviders(sessionId),
+    queryFn: async () => unwrap(await commands.agentProvidersList(sessionId)),
     // Only ask while the list is on screen.
     enabled: open,
     staleTime: 0,
   })
 
-  const rows = query.data ?? []
+  const rows = query.data?.providers ?? []
+  // Whether this chat may change files is the backend's answer, not one
+  // re-derived here. An earlier version worked it out from the composer's
+  // mode pill and got a different answer than the engine's own tool gate, so
+  // the picker offered a tool for a Review chat that the launch then refused.
+  const readOnly = query.data?.readOnly ?? false
   const chosen = rows.find((r) => r.id === provider)
   const label = chosen?.displayName ?? (provider ?? 'Default AI')
 
@@ -73,12 +77,29 @@ export function ProviderControl({
 
         {query.isLoading ? (
           <p className="px-1 py-2 text-2xs text-muted-foreground">Looking for installed AI tools…</p>
+        ) : query.isError ? (
+          // A failed check and an empty list are different problems and need
+          // different words. This one has a button that actually retries,
+          // rather than copy telling the user to try again with nothing to
+          // press.
+          <div className="px-1 py-2">
+            <p className="text-2xs leading-relaxed text-muted-foreground">
+              GitWyrm could not check which AI tools you have.
+            </p>
+            <button
+              type="button"
+              onClick={() => void query.refetch()}
+              className="mt-1.5 rounded border border-border px-1.5 py-0.5 text-2xs font-semibold hover:bg-panel3"
+            >
+              Try again
+            </button>
+          </div>
         ) : rows.length === 0 ? (
           <p className="px-1 py-2 text-2xs leading-relaxed text-muted-foreground">
-            GitWyrm could not check which AI tools you have. Try again in a moment.
+            This build of GitWyrm has no AI tools set up.
           </p>
         ) : (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5" role="listbox" aria-label="AI tool">
             <ProviderRow
               label="Default AI"
               detail="Use whichever tool GitWyrm is set up to use."
@@ -94,7 +115,7 @@ export function ProviderControl({
                 <ProviderRow
                   key={row.id}
                   label={row.displayName}
-                  detail={detailFor(row)}
+                  detail={detailFor(row, readOnly)}
                   note={row.isDefault ? 'default' : row.version ?? undefined}
                   selected={provider === row.id}
                   blocked={blocked}
@@ -132,9 +153,13 @@ export function blockedReason(row: AgentProvider, readOnly: boolean): string | u
   return undefined
 }
 
-export function detailFor(row: AgentProvider): string {
+export function detailFor(row: AgentProvider, readOnly: boolean): string {
   if (row.canDoReadOnlyWork) return 'Can be used for any kind of chat.'
-  return 'Can only be used for chats that are allowed to change files.'
+  // Only worth saying where it bites. On a chat that is allowed to change
+  // files this tool is a perfectly ordinary choice, and printing its
+  // limitation under an enabled row reads as a warning about picking it.
+  if (readOnly) return 'Can only be used for chats that are allowed to change files.'
+  return 'Can be used for this chat.'
 }
 
 function ProviderRow({
@@ -156,8 +181,17 @@ function ProviderRow({
   return (
     <button
       type="button"
-      disabled={disabled}
-      onClick={onSelect}
+      // `aria-disabled` rather than `disabled`: a real `disabled` button is
+      // removed from the tab order, so a keyboard or screen-reader user never
+      // reaches the row and never hears why it cannot be used -- which makes
+      // the explanation decorative for exactly the people who most need it
+      // read aloud. Focusable and announced, with the click guarded instead.
+      aria-disabled={disabled}
+      role="option"
+      aria-selected={selected && !disabled}
+      onClick={() => {
+        if (!disabled) onSelect()
+      }}
       // A disabled row still has to be readable: the reason it is disabled is
       // the most useful thing on it, so the text stays legible and only the
       // affordance is dimmed.

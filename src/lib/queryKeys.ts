@@ -43,7 +43,7 @@ export const keys = {
   agentSessionUsage: (sessionId: string) => ['agentSessionUsage', sessionId] as const,
   /** Which AI tools are installed. Not cached across opens: installing one is
    *  exactly what a user does after finding it missing here. */
-  agentProviders: ['agentProviders'] as const,
+  agentProviders: (sessionId: string | null) => ['agentProviders', sessionId ?? 'none'] as const,
   /** The context a lead agent reads for an `openSpecChange`/`openSpecTask` session source. */
   agentSessionOpenspecContext: (sessionId: string) => ['agentSessionOpenspecContext', sessionId] as const,
   /** Active/archived/moved/deleted status of an `openSpecChange`/`openSpecTask` session source. */

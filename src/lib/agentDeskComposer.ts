@@ -6,6 +6,7 @@ export type ComposerMode = 'Ask' | 'Plan' | 'Auto'
 /** UI-facing team shape, matching the mockup's Solo/Lead + helpers choice. */
 export type ComposerTeam = 'solo' | 'helpers'
 
+
 /**
  * Plain-language note shown next to the mode pills (tasks.md 6.1).
  *

@@ -3,8 +3,7 @@ import {
   MODE_NOTES,
   canSendComposerDraft,
   modeToExecutionMode,
-  teamToExecutionTeam,
-} from './agentDeskComposer'
+  teamToExecutionTeam } from './agentDeskComposer'
 
 describe('canSendComposerDraft', () => {
   it('allows sending non-empty trimmed text with a session and nothing in flight', () => {
