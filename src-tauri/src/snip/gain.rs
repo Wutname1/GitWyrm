@@ -16,6 +16,23 @@
 //! `"daily": null` rather than a failure, and there are no `omitempty` tags to
 //! turn a missing list into an absent key. Both lists are read as `Option`, and
 //! the summary too, since a nil summary marshals to `null` the same way.
+//!
+//! # Why every number is defaulted, and one carries an alias
+//!
+//! These field names are inferred from Go's own defaults, not from a schema
+//! `snip` publishes, so a rename upstream is invisible until it happens. Serde
+//! treats a missing field as a hard error by default, which would turn one
+//! renamed key into "your working install is broken" -- so every number
+//! defaults to zero and the report still renders.
+//!
+//! `TotalTimeMs` additionally accepts `TotalTimeMS`: Go's convention for a
+//! trailing acronym is genuinely split, and this is the only field here where
+//! the spelling is a coin flip.
+//!
+//! Numbers are `i32`, not `i64`: specta refuses to export BigInt types through
+//! the bindings, and every other exported number in this crate is `u32`/`i32`
+//! or `f64`. Signed rather than unsigned because a savings figure can be
+//! negative if a filter ever made output longer than input.
 
 use std::process::Command;
 use std::time::Duration;
@@ -50,13 +67,18 @@ const LITE_BUILD_MARKER: &str = "requires full build";
 #[serde(rename_all = "PascalCase")]
 pub struct SnipSummary {
     /// How many commands `snip` has filtered.
-    pub total_commands: i64,
+    #[serde(default)]
+    pub total_commands: i32,
     /// Tokens saved in total, summed over those commands.
-    pub total_saved: i64,
+    #[serde(default)]
+    pub total_saved: i32,
     /// Mean percentage saved per command.
+    #[serde(default)]
     pub avg_savings: f64,
     /// Total time those commands spent running, in milliseconds.
-    pub total_time_ms: i64,
+    #[serde(default)]
+    #[serde(alias = "TotalTimeMS")]
+    pub total_time_ms: i32,
 }
 
 /// One day's worth of savings.
@@ -67,10 +89,15 @@ pub struct SnipDaily {
     /// never compared, and parsing it would invent a format contract that the
     /// CLI has not promised.
     pub day: String,
-    pub commands: i64,
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub saved_tokens: i64,
+    #[serde(default)]
+    pub commands: i32,
+    #[serde(default)]
+    pub input_tokens: i32,
+    #[serde(default)]
+    pub output_tokens: i32,
+    #[serde(default)]
+    pub saved_tokens: i32,
+    #[serde(default)]
     pub avg_savings: f64,
 }
 
@@ -83,10 +110,15 @@ pub struct SnipDaily {
 #[serde(rename_all = "PascalCase")]
 pub struct SnipByCommand {
     pub command: String,
-    pub count: i64,
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub saved_tokens: i64,
+    #[serde(default)]
+    pub count: i32,
+    #[serde(default)]
+    pub input_tokens: i32,
+    #[serde(default)]
+    pub output_tokens: i32,
+    #[serde(default)]
+    pub saved_tokens: i32,
+    #[serde(default)]
     pub avg_savings: f64,
 }
 

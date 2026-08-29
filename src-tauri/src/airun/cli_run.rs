@@ -295,17 +295,32 @@ pub async fn run_task(
     };
 
     // Emitted before the run's terminal step so the durable record carries
-    // the cost even for a run that ends as Failed or Stopped -- a cancelled
-    // turn still spent tokens, and dropping its usage would quietly
-    // under-report what the session actually cost.
-    if let Ok(o) = &outcome {
-        if let Some(usage) = &o.usage {
-            sink(
-                RunState::Working,
-                RunStep::Usage {
-                    usage: usage.clone(),
-                },
-            );
+    // the cost even for a run that ends as Stopped rather than Finished -- a
+    // cancelled turn still spent tokens, and dropping its usage would quietly
+    // under-report what the session cost. A clean cancel still answers
+    // `session/prompt` (the protocol requires it), so its usage arrives here
+    // like any other turn's.
+    //
+    // What CANNOT be recovered is the turn that never answered at all: the
+    // cancel-ACK timeout below breaks with an `Err`, and the usage for that
+    // turn was in the reply that never came. That is a real under-report on
+    // exactly the most expensive runs (a budget-blown agent that then ignored
+    // its cancel), and it is a limit of the transport rather than something
+    // this function can paper over -- there is no number here to record.
+    // Guessing one would be worse than the gap.
+    match &outcome {
+        Ok(o) => {
+            if let Some(usage) = &o.usage {
+                sink(
+                    RunState::Working,
+                    RunStep::Usage {
+                        usage: usage.clone(),
+                    },
+                );
+            }
+        }
+        Err(e) => {
+            log::info!("this turn ended without reporting what it cost: {e}");
         }
     }
 

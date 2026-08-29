@@ -93,29 +93,29 @@ impl Denial {
 /// session and a session that can edit the user's files.
 #[derive(Debug, Clone, Copy)]
 pub struct DeniableTools {
-    pub shell: Option<&'static str>,
-    pub network: Option<&'static str>,
-    pub write: Option<&'static str>,
+    pub shell: &'static [&'static str],
+    pub network: &'static [&'static str],
+    pub write: &'static [&'static str],
 }
 
 impl DeniableTools {
     /// Translates one of GitWyrm's own capability words into this tool's name
     /// for it, or `None` when the tool has no such concept.
-    fn name_for(&self, gitwyrm_name: &str) -> Option<&'static str> {
+    pub(crate) fn name_for(&self, gitwyrm_name: &str) -> &'static [&'static str] {
         match gitwyrm_name {
             "shell" => self.shell,
             "url" => self.network,
             "write" => self.write,
-            _ => None,
+            _ => &[],
         }
     }
 }
 
 /// The empty set, for agents whose denial takes no tool names.
 const NO_TOOL_NAMES: DeniableTools = DeniableTools {
-    shell: None,
-    network: None,
-    write: None,
+    shell: &[],
+    network: &[],
+    write: &[],
 };
 
 /// Everything GitWyrm needs to know to find and start one agent.
@@ -195,17 +195,30 @@ impl AgentSpec {
         match self.denial {
             Denial::LaunchFlags { deny_flag } => {
                 for tool in denied {
-                    if let Some(name) = self.tool_names.name_for(tool) {
+                    for name in self.tool_names.name_for(tool) {
                         args.push(format!("{deny_flag}={name}"));
                     }
                 }
             }
             Denial::ReadOnlyMode { flag } => {
-                // No per-tool granularity: the mode is either on or off. It
-                // goes on whenever anything at all is denied, which is the
-                // safe reading -- a partial denial this tool cannot express
-                // becomes a total one rather than none.
-                if !denied.is_empty() {
+                // No per-tool granularity: the mode is either on or off, and
+                // on means the session cannot change anything at all. So it
+                // turns on for a WRITE denial specifically, not for any
+                // denial.
+                //
+                // "any denial" was wrong in a way that hid behind a passing
+                // test: `shell` and `url` are denied on every run, including
+                // Fix, so the flag was added unconditionally and a Fix
+                // session launched unable to edit a file -- the one thing it
+                // exists to do. The test only checked the empty-denial case,
+                // which production never produces.
+                //
+                // The cost of this narrower rule is that a Fix session on
+                // such a tool keeps shell and network access it was meant to
+                // lose. That is the honest trade for a tool with one switch,
+                // and it is why `Denial::ReadOnlyMode` is not treated as
+                // equivalent to per-tool denial anywhere the promise matters.
+                if denied.contains(&"write") {
                     args.push(flag.to_string());
                 }
             }
@@ -225,7 +238,7 @@ impl AgentSpec {
         }
         let names: Vec<&str> = denied
             .iter()
-            .filter_map(|t| self.tool_names.name_for(t))
+            .flat_map(|t| self.tool_names.name_for(t).iter().copied())
             .collect();
         if names.is_empty() {
             return None;
@@ -262,9 +275,9 @@ pub const AGENTS: &[AgentSpec] = &[
         // ignored rather than rejected, so it would look like it worked while
         // filtering nothing.
         tool_names: DeniableTools {
-            shell: Some("shell"),
-            network: Some("url"),
-            write: Some("write"),
+            shell: &["shell"],
+            network: &["url"],
+            write: &["write"],
         },
     },
     // Gemini CLI. `--acp` is the current flag; `--experimental-acp` still
@@ -312,12 +325,21 @@ pub const AGENTS: &[AgentSpec] = &[
         version_args: &["--version"],
         denial: Denial::SessionMeta,
         // Claude Code's own tool names, as they appear in `disallowedTools`.
-        // The adapter matches on exact names, so these are spelled the way
-        // Claude Code spells them rather than the way GitWyrm does.
+        // The adapter matches on EXACT names, so these are spelled the way
+        // Claude Code spells them rather than the way GitWyrm does -- and
+        // every name for a capability has to be listed, because a name left
+        // out is a tool that stays available.
+        //
+        // `Write` alone would not have been enough: Claude Code edits files
+        // through `Edit`, `MultiEdit` and `NotebookEdit` as well, so denying
+        // only `Write` would leave a read-only session able to change files
+        // by another name. Likewise `WebFetch` and `WebSearch` are separate
+        // tools. `Bash` covers shell; `BashOutput` and `KillShell` only
+        // manage a shell that `Bash` alone can start.
         tool_names: DeniableTools {
-            shell: Some("Bash"),
-            network: Some("WebFetch"),
-            write: Some("Write"),
+            shell: &["Bash", "BashOutput", "KillShell"],
+            network: &["WebFetch", "WebSearch"],
+            write: &["Write", "Edit", "MultiEdit", "NotebookEdit"],
         },
     },
     // opencode. ACP is a SUBCOMMAND (`opencode acp`), not a flag.
@@ -522,10 +544,28 @@ mod tests {
     /// whole session in read-only mode. Doing less would be the unsafe
     /// reading.
     #[test]
-    fn gemini_turns_any_denial_into_whole_session_read_only_mode() {
+    fn gemini_turns_a_write_denial_into_whole_session_read_only_mode() {
         let gemini = find("gemini").expect("gemini is in the table");
         assert_eq!(gemini.launch_args(&["write"]), vec!["--acp", "--approval-mode=plan"]);
         assert_eq!(gemini.launch_args(&[]), vec!["--acp"]);
+    }
+
+    /// A Fix run denies `shell` and `url` but NOT `write`, and must still be
+    /// able to change files.
+    ///
+    /// This is the case the old test missed: it only checked the empty-denial
+    /// input, which production never produces (`ALWAYS_DENIED_TOOLS` puts
+    /// `shell` and `url` on every run), so a rule of "any denial turns on
+    /// read-only mode" looked correct while silently making every Gemini Fix
+    /// session unable to write.
+    #[test]
+    fn a_write_capable_run_is_not_forced_into_read_only_mode() {
+        let gemini = find("gemini").expect("gemini is in the table");
+        let args = gemini.launch_args(&["shell", "url"]);
+        assert!(
+            !args.iter().any(|a| a.contains("approval-mode")),
+            "a run allowed to write must not launch in read-only mode, got {args:?}"
+        );
     }
 
     /// The Claude adapter's denial is in the protocol, so nothing about it
@@ -596,11 +636,71 @@ mod tests {
         for spec in AGENTS {
             let names_tools = matches!(spec.denial, Denial::LaunchFlags { .. } | Denial::SessionMeta);
             if names_tools {
-                assert!(spec.tool_names.shell.is_some(), "{} shell name", spec.id);
-                assert!(spec.tool_names.network.is_some(), "{} network name", spec.id);
-                assert!(spec.tool_names.write.is_some(), "{} write name", spec.id);
+                assert!(!spec.tool_names.shell.is_empty(), "{} shell name", spec.id);
+                assert!(!spec.tool_names.network.is_empty(), "{} network name", spec.id);
+                assert!(!spec.tool_names.write.is_empty(), "{} write name", spec.id);
             }
         }
+    }
+
+    /// Claude Code writes files through more than one tool, and
+    /// `disallowedTools` matches on exact names. Denying only `Write` would
+    /// leave `Edit`/`MultiEdit`/`NotebookEdit` available to a session that
+    /// was promised it could not change anything -- the exact hole this list
+    /// exists to close, and one nothing else would catch.
+    #[test]
+    fn claudes_write_denial_covers_every_tool_that_edits_a_file() {
+        let claude = find("claude").expect("the Claude row must exist");
+        let meta = claude
+            .session_meta(&["write"])
+            .expect("a write denial must produce a session _meta");
+        let denied = meta["claudeCode"]["options"]["disallowedTools"]
+            .as_array()
+            .expect("disallowedTools must be a list")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>();
+        for tool in ["Write", "Edit", "MultiEdit", "NotebookEdit"] {
+            assert!(
+                denied.contains(&tool),
+                "{tool} can change a file and must be denied, got {denied:?}"
+            );
+        }
+    }
+
+    /// The same reasoning for the other two gates: one name per capability
+    /// was never enough for a tool that spells a capability several ways.
+    #[test]
+    fn claudes_shell_and_network_denials_cover_their_aliases() {
+        let claude = find("claude").expect("the Claude row must exist");
+        let meta = claude
+            .session_meta(&["shell", "url"])
+            .expect("a denial must produce a session _meta");
+        let denied = meta["claudeCode"]["options"]["disallowedTools"]
+            .as_array()
+            .expect("disallowedTools must be a list")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>();
+        for tool in ["Bash", "WebFetch", "WebSearch"] {
+            assert!(denied.contains(&tool), "{tool} must be denied, got {denied:?}");
+        }
+    }
+
+    /// A tool that names several aliases must emit a separate deny flag for
+    /// each: one flag carrying a comma-joined list would be read by the CLI
+    /// as a single tool with a very strange name, and would filter nothing.
+    #[test]
+    fn each_denied_alias_becomes_its_own_launch_flag() {
+        let copilot = find("copilot").expect("the Copilot row must exist");
+        let args = copilot.launch_args(&["shell", "url", "write"]);
+        for expected in ["--deny-tool=shell", "--deny-tool=url", "--deny-tool=write"] {
+            assert!(args.contains(&expected.to_string()), "missing {expected} in {args:?}");
+        }
+        assert!(
+            !args.iter().any(|a| a.contains(',')),
+            "a deny flag must name one tool, got {args:?}"
+        );
     }
 
     #[test]

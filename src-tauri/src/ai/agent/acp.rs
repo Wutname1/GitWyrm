@@ -124,8 +124,21 @@ fn parse_turn_usage(res: &Value) -> Option<crate::agentdesk::model::TurnUsage> {
         .or_else(|| res.get("meta").and_then(|m| m.get("usage")))?;
 
     /// Reads the first present spelling of a count, as a whole number.
-    fn count(node: &Value, names: &[&str]) -> Option<u64> {
-        names.iter().find_map(|n| node.get(*n)?.as_u64())
+    ///
+    /// `as_u64` first, then `as_f64` for an agent that serializes counts as
+    /// floats (`1200.0`) -- JSON has one number type, and a provider that
+    /// emits a trailing `.0` would otherwise report nothing at all rather
+    /// than failing visibly. Saturated into `u32`, the width the bindings can
+    /// carry, so an absurd figure clamps instead of wrapping to a small one.
+    fn count(node: &Value, names: &[&str]) -> Option<u32> {
+        let raw = names.iter().find_map(|n| {
+            let v = node.get(*n)?;
+            v.as_u64().or_else(|| {
+                let f = v.as_f64()?;
+                (f.is_finite() && f >= 0.0).then_some(f.round() as u64)
+            })
+        })?;
+        Some(raw.min(u32::MAX as u64) as u32)
     }
 
     let usage = crate::agentdesk::model::TurnUsage {
@@ -155,7 +168,7 @@ fn parse_turn_usage(res: &Value) -> Option<crate::agentdesk::model::TurnUsage> {
             .iter()
             .find_map(|n| node.get(*n)?.as_f64())
             .filter(|c| c.is_finite() && *c >= 0.0)
-            .map(|c| (c * 1_000_000.0).round() as u64),
+            .map(|c| (c * 1_000_000.0).round().min(u32::MAX as f64) as u32),
     };
 
     // An empty object is the same as no object: report nothing rather than a

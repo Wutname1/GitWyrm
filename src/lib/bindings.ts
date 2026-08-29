@@ -210,6 +210,35 @@ async openspecRecheckCli() : Promise<Result<CliInfo, string>> {
 }
 },
 /**
+ * Whether `snip` is installed, and which version answered.
+ * 
+ * Safe to call repeatedly: a found result is cached, and a "not found" is
+ * re-probed so installing the tool is noticed without restarting GitWyrm.
+ */
+async snipDetect() : Promise<Result<SnipState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("snip_detect") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * How many tokens `snip` has saved, as it has recorded them.
+ * 
+ * Never fails for the ordinary reasons -- not installed, nothing recorded yet,
+ * a build without the tracking database -- because each of those is a state
+ * the UI should describe in its own words rather than an error dialog.
+ */
+async snipGain() : Promise<Result<SnipGainOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("snip_gain") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Draft a change with the AI. **Writes nothing.**
  * 
  * The returned draft lives in the frontend until the user reviews it and
@@ -4798,6 +4827,16 @@ integrationWorktreePath?: string | null;
  */
 reviewExecutionId?: string | null; 
 /**
+ * What this execution actually cost, as the provider reported it.
+ * 
+ * `None` for an execution whose provider reported nothing -- which is a
+ * different fact from "it cost zero" and is why this is an `Option`
+ * rather than a defaulted-to-0 struct. Accumulated across the turns of
+ * one execution by `bridge::apply_run_event`; summed across executions
+ * by `commands::agent_desk::session_usage_at`.
+ */
+usage?: ExecutionUsage | null; 
+/**
  * Task 3.3 ("block Start until refreshed/accepted"): set only on a
  * LEAD's own execution record, and only once the user explicitly chose
  * "Start anyway" in front of a staleness warning
@@ -4813,6 +4852,55 @@ acceptedStaleContextFingerprint?: string | null }
  * `solo | lead`.
  */
 export type ExecutionTeam = "solo" | "lead"
+/**
+ * What one execution cost, accumulated over its turns.
+ * 
+ * Every field is optional for the same reason the IPC-facing `SessionUsage`
+ * is: a provider that reports prompt tokens but not cost must not be turned
+ * into a zero-dollar run. `None` means "not reported", never "zero".
+ * 
+ * Counts are `u64` because they are whole tokens; cost is `f64` because it is
+ * money and arrives from the provider already divided.
+ */
+export type ExecutionUsage = { 
+/**
+ * Tokens sent to the model, summed over this execution's turns.
+ * 
+ * `u32` for the same binding reason as `cost_micro_usd`; the ceiling is
+ * over four billion tokens in one execution.
+ */
+inputTokens?: number | null; 
+/**
+ * Tokens the model produced, summed over this execution's turns.
+ */
+outputTokens?: number | null; 
+/**
+ * Input tokens served from the provider's prompt cache. A subset of
+ * `input_tokens`, not an addition to it -- kept separate because it is
+ * the number that explains a surprisingly small bill.
+ */
+cachedInputTokens?: number | null; 
+/**
+ * What the provider said this cost, in MICRO-USD (millionths of a
+ * dollar). Only ever set from a provider-reported figure; GitWyrm never
+ * multiplies tokens by a price table of its own, because that table goes
+ * stale silently and a wrong dollar figure is worse than none.
+ * 
+ * An integer rather than an `f64` because `RunStep` (which carries a
+ * `TurnUsage`) derives `Eq`, which `f64` cannot satisfy. Micro-USD
+ * because per-turn costs are routinely below a cent.
+ * 
+ * `u32` rather than `u64` because specta refuses to export BigInt types
+ * through the bindings, and every other exported number in this crate is
+ * `u32` or `f64`. The ceiling is about $4,294 in one execution, far past
+ * any real run, and the adds saturate rather than wrap.
+ */
+costMicroUsd?: number | null; 
+/**
+ * How many model turns this execution took. Always known, because
+ * GitWyrm counts them itself rather than asking the provider.
+ */
+turns?: number }
 /**
  * One external session as an adapter's `list` reports it -- enough to render
  * a picker row before any message content is read.
@@ -6350,6 +6438,16 @@ export type RunStep =
  */
 { kind: "adapted"; text: string } | 
 /**
+ * What the turn cost, as the provider reported it.
+ * 
+ * Not a transcript message: it updates the execution's usage total and
+ * is never shown as a row in the conversation. Emitted at most once per
+ * turn, and only when the provider actually reported numbers -- a
+ * provider that reports nothing produces no `Usage` step at all, which
+ * is what keeps "not measured" distinguishable from "cost zero".
+ */
+{ kind: "usage"; usage: TurnUsage } | 
+/**
  * The run ended.
  */
 { kind: "ended"; state: RunState; detail: string }
@@ -6998,6 +7096,101 @@ missingSigningKey: boolean;
  * the user hunting for a setting that is not where they are looking.
  */
 signingScope: string | null }
+/**
+ * Savings attributed to one command.
+ * 
+ * `snip` returns at most ten of these -- the limit is hardcoded in its query,
+ * not something we ask for -- so this is a top-ten list, never an exhaustive
+ * one. Anything built on it should say "top commands", not "all commands".
+ */
+export type SnipByCommand = { Command: string; Count?: number; InputTokens?: number; OutputTokens?: number; SavedTokens?: number; AvgSavings?: number }
+/**
+ * One day's worth of savings.
+ */
+export type SnipDaily = { 
+/**
+ * The day, as `snip` formatted it. Kept as text: it is only ever shown,
+ * never compared, and parsing it would invent a format contract that the
+ * CLI has not promised.
+ */
+Day: string; Commands?: number; InputTokens?: number; OutputTokens?: number; SavedTokens?: number; AvgSavings?: number }
+/**
+ * What came of asking for the report.
+ * 
+ * A typed outcome rather than a `Result` with a string in it: every one of
+ * these is a state the UI should describe differently, and only the last is
+ * something that went wrong. Flattening them into an error would leave the
+ * screen unable to tell "you have not used it yet" from "it is broken".
+ */
+export type SnipGainOutcome = 
+/**
+ * The report was read.
+ */
+{ kind: "available"; report: SnipGainReport } | 
+/**
+ * No `snip` on this machine, so there is nothing to report on.
+ */
+{ kind: "notInstalled" } | 
+/**
+ * `snip` is installed but has not recorded anything yet -- a fresh install,
+ * or one that has not wrapped a command. Not a failure, and the difference
+ * matters: the answer here is "use it once", not "something is wrong".
+ */
+{ kind: "noData" } | 
+/**
+ * This `snip` was built without the tracking database, so it cannot report
+ * savings at all. A build-time choice, permanent for this binary, and only
+ * fixable by installing a full build -- which is why it is its own state
+ * rather than a generic failure the user would keep retrying.
+ */
+{ kind: "liteBuild" } | 
+/**
+ * Something else went wrong. `detail` is the CLI's own text, for the log
+ * and for a diagnostics view; the UI wraps it in plain language.
+ */
+{ kind: "failed"; detail: string }
+/**
+ * The whole report, exactly as `snip gain --json` shapes it.
+ */
+export type SnipGainReport = { summary: SnipSummary | null; daily: SnipDaily[] | null; by_command: SnipByCommand[] | null }
+/**
+ * What discovery found.
+ */
+export type SnipState = 
+/**
+ * Found, and it answered `--version`.
+ * 
+ * No version floor. GitWyrm only reads what `snip` reports; it does not
+ * drive any interface that could break between releases, so refusing an
+ * older install would deny the user a working tool for no gain.
+ */
+{ kind: "ready"; version: string; path: string } | 
+/**
+ * Nothing on PATH or in a known install location.
+ */
+{ kind: "notFound" }
+/**
+ * Totals across everything `snip` has recorded.
+ * 
+ * PascalCase on the wire: these are untagged Go struct fields.
+ */
+export type SnipSummary = { 
+/**
+ * How many commands `snip` has filtered.
+ */
+TotalCommands?: number; 
+/**
+ * Tokens saved in total, summed over those commands.
+ */
+TotalSaved?: number; 
+/**
+ * Mean percentage saved per command.
+ */
+AvgSavings?: number; 
+/**
+ * Total time those commands spent running, in milliseconds.
+ */
+TotalTimeMs?: number }
 /**
  * One Visual Studio solution found inside a repository.
  */
@@ -7697,6 +7890,14 @@ available: string | null;
  * Whether a download would change anything.
  */
 updateAvailable: boolean }
+/**
+ * One turn's worth of provider-reported usage, before accumulation.
+ * 
+ * Separate from [`ExecutionUsage`] because a turn reports a delta while the
+ * record holds a total, and conflating the two is how double-counting
+ * happens.
+ */
+export type TurnUsage = { inputTokens?: number | null; outputTokens?: number | null; cachedInputTokens?: number | null; costMicroUsd?: number | null }
 export type TutorialRepo = { 
 /**
  * Working directory to open as a tab.

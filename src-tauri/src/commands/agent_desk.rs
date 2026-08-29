@@ -2091,19 +2091,40 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
         }
     };
 
+    // Turns, not messages. Counting messages counted every streamed note and
+    // every tool activity row, so a three-turn run reported dozens of
+    // "turns". Each execution's own recorded turn count is the real figure.
+    //
+    // Falls back to the message count only when nothing recorded a turn at
+    // all, so a run whose provider reports no usage still shows something
+    // rather than dropping to zero -- but it is labelled `Measured` there,
+    // because a message count is genuinely what GitWyrm measured itself.
     let session_requests = {
-        let n = session
-            .messages
+        let reported: u32 = session
+            .executions
             .iter()
-            .filter(|m| m.execution_id.is_some())
-            .count();
-        if n == 0 {
-            None
-        } else {
+            .filter_map(|e| e.usage.as_ref())
+            .map(|u| u.turns)
+            .sum();
+        if reported > 0 {
             Some(UsageValue {
-                value: n as f64,
-                source: UsageSource::Measured,
+                value: f64::from(reported),
+                source: UsageSource::ProviderReported,
             })
+        } else {
+            let n = session
+                .messages
+                .iter()
+                .filter(|m| m.execution_id.is_some())
+                .count();
+            if n == 0 {
+                None
+            } else {
+                Some(UsageValue {
+                    value: n as f64,
+                    source: UsageSource::Measured,
+                })
+            }
         }
     };
 
@@ -2118,11 +2139,14 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
         for usage in session.executions.iter().filter_map(|e| e.usage.as_ref()) {
             for part in [usage.input_tokens, usage.output_tokens] {
                 if let Some(v) = part {
-                    tokens = Some(tokens.unwrap_or(0).saturating_add(v));
+                    // Widened to u64 for the sum: each execution's own figure
+                    // is u32 (what the bindings can carry), but a session with
+                    // many helpers could in principle total past that.
+                    tokens = Some(tokens.unwrap_or(0).saturating_add(u64::from(v)));
                 }
             }
             if let Some(c) = usage.cost_micro_usd {
-                micro_usd = Some(micro_usd.unwrap_or(0).saturating_add(c));
+                micro_usd = Some(micro_usd.unwrap_or(0).saturating_add(u64::from(c)));
             }
         }
         (

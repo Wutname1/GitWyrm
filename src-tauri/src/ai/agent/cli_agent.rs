@@ -109,7 +109,15 @@ impl CliAgent {
     ///
     /// The version floor and the "not installed" case produce different
     /// sentences, because they need different actions from the user.
-    pub fn discover_agent(spec: &'static AgentSpec, cwd: PathBuf) -> Result<Self, AgentError> {
+    ///
+    /// Private on purpose. It takes a raw [`AgentSpec`] and never consults
+    /// the policy, so a `pub` version would be exactly the gate bypass that
+    /// removing the old `discover` was meant to close -- the same hole under
+    /// a new name. Everything goes through [`Self::discover_for`], which
+    /// chooses the tool by asking the policy first. `connect` re-checks
+    /// regardless, but defence in depth is not a reason to leave the front
+    /// door open.
+    fn discover_agent(spec: &'static AgentSpec, cwd: PathBuf) -> Result<Self, AgentError> {
         let name = spec.display_name;
         match &copilot_cli::detect_agent(spec).state {
             CliState::Ready { path, version } => {
@@ -311,12 +319,25 @@ mod tests {
                         })
                         .unwrap_or(0);
                     let expressed = on_command_line + in_session_meta;
-                    assert_eq!(
-                        expressed,
-                        denied.len(),
-                        "{} dropped a denial from {denied:?} ({intent:?}, started={started})",
+                    // At LEAST one name per refused capability, not exactly
+                    // one: a tool that spells a capability several ways has
+                    // to name them all (Claude Code writes through `Write`,
+                    // `Edit`, `MultiEdit` and `NotebookEdit`), so the count
+                    // is legitimately higher than the number of gates. What
+                    // must never happen is a capability translating to
+                    // nothing, which is what this catches.
+                    assert!(
+                        expressed >= denied.len(),
+                        "{} dropped a denial from {denied:?} ({intent:?}, started={started}): only {expressed} expressed",
                         spec.id
                     );
+                    for gate in &denied {
+                        assert!(
+                            !spec.tool_names.name_for(gate).is_empty(),
+                            "{} has no name for {gate} ({intent:?}, started={started})",
+                            spec.id
+                        );
+                    }
                 }
             }
         }

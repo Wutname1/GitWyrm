@@ -89,6 +89,17 @@ describe('buildUsageRows', () => {
     expect(buildUsageRows(usage)[0].value).toBe('$0.0034')
   })
 
+  it('never rounds a real charge down to nothing', () => {
+    // Cost arrives in millionths of a dollar, so four decimal places is not
+    // enough on its own -- anything under $0.00005 would print "$0.0000",
+    // which is the same "a real charge shown as free" bug in a new place.
+    const usage: SessionUsage = {
+      ...EMPTY,
+      sessionCostUsd: { value: 0.000004, source: 'providerReported' },
+    }
+    expect(buildUsageRows(usage)[0].value).toBe('< $0.0001')
+  })
+
   it('shows a genuine zero cost as $0.00 rather than padding it', () => {
     const usage: SessionUsage = {
       ...EMPTY,

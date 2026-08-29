@@ -168,6 +168,13 @@ function StreamRow({
 
     case 'ended':
       return <Row icon={null} text={step.detail} />
+
+    // Bookkeeping, never a visible row. `aiRunStore` already drops these
+    // before they reach `steps`, so this arm is unreachable in practice --
+    // it exists so the switch stays exhaustive and a future step kind
+    // cannot silently render as an empty list item.
+    case 'usage':
+      return null
   }
 }
 

@@ -24,6 +24,25 @@ function isEstimate(v: UsageValue): boolean {
 }
 
 /**
+ * Money, without ever rounding a real charge down to nothing.
+ *
+ * A single turn routinely costs a fraction of a cent, so plain two-decimal
+ * formatting would print a genuine charge as "$0.00". Adding decimal places
+ * only moves the problem: cost arrives in millionths of a dollar, so four
+ * places still shows anything under $0.00005 as "$0.0000".
+ *
+ * So anything too small to write exactly becomes "< $0.0001" -- true, and
+ * clearly not free. A real zero still prints "$0.00", because a run that cost
+ * nothing should say so plainly rather than hedging.
+ */
+function formatCost(usd: number): string {
+  if (usd <= 0) return '$0.00'
+  if (usd < 0.0001) return '< $0.0001'
+  if (usd < 0.01) return `$${usd.toFixed(4)}`
+  return `$${usd.toFixed(2)}`
+}
+
+/**
  * Builds the usage card's rows from optional, provider-normalized data
  * (architecture.md section 12).
  *
@@ -70,13 +89,7 @@ export function buildUsageRows(usage: SessionUsage): UsageRow[] {
       // reported is not an estimate, and calling it one would undersell a
       // real number the same way inventing one would oversell an absent one.
       label: isEstimate(usage.sessionCostUsd) ? 'Estimated cost' : 'Cost',
-      // Sub-cent runs are the common case for a single turn, so two decimal
-      // places alone would show a real cost as "$0.00". Widen only when the
-      // figure is genuinely small rather than padding every row.
-      value:
-        usage.sessionCostUsd.value > 0 && usage.sessionCostUsd.value < 0.01
-          ? `$${usage.sessionCostUsd.value.toFixed(4)}`
-          : `$${usage.sessionCostUsd.value.toFixed(2)}`,
+      value: formatCost(usage.sessionCostUsd.value),
       isEstimate: isEstimate(usage.sessionCostUsd),
     })
   }

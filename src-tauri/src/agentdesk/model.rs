@@ -407,27 +407,34 @@ pub struct ImportProvenance {
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionUsage {
     /// Tokens sent to the model, summed over this execution's turns.
+    ///
+    /// `u32` for the same binding reason as `cost_micro_usd`; the ceiling is
+    /// over four billion tokens in one execution.
     #[serde(default)]
-    pub input_tokens: Option<u64>,
+    pub input_tokens: Option<u32>,
     /// Tokens the model produced, summed over this execution's turns.
     #[serde(default)]
-    pub output_tokens: Option<u64>,
+    pub output_tokens: Option<u32>,
     /// Input tokens served from the provider's prompt cache. A subset of
     /// `input_tokens`, not an addition to it -- kept separate because it is
     /// the number that explains a surprisingly small bill.
     #[serde(default)]
-    pub cached_input_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u32>,
     /// What the provider said this cost, in MICRO-USD (millionths of a
     /// dollar). Only ever set from a provider-reported figure; GitWyrm never
     /// multiplies tokens by a price table of its own, because that table goes
     /// stale silently and a wrong dollar figure is worse than none.
     ///
-    /// An integer rather than an `f64` for two reasons: money should not
-    /// accumulate rounding error across dozens of turns, and `RunStep` (which
-    /// carries a `TurnUsage`) derives `Eq`, which `f64` cannot satisfy.
-    /// Micro-USD because per-turn costs are routinely below a cent.
+    /// An integer rather than an `f64` because `RunStep` (which carries a
+    /// `TurnUsage`) derives `Eq`, which `f64` cannot satisfy. Micro-USD
+    /// because per-turn costs are routinely below a cent.
+    ///
+    /// `u32` rather than `u64` because specta refuses to export BigInt types
+    /// through the bindings, and every other exported number in this crate is
+    /// `u32` or `f64`. The ceiling is about $4,294 in one execution, far past
+    /// any real run, and the adds saturate rather than wrap.
     #[serde(default)]
-    pub cost_micro_usd: Option<u64>,
+    pub cost_micro_usd: Option<u32>,
     /// How many model turns this execution took. Always known, because
     /// GitWyrm counts them itself rather than asking the provider.
     #[serde(default)]
@@ -442,7 +449,7 @@ impl ExecutionUsage {
     /// one. `turns` increments on every call, including one that reports no
     /// numbers at all -- a turn happened whether or not it was measured.
     pub fn accumulate(&mut self, turn: &TurnUsage) {
-        fn add(slot: &mut Option<u64>, v: Option<u64>) {
+        fn add(slot: &mut Option<u32>, v: Option<u32>) {
             if let Some(v) = v {
                 *slot = Some(slot.unwrap_or(0).saturating_add(v));
             }
@@ -479,13 +486,13 @@ impl ExecutionUsage {
 #[serde(rename_all = "camelCase")]
 pub struct TurnUsage {
     #[serde(default)]
-    pub input_tokens: Option<u64>,
+    pub input_tokens: Option<u32>,
     #[serde(default)]
-    pub output_tokens: Option<u64>,
+    pub output_tokens: Option<u32>,
     #[serde(default)]
-    pub cached_input_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u32>,
     #[serde(default)]
-    pub cost_micro_usd: Option<u64>,
+    pub cost_micro_usd: Option<u32>,
 }
 
 impl TurnUsage {
@@ -861,14 +868,14 @@ mod tests {
     #[test]
     fn accumulation_saturates_rather_than_overflowing() {
         let mut total = ExecutionUsage {
-            input_tokens: Some(u64::MAX),
+            input_tokens: Some(u32::MAX),
             ..Default::default()
         };
         total.accumulate(&TurnUsage {
             input_tokens: Some(10),
             ..Default::default()
         });
-        assert_eq!(total.input_tokens, Some(u64::MAX));
+        assert_eq!(total.input_tokens, Some(u32::MAX));
     }
 
     #[test]

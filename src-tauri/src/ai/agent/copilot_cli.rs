@@ -384,9 +384,9 @@ mod tests {
             version_args: &["--version"],
             denial: registry::Denial::None,
             tool_names: registry::DeniableTools {
-                shell: None,
-                network: None,
-                write: None,
+                shell: &[],
+                network: &[],
+                write: &[],
             },
         };
 

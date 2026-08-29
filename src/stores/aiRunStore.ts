@@ -42,6 +42,18 @@ export const useAiRunStore = create<AiRunStore>((set) => ({
         return s
       }
       const base = current ?? EMPTY
+      // Usage is bookkeeping, not activity: it carries what the turn cost and
+      // has no place in the visible stream. Dropping it here rather than in
+      // the renderer keeps it out of `latest` too, which would otherwise show
+      // the step's internal summary as the run's status line.
+      if (event.step.kind === 'usage') {
+        return {
+          byRepo: {
+            ...s.byRepo,
+            [event.repo_id]: { ...base, state: event.state },
+          },
+        }
+      }
       return {
         byRepo: {
           ...s.byRepo,
