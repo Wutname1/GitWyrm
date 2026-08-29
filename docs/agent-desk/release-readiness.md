@@ -147,8 +147,11 @@ The lever that certainly applies to Agent Desk is the usage tracking in item 2: 
 cost is what makes any reduction provable.
 
 Two facts in `snip/gain.rs` are inferred from Go's naming defaults rather than a published
-schema, and want one capture from a real `snip gain --json` to confirm: the `TotalTimeMs`
-spelling (an alias for `TotalTimeMS` is already in place) and the lite-build marker text.
+schema: the `TotalTimeMs` spelling and the lite-build marker text. Both still want one
+capture from a real `snip gain --json` to settle, but neither can now hide a working
+install: the time field accepts either spelling, and every numeric field is defaulted, so a
+name that turns out to be wrong leaves a gap in the report rather than failing it. Tests
+cover both, on the summary and on the list rows.
 
 `snip init --agent` is deliberately not implemented: it merges into other tools' config
 files and its uninstall matches a substring that would strip unrelated hooks.
