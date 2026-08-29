@@ -308,6 +308,50 @@ mod tests {
         ]
     }"#;
 
+    /// Go's convention for a trailing acronym is genuinely split, and this
+    /// field name was inferred rather than read off a published schema, so
+    /// both spellings have to work.
+    #[test]
+    fn either_spelling_of_the_time_field_is_understood() {
+        let with_caps = FULL_REPORT.replace("\"TotalTimeMs\"", "\"TotalTimeMS\"");
+        let SnipGainOutcome::Available { report } = interpret_report(&with_caps) else {
+            panic!("TotalTimeMS must be understood, not treated as a broken install");
+        };
+        let summary = report.summary.expect("a summary");
+        assert_eq!(summary.total_time_ms, 91_234);
+        assert_eq!(summary.total_commands, 42, "the rest of the summary survives");
+    }
+
+    /// Every field name here is inferred from Go's defaults rather than a
+    /// schema snip publishes, so one of them being wrong is a live
+    /// possibility. When that happens the report must still render with a
+    /// gap, never collapse into "your install is broken" -- serde treats a
+    /// missing field as a hard error unless it is defaulted, and that error
+    /// would surface as `Failed` on a perfectly healthy machine.
+    #[test]
+    fn a_renamed_field_leaves_a_gap_rather_than_failing_the_whole_report() {
+        let renamed = FULL_REPORT.replace("\"TotalSaved\"", "\"TotalSavedTokens\"");
+        let SnipGainOutcome::Available { report } = interpret_report(&renamed) else {
+            panic!("one unknown field must not fail the report");
+        };
+        let summary = report.summary.expect("a summary");
+        assert_eq!(summary.total_saved, 0, "the unknown field reads as zero");
+        assert_eq!(summary.total_commands, 42, "every other field still parses");
+        assert_eq!(summary.avg_savings, 87.5);
+    }
+
+    /// The same guarantee for the list rows, which have their own structs.
+    #[test]
+    fn a_renamed_row_field_does_not_fail_the_report() {
+        let renamed = FULL_REPORT.replace("\"SavedTokens\"", "\"Saved\"");
+        let SnipGainOutcome::Available { report } = interpret_report(&renamed) else {
+            panic!("one unknown row field must not fail the report");
+        };
+        let daily = report.daily.expect("daily rows");
+        assert_eq!(daily[0].saved_tokens, 0);
+        assert_eq!(daily[0].commands, 12, "the rest of the row still parses");
+    }
+
     #[test]
     fn the_outer_keys_are_snake_case_and_the_inner_fields_are_pascal_case() {
         // The mismatch is the CLI's, not ours: it writes the three outer keys by
