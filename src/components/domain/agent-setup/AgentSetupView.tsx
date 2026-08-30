@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { SyncSummaryLine, SyncTable } from './SyncTable'
 import { CopyPreviewDialog } from './CopyPreviewDialog'
 import { BatchReviewDialog } from './BatchReviewDialog'
+import { AgentCatalog } from './AgentCatalog'
 import { DetectedAppsTab } from './DetectedAppsTab'
 
 type SetupTab = 'skills' | 'connections' | 'providers' | 'detected'
@@ -15,7 +16,7 @@ type SetupTab = 'skills' | 'connections' | 'providers' | 'detected'
 const TABS: { id: SetupTab; label: string }[] = [
   { id: 'skills', label: 'Skills' },
   { id: 'connections', label: 'Connections' },
-  { id: 'providers', label: 'Providers' },
+  { id: 'providers', label: 'AI tools' },
   { id: 'detected', label: 'Detected apps' },
 ]
 
@@ -97,11 +98,7 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
             <SyncTable entries={entries} kind="mcpConnector" onSelectItem={setActiveItem} />
           </>
         ) : tab === 'providers' ? (
-          <p className="py-6 text-center text-2xs text-muted-foreground">
-            Provider configuration sync is not available yet. Skills and MCP connectors can be
-            compared and copied today; provider credentials are kept out of scope until a safe,
-            independently proven writer exists for them.
-          </p>
+          <AgentCatalog />
         ) : (
           <DetectedAppsTab detections={detections.data ?? []} />
         )}

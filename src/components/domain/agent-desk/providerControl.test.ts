@@ -11,6 +11,9 @@ const READY: AgentProvider = {
   tooOld: false,
   canDoReadOnlyWork: true,
   readOnlyLimit: null,
+  homepageUrl: 'https://example.invalid/install',
+  installHint: 'npm install -g example',
+  binaryName: 'copilot',
 }
 
 describe('blockedReason', () => {
