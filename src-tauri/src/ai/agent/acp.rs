@@ -53,13 +53,16 @@ pub enum Incoming {
         size: u32,
         cost_micro_usd: Option<u32>,
     },
-    /// The agent is asking whether it may do something. `respond` MUST be
-    /// answered -- the agent's turn is blocked until it is.
-    PermissionRequest {
-        tool_call: Value,
-        options: Vec<PermissionOption>,
-        respond: oneshot::Sender<PermissionDecision>,
-    },
+    /// The agent is asking whether it may do something.
+    ///
+    /// Already classified into GitWyrm's own vocabulary by this adapter --
+    /// see `super::wire::PermissionRequest`. The run loop's safety gate used
+    /// to read `toolCall.kind` and `toolCall.locations` out of raw ACP JSON
+    /// itself, which would have meant teaching the gate a second dialect the
+    /// moment a second protocol existed.
+    ///
+    /// `respond` MUST be answered -- the agent's turn is blocked until it is.
+    PermissionRequest(super::wire::PermissionRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -616,14 +619,22 @@ async fn read_loop(
                 let tool_call = params.get("toolCall").cloned().unwrap_or(Value::Null);
 
                 let (respond, answer) = oneshot::channel();
-                if tx
-                    .send(Incoming::PermissionRequest {
-                        tool_call,
-                        options,
-                        respond,
-                    })
-                    .is_err()
-                {
+                let request = super::wire::PermissionRequest {
+                    // Fails closed: an unrecognised or missing kind is a
+                    // write, so a tool this build does not understand cannot
+                    // slip a change past a read-only run.
+                    capability: crate::agentdesk::policy::ToolCapability::from_acp_kind(
+                        tool_call.get("kind").and_then(Value::as_str),
+                    ),
+                    path: edit_path_of(&tool_call),
+                    summary: tool_call
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .unwrap_or("do something it did not describe")
+                        .to_string(),
+                    respond,
+                };
+                if tx.send(Incoming::PermissionRequest(request)).is_err() {
                     break;
                 }
 
@@ -631,13 +642,12 @@ async fn read_loop(
                 // the read loop -- streaming for the same turn is still arriving.
                 let stdin = stdin.clone();
                 tokio::spawn(async move {
-                    let decision = answer.await.unwrap_or(PermissionDecision::Cancelled);
-                    let outcome = match decision {
-                        PermissionDecision::AllowOnce { option_id }
-                        | PermissionDecision::RejectOnce { option_id } => {
-                            json!({ "outcome": "selected", "optionId": option_id })
-                        }
-                        PermissionDecision::Cancelled => json!({ "outcome": "cancelled" }),
+                    let decision = answer
+                        .await
+                        .unwrap_or(super::wire::PermissionDecision::Cancelled);
+                    let outcome = match pick_option(&options, decision) {
+                        Some(option_id) => json!({ "outcome": "selected", "optionId": option_id }),
+                        None => json!({ "outcome": "cancelled" }),
                     };
                     let reply =
                         json!({ "jsonrpc": "2.0", "id": id, "result": { "outcome": outcome } });
@@ -748,6 +758,52 @@ fn classify_update(update: &Value) -> Option<Incoming> {
     }
 }
 
+/// The file an ACP tool call would touch, from its `locations` array.
+///
+/// Moved here from the run loop: `toolCall.locations[0].path` is ACP's shape,
+/// and a path-scoped helper's allowance check should not have to know that.
+fn edit_path_of(tool_call: &Value) -> Option<String> {
+    tool_call
+        .get("locations")
+        .and_then(|v| v.as_array())
+        .and_then(|locations| locations.first())
+        .and_then(|loc| loc.get("path"))
+        .and_then(|p| p.as_str())
+        .map(str::to_string)
+}
+
+/// Turns GitWyrm's answer back into one of the option ids ACP offered.
+///
+/// Never picks an `allow_always` variant even when one is offered: a
+/// remembered approval is a decision made once and then applied to situations
+/// the person never saw. `None` means nothing usable was offered, which is
+/// answered as a cancel rather than by guessing.
+fn pick_option(
+    options: &[PermissionOption],
+    decision: super::wire::PermissionDecision,
+) -> Option<String> {
+    let allow = match decision {
+        super::wire::PermissionDecision::AllowOnce => true,
+        super::wire::PermissionDecision::RejectOnce => false,
+        super::wire::PermissionDecision::Cancelled => return None,
+    };
+    let wanted = if allow { "allow_once" } else { "reject_once" };
+    options
+        .iter()
+        .find(|o| o.kind == wanted)
+        // Any option of the right sense, but never a remembered one.
+        .or_else(|| {
+            options.iter().find(|o| {
+                if allow {
+                    o.kind == "allow_once"
+                } else {
+                    o.kind.starts_with("reject")
+                }
+            })
+        })
+        .map(|o| o.option_id.clone())
+}
+
 /// Maps a JSON-RPC error onto something the console can say.
 fn rpc_error(err: &Value) -> AgentError {
     let message = err
@@ -775,6 +831,68 @@ fn rpc_error(err: &Value) -> AgentError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn opt(kind: &str, id: &str) -> PermissionOption {
+        PermissionOption {
+            option_id: id.to_string(),
+            name: id.to_string(),
+            kind: kind.to_string(),
+        }
+    }
+
+    #[test]
+    fn allowing_picks_the_once_option_not_the_remembered_one() {
+        // A remembered approval applies one decision to situations nobody
+        // saw, which is the thing the gate exists to prevent.
+        let options = vec![opt("allow_always", "a"), opt("allow_once", "b")];
+        assert_eq!(
+            pick_option(&options, super::super::wire::PermissionDecision::AllowOnce),
+            Some("b".to_string())
+        );
+    }
+
+    #[test]
+    fn denying_picks_a_reject_option() {
+        let options = vec![opt("allow_once", "a"), opt("reject_once", "r")];
+        assert_eq!(
+            pick_option(&options, super::super::wire::PermissionDecision::RejectOnce),
+            Some("r".to_string())
+        );
+    }
+
+    #[test]
+    fn nothing_usable_cancels_rather_than_guessing() {
+        // Offered only a remembered approval, the honest answer is to cancel
+        // rather than pick something that means more than was decided.
+        let options = vec![opt("allow_always", "a")];
+        assert_eq!(
+            pick_option(&options, super::super::wire::PermissionDecision::RejectOnce),
+            None
+        );
+    }
+
+    #[test]
+    fn cancelling_never_selects_an_option() {
+        let options = vec![opt("allow_once", "a"), opt("reject_once", "r")];
+        assert_eq!(
+            pick_option(&options, super::super::wire::PermissionDecision::Cancelled),
+            None
+        );
+    }
+
+    #[test]
+    fn the_edit_path_comes_from_the_first_location() {
+        let tool_call = serde_json::json!({ "locations": [{ "path": "src/a.rs" }] });
+        assert_eq!(edit_path_of(&tool_call), Some("src/a.rs".to_string()));
+    }
+
+    #[test]
+    fn no_locations_means_no_path_rather_than_a_guess() {
+        // A path-scoped helper treats an unknown path as a refusal, so
+        // inventing one here would be the difference between a blocked write
+        // and an allowed one.
+        assert_eq!(edit_path_of(&serde_json::json!({ "title": "x" })), None);
+    }
 
     #[test]
     fn a_usage_update_is_read_as_context_occupancy() {

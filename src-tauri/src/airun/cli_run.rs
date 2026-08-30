@@ -14,7 +14,8 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ai::agent::acp::{Incoming, PermissionDecision, StopReason};
+use crate::ai::agent::acp::{Incoming, StopReason};
+use crate::ai::agent::wire::PermissionDecision;
 use crate::ai::agent::cli_agent::CliAgent;
 use crate::ai::agent::transport::AgentError;
 use crate::agentdesk::graph::JobBudget;
@@ -590,36 +591,28 @@ fn handle(
                 sink(RunState::Working, RunStep::Activity { text: title });
             }
         }
-        Incoming::PermissionRequest {
-            tool_call,
-            options,
-            respond,
-        } => {
-            let request = describe(&tool_call);
-
-            // Classify from the tool call's own declared kind (ACP's
-            // `toolCall.kind`), failing closed to a write for anything
-            // unrecognised or missing -- see
-            // `policy::ToolCapability::from_acp_kind`'s doc comment.
-            let acp_kind = tool_call.get("kind").and_then(|v| v.as_str());
-            let capability = crate::agentdesk::policy::ToolCapability::from_acp_kind(acp_kind);
+        Incoming::PermissionRequest(request) => {
+            let crate::ai::agent::wire::PermissionRequest {
+                capability,
+                path,
+                summary,
+                respond,
+            } = request;
+            let gate = GateRequest::Unclassified {
+                summary: summary.clone(),
+            };
 
             if let Err(refusal) = policy.check_tool_capability(started, capability) {
-                // Refused BEFORE disk is ever touched, and before the run
-                // even shows a gate to the user: this is not something the
-                // user needs to approve or deny, it is something this
-                // intent is structurally unable to do. Still surfaced on the
-                // sink (as a Note, not a Gate) so the transcript honestly
-                // says the request was declined rather than silently eating
-                // it.
+                // Refused BEFORE disk is ever touched, and before the run even
+                // shows a gate: this is not something the user needs to
+                // approve or deny, it is something this run may never do.
                 sink(
                     RunState::Working,
                     RunStep::Note {
                         text: refusal_note(&refusal),
                     },
                 );
-                let decision = pick(&options, false);
-                let _ = respond.send(decision);
+                let _ = respond.send(PermissionDecision::RejectOnce);
                 return;
             }
 
@@ -628,29 +621,27 @@ fn handle(
             // inside its own path allowance -- enforced here, not merely
             // recorded on the `ExecutionRecord`, so a helper cannot edit a
             // sibling's files just because its role permits writing at all.
-            let edit_path = extract_edit_path(&tool_call);
-            if let Err(refusal) = policy.check_path_allowance(capability, edit_path.as_deref()) {
+            if let Err(refusal) = policy.check_path_allowance(capability, path.as_deref()) {
                 sink(
                     RunState::Working,
                     RunStep::Note {
                         text: refusal_note(&refusal),
                     },
                 );
-                let decision = pick(&options, false);
-                let _ = respond.send(decision);
+                let _ = respond.send(PermissionDecision::RejectOnce);
                 return;
             }
 
-            sink(RunState::NeedsYou, RunStep::Gate { request });
+            sink(RunState::NeedsYou, RunStep::Gate { request: gate });
 
-            // Blocking here is what "the run fully pauses" means: the agent's turn
-            // does not continue until this is answered.
+            // Blocking here is what "the run fully pauses" means: the agent's
+            // turn does not continue until this is answered.
             let decision = match answers.recv() {
-                Ok(GateAnswer::AllowOnce) => pick(&options, true),
-                Ok(GateAnswer::FindAnotherWay) => pick(&options, false),
-                // A closed channel means the console went away. Cancelling is the safe
-                // reading; treating it as approval would let a run continue with
-                // nobody watching.
+                Ok(GateAnswer::AllowOnce) => PermissionDecision::AllowOnce,
+                Ok(GateAnswer::FindAnotherWay) => PermissionDecision::RejectOnce,
+                // A closed channel means the console went away. Cancelling is
+                // the safe reading; treating it as approval would let a run
+                // continue with nobody watching.
                 Ok(GateAnswer::StopRun) | Err(_) => PermissionDecision::Cancelled,
             };
             let _ = respond.send(decision);
@@ -676,116 +667,18 @@ fn refusal_note(refusal: &crate::agentdesk::policy::ToolRefusal) -> String {
     }
 }
 
-/// Best-effort extraction of the file path a write-shaped tool call names,
-/// from ACP's `toolCall.locations` array (`[{ "path": "...": ... }, ...]`).
-/// Only the first location is used -- a tool call touching several files at
-/// once is not a shape any provider this build talks to produces today, and
-/// `check_path_allowance` fails closed (refuses) when this returns `None`
-/// rather than guessing a single path covers a multi-file edit.
-fn extract_edit_path(tool_call: &serde_json::Value) -> Option<String> {
-    tool_call
-        .get("locations")
-        .and_then(|v| v.as_array())
-        .and_then(|locations| locations.first())
-        .and_then(|loc| loc.get("path"))
-        .and_then(|p| p.as_str())
-        .map(|s| s.to_string())
-}
 
-/// Chooses an allow-once or reject-once option from what the agent offered.
-///
-/// Never picks an `allow_always` variant even when one is offered: a remembered
-/// approval is a decision made once and then applied to situations the user
-/// never saw.
-fn pick(options: &[crate::ai::agent::acp::PermissionOption], allow: bool) -> PermissionDecision {
-    let wanted = if allow { "allow_once" } else { "reject_once" };
-    let chosen = options
-        .iter()
-        .find(|o| o.kind == wanted)
-        // Fall back to any option of the right sense, but never a remembered one.
-        .or_else(|| {
-            options.iter().find(|o| {
-                if allow {
-                    o.kind == "allow_once"
-                } else {
-                    o.kind.starts_with("reject")
-                }
-            })
-        });
 
-    match chosen {
-        Some(o) if allow => PermissionDecision::AllowOnce {
-            option_id: o.option_id.clone(),
-        },
-        Some(o) => PermissionDecision::RejectOnce {
-            option_id: o.option_id.clone(),
-        },
-        // Nothing usable on offer: cancelling is safer than guessing.
-        None => PermissionDecision::Cancelled,
-    }
-}
-
-/// Best-effort reading of what the agent is asking permission for.
-///
-/// The tool call's shape is the agent's to define, so this falls back to a
-/// generic ask rather than guessing wrongly and mislabelling the consequence.
-fn describe(tool_call: &serde_json::Value) -> GateRequest {
-    let title = tool_call
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("something outside its normal tools");
-    GateRequest::Unclassified {
-        summary: title.to_string(),
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ai::agent::acp::PermissionOption;
 
-    fn opt(kind: &str, id: &str) -> PermissionOption {
-        PermissionOption {
-            option_id: id.into(),
-            name: kind.into(),
-            kind: kind.into(),
-        }
-    }
 
-    #[test]
-    fn allowing_picks_the_once_option_not_the_remembered_one() {
-        let options = vec![opt("allow_always", "a"), opt("allow_once", "b")];
-        match pick(&options, true) {
-            PermissionDecision::AllowOnce { option_id } => assert_eq!(option_id, "b"),
-            other => panic!("expected allow-once, got {other:?}"),
-        }
-    }
 
-    #[test]
-    fn denying_picks_a_reject_option() {
-        let options = vec![opt("allow_once", "a"), opt("reject_once", "b")];
-        match pick(&options, false) {
-            PermissionDecision::RejectOnce { option_id } => assert_eq!(option_id, "b"),
-            other => panic!("expected reject-once, got {other:?}"),
-        }
-    }
 
-    #[test]
-    fn nothing_usable_cancels_rather_than_guessing() {
-        let options = vec![opt("allow_always", "a")];
-        assert!(matches!(
-            pick(&options, true),
-            PermissionDecision::Cancelled
-        ));
-    }
 
-    #[test]
-    fn a_gate_always_has_something_to_show() {
-        let empty = serde_json::json!({});
-        assert!(!describe(&empty).title().is_empty());
-        let named = serde_json::json!({ "title": "Run npm install" });
-        assert!(describe(&named).title().contains("npm install"));
-    }
 
     // -- task 1.7: adversarial engine-boundary refusal tests --
     //
@@ -828,15 +721,28 @@ mod tests {
         (sink, log)
     }
 
+    /// A request as an ADAPTER would hand it over: already classified.
+    ///
+    /// `kind` is still an ACP kind string so these tests keep exercising the
+    /// same classification rule they always did -- it is just applied here,
+    /// where an adapter applies it, rather than inside the gate.
     fn permission_request(
         kind: &str,
     ) -> (Incoming, tokio::sync::oneshot::Receiver<PermissionDecision>) {
+        permission_request_with_path(kind, None)
+    }
+
+    fn permission_request_with_path(
+        kind: &str,
+        path: Option<&str>,
+    ) -> (Incoming, tokio::sync::oneshot::Receiver<PermissionDecision>) {
         let (respond, rx) = tokio::sync::oneshot::channel();
-        let item = Incoming::PermissionRequest {
-            tool_call: serde_json::json!({ "title": "Edit a file", "kind": kind }),
-            options: vec![opt("allow_once", "a"), opt("reject_once", "r")],
+        let item = Incoming::PermissionRequest(crate::ai::agent::wire::PermissionRequest {
+            capability: crate::agentdesk::policy::ToolCapability::from_acp_kind(Some(kind)),
+            path: path.map(str::to_string),
+            summary: "Edit a file".to_string(),
             respond,
-        };
+        });
         (item, rx)
     }
 
@@ -955,12 +861,9 @@ mod tests {
         let policy = policy_for(SessionIntent::Ask);
         let (sink, _log) = recording_sink();
         let answers = closed_answers();
-        let (respond, mut decision_rx) = tokio::sync::oneshot::channel();
-        let item = Incoming::PermissionRequest {
-            tool_call: serde_json::json!({ "title": "Do something" }),
-            options: vec![opt("allow_once", "a"), opt("reject_once", "r")],
-            respond,
-        };
+        // No kind at all: the adapter's classifier must call this a write, so
+        // a tool GitWyrm does not understand cannot slip past a read-only run.
+        let (item, mut decision_rx) = permission_request_with_path("", None);
 
         handle(item, &sink, &answers, &policy, false);
 
@@ -989,33 +892,8 @@ mod tests {
 
     // -- R6.4: helper path-allowance enforcement inside handle() --
 
-    fn permission_request_with_path(
-        kind: &str,
-        path: &str,
-    ) -> (Incoming, tokio::sync::oneshot::Receiver<PermissionDecision>) {
-        let (respond, rx) = tokio::sync::oneshot::channel();
-        let item = Incoming::PermissionRequest {
-            tool_call: serde_json::json!({
-                "title": "Edit a file",
-                "kind": kind,
-                "locations": [{ "path": path }],
-            }),
-            options: vec![opt("allow_once", "a"), opt("reject_once", "r")],
-            respond,
-        };
-        (item, rx)
-    }
 
-    #[test]
-    fn extract_edit_path_reads_the_first_location() {
-        let call = serde_json::json!({ "locations": [{ "path": "src/lib.rs" }, { "path": "src/other.rs" }] });
-        assert_eq!(extract_edit_path(&call).as_deref(), Some("src/lib.rs"));
-    }
 
-    #[test]
-    fn extract_edit_path_is_none_when_no_locations_are_present() {
-        assert_eq!(extract_edit_path(&serde_json::json!({})), None);
-    }
 
     /// The literal R6.4 scenario: a helper whose `allowed_paths` is
     /// `src/**` tries to edit a file outside that allowance. Refused before
@@ -1025,7 +903,7 @@ mod tests {
         let policy = ExecutionPolicy::resolve_for_helper(true, vec!["src/**".into()]);
         let (sink, log) = recording_sink();
         let answers = closed_answers();
-        let (item, mut decision_rx) = permission_request_with_path("edit", "Cargo.toml");
+        let (item, mut decision_rx) = permission_request_with_path("edit", Some("Cargo.toml"));
 
         handle(item, &sink, &answers, &policy, true);
 
@@ -1043,7 +921,7 @@ mod tests {
         let policy = ExecutionPolicy::resolve_for_helper(true, vec!["src/**".into()]);
         let (sink, log) = recording_sink();
         let (answer_tx, answers) = mpsc::channel::<GateAnswer>();
-        let (item, mut decision_rx) = permission_request_with_path("edit", "src/lib.rs");
+        let (item, mut decision_rx) = permission_request_with_path("edit", Some("src/lib.rs"));
 
         answer_tx.send(GateAnswer::AllowOnce).unwrap();
         handle(item, &sink, &answers, &policy, true);

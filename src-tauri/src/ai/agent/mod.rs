@@ -17,3 +17,4 @@ pub mod run;
 pub mod select;
 pub mod shell_path;
 pub mod transport;
+pub mod wire;
