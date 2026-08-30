@@ -33,8 +33,12 @@ import { useGitMutations } from "@/hooks/useGitMutations";
 import {
   useActiveRepo,
   useWorkspaceStore,
+  DEFAULT_COMMIT_DESC_LINES,
+  MAX_COMMIT_DESC_LINES,
+  MIN_COMMIT_DESC_LINES,
   type CommitButtonMode,
 } from "@/stores/workspaceStore";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { useUiStore } from "@/stores/uiStore";
 
 export function CommitMessageForm() {
@@ -63,6 +67,19 @@ export function CommitMessageForm() {
   };
   const [justGenerated, setJustGenerated] = useState(false);
   const generatedTimer = useRef<number | null>(null);
+  const descRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // The handle moves the box in lines, but the pointer moves in pixels, and a
+  // line is not a fixed height: the Text Size setting scales the root font, and
+  // the UI Scale setting zooms the whole body. Measuring the box itself covers
+  // both, so the edge tracks the pointer at any setting.
+  const pixelsToLines = (pixels: number) => {
+    const el = descRef.current;
+    const lineHeight = el
+      ? Number.parseFloat(getComputedStyle(el).lineHeight)
+      : Number.NaN;
+    return pixels / (Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 16);
+  };
 
   const headSha = log.data?.pages[0]?.commits[0]?.sha ?? null;
   const headDetail = useCommitDetail(repo?.id ?? null, amend ? headSha : null);
@@ -71,6 +88,8 @@ export function CommitMessageForm() {
   const showSettings = useUiStore((s) => s.showSettings);
   const openModal = useUiStore((s) => s.openModal);
   const commitButtonMode = useWorkspaceStore((s) => s.commitButtonMode);
+  const commitDescLines = useWorkspaceStore((s) => s.commitDescLines);
+  const setCommitDescLines = useWorkspaceStore((s) => s.setCommitDescLines);
   const setCommitButtonMode = useWorkspaceStore((s) => s.setCommitButtonMode);
   // One resolver, shared with the commit-generation dialog and the Spec Desk, so
   // they cannot disagree about which AI is in use.
@@ -209,7 +228,31 @@ export function CommitMessageForm() {
   const nothingToGenerateFrom = aiReady && (!repo || stagedCount === 0);
 
   return (
-    <div className="flex-none border-t border-border bg-panel2 px-3 pb-[13px] pt-[11px]">
+    <div
+      className="relative flex-none border-t border-border bg-panel2 px-3 pb-[13px] pt-[11px]"
+      style={
+        {
+          "--wyrm-commit-desc-lines": commitDescLines,
+        } as React.CSSProperties
+      }
+    >
+      {/*
+        Sits on the panel's top edge: dragging up gives the description more
+        room and hands the space back to the file list below it. One line of
+        text per 1rem of travel, so the box follows the pointer.
+      */}
+      <ResizeHandle
+        ariaLabel="Resize commit message box"
+        axis="y"
+        direction={-1}
+        value={commitDescLines}
+        min={MIN_COMMIT_DESC_LINES}
+        max={MAX_COMMIT_DESC_LINES}
+        defaultValue={DEFAULT_COMMIT_DESC_LINES}
+        onChange={setCommitDescLines}
+        toValue={pixelsToLines}
+        className="-top-1"
+      />
       <div className={cn("relative mb-[9px]", generating && "min-h-[116px]")}>
         <div className="relative mb-[7px] rounded-md">
           <Input
@@ -274,6 +317,7 @@ export function CommitMessageForm() {
           </DisabledHint>
         </div>
         <Textarea
+          ref={descRef}
           value={generating ? "" : desc}
           onChange={(e) => setDesc(e.target.value)}
           disabled={generating}

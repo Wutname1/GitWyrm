@@ -376,15 +376,31 @@
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
-/* Branded AI commit-message generation state. */
+/*
+ * The description grows with what is typed: two lines at rest, up to five
+ * before it starts scrolling. `--wyrm-commit-desc-lines` is set by the drag
+ * handle on the commit panel so the resting size is the user's choice; the
+ * cap always stays at least that tall so dragging taller cannot make the box
+ * scroll a message it was already showing.
+ */
 .wyrm-commit-description {
-  field-sizing: fixed;
-  height: 46px;
-  min-height: 46px;
-  max-height: 46px;
+  --wyrm-commit-desc-lines: 2;
+  /* 1rem line box, 8px padding each side, 1px border each side. */
+  --wyrm-commit-desc-chrome: 18px;
+  field-sizing: content;
+  height: auto;
+  min-height: calc(
+    var(--wyrm-commit-desc-lines) * 1rem + var(--wyrm-commit-desc-chrome)
+  );
+  max-height: calc(
+    max(5, var(--wyrm-commit-desc-lines)) * 1rem +
+      var(--wyrm-commit-desc-chrome)
+  );
   overflow-y: auto;
   resize: none;
 }
+
+/* Branded AI commit-message generation state. */
 
 .wyrm-ai-stage {
   position: absolute;

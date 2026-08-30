@@ -4664,6 +4664,10 @@ drawer_commit_list_width?: number;
  */
 changes_split?: number; 
 /**
+ * Resting height of the commit description box, counted in lines (2-12).
+ */
+commit_description_lines?: number; 
+/**
  * Percent of the conflict view's width given to the OURS pane (20-80).
  */
 conflict_side_split?: number; 

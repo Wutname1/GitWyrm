@@ -284,6 +284,9 @@ pub struct Settings {
     /// Percent of the changes pane given to the unstaged list (30-70).
     #[serde(default = "default_changes_split")]
     pub changes_split: f64,
+    /// Resting height of the commit description box, counted in lines (2-12).
+    #[serde(default = "default_commit_description_lines")]
+    pub commit_description_lines: f64,
     /// Percent of the conflict view's width given to the OURS pane (20-80).
     #[serde(default = "default_conflict_side_split")]
     pub conflict_side_split: f64,
@@ -679,6 +682,10 @@ fn default_changes_split() -> f64 {
     50.0
 }
 
+fn default_commit_description_lines() -> f64 {
+    2.0
+}
+
 fn default_conflict_side_split() -> f64 {
     50.0
 }
@@ -715,6 +722,7 @@ impl Default for Settings {
             drawer_height: default_drawer_height(),
             drawer_commit_list_width: default_drawer_commit_list_width(),
             changes_split: default_changes_split(),
+            commit_description_lines: default_commit_description_lines(),
             conflict_side_split: default_conflict_side_split(),
             conflict_result_split: default_conflict_result_split(),
             change_size_display: default_change_size_display(),
@@ -1172,6 +1180,7 @@ mod tests {
         assert_eq!(settings.drawer_height, 212.0);
         assert_eq!(settings.drawer_commit_list_width, 280.0);
         assert_eq!(settings.changes_split, 50.0);
+        assert_eq!(settings.commit_description_lines, 2.0);
         assert_eq!(settings.change_size_display, ChangeSizeDisplay::Column);
         assert!(settings.show_change_indicator);
         assert!(!settings.show_change_line_counts);
@@ -1598,6 +1607,7 @@ mod tests {
             left_panel_width: 276.0,
             right_panel_width: 388.0,
             changes_split: 64.0,
+            commit_description_lines: 5.0,
             ..Settings::default()
         };
 
@@ -1607,6 +1617,7 @@ mod tests {
         assert_eq!(restored.left_panel_width, 276.0);
         assert_eq!(restored.right_panel_width, 388.0);
         assert_eq!(restored.changes_split, 64.0);
+        assert_eq!(restored.commit_description_lines, 5.0);
         assert_eq!(
             restored.column_layout.unwrap().widths.get("graph"),
             Some(&184.0)

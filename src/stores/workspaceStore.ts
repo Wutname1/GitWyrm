@@ -271,6 +271,22 @@ export function clampChangesSplit(split: number): number {
 }
 
 /**
+ * Resting height of the commit description box, counted in lines of text. The
+ * box always grows on its own up to five lines; this is how tall it sits when
+ * empty, so someone who writes long descriptions can keep the room open.
+ */
+export const MIN_COMMIT_DESC_LINES = 2;
+export const MAX_COMMIT_DESC_LINES = 12;
+export const DEFAULT_COMMIT_DESC_LINES = 2;
+
+export function clampCommitDescLines(lines: number): number {
+  if (!Number.isFinite(lines)) return DEFAULT_COMMIT_DESC_LINES;
+  return Math.round(
+    Math.min(MAX_COMMIT_DESC_LINES, Math.max(MIN_COMMIT_DESC_LINES, lines)),
+  );
+}
+
+/**
  * Share of the conflict view's width given to the OURS pane, as a percentage
  * of the space OURS and THEIRS share.
  */
@@ -631,6 +647,8 @@ interface WorkspaceState {
   drawerListWidth: number;
   /** Percent of the changes pane given to the unstaged list (persisted). */
   changesSplit: number;
+  /** Resting height of the commit description box, in lines (persisted). */
+  commitDescLines: number;
   /** Percent of the conflict view's width given to the OURS pane (persisted). */
   conflictSideSplit: number;
   /** Percent of the conflict view's height given to OURS/THEIRS (persisted). */
@@ -1018,6 +1036,7 @@ interface WorkspaceState {
   setDrawerHeight: (height: number) => void;
   setDrawerListWidth: (width: number) => void;
   setChangesSplit: (split: number) => void;
+  setCommitDescLines: (lines: number) => void;
   setConflictSideSplit: (split: number) => void;
   setConflictResultSplit: (split: number) => void;
   /** Put every draggable workspace panel back at its shipped size. */
@@ -1082,6 +1101,7 @@ function toSettings(s: WorkspaceState): Settings {
     drawer_height: s.drawerHeight,
     drawer_commit_list_width: s.drawerListWidth,
     changes_split: s.changesSplit,
+    commit_description_lines: s.commitDescLines,
     conflict_side_split: s.conflictSideSplit,
     conflict_result_split: s.conflictResultSplit,
     change_size_display: s.changeSizeDisplay,
@@ -1457,6 +1477,7 @@ export const SETTINGS_DEFAULTS = {
   drawerHeight: DEFAULT_DRAWER_HEIGHT,
   drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
   changesSplit: DEFAULT_CHANGES_SPLIT,
+  commitDescLines: DEFAULT_COMMIT_DESC_LINES,
   conflictSideSplit: DEFAULT_CONFLICT_SIDE_SPLIT,
   conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
   verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
@@ -1552,6 +1573,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   drawerHeight: DEFAULT_DRAWER_HEIGHT,
   drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
   changesSplit: DEFAULT_CHANGES_SPLIT,
+  commitDescLines: DEFAULT_COMMIT_DESC_LINES,
   conflictSideSplit: DEFAULT_CONFLICT_SIDE_SPLIT,
   conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
   changeSizeDisplay: "column",
@@ -2821,6 +2843,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ changesSplit: clampChangesSplit(split) });
     schedulePersist();
   },
+  setCommitDescLines: (lines) => {
+    set({ commitDescLines: clampCommitDescLines(lines) });
+    schedulePersist();
+  },
   setConflictSideSplit: (split) => {
     set({ conflictSideSplit: clampConflictSideSplit(split) });
     schedulePersist();
@@ -2836,6 +2862,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       drawerHeight: DEFAULT_DRAWER_HEIGHT,
       drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
       changesSplit: DEFAULT_CHANGES_SPLIT,
+      commitDescLines: DEFAULT_COMMIT_DESC_LINES,
       conflictSideSplit: DEFAULT_CONFLICT_SIDE_SPLIT,
       conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
       verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
@@ -2926,6 +2953,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ),
         changesSplit: clampChangesSplit(
           settings.changes_split ?? DEFAULT_CHANGES_SPLIT,
+        ),
+        commitDescLines: clampCommitDescLines(
+          settings.commit_description_lines ?? DEFAULT_COMMIT_DESC_LINES,
         ),
         conflictSideSplit: clampConflictSideSplit(
           settings.conflict_side_split ?? DEFAULT_CONFLICT_SIDE_SPLIT,
