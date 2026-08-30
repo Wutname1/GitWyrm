@@ -88,6 +88,25 @@ const REPO_PICKER_SECTIONS = new Set<RepoPickerSection>([
 export type TagPushDefault = "ask" | "always" | "never";
 
 /**
+ * What to do with a worktree's branch once its folder is removed.
+ *
+ * "ask" shows the dialog every time. The other two are what "Remember my
+ * choice" records, so the dialog stops appearing for the ordinary case.
+ */
+export type WorktreeBranchCleanup = "ask" | "keep" | "delete";
+
+/**
+ * Read a stored branch-cleanup choice, falling back to asking.
+ *
+ * The value is a plain string in settings.json, so anything unrecognised -- a
+ * hand-edit, or a value written by a newer build -- must land on "ask". The
+ * fallback is the one option that cannot delete anything by surprise.
+ */
+function readBranchCleanup(value: unknown): WorktreeBranchCleanup {
+  return value === "keep" || value === "delete" ? value : "ask";
+}
+
+/**
  * A single repo's tag-setting overrides. Each field is optional: present means
  * this repo overrides that setting; absent means it follows the app-wide default.
  */
@@ -738,6 +757,20 @@ interface WorkspaceState {
   openspecArchiveWithoutAsking: boolean;
   /** Delete a change from its row button without confirming first (persisted). */
   openspecDeleteWithoutAsking: boolean;
+  /**
+   * What to do with a worktree's branch after removing the folder (persisted).
+   *
+   * "ask" is the default. A remembered "delete" still does not apply to a
+   * branch with unmerged work: that case asks anyway, because the remembered
+   * answer was given about a branch that had nothing to lose.
+   */
+  worktreeBranchCleanup: WorktreeBranchCleanup;
+  /**
+   * Whether that dialog's "delete it on the remote too" box starts checked
+   * (persisted). Off by default -- deleting a published branch affects everyone
+   * else working on it.
+   */
+  worktreeBranchDeleteOnRemote: boolean;
   /** Reopen the last session's tabs on launch. Off starts with no tabs (persisted). */
   restoreTabs: boolean;
   /** Fetch open repositories in the background to keep remote state current (persisted). */
@@ -943,6 +976,8 @@ interface WorkspaceState {
   setEnableSpecDesk: (enabled: boolean) => void;
   setOpenspecArchiveWithoutAsking: (skip: boolean) => void;
   setOpenspecDeleteWithoutAsking: (skip: boolean) => void;
+  setWorktreeBranchCleanup: (choice: WorktreeBranchCleanup) => void;
+  setWorktreeBranchDeleteOnRemote: (on: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
   setAutoFetch: (enabled: boolean) => void;
   setGhCliFallback: (enabled: boolean) => void;
@@ -1150,6 +1185,8 @@ function toSettings(s: WorkspaceState): Settings {
     enable_spec_desk: s.enableSpecDesk,
     openspec_archive_without_asking: s.openspecArchiveWithoutAsking,
     openspec_delete_without_asking: s.openspecDeleteWithoutAsking,
+    worktree_branch_cleanup: s.worktreeBranchCleanup,
+    worktree_branch_delete_on_remote: s.worktreeBranchDeleteOnRemote,
     restore_tabs: s.restoreTabs,
     show_tips: s.showTips,
     auto_fetch: s.autoFetch,
@@ -1488,6 +1525,8 @@ export const SETTINGS_DEFAULTS = {
   enableSpecDesk: true,
   openspecArchiveWithoutAsking: false,
   openspecDeleteWithoutAsking: false,
+  worktreeBranchCleanup: "ask",
+  worktreeBranchDeleteOnRemote: false,
   restoreTabs: true,
   autoFetch: true,
   ghCliFallback: true,
@@ -1550,6 +1589,10 @@ export const SETTINGS_GROUPS = {
     "defaultEditor",
     "enableWorktrees",
     "worktreesSettingTouched",
+    // Resetting General brings the branch-cleanup prompt back, which is the
+    // only way to undo a "Remember my choice" the user later regrets.
+    "worktreeBranchCleanup",
+    "worktreeBranchDeleteOnRemote",
     "tabLayout",
     "horizontalTabRow",
   ],
@@ -1643,6 +1686,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   enableSpecDesk: true,
   openspecArchiveWithoutAsking: false,
   openspecDeleteWithoutAsking: false,
+  worktreeBranchCleanup: "ask",
+  worktreeBranchDeleteOnRemote: false,
   restoreTabs: true,
   autoFetch: true,
   ghCliFallback: true,
@@ -2169,6 +2214,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setOpenspecDeleteWithoutAsking: (skip) => {
     set({ openspecDeleteWithoutAsking: skip });
+    schedulePersist();
+  },
+  setWorktreeBranchCleanup: (choice) => {
+    set({ worktreeBranchCleanup: choice });
+    schedulePersist();
+  },
+  setWorktreeBranchDeleteOnRemote: (on) => {
+    set({ worktreeBranchDeleteOnRemote: on });
     schedulePersist();
   },
   setRestoreTabs: (enabled) => {
@@ -3064,6 +3117,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.openspec_archive_without_asking === true,
         openspecDeleteWithoutAsking:
           settings.openspec_delete_without_asking === true,
+        worktreeBranchCleanup: readBranchCleanup(
+          settings.worktree_branch_cleanup,
+        ),
+        worktreeBranchDeleteOnRemote:
+          settings.worktree_branch_delete_on_remote === true,
         restoreTabs: settings.restore_tabs ?? true,
         autoFetch: settings.auto_fetch ?? true,
         ghCliFallback: settings.gh_cli_fallback ?? true,
@@ -3183,6 +3241,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         settings.openspec_archive_without_asking === true,
       openspecDeleteWithoutAsking:
         settings.openspec_delete_without_asking === true,
+      worktreeBranchCleanup: readBranchCleanup(settings.worktree_branch_cleanup),
+      worktreeBranchDeleteOnRemote:
+        settings.worktree_branch_delete_on_remote === true,
       openspecArchiveCommitTemplate:
         settings.openspec_archive_commit_template ?? null,
     });

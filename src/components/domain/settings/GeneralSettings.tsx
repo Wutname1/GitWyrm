@@ -39,6 +39,8 @@ export function GeneralSettings() {
   const commitButtonMode = useWorkspaceStore((s) => s.commitButtonMode)
   const setCommitButtonMode = useWorkspaceStore((s) => s.setCommitButtonMode)
   const enableWorktrees = useWorkspaceStore((s) => s.enableWorktrees)
+  const worktreeBranchCleanup = useWorkspaceStore((s) => s.worktreeBranchCleanup)
+  const setWorktreeBranchCleanup = useWorkspaceStore((s) => s.setWorktreeBranchCleanup)
   const setEnableWorktrees = useWorkspaceStore((s) => s.setEnableWorktrees)
   const tabLayout = useWorkspaceStore((s) => s.tabLayout)
   const setTabLayout = useWorkspaceStore((s) => s.setTabLayout)
@@ -160,6 +162,25 @@ export function GeneralSettings() {
             Enable worktrees
           </label>
         </SettingRow>
+        {enableWorktrees && (
+          <SettingRow
+            label="Removing a worktree"
+            searchId="worktree-branch-cleanup"
+            hint="What to do with the branch when you remove the folder it was checked out in."
+          >
+            <select
+              value={worktreeBranchCleanup}
+              onChange={(e) =>
+                setWorktreeBranchCleanup(e.target.value as 'ask' | 'keep' | 'delete')
+              }
+              className="rounded border border-line bg-panel2 px-2 py-1 text-xs text-foreground"
+            >
+              <option value="ask">Ask me each time</option>
+              <option value="keep">Keep the branch</option>
+              <option value="delete">Delete the branch too</option>
+            </select>
+          </SettingRow>
+        )}
         {TUTORIAL_ENABLED && (
           <SettingRow
             label="Hands-on tour"

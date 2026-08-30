@@ -16,12 +16,14 @@ import { commands, type DirtyCount, type Worktree } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { samePath } from '@/lib/paths'
 import {
+  branchCleanupOffer,
   brokenAction,
   brokenExplanation,
   dirtySummary,
   hasUnrecoverableWork,
   linkedWorktrees,
   looksLikeMovedRepository,
+  planBranchCleanup,
   removeConfirmCopy,
   sectionVisibility,
   visibleWorktrees,
@@ -63,7 +65,24 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
   const [dirt, setDirt] = useState<DirtyCount>({ modified: 0, untracked: 0 })
   const [discard, setDiscard] = useState(false)
   const [opening, setOpening] = useState(false)
-  const [cleanupBranch, setCleanupBranch] = useState<string | null>(null)
+  /**
+   * The branch left behind by a removal, and what the dialog may offer for it.
+   * Null while there is nothing to ask about.
+   */
+  const [cleanupBranch, setCleanupBranch] = useState<{
+    branch: string
+    remote: string | null
+    merged: boolean
+  } | null>(null)
+  /** Opt-in to deleting the branch on the remote as well. */
+  const [alsoRemote, setAlsoRemote] = useState(false)
+  /** "Remember my choice": save this answer and stop asking. */
+  const [remember, setRemember] = useState(false)
+
+  const branchCleanupPref = useWorkspaceStore((s) => s.worktreeBranchCleanup)
+  const branchDeleteOnRemotePref = useWorkspaceStore((s) => s.worktreeBranchDeleteOnRemote)
+  const setBranchCleanupPref = useWorkspaceStore((s) => s.setWorktreeBranchCleanup)
+  const setBranchDeleteOnRemotePref = useWorkspaceStore((s) => s.setWorktreeBranchDeleteOnRemote)
 
   const label = stateLabel(worktree)
   const broken = worktree.state !== 'ok'
@@ -111,6 +130,22 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
     setConfirmRemove(true)
   }
 
+  /**
+   * Delete the branch the removed worktree had checked out.
+   *
+   * The remote goes through `deleteRemoteBranch` with `alsoLocal`, which
+   * deletes there first: if that fails the local copy is still here to try
+   * again, whereas the reverse would leave a published branch with nothing
+   * local to delete it from.
+   */
+  function deleteTheBranch(branch: string, remote: string | null, onRemote: boolean) {
+    if (remote && onRemote) {
+      m.deleteRemoteBranch.mutate({ name: branch, remote, alsoLocal: true })
+    } else {
+      m.deleteBranch.mutate(branch)
+    }
+  }
+
   function runRemove() {
     const clean = dirt.modified === 0 && dirt.untracked === 0
     m.removeWorktree.mutate(
@@ -123,10 +158,28 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
       },
       {
         onSuccess: ({ outcome }) => {
-          if (outcome.kind === 'removed' && outcome.branch && outcome.branch_merged) {
-            // Cleaning up in two places is the step people forget, so offer the
-            // second one -- but only when the branch has nothing of its own.
-            setCleanupBranch(outcome.branch)
+          if (outcome.kind === 'removed') {
+            // Cleaning up in two places is the step people forget, so the
+            // branch is offered rather than silently left behind. What happens
+            // next is the user's saved choice, except that a branch with
+            // unmerged work always asks -- see `planBranchCleanup`.
+            const plan = planBranchCleanup(
+              outcome.branch,
+              outcome.branch_merged,
+              outcome.branch_remote,
+              branchCleanupPref
+            )
+            if (plan.kind === 'delete') {
+              deleteTheBranch(plan.branch, plan.remote, branchDeleteOnRemotePref)
+            } else if (plan.kind === 'ask') {
+              setAlsoRemote(plan.remote ? branchDeleteOnRemotePref : false)
+              setRemember(false)
+              setCleanupBranch({
+                branch: plan.branch,
+                remote: plan.remote,
+                merged: plan.merged,
+              })
+            }
           }
           if (outcome.kind === 'refusedLocked') {
             toast.error('A program is still using that folder', {
@@ -309,14 +362,65 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
 
       <ConfirmDialog
         open={cleanupBranch != null}
-        onOpenChange={(o) => !o && setCleanupBranch(null)}
-        title={`Delete the ${cleanupBranch} branch too?`}
-        description={`Its work is already saved elsewhere, so nothing is lost. Branch lists fill up fast with names nobody needs any more.`}
+        onOpenChange={(o) => {
+          if (!o) {
+            // Closing without confirming is a "keep it" answer, and it counts
+            // for the remembered choice too -- otherwise "remember" would only
+            // ever be able to record a delete.
+            if (remember) setBranchCleanupPref('keep')
+            setCleanupBranch(null)
+          }
+        }}
+        title={`Delete the ${cleanupBranch?.branch} branch too?`}
+        description={
+          cleanupBranch ? branchCleanupOffer(cleanupBranch.branch, cleanupBranch.merged).text : ''
+        }
+        destructive
+        extra={
+          <div className="flex flex-col gap-2">
+            {cleanupBranch?.remote && (
+              <label className="flex cursor-pointer items-start gap-2 text-xs text-sub">
+                <input
+                  type="checkbox"
+                  checked={alsoRemote}
+                  onChange={(e) => setAlsoRemote(e.target.checked)}
+                  className="mt-0.5 size-3.5 accent-[var(--gw-accent)]"
+                />
+                <span>
+                  Also delete it on {cleanupBranch.remote}
+                  <span className="block text-2xs text-muted-foreground">
+                    Anyone else working on this branch will lose it too.
+                  </span>
+                </span>
+              </label>
+            )}
+            <label className="flex cursor-pointer items-start gap-2 text-xs text-sub">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                className="mt-0.5 size-3.5 accent-[var(--gw-accent)]"
+              />
+              <span>
+                Remember my choice
+                <span className="block text-2xs text-muted-foreground">
+                  Next time this happens GitWyrm does the same thing without asking. You can change
+                  it back in Settings.
+                </span>
+              </span>
+            </label>
+          </div>
+        }
         confirmLabel="Delete the branch"
-        pending={m.deleteBranch.isPending}
+        pending={m.deleteBranch.isPending || m.deleteRemoteBranch.isPending}
         pendingLabel="Deleting…"
         onConfirm={() => {
-          if (cleanupBranch) m.deleteBranch.mutate(cleanupBranch)
+          if (!cleanupBranch) return
+          if (remember) {
+            setBranchCleanupPref('delete')
+            if (cleanupBranch.remote) setBranchDeleteOnRemotePref(alsoRemote)
+          }
+          deleteTheBranch(cleanupBranch.branch, cleanupBranch.remote, alsoRemote)
           setCleanupBranch(null)
         }}
       />

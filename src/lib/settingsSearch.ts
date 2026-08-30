@@ -124,6 +124,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['worktree', 'multiple branches', 'advanced'],
   },
   {
+    id: 'worktree-branch-cleanup',
+    section: 'general',
+    label: 'Branch left behind by a removed worktree',
+    hint: 'What happens to the branch when you remove the folder it was in.',
+    keywords: ['worktree', 'branch', 'delete', 'remove', 'cleanup', 'ask again', 'remember'],
+  },
+  {
     id: 'tutorial',
     section: 'general',
     label: 'Hands-on tour',

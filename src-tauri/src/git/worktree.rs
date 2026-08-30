@@ -106,9 +106,16 @@ pub enum RemoveOutcome {
     /// The worktree is gone. `branch` is what it had checked out, so the caller
     /// can offer to delete it as a follow-on; `branch_merged` says whether that
     /// offer is safe to make.
+    ///
+    /// `branch_remote` names the remote the branch is published to, when it has
+    /// an upstream. It is what lets the follow-on offer include "and on origin"
+    /// rather than leaving a published branch behind that the user has to go
+    /// and find later. None means the branch lives only on this computer, and
+    /// the remote half of the offer is not shown at all.
     Removed {
         branch: Option<String>,
         branch_merged: bool,
+        branch_remote: Option<String>,
     },
     /// Refused: there is uncommitted work in it. Ask, then call again with a
     /// decision.
@@ -434,6 +441,26 @@ pub fn dirty_count(path: &Path) -> Result<DirtyCount, AppError> {
         }
     }
     Ok(count)
+}
+
+/// The remote a branch is published to, if it has an upstream configured.
+///
+/// Read from the branch's own upstream rather than matched by name: a local
+/// `main` and an `origin/main` share a name whether or not either knows about
+/// the other, and offering to delete a remote branch on the strength of a
+/// coincidence is how the wrong branch gets deleted.
+pub fn branch_remote(repo: &git2::Repository, branch: &str) -> Option<String> {
+    let local = repo.find_branch(branch, git2::BranchType::Local).ok()?;
+    let upstream = local.upstream().ok()?;
+    // A ref whose name is not valid UTF-8 has no name to read here; it is not a
+    // remote we could name in a dialog either way.
+    let full = upstream.get().name().ok()?;
+    // refs/remotes/<remote>/<branch> -- the remote is the first segment after
+    // the prefix, and a remote name cannot contain a slash.
+    full.strip_prefix("refs/remotes/")?
+        .split('/')
+        .next()
+        .map(|s| s.to_string())
 }
 
 /// True when `branch` is fully contained in another local branch or its
@@ -820,6 +847,7 @@ pub fn remove(
                 .as_deref()
                 .map(|b| branch_is_merged(repo, b))
                 .unwrap_or(false),
+            branch_remote: branch.as_deref().and_then(|b| branch_remote(repo, b)),
         });
     }
 
@@ -879,9 +907,13 @@ pub fn remove(
         .as_deref()
         .map(|b| branch_is_merged(repo, b))
         .unwrap_or(false);
+    // Read before the branch is moved into the outcome; once it is gone the
+    // upstream can no longer be looked up.
+    let branch_upstream = branch.as_deref().and_then(|b| branch_remote(repo, b));
     Ok(RemoveOutcome::Removed {
         branch,
         branch_merged,
+        branch_remote: branch_upstream,
     })
 }
 

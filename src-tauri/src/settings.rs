@@ -346,6 +346,20 @@ pub struct Settings {
     /// throws the work away.
     #[serde(default)]
     pub openspec_delete_without_asking: bool,
+    /// What to do with a worktree's branch once the folder is removed: "ask"
+    /// (the default), "keep", or "delete". Set by the "Remember my choice" box
+    /// in that dialog, and resettable from the Worktrees settings screen.
+    ///
+    /// A remembered "delete" still never deletes a branch holding work that
+    /// exists nowhere else -- an unmerged branch falls back to asking, because
+    /// the remembered answer was given about a different, safe situation.
+    #[serde(default = "default_worktree_branch_cleanup")]
+    pub worktree_branch_cleanup: String,
+    /// Whether the "and delete it on the remote too" box in that dialog starts
+    /// checked. Off by default: deleting a published branch affects everyone
+    /// else on it, so it is opted into rather than out of.
+    #[serde(default)]
+    pub worktree_branch_delete_on_remote: bool,
     /// Reopen the tabs from the last session on launch. On by default; when off
     /// the app starts with no repository open.
     #[serde(default = "default_restore_tabs")]
@@ -569,6 +583,10 @@ fn default_show_repo_icons() -> bool {
     true
 }
 
+fn default_worktree_branch_cleanup() -> String {
+    "ask".to_string()
+}
+
 fn default_enable_spec_desk() -> bool {
     true
 }
@@ -744,6 +762,8 @@ impl Default for Settings {
             worktrees_setting_touched: false,
             enable_spec_desk: default_enable_spec_desk(),
             openspec_archive_without_asking: false,
+            worktree_branch_cleanup: default_worktree_branch_cleanup(),
+            worktree_branch_delete_on_remote: false,
             openspec_delete_without_asking: false,
             restore_tabs: true,
             auto_fetch: true,

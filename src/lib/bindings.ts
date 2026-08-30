@@ -4326,8 +4326,14 @@ export type RemoveOutcome =
  * The worktree is gone. `branch` is what it had checked out, so the caller
  * can offer to delete it as a follow-on; `branch_merged` says whether that
  * offer is safe to make.
+ * 
+ * `branch_remote` names the remote the branch is published to, when it has
+ * an upstream. It is what lets the follow-on offer include "and on origin"
+ * rather than leaving a published branch behind that the user has to go
+ * and find later. None means the branch lives only on this computer, and
+ * the remote half of the offer is not shown at all.
  */
-{ kind: "removed"; branch: string | null; branch_merged: boolean } | 
+{ kind: "removed"; branch: string | null; branch_merged: boolean; branch_remote: string | null } | 
 /**
  * Refused: there is uncommitted work in it. Ask, then call again with a
  * decision.
@@ -4769,6 +4775,22 @@ openspec_archive_without_asking?: boolean;
  * throws the work away.
  */
 openspec_delete_without_asking?: boolean; 
+/**
+ * What to do with a worktree's branch once the folder is removed: "ask"
+ * (the default), "keep", or "delete". Set by the "Remember my choice" box
+ * in that dialog, and resettable from the Worktrees settings screen.
+ * 
+ * A remembered "delete" still never deletes a branch holding work that
+ * exists nowhere else -- an unmerged branch falls back to asking, because
+ * the remembered answer was given about a different, safe situation.
+ */
+worktree_branch_cleanup?: string; 
+/**
+ * Whether the "and delete it on the remote too" box in that dialog starts
+ * checked. Off by default: deleting a published branch affects everyone
+ * else on it, so it is opted into rather than out of.
+ */
+worktree_branch_delete_on_remote?: boolean; 
 /**
  * Reopen the tabs from the last session on launch. On by default; when off
  * the app starts with no repository open.
