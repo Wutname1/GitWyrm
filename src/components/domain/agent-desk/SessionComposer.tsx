@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { ArrowUp, Paperclip, Sparkles } from 'lucide-react'
 import { commands } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError, log } from '@/lib/log'
 import { Textarea } from '@/components/ui/textarea'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
@@ -15,6 +15,8 @@ import {
   type ComposerTeam,
 } from '@/lib/agentDeskComposer'
 import { OperatingModeControl } from './OperatingModeControl'
+import { cn } from '@/lib/utils'
+import { NewChatLanding } from './NewChatLanding'
 import { ProviderControl } from './ProviderControl'
 import { TeamShapeControl } from './TeamShapeControl'
 
@@ -48,7 +50,14 @@ import { TeamShapeControl } from './TeamShapeControl'
  * fully independent drafts for free -- there is nothing pane-local to keep
  * in sync.
  */
-export function SessionComposer({ sessionId }: { sessionId: string | null }) {
+export function SessionComposer({
+  sessionId,
+  /** True while this chat has nothing in it yet. */
+  isEmpty = false,
+}: {
+  sessionId: string | null
+  isEmpty?: boolean
+}) {
   const qc = useQueryClient()
   const draft = useAgentDeskUiStore((s) => (sessionId ? (s.drafts[sessionId]?.text ?? '') : ''))
   const setDraftInStore = useAgentDeskUiStore((s) => s.setDraft)
@@ -65,6 +74,16 @@ export function SessionComposer({ sessionId }: { sessionId: string | null }) {
   // default if it ever changes.
   const [provider, setProvider] = useState<string | null>(null)
   const [providerOpen, setProviderOpen] = useState(false)
+  // Resolved to the tool's real name rather than its id: the landing would
+  // otherwise read "copilot" where the rest of the app says "GitHub Copilot".
+  const providerNames = useQuery({
+    queryKey: keys.agentProviders(sessionId),
+    queryFn: async () => unwrap(await commands.agentProvidersList(sessionId)),
+    enabled: isEmpty,
+  })
+  const providerLabel =
+    providerNames.data?.providers.find((p) => p.id === provider)?.displayName ??
+    (provider ?? 'Default AI')
 
   const canSend = canSendComposerDraft({ draft, sessionId, sending })
 
@@ -150,7 +169,21 @@ export function SessionComposer({ sessionId }: { sessionId: string | null }) {
   }
 
   return (
-    <div className="flex-none border-t border-border p-2">
+    <div className={cn(isEmpty ? 'flex min-h-0 flex-1 flex-col' : 'flex-none', 'border-t border-border p-2')}>
+      {/* Before there is anything to read, the choices that shape the run get
+          the space instead of hiding as chips under the box. They edit the
+          same state the compact controls do, so nothing is lost when this
+          gives way to the transcript. */}
+      {isEmpty && (
+        <NewChatLanding
+          mode={mode}
+          onModeChange={setMode}
+          team={team}
+          onTeamChange={setTeam}
+          providerLabel={providerLabel}
+          onOpenProviderPicker={() => setProviderOpen(true)}
+        />
+      )}
       <div className="rounded-lg border border-border bg-panel2 p-1.5">
         <OperatingModeControl mode={mode} onChange={setMode} />
 

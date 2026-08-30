@@ -580,12 +580,11 @@ export function ConversationPane({
       <div className="relative flex min-h-0 flex-1">
         <div ref={transcriptRef} className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 py-3">
           {messages.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-1 text-center">
-              <p className="text-xs font-semibold text-foreground">No messages yet</p>
-              <p className="max-w-xs text-2xs leading-relaxed text-muted-foreground">
-                Say what you would like help with below.
-              </p>
-            </div>
+            /* Nothing here on purpose: `SessionComposer` grows into this space
+               with the mode, team and AI choices while a chat is empty. Two
+               empty states stacked would have left the real one squeezed
+               under a placeholder saying the same thing. */
+            null
           ) : (
             messages.flatMap((m) => {
               // `tool` messages render as part of an `EventStack` (anchored
@@ -687,7 +686,7 @@ export function ConversationPane({
           extracted to `SessionComposer` so this file's section-4/5 work
           (transcript, targets, auto-follow, history rail) is unaffected by
           composer changes and vice versa. */}
-      <SessionComposer sessionId={sessionId} />
+      <SessionComposer sessionId={sessionId} isEmpty={messages.length === 0} />
     </div>
   )
 }
