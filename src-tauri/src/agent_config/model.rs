@@ -9,9 +9,17 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-/// Which agent client a location/state belongs to. Kept as a fixed enum
-/// (rather than a free string) so the UI's per-client columns and the
-/// writers dispatch table are exhaustive-checked by the compiler.
+/// Which agent client a location/state belongs to.
+///
+/// Kept as a fixed enum because this is the wire/IPC type: the frontend's
+/// per-client columns are typed against it, so widening it to a free string
+/// would churn every one of them. What each client *is* -- its paths, its
+/// config keys, whether it can be written to -- is no longer expressed here
+/// but as a row in [`super::registry`]. This enum is only the name.
+///
+/// Anything persisted to disk records [`super::registry::ClientSpec::key`]
+/// (the same kebab-case string this enum serializes to) instead of the enum,
+/// so a client added later can still be read back out of an old file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClientId {
@@ -31,14 +39,17 @@ impl ClientId {
         ClientId::OpenChamber,
     ];
 
+    /// The short product name shown to people, read from this client's
+    /// registry row so a name is written down once.
     pub fn label(self) -> &'static str {
-        match self {
-            ClientId::Codex => "Codex",
-            ClientId::ClaudeCode => "Claude",
-            ClientId::OpenCode => "OpenCode",
-            ClientId::VsCodeCopilot => "Copilot",
-            ClientId::OpenChamber => "OpenChamber",
-        }
+        super::registry::spec(self).display_name
+    }
+
+    /// The stable string form persisted in receipts. Matches how this enum
+    /// serializes, so an old receipt and a new one name the same client the
+    /// same way.
+    pub fn key(self) -> &'static str {
+        super::registry::spec(self).key
     }
 }
 
@@ -513,7 +524,23 @@ pub struct ApplyOutcome {
 pub struct OperationReceipt {
     pub operation_id: String,
     pub plan_id: String,
-    pub client: ClientId,
+    /// Which client was written to, as a stable string
+    /// ([`super::registry::ClientSpec::key`]) rather than the [`ClientId`]
+    /// enum.
+    ///
+    /// A receipt outlives the release that wrote it: it is read back weeks
+    /// later to undo a write. If this were the enum, a receipt naming a
+    /// client that a future build no longer knows -- or that a build knew
+    /// only in an unreleased form -- would fail to deserialize, and undo
+    /// would be impossible for a write GitWyrm itself made. A string always
+    /// reads back, and undo does not need to interpret it: the path, hashes,
+    /// and backup in this same receipt carry everything the restore needs.
+    ///
+    /// Backward compatible on purpose: [`ClientId`] serializes to exactly
+    /// these kebab-case strings, so receipts written before this field was
+    /// widened deserialize unchanged. Use [`super::registry::spec_by_key`]
+    /// to get back to a row when one is needed for display.
+    pub client: String,
     pub destination_path: String,
     /// Hash of the destination's content immediately before this write (the
     /// same value the write was gated on). `None` if the file did not exist

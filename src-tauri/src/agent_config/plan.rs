@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 
-use super::model::{ClientId, OperationReceipt};
+use super::model::OperationReceipt;
 
 /// Hash of file content, used both to gate an apply against concurrent edits
 /// and to identify a receipt's before/after state. SHA-256 over raw bytes --
@@ -154,7 +154,7 @@ fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), ApplyWriteError> 
 pub fn apply_write(
     roots: &SafeWriteRoot,
     plan_id: &str,
-    client: ClientId,
+    client_key: &str,
     destination_path: &Path,
     expected_before_hash: Option<&str>,
     new_content: &[u8],
@@ -184,7 +184,7 @@ pub fn apply_write(
     let receipt = OperationReceipt {
         operation_id: operation_id.to_string(),
         plan_id: plan_id.to_string(),
-        client,
+        client: client_key.to_string(),
         destination_path: destination_path.to_string_lossy().into_owned(),
         before_hash: expected_before_hash.map(str::to_string),
         after_hash: hash_bytes(new_content),
@@ -316,7 +316,7 @@ mod tests {
         let receipt = apply_write(
             &roots,
             "plan-1",
-            ClientId::ClaudeCode,
+            "claude-code",
             &dest,
             Some(&before_hash),
             b"{\"a\":2}",
@@ -342,7 +342,7 @@ mod tests {
         let result = apply_write(
             &roots,
             "plan-1",
-            ClientId::ClaudeCode,
+            "claude-code",
             &dest,
             Some(&stale_hash),
             b"{\"a\":2}",
@@ -363,7 +363,7 @@ mod tests {
         let receipt = apply_write(
             &roots,
             "plan-1",
-            ClientId::OpenCode,
+            "open-code",
             &dest,
             None,
             b"{\"a\":1}",
@@ -387,7 +387,7 @@ mod tests {
         apply_write(
             &roots,
             "plan-1",
-            ClientId::ClaudeCode,
+            "claude-code",
             &dest,
             Some(&before_hash),
             b"{\"a\":2}",
@@ -406,7 +406,7 @@ mod tests {
     fn undo_deletes_a_file_that_was_created_from_nothing() {
         let (dir, roots) = roots();
         let dest = dir.path().join("new.json");
-        apply_write(&roots, "plan-1", ClientId::OpenCode, &dest, None, b"{\"a\":1}", "op-2", "t").unwrap();
+        apply_write(&roots, "plan-1", "open-code", &dest, None, b"{\"a\":1}", "op-2", "t").unwrap();
         assert!(dest.exists());
 
         undo_write(&roots, "op-2").unwrap();
@@ -419,7 +419,7 @@ mod tests {
         let dest = dir.path().join("dest.json");
         fs::write(&dest, "{\"a\":1}").unwrap();
         let before_hash = hash_bytes(b"{\"a\":1}");
-        apply_write(&roots, "plan-1", ClientId::ClaudeCode, &dest, Some(&before_hash), b"{\"a\":2}", "op-1", "t")
+        apply_write(&roots, "plan-1", "claude-code", &dest, Some(&before_hash), b"{\"a\":2}", "op-1", "t")
             .unwrap();
 
         // Someone else edits the file after our write.
@@ -436,12 +436,60 @@ mod tests {
         let dest = dir.path().join("dest.json");
         fs::write(&dest, "{\"a\":1}").unwrap();
         let before_hash = hash_bytes(b"{\"a\":1}");
-        apply_write(&roots, "plan-1", ClientId::ClaudeCode, &dest, Some(&before_hash), b"{\"a\":2}", "op-1", "t")
+        apply_write(&roots, "plan-1", "claude-code", &dest, Some(&before_hash), b"{\"a\":2}", "op-1", "t")
             .unwrap();
         undo_write(&roots, "op-1").unwrap();
 
         let result = undo_write(&roots, "op-1");
         assert!(matches!(result, Err(UndoWriteError::AlreadyUndone)));
+    }
+
+    #[test]
+    fn a_receipt_written_before_the_client_field_was_widened_still_reads_back() {
+        // Receipts written by earlier builds stored the client as the enum,
+        // which serialized to exactly these kebab-case strings. A receipt is
+        // read back weeks later to undo a write, so an old one that no longer
+        // parsed would strand the user with no way to undo.
+        let old_receipt = r#"{
+  "operationId": "op-old",
+  "planId": "plan-old",
+  "client": "claude-code",
+  "destinationPath": "C:/somewhere/settings.json",
+  "beforeHash": null,
+  "afterHash": "abc",
+  "backupPath": null,
+  "appliedAt": "2026-01-01T00:00:00Z",
+  "undone": false
+}"#;
+        let parsed: OperationReceipt = serde_json::from_str(old_receipt).expect("old receipt still parses");
+        assert_eq!(parsed.client, "claude-code");
+        assert_eq!(parsed.operation_id, "op-old");
+    }
+
+    #[test]
+    fn a_receipt_naming_a_client_this_build_does_not_know_is_still_undoable() {
+        // The whole reason the field is a string: undo depends on the path,
+        // hashes, and backup in the receipt, never on recognizing the client.
+        let (dir, roots) = roots();
+        let dest = dir.path().join("dest.json");
+        fs::write(&dest, "{\"a\":1}").unwrap();
+        let before_hash = hash_bytes(b"{\"a\":1}");
+
+        apply_write(
+            &roots,
+            "plan-1",
+            "some-client-from-the-future",
+            &dest,
+            Some(&before_hash),
+            b"{\"a\":2}",
+            "op-future",
+            "t",
+        )
+        .unwrap();
+
+        let receipt = undo_write(&roots, "op-future").unwrap();
+        assert!(receipt.undone);
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "{\"a\":1}");
     }
 
     #[test]
@@ -471,7 +519,7 @@ mod tests {
         let receipt = OperationReceipt {
             operation_id: "op-x".into(),
             plan_id: "plan-1".into(),
-            client: ClientId::ClaudeCode,
+            client: "claude-code".into(),
             destination_path: dest.to_string_lossy().into_owned(),
             before_hash: Some(before_hash),
             after_hash: hash_bytes(original.as_bytes()), // write never happened; dest still == original

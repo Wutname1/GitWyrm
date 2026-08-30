@@ -13,10 +13,17 @@
 //!
 //! Every function here only *locates* files; nothing in this module opens a
 //! file for writing (task 1.2: "no write capability in scan commands").
+//!
+//! Which paths belong to which client is not decided here: this module only
+//! knows how to join a client's declared relative path components onto a
+//! root (the user's home directory, or an open repo). The components
+//! themselves live in [`super::registry`], so a new client is a new row
+//! there rather than a new arm here.
 
 use std::path::PathBuf;
 
 use super::model::{ClientDetection, ClientId, ConfigLocation, ConfigScope};
+use super::registry;
 
 /// The user's home directory, resolved once per call so tests can override it
 /// without touching process-global state.
@@ -39,97 +46,44 @@ fn dirs_home() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Personal (user-home) configuration locations for each client, plus a
-/// repository-scoped location when the client supports one and `repo_root`
-/// is given. A location is returned even when nothing exists there yet --
-/// presence is reported separately via [`detect_clients`] -- so a preview can
-/// still target the conventional path for a client that simply has not
-/// written anything there.
+/// Join one client's declared relative path components onto `root`, tagged
+/// with `scope`. The components come from the client's registry row, so this
+/// is the only place a path is assembled and no client-specific knowledge
+/// lives here.
+fn locations_under(client: ClientId, scope: ConfigScope, root: &PathBuf, parts: &[&[&str]]) -> Vec<ConfigLocation> {
+    parts
+        .iter()
+        .map(|components| {
+            let mut path = root.clone();
+            for component in components.iter() {
+                path.push(component);
+            }
+            ConfigLocation {
+                client,
+                scope,
+                path: path.to_string_lossy().into_owned(),
+            }
+        })
+        .collect()
+}
+
+/// Personal (user-home) configuration locations for each client. A location
+/// is returned even when nothing exists there yet -- presence is reported
+/// separately via [`detect_clients`] -- so a preview can still target the
+/// conventional path for a client that simply has not written anything there.
 pub fn personal_locations(client: ClientId) -> Vec<ConfigLocation> {
     let Some(home) = home_dir() else {
         return Vec::new();
     };
-    match client {
-        ClientId::Codex => vec![ConfigLocation {
-            client,
-            scope: ConfigScope::Personal,
-            path: home.join(".codex").join("config.toml").to_string_lossy().into_owned(),
-        }],
-        ClientId::ClaudeCode => vec![
-            ConfigLocation {
-                client,
-                scope: ConfigScope::Personal,
-                path: home.join(".claude").join("settings.json").to_string_lossy().into_owned(),
-            },
-            ConfigLocation {
-                client,
-                scope: ConfigScope::Personal,
-                path: home
-                    .join(".claude.json")
-                    .to_string_lossy()
-                    .into_owned(),
-            },
-        ],
-        ClientId::OpenCode => vec![ConfigLocation {
-            client,
-            scope: ConfigScope::Personal,
-            path: home
-                .join(".config")
-                .join("opencode")
-                .join("opencode.json")
-                .to_string_lossy()
-                .into_owned(),
-        }],
-        ClientId::VsCodeCopilot => vec![ConfigLocation {
-            client,
-            scope: ConfigScope::Personal,
-            path: home
-                .join(".config")
-                .join("Code")
-                .join("User")
-                .join("settings.json")
-                .to_string_lossy()
-                .into_owned(),
-        }],
-        ClientId::OpenChamber => vec![ConfigLocation {
-            client,
-            scope: ConfigScope::Personal,
-            path: home
-                .join(".config")
-                .join("openchamber")
-                .join("config.json")
-                .to_string_lossy()
-                .into_owned(),
-        }],
-    }
+    locations_under(client, ConfigScope::Personal, &home, registry::spec(client).personal_paths)
 }
 
 /// Repository-scoped locations, when the client supports project-local
 /// configuration. `repo_root` is the working directory of the open repo.
+/// A client whose registry row declares no repo paths gets an empty list.
 pub fn repo_locations(client: ClientId, repo_root: &str) -> Vec<ConfigLocation> {
     let root = PathBuf::from(repo_root);
-    match client {
-        ClientId::ClaudeCode => vec![ConfigLocation {
-            client,
-            scope: ConfigScope::Repo,
-            path: root.join(".claude").join("settings.json").to_string_lossy().into_owned(),
-        }],
-        ClientId::OpenCode => vec![ConfigLocation {
-            client,
-            scope: ConfigScope::Repo,
-            path: root.join("opencode.json").to_string_lossy().into_owned(),
-        }],
-        ClientId::VsCodeCopilot => vec![ConfigLocation {
-            client,
-            scope: ConfigScope::Repo,
-            path: root
-                .join(".vscode")
-                .join("settings.json")
-                .to_string_lossy()
-                .into_owned(),
-        }],
-        ClientId::Codex | ClientId::OpenChamber => Vec::new(),
-    }
+    locations_under(client, ConfigScope::Repo, &root, registry::spec(client).repo_paths)
 }
 
 /// Which clients are actually present on this machine: does any known
@@ -222,6 +176,26 @@ mod tests {
         let claude_after = after.iter().find(|d| d.client == ClientId::ClaudeCode).unwrap();
         assert!(claude_after.present);
         drop(guard);
+    }
+
+    #[test]
+    fn every_client_gets_one_location_per_declared_path() {
+        // Proves the join is driven by the table: a row that gains a path
+        // gains a location with no change here.
+        let _guard = with_home();
+        for spec in registry::CLIENTS {
+            let locs = personal_locations(spec.id);
+            assert_eq!(
+                locs.len(),
+                spec.personal_paths.len(),
+                "{:?} should get one location per declared personal path",
+                spec.id
+            );
+            for (loc, components) in locs.iter().zip(spec.personal_paths.iter()) {
+                let tail = components.join(std::path::MAIN_SEPARATOR_STR);
+                assert!(loc.path.ends_with(&tail), "{} should end with {tail}", loc.path);
+            }
+        }
     }
 
     #[test]

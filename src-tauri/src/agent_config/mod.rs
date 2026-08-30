@@ -18,4 +18,6 @@ pub mod normalize;
 pub mod plan;
 pub mod readers;
 pub mod redact;
+pub mod registry;
+pub mod skills;
 pub mod writers;

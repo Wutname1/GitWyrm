@@ -4338,9 +4338,17 @@ export type ClientDetection = { client: ClientId; present: boolean;
  */
 writeSupported: boolean }
 /**
- * Which agent client a location/state belongs to. Kept as a fixed enum
- * (rather than a free string) so the UI's per-client columns and the
- * writers dispatch table are exhaustive-checked by the compiler.
+ * Which agent client a location/state belongs to.
+ * 
+ * Kept as a fixed enum because this is the wire/IPC type: the frontend's
+ * per-client columns are typed against it, so widening it to a free string
+ * would churn every one of them. What each client *is* -- its paths, its
+ * config keys, whether it can be written to -- is no longer expressed here
+ * but as a row in [`super::registry`]. This enum is only the name.
+ * 
+ * Anything persisted to disk records [`super::registry::ClientSpec::key`]
+ * (the same kebab-case string this enum serializes to) instead of the enum,
+ * so a client added later can still be read back out of an old file.
  */
 export type ClientId = "codex" | "claude-code" | "open-code" | "vs-code-copilot" | "open-chamber"
 /**
@@ -5733,7 +5741,26 @@ export type OperationKind = "Merge" | "CherryPick" | "Revert" | "Rebase"
  * destination file, so a corrupted client directory cannot also destroy the
  * recovery copy.
  */
-export type OperationReceipt = { operationId: string; planId: string; client: ClientId; destinationPath: string; 
+export type OperationReceipt = { operationId: string; planId: string; 
+/**
+ * Which client was written to, as a stable string
+ * ([`super::registry::ClientSpec::key`]) rather than the [`ClientId`]
+ * enum.
+ * 
+ * A receipt outlives the release that wrote it: it is read back weeks
+ * later to undo a write. If this were the enum, a receipt naming a
+ * client that a future build no longer knows -- or that a build knew
+ * only in an unreleased form -- would fail to deserialize, and undo
+ * would be impossible for a write GitWyrm itself made. A string always
+ * reads back, and undo does not need to interpret it: the path, hashes,
+ * and backup in this same receipt carry everything the restore needs.
+ * 
+ * Backward compatible on purpose: [`ClientId`] serializes to exactly
+ * these kebab-case strings, so receipts written before this field was
+ * widened deserialize unchanged. Use [`super::registry::spec_by_key`]
+ * to get back to a row when one is needed for display.
+ */
+client: string; destinationPath: string; 
 /**
  * Hash of the destination's content immediately before this write (the
  * same value the write was gated on). `None` if the file did not exist

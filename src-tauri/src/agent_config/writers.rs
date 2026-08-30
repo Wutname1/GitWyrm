@@ -24,12 +24,17 @@ use serde_json::Value;
 
 use super::json_patch::{self, PatchError};
 use super::model::{ClientId, ExtraFields, ItemKind};
+use super::registry::{self, WriterKind};
 
 /// Which clients currently have a working writer. Read-only clients still
 /// appear in the inventory and their detected presence is reported --
 /// they simply cannot be an apply destination (task 4.6).
+///
+/// This is a lookup into [`registry::CLIENTS`] rather than its own list, so
+/// a client cannot end up declared writable in one place and read-only in
+/// another. A row with no writer is read-only, full stop.
 pub fn is_supported(client: ClientId) -> bool {
-    matches!(client, ClientId::ClaudeCode | ClientId::OpenCode)
+    registry::spec(client).can_write()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -52,12 +57,12 @@ pub fn build_new_content(
     current_text: &str,
 ) -> Result<String, WriteContentError> {
     let value = Value::Object(extra.iter().map(|(k, v)| (k.clone(), v.0.clone())).collect());
-    match (client, kind) {
-        (ClientId::ClaudeCode, ItemKind::McpConnector) => {
-            Ok(json_patch::set_path(current_text, &["mcpServers", identity], &value)?)
-        }
-        (ClientId::OpenCode, ItemKind::McpConnector) => {
-            Ok(json_patch::set_path(current_text, &["mcp", identity], &value)?)
+    // Dispatch is on the *kind of writing* the registry row declares, not on
+    // which client it is. A client with no writer never reaches a branch that
+    // can produce content, which is what keeps read-only clients read-only.
+    match (registry::spec(client).writer, kind) {
+        (Some(WriterKind::JsonMcpMap { key }), ItemKind::McpConnector) => {
+            Ok(json_patch::set_path(current_text, &[key, identity], &value)?)
         }
         _ => Err(WriteContentError::Unsupported),
     }
@@ -66,10 +71,7 @@ pub fn build_new_content(
 /// The empty-document text a writer starts from when the destination file
 /// does not exist yet.
 pub fn empty_document(client: ClientId) -> &'static str {
-    match client {
-        ClientId::ClaudeCode | ClientId::OpenCode | ClientId::VsCodeCopilot | ClientId::OpenChamber => "{}\n",
-        ClientId::Codex => "",
-    }
+    registry::spec(client).empty_document
 }
 
 #[cfg(test)]
@@ -107,6 +109,32 @@ mod tests {
     fn unsupported_client_refuses_to_build_content() {
         let item = extra(&[("command", json!("x"))]);
         let result = build_new_content(ClientId::Codex, ItemKind::McpConnector, "x", &item, "");
+        assert!(matches!(result, Err(WriteContentError::Unsupported)));
+    }
+
+    #[test]
+    fn every_read_only_client_refuses_to_build_content_for_any_kind() {
+        // The read-only promise, checked against the table rather than a
+        // hand-listed set, so a client added later is covered too.
+        let item = extra(&[("command", json!("x"))]);
+        for spec in super::registry::CLIENTS.iter().filter(|s| !s.can_write()) {
+            for kind in [ItemKind::Skill, ItemKind::McpConnector] {
+                let result = build_new_content(spec.id, kind, "x", &item, "{}");
+                assert!(
+                    matches!(result, Err(WriteContentError::Unsupported)),
+                    "{:?} is read-only and must refuse {kind:?}",
+                    spec.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_writable_client_still_refuses_a_kind_its_writer_does_not_handle() {
+        // The JSON map writer only knows how to place an MCP connector; a
+        // skill must not be silently written into the connector map.
+        let item = extra(&[("command", json!("x"))]);
+        let result = build_new_content(ClientId::ClaudeCode, ItemKind::Skill, "x", &item, "{}");
         assert!(matches!(result, Err(WriteContentError::Unsupported)));
     }
 
