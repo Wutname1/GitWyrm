@@ -11,6 +11,7 @@
 
 pub mod acp;
 pub mod cli_agent;
+pub mod codex;
 pub mod copilot_cli;
 pub mod registry;
 pub mod run;

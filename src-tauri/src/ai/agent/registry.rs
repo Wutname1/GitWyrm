@@ -668,6 +668,25 @@ mod tests {
     /// `shell` and `url` on every run), so a rule of "any denial turns on
     /// read-only mode" looked correct while silently making every Gemini Fix
     /// session unable to write.
+    /// Codex bounds the whole session rather than naming tools, so a
+    /// read-only chat has to reach it as a sandbox mode.
+    #[test]
+    fn codex_takes_a_read_only_sandbox_when_writing_is_denied() {
+        let codex = find("codex").expect("codex is in the table");
+        let args = codex.launch_args(&["shell", "url", "write"]);
+        assert!(
+            args.iter().any(|a| a.contains("read-only")),
+            "no read-only bound reached the launch line: {args:?}"
+        );
+        // And a run that IS allowed to write must not be sandboxed shut, or
+        // Fix on Codex could never change a file.
+        let writing = codex.launch_args(&["shell", "url"]);
+        assert!(
+            !writing.iter().any(|a| a.contains("read-only")),
+            "a write-capable run was forced read-only: {writing:?}"
+        );
+    }
+
     #[test]
     fn a_write_capable_run_is_not_forced_into_read_only_mode() {
         let gemini = find("gemini").expect("gemini is in the table");

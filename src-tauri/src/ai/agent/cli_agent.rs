@@ -180,12 +180,33 @@ impl CliAgent {
             return Err(select::refuse_read_only(self.spec));
         }
         let denied = denied_tools_for(policy, started);
-        // Which protocol to speak is the spec's to say. Today every row is
-        // ACP; a row naming another one branches here and nothing above this
-        // line changes.
-        let mut conn = AcpConnection::spawn_agent(self.spec, &self.program, &self.cwd, &denied).await?;
-        conn.start_session(&self.cwd).await?;
-        Ok(super::wire::Connection::Acp(conn))
+        // Which language to speak is the spec's to say.
+        match self.spec.protocol {
+            super::registry::Protocol::Acp => {
+                let mut conn =
+                    AcpConnection::spawn_agent(self.spec, &self.program, &self.cwd, &denied)
+                        .await?;
+                conn.start_session(&self.cwd).await?;
+                Ok(super::wire::Connection::Acp(conn))
+            }
+            super::registry::Protocol::CodexAppServer => {
+                let args: Vec<String> =
+                    self.spec.launch_args(&denied).into_iter().collect();
+                let mut conn =
+                    super::codex::CodexConnection::spawn(&self.program, &self.cwd, &args).await?;
+                // Codex bounds the whole session rather than naming tools, so
+                // the read-only decision is made once, here, and a later turn
+                // cannot widen it.
+                let read_only = denied.contains(&"write");
+                conn.start_session(&self.cwd, read_only).await?;
+                Ok(super::wire::Connection::Codex(conn))
+            }
+            super::registry::Protocol::ClaudeStreamJson => Err(AgentError::TransportUnavailable {
+                transport: super::transport::Transport::Cli,
+                detail: "GitWyrm cannot talk to Claude Code yet. Pick a different AI tool for now."
+                    .into(),
+            }),
+        }
     }
 }
 

@@ -153,6 +153,8 @@ pub struct TurnOutcome {
 pub enum Connection {
     /// Agent Client Protocol over stdio. Copilot and Gemini speak this.
     Acp(super::acp::AcpConnection),
+    /// Codex's own app-server, which is not ACP. See `super::codex`.
+    Codex(super::codex::CodexConnection),
 }
 
 impl Connection {
@@ -165,6 +167,7 @@ impl Connection {
     pub fn take_incoming(&mut self) -> Option<tokio::sync::mpsc::UnboundedReceiver<Incoming>> {
         match self {
             Connection::Acp(c) => c.take_incoming(),
+            Connection::Codex(c) => c.take_incoming(),
         }
     }
 
@@ -172,6 +175,7 @@ impl Connection {
     pub async fn prompt(&self, text: &str) -> Result<TurnOutcome, super::transport::AgentError> {
         match self {
             Connection::Acp(c) => c.prompt(text).await,
+            Connection::Codex(c) => c.prompt(text).await,
         }
     }
 
@@ -183,6 +187,7 @@ impl Connection {
     pub async fn ask(&mut self, text: &str) -> Result<String, super::transport::AgentError> {
         match self {
             Connection::Acp(c) => c.ask(text).await,
+            Connection::Codex(c) => c.ask(text).await,
         }
     }
 
@@ -190,6 +195,7 @@ impl Connection {
     pub async fn cancel(&self) -> Result<(), super::transport::AgentError> {
         match self {
             Connection::Acp(c) => c.cancel().await,
+            Connection::Codex(c) => c.cancel().await,
         }
     }
 
@@ -197,6 +203,7 @@ impl Connection {
     pub async fn shutdown(self) {
         match self {
             Connection::Acp(c) => c.shutdown().await,
+            Connection::Codex(c) => c.shutdown().await,
         }
     }
 }
