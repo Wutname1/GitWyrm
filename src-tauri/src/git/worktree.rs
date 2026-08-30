@@ -754,6 +754,32 @@ pub fn looks_like_file_lock(text: &str) -> bool {
         || lower.contains("text file busy")
 }
 
+/// True when `path` has at least one submodule actually checked out.
+///
+/// Git refuses `worktree remove` outright on a worktree containing a populated
+/// submodule -- "fatal: working trees containing submodules cannot be moved or
+/// removed" -- and refuses it whether or not the submodule has any changes in
+/// it. `--force` skips that check, so this is a third reason force is needed,
+/// alongside uncommitted work and a git lock.
+///
+/// A submodule that is only *declared* is not the problem: `.gitmodules` and a
+/// gitlink with an empty folder pass the check. What git objects to is a real
+/// checkout it would have to delete, so that is what is looked for -- otherwise
+/// every repo that merely mentions a submodule would be forced needlessly.
+fn has_populated_submodule(path: &Path) -> bool {
+    let Ok(repo) = git2::Repository::open(path) else {
+        return false;
+    };
+    let Ok(subs) = repo.submodules() else {
+        return false;
+    };
+    subs.iter().any(|sub| {
+        // `open` succeeds only once the submodule's own checkout exists, which
+        // is exactly the state git refuses to remove around.
+        sub.open().is_ok()
+    })
+}
+
 /// Remove a linked worktree.
 ///
 /// Refuses the main checkout and the currently open one outright -- removing
@@ -814,7 +840,11 @@ pub fn remove(
         }
     }
 
-    let force_needed = !dirt.is_clean() || entry.is_locked;
+    // A populated submodule is refused by plain `remove` no matter how clean
+    // the worktree is, so it joins dirt and locks as a reason to force. Without
+    // this the removal fails on a spotless folder with a message about
+    // submodules that the user can do nothing with.
+    let force_needed = !dirt.is_clean() || entry.is_locked || has_populated_submodule(&target);
     let mut args: Vec<&str> = vec!["worktree", "remove"];
     if force_needed {
         args.push("--force");
@@ -1063,6 +1093,123 @@ mod tests {
         std::fs::create_dir_all(&path).unwrap();
         // Exists but is not a checkout: the link is what broke, so repair, not prune.
         assert_eq!(classify(&path), WorktreeState::Moved);
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn a_plain_checkout_has_no_populated_submodule() {
+        let path = std::env::temp_dir().join(format!("gitwyrm-nosub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        let repo = git2::Repository::init(&path).unwrap();
+        drop(repo);
+        // No submodules declared at all: nothing to force around.
+        assert!(!has_populated_submodule(&path));
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn a_declared_but_unchecked_out_submodule_does_not_need_force() {
+        let path = std::env::temp_dir().join(format!("gitwyrm-declsub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        let repo = git2::Repository::init(&path).unwrap();
+        // Declared in .gitmodules but never checked out. Git removes a worktree
+        // in this state without complaint, so forcing here would be gratuitous.
+        std::fs::write(
+            path.join(".gitmodules"),
+            "[submodule \"packages/core\"]
+	path = packages/core
+	url = https://example.invalid/x.git
+",
+        )
+        .unwrap();
+        drop(repo);
+        assert!(!has_populated_submodule(&path));
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// The case the whole helper exists for, built end to end.
+    ///
+    /// Ignored by default because it shells out to git several times and writes
+    /// a few repositories to the temp folder; run it with
+    /// `cargo test populated_submodule -- --ignored` when touching this logic.
+    #[test]
+    #[ignore]
+    fn a_checked_out_submodule_is_detected() {
+        let root = std::env::temp_dir().join(format!("gitwyrm-subfix-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let sub = root.join("sub");
+        let main = root.join("main");
+        let wt = root.join("wt");
+
+        let git = |dir: &Path, args: &[&str]| {
+            std::process::Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .output()
+                .unwrap();
+        };
+
+        std::fs::create_dir_all(&sub).unwrap();
+        git(&sub, &["init", "-q"]);
+        git(&sub, &["config", "user.email", "t@t"]);
+        git(&sub, &["config", "user.name", "t"]);
+        std::fs::write(sub.join("a.txt"), "hi").unwrap();
+        git(&sub, &["add", "."]);
+        git(&sub, &["commit", "-qm", "init"]);
+
+        std::fs::create_dir_all(&main).unwrap();
+        git(&main, &["init", "-q"]);
+        git(&main, &["config", "user.email", "t@t"]);
+        git(&main, &["config", "user.name", "t"]);
+        std::fs::write(main.join("m.txt"), "m").unwrap();
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-qm", "init"]);
+        // Local-path submodules need this opt-in on current git.
+        git(
+            &main,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                "../sub",
+                "packages/core",
+            ],
+        );
+        git(&main, &["commit", "-qm", "addsub"]);
+        git(
+            &main,
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "feature"],
+        );
+        git(
+            &wt,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "update",
+                "--init",
+                "-q",
+            ],
+        );
+
+        // This is the state git refuses to remove without --force, even though
+        // the worktree is completely clean.
+        assert!(has_populated_submodule(&wt));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_folder_that_is_not_a_checkout_needs_no_force() {
+        let path = std::env::temp_dir().join(format!("gitwyrm-nonrepo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        // Unopenable is not the same as "has submodules"; guessing yes here
+        // would force every removal over a folder git cannot even read.
+        assert!(!has_populated_submodule(&path));
         let _ = std::fs::remove_dir_all(&path);
     }
 
