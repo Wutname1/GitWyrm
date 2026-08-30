@@ -58,6 +58,19 @@ export const DEFAULT_EDITOR: EditorKind = "vs_code";
 export type ChangeSizeDisplay = "row" | "column";
 /** How the changed-file lists are arranged: grouped by folder, or one flat row per file. */
 export type ChangesViewMode = "tree" | "list";
+/** Which column the repository picker's table is ordered by. */
+export type RepoPickerSortKey = "name" | "activity" | "branch";
+/** A column plus its direction, e.g. `activity` descending. */
+export interface RepoPickerSort {
+  key: RepoPickerSortKey;
+  desc: boolean;
+}
+/** Open issue and pull request counts for one repository, from the last scan. */
+export interface RepoActivity {
+  prs: number;
+  issues: number;
+}
+
 export type RepoPickerSection =
   | "pinned_groups"
   | "pinned_repositories"
@@ -830,6 +843,19 @@ interface WorkspaceState {
   pinnedSavedGroupIds: string[];
   /** Repository-picker sections the user has hidden (persisted). */
   repoPickerCollapsedSections: RepoPickerSection[];
+  /** How the repository picker's table is ordered (persisted). */
+  repoPickerSort: RepoPickerSort;
+  /**
+   * Open issue and pull request counts from the last scan, keyed by
+   * `pathKey(path)`.
+   *
+   * Deliberately in-memory only. These are a live view of what is open on the
+   * host, and a count restored from disk days later would be wrong in a way the
+   * user cannot see -- better to show "never scanned" and let them press Scan.
+   */
+  repoActivity: Record<string, RepoActivity>;
+  /** When the last scan finished, as epoch milliseconds. Null until one runs (persisted). */
+  repoScanAt: number | null;
   /**
    * Folders left open in the changes trees, keyed by `changeTreeKey(repo, tree)`.
    * Only open folders are stored, so a folder the user never touched stays
@@ -972,6 +998,10 @@ interface WorkspaceState {
   ) => void;
   togglePinnedSavedGroup: (groupId: string) => void;
   toggleRepoPickerSection: (section: RepoPickerSection) => void;
+  /** Sort by a column; picking the current column flips the direction. */
+  sortRepoPicker: (key: RepoPickerSortKey) => void;
+  /** Record the counts a scan came back with, and when it finished. */
+  setRepoActivity: (activity: Record<string, RepoActivity>) => void;
   /**
    * Replace the open-folder set for one changes tree. An empty list drops the
    * entry entirely so settings.json does not accumulate keys for repos whose
@@ -1165,6 +1195,8 @@ function toSettings(s: WorkspaceState): Settings {
     pinned_repo_paths: s.pinnedRepoPaths,
     pinned_saved_group_ids: s.pinnedSavedGroupIds,
     repo_picker_collapsed_sections: s.repoPickerCollapsedSections,
+    repo_picker_sort: `${s.repoPickerSort.key}${s.repoPickerSort.desc ? ":desc" : ""}`,
+    repo_scan_at: s.repoScanAt == null ? null : new Date(s.repoScanAt).toISOString(),
     expanded_change_folders: s.expandedChangeFolders,
     changes_view_mode: s.changesViewMode,
   };
@@ -1249,6 +1281,24 @@ function normalizeRepoPickerSections(
   return (sections ?? []).filter((section): section is RepoPickerSection =>
     REPO_PICKER_SECTIONS.has(section as RepoPickerSection),
   );
+}
+
+/** Validate a stored sort choice; anything unrecognised falls back to name ascending. */
+function normalizeRepoPickerSort(
+  sort: string | null | undefined,
+): RepoPickerSort {
+  const [key, direction] = (sort ?? "").split(":");
+  if (key !== "name" && key !== "activity" && key !== "branch") {
+    return { key: "name", desc: false };
+  }
+  return { key, desc: direction === "desc" };
+}
+
+/** Validate a stored scan timestamp; an unparseable one reads as never scanned. */
+function normalizeScanAt(at: string | null | undefined): number | null {
+  if (!at) return null;
+  const parsed = Date.parse(at);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 /** Validate a stored theme id; unknown/absent falls back to Auto. */
@@ -1423,6 +1473,7 @@ export const SETTINGS_DEFAULTS = {
   codeFolders: [],
   cloneDirectory: null,
   repoPickerCollapsedSections: [],
+  repoPickerSort: { key: "name", desc: false },
   gitExecutable: "",
   gpgExecutable: "",
   // Not in any per-screen group: only the global "Reset all" restores them.
@@ -1628,6 +1679,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   pinnedRepoPaths: [],
   pinnedSavedGroupIds: [],
   repoPickerCollapsedSections: [],
+  repoPickerSort: { key: "name", desc: false },
+  repoActivity: {},
+  repoScanAt: null,
   expandedChangeFolders: {},
   changesViewMode: "tree",
   hydrated: false,
@@ -2554,6 +2608,21 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }));
     schedulePersist();
   },
+  sortRepoPicker: (key) => {
+    set((s) => ({
+      repoPickerSort:
+        s.repoPickerSort.key === key
+          ? { key, desc: !s.repoPickerSort.desc }
+          : // A fresh column starts in the direction that is useful for it:
+            // most activity first, but names and branches A to Z.
+            { key, desc: key === "activity" },
+    }));
+    schedulePersist();
+  },
+  setRepoActivity: (activity) => {
+    set({ repoActivity: activity, repoScanAt: Date.now() });
+    schedulePersist();
+  },
   setExpandedChangeFolders: (key, folders) => {
     set((s) => {
       const next = { ...s.expandedChangeFolders };
@@ -3053,6 +3122,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         repoPickerCollapsedSections: normalizeRepoPickerSections(
           settings.repo_picker_collapsed_sections,
         ),
+        repoPickerSort: normalizeRepoPickerSort(settings.repo_picker_sort),
+        repoScanAt: normalizeScanAt(settings.repo_scan_at),
         expandedChangeFolders: normalizeExpandedChangeFolders(
           settings.expanded_change_folders,
         ),

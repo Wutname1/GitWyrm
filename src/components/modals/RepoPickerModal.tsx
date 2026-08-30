@@ -4,12 +4,15 @@ import {
   ArrowRight,
   Check,
   ChevronRight,
+  ChevronUp,
+  CircleDot,
   Clock3,
   Code2,
   Download,
   Eye,
   Folder,
   FolderGit2,
+  GitPullRequest,
   FolderPlus,
   FolderSearch,
   GripVertical,
@@ -53,6 +56,8 @@ import {
   type RepositoryStarter,
 } from "@/lib/bindings";
 import { isTauri } from "@/lib/env";
+import { describeError, log } from "@/lib/log";
+import { sortRepos as sortLibraryRepos } from "@/lib/repoSort";
 import { joinPath, normalizePath, pathKey, pathName } from "@/lib/paths";
 import { unwrap } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
@@ -61,7 +66,10 @@ import {
   usePrimaryCodeFolder,
   useWorkspaceStore,
   type RecentRepo,
+  type RepoActivity,
   type RepoPickerSection,
+  type RepoPickerSort,
+  type RepoPickerSortKey,
   type SavedTabGroup,
 } from "@/stores/workspaceStore";
 import { CodeFoldersSetting } from "@/components/domain/settings/CodeFoldersSetting";
@@ -280,6 +288,147 @@ function RouteButton({
 }
 
 /**
+ * "a moment ago", "about 3 hours ago", "yesterday" -- how long since the scan.
+ *
+ * Written out rather than reusing the terse commit-graph form ("3h ago"),
+ * because this one sits inside a sentence.
+ */
+function describeScanTime(at: number, now = Date.now()): string {
+  const minutes = Math.max(0, Math.round((now - at) / 60_000));
+  if (minutes < 2) return "a moment ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `about ${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  return new Date(at).toLocaleDateString();
+}
+
+/**
+ * The issues and pull requests column: two counts, or a quiet dash.
+ *
+ * A repository with nothing open shows nothing rather than "0 0" -- a screen of
+ * zeroes is noise, and the counts that matter should be the only ones that draw
+ * the eye. A repository that has never been scanned looks the same as one with
+ * nothing open, which is why the header carries the "last checked" line.
+ */
+function RepoActivityCell({
+  activity,
+  scanning,
+}: {
+  activity?: RepoActivity;
+  scanning: boolean;
+}) {
+  if (scanning && !activity) {
+    return (
+      <span className="hidden w-20 flex-none justify-end min-[900px]:flex">
+        <Loader2 size={11} className="animate-spin text-muted-foreground" />
+      </span>
+    );
+  }
+  const issues = activity?.issues ?? 0;
+  const prs = activity?.prs ?? 0;
+  return (
+    <span className="hidden w-20 flex-none items-center justify-end gap-2 min-[900px]:flex">
+      {issues > 0 && (
+        <span
+          title={`${issues} open ${issues === 1 ? "issue" : "issues"}`}
+          className="flex items-center gap-0.5 font-mono text-2xs text-sub"
+        >
+          <CircleDot size={10} className="text-muted-foreground" />
+          {issues}
+        </span>
+      )}
+      {prs > 0 && (
+        <span
+          title={`${prs} open ${prs === 1 ? "pull request" : "pull requests"}`}
+          className="flex items-center gap-0.5 font-mono text-2xs text-sub"
+        >
+          <GitPullRequest size={10} className="text-muted-foreground" />
+          {prs}
+        </span>
+      )}
+      {issues === 0 && prs === 0 && (
+        <span className="font-mono text-2xs text-muted-foreground/60">—</span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The column headings above a repository list.
+ *
+ * Laid out to line up with `RepoLibraryRow`'s own three-column grid, so the
+ * headings sit over the values they name without either side hard-coding the
+ * other's widths beyond the two fixed columns on the right.
+ */
+function RepoTableHeader({
+  sort,
+  onSort,
+}: {
+  sort: RepoPickerSort;
+  /** Undefined leaves the headings inert, for a list with a fixed order. */
+  onSort?: (key: RepoPickerSortKey) => void;
+}) {
+  const heading = (key: RepoPickerSortKey, label: string, width: string) => {
+    const active = sort.key === key;
+    const body = (
+      <>
+        {label}
+        {active && onSort && (
+          <ChevronUp
+            size={9}
+            className={cn("transition-transform", sort.desc && "rotate-180")}
+          />
+        )}
+      </>
+    );
+    const classes = cn(
+      "flex items-center gap-1 text-[9px] font-bold uppercase tracking-[.09em]",
+      width,
+      active && onSort ? "text-accent-text" : "text-muted-foreground",
+    );
+    if (!onSort) return <span className={classes}>{body}</span>;
+    return (
+      <button
+        type="button"
+        onClick={() => onSort(key)}
+        aria-label={`Sort by ${label.toLowerCase()}`}
+        className={cn(classes, "rounded hover:text-foreground")}
+      >
+        {body}
+      </button>
+    );
+  };
+
+  // Mirrors RepoLibraryRow's outer grid so the headings land over their
+  // values: a spacer for the checkbox column, the row's own padding and icon
+  // width on the left, and the trailing controls' width on the right.
+  return (
+    <div className="mb-1 grid min-h-6 grid-cols-[auto_minmax(0,1fr)_auto] items-end border-b border-border/60 pr-1.5">
+      <span aria-hidden className="ml-2.5 size-6" />
+      <span className="flex min-w-0 items-center gap-2.5 px-2.5 pb-1">
+        <span aria-hidden className="size-8 flex-none" />
+        {heading("name", "Repository", "min-w-0 flex-1")}
+        {heading(
+          "activity",
+          "Open work",
+          "hidden w-20 flex-none justify-end min-[900px]:flex",
+        )}
+        {heading(
+          "branch",
+          "Branch",
+          "hidden w-28 flex-none justify-end min-[1100px]:flex",
+        )}
+      </span>
+      {/* Matches the pin, remove and open controls the row keeps on its right. */}
+      <span aria-hidden className="w-[5.6rem]" />
+    </div>
+  );
+}
+
+/**
  * Drag-to-reorder wiring handed to a pinned repo row. Only pinned rows get
  * this; every other row renders without drag handlers.
  */
@@ -300,6 +449,8 @@ function RepoLibraryRow({
   iconUrl,
   pinned,
   openRepoId,
+  activity,
+  scanning,
   selected,
   checked,
   busy,
@@ -315,6 +466,9 @@ function RepoLibraryRow({
   iconUrl?: string;
   pinned: boolean;
   openRepoId?: string;
+  /** Counts from the last scan, or undefined when this repo has none yet. */
+  activity?: RepoActivity;
+  scanning: boolean;
   selected: boolean;
   checked: boolean;
   busy: boolean;
@@ -389,23 +543,24 @@ function RepoLibraryRow({
       >
         <RepoRowIcon dataUrl={iconUrl} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-semibold text-foreground">
-            {repo.name}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-xs font-semibold text-foreground">
+              {repo.name}
+            </span>
+            {openRepoId && (
+              <span className="flex-none rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold text-accent-text">
+                Open
+              </span>
+            )}
           </span>
           <span className="block truncate font-mono text-2xs text-muted-foreground">
             {repo.path}
           </span>
         </span>
-        {repo.headBranch && (
-          <span className="hidden flex-none font-mono text-2xs text-sub min-[1100px]:block">
-            {repo.headBranch}
-          </span>
-        )}
-        {openRepoId && (
-          <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold text-accent-text">
-            Open
-          </span>
-        )}
+        <RepoActivityCell activity={activity} scanning={scanning} />
+        <span className="hidden w-28 flex-none truncate text-right font-mono text-2xs text-sub min-[1100px]:block">
+          {repo.headBranch}
+        </span>
       </button>
       <div className="flex items-center gap-0.5">
         <TooltipButton
@@ -969,6 +1124,11 @@ function RepoPickerPanel({
   const togglePinnedSavedGroup = useWorkspaceStore(
     (state) => state.togglePinnedSavedGroup,
   );
+  const repoPickerSort = useWorkspaceStore((state) => state.repoPickerSort);
+  const sortRepoPicker = useWorkspaceStore((state) => state.sortRepoPicker);
+  const repoActivity = useWorkspaceStore((state) => state.repoActivity);
+  const repoScanAt = useWorkspaceStore((state) => state.repoScanAt);
+  const setRepoActivity = useWorkspaceStore((state) => state.setRepoActivity);
   const toggleRepoPickerSection = useWorkspaceStore(
     (state) => state.toggleRepoPickerSection,
   );
@@ -986,6 +1146,7 @@ function RepoPickerPanel({
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [namingGroup, setNamingGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
+  const [scanning, setScanning] = useState(false);
   const [groupLibraryOpen, setGroupLibraryOpen] = useState(false);
   const [folderManagerOpen, setFolderManagerOpen] = useState(false);
   /** Which watched folder the library is filtered to; null means all of them. */
@@ -1073,6 +1234,9 @@ function RepoPickerPanel({
     `${repo.name} ${repo.path} ${repo.headBranch ?? ""}`
       .toLowerCase()
       .includes(query);
+  const sortRepos = (repos: LibraryRepo[]) =>
+    sortLibraryRepos(repos, repoPickerSort, repoActivity);
+
   const pinnedRepos = pinnedRepoPaths.flatMap((path) => {
     const repo = repoByPath.get(pathKey(path));
     return repo && matches(repo) ? [repo] : [];
@@ -1089,6 +1253,7 @@ function RepoPickerPanel({
       const item = repoByPath.get(pathKey(repo.path));
       return item && matches(item) ? [item] : [];
     });
+  const sortedRecentRepos = sortRepos(recentRepos);
 
   const hiddenKeys = new Set(
     [...pinnedRepos, ...recentRepos].map((repo) => pathKey(repo.path)),
@@ -1104,12 +1269,14 @@ function RepoPickerPanel({
    */
   const folderSections = scopedFolders.map((folder) => ({
     folder,
-    repos: folder.repos
-      .flatMap((repo): LibraryRepo[] => {
-        const item = repoByPath.get(pathKey(repo.path));
-        return item ? [item] : [];
-      })
-      .filter((repo) => !hiddenKeys.has(pathKey(repo.path)) && matches(repo)),
+    repos: sortRepos(
+      folder.repos
+        .flatMap((repo): LibraryRepo[] => {
+          const item = repoByPath.get(pathKey(repo.path));
+          return item ? [item] : [];
+        })
+        .filter((repo) => !hiddenKeys.has(pathKey(repo.path)) && matches(repo)),
+    ),
   }));
 
   // Flat view of the same rows, for counts and shift-click ranges. De-duplicated
@@ -1126,7 +1293,7 @@ function RepoPickerPanel({
   // sections are left out so a range never reaches rows you cannot see.
   const visibleRowKeys = [
     ...(isSectionCollapsed("pinned_repositories") ? [] : pinnedRepos),
-    ...(isSectionCollapsed("recent") ? [] : recentRepos),
+    ...(isSectionCollapsed("recent") ? [] : sortedRecentRepos),
     ...(isSectionCollapsed("watched") ? [] : otherRepos),
   ].map((repo) => pathKey(repo.path));
 
@@ -1590,6 +1757,46 @@ function RepoPickerPanel({
     }
   };
 
+  /**
+   * Check every repository in the library for open issues and pull requests.
+   *
+   * One pass over the whole list rather than a badge per row that fetches on
+   * its own: the counts are only useful when they can be compared, and a
+   * hundred quiet background requests every time this screen opens is not a
+   * trade worth making.
+   */
+  const scanLibrary = async () => {
+    const paths = [
+      ...new Map(libraryRepos.map((repo) => [pathKey(repo.path), repo.path])),
+    ].map(([, path]) => path);
+    if (paths.length === 0) {
+      toast("No repositories to check yet");
+      return;
+    }
+    setScanning(true);
+    try {
+      const counts = unwrap(await commands.githubScanRepos(paths));
+      const next: Record<string, RepoActivity> = {};
+      let reached = 0;
+      for (const count of counts) {
+        if (!count.checked) continue;
+        reached += 1;
+        next[pathKey(count.path)] = { prs: count.prs, issues: count.issues };
+      }
+      setRepoActivity(next);
+      toast(
+        reached === 0
+          ? "None of these repositories are on a connected host"
+          : `Checked ${reached} of ${paths.length} repositories`,
+      );
+    } catch (error) {
+      log.error(`repo picker scan failed: ${describeError(error)}`);
+      toast.error("Could not check for issues and pull requests");
+    } finally {
+      setScanning(false);
+    }
+  };
+
   // `fromRecent` rather than deriving it from the path: the same repo can also
   // be pinned or scanned, and only the row drawn under RECENT should offer to
   // remove it from that list.
@@ -1605,6 +1812,8 @@ function RepoPickerPanel({
         iconUrl={iconsByPath.get(key)}
         pinned={pinnedRepoPaths.some((path) => pathKey(path) === key)}
         openRepoId={open?.id}
+        activity={repoActivity[key]}
+        scanning={scanning}
         selected={
           selectedItem?.type === "repo" && pathKey(selectedItem.path) === key
         }
@@ -1672,6 +1881,21 @@ function RepoPickerPanel({
             variant="secondary"
             size="sm"
             className="h-9 flex-none gap-1.5 text-xs"
+            onClick={() => void scanLibrary()}
+            disabled={scanning}
+            tooltip="Check every repository for open issues and pull requests"
+          >
+            {scanning ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <RefreshCw size={13} />
+            )}
+            {scanning ? "Checking…" : "Scan"}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-9 flex-none gap-1.5 text-xs"
             onClick={browseForRepositories}
             disabled={busy}
           >
@@ -1679,6 +1903,13 @@ function RepoPickerPanel({
             Browse…
           </Button>
         </div>
+        <p className="mt-2 text-2xs text-muted-foreground">
+          {scanning
+            ? "Checking every repository for open issues and pull requests…"
+            : repoScanAt == null
+              ? "Issues and pull requests have not been checked yet. Press Scan."
+              : `Issues and pull requests last checked ${describeScanTime(repoScanAt)}.`}
+        </p>
       </div>
 
       <button
@@ -1774,9 +2005,14 @@ function RepoPickerPanel({
                 Pinned repositories
               </SectionHeading>
               {!isSectionCollapsed("pinned_repositories") && (
-                <div className="grid gap-0.5">
-                  {pinnedRepos.map((repo) => renderRepoRow(repo))}
-                </div>
+                <>
+                  {/* No sort control: pinned rows are in the order the user
+                      dragged them into, and a sort would quietly discard it. */}
+                  <RepoTableHeader sort={repoPickerSort} />
+                  <div className="grid gap-0.5">
+                    {pinnedRepos.map((repo) => renderRepoRow(repo))}
+                  </div>
+                </>
               )}
             </section>
           )}
@@ -1802,9 +2038,15 @@ function RepoPickerPanel({
               Recent
             </SectionHeading>
             {!isSectionCollapsed("recent") && (
-              <div className="grid gap-0.5">
-                {recentRepos.map((repo) => renderRepoRow(repo, true))}
-              </div>
+              <>
+                <RepoTableHeader
+                  sort={repoPickerSort}
+                  onSort={sortRepoPicker}
+                />
+                <div className="grid gap-0.5">
+                  {sortedRecentRepos.map((repo) => renderRepoRow(repo, true))}
+                </div>
+              </>
             )}
           </section>
 
@@ -1938,9 +2180,15 @@ function RepoPickerPanel({
                           Finding repositories…
                         </div>
                       ) : (
-                        <div className="grid gap-0.5">
-                          {repos.map((repo) => renderRepoRow(repo))}
-                        </div>
+                        <>
+                          <RepoTableHeader
+                            sort={repoPickerSort}
+                            onSort={sortRepoPicker}
+                          />
+                          <div className="grid gap-0.5">
+                            {repos.map((repo) => renderRepoRow(repo))}
+                          </div>
+                        </>
                       )}
                     </div>
                   );

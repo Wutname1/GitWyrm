@@ -2643,6 +2643,23 @@ async githubListIssues(repoId: string | null, owner: string, repo: string) : Pro
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Counts open pull requests and issues for a list of repositories on disk.
+ * 
+ * Reads `origin` straight off each path rather than going through RepoManager:
+ * the picker's repositories are closed, so there is no open handle to ask.
+ * A repository that is not on a known host, or whose host errors, comes back
+ * with `checked: false` instead of failing the whole scan -- one unreachable
+ * remote must not cost the user every other count.
+ */
+async githubScanRepos(paths: string[]) : Promise<Result<RepoActivityCount[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_scan_repos", { paths }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async githubPrDetail(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<PrDetail, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("github_pr_detail", { repoId, owner, repo, number }) };
@@ -4328,6 +4345,19 @@ export type RemoveOutcome =
  * lie.
  */
 { kind: "partiallyRemoved"; path: string }
+/**
+ * Open pull request and issue counts for one repository on disk.
+ * 
+ * `path` is echoed back exactly as it came in so the picker can match the row
+ * it asked about without re-normalising anything.
+ */
+export type RepoActivityCount = { path: string; prs: number; issues: number; 
+/**
+ * None when the repository has no remote on a host GitWyrm integrates
+ * with, or the host could not be reached. Distinct from a count of zero,
+ * which means the host answered and there is genuinely nothing open.
+ */
+checked: boolean }
 export type RepoChangedPayload = { repo_id: string }
 /**
  * The three numbers a repository tab badge shows.
@@ -4911,6 +4941,17 @@ pinned_saved_group_ids?: string[] | null;
  * Repository-picker sections the user has hidden.
  */
 repo_picker_collapsed_sections?: string[]; 
+/**
+ * How the repository picker's table is sorted: "name", "activity",
+ * "branch", each optionally suffixed ":desc". None sorts by name.
+ * Validated on the frontend.
+ */
+repo_picker_sort?: string | null; 
+/**
+ * When every repository was last checked for issues and pull requests,
+ * as an RFC 3339 timestamp. None means never scanned.
+ */
+repo_scan_at?: string | null; 
 /**
  * What to do about local-only tags after a push: "ask", "always", "never".
  * None means ask. Validated on the frontend.

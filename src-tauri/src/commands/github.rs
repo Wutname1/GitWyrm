@@ -844,3 +844,111 @@ mod tests {
         assert!(slug.extra.is_none());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Library scan (repository picker)
+
+/// Open pull request and issue counts for one repository on disk.
+///
+/// `path` is echoed back exactly as it came in so the picker can match the row
+/// it asked about without re-normalising anything.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct RepoActivityCount {
+    pub path: String,
+    pub prs: u32,
+    pub issues: u32,
+    /// None when the repository has no remote on a host GitWyrm integrates
+    /// with, or the host could not be reached. Distinct from a count of zero,
+    /// which means the host answered and there is genuinely nothing open.
+    pub checked: bool,
+}
+
+/// Counts open pull requests and issues for a list of repositories on disk.
+///
+/// Reads `origin` straight off each path rather than going through RepoManager:
+/// the picker's repositories are closed, so there is no open handle to ask.
+/// A repository that is not on a known host, or whose host errors, comes back
+/// with `checked: false` instead of failing the whole scan -- one unreachable
+/// remote must not cost the user every other count.
+#[tauri::command]
+#[specta::specta]
+pub async fn github_scan_repos(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<RepoActivityCount>, AppError> {
+    // Six at a time: enough that a folder of twenty repositories finishes in a
+    // few seconds, few enough that the host does not see a burst it rate-limits.
+    const AT_ONCE: usize = 6;
+    let mut out = Vec::with_capacity(paths.len());
+    for chunk in paths.chunks(AT_ONCE) {
+        let mut set = tokio::task::JoinSet::new();
+        for path in chunk {
+            let app = app.clone();
+            let path = path.clone();
+            set.spawn(async move { count_one(&app, path).await });
+        }
+        while let Some(joined) = set.join_next().await {
+            out.push(joined.map_err(|e| AppError::Other(e.to_string()))?);
+        }
+    }
+    // JoinSet finishes out of order; the picker matches on path, but a stable
+    // order keeps the result readable in logs and tests.
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
+/// One repository's counts. Never fails: an unreadable repository, an unknown
+/// host, or a host that errors all come back unchecked.
+async fn count_one(app: &tauri::AppHandle, path: String) -> RepoActivityCount {
+    let unchecked = |path: String| RepoActivityCount {
+        path,
+        prs: 0,
+        issues: 0,
+        checked: false,
+    };
+
+    let disk = path.clone();
+    let url = tauri::async_runtime::spawn_blocking(move || {
+        git2::Repository::open(&disk)
+            .ok()
+            .and_then(|repo| {
+                repo.find_remote("origin")
+                    .ok()?
+                    .url()
+                    .ok()
+                    .map(String::from)
+            })
+    })
+    .await
+    .ok()
+    .flatten();
+
+    let Some(url) = url else { return unchecked(path) };
+    let Some(provider) = hosting::provider_for(&url) else {
+        return unchecked(path);
+    };
+    let Some(slug) = provider.slug_from_remote(&url) else {
+        return unchecked(path);
+    };
+
+    let prs = match provider.list_prs(app, &slug).await {
+        Ok(prs) => prs.len() as u32,
+        Err(_) => return unchecked(path),
+    };
+    let issues = if provider.capabilities().issues {
+        match provider.list_issues(app, &slug).await {
+            Ok(issues) => issues.len() as u32,
+            // Issues need a connected account on most hosts; a signed-out user
+            // still gets their pull request counts rather than nothing.
+            Err(_) => 0,
+        }
+    } else {
+        0
+    };
+    RepoActivityCount {
+        path,
+        prs,
+        issues,
+        checked: true,
+    }
+}

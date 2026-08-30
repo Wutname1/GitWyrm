@@ -498,6 +498,15 @@ pub struct Settings {
     /// Repository-picker sections the user has hidden.
     #[serde(default)]
     pub repo_picker_collapsed_sections: Vec<String>,
+    /// How the repository picker's table is sorted: "name", "activity",
+    /// "branch", each optionally suffixed ":desc". None sorts by name.
+    /// Validated on the frontend.
+    #[serde(default)]
+    pub repo_picker_sort: Option<String>,
+    /// When every repository was last checked for issues and pull requests,
+    /// as an RFC 3339 timestamp. None means never scanned.
+    #[serde(default)]
+    pub repo_scan_at: Option<String>,
     /// What to do about local-only tags after a push: "ask", "always", "never".
     /// None means ask. Validated on the frontend.
     #[serde(default)]
@@ -771,6 +780,8 @@ impl Default for Settings {
             pinned_repo_paths: Vec::new(),
             pinned_saved_group_ids: None,
             repo_picker_collapsed_sections: Vec::new(),
+            repo_picker_sort: None,
+            repo_scan_at: None,
             expanded_change_folders: HashMap::new(),
             changes_view_mode: None,
             tag_push_default: None,
