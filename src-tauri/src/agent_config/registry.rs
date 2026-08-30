@@ -85,7 +85,6 @@ pub struct ClientSpec {
     /// Which kinds of item can be read out of this client today. A kind
     /// missing here is simply not discovered, which is different from being
     /// discovered and unwritable. Read through [`ClientSpec::can_read_kind`].
-    #[cfg_attr(not(test), allow(dead_code))]
     pub readable_kinds: &'static [ItemKind],
     /// How this client's files are written, or `None` when it is read-only.
     pub writer: Option<WriterKind>,
@@ -117,7 +116,6 @@ impl ClientSpec {
     ///
     /// Read by the item readers, which decide per client whether to look for
     /// a kind at all rather than parsing every file for everything.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn can_read_kind(&self, kind: ItemKind) -> bool {
         self.readable_kinds.contains(&kind)
     }
@@ -150,7 +148,9 @@ pub const CLIENTS: &[ClientSpec] = &[
         display_name: "Claude",
         personal_paths: &[&[".claude", "settings.json"], &[".claude.json"]],
         repo_paths: &[&[".claude", "settings.json"]],
-        readable_kinds: &[ItemKind::McpConnector],
+        // The only client whose skills folder has been checked against a real
+        // install. See `skills::skill_dirs`, which reads this.
+        readable_kinds: &[ItemKind::McpConnector, ItemKind::Skill],
         writer: Some(WriterKind::JsonMcpMap { key: "mcpServers" }),
         empty_document: "{}\n",
     },

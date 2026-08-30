@@ -204,6 +204,14 @@ fn content_hash(raw: &[u8]) -> String {
 /// this does not apply to.
 pub fn skill_dirs(home: &Path, repo_root: Option<&Path>, client: super::model::ClientId) -> Vec<(PathBuf, super::model::ConfigScope)> {
     use super::model::{ClientId, ConfigScope};
+
+    // Whether a client has skills at all is the registry's answer, not a
+    // second list kept here. Two places stating the same fact is exactly what
+    // the client table exists to stop.
+    if !super::registry::spec(client).can_read_kind(super::model::ItemKind::Skill) {
+        return Vec::new();
+    }
+
     let mut out = Vec::new();
     match client {
         // Claude Code reads `~/.claude/skills` and, for work scoped to one
@@ -214,9 +222,9 @@ pub fn skill_dirs(home: &Path, repo_root: Option<&Path>, client: super::model::C
                 out.push((root.join(".claude").join("skills"), ConfigScope::Repo));
             }
         }
-        // The rest have no skills folder this has been able to verify against
-        // a real install. Guessing a path would produce an empty list that
-        // looks like "no skills" rather than "not checked".
+        // Unreachable while Claude Code is the only row declaring `Skill`.
+        // Kept exhaustive so adding that kind to another row fails to compile
+        // here rather than silently returning nothing.
         ClientId::Codex | ClientId::OpenCode | ClientId::VsCodeCopilot | ClientId::OpenChamber => {}
     }
     out
@@ -387,19 +395,20 @@ mod tests {
     }
 
     #[test]
-    fn only_claude_code_reports_a_skills_folder_today() {
-        // The others have no path verified against a real install. A guessed
-        // one would produce an empty list that reads as "no skills" rather
-        // than "not checked".
+    fn a_client_gets_a_skills_folder_only_when_the_table_says_it_reads_skills() {
+        // The registry is the single source of truth for this. A client whose
+        // row does not declare `Skill` gets no folder scanned, so the fact
+        // lives in one place rather than being restated here.
         let home = Path::new("/home/someone");
-        assert_eq!(skill_dirs(home, None, ClientId::ClaudeCode).len(), 1);
-        for client in [
-            ClientId::Codex,
-            ClientId::OpenCode,
-            ClientId::VsCodeCopilot,
-            ClientId::OpenChamber,
-        ] {
-            assert!(skill_dirs(home, None, client).is_empty(), "{client:?}");
+        for client in ClientId::ALL {
+            let declared = crate::agent_config::registry::spec(client)
+                .can_read_kind(ItemKind::Skill);
+            let dirs = skill_dirs(home, None, client);
+            assert_eq!(
+                !dirs.is_empty(),
+                declared,
+                "{client:?} disagrees with its registry row about skills"
+            );
         }
     }
 
