@@ -22,48 +22,14 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use super::transport::AgentError;
+// The shared vocabulary every adapter speaks. This module's job is to
+// translate ACP into it; see `super::wire`.
+use super::wire::{Incoming, PermissionDecision, StopReason, TurnOutcome};
 
 /// Protocol version we negotiate. ACP is in public preview; a mismatch is
 /// reported rather than guessed at.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// What the agent sent us that is not a reply to something we asked.
-///
-/// The engine consumes these to drive the console: text chunks become the
-/// visible transcript, tool calls become steps, and permission requests become
-/// a decision it has to make.
-#[derive(Debug)]
-pub enum Incoming {
-    /// A piece of the agent's prose, as it is produced.
-    TextChunk(String),
-    /// A tool call starting or changing state.
-    ToolCall {
-        id: String,
-        title: String,
-        raw: Value,
-    },
-    /// How full the session's context window is, and what it has cost.
-    ///
-    /// `used` is occupancy rather than spend and falls when the agent compacts
-    /// its history, so it replaces the previous figure rather than adding to
-    /// it. `cost` is cumulative for the session when an agent reports it at
-    /// all, which most do not.
-    ContextUsage {
-        used: u32,
-        size: u32,
-        cost_micro_usd: Option<u32>,
-    },
-    /// The agent is asking whether it may do something.
-    ///
-    /// Already classified into GitWyrm's own vocabulary by this adapter --
-    /// see `super::wire::PermissionRequest`. The run loop's safety gate used
-    /// to read `toolCall.kind` and `toolCall.locations` out of raw ACP JSON
-    /// itself, which would have meant teaching the gate a second dialect the
-    /// moment a second protocol existed.
-    ///
-    /// `respond` MUST be answered -- the agent's turn is blocked until it is.
-    PermissionRequest(super::wire::PermissionRequest),
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionOption {
@@ -73,50 +39,8 @@ pub struct PermissionOption {
     pub kind: String,
 }
 
-/// Our answer to a permission request.
-///
-/// There is deliberately no "allow always" variant. The protocol offers
-/// `allow_always`, but a remembered approval is a decision made once and then
-/// applied to situations the user never saw -- exactly what the guardrails
-/// exist to prevent.
-#[derive(Debug, Clone)]
-pub enum PermissionDecision {
-    AllowOnce { option_id: String },
-    RejectOnce { option_id: String },
-    Cancelled,
-}
 
-/// Why a prompt turn ended, as the agent reported it.
-///
-/// Mirrors ACP's `StopReason`. Note `end_turn`, not `completed` -- the docs
-/// site lists a value the schema does not have.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StopReason {
-    EndTurn,
-    MaxTokens,
-    MaxTurnRequests,
-    Refusal,
-    Cancelled,
-    /// Anything the protocol adds later. Treated as "ended, cause unknown"
-    /// rather than a parse failure, since the enum is `non_exhaustive` upstream.
-    #[serde(other)]
-    Unknown,
-}
 
-/// What one `session/prompt` turn produced: why it stopped, and what it cost.
-///
-/// Exists because `prompt` used to return only the stop reason and drop the
-/// rest of the response on the floor -- including any usage the agent
-/// reported, which is the only place a token count is ever offered.
-#[derive(Debug, Clone, Default)]
-pub struct TurnOutcome {
-    pub stop_reason: StopReason,
-    /// `None` when the agent reported no usage for this turn. Distinct from
-    /// zero: most ACP agents report nothing at all, and inventing a zero
-    /// would make an unmeasured run look free.
-    pub usage: Option<crate::agentdesk::model::TurnUsage>,
-}
 
 /// Pulls whatever usage an agent chose to report out of a `session/prompt`
 /// response.
@@ -194,30 +118,7 @@ fn parse_turn_usage(res: &Value) -> Option<crate::agentdesk::model::TurnUsage> {
     }
 }
 
-impl Default for StopReason {
-    fn default() -> Self {
-        StopReason::Unknown
-    }
-}
 
-impl StopReason {
-    /// Whether this is a turn that did its work, as opposed to one cut short.
-    pub fn is_success(self) -> bool {
-        matches!(self, StopReason::EndTurn)
-    }
-
-    /// Plain-language cause, for the console to show when a run did not finish.
-    pub fn plain_reason(self) -> &'static str {
-        match self {
-            StopReason::EndTurn => "finished",
-            StopReason::MaxTokens => "the reply grew too long to continue",
-            StopReason::MaxTurnRequests => "the AI reached its own step limit",
-            StopReason::Refusal => "the AI declined to continue",
-            StopReason::Cancelled => "you stopped it",
-            StopReason::Unknown => "it stopped for a reason GitWyrm did not recognise",
-        }
-    }
-}
 
 type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, AgentError>>>>>;
 
@@ -450,7 +351,7 @@ impl AcpConnection {
             .await?;
 
         let stop = res.get("stopReason").cloned().unwrap_or(Value::Null);
-        let stop_reason = serde_json::from_value(stop).unwrap_or(StopReason::Unknown);
+        let stop_reason = stop_reason_from_acp(stop.as_str());
         Ok(TurnOutcome {
             stop_reason,
             usage: parse_turn_usage(&res),
@@ -724,11 +625,7 @@ fn classify_update(update: &Value) -> Option<Incoming> {
             // when there is nothing real to say is correct -- the tool call
             // that started this id already carried its own title.
             let title = update.get("title").and_then(Value::as_str)?.to_string();
-            Some(Incoming::ToolCall {
-                id,
-                title,
-                raw: update.clone(),
-            })
+            Some(Incoming::ToolCall { title })
         }
         // ACP's own usage report: how much of the context window this session
         // is holding, and optionally what it has cost so far. `used` and
@@ -755,6 +652,22 @@ fn classify_update(update: &Value) -> Option<Incoming> {
             })
         }
         _ => None,
+    }
+}
+
+/// ACP's own stop-reason spellings, mapped to GitWyrm's.
+///
+/// Note `end_turn`, not `completed` -- the docs site lists a value the schema
+/// does not have. Anything unrecognised becomes `Unknown` rather than a clean
+/// finish, so a protocol that adds a value cannot be read as success.
+fn stop_reason_from_acp(raw: Option<&str>) -> StopReason {
+    match raw {
+        Some("end_turn") => StopReason::EndTurn,
+        Some("max_tokens") => StopReason::MaxTokens,
+        Some("max_turn_requests") => StopReason::MaxTurnRequests,
+        Some("refusal") => StopReason::Refusal,
+        Some("cancelled") => StopReason::Cancelled,
+        _ => StopReason::Unknown,
     }
 }
 
@@ -1009,8 +922,7 @@ mod tests {
         // Guards the ordering assumption in `prompt`: usage is additive, and
         // its absence must never cost us the stop reason.
         let res = serde_json::json!({ "stopReason": "refusal" });
-        let stop: StopReason =
-            serde_json::from_value(res.get("stopReason").cloned().unwrap()).unwrap();
+        let stop = stop_reason_from_acp(res.get("stopReason").and_then(|v| v.as_str()));
         assert_eq!(stop, StopReason::Refusal);
         assert!(parse_turn_usage(&res).is_none());
     }
@@ -1019,22 +931,24 @@ mod tests {
     fn stop_reason_uses_end_turn_not_completed() {
         // The docs site lists "completed", which the schema does not have. Parsing
         // the schema's value is what matters.
-        let parsed: StopReason = serde_json::from_value(json!("end_turn")).unwrap();
+        let parsed = stop_reason_from_acp(Some("end_turn"));
         assert_eq!(parsed, StopReason::EndTurn);
         assert!(parsed.is_success());
     }
 
     #[test]
     fn unknown_stop_reason_does_not_fail_the_parse() {
-        let parsed: StopReason = serde_json::from_value(json!("something_new")).unwrap();
+        // A value this build has never seen must not read as a clean finish.
+        let parsed = stop_reason_from_acp(Some("something_new"));
         assert_eq!(parsed, StopReason::Unknown);
+        assert_eq!(stop_reason_from_acp(None), StopReason::Unknown);
         assert!(!parsed.is_success());
     }
 
     #[test]
     fn agent_limits_are_not_success() {
         for raw in ["max_tokens", "max_turn_requests", "refusal", "cancelled"] {
-            let parsed: StopReason = serde_json::from_value(json!(raw)).unwrap();
+            let parsed = stop_reason_from_acp(Some(raw));
             assert!(!parsed.is_success(), "{raw} should not count as finished");
             assert!(!parsed.plain_reason().is_empty());
         }
@@ -1060,8 +974,9 @@ mod tests {
           "title": "Read a file"
         });
         match classify_update(&update) {
-            Some(Incoming::ToolCall { id, title, .. }) => {
-                assert_eq!(id, "t1");
+            Some(Incoming::ToolCall { title }) => {
+                // The id is deliberately not carried across: nothing outside
+                // this adapter ever used it.
                 assert_eq!(title, "Read a file");
             }
             other => panic!("expected a tool call, got {other:?}"),

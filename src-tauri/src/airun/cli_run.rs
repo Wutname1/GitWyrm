@@ -14,8 +14,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ai::agent::acp::{Incoming, StopReason};
-use crate::ai::agent::wire::PermissionDecision;
+use crate::ai::agent::wire::{Incoming, PermissionDecision, StopReason};
 use crate::ai::agent::cli_agent::CliAgent;
 use crate::ai::agent::transport::AgentError;
 use crate::agentdesk::graph::JobBudget;
@@ -320,7 +319,7 @@ pub async fn run_task(
     let mut turns: u32 = 0;
     let run_started = tokio::time::Instant::now();
 
-    let outcome: Result<crate::ai::agent::acp::TurnOutcome, AgentError> = {
+    let outcome: Result<crate::ai::agent::wire::TurnOutcome, AgentError> = {
         let prompt = conn.prompt(task);
         tokio::pin!(prompt);
         // `tokio::time::sleep` needs a fixed deadline to `select!` against

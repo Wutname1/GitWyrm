@@ -167,7 +167,11 @@ impl CliAgent {
     /// `--allow-all-tools` inside the CLI can never grant what was refused
     /// here (denial takes precedence over every allow rule -- see
     /// `denied_tools_for`'s own doc comment).
-    pub async fn connect(&self, policy: &ExecutionPolicy, started: bool) -> Result<AcpConnection, AgentError> {
+    pub async fn connect(
+        &self,
+        policy: &ExecutionPolicy,
+        started: bool,
+    ) -> Result<super::wire::Connection, AgentError> {
         // Checked again here, not only in `discover_for`. A `CliAgent` can be
         // built for the default tool by a caller that had no policy yet
         // (`discover`), so this is the last point before a process starts
@@ -176,9 +180,12 @@ impl CliAgent {
             return Err(select::refuse_read_only(self.spec));
         }
         let denied = denied_tools_for(policy, started);
+        // Which protocol to speak is the spec's to say. Today every row is
+        // ACP; a row naming another one branches here and nothing above this
+        // line changes.
         let mut conn = AcpConnection::spawn_agent(self.spec, &self.program, &self.cwd, &denied).await?;
         conn.start_session(&self.cwd).await?;
-        Ok(conn)
+        Ok(super::wire::Connection::Acp(conn))
     }
 }
 

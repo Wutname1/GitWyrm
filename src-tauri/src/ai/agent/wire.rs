@@ -139,6 +139,68 @@ pub struct TurnOutcome {
     pub usage: Option<crate::agentdesk::model::TurnUsage>,
 }
 
+/// A live conversation with one agent tool, whatever protocol it speaks.
+///
+/// # Why an enum rather than a trait
+///
+/// The set of protocols is small, closed, and known at compile time -- there
+/// is no plugin loading a fourth one at runtime. An enum keeps `shutdown` able
+/// to take `self` by value (a `dyn` trait cannot), keeps every method a plain
+/// `async fn` without pulling in `async-trait`, and makes adding a protocol a
+/// compile error in every place that has to handle it rather than a silent
+/// gap. The cost is that this file names each adapter, which is the honest
+/// shape of the dependency anyway.
+pub enum Connection {
+    /// Agent Client Protocol over stdio. Copilot and Gemini speak this.
+    Acp(super::acp::AcpConnection),
+}
+
+impl Connection {
+    /// Takes the stream of things the agent says on its own initiative.
+    ///
+    /// `None` on a second call: there is one stream and one reader. The run
+    /// loop has to read it *while* a turn is in flight, because a permission
+    /// request arrives mid-turn and the turn does not finish until it is
+    /// answered -- so this hands the receiver over rather than lending it.
+    pub fn take_incoming(&mut self) -> Option<tokio::sync::mpsc::UnboundedReceiver<Incoming>> {
+        match self {
+            Connection::Acp(c) => c.take_incoming(),
+        }
+    }
+
+    /// Sends one turn and waits for it to end.
+    pub async fn prompt(&self, text: &str) -> Result<TurnOutcome, super::transport::AgentError> {
+        match self {
+            Connection::Acp(c) => c.prompt(text).await,
+        }
+    }
+
+    /// Sends one prompt and returns everything the agent said back.
+    ///
+    /// For a question with an answer rather than a task with a stream. Safe
+    /// only under a read-only policy: tool calls and permission requests are
+    /// dropped, and a tool that cannot write has nothing to ask about.
+    pub async fn ask(&mut self, text: &str) -> Result<String, super::transport::AgentError> {
+        match self {
+            Connection::Acp(c) => c.ask(text).await,
+        }
+    }
+
+    /// Asks the agent to stop the current turn.
+    pub async fn cancel(&self) -> Result<(), super::transport::AgentError> {
+        match self {
+            Connection::Acp(c) => c.cancel().await,
+        }
+    }
+
+    /// Ends the session and the child process.
+    pub async fn shutdown(self) {
+        match self {
+            Connection::Acp(c) => c.shutdown().await,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
