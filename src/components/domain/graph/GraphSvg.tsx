@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo } from 'react'
 import type { CommitEntry, StashInfo } from '@/lib/bindings'
-import { laneColor } from '@/lib/gitDisplay'
+import { authorColor, laneColor } from '@/lib/gitDisplay'
 import { laneGeometry } from '@/lib/graphLanes'
 import { useAvatarUrls } from '@/lib/useAvatarUrls'
 import { useUiStore } from '@/stores/uiStore'
@@ -520,12 +520,51 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
 
         // A picture only replaces the dot once it has actually resolved.
         // Swapping in an empty disc first would flash a hole in the lane on
-        // every scroll, and authors with no picture anywhere never resolve at
-        // all -- they keep the plain dot for good.
+        // every scroll.
         //
         // Overflow commits stay dots regardless: at 3.5px a face is a smudge,
         // and shrinking that column is what makes it read as "more out here".
-        const avatar = showAvatars && !overflow ? avatarUrls.get(c.author_email.trim().toLowerCase()) : undefined
+        const lookedUp = showAvatars && !overflow
+        const avatar = lookedUp ? avatarUrls.get(c.author_email.trim().toLowerCase()) : undefined
+
+        // Resolved to nothing: this author has no picture anywhere, so the node
+        // carries their initials instead. Sizing the node the same either way
+        // keeps the lane pitch steady, so a repo where only some people have
+        // pictures does not draw a ragged column of big and small nodes.
+        if (avatar === null) {
+          const tint = authorColor(c.author_email || c.author_name)
+          const ringR = AVATAR_OUTER_R - AVATAR_RING / 2
+          return (
+            <g key={c.sha}>
+              <circle cx={x} cy={y} r={AVATAR_OUTER_R} fill="var(--gw-bg)" />
+              <circle cx={x} cy={y} r={AVATAR_R} fill={tint} fillOpacity={0.17} />
+              <text
+                x={x}
+                y={y}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={AVATAR_R * 0.95}
+                fontWeight={700}
+                fill={tint}
+                // The node sits under the pointer target for the row, and a
+                // caret dragged across the graph selecting stray letters is
+                // noise the dots never produced.
+                style={{ userSelect: 'none' }}
+              >
+                {c.author_initials}
+              </text>
+              <circle
+                cx={x}
+                cy={y}
+                r={ringR}
+                fill="none"
+                stroke={sel ? 'var(--gw-text)' : col}
+                strokeWidth={AVATAR_RING}
+              />
+            </g>
+          )
+        }
+
         if (avatar) {
           const clipId = `${clipPrefix}-${c.sha}`
           const maskId = `${clipPrefix}-m${c.sha}`

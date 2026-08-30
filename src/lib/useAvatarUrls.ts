@@ -26,11 +26,12 @@ export interface ResolvedAvatar {
  *
  * @param emails Author emails currently on screen. Order does not matter.
  * @param px Pixel size to request, before device scaling.
- * @returns Map from lowercased email to its picture. A missing entry means the
- *   lookup has not finished or the author has no picture anywhere.
+ * @returns Map from lowercased email to its picture. A `null` entry means the
+ *   lookup finished and the author has no picture anywhere, so the caller can
+ *   draw initials instead; a missing entry means it has not finished yet.
  */
-export function useAvatarUrls(emails: string[], px: number): Map<string, ResolvedAvatar> {
-  const [urls, setUrls] = useState<Map<string, ResolvedAvatar>>(new Map())
+export function useAvatarUrls(emails: string[], px: number): Map<string, ResolvedAvatar | null> {
+  const [urls, setUrls] = useState<Map<string, ResolvedAvatar | null>>(new Map())
   // Depending on the array itself would re-run on every render, since the
   // caller rebuilds it each time. The joined key changes only when the set of
   // authors on screen actually changes.
@@ -56,7 +57,8 @@ export function useAvatarUrls(emails: string[], px: number): Map<string, Resolve
         const next = new Map(prev)
         let changed = false
         for (const [email, resolved] of pairs) {
-          if (resolved && next.get(email)?.url !== resolved.url) {
+          const had = next.has(email)
+          if (resolved ? next.get(email)?.url !== resolved.url : !had || next.get(email) !== null) {
             next.set(email, resolved)
             changed = true
           }
