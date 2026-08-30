@@ -1478,6 +1478,20 @@ pub(crate) fn start_execution_at(
             })
         };
 
+        // What the auditor gets to work with. A run that cannot write files
+        // has no diff to read and nothing to have cut corners on, so it is
+        // not audited at all.
+        let worktree_for_audit = if intent_policy.can_write {
+            Some(engine_root.clone())
+        } else {
+            None
+        };
+        // What was asked for, taken from the prompt the working agent was
+        // actually given. That prompt already opens with the rendered spec
+        // when the session has one, so this is the same text rather than a
+        // second rendering that could drift from it.
+        let spec_for_audit = prompt.clone();
+
         crate::airun::cli_run::run_task(
             &agent,
             &format!(
@@ -1507,6 +1521,11 @@ pub(crate) fn start_execution_at(
             // set at graph-start time). This execution's own record is
             // never a helper's, so it never has one to enforce.
             None,
+            // Checked over before it is called finished, but only when the
+            // run could change files at all: a read-only chat has no diff
+            // and nothing to have cut corners on.
+            worktree_for_audit,
+            spec_for_audit,
         )
         .await;
 

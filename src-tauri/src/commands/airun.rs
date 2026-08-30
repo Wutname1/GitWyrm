@@ -945,5 +945,9 @@ The task:
         crate::airun::cli_run::CancelHandle::new(),
         // No budget: this legacy console has no helper/graph concept at all.
         None,
+        // No audit either: this console predates worktree-isolated runs and
+        // has no separate tree to read a diff out of.
+        None,
+        String::new(),
     ));
 }

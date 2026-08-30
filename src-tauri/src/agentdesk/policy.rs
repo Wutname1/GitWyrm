@@ -333,6 +333,29 @@ impl ExecutionPolicy {
         }
     }
 
+    /// A read-only policy for checking over work someone else did.
+    ///
+    /// `SessionIntent::Review` rather than `Fix`: an auditor that decided to
+    /// fix what it found would stop being a second opinion, and the value of
+    /// the check is entirely that it did not touch the code. That intent
+    /// carries `can_write: false`, so the tool is launched with writing denied
+    /// -- the auditor cannot change its mind about this once it is running.
+    ///
+    /// Keeps the audited run's own provider so the check happens on a tool the
+    /// user actually has, rather than defaulting to one that may not be
+    /// installed.
+    pub fn resolve_for_audit(of: &ExecutionPolicy) -> Self {
+        let intent = SessionIntent::Review;
+        Self {
+            intent,
+            mode: ExecutionMode::Ask,
+            team: ExecutionTeam::Solo,
+            provider: of.provider,
+            intent_policy: for_intent(intent),
+            allowed_paths: None,
+        }
+    }
+
     /// The agent-registry id of the tool this execution runs on.
     ///
     /// Convenience over `self.provider.agent_id()`, so provider selection
@@ -569,6 +592,48 @@ pub fn check_tool_capability(
 
 #[cfg(test)]
 mod tests {
+    // Placed first so it is read alongside the other authority tests.
+    #[test]
+    fn an_auditor_is_launched_unable_to_write() {
+        // The whole value of the check is that it did not touch the code. An
+        // auditor that could edit would stop being a second opinion, and this
+        // is enforced at launch rather than by asking it nicely.
+        use super::*;
+        let audited = ExecutionPolicy::resolve_for_helper(true, vec![]);
+        let auditor = ExecutionPolicy::resolve_for_audit(&audited);
+
+        for started in [false, true] {
+            assert!(
+                auditor
+                    .check_tool_capability(started, ToolCapability::EditFile)
+                    .is_err(),
+                "an auditor could write with started={started}"
+            );
+            assert!(
+                auditor
+                    .check_tool_capability(started, ToolCapability::Commit)
+                    .is_err(),
+                "an auditor could commit with started={started}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_auditor_runs_on_the_same_tool_as_the_work_it_checks() {
+        // Defaulting to a fixed provider would try to audit on a tool the
+        // user may not have installed, and the audit would simply never run.
+        use super::*;
+        for provider in [
+            ExecutionProvider::Copilot,
+            ExecutionProvider::Gemini,
+            ExecutionProvider::Claude,
+        ] {
+            let mut audited = ExecutionPolicy::resolve_for_helper(true, vec![]);
+            audited.provider = provider;
+            assert_eq!(ExecutionPolicy::resolve_for_audit(&audited).provider, provider);
+        }
+    }
+
     use super::*;
 
     fn all_intents() -> [SessionIntent; 6] {

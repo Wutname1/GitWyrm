@@ -6,6 +6,7 @@
 //! module implements incrementally.
 
 pub mod adapters;
+pub mod auditor;
 pub mod bridge;
 pub mod events;
 pub mod execution_registry;

@@ -148,6 +148,105 @@ fn turn_budget_exceeded(turns: u32, budget: Option<JobBudget>) -> Option<BudgetE
 /// exactly as cleanly (worktree preserved, process killed, `Ended` reported)
 /// as any other stop -- see `BudgetExceeded`'s doc comment for how the
 /// reported reason stays distinct from an ordinary user-initiated stop.
+/// Collects what the auditor needs to judge, or `None` when there is nothing
+/// worth judging.
+///
+/// `None` for a run that changed no files: there is no work to have cut
+/// corners on, and asking a model to review an empty diff wastes a turn to be
+/// told nothing happened.
+fn gather_evidence(
+    worktree: &std::path::Path,
+    spec: &str,
+    agent_summary: &str,
+) -> Option<crate::agentdesk::auditor::AuditEvidence> {
+    use crate::agentdesk::auditor::{clamp_diff, AuditEvidence};
+
+    let repo = git2::Repository::open(worktree).ok()?;
+
+    let mut opts = git2::DiffOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true);
+    // Against the working tree, not a commit: the changes sit uncommitted
+    // until someone presses Keep, so a commit-to-commit diff would be empty
+    // for exactly the runs this needs to check.
+    let diff = repo.diff_index_to_workdir(None, Some(&mut opts)).ok()?;
+
+    let mut changed_paths = Vec::new();
+    let mut text = String::new();
+    diff.print(git2::DiffFormat::Patch, |delta, _, line| {
+        if let Some(path) = delta.new_file().path().and_then(|p| p.to_str()) {
+            let entry = format!("{path}");
+            if !changed_paths.contains(&entry) {
+                changed_paths.push(entry);
+            }
+        }
+        match line.origin() {
+            '+' | '-' | ' ' => text.push(line.origin()),
+            _ => {}
+        }
+        text.push_str(&String::from_utf8_lossy(line.content()));
+        true
+    })
+    .ok()?;
+
+    if changed_paths.is_empty() {
+        return None;
+    }
+
+    let (diff, diff_truncated) = clamp_diff(&text);
+    Some(AuditEvidence {
+        spec: spec.to_string(),
+        agent_summary: agent_summary.to_string(),
+        diff,
+        diff_truncated,
+        changed_paths,
+        // Checks live in the transcript rather than here; the auditor is told
+        // plainly that passing checks are weak evidence anyway.
+        checks: Vec::new(),
+    })
+}
+
+/// Checks a finished run's work, and says whether it should keep going.
+///
+/// Runs on a FRESH session of the same tool. Fresh matters: an agent asked to
+/// review its own turn has the whole conversation in front of it, including
+/// its own reasoning for why what it did was fine, and agrees with itself. A
+/// new session sees only the change and the request.
+///
+/// Everything about this is best effort. A tool that will not start, a reply
+/// that cannot be read, a worktree that cannot be diffed -- each ends the
+/// audit as [`Verdict::Unavailable`] and lets the work through, because an
+/// audit that did not happen knows nothing about the work and refusing to
+/// hand over on that basis would strand people behind a broken check.
+async fn audit_finished_work(
+    agent: &CliAgent,
+    policy: &ExecutionPolicy,
+    evidence: crate::agentdesk::auditor::AuditEvidence,
+) -> crate::agentdesk::auditor::Verdict {
+    use crate::agentdesk::auditor::{audit_prompt, parse_verdict, Verdict};
+
+    // The auditor only reads. It is given the same read-only policy a Review
+    // chat gets, so an auditor that decided to "just fix it" cannot -- the
+    // whole value of a second opinion is that it did not touch the code.
+    let review_policy = ExecutionPolicy::resolve_for_audit(policy);
+
+    let mut conn = match agent.connect(&review_policy, false).await {
+        Ok(c) => c,
+        Err(e) => {
+            return Verdict::Unavailable {
+                detail: crate::ai::agent::select::plain_explanation(&e),
+            }
+        }
+    };
+
+    let said = conn.ask(&audit_prompt(&evidence)).await;
+    conn.shutdown().await;
+
+    match said {
+        Ok(text) => parse_verdict(&text),
+        Err(e) => Verdict::Unavailable { detail: e.to_string() },
+    }
+}
+
 pub async fn run_task(
     agent: &CliAgent,
     task: &str,
@@ -157,6 +256,12 @@ pub async fn run_task(
     started: bool,
     cancel: CancelHandle,
     budget: Option<JobBudget>,
+    // `audit_target`: the worktree to read a diff out of when the work is
+    // checked over, or `None` to skip the check -- a read-only run has
+    // nothing to audit. `spec_text`: what was asked for, as the working agent
+    // saw it; empty when the run had no spec behind it.
+    audit_target: Option<std::path::PathBuf>,
+    spec_text: String,
 ) {
     let mut conn = match agent.connect(&policy, started).await {
         Ok(c) => c,
@@ -324,12 +429,54 @@ pub async fn run_task(
         }
     }
 
+    // The work is checked over before it is called finished, and sent back
+    // if it is not really done. Only for a run that (a) believed it finished,
+    // (b) was allowed to change files, and (c) has a worktree to read a diff
+    // out of -- there is nothing to audit about an answer to a question.
+    //
+    // Every failure here lets the work through. An audit that could not run
+    // knows nothing about the work, and stranding people behind a broken
+    // check would be worse than the corner-cutting it exists to catch.
+    let mut audit_verdict: Option<crate::agentdesk::auditor::Verdict> = None;
+    if matches!(outcome.as_ref().map(|o| o.stop_reason), Ok(StopReason::EndTurn)) {
+        if let Some(worktree) = audit_target.as_deref() {
+            let mut pass = 0u32;
+            while pass < crate::agentdesk::auditor::MAX_CORRECTION_PASSES {
+                let evidence = match gather_evidence(worktree, &spec_text, "") {
+                    Some(e) => e,
+                    None => break,
+                };
+                let verdict = audit_finished_work(agent, &policy, evidence).await;
+                sink(RunState::Working, RunStep::Note { text: verdict.summary() });
+
+                let crate::agentdesk::auditor::Verdict::Hollow { reasons } = &verdict else {
+                    audit_verdict = Some(verdict);
+                    break;
+                };
+
+                // Send it back. The correction runs on the SAME connection as
+                // the original work, so the agent still has the context it
+                // built up -- it is being asked to finish, not to start over.
+                let correction = crate::agentdesk::auditor::correction_prompt(reasons);
+                audit_verdict = Some(verdict);
+                if conn.prompt(&correction).await.is_err() {
+                    break;
+                }
+                pass += 1;
+            }
+        }
+    }
+
     let (state, detail) = match outcome.map(|o| o.stop_reason) {
         Ok(stop) => match stop {
             StopReason::EndTurn => (
                 RunState::Finished,
                 "Finished. Your changes are ready to look over.".to_string(),
             ),
+            // NOTE: the audit pass runs before this match, in `run_task`'s
+            // caller loop -- see `audit_and_maybe_correct`. Reaching here
+            // means either the work passed, the audit could not run, or the
+            // corrections were used up.
             StopReason::Cancelled => match budget_exceeded {
                 // R6.4: the CLI acknowledged the cancel cleanly (the common
                 // case -- `CANCEL_ACK_TIMEOUT` is the same 8s either way),

@@ -1166,6 +1166,11 @@ fn launch_helper(
             true,
             cancel_handle,
             budget,
+            // A helper's work is checked over in its own worktree before
+            // it is reported finished, so a hollow helper is caught before
+            // its changes are folded into the combined result.
+            Some(std::path::PathBuf::from(&worktree_path)),
+            String::new(),
         )
         .await;
 
@@ -2383,6 +2388,9 @@ fn launch_lead_review(
     let executions_for_task = executions.inner().clone();
     let root_for_task = root.clone();
     let locks_for_task = locks.clone();
+    // Owned before the move: the review turn is audited against the same
+    // integration worktree it runs in, and a borrow cannot outlive this call.
+    let integration_worktree = std::path::PathBuf::from(integration_path);
     let join_handle = tauri::async_runtime::spawn(async move {
         let sink: crate::airun::engine::Sink = {
             let app = app_for_task.clone();
@@ -2393,7 +2401,7 @@ fn launch_lead_review(
             })
         };
 
-        crate::airun::cli_run::run_task(&agent, &format!("{}\n\nThe task:\n{}", crate::ai::agent::run::SYSTEM_PROMPT, prompt), sink, answer_rx, policy, true, cancel_handle, None).await;
+        crate::airun::cli_run::run_task(&agent, &format!("{}\n\nThe task:\n{}", crate::ai::agent::run::SYSTEM_PROMPT, prompt), sink, answer_rx, policy, true, cancel_handle, None, Some(integration_worktree.clone()), String::new()).await;
 
         crate::commands::airun::gate_answers()
             .lock()

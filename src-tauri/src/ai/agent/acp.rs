@@ -454,6 +454,47 @@ impl AcpConnection {
         })
     }
 
+    /// Sends one prompt and returns everything the agent said back.
+    ///
+    /// For a question with an answer, rather than a task with a stream: the
+    /// caller wants the whole reply, not a running commentary. Tool calls and
+    /// permission requests are dropped rather than surfaced, which is safe
+    /// only because callers use this with a read-only policy -- a tool that
+    /// cannot write has nothing to ask permission for.
+    ///
+    /// Returns the collected text, which is empty when the agent said nothing.
+    pub async fn ask(&mut self, text: &str) -> Result<String, AgentError> {
+        let mut incoming = self.take_incoming().ok_or_else(|| AgentError::Failed {
+            detail: "this connection is already being read somewhere else".into(),
+        })?;
+
+        let prompt = self.prompt(text);
+        tokio::pin!(prompt);
+
+        let mut said = String::new();
+        loop {
+            tokio::select! {
+                result = &mut prompt => {
+                    result?;
+                    // Drain whatever arrived in the same tick as the reply:
+                    // the last chunk of an answer routinely lands alongside
+                    // the turn ending, and dropping it truncates the reply.
+                    while let Ok(item) = incoming.try_recv() {
+                        if let Incoming::TextChunk(chunk) = item {
+                            said.push_str(&chunk);
+                        }
+                    }
+                    return Ok(said);
+                }
+                Some(item) = incoming.recv() => {
+                    if let Incoming::TextChunk(chunk) = item {
+                        said.push_str(&chunk);
+                    }
+                }
+            }
+        }
+    }
+
     /// Asks the agent to stop the current turn.
     ///
     /// A notification, not a request: the protocol requires the agent to answer
