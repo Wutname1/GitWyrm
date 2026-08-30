@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Check, ExternalLink, Plus } from 'lucide-react'
+import { AlertTriangle, Check, ExternalLink, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { groupHostingProviders } from '@/lib/hostingGroups'
 import { GithubIcon } from '@/components/domain/github/GithubIcon'
 import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
 import {
@@ -30,14 +31,20 @@ export function IntegrationsSettings() {
   /** Which host's connect form is open, or null when none is. */
   const [adding, setAdding] = useState<ProviderId | null>(null)
 
-  const connected = providers.data?.filter((p) => p.connected_as != null) ?? []
-  const available = providers.data?.filter((p) => p.connected_as == null) ?? []
+  // Three groups, not two: a saved sign-in that failed is neither connected
+  // nor available. See `groupHostingProviders` for why that distinction is
+  // load-bearing.
+  const { connected, failing, available } = groupHostingProviders(providers.data)
 
   return (
     <div>
       <SettingsGroup title="Code hosts" blurb="Connect the sites where your repositories are stored.">
       {connected.map((provider) => (
         <ProviderRow key={provider.id} provider={provider} />
+      ))}
+
+      {failing.map((provider) => (
+        <NeedsAttention key={provider.id} provider={provider} />
       ))}
 
       {/* Four hosts' worth of token boxes and scope lists is a wall of inputs
@@ -62,6 +69,40 @@ export function IntegrationsSettings() {
         <TabCountSettings />
       </SettingsGroup>
       <ResetToDefaults group="integrations" />
+    </div>
+  )
+}
+
+/**
+ * A host that is set up but whose sign-in did not work.
+ *
+ * Amber rather than red, and worded as a thing to finish rather than a thing
+ * that broke: the usual cause is a token that expired or was revoked, which is
+ * ordinary and fixed in a minute. Shows the host's own words underneath,
+ * because "could not sign in" alone does not tell anyone which of the several
+ * possible causes they have.
+ */
+function NeedsAttention({ provider }: { provider: HostProviderInfo }) {
+  return (
+    <div className="grid gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <AlertTriangle size={14} className="flex-none text-amber-600 dark:text-amber-300" aria-hidden />
+        <span className="text-xs font-medium text-foreground">
+          {provider.display_name} needs signing in again
+        </span>
+      </div>
+      <p className="text-2xs leading-relaxed text-muted-foreground">
+        GitWyrm has a sign-in saved for {provider.display_name} but could not use it. This usually
+        means it expired or was turned off.
+      </p>
+      {provider.auth_error && (
+        <p className="rounded bg-panel3 px-2 py-1 font-mono text-[10.5px] leading-snug text-muted-foreground">
+          {provider.auth_error}
+        </p>
+      )}
+      <div>
+        <ProviderRow provider={provider} />
+      </div>
     </div>
   )
 }

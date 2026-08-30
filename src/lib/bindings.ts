@@ -2558,8 +2558,10 @@ async generateCommits(repoId: string, provider: string, model: string, commitCou
  * Every host GitWyrm knows about, with the connection state of each.
  * 
  * Status is best-effort per host: one unreachable site must not blank the
- * whole screen, so a failed check reads as "not connected" and the user can
- * retry by reopening.
+ * whole screen. A failed check is reported as such on that host's own row
+ * (`auth_error`) rather than being flattened into "not connected", so a
+ * stale token asks to be signed in again instead of pretending the host was
+ * never set up.
  */
 async hostingProviders() : Promise<Result<HostProviderInfo[], string>> {
     try {
@@ -5254,7 +5256,18 @@ required_scopes: string[];
 /**
  * The signed-in account name, or None when not connected.
  */
-connected_as: string | null; capabilities: HostCapabilities }
+connected_as: string | null; 
+/**
+ * Set when GitWyrm holds a credential for this host but could not use it:
+ * the message, in the host's own words.
+ * 
+ * Distinct from `connected_as: None`, which means there is nothing saved.
+ * Flattening the two was a real bug: a token that had expired or been
+ * revoked showed as never-connected, so the fix on offer was "add an
+ * integration" for a host already set up, and the actual problem -- sign
+ * in again -- was never named.
+ */
+auth_error: string | null; capabilities: HostCapabilities }
 /**
  * A `@@ -old_start,old_lines +new_start,new_lines @@` hunk boundary.
  */

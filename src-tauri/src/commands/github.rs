@@ -207,19 +207,31 @@ pub struct HostProviderInfo {
     pub required_scopes: Vec<String>,
     /// The signed-in account name, or None when not connected.
     pub connected_as: Option<String>,
+    /// Set when GitWyrm holds a credential for this host but could not use it:
+    /// the message, in the host's own words.
+    ///
+    /// Distinct from `connected_as: None`, which means there is nothing saved.
+    /// Flattening the two was a real bug: a token that had expired or been
+    /// revoked showed as never-connected, so the fix on offer was "add an
+    /// integration" for a host already set up, and the actual problem -- sign
+    /// in again -- was never named.
+    pub auth_error: Option<String>,
     pub capabilities: crate::hosting::HostCapabilities,
 }
 
 /// Every host GitWyrm knows about, with the connection state of each.
 ///
 /// Status is best-effort per host: one unreachable site must not blank the
-/// whole screen, so a failed check reads as "not connected" and the user can
-/// retry by reopening.
+/// whole screen. A failed check is reported as such on that host's own row
+/// (`auth_error`) rather than being flattened into "not connected", so a
+/// stale token asks to be signed in again instead of pretending the host was
+/// never set up.
 #[tauri::command]
 #[specta::specta]
 pub async fn hosting_providers(app: tauri::AppHandle) -> Result<Vec<HostProviderInfo>, AppError> {
     let mut out = Vec::with_capacity(hosting::ALL_PROVIDERS.len());
     for provider in hosting::ALL_PROVIDERS {
+        let status = provider.auth_status(&app).await;
         out.push(HostProviderInfo {
             id: provider.id(),
             display_name: provider.display_name().to_string(),
@@ -230,7 +242,10 @@ pub async fn hosting_providers(app: tauri::AppHandle) -> Result<Vec<HostProvider
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
-            connected_as: provider.auth_status(&app).await.unwrap_or(None),
+            connected_as: status.as_ref().ok().and_then(Clone::clone),
+            // Only a failed CHECK, never "no credential saved" -- see
+            // `auth_error`'s own comment on why the two must stay apart.
+            auth_error: status.as_ref().err().map(ToString::to_string),
             capabilities: provider.capabilities(),
         });
     }
