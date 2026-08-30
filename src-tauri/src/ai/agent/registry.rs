@@ -86,6 +86,25 @@ impl Denial {
     }
 }
 
+/// Which language a tool speaks.
+///
+/// Not every tool speaks the Agent Client Protocol, and the ones that do not
+/// are not obscure -- Claude Code and Codex are two of the most used, and
+/// neither offers an ACP mode. Bridging them through a package the user has to
+/// install is the wrong answer: a tool working in their terminal should work
+/// here, so GitWyrm learns their protocol instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Protocol {
+    /// Agent Client Protocol over stdio.
+    Acp,
+    /// Codex's own app-server: JSON-RPC on stdio, with `initialize`,
+    /// `thread/start` and `turn/start` where ACP has `session/*`.
+    CodexAppServer,
+    /// Claude Code's `--print --input-format=stream-json` stream: newline
+    /// JSON in both directions, no JSON-RPC framing.
+    ClaudeStreamJson,
+}
+
 /// What one agent calls the three things GitWyrm gates.
 ///
 /// A struct of three named fields rather than a list, so a row cannot quietly
@@ -131,7 +150,10 @@ pub struct AgentSpec {
     pub windows_names: &'static [&'static str],
     /// Binary names on everything that is not Windows.
     pub unix_names: &'static [&'static str],
-    /// Arguments that start the tool's ACP server on stdin/stdout.
+    /// Which language this tool speaks. See [`Protocol`].
+    pub protocol: Protocol,
+    /// Arguments that put the tool into whatever mode [`Self::protocol`]
+    /// names, on stdin/stdout.
     pub acp_args: &'static [&'static str],
     /// Arguments that make the tool print its version and exit.
     pub version_args: &'static [&'static str],
@@ -160,16 +182,6 @@ pub struct AgentSpec {
     /// choosing a package manager for them and writing outside anywhere
     /// GitWyrm owns. Showing it lets them decide.
     pub install_hint: &'static str,
-    /// Set when the thing GitWyrm launches is an ADAPTER rather than the tool
-    /// itself, naming the tool it drives.
-    ///
-    /// This exists because the alternative is a lie. Claude Code and Codex
-    /// both speak their own protocols and neither offers ACP, so GitWyrm
-    /// drives a small bridge package instead. Someone with Claude working
-    /// perfectly in their terminal sees "not installed" and reasonably
-    /// concludes GitWyrm is broken. The row has to say that the tool is fine
-    /// and a bridge is what is missing.
-    pub adapter_for: Option<&'static str>,
 }
 
 impl AgentSpec {
@@ -288,6 +300,7 @@ pub const AGENTS: &[AgentSpec] = &[
     AgentSpec {
         id: "copilot",
         display_name: "GitHub Copilot",
+        protocol: Protocol::Acp,
         windows_names: &["copilot.exe", "copilot.cmd", "copilot.bat", "copilot"],
         unix_names: &["copilot"],
         acp_args: &["--acp", "--stdio"],
@@ -307,7 +320,6 @@ pub const AGENTS: &[AgentSpec] = &[
         },
         homepage_url: "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
         install_hint: "npm install -g @github/copilot",
-        adapter_for: None,
     },
     // Gemini CLI. `--acp` is the current flag; `--experimental-acp` still
     // works but is deprecated in favour of it.
@@ -319,6 +331,7 @@ pub const AGENTS: &[AgentSpec] = &[
     AgentSpec {
         id: "gemini",
         display_name: "Gemini CLI",
+        protocol: Protocol::Acp,
         windows_names: &["gemini.exe", "gemini.cmd", "gemini.bat", "gemini"],
         unix_names: &["gemini"],
         acp_args: &["--acp"],
@@ -329,7 +342,6 @@ pub const AGENTS: &[AgentSpec] = &[
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://github.com/google-gemini/gemini-cli#quickstart",
         install_hint: "npm install -g @google/gemini-cli",
-        adapter_for: None,
     },
     // Claude Code, reached through an adapter rather than directly: Claude
     // Code itself has no ACP mode. The adapter is npm
@@ -346,16 +358,23 @@ pub const AGENTS: &[AgentSpec] = &[
     AgentSpec {
         id: "claude",
         display_name: "Claude Code",
-        windows_names: &[
-            "claude-agent-acp.exe",
-            "claude-agent-acp.cmd",
-            "claude-agent-acp.bat",
-            "claude-agent-acp",
+        protocol: Protocol::ClaudeStreamJson,
+        windows_names: &["claude.exe", "claude.cmd", "claude.bat", "claude"],
+        unix_names: &["claude"],
+        // A one-shot print run reading and writing newline JSON. `--verbose`
+        // is required alongside stream-json output or the CLI refuses.
+        acp_args: &[
+            "--print",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
         ],
-        unix_names: &["claude-agent-acp"],
-        acp_args: &[],
         version_args: &["--version"],
-        denial: Denial::SessionMeta,
+        denial: Denial::LaunchFlags {
+            deny_flag: "--disallowedTools",
+        },
         // Claude Code's own tool names, as they appear in `disallowedTools`.
         // The adapter matches on EXACT names, so these are spelled the way
         // Claude Code spells them rather than the way GitWyrm does -- and
@@ -378,7 +397,6 @@ pub const AGENTS: &[AgentSpec] = &[
         // Code alone still ends up with nothing GitWyrm can drive.
         homepage_url: "https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp",
         install_hint: "npm install -g @agentclientprotocol/claude-agent-acp",
-        adapter_for: Some("Claude Code"),
     },
     // opencode. ACP is a SUBCOMMAND (`opencode acp`), not a flag.
     //
@@ -390,6 +408,7 @@ pub const AGENTS: &[AgentSpec] = &[
     AgentSpec {
         id: "opencode",
         display_name: "opencode",
+        protocol: Protocol::Acp,
         windows_names: &["opencode.exe", "opencode.cmd", "opencode.bat", "opencode"],
         unix_names: &["opencode"],
         acp_args: &["acp"],
@@ -398,7 +417,6 @@ pub const AGENTS: &[AgentSpec] = &[
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://opencode.ai/docs/",
         install_hint: "npm install -g opencode-ai",
-        adapter_for: None,
     },
     // Codex, through an adapter. `codex` itself speaks its own app-server
     // JSON-RPC rather than ACP -- confirmed against 0.151.0, whose `--help`
@@ -412,20 +430,19 @@ pub const AGENTS: &[AgentSpec] = &[
     AgentSpec {
         id: "codex",
         display_name: "Codex",
-        windows_names: &[
-            "codex-acp.exe",
-            "codex-acp.cmd",
-            "codex-acp.bat",
-            "codex-acp",
-        ],
-        unix_names: &["codex-acp"],
-        acp_args: &[],
+        protocol: Protocol::CodexAppServer,
+        windows_names: &["codex.exe", "codex.cmd", "codex.bat", "codex"],
+        unix_names: &["codex"],
+        acp_args: &["app-server"],
         version_args: &["--version"],
-        denial: Denial::None,
+        // Codex sandboxes the whole session rather than naming tools:
+        // `--sandbox read-only` is a real bound, verified against 0.151.0.
+        denial: Denial::ReadOnlyMode {
+            flag: "--sandbox=read-only",
+        },
         tool_names: NO_TOOL_NAMES,
-        homepage_url: "https://github.com/openai/codex",
-        install_hint: "npm install -g @zed-industries/codex-acp",
-        adapter_for: Some("Codex"),
+        homepage_url: "https://developers.openai.com/codex/cli/",
+        install_hint: "npm install -g @openai/codex",
     },
 ];
 
@@ -586,10 +603,24 @@ mod tests {
             // `--experimental-acp` still exists but is deprecated in favour
             // of `--acp`.
             ("gemini", &["--acp"]),
-            // The adapter IS the ACP server, so it takes no mode argument.
-            ("claude", &[]),
+            // Not ACP at all: Claude Code has no such mode, so GitWyrm
+            // drives its own newline-JSON stream. `--verbose` is required
+            // alongside stream-json output or the CLI refuses to start.
+            (
+                "claude",
+                &[
+                    "--print",
+                    "--input-format",
+                    "stream-json",
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                ],
+            ),
             // A subcommand, not a flag.
             ("opencode", &["acp"]),
+            // Codex's own JSON-RPC server, also a subcommand.
+            ("codex", &["app-server"]),
         ];
         for (id, expected) in cases {
             let spec = find(id).unwrap_or_else(|| panic!("{id} must be in the table"));
@@ -647,25 +678,24 @@ mod tests {
         );
     }
 
-    /// The Claude adapter's denial is in the protocol, so nothing about it
-    /// appears on the command line.
+    /// Claude Code is driven directly, so its denial is a launch flag.
+    ///
+    /// It used to be reached through a bridge package that took denials
+    /// inside the session request. Requiring an install for a tool the user
+    /// already had was the wrong trade, so GitWyrm speaks Claude's own
+    /// stream-json instead and `--disallowedTools` is the bound.
     #[test]
-    fn the_claude_adapter_denies_in_session_meta_not_on_the_command_line() {
+    fn claude_denies_on_its_own_command_line() {
         let claude = find("claude").expect("claude is in the table");
+        let args = claude.launch_args(&["shell", "url", "write"]);
         assert!(
-            claude.launch_args(&["shell", "url", "write"]).is_empty(),
-            "denial must not leak onto the adapter's command line"
+            args.iter().any(|a| a.starts_with("--disallowedTools=")),
+            "no denial reached the command line: {args:?}"
         );
-        let meta = claude
-            .session_meta(&["shell", "url", "write"])
-            .expect("a denial must produce a _meta object");
-        let disallowed = meta["claudeCode"]["options"]["disallowedTools"]
-            .as_array()
-            .expect("disallowedTools must be a list");
-        let names: Vec<&str> = disallowed.iter().filter_map(|v| v.as_str()).collect();
-        assert!(names.contains(&"Bash"));
-        assert!(names.contains(&"WebFetch"));
-        assert!(names.contains(&"Write"));
+        assert!(
+            claude.session_meta(&["write"]).is_none(),
+            "a directly driven tool sends no session _meta"
+        );
     }
 
     #[test]
@@ -729,16 +759,14 @@ mod tests {
     /// exists to close, and one nothing else would catch.
     #[test]
     fn claudes_write_denial_covers_every_tool_that_edits_a_file() {
+        // Claude is driven directly now, so its denial is a launch flag
+        // rather than something inside a session request.
         let claude = find("claude").expect("the Claude row must exist");
-        let meta = claude
-            .session_meta(&["write"])
-            .expect("a write denial must produce a session _meta");
-        let denied = meta["claudeCode"]["options"]["disallowedTools"]
-            .as_array()
-            .expect("disallowedTools must be a list")
+        let args = claude.launch_args(&["write"]);
+        let denied: Vec<&str> = args
             .iter()
-            .filter_map(|v| v.as_str())
-            .collect::<Vec<_>>();
+            .filter_map(|a| a.strip_prefix("--disallowedTools="))
+            .collect();
         for tool in ["Write", "Edit", "MultiEdit", "NotebookEdit"] {
             assert!(
                 denied.contains(&tool),
@@ -752,15 +780,11 @@ mod tests {
     #[test]
     fn claudes_shell_and_network_denials_cover_their_aliases() {
         let claude = find("claude").expect("the Claude row must exist");
-        let meta = claude
-            .session_meta(&["shell", "url"])
-            .expect("a denial must produce a session _meta");
-        let denied = meta["claudeCode"]["options"]["disallowedTools"]
-            .as_array()
-            .expect("disallowedTools must be a list")
+        let args = claude.launch_args(&["shell", "url"]);
+        let denied: Vec<&str> = args
             .iter()
-            .filter_map(|v| v.as_str())
-            .collect::<Vec<_>>();
+            .filter_map(|a| a.strip_prefix("--disallowedTools="))
+            .collect();
         for tool in ["Bash", "WebFetch", "WebSearch"] {
             assert!(denied.contains(&tool), "{tool} must be denied, got {denied:?}");
         }

@@ -164,16 +164,6 @@ function AgentRow({ row }: { row: AgentProvider }) {
           {row.installed && row.version ? row.version : row.binaryName}
         </span>
 
-        {!row.installed && row.adapterFor && (
-          // Without this the row is actively misleading: someone with Claude
-          // working in their terminal reads "not installed" and concludes
-          // GitWyrm is broken. The tool is fine; a small bridge is missing.
-          <span className="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">
-            {row.adapterFor} itself does not speak the protocol GitWyrm uses, so it needs a small
-            bridge. Installing this does not change your {row.adapterFor} setup.
-          </span>
-        )}
-
         {!row.installed && (
           <span className="mt-1 flex flex-wrap items-center gap-1.5">
             <code className="rounded bg-panel3 px-1.5 py-0.5 font-mono text-[10.5px] text-foreground">

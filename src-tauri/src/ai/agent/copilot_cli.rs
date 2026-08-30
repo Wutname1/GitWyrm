@@ -389,6 +389,7 @@ mod tests {
         static MISSING: AgentSpec = AgentSpec {
             id: "gitwyrm-test-agent-that-is-not-installed",
             display_name: "A tool nobody has",
+            protocol: registry::Protocol::Acp,
             windows_names: &["gitwyrm-no-such-tool.exe", "gitwyrm-no-such-tool.cmd"],
             unix_names: &["gitwyrm-no-such-tool"],
             acp_args: &["--acp"],
@@ -401,7 +402,6 @@ mod tests {
             },
             homepage_url: "https://example.invalid",
             install_hint: "",
-            adapter_for: None,
 
         };
 
