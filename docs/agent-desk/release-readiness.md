@@ -127,6 +127,41 @@ exists. Leaving it undecided means the feature works by luck.
 Not urgent, and explicitly not "delete it": it fails safe, and it costs nothing when a
 model writes prose instead.
 
+### 7. Autonomy: the adversarial auditor
+
+Landed 2026-08-29 (`agentdesk/auditor.rs`). A run that reports itself finished is
+read by a second agent whose brief is to find what is wrong with it, not to
+confirm it is done.
+
+The design differs deliberately from OpenChamber's verify loop, which asks
+whether progress happened. This assumes the spec is loose and the agent cut
+corners, and asks whether the work would survive a real user. `Verdict::Hollow`
+is a state neither "done" nor "blocked" can express: it is specifically "this
+looks finished and is not".
+
+Properties worth keeping when this is touched:
+
+- **The auditor cannot write.** `ExecutionPolicy::resolve_for_audit` uses
+  `SessionIntent::Review`, so the tool launches with writing denied. An auditor
+  that fixed what it found would stop being a second opinion.
+- **Failure lets work through.** An unreadable reply, a tool that will not
+  start, a rejection with no reasons -- all become `Unavailable`, never a
+  rejection. An audit that did not happen knows nothing about the work.
+- **It reads the real diff**, capped at 120 KB and cut on a line boundary.
+  A summary only catches an agent willing to admit it cut a corner.
+- **Corrections are bounded at two passes** and run on the same connection, so
+  the agent is finishing rather than starting over.
+
+Still open here:
+
+- **Not exercised against a real corner-cutting run.** The judgement is a model's,
+  so the prompt's wording is the feature. `audit_prompt_reads_well` (ignored)
+  prints it for a realistic stubbed-retry case; a live run against a
+  deliberately under-specified task is the acceptance test the plan calls for.
+- **Checks are not passed as evidence.** They live in the transcript rather
+  than in `AuditEvidence`; the prompt tells the auditor passing checks are weak
+  evidence anyway.
+
 ### 6. Hosting other agents' skills and connectors
 
 Closed 2026-08-29, in two halves.
