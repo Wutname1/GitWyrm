@@ -9,6 +9,8 @@ const EMPTY: SessionUsage = {
   planLimit: null,
   planResetAt: null,
   activeHelperCount: null,
+  contextUsed: null,
+  contextSize: null,
   dataTimestamp: '2026-08-19T00:00:00Z',
 }
 
@@ -118,6 +120,35 @@ describe('buildUsageRows', () => {
     expect(rows[0].label).toBe('Current session')
     expect(rows[0].value).toBe('31k tokens · 7 turns')
     expect(rows[0].isEstimate).toBe(false)
+  })
+
+  it('shows context as a share of the window rather than raw numbers', () => {
+    // "31k of 200k" makes the reader do the division to answer the only
+    // question they have, which is how close a compaction is.
+    const usage: SessionUsage = {
+      ...EMPTY,
+      contextUsed: { value: 31_000, source: 'providerReported' },
+      contextSize: { value: 200_000, source: 'providerReported' },
+    }
+    const rows = buildUsageRows(usage)
+    expect(rows[0].label).toBe('Context used')
+    expect(rows[0].value).toBe('16% of 200k tokens')
+  })
+
+  it('shows no context row when only half of it was reported', () => {
+    // A window size with no occupancy, or the reverse, says nothing useful.
+    expect(
+      buildUsageRows({ ...EMPTY, contextSize: { value: 200_000, source: 'providerReported' } })
+    ).toEqual([])
+  })
+
+  it('does not divide by a zero window', () => {
+    const usage: SessionUsage = {
+      ...EMPTY,
+      contextUsed: { value: 10, source: 'providerReported' },
+      contextSize: { value: 0, source: 'providerReported' },
+    }
+    expect(buildUsageRows(usage)).toEqual([])
   })
 
   it('formats the reset date without inventing a time-of-day claim', () => {

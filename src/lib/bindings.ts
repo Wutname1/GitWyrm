@@ -5017,7 +5017,16 @@ costMicroUsd?: number | null;
  * How many model turns this execution took. Always known, because
  * GitWyrm counts them itself rather than asking the provider.
  */
-turns?: number }
+turns?: number; 
+/**
+ * How much of the model's context window the session was last holding,
+ * and how big that window is.
+ * 
+ * Replaced on every report rather than accumulated: this is occupancy,
+ * not spend, and it falls when the agent compacts its history. Summing it
+ * would produce a number that means nothing.
+ */
+contextUsed?: number | null; contextSize?: number | null }
 /**
  * One external session as an adapter's `list` reports it -- enough to render
  * a picker row before any message content is read.
@@ -6576,6 +6585,15 @@ export type RunStep =
  */
 { kind: "usage"; usage: TurnUsage } | 
 /**
+ * How full the model's context window is for this session.
+ * 
+ * Not a transcript row and not a running total: this is occupancy, it
+ * replaces whatever was recorded before, and it goes DOWN when the agent
+ * compacts its history. Distinct from `Usage`, which is spend and does
+ * accumulate.
+ */
+{ kind: "contextUsage"; used: number; size: number; cost_micro_usd: number | null } | 
+/**
  * The run ended.
  */
 { kind: "ended"; state: RunState; detail: string }
@@ -6728,7 +6746,15 @@ export type SessionState =
  * Every field is optional -- unknown values are omitted, never zero -- and
  * carries its own [`UsageSource`] so the UI can mark estimates as estimates.
  */
-export type SessionUsage = { sessionTokens: UsageValue | null; sessionRequests: UsageValue | null; sessionCostUsd: UsageValue | null; planLimit: UsageValue | null; planResetAt: string | null; activeHelperCount: number | null; 
+export type SessionUsage = { sessionTokens: UsageValue | null; sessionRequests: UsageValue | null; sessionCostUsd: UsageValue | null; planLimit: UsageValue | null; planResetAt: string | null; 
+/**
+ * How full the model's context window is right now, and how big it is.
+ * 
+ * Occupancy, not spend: it falls when the agent compacts its history, so
+ * it is the newest reading rather than a total. Reported by the agent
+ * over ACP's own `usage_update`; absent for agents that do not send one.
+ */
+contextUsed: UsageValue | null; contextSize: UsageValue | null; activeHelperCount: number | null; 
 /**
  * RFC 3339 UTC timestamp of when this data was produced, so the UI can
  * show "as of" rather than implying it is live.

@@ -414,6 +414,24 @@ fn handle(
                 sink(RunState::Working, RunStep::Note { text });
             }
         }
+        // Context occupancy, not spend. Emitted as its own step so the
+        // execution record can carry "this session is holding 31k of a 200k
+        // window" without it being mistaken for a running total -- the figure
+        // REPLACES the previous one and falls when the agent compacts.
+        Incoming::ContextUsage {
+            used,
+            size,
+            cost_micro_usd,
+        } => {
+            sink(
+                RunState::Working,
+                RunStep::ContextUsage {
+                    used,
+                    size,
+                    cost_micro_usd,
+                },
+            );
+        }
         Incoming::ToolCall { title, .. } => {
             // `Activity`, never `Note`: tool calls are what the agent is
             // *doing*, not what it is *saying*. Keeping them a distinct step

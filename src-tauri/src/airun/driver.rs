@@ -161,6 +161,17 @@ pub enum RunStep {
     Usage {
         usage: crate::agentdesk::model::TurnUsage,
     },
+    /// How full the model's context window is for this session.
+    ///
+    /// Not a transcript row and not a running total: this is occupancy, it
+    /// replaces whatever was recorded before, and it goes DOWN when the agent
+    /// compacts its history. Distinct from `Usage`, which is spend and does
+    /// accumulate.
+    ContextUsage {
+        used: u32,
+        size: u32,
+        cost_micro_usd: Option<u32>,
+    },
     /// The run ended.
     Ended { state: RunState, detail: String },
 }
@@ -241,6 +252,9 @@ pub fn summarize(step: &RunStep) -> String {
         // sentence exists only for logs and for the exhaustiveness this match
         // enforces.
         RunStep::Usage { .. } => "Recorded what the turn cost".to_string(),
+        RunStep::ContextUsage { used, size, .. } => {
+            format!("Context window: {used} of {size}")
+        }
         RunStep::Ended { detail, .. } => detail.clone(),
     }
 }

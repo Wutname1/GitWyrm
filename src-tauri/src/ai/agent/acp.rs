@@ -42,6 +42,17 @@ pub enum Incoming {
         title: String,
         raw: Value,
     },
+    /// How full the session's context window is, and what it has cost.
+    ///
+    /// `used` is occupancy rather than spend and falls when the agent compacts
+    /// its history, so it replaces the previous figure rather than adding to
+    /// it. `cost` is cumulative for the session when an agent reports it at
+    /// all, which most do not.
+    ContextUsage {
+        used: u32,
+        size: u32,
+        cost_micro_usd: Option<u32>,
+    },
     /// The agent is asking whether it may do something. `respond` MUST be
     /// answered -- the agent's turn is blocked until it is.
     PermissionRequest {
@@ -668,6 +679,30 @@ fn classify_update(update: &Value) -> Option<Incoming> {
                 raw: update.clone(),
             })
         }
+        // ACP's own usage report: how much of the context window this session
+        // is holding, and optionally what it has cost so far. `used` and
+        // `size` are required by the schema; `cost` is not, and most agents
+        // omit it.
+        //
+        // Worth being precise about what `used` means, because the obvious
+        // reading is wrong: it is context OCCUPANCY, not spend. It goes DOWN
+        // after the agent compacts its history. Adding it up across turns
+        // would produce a number that means nothing.
+        "usage_update" => {
+            let used = update.get("used").and_then(Value::as_u64)?;
+            let size = update.get("size").and_then(Value::as_u64)?;
+            let cost_micro_usd = update
+                .get("cost")
+                .and_then(|c| c.get("amount"))
+                .and_then(Value::as_f64)
+                .filter(|a| a.is_finite() && *a >= 0.0)
+                .map(|a| (a * 1_000_000.0).round().min(u32::MAX as f64) as u32);
+            Some(Incoming::ContextUsage {
+                used: used.min(u32::MAX as u64) as u32,
+                size: size.min(u32::MAX as u64) as u32,
+                cost_micro_usd,
+            })
+        }
         _ => None,
     }
 }
@@ -699,6 +734,48 @@ fn rpc_error(err: &Value) -> AgentError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_usage_update_is_read_as_context_occupancy() {
+        // ACP's own schema: `used` and `size` required, `cost` optional.
+        let update = serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 31_000,
+            "size": 200_000,
+        });
+        match classify_update(&update) {
+            Some(Incoming::ContextUsage { used, size, cost_micro_usd }) => {
+                assert_eq!(used, 31_000);
+                assert_eq!(size, 200_000);
+                assert_eq!(cost_micro_usd, None);
+            }
+            other => panic!("expected context usage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_cost_on_a_usage_update_becomes_micro_usd() {
+        let update = serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 10,
+            "size": 100,
+            "cost": { "amount": 0.0125, "currency": "USD" },
+        });
+        match classify_update(&update) {
+            Some(Incoming::ContextUsage { cost_micro_usd, .. }) => {
+                assert_eq!(cost_micro_usd, Some(12_500));
+            }
+            other => panic!("expected context usage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_usage_update_missing_its_required_fields_is_ignored() {
+        // Dropping it is right: a partial reading would be shown as if it were
+        // measured, and there is nothing useful to say from half of it.
+        let update = serde_json::json!({ "sessionUpdate": "usage_update", "used": 5 });
+        assert!(classify_update(&update).is_none());
+    }
 
     #[test]
     fn copilot_cli_usage_shape_is_understood() {

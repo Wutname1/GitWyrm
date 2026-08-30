@@ -253,6 +253,17 @@ pub fn apply_run_event(
         record.usage.get_or_insert_with(Default::default).accumulate(usage);
     }
 
+    // Occupancy replaces rather than accumulates -- see `set_context`. A cost
+    // reported alongside it is cumulative for the session, so it is recorded
+    // the same way rather than being added to the per-turn total.
+    if let RunStep::ContextUsage { used, size, cost_micro_usd } = &event.step {
+        let slot = record.usage.get_or_insert_with(Default::default);
+        slot.set_context(*used, *size);
+        if let Some(c) = cost_micro_usd {
+            slot.cost_micro_usd = Some(*c);
+        }
+    }
+
     let kind = map_run_step(session, execution_id, sequence, occurred_at, event);
 
     match &kind {
@@ -512,7 +523,7 @@ fn map_run_step(
     // row for it would put "Recorded what the turn cost" in the user's chat.
     // Reported as a state change so a listener still refreshes the usage
     // card without a message appearing.
-    if let RunStep::Usage { .. } = &event.step {
+    if let RunStep::Usage { .. } | RunStep::ContextUsage { .. } = &event.step {
         return AgentSessionEventKind::StateChanged {
             state: map_run_state(event.state),
         };
@@ -665,6 +676,8 @@ fn message_kind_for_step(step: &RunStep) -> MessageKind {
         // same reason `Ended` is: kept here only to keep the match
         // exhaustive.
         RunStep::Usage { .. } => MessageKind::System,
+        // Also handled before this is reached, for the same reason as `Usage`.
+        RunStep::ContextUsage { .. } => MessageKind::System,
     }
 }
 

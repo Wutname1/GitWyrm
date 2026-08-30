@@ -439,6 +439,16 @@ pub struct ExecutionUsage {
     /// GitWyrm counts them itself rather than asking the provider.
     #[serde(default)]
     pub turns: u32,
+    /// How much of the model's context window the session was last holding,
+    /// and how big that window is.
+    ///
+    /// Replaced on every report rather than accumulated: this is occupancy,
+    /// not spend, and it falls when the agent compacts its history. Summing it
+    /// would produce a number that means nothing.
+    #[serde(default)]
+    pub context_used: Option<u32>,
+    #[serde(default)]
+    pub context_size: Option<u32>,
 }
 
 impl ExecutionUsage {
@@ -459,6 +469,12 @@ impl ExecutionUsage {
         add(&mut self.cached_input_tokens, turn.cached_input_tokens);
         add(&mut self.cost_micro_usd, turn.cost_micro_usd);
         self.turns = self.turns.saturating_add(1);
+    }
+
+    /// Records the latest context-window reading, replacing any previous one.
+    pub fn set_context(&mut self, used: u32, size: u32) {
+        self.context_used = Some(used);
+        self.context_size = Some(size);
     }
 
     /// True when nothing but the turn count is known -- the case the UI must
@@ -823,6 +839,25 @@ mod tests {
         assert_eq!(total.cached_input_tokens, Some(60));
         assert_eq!(total.cost_micro_usd, Some(2_000));
         assert_eq!(total.turns, 2);
+    }
+
+    #[test]
+    fn context_occupancy_replaces_rather_than_accumulates() {
+        // The distinction the whole field rests on: occupancy falls when the
+        // agent compacts its history, so adding readings together would
+        // produce a number that means nothing and only ever grows.
+        let mut total = ExecutionUsage::default();
+        total.set_context(180_000, 200_000);
+        total.set_context(24_000, 200_000);
+        assert_eq!(total.context_used, Some(24_000));
+        assert_eq!(total.context_size, Some(200_000));
+    }
+
+    #[test]
+    fn context_is_absent_until_something_reports_it() {
+        let total = ExecutionUsage::default();
+        assert_eq!(total.context_used, None);
+        assert_eq!(total.context_size, None);
     }
 
     #[test]

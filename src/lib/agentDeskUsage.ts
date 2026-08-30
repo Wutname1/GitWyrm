@@ -94,6 +94,19 @@ export function buildUsageRows(usage: SessionUsage): UsageRow[] {
     })
   }
 
+  // Occupancy, shown as a share of the window rather than a raw pair of
+  // numbers: "31k of 200k" makes someone do the division to answer the only
+  // question they actually have, which is how close a compaction is.
+  if (usage.contextUsed && usage.contextSize && usage.contextSize.value > 0) {
+    const pct = Math.round((usage.contextUsed.value / usage.contextSize.value) * 100)
+    rows.push({
+      key: 'context',
+      label: 'Context used',
+      value: `${pct}% of ${formatTokens(usage.contextSize.value)}`,
+      isEstimate: isEstimate(usage.contextUsed),
+    })
+  }
+
   if (usage.planLimit) {
     const remaining = Math.max(0, usage.planLimit.value)
     rows.push({

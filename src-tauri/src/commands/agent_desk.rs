@@ -2016,6 +2016,13 @@ pub struct SessionUsage {
     pub session_cost_usd: Option<UsageValue>,
     pub plan_limit: Option<UsageValue>,
     pub plan_reset_at: Option<String>,
+    /// How full the model's context window is right now, and how big it is.
+    ///
+    /// Occupancy, not spend: it falls when the agent compacts its history, so
+    /// it is the newest reading rather than a total. Reported by the agent
+    /// over ACP's own `usage_update`; absent for agents that do not send one.
+    pub context_used: Option<UsageValue>,
+    pub context_size: Option<UsageValue>,
     pub active_helper_count: Option<u32>,
     /// RFC 3339 UTC timestamp of when this data was produced, so the UI can
     /// show "as of" rather than implying it is live.
@@ -2128,6 +2135,16 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
         }
     };
 
+    // The most recent context reading on the session. Deliberately not summed:
+    // two agents each holding 30k of their own 200k windows is not 60k of
+    // anything.
+    let latest_context = session
+        .executions
+        .iter()
+        .filter_map(|e| e.usage.as_ref())
+        .filter_map(|u| Some((u.context_used?, u.context_size?)))
+        .next_back();
+
     // Summed across every execution on the session -- helpers included, since
     // a lead that spent its budget on five helpers cost the user all five.
     // Left `None` unless at least one execution actually reported a figure:
@@ -2171,6 +2188,17 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
             session_cost_usd,
             plan_limit: None,
             plan_reset_at: None,
+            // The newest reading across this session's executions, not a sum.
+            // The lead's own window is the one that matters to a person
+            // reading "how close am I to a compaction".
+            context_used: latest_context.map(|(used, _)| UsageValue {
+                value: f64::from(used),
+                source: UsageSource::ProviderReported,
+            }),
+            context_size: latest_context.map(|(_, size)| UsageValue {
+                value: f64::from(size),
+                source: UsageSource::ProviderReported,
+            }),
             active_helper_count,
             data_timestamp: now_rfc3339(),
         },
