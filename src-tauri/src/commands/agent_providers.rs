@@ -37,6 +37,18 @@ pub struct AgentProvider {
     /// Why it cannot, in words the picker can show directly. `None` when it
     /// can.
     pub read_only_limit: Option<String>,
+    /// Where to send someone who wants this tool: its install page when it is
+    /// missing, its documentation when it is present. One URL, one control.
+    pub homepage_url: String,
+    /// The command that installs it, to be read and copied. GitWyrm never runs
+    /// this.
+    pub install_hint: String,
+    /// The binary name being looked for on this platform.
+    ///
+    /// Shown on every row, including missing ones, because a package name, a
+    /// binary name and a product name are routinely three different strings.
+    /// When detection is wrong this is the line that explains why.
+    pub binary_name: String,
 }
 
 /// What the picker needs to render itself for one chat.
@@ -99,6 +111,39 @@ fn session_is_read_only(root: &crate::agentdesk::store::SessionStoreRoot, sessio
     check_tool_capability(session.header.intent, started, ToolCapability::EditFile).is_err()
 }
 
+/// Re-reads the shell's `PATH`, forgets every cached probe, and detects again.
+///
+/// This is the Refresh button, and the `PATH` step is the whole reason it
+/// works. A GUI app holds the environment it was launched with, so a tool
+/// installed a minute ago is not on the `PATH` this process can see; probing
+/// again without re-reading it returns the same "not installed" answer and the
+/// button looks broken. See `ai::agent::shell_path`.
+///
+/// Returns the same shape as [`agent_providers_list`] so the screen can
+/// replace its state wholesale.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_providers_refresh(
+    app: tauri::AppHandle,
+    session_id: Option<String>,
+) -> Result<AgentProviderChoices, crate::error::AppError> {
+    let root = crate::agentdesk::store::SessionStoreRoot::resolve(&app)
+        .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let added = crate::ai::agent::shell_path::rehydrate();
+        crate::ai::agent::copilot_cli::forget_all_cached();
+        log::info!("agent refresh: {added} new PATH folders, cached probes dropped");
+        AgentProviderChoices {
+            providers: list(),
+            read_only: session_id
+                .map(|id| session_is_read_only(&root, &id))
+                .unwrap_or(false),
+        }
+    })
+    .await
+    .map_err(|e| crate::error::AppError::Other(e.to_string()))
+}
+
 fn list() -> Vec<AgentProvider> {
     registry::AGENTS.iter().map(row).collect()
 }
@@ -120,6 +165,14 @@ fn row(spec: &'static registry::AgentSpec) -> AgentProvider {
         too_old,
         can_do_read_only_work: spec.can_guarantee_read_only(),
         read_only_limit: read_only_limit(spec),
+        homepage_url: spec.homepage_url.to_string(),
+        install_hint: spec.install_hint.to_string(),
+        binary_name: spec
+            .candidate_names()
+            .first()
+            .copied()
+            .unwrap_or(spec.id)
+            .to_string(),
     }
 }
 
@@ -286,6 +339,42 @@ mod tests {
             assert!(
                 row.read_only_limit.is_none(),
                 "{id} must not carry a limit sentence"
+            );
+        }
+    }
+
+    /// Every tool has somewhere to send a person who does not have it.
+    ///
+    /// This is the field that ends the "not found on this machine" dead end,
+    /// so an empty one silently turns a row back into a dead end.
+    #[test]
+    fn every_tool_says_where_to_get_it() {
+        for row in list() {
+            assert!(
+                row.homepage_url.starts_with("https://"),
+                "{} has no install page",
+                row.id
+            );
+            assert!(!row.install_hint.is_empty(), "{} has no install command", row.id);
+            assert!(
+                !row.binary_name.is_empty(),
+                "{} does not say what binary it looks for",
+                row.id
+            );
+        }
+    }
+
+    /// The binary name shown must be one detection actually tries, or the row
+    /// tells the user to look for the wrong thing when detection is wrong.
+    #[test]
+    fn the_binary_name_shown_is_one_that_is_probed_for() {
+        for spec in registry::AGENTS {
+            let shown = row(spec).binary_name;
+            assert!(
+                spec.candidate_names().contains(&shown.as_str()),
+                "{} shows {shown} but probes for {:?}",
+                spec.id,
+                spec.candidate_names()
             );
         }
     }

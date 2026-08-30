@@ -231,6 +231,26 @@ async agentProvidersList(sessionId: string | null) : Promise<Result<AgentProvide
 }
 },
 /**
+ * Re-reads the shell's `PATH`, forgets every cached probe, and detects again.
+ * 
+ * This is the Refresh button, and the `PATH` step is the whole reason it
+ * works. A GUI app holds the environment it was launched with, so a tool
+ * installed a minute ago is not on the `PATH` this process can see; probing
+ * again without re-reading it returns the same "not installed" answer and the
+ * button looks broken. See `ai::agent::shell_path`.
+ * 
+ * Returns the same shape as [`agent_providers_list`] so the screen can
+ * replace its state wholesale.
+ */
+async agentProvidersRefresh(sessionId: string | null) : Promise<Result<AgentProviderChoices, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_providers_refresh", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether `snip` is installed, and which version answered.
  * 
  * Safe to call repeatedly: a found result is cached, and a "not found" is
@@ -3759,7 +3779,25 @@ canDoReadOnlyWork: boolean;
  * Why it cannot, in words the picker can show directly. `None` when it
  * can.
  */
-readOnlyLimit: string | null }
+readOnlyLimit: string | null; 
+/**
+ * Where to send someone who wants this tool: its install page when it is
+ * missing, its documentation when it is present. One URL, one control.
+ */
+homepageUrl: string; 
+/**
+ * The command that installs it, to be read and copied. GitWyrm never runs
+ * this.
+ */
+installHint: string; 
+/**
+ * The binary name being looked for on this platform.
+ * 
+ * Shown on every row, including missing ones, because a package name, a
+ * binary name and a product name are routinely three different strings.
+ * When detection is wrong this is the line that explains why.
+ */
+binaryName: string }
 /**
  * What the picker needs to render itself for one chat.
  */

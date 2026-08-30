@@ -144,6 +144,22 @@ pub struct AgentSpec {
     /// ([`Denial::ReadOnlyMode`], [`Denial::None`]), because there is nothing
     /// to name.
     pub tool_names: DeniableTools,
+    /// Where to send someone who wants this tool.
+    ///
+    /// One URL serves both states: it is the install page for a tool that is
+    /// missing and the documentation for one that is present, so the row needs
+    /// a single link control whose wording changes rather than two controls.
+    /// Point it at the page that actually explains installing, not a product
+    /// home page -- the whole value of this field is that it ends the "not
+    /// found on this machine" dead end.
+    pub homepage_url: &'static str,
+    /// The command that installs this tool, shown to be read and copied and
+    /// never run by GitWyrm.
+    ///
+    /// Never executed: running an install command on someone's behalf means
+    /// choosing a package manager for them and writing outside anywhere
+    /// GitWyrm owns. Showing it lets them decide.
+    pub install_hint: &'static str,
 }
 
 impl AgentSpec {
@@ -279,6 +295,8 @@ pub const AGENTS: &[AgentSpec] = &[
             network: &["url"],
             write: &["write"],
         },
+        homepage_url: "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
+        install_hint: "npm install -g @github/copilot",
     },
     // Gemini CLI. `--acp` is the current flag; `--experimental-acp` still
     // works but is deprecated in favour of it.
@@ -298,6 +316,8 @@ pub const AGENTS: &[AgentSpec] = &[
             flag: "--approval-mode=plan",
         },
         tool_names: NO_TOOL_NAMES,
+        homepage_url: "https://github.com/google-gemini/gemini-cli#quickstart",
+        install_hint: "npm install -g @google/gemini-cli",
     },
     // Claude Code, reached through an adapter rather than directly: Claude
     // Code itself has no ACP mode. The adapter is npm
@@ -341,6 +361,11 @@ pub const AGENTS: &[AgentSpec] = &[
             network: &["WebFetch", "WebSearch"],
             write: &["Write", "Edit", "MultiEdit", "NotebookEdit"],
         },
+        // The adapter, not Claude Code itself: Claude Code has no ACP mode, so
+        // this is the package that provides one. Someone who installs Claude
+        // Code alone still ends up with nothing GitWyrm can drive.
+        homepage_url: "https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp",
+        install_hint: "npm install -g @agentclientprotocol/claude-agent-acp",
     },
     // opencode. ACP is a SUBCOMMAND (`opencode acp`), not a flag.
     //
@@ -358,6 +383,8 @@ pub const AGENTS: &[AgentSpec] = &[
         version_args: &["--version"],
         denial: Denial::None,
         tool_names: NO_TOOL_NAMES,
+        homepage_url: "https://opencode.ai/docs/",
+        install_hint: "npm install -g opencode-ai",
     },
 ];
 

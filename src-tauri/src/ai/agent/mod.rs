@@ -15,4 +15,5 @@ pub mod copilot_cli;
 pub mod registry;
 pub mod run;
 pub mod select;
+pub mod shell_path;
 pub mod transport;

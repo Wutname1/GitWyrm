@@ -102,6 +102,17 @@ fn cache() -> &'static Mutex<HashMap<&'static str, CopilotCli>> {
 /// Guards against a hung or non-responding binary blocking the caller.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Drops every remembered probe so the next detection starts from nothing.
+///
+/// Only found answers are ever cached, so this exists for the other
+/// direction: a tool that was present and has since been uninstalled or moved
+/// would otherwise keep being reported as ready for the rest of the session.
+pub fn forget_all_cached() {
+    if let Ok(mut guard) = cache().lock() {
+        guard.clear();
+    }
+}
+
 /// Finds the default agent's tool. Kept as-is so existing callers and the
 /// end-to-end test read the same as before.
 pub fn detect() -> CopilotCli {
@@ -388,6 +399,9 @@ mod tests {
                 network: &[],
                 write: &[],
             },
+            homepage_url: "https://example.invalid",
+            install_hint: "",
+
         };
 
         let first = detect_agent(&MISSING);

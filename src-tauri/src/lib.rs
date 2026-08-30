@@ -75,6 +75,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::opencode::opencode_available,
             commands::openspec::openspec_recheck_cli,
             commands::agent_providers::agent_providers_list,
+            commands::agent_providers::agent_providers_refresh,
             commands::snip::snip_detect,
             commands::snip::snip_gain,
             commands::openspec::openspec_draft_change,
