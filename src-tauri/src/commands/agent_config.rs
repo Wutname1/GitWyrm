@@ -25,7 +25,7 @@ use crate::agent_config::model::{
     WarningKind,
 };
 use crate::agent_config::plan::{self, SafeWriteRoot};
-use crate::agent_config::{locations, normalize, readers, redact, writers};
+use crate::agent_config::{locations, normalize, readers, redact, skills, writers};
 use crate::error::AppError;
 use crate::state::RepoManager;
 
@@ -107,8 +107,38 @@ fn scan_all_items(repo_root: Option<&str>) -> (Vec<RawItem>, Vec<(ConfigLocation
                 Err(e) => errors.push((loc, e.to_string())),
             }
         }
+
+        // Skills are found by scanning a folder rather than by reading a key
+        // in a config file, so they cannot come from `read_items` and are
+        // collected separately. This is why the Skills tab used to render
+        // empty: `ItemKind::Skill` existed but nothing produced one.
+        items.extend(scan_skills(client, repo_root));
     }
     (items, errors)
+}
+
+/// Every skill one client has installed, personal and repository-scoped.
+///
+/// A client with no skills folder contributes nothing, and a folder that is
+/// not there is not an error -- see `agent_config::skills`.
+fn scan_skills(client: ClientId, repo_root: Option<&str>) -> Vec<RawItem> {
+    let Some(home) = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)
+    else {
+        return Vec::new();
+    };
+    let repo = repo_root.map(std::path::PathBuf::from);
+
+    let mut out = Vec::new();
+    for (dir, scope) in skills::skill_dirs(&home, repo.as_deref(), client) {
+        out.extend(skills::read_skills_at(&dir, |manifest| ConfigLocation {
+            client,
+            scope,
+            path: manifest.to_string_lossy().into_owned(),
+        }));
+    }
+    out
 }
 
 /// Which clients were detected on this machine, for the "Detected apps" tab.
@@ -340,7 +370,7 @@ fn apply_copy_at(write_root: &SafeWriteRoot, plan_id: &str) -> ApplyOutcome {
         let result = plan::apply_write(
             write_root,
             &plan.plan_id,
-            destination.client,
+            destination.client.key(),
             Path::new(&destination.destination_path),
             destination.before_hash.as_deref(),
             destination.proposed_content.as_bytes(),
