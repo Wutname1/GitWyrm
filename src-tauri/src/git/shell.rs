@@ -110,26 +110,23 @@ pub enum Attended {
 /// behaviour, and would put us in the business of re-supplying Git for Windows'
 /// defaults by hand.
 ///
-/// An attended run then names Credential Manager itself. An unattended one
-/// names this binary's read-only front for it instead (see
-/// `git::credential_helper`): git erases a credential from every helper after
-/// any 401, and GitHub sends 401 for a renamed or deleted repository even when
-/// the sign-in is good, so a background fetch of one stale checkout deleted the
-/// user's saved sign-in every fifteen minutes. Unattended work can read the
-/// stored credential; it must not be able to throw it away.
+/// Both kinds of run then name this binary's helper as the only entry -- the
+/// account the user connected in Settings answers first, and Credential
+/// Manager is reached *through* the helper rather than listed beside it. If
+/// `manager` sat in the list too, a push that succeeded on our token would
+/// make git `store` that token into Credential Manager, overwriting the user's
+/// own sign-in. See `git::credential_helper` for the full policy; the flag
+/// difference between the two runs is what stops a background 401 from erasing
+/// the stored sign-in.
 pub fn credential_args(attended: Attended) -> Vec<String> {
     let mut args = vec!["-c".into(), "credential.helper=".into()];
-    let helper = match attended {
-        Attended::User => None,
-        Attended::Background => read_only_credential_helper(),
-    };
     args.push("-c".into());
-    // When the current executable cannot be located the front could not be
+    // When the current executable cannot be located the helper could not be
     // spawned anyway; Credential Manager alone is the behaviour before the
-    // front existed rather than a broken helper that errors on every run.
+    // helper existed rather than a broken entry that errors on every run.
     args.push(format!(
         "credential.helper={}",
-        helper.unwrap_or_else(|| "manager".to_string())
+        own_credential_helper(attended).unwrap_or_else(|| "manager".to_string())
     ));
     args
 }
@@ -141,15 +138,20 @@ pub fn credential_args(attended: Attended) -> Vec<String> {
 /// under `C:\Program Files\`, and unquoted that parses as the program
 /// `C:\Program` with an argument. Confirmed by the quoting rule in
 /// git-credential(1).
-fn read_only_credential_helper() -> Option<String> {
+fn own_credential_helper(attended: Attended) -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let path = exe.to_str()?;
     // `!` marks the value as a shell command, which is what allows an absolute
     // path with an argument. Without it git would look for `git-credential-<value>`.
-    Some(format!(
+    let mut value = format!(
         "!\"{path}\" {}",
         crate::git::credential_helper::HELPER_FLAG
-    ))
+    );
+    if attended == Attended::Background {
+        value.push(' ');
+        value.push_str(crate::git::credential_helper::UNATTENDED_FLAG);
+    }
+    Some(value)
 }
 
 /// The environment variable that stops Git Credential Manager opening a window.
@@ -398,61 +400,59 @@ mod credential_trace_tests {
         }
     }
 
-    /// A run the user is watching talks to Credential Manager directly: it may
-    /// open a window and may replace a rejected credential. Nothing of ours in
-    /// the way -- an earlier helper that offered the app's own token made every
-    /// push to an OAuth-restricted org fail before Credential Manager was asked.
+    /// Both kinds of run name our helper as the only entry. Credential Manager
+    /// must NOT also be listed: a push that succeeded on our token would make
+    /// git `store` that token into Credential Manager, overwriting the user's
+    /// own sign-in -- and on background runs git would erase from it directly,
+    /// so the helper would protect nothing.
     #[test]
-    fn an_attended_run_uses_credential_manager_alone() {
-        let args = credential_args(Attended::User);
-        assert!(
-            args.contains(&"credential.helper=manager".to_string()),
-            "{args:?}"
-        );
-        assert!(!args.iter().any(|a| a.contains(HELPER_FLAG)), "{args:?}");
-        assert_eq!(
-            args.len(),
-            4,
-            "exactly one helper after the reset: {args:?}"
-        );
-    }
-
-    /// An unattended run goes through the read-only front, so a 401 cannot
-    /// erase the stored sign-in. Credential Manager must NOT also be listed:
-    /// git would erase from it directly and the front would protect nothing.
-    #[test]
-    fn a_background_run_uses_the_read_only_front_instead_of_manager() {
-        let args = credential_args(Attended::Background);
-        let Some(front) = args.iter().find(|a| a.contains(HELPER_FLAG)) else {
-            // current_exe() failed, so manager alone is the documented fallback.
+    fn every_run_goes_through_our_helper_and_never_lists_manager_beside_it() {
+        use crate::git::credential_helper::UNATTENDED_FLAG;
+        for attended in [Attended::User, Attended::Background] {
+            let args = credential_args(attended);
+            let Some(front) = args.iter().find(|a| a.contains(HELPER_FLAG)) else {
+                // current_exe() failed, so manager alone is the documented fallback.
+                assert!(
+                    args.contains(&"credential.helper=manager".to_string()),
+                    "{args:?}"
+                );
+                continue;
+            };
             assert!(
-                args.contains(&"credential.helper=manager".to_string()),
+                !args.contains(&"credential.helper=manager".to_string()),
                 "{args:?}"
             );
-            return;
-        };
-        assert!(
-            !args.contains(&"credential.helper=manager".to_string()),
-            "{args:?}"
-        );
-        assert_eq!(
-            args.len(),
-            4,
-            "exactly one helper after the reset: {args:?}"
-        );
+            assert_eq!(
+                args.len(),
+                4,
+                "exactly one helper after the reset: {args:?}"
+            );
 
-        // The path is quoted because a default Windows install sits under
-        // `C:\Program Files\`, which unquoted parses as the program `C:\Program`.
-        let value = front.trim_start_matches("credential.helper=");
-        assert!(
-            value.starts_with("!\""),
-            "must be a quoted command: {value}"
-        );
-        // The closing quote has to land before the flag, or the flag is inside
-        // the program name.
-        let close = value.rfind('"').expect("closing quote");
-        let flag = value.find(HELPER_FLAG).expect("flag");
-        assert!(close < flag, "flag must sit outside the quotes: {value}");
+            // The path is quoted because a default Windows install sits under
+            // `C:\Program Files\`, which unquoted parses as the program `C:\Program`.
+            let value = front.trim_start_matches("credential.helper=");
+            assert!(
+                value.starts_with("!\""),
+                "must be a quoted command: {value}"
+            );
+            // The closing quote has to land before the flag, or the flag is inside
+            // the program name.
+            let close = value.rfind('"').expect("closing quote");
+            let flag = value.find(HELPER_FLAG).expect("flag");
+            assert!(close < flag, "flag must sit outside the quotes: {value}");
+
+            // The unattended marker is what stops a background 401 from erasing
+            // the stored sign-in; an attended run must not carry it, or the
+            // login window it is allowed to open never appears.
+            match attended {
+                Attended::User => {
+                    assert!(!value.contains(UNATTENDED_FLAG), "{value}");
+                }
+                Attended::Background => {
+                    assert!(value.contains(UNATTENDED_FLAG), "{value}");
+                }
+            }
+        }
     }
 
     /// These are passed to git as global options, so each value needs its own

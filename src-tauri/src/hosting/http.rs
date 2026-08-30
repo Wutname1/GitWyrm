@@ -88,6 +88,34 @@ fn non_empty(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+/// Reads the credential for a provider straight from a data directory.
+///
+/// The twin of [`credential`] for the git credential helper process, which
+/// runs before Tauri initializes and so has no `AppHandle` to resolve paths
+/// with. Reading the file directly also means the helper cannot accidentally
+/// initialize app state.
+pub fn credential_from_dir(
+    dir: &std::path::Path,
+    provider: ProviderId,
+) -> Result<Option<StoredCredential>, AppError> {
+    let raw = match std::fs::read_to_string(dir.join("auth.json")) {
+        Ok(raw) => raw,
+        // No store yet is not an error: it means no account is connected, and
+        // the helper answers that with silence.
+        Err(_) => return Ok(None),
+    };
+    let all: std::collections::BTreeMap<String, crate::ai::auth::AuthInfo> =
+        serde_json::from_str(&raw).unwrap_or_default();
+    let Some(info) = all.get(provider.as_str()) else {
+        return Ok(None);
+    };
+    let stored = match info {
+        crate::ai::auth::AuthInfo::Api { key } => key.clone(),
+        crate::ai::auth::AuthInfo::Oauth { access, .. } => access.clone(),
+    };
+    Ok(Some(parse_credential(&stored)))
+}
+
 pub fn client() -> reqwest::Client {
     reqwest::Client::new()
 }

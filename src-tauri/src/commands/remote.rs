@@ -300,7 +300,7 @@ fn run_streaming_with(
     // Before the subcommand: `-c` overrides are global options and git rejects
     // them after the verb. Collapses the doubled credential helper that makes a
     // machine with both a system and a bundled git show two login windows.
-    cmd.args(cred_args);
+    cmd.args(&cred_args);
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
 
     // Hand this child the system's libraries, not the AppImage's.
@@ -331,8 +331,15 @@ fn run_streaming_with(
     // Nothing here can carry a secret. Which git, which helper binary, and
     // whether a prompt was permitted are all facts about configuration, and the
     // credential itself never enters this process.
+    //
+    // `effective` is the helper list this run actually passes with `-c`, which
+    // overrides everything `config-helpers` reports -- logging only the config
+    // view once sent an investigation down the wrong path. The helper binary's
+    // own decisions (answered / forwarded / refusal recorded) land in
+    // `credential-helper.log` next to auth.json, because that process runs
+    // before any logger exists.
     log::info!(
-        "git {operation}: program={} source={:?} attended={} helpers=[{}]",
+        "git {operation}: program={} source={:?} attended={} effective=[{}] config-helpers=[{}]",
         crate::git::shell::git_program_name(),
         crate::git::shell::git_source(),
         if attended == Attended::Background {
@@ -340,6 +347,15 @@ fn run_streaming_with(
         } else {
             "user"
         },
+        // The exe path inside the value is the app's own install location; the
+        // scrubber's path rules apply on the way to Sentry as they do to every
+        // log line.
+        cred_args
+            .iter()
+            .filter(|a| a.starts_with("credential.helper=") && a.len() > "credential.helper=".len())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", "),
         crate::git::shell::describe_credential_helpers(repo_path).join(", "),
     );
 

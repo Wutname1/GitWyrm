@@ -274,6 +274,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::github::github_repo_slug,
             commands::github::github_list_prs,
             commands::github::github_list_issues,
+            commands::github::github_scan_repos,
             commands::github::github_pr_detail,
             commands::github::github_pr_files,
             commands::github::github_pr_commits,
@@ -473,7 +474,47 @@ pub fn is_credential_helper(args: &[String]) -> bool {
 /// same binary is launched from Explorer. Nothing extra is needed for it to
 /// work, but the reason is worth stating: it looks like it should not.
 pub fn run_credential_helper(args: &[String]) -> i32 {
-    git::credential_helper::run(args)
+    git::credential_helper::run(args, helper_data_dir())
+}
+
+/// The app data directory, resolved without Tauri.
+///
+/// The credential helper runs before Tauri initializes -- it must not build a
+/// window or trip the single-instance guard -- so it cannot ask an `AppHandle`
+/// where `auth.json` lives. This mirrors Tauri's own per-platform resolution
+/// for the `dev.gitwyrm.app` identifier; if the identifier or Tauri's layout
+/// ever changes, this must follow.
+fn helper_data_dir() -> std::path::PathBuf {
+    const IDENTIFIER: &str = "dev.gitwyrm.app";
+
+    #[cfg(target_os = "windows")]
+    {
+        // %APPDATA%\dev.gitwyrm.app
+        let base = std::env::var_os("APPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        base.join(IDENTIFIER)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        home.join("Library/Application Support").join(IDENTIFIER)
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // $XDG_CONFIG_HOME, else ~/.config -- matching Tauri's Linux resolution.
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(std::path::PathBuf::from)
+                    .map(|h| h.join(".config"))
+            })
+            .unwrap_or_default();
+        base.join(IDENTIFIER)
+    }
 }
 
 pub fn run() {
