@@ -62,9 +62,17 @@ Two things remain true about this and are deliberate:
   cost; an agent that reports nothing produces no rows at all. GitWyrm never multiplies
   tokens by a price table of its own, so a cost figure appears only when a provider
   states one.
-- **`plan_limit` and `plan_reset_at` still have no source.** Provider plan quotas are
-  not exposed over ACP, so those two fields stay `None` until something else supplies
-  them.
+- **`plan_limit` and `plan_reset_at` still have no source, and may never get one.**
+  ACP exposes no plan quota. The obvious alternative -- asking GitHub directly -- is
+  blocked: Copilot only returns real entitlement data to OAuth apps on its approved
+  allowlist, and GitWyrm's app is not on it. The failure is silent (200 with a short
+  public list rather than an error), which makes it exactly the kind of source that
+  would produce a confident wrong number. See `ai/copilot_sdk.rs`. Reaching parity with
+  OpenChamber's 22-provider quota line would mean per-provider credential scraping of
+  the kind it and Orca both do.
+- **Context-window occupancy is reported** (added 2026-08-29) from ACP's own
+  `usage_update`, which GitWyrm was receiving and discarding. Distinct from spend: it
+  replaces rather than accumulates, and falls when the agent compacts.
 
 ### 3. ~~One transport, one provider~~ Partly closed 2026-08-28
 
