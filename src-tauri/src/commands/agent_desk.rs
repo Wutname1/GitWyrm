@@ -581,6 +581,61 @@ pub async fn agent_session_mark_read(
     .map_err(|e| AppError::Other(e.to_string()))
 }
 
+/// What happened when a chat was asked to be deleted.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DeleteSessionOutcome {
+    Deleted,
+    /// An agent is still working in this chat. Deleting the file underneath a
+    /// running process would leave it writing into a session nobody can see,
+    /// so the answer is to stop it first rather than to delete anyway.
+    StillRunning,
+    Failed {
+        detail: String,
+    },
+}
+
+/// Deletes one chat and everything written for it.
+///
+/// Permanent, and deliberately separate from Archive: archive is for a chat
+/// you are done with, delete is for one that should not exist. The two are
+/// not the same request and collapsing them would mean either a hoarded list
+/// nobody prunes or an archive button that quietly destroys work.
+///
+/// Refuses while an agent is running rather than stopping it: a delete that
+/// silently killed a working agent would lose whatever it was part-way
+/// through, and the person asking may not have realised it was still going.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_delete(
+    app: AppHandle,
+    executions: tauri::State<'_, std::sync::Arc<crate::agentdesk::ExecutionRegistry>>,
+    session_id: SessionId,
+) -> Result<DeleteSessionOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    let registry = executions.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if !registry.live_executions_for_session(&session_id).is_empty() {
+            return DeleteSessionOutcome::StillRunning;
+        }
+        match store::delete_session(&root, &session_id) {
+            Ok(()) => {
+                // The index is a projection: rebuilding it from what is on
+                // disk is what makes the row disappear, and it cannot drift
+                // from the files because it is derived from them.
+                let (headers, _) = store::rebuild_index_from_sessions(&root);
+                let _ = store::write_index(&root, &headers);
+                DeleteSessionOutcome::Deleted
+            }
+            Err(e) => DeleteSessionOutcome::Failed {
+                detail: e.to_string(),
+            },
+        }
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
 // -- 3.2: append-user-message / attach-context --
 
 /// A file/diff/source/graph/OpenSpec-task reference to attach to a message or

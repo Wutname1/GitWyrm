@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import type { SessionListFilterInput } from '@/lib/bindings'
 import { useAgentSessionHeaders } from '@/hooks/useAgentSessions'
+import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { useAgentSessionMutations } from '@/hooks/useAgentSessionMutations'
 import { NewSessionButton } from '@/components/domain/agent-desk/NewSessionButton'
 import { SessionGroups } from '@/components/domain/agent-desk/SessionGroups'
@@ -80,7 +81,9 @@ export function SessionSidebar({
     titleContains: null,
     ...filter,
   })
-  const { rename, archive, markRead } = useAgentSessionMutations()
+  const { rename, archive, markRead, remove } = useAgentSessionMutations()
+  // Which chat a delete has been asked for, held until it is confirmed.
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null)
 
   // Narrow-width drawer (task: "a hidden sidebar with no reopen affordance
   // violates house Rule #1"). Tracks the *container's* width via
@@ -172,6 +175,28 @@ export function SessionSidebar({
         onSelectSession={handleSelect}
         onRename={(sessionId, title) => rename.mutate({ sessionId, title })}
         onArchive={(sessionId, archived) => archive.mutate({ sessionId, archived })}
+        onDelete={(sessionId, title) => setPendingDelete({ id: sessionId, title })}
+      />
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+        title={pendingDelete ? `Delete "${pendingDelete.title}"?` : 'Delete this chat?'}
+        description={
+          <>
+            This chat and everything in it are removed for good. Any files the agent already
+            changed stay exactly where they are, and nothing in your project is touched. If you
+            only want it out of the way, Archive keeps it.
+          </>
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (pendingDelete) remove.mutate(pendingDelete.id)
+          setPendingDelete(null)
+        }}
       />
       {isLoading && headers.length === 0 && (
         <p className="flex-none px-3 py-2 text-2xs text-muted-foreground">Loading chats…</p>

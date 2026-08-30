@@ -23,6 +23,7 @@ export function VirtualSessionList({
   onSelectSession,
   onRename,
   onArchive,
+  onDelete,
   onToggleGroup,
   emptyMessage,
 }: {
@@ -31,6 +32,7 @@ export function VirtualSessionList({
   onSelectSession: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => void
   onArchive: (sessionId: string, archived: boolean) => void
+  onDelete: (sessionId: string, title: string) => void
   onToggleGroup: (groupId: string) => void
   emptyMessage: React.ReactNode
 }) {
@@ -100,6 +102,7 @@ export function VirtualSessionList({
               onSelect={onSelectSession}
               onRename={onRename}
               onArchive={onArchive}
+              onDelete={onDelete}
               style={style}
             />
           )

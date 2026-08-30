@@ -12,6 +12,7 @@ import {
   ListTree,
   MessageSquareText,
   Pencil,
+  Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { AgentSessionHeader } from '@/lib/bindings'
@@ -62,6 +63,7 @@ export function SessionRow({
   onSelect,
   onRename,
   onArchive,
+  onDelete,
   style,
 }: {
   header: AgentSessionHeader
@@ -69,6 +71,8 @@ export function SessionRow({
   onSelect: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => void
   onArchive: (sessionId: string, archived: boolean) => void
+  /** Asks to delete this chat. The confirm lives with the caller. */
+  onDelete: (sessionId: string, title: string) => void
   /** Positioning style from the virtualizer; applied directly to the row element. */
   style?: React.CSSProperties
 }) {
@@ -200,6 +204,18 @@ export function SessionRow({
             Archive
           </ContextMenuItem>
         )}
+        <ContextMenuSeparator />
+        {/* Separated from Archive on purpose: archive is for a chat you are
+            done with, delete is for one that should not exist. Putting them
+            adjacent without a divider is how someone loses work reaching for
+            the other one. */}
+        <ContextMenuItem
+          variant="destructive"
+          onSelect={() => onDelete(header.sessionId, title)}
+        >
+          <Trash2 />
+          Delete
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   )

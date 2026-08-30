@@ -3164,6 +3164,26 @@ async agentSessionArchive(sessionId: string, archived: boolean) : Promise<Result
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Deletes one chat and everything written for it.
+ * 
+ * Permanent, and deliberately separate from Archive: archive is for a chat
+ * you are done with, delete is for one that should not exist. The two are
+ * not the same request and collapsing them would mean either a hoarded list
+ * nobody prunes or an archive button that quietly destroys work.
+ * 
+ * Refuses while an agent is running rather than stopping it: a delete that
+ * silently killed a working agent would lose whatever it was part-way
+ * through, and the person asking may not have realised it was still going.
+ */
+async agentSessionDelete(sessionId: string) : Promise<Result<DeleteSessionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_delete", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async agentSessionMarkRead(sessionId: string) : Promise<Result<UpdateSessionOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_mark_read", { sessionId }) };
@@ -4629,6 +4649,16 @@ email?: string | null;
  * None means the provider's public host.
  */
 base_url?: string | null }
+/**
+ * What happened when a chat was asked to be deleted.
+ */
+export type DeleteSessionOutcome = { kind: "deleted" } | 
+/**
+ * An agent is still working in this chat. Deleting the file underneath a
+ * running process would leave it writing into a session nobody can see,
+ * so the answer is to stop it first rather than to delete anyway.
+ */
+{ kind: "stillRunning" } | { kind: "failed"; detail: string }
 /**
  * What kind of spec edit a delta describes.
  */

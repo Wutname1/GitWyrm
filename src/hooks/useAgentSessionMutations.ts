@@ -5,7 +5,8 @@ import { keys, unwrap } from '@/lib/queryKeys'
 import { log } from '@/lib/log'
 
 /**
- * Sidebar-scoped session mutations (rename, archive) for tasks 3.5's actions.
+ * Sidebar-scoped session mutations (rename, archive, delete) for task 3.5's
+ * actions.
  *
  * Separate from a hypothetical `useAgentSessions` mutation set because the
  * sidebar is the only cluster-C surface that performs these -- keeping them
@@ -67,7 +68,32 @@ export function useAgentSessionMutations() {
     onError: (e) => log.error(`agent session mark-read threw: ${String(e)}`),
   })
 
-  return { rename, archive, markRead }
+  const remove = useMutation({
+    mutationFn: async (sessionId: string) =>
+      unwrap(await commands.agentSessionDelete(sessionId)),
+    onSuccess: (outcome, sessionId) => {
+      invalidate(sessionId)
+      if (outcome.kind === 'stillRunning') {
+        // Not an error: the chat is fine, it is just busy. Deleting the file
+        // underneath a working agent would lose whatever it was part-way
+        // through, and the person asking may not have known it was running.
+        toast.error('That chat is still working.', {
+          description: 'Stop it first, then delete it.',
+        })
+        return
+      }
+      if (outcome.kind === 'failed') {
+        log.warn(`agent session delete failed for ${sessionId}: ${outcome.detail}`)
+        toast.error('Could not delete that chat.', { description: outcome.detail })
+      }
+    },
+    onError: (e, sessionId) => {
+      log.error(`agent session delete threw for ${sessionId}: ${String(e)}`)
+      toast.error('Could not delete that chat.')
+    },
+  })
+
+  return { rename, archive, markRead, remove }
 }
 
 function renameFailureReason(kind: string): string {

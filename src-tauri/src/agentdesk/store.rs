@@ -118,6 +118,12 @@ pub enum WriteError {
     Flush { detail: String },
     #[error("could not rename temp file into place at {path}: {detail}", path = path.display())]
     Rename { path: PathBuf, detail: String },
+    /// A delete that failed for a reason other than the file being absent.
+    /// Its own variant because every other one here describes a step of
+    /// writing, and reporting a failed delete as a failed temp-file write
+    /// would send whoever reads the log looking in the wrong place.
+    #[error("could not delete {path}: {detail}", path = path.display())]
+    Delete { path: PathBuf, detail: String },
 }
 
 /// Write `value` to `path` through a sibling temp file, an explicit flush,
@@ -156,6 +162,33 @@ pub(crate) fn write_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), W
 pub fn write_session(root: &SessionStoreRoot, session: &AgentSession) -> Result<(), WriteError> {
     let path = root.session_path(&session.header.session_id);
     write_atomic(&path, session)
+}
+
+/// Deletes one session's file, and its result sidecar if it has one.
+///
+/// The index is not rewritten here: it is a projection that
+/// [`list_sessions_reconciled`] rebuilds from what is on disk, so removing the
+/// file is what actually removes the session. A stale row would be dropped on
+/// the next read anyway, and rewriting it here would mean two places that
+/// could disagree about what exists.
+///
+/// A file that is already gone is a success. Delete is the one operation where
+/// "it was not there" and "it is not there now" are the same outcome to the
+/// person who asked, and reporting a failure would leave them looking for
+/// something to fix that is already fixed.
+pub fn delete_session(root: &SessionStoreRoot, session_id: &str) -> Result<(), WriteError> {
+    let path = root.session_path(session_id);
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(WriteError::Delete {
+                path,
+                detail: e.to_string(),
+            })
+        }
+    }
+    Ok(())
 }
 
 /// Read and migrate one session file by ID. Never deletes or moves the file,
@@ -586,6 +619,54 @@ fn leave_interrupted_temp_file(dir: &Path, contents: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn deleting_a_session_removes_its_file() {
+        let (_dir, root) = temp_root();
+        let session = AgentSession::new(header("s-del", "Doomed"));
+        write_session(&root, &session).expect("write");
+        assert!(read_session(&root, "s-del").is_ok());
+
+        delete_session(&root, "s-del").expect("delete");
+        assert!(matches!(
+            read_session(&root, "s-del"),
+            Err(SessionLoadError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn deleting_a_session_that_is_already_gone_is_a_success() {
+        // "It was not there" and "it is not there now" are the same outcome to
+        // whoever asked. Reporting a failure would send them looking for
+        // something to fix that is already fixed.
+        let (_dir, root) = temp_root();
+        delete_session(&root, "never-existed").expect("a missing file is not a failure");
+    }
+
+    #[test]
+    fn deleting_one_session_leaves_the_others_alone() {
+        let (_dir, root) = temp_root();
+        for id in ["keep-1", "doomed", "keep-2"] {
+            write_session(&root, &AgentSession::new(header(id, id))).expect("write");
+        }
+        delete_session(&root, "doomed").expect("delete");
+        assert!(read_session(&root, "keep-1").is_ok());
+        assert!(read_session(&root, "keep-2").is_ok());
+    }
+
+    #[test]
+    fn a_deleted_session_is_gone_from_a_rebuilt_index() {
+        // The index is a projection, so this is what actually makes the row
+        // disappear from the list.
+        let (_dir, root) = temp_root();
+        for id in ["a", "b"] {
+            write_session(&root, &AgentSession::new(header(id, id))).expect("write");
+        }
+        delete_session(&root, "a").expect("delete");
+        let (headers, _) = rebuild_index_from_sessions(&root);
+        let ids: Vec<&str> = headers.iter().map(|h| h.session_id.as_str()).collect();
+        assert_eq!(ids, vec!["b"]);
+    }
     use super::*;
     use crate::agentdesk::model::{
         AgentSession, AgentSessionHeader, SessionIntent, SessionSource, SessionState,

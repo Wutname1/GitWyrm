@@ -26,12 +26,14 @@ export function SessionGroups({
   onSelectSession,
   onRename,
   onArchive,
+  onDelete,
 }: {
   headers: AgentSessionHeader[]
   selectedId: string | null
   onSelectSession: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => void
   onArchive: (sessionId: string, archived: boolean) => void
+  onDelete: (sessionId: string, title: string) => void
 }) {
   const [mode, setMode] = useState<SidebarGroupMode>('recent')
   // Separate collapse sets per mode: collapsing "Today" in Recent should not
@@ -85,6 +87,7 @@ export function SessionGroups({
         onSelectSession={onSelectSession}
         onRename={onRename}
         onArchive={onArchive}
+        onDelete={onDelete}
         onToggleGroup={toggleGroup}
         emptyMessage={
           headers.length === 0

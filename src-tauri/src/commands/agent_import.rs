@@ -469,7 +469,12 @@ fn import_session_at(
                 | Err(WriteError::CreateTemp { detail, .. })
                 | Err(WriteError::WriteTemp { detail })
                 | Err(WriteError::Flush { detail })
-                | Err(WriteError::Rename { detail, .. }) => {
+                | Err(WriteError::Rename { detail, .. })
+                // Import never deletes, so this arm is unreachable. Listed
+                // rather than wildcarded so a future variant still has to be
+                // decided on here instead of silently becoming a write
+                // failure.
+                | Err(WriteError::Delete { detail, .. }) => {
                     ImportSessionOutcome::WriteFailed { detail }
                 }
             }
