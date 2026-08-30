@@ -160,6 +160,16 @@ pub struct AgentSpec {
     /// choosing a package manager for them and writing outside anywhere
     /// GitWyrm owns. Showing it lets them decide.
     pub install_hint: &'static str,
+    /// Set when the thing GitWyrm launches is an ADAPTER rather than the tool
+    /// itself, naming the tool it drives.
+    ///
+    /// This exists because the alternative is a lie. Claude Code and Codex
+    /// both speak their own protocols and neither offers ACP, so GitWyrm
+    /// drives a small bridge package instead. Someone with Claude working
+    /// perfectly in their terminal sees "not installed" and reasonably
+    /// concludes GitWyrm is broken. The row has to say that the tool is fine
+    /// and a bridge is what is missing.
+    pub adapter_for: Option<&'static str>,
 }
 
 impl AgentSpec {
@@ -297,6 +307,7 @@ pub const AGENTS: &[AgentSpec] = &[
         },
         homepage_url: "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
         install_hint: "npm install -g @github/copilot",
+        adapter_for: None,
     },
     // Gemini CLI. `--acp` is the current flag; `--experimental-acp` still
     // works but is deprecated in favour of it.
@@ -318,6 +329,7 @@ pub const AGENTS: &[AgentSpec] = &[
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://github.com/google-gemini/gemini-cli#quickstart",
         install_hint: "npm install -g @google/gemini-cli",
+        adapter_for: None,
     },
     // Claude Code, reached through an adapter rather than directly: Claude
     // Code itself has no ACP mode. The adapter is npm
@@ -366,6 +378,7 @@ pub const AGENTS: &[AgentSpec] = &[
         // Code alone still ends up with nothing GitWyrm can drive.
         homepage_url: "https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp",
         install_hint: "npm install -g @agentclientprotocol/claude-agent-acp",
+        adapter_for: Some("Claude Code"),
     },
     // opencode. ACP is a SUBCOMMAND (`opencode acp`), not a flag.
     //
@@ -385,6 +398,34 @@ pub const AGENTS: &[AgentSpec] = &[
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://opencode.ai/docs/",
         install_hint: "npm install -g opencode-ai",
+        adapter_for: None,
+    },
+    // Codex, through an adapter. `codex` itself speaks its own app-server
+    // JSON-RPC rather than ACP -- confirmed against 0.151.0, whose `--help`
+    // offers `app-server` and `mcp-server` and no ACP mode at all -- so the
+    // binary GitWyrm drives is the adapter, not Codex.
+    //
+    // Denial: the adapter exposes no launch-time tool restriction that has
+    // been verified, so it is `None` and Codex is refused read-only work for
+    // the same reason opencode is. Better a refusal that names the limit than
+    // a read-only promise nothing enforces.
+    AgentSpec {
+        id: "codex",
+        display_name: "Codex",
+        windows_names: &[
+            "codex-acp.exe",
+            "codex-acp.cmd",
+            "codex-acp.bat",
+            "codex-acp",
+        ],
+        unix_names: &["codex-acp"],
+        acp_args: &[],
+        version_args: &["--version"],
+        denial: Denial::None,
+        tool_names: NO_TOOL_NAMES,
+        homepage_url: "https://github.com/openai/codex",
+        install_hint: "npm install -g @zed-industries/codex-acp",
+        adapter_for: Some("Codex"),
     },
 ];
 
@@ -426,6 +467,17 @@ pub fn known_locations() -> Vec<PathBuf> {
                     .join("copilot"),
             );
             out.push(home.join("AppData").join("Roaming").join("npm"));
+            // Codex's own installer writes here and does not touch PATH, so
+            // a machine with Codex working in a terminal still looks empty to
+            // a plain PATH probe.
+            out.push(
+                home.join("AppData")
+                    .join("Local")
+                    .join("Programs")
+                    .join("OpenAI")
+                    .join("Codex")
+                    .join("bin"),
+            );
         }
     }
     if !cfg!(windows) {

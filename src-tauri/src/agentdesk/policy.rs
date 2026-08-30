@@ -173,6 +173,7 @@ pub enum ExecutionProvider {
     Gemini,
     Claude,
     OpenCode,
+    Codex,
 }
 
 impl ExecutionProvider {
@@ -190,6 +191,7 @@ impl ExecutionProvider {
             ExecutionProvider::Gemini,
             ExecutionProvider::Claude,
             ExecutionProvider::OpenCode,
+            ExecutionProvider::Codex,
         ] {
             if name.eq_ignore_ascii_case(candidate.agent_id()) {
                 return Some(candidate);
@@ -205,6 +207,7 @@ impl ExecutionProvider {
             ExecutionProvider::Gemini => "gemini",
             ExecutionProvider::Claude => "claude",
             ExecutionProvider::OpenCode => "opencode",
+            ExecutionProvider::Codex => "codex",
         }
     }
 }
@@ -872,6 +875,7 @@ mod tests {
             ExecutionProvider::Gemini,
             ExecutionProvider::Claude,
             ExecutionProvider::OpenCode,
+            ExecutionProvider::Codex,
         ] {
             let id = provider.agent_id();
             assert!(

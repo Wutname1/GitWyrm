@@ -3799,7 +3799,14 @@ installHint: string;
  * binary name and a product name are routinely three different strings.
  * When detection is wrong this is the line that explains why.
  */
-binaryName: string }
+binaryName: string; 
+/**
+ * Set when GitWyrm launches a bridge rather than the tool itself, naming
+ * the tool. A row saying "not installed" for Claude when Claude is
+ * working fine in a terminal reads as a bug; naming the bridge is what
+ * makes it a two minute fix instead.
+ */
+adapterFor: string | null }
 /**
  * What the picker needs to render itself for one chat.
  */

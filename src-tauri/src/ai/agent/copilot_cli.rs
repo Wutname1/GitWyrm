@@ -401,6 +401,7 @@ mod tests {
             },
             homepage_url: "https://example.invalid",
             install_hint: "",
+            adapter_for: None,
 
         };
 

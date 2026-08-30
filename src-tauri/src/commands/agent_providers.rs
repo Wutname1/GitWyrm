@@ -49,6 +49,11 @@ pub struct AgentProvider {
     /// binary name and a product name are routinely three different strings.
     /// When detection is wrong this is the line that explains why.
     pub binary_name: String,
+    /// Set when GitWyrm launches a bridge rather than the tool itself, naming
+    /// the tool. A row saying "not installed" for Claude when Claude is
+    /// working fine in a terminal reads as a bug; naming the bridge is what
+    /// makes it a two minute fix instead.
+    pub adapter_for: Option<String>,
 }
 
 /// What the picker needs to render itself for one chat.
@@ -173,6 +178,7 @@ fn row(spec: &'static registry::AgentSpec) -> AgentProvider {
             .copied()
             .unwrap_or(spec.id)
             .to_string(),
+        adapter_for: spec.adapter_for.map(str::to_string),
     }
 }
 
