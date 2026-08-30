@@ -243,3 +243,52 @@ pub async fn generate_commit_message(
 
     Ok(split_message(&text))
 }
+
+/// Ask the configured model to resolve one conflicted file.
+///
+/// Returns the proposed file text and writes nothing: the caller loads it into
+/// the editor for review, and the existing `resolve_conflict` command stages it
+/// only once the user accepts. Keeping the model out of the write path is
+/// deliberate -- a resolution is a claim about intent that only the author can
+/// confirm, and a wrong one fails silently.
+#[tauri::command]
+#[specta::specta]
+pub async fn ai_resolve_conflict(
+    app: tauri::AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    path: String,
+    provider: String,
+    model: String,
+) -> Result<String, AppError> {
+    let open = manager.get(&repo_id)?;
+    let workdir = open.path.clone();
+
+    let for_read = path.clone();
+    let content = tauri::async_runtime::spawn_blocking(move || {
+        let repo = open.repo.lock().unwrap();
+        crate::git::merge_ops::conflict_content(&repo, &workdir, &for_read)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))??;
+
+    if content.binary {
+        return Err(AppError::Other(
+            "This file isn't text, so it can't be resolved automatically.".into(),
+        ));
+    }
+
+    // A file only one side still has is a keep-or-delete decision, not a merge
+    // of two texts; there is nothing for a model to reconcile.
+    if content.ours_deleted || content.theirs_deleted {
+        return Err(AppError::Other(
+            "One side deleted this file. Choose whether to keep or delete it.".into(),
+        ));
+    }
+
+    if content.conflict_text.trim().is_empty() {
+        return Err(AppError::Other("Nothing to resolve in this file.".into()));
+    }
+
+    crate::ai::conflict::resolve(&app, &provider, &model, &path, &content.conflict_text).await
+}

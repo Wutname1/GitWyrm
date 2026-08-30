@@ -609,6 +609,16 @@ pub struct ConflictContent {
     pub theirs: String,
     /// Working-tree text with conflict markers, for manual editing.
     pub merged: String,
+    /// Marker text regenerated from the index stages in diff3 style.
+    ///
+    /// Not the same as `merged`, which is whatever is on disk. Git's default
+    /// marker style merges adjacent edits into one block that also swallows the
+    /// untouched lines between them; diff3 uses the common ancestor to keep
+    /// them separate, which is what makes per-hunk resolution worth offering.
+    /// Generated here rather than read from the file so it does not depend on
+    /// the user's `merge.conflictStyle`, nor on the file still being pristine.
+    /// Empty when the file is binary or the three-way merge could not be run.
+    pub conflict_text: String,
     /// Any side is binary/undecodable; only ours/theirs whole-file choice is safe.
     pub binary: bool,
     /// Our side deleted the file; choosing ours removes it.

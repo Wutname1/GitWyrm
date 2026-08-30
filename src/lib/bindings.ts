@@ -2484,6 +2484,23 @@ async generateCommitMessage(repoId: string, provider: string, model: string) : P
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Ask the configured model to resolve one conflicted file.
+ * 
+ * Returns the proposed file text and writes nothing: the caller loads it into
+ * the editor for review, and the existing `resolve_conflict` command stages it
+ * only once the user accepts. Keeping the model out of the write path is
+ * deliberate -- a resolution is a claim about intent that only the author can
+ * confirm, and a wrong one fails silently.
+ */
+async aiResolveConflict(repoId: string, path: string, provider: string, model: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_resolve_conflict", { repoId, path, provider, model }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async generateCommits(repoId: string, provider: string, model: string, commitCount: number, specialInstructions: string) : Promise<Result<AiCreatedCommit[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("generate_commits", { repoId, provider, model, commitCount, specialInstructions }) };
@@ -3537,6 +3554,18 @@ theirs: string;
  */
 merged: string; 
 /**
+ * Marker text regenerated from the index stages in diff3 style.
+ * 
+ * Not the same as `merged`, which is whatever is on disk. Git's default
+ * marker style merges adjacent edits into one block that also swallows the
+ * untouched lines between them; diff3 uses the common ancestor to keep
+ * them separate, which is what makes per-hunk resolution worth offering.
+ * Generated here rather than read from the file so it does not depend on
+ * the user's `merge.conflictStyle`, nor on the file still being pristine.
+ * Empty when the file is binary or the three-way merge could not be run.
+ */
+conflict_text: string; 
+/**
  * Any side is binary/undecodable; only ours/theirs whole-file choice is safe.
  */
 binary: boolean; 
@@ -3548,6 +3577,18 @@ ours_deleted: boolean;
  * Their side deleted the file; choosing theirs removes it.
  */
 theirs_deleted: boolean }
+/**
+ * How the conflict view presents a conflicted file.
+ */
+export type ConflictViewMode = 
+/**
+ * Only the contested regions, resolved one at a time.
+ */
+"hunks" | 
+/**
+ * The whole file, for conflicts that need the surrounding context.
+ */
+"file"
 /**
  * The credential a provider needs, as entered by the user.
  */
@@ -4711,6 +4752,10 @@ conflict_side_split?: number;
  * Percent of the conflict view's height given to OURS/THEIRS (20-80).
  */
 conflict_result_split?: number; 
+/**
+ * Whether the conflict view shows hunks or the whole file.
+ */
+conflict_view_mode?: ConflictViewMode; 
 /**
  * Whether change size appears below the message or in its own column.
  */

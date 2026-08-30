@@ -107,7 +107,12 @@ fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, App
     // Normal merge: write the merged result into the working tree/index.
     let mut opts = MergeOptions::new();
     let mut checkout = CheckoutBuilder::new();
-    checkout.allow_conflicts(true).conflict_style_merge(true);
+    // diff3 rather than the default style: it keeps two independent edits as two
+    // separate conflicts instead of one block spanning the untouched lines
+    // between them, which is what the per-hunk resolver needs. Writing the same
+    // style to disk that `conflict_content` regenerates also keeps the file the
+    // user might open in another editor consistent with what we show.
+    checkout.allow_conflicts(true).conflict_style_diff3(true);
     repo.merge(&[&annotated], Some(&mut opts), Some(&mut checkout))?;
 
     let conflicts = refs::conflicted_paths(repo)?;

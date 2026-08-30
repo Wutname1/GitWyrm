@@ -108,6 +108,20 @@ fn default_change_size_display() -> ChangeSizeDisplay {
     ChangeSizeDisplay::Column
 }
 
+/// How the conflict view presents a conflicted file.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictViewMode {
+    /// Only the contested regions, resolved one at a time.
+    Hunks,
+    /// The whole file, for conflicts that need the surrounding context.
+    File,
+}
+
+fn default_conflict_view_mode() -> ConflictViewMode {
+    ConflictViewMode::Hunks
+}
+
 fn default_show_change_indicator() -> bool {
     true
 }
@@ -293,6 +307,9 @@ pub struct Settings {
     /// Percent of the conflict view's height given to OURS/THEIRS (20-80).
     #[serde(default = "default_conflict_result_split")]
     pub conflict_result_split: f64,
+    /// Whether the conflict view shows hunks or the whole file.
+    #[serde(default = "default_conflict_view_mode")]
+    pub conflict_view_mode: ConflictViewMode,
     /// Whether change size appears below the message or in its own column.
     #[serde(default = "default_change_size_display")]
     pub change_size_display: ChangeSizeDisplay,
@@ -752,6 +769,7 @@ impl Default for Settings {
             commit_description_lines: default_commit_description_lines(),
             conflict_side_split: default_conflict_side_split(),
             conflict_result_split: default_conflict_result_split(),
+            conflict_view_mode: default_conflict_view_mode(),
             change_size_display: default_change_size_display(),
             show_change_indicator: default_show_change_indicator(),
             show_change_line_counts: false,

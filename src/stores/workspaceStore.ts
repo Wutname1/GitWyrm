@@ -58,6 +58,8 @@ export const DEFAULT_EDITOR: EditorKind = "vs_code";
 export type ChangeSizeDisplay = "row" | "column";
 /** How the changed-file lists are arranged: grouped by folder, or one flat row per file. */
 export type ChangesViewMode = "tree" | "list";
+/** How the conflict view presents a conflicted file. Mirrors the Rust enum. */
+export type ConflictViewMode = "hunks" | "file";
 /** Which column the repository picker's table is ordered by. */
 export type RepoPickerSortKey = "name" | "activity" | "branch";
 /** A column plus its direction, e.g. `activity` descending. */
@@ -897,6 +899,8 @@ interface WorkspaceState {
   expandedChangeFolders: Record<string, string[]>;
   /** Whether the changed-file lists group by folder or show one flat row per file (persisted). */
   changesViewMode: ChangesViewMode;
+  /** Whether the conflict view shows one hunk at a time or the whole file (persisted). */
+  conflictViewMode: ConflictViewMode;
   /** True once settings.json has been read on launch. */
   hydrated: boolean;
 
@@ -1045,6 +1049,7 @@ interface WorkspaceState {
   setExpandedChangeFolders: (key: string, folders: string[]) => void;
   /** Switch the changed-file lists between the folder tree and the flat list. */
   setChangesViewMode: (mode: ChangesViewMode) => void;
+  setConflictViewMode: (mode: ConflictViewMode) => void;
   /**
    * Choose how tabs are arranged. Manual restores the user's dragged order.
    * Picking the sort that is already active flips its direction instead, so a
@@ -1236,6 +1241,7 @@ function toSettings(s: WorkspaceState): Settings {
     repo_scan_at: s.repoScanAt == null ? null : new Date(s.repoScanAt).toISOString(),
     expanded_change_folders: s.expandedChangeFolders,
     changes_view_mode: s.changesViewMode,
+    conflict_view_mode: s.conflictViewMode,
   };
 }
 
@@ -1572,6 +1578,7 @@ export const SETTINGS_DEFAULTS = {
   conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
   verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
   changesViewMode: "tree",
+  conflictViewMode: "hunks",
   showTabPrCount: true,
   showTabIssueCount: true,
 } satisfies Partial<WorkspaceState>;
@@ -1729,6 +1736,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   repoScanAt: null,
   expandedChangeFolders: {},
   changesViewMode: "tree",
+  conflictViewMode: "hunks",
   hydrated: false,
 
   addRepo: (repo) => {
@@ -2689,6 +2697,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ changesViewMode: mode });
     schedulePersist();
   },
+  setConflictViewMode: (mode) => {
+    set({ conflictViewMode: mode });
+    schedulePersist();
+  },
   setTabSort: (sort) => {
     // Re-picking the active sort flips it; switching sorts starts forward, so
     // Name always opens as A-Z rather than inheriting the last rule's direction.
@@ -3187,6 +3199,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ),
         changesViewMode:
           settings.changes_view_mode === "list" ? "list" : "tree",
+        conflictViewMode:
+          settings.conflict_view_mode === "file" ? "file" : "hunks",
         hydrated: true,
       });
     }

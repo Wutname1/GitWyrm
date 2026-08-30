@@ -1,12 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, FileWarning } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
+import { Check, ChevronDown, ChevronUp, FileWarning, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
 import { ResizeHandle } from '@/components/ui/ResizeHandle'
+import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { ConflictEditor } from '@/components/domain/conflict/ConflictEditor'
+import { HunkCard } from '@/components/domain/conflict/HunkCard'
+import { diffLines } from '@/lib/textDiff'
 import { useConflict, useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
+import { useAiMutations } from '@/hooks/useAi'
+import { useAiSelection } from '@/hooks/useAiSelection'
 import { useUiStore } from '@/stores/uiStore'
+import {
+  conflictsOf,
+  detectEol,
+  hasMarkers,
+  parseConflict,
+  renderSections,
+  resolvedCount,
+  type Choice,
+  type Choices,
+} from '@/lib/conflictHunks'
 import {
   DEFAULT_CONFLICT_RESULT_SPLIT,
   DEFAULT_CONFLICT_SIDE_SPLIT,
@@ -18,92 +35,38 @@ import {
   useWorkspaceStore,
 } from '@/stores/workspaceStore'
 
-/** Shared type ramp so gutter digits and code sit on the same baseline. */
-const CODE_LINE = 'font-mono text-2xs leading-[1.7]'
-
-/** Read-only side panel showing one version's text, with line numbers. */
-function SidePanel({
-  title,
-  tone,
-  text,
-  deleted,
-}: {
-  title: string
-  tone: 'ours' | 'theirs'
-  text: string
-  deleted: boolean
-}) {
-  const lines = useMemo(() => text.split('\n'), [text])
-
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div
-        className={cn(
-          'flex-none border-b border-border px-3 py-1.5 text-2xs font-bold tracking-[.05em]',
-          tone === 'ours' ? 'text-added' : 'text-modified'
-        )}
-      >
-        {title}
-      </div>
-      {deleted ? (
-        <div className={cn('min-h-0 flex-1 overflow-auto px-3 py-2 italic text-removed', CODE_LINE)}>
-          This side deleted the file. Choosing it removes the file.
-        </div>
-      ) : text === '' ? (
-        <div
-          className={cn(
-            'min-h-0 flex-1 overflow-auto px-3 py-2 italic text-muted-foreground',
-            CODE_LINE
-          )}
-        >
-          (empty)
-        </div>
-      ) : (
-        // One scroll container holding a sticky gutter, so the numbers stay put
-        // horizontally while long lines scroll under them.
-        <div className="min-h-0 flex-1 overflow-auto py-2">
-          <div className="flex min-w-max">
-            <div
-              aria-hidden
-              className={cn(
-                'sticky left-0 z-10 flex-none select-none bg-background px-2 text-right text-muted-foreground',
-                CODE_LINE
-              )}
-            >
-              {lines.map((_, i) => (
-                <div key={i}>{i + 1}</div>
-              ))}
-            </div>
-            <div className={cn('flex-1 whitespace-pre pr-3 text-sub', CODE_LINE)}>
-              {lines.map((line, i) => (
-                <div key={i}>{line === '' ? ' ' : line}</div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 /**
- * Line-number gutter for the editable RESULT pane. A textarea can't render its
- * own gutter, so this mirrors it in a sibling column kept in vertical sync by
- * the textarea's scroll handler.
+ * Resolving a conflicted file.
+ *
+ * Two ways to look at the same file. **Hunks** shows only the regions the two
+ * branches disagree about, each with the buttons that settle it -- which is
+ * what almost every conflict actually needs, and what makes a one-line clash
+ * inside a thousand-line file a one-click job. **Whole file** shows both
+ * versions and an editable result, for the conflicts where the surrounding code
+ * is the thing you have to read to decide.
+ *
+ * Nothing is written until "Mark resolved". Choices accumulate in memory, so
+ * changing your mind about hunk 2 after settling hunk 5 costs nothing, and a
+ * half-finished file is never left on disk.
  */
-function ResultGutter({ count, scrollTop }: { count: number; scrollTop: number }) {
-  return (
-    <div
-      aria-hidden
-      className="relative flex-none select-none overflow-hidden border-r border-border bg-panel/40 px-2 py-2 text-right"
-    >
-      <div className={cn('text-muted-foreground', CODE_LINE)} style={{ transform: `translateY(${-scrollTop}px)` }}>
-        {Array.from({ length: count }, (_, i) => (
-          <div key={i}>{i + 1}</div>
-        ))}
-      </div>
-    </div>
-  )
+
+/** The shortest tail of a path that tells two files apart. */
+function disambiguate(paths: string[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const path of paths) {
+    const parts = path.split('/')
+    let label = parts[parts.length - 1]
+    // Grow the label leftwards until no other conflicted file ends the same
+    // way. Two files called `mod.rs` are not a rare case in a Rust repo, and a
+    // list of identical names is a list of nothing.
+    for (let take = 2; take <= parts.length; take++) {
+      const others = paths.filter((p) => p !== path)
+      if (!others.some((p) => p.endsWith(`/${label}`) || p === label)) break
+      label = parts.slice(-take).join('/')
+    }
+    out.set(path, label)
+  }
+  return out
 }
 
 export function ConflictView() {
@@ -111,13 +74,18 @@ export function ConflictView() {
   const path = useUiStore((s) => s.conflictPath)
   const openConflict = useUiStore((s) => s.openConflict)
   const showGraph = useUiStore((s) => s.showGraph)
+  const showSettings = useUiStore((s) => s.showSettings)
 
   const merge = useMergeState(repo?.id ?? null)
   const conflict = useConflict(repo?.id ?? null, path)
   const m = useGitMutations(repo?.id ?? null)
+  const ai = useAiMutations()
+  const aiSelection = useAiSelection()
 
-  const conflicts = merge.data?.conflicts ?? []
-  const [draft, setDraft] = useState('')
+  const conflicts = useMemo(() => merge.data?.conflicts ?? [], [merge.data?.conflicts])
+
+  const viewMode = useWorkspaceStore((s) => s.conflictViewMode)
+  const setViewMode = useWorkspaceStore((s) => s.setConflictViewMode)
 
   const conflictSideSplit = useWorkspaceStore((s) => s.conflictSideSplit)
   const setConflictSideSplit = useWorkspaceStore((s) => s.setConflictSideSplit)
@@ -126,62 +94,254 @@ export function ConflictView() {
 
   const hSplitRef = useRef<HTMLDivElement>(null)
   const vSplitRef = useRef<HTMLDivElement>(null)
+  const hunkListRef = useRef<HTMLDivElement>(null)
 
-  /** Drag distance in pixels as a share of the width OURS and THEIRS split. */
-  const pixelsToSideSplit = (pixels: number) => {
-    const width = hSplitRef.current?.clientWidth ?? 0
-    return width > 0 ? (pixels / width) * 100 : 0
-  }
+  /** Hand-edited result text; the source of truth for what gets written. */
+  const [draft, setDraft] = useState('')
+  /** Per-hunk decisions in hunk mode, keyed by section id. */
+  const [choices, setChoices] = useState<Choices>({})
+  const [focusedHunk, setFocusedHunk] = useState(0)
+  const [showBase, setShowBase] = useState(false)
+  /** Per-line picking, off by default so a simple conflict stays a two-click job. */
+  const [picking, setPicking] = useState(false)
+  const [markerWarning, setMarkerWarning] = useState(false)
+  /** Set once the user edits by hand, so their edits win over hunk choices. */
+  const [handEdited, setHandEdited] = useState(false)
 
-  /** Drag distance in pixels as a share of the height the rows split. */
-  const pixelsToResultSplit = (pixels: number) => {
-    const height = vSplitRef.current?.clientHeight ?? 0
-    return height > 0 ? (pixels / height) * 100 : 0
-  }
+  const data = conflict.data
 
-  // The RESULT gutter can't scroll itself; it mirrors the textarea's offset.
-  const [resultScrollTop, setResultScrollTop] = useState(0)
-  const draftLineCount = useMemo(() => draft.split('\n').length, [draft])
+  /**
+   * Marker text to work from.
+   *
+   * `conflict_text` is regenerated by the backend in diff3 style, which keeps
+   * independent edits as separate hunks; `merged` is whatever is on disk and is
+   * only a fallback for files the backend could not merge as text.
+   */
+  const sourceText = data?.conflict_text || data?.merged || ''
 
-  // Load the marker text into the editable draft only when the shown file
-  // changes, so a background refetch never wipes in-progress hand edits.
+  const sections = useMemo(() => parseConflict(sourceText), [sourceText])
+  const hunks = useMemo(() => conflictsOf(sections), [sections])
+  const eol = useMemo(() => detectEol(sourceText), [sourceText])
+
+  const decided = resolvedCount(sections, choices)
+  const allDecided = hunks.length > 0 && decided === hunks.length
+
+  /**
+   * The lines that actually differ between the two sides, per side.
+   *
+   * Whole-file mode shows both versions in full, and most of a conflicted file
+   * is identical on both sides -- tinting every line would say "all of this is
+   * in dispute" and hide the handful of lines that are. `diffLines` walks the
+   * two texts and reports which lines were removed (ours) and added (theirs);
+   * everything it calls unchanged stays uncoloured.
+   */
+  const sideChanges = useMemo(() => {
+    const ours = new Set<number>()
+    const theirs = new Set<number>()
+    if (!data || data.binary || data.ours_deleted || data.theirs_deleted) {
+      return { ours, theirs }
+    }
+    // Line numbers are counted per side as the diff is walked, because a diff
+    // entry's position in the list is not its line number in either file.
+    let ourLine = 0
+    let theirLine = 0
+    for (const line of diffLines(data.ours, data.theirs)) {
+      if (line.sign === ' ') {
+        ourLine++
+        theirLine++
+      } else if (line.sign === '-') {
+        ours.add(++ourLine)
+      } else {
+        theirs.add(++theirLine)
+      }
+    }
+    return { ours, theirs }
+  }, [data])
+
+  /**
+   * The text that will be written.
+   *
+   * Hand edits win: once the user has typed into the result editor, rebuilding
+   * from hunk choices would silently throw their work away.
+   */
+  const resultText = useMemo(
+    () => (handEdited ? draft : renderSections(sections, choices, eol)),
+    [handEdited, draft, sections, choices, eol]
+  )
+
+  // Reset per-file state only when the file actually changes. A background
+  // refetch -- and `resolveConflict` invalidates `mergeState`, so there are
+  // several -- must never wipe decisions or hand edits in progress.
   const loadedPath = useRef<string | null>(null)
   useEffect(() => {
-    if (conflict.data && conflict.data.path !== loadedPath.current) {
-      loadedPath.current = conflict.data.path
-      setDraft(conflict.data.merged)
-    }
-  }, [conflict.data])
+    if (!data || data.path === loadedPath.current) return
+    loadedPath.current = data.path
+    setDraft(data.conflict_text || data.merged || '')
+    setChoices({})
+    setFocusedHunk(0)
+    setHandEdited(false)
+    setPicking(false)
+  }, [data])
 
-  // When no path is selected but conflicts exist, jump to the first one.
+  // When no file is selected but conflicts exist, open the first one.
   useEffect(() => {
     if (!path && conflicts.length > 0) openConflict(conflicts[0])
   }, [path, conflicts, openConflict])
 
-  const resolveWith = (resolution: Parameters<typeof m.resolveConflict.mutate>[0]['resolution']) => {
-    if (!path) return
-    m.resolveConflict.mutate(
-      { path, resolution },
+  /** Move to the file after this one, wrapping; back to the graph when done. */
+  const advance = useCallback(
+    (resolvedPath: string) => {
+      const remaining = conflicts.filter((c) => c !== resolvedPath)
+      if (remaining.length === 0) {
+        showGraph()
+        return
+      }
+      const idx = conflicts.indexOf(resolvedPath)
+      const next = remaining.find((c) => conflicts.indexOf(c) > idx) ?? remaining[0]
+      openConflict(next)
+    },
+    [conflicts, openConflict, showGraph]
+  )
+
+  const resolveWith = useCallback(
+    (resolution: Parameters<typeof m.resolveConflict.mutate>[0]['resolution']) => {
+      if (!path) return
+      m.resolveConflict.mutate(
+        { path, resolution },
+        { onSuccess: () => advance(path) }
+      )
+    },
+    [path, m.resolveConflict, advance]
+  )
+
+  /** Write the assembled result, refusing text that is still conflicted. */
+  const markResolved = useCallback(
+    (force = false) => {
+      if (!path) return
+      if (!force && hasMarkers(resultText)) {
+        setMarkerWarning(true)
+        return
+      }
+      resolveWith({ kind: 'manual', text: resultText })
+    },
+    [path, resultText, resolveWith]
+  )
+
+  const setChoice = useCallback(
+    (id: number, choice: Choice | undefined) => {
+      setChoices((prev) => ({ ...prev, [id]: choice }))
+      // A choice made after hand-editing means the user wants the hunk buttons
+      // to drive again; keeping `handEdited` would make the click do nothing.
+      setHandEdited(false)
+    },
+    []
+  )
+
+  /** Settle every remaining hunk one way. */
+  const takeAll = useCallback(
+    (choice: Choice) => {
+      setChoices(Object.fromEntries(hunks.map((h) => [h.id, choice])))
+      setHandEdited(false)
+    },
+    [hunks]
+  )
+
+  const scrollToHunk = useCallback((index: number) => {
+    const host = hunkListRef.current
+    if (!host) return
+    const card = host.querySelector(`[data-hunk="${index}"]`)
+    card?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [])
+
+  const stepHunk = useCallback(
+    (delta: number) => {
+      if (hunks.length === 0) return
+      const next = Math.min(Math.max(focusedHunk + delta, 0), hunks.length - 1)
+      setFocusedHunk(next)
+      scrollToHunk(hunks[next].id)
+    },
+    [focusedHunk, hunks, scrollToHunk]
+  )
+
+  const stepFile = useCallback(
+    (delta: number) => {
+      if (!path || conflicts.length < 2) return
+      const idx = conflicts.indexOf(path)
+      const next = (idx + delta + conflicts.length) % conflicts.length
+      openConflict(conflicts[next])
+    },
+    [path, conflicts, openConflict]
+  )
+
+  /**
+   * Keyboard navigation.
+   *
+   * Modifiers rather than bare keys because the result pane is a real editor:
+   * bare `n`/`j` would either be swallowed while typing or, worse, land in the
+   * file. Alt is free in both places.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey) return
+      const handled = () => {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+      switch (event.key) {
+        case 'ArrowDown':
+          handled()
+          stepHunk(1)
+          break
+        case 'ArrowUp':
+          handled()
+          stepHunk(-1)
+          break
+        case 'ArrowRight':
+          handled()
+          stepFile(1)
+          break
+        case 'ArrowLeft':
+          handled()
+          stepFile(-1)
+          break
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [stepHunk, stepFile])
+
+  const runAiResolve = useCallback(() => {
+    // Not configured is a reason to offer setup, not to sit disabled.
+    if (!aiSelection.ready) {
+      showSettings('ai')
+      return
+    }
+    if (!repo || !path || ai.resolveConflict.isPending) return
+    ai.resolveConflict.mutate(
       {
-        onSuccess: () => {
-          // Advance to the file after this one (wrapping), or back to the graph.
-          const remaining = conflicts.filter((c) => c !== path)
-          if (remaining.length === 0) {
-            showGraph()
-            return
-          }
-          const idx = conflicts.indexOf(path)
-          const next = remaining.find((c) => conflicts.indexOf(c) > idx) ?? remaining[0]
-          openConflict(next)
+        repoId: repo.id,
+        path,
+        provider: aiSelection.provider!,
+        model: aiSelection.model!,
+      },
+      {
+        onSuccess: (text) => {
+          // A draft to read, never an answer to trust: it lands in the editor
+          // and the user still has to accept it.
+          setDraft(text)
+          setHandEdited(true)
+          setViewMode('file')
+          toast.success('AI drafted a resolution - check it before marking resolved')
         },
+        onError: (e) => toast.error(String(e)),
       }
     )
-  }
+  }, [aiSelection, repo, path, ai.resolveConflict, showSettings, setViewMode])
 
   if (!repo) return null
 
-  // Merge state not known yet: render nothing rather than flashing the
-  // "no conflicts" screen for a repo that may be mid-operation.
+  // Merge state not known yet: render nothing rather than flashing the "no
+  // conflicts" screen for a repo that may be mid-operation.
   if (merge.isLoading) return null
 
   if (conflicts.length === 0) {
@@ -199,66 +359,126 @@ export function ConflictView() {
     )
   }
 
-  const data = conflict.data
   const activeResolution = m.resolveConflict.isPending
     ? m.resolveConflict.variables?.resolution.kind
     : undefined
+  const busy = m.resolveConflict.isPending
+  const aiPending = ai.resolveConflict.isPending
+  const labels = disambiguate(conflicts)
+  /**
+   * One side deleted the file, so there is no text to merge -- only a decision
+   * about whether the file lives. Editing here would silently resurrect a file
+   * someone deliberately removed, so the editor and "Mark resolved" both step
+   * aside and leave the two whole-file buttons.
+   */
+  const deletedSide = Boolean(data && (data.ours_deleted || data.theirs_deleted))
+  const canUseHunks = hunks.length > 0 && !data?.binary && !deletedSide
+  const mode = canUseHunks ? viewMode : 'file'
 
   return (
     <div className="flex min-h-0 flex-1">
-      {/* Conflict file list */}
-      <div className="w-56 flex-none overflow-y-auto border-r border-border bg-panel py-2">
-        <div className="px-3 pb-1.5 text-2xs font-bold tracking-[.05em] text-sub">
+      {/* Conflicted file list */}
+      <div className="flex w-56 flex-none flex-col border-r border-border bg-panel">
+        <div className="flex-none px-3 pb-1.5 pt-2 text-2xs font-bold tracking-[.05em] text-sub">
           CONFLICTED FILES
+          <span className="ml-1 font-normal text-muted-foreground">({conflicts.length} left)</span>
         </div>
-        {conflicts.map((c) => (
-          <button
-            key={c}
-            onClick={() => openConflict(c)}
-            className={cn(
-              'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-panel2',
-              c === path && 'bg-soft'
-            )}
-          >
-            <FileWarning size={13} className="flex-none text-removed" />
-            <span
+        <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+          {conflicts.map((c) => (
+            <button
+              key={c}
+              onClick={() => openConflict(c)}
+              title={c}
               className={cn(
-                'overflow-hidden text-ellipsis whitespace-nowrap text-xs',
-                c === path ? 'font-semibold text-foreground' : 'text-sub'
+                'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-panel2',
+                c === path && 'bg-soft'
               )}
             >
-              {c.split('/').pop()}
-            </span>
-          </button>
-        ))}
+              <FileWarning size={13} className="flex-none text-removed" />
+              <span
+                className={cn(
+                  'overflow-hidden text-ellipsis whitespace-nowrap text-xs',
+                  c === path ? 'font-semibold text-foreground' : 'text-sub'
+                )}
+              >
+                {labels.get(c)}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Resolution area */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex flex-none items-center gap-2 border-b border-border bg-panel px-3.5 py-2">
           <FileWarning size={14} className="flex-none text-removed" />
-          <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs text-foreground">
+          <span
+            className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs text-foreground"
+            title={path ?? undefined}
+          >
             {path}
           </span>
+
+          {/* Mode switch. A file with nothing to split has no choice to offer. */}
+          {canUseHunks && (
+            <div className="flex flex-none items-center rounded border border-border bg-panel2 p-px">
+              {(['hunks', 'file'] as const).map((key) => (
+                <Button
+                  key={key}
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setViewMode(key)}
+                  aria-pressed={mode === key}
+                  className={cn(
+                    'h-auto rounded-[3px] px-2 py-0.5 text-2xs font-semibold',
+                    mode === key
+                      ? 'bg-soft text-accent-text hover:bg-soft'
+                      : 'text-sub hover:bg-panel3 hover:text-foreground'
+                  )}
+                >
+                  {key === 'hunks' ? 'Conflicts only' : 'Whole file'}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-7 gap-1.5 text-2xs"
+            disabled={aiPending || busy || !data || data.binary || deletedSide}
+            onClick={runAiResolve}
+            tooltip={
+              aiPending
+                ? 'Asking the AI to resolve this file'
+                : !aiSelection.ready
+                  ? 'Set up an AI provider to resolve conflicts automatically'
+                  : 'Draft a resolution with AI, then review it'
+            }
+          >
+            {aiPending ? <PendingIndicator /> : <Sparkles size={12} />}
+            {aiPending ? 'Resolving…' : 'AI resolve'}
+          </Button>
+
           <Button
             size="sm"
             variant="secondary"
             className="h-7 gap-1.5 text-2xs text-added"
-            disabled={m.resolveConflict.isPending || !data}
+            disabled={busy || !data}
             onClick={() => resolveWith({ kind: 'ours' })}
           >
             {activeResolution === 'ours' && <PendingIndicator />}
             {activeResolution === 'ours'
-              ? 'Using ours…'
+              ? 'Using yours…'
               : data?.ours_deleted
-                ? 'Use ours (delete)'
-                : 'Use ours'}
+                ? 'Use yours (delete)'
+                : 'Use all yours'}
           </Button>
           <Button
             size="sm"
             variant="secondary"
             className="h-7 gap-1.5 text-2xs text-modified"
-            disabled={m.resolveConflict.isPending || !data}
+            disabled={busy || !data}
             onClick={() => resolveWith({ kind: 'theirs' })}
           >
             {activeResolution === 'theirs' && <PendingIndicator />}
@@ -266,13 +486,13 @@ export function ConflictView() {
               ? 'Using theirs…'
               : data?.theirs_deleted
                 ? 'Use theirs (delete)'
-                : 'Use theirs'}
+                : 'Use all theirs'}
           </Button>
           <Button
             size="sm"
             className="h-7 gap-1.5 text-2xs"
-            disabled={m.resolveConflict.isPending || !data || data.binary}
-            onClick={() => resolveWith({ kind: 'manual', text: draft })}
+            disabled={busy || !data || data.binary || deletedSide}
+            onClick={() => markResolved()}
           >
             {activeResolution === 'manual' ? <PendingIndicator /> : <Check size={13} />}
             {activeResolution === 'manual' ? 'Marking resolved…' : 'Mark resolved'}
@@ -287,54 +507,208 @@ export function ConflictView() {
         )}
         {data?.binary && (
           <div className="p-4 text-xs text-muted-foreground">
-            This file isn't text, so it can't be edited here — pick “Use ours” or “Use
-            theirs” to keep one whole version.
+            This file isn't text, so it can't be edited here — pick “Use all yours” or “Use
+            all theirs” to keep one whole version.
+          </div>
+        )}
+        {data && !data.binary && deletedSide && (
+          <div className="border-b border-border bg-panel2/60 px-4 py-2.5 text-xs text-muted-foreground">
+            {data.ours_deleted
+              ? 'You deleted this file and they changed it. '
+              : 'They deleted this file and you changed it. '}
+            Choose whether to keep the changed version or let the file go.
           </div>
         )}
 
-        {data && !data.binary && (
+        {data && !data.binary && mode === 'hunks' && (
+          <>
+            {/* Progress and bulk actions */}
+            <div className="flex flex-none items-center gap-2 border-b border-border bg-panel2 px-3 py-1.5">
+              <span className="text-2xs font-semibold text-sub">
+                {decided} of {hunks.length} resolved
+              </span>
+              <div className="ml-1 h-1 w-24 overflow-hidden rounded-full bg-panel3">
+                <div
+                  className="h-full rounded-full bg-added transition-[width]"
+                  style={{ width: `${hunks.length ? (decided / hunks.length) * 100 : 0}%` }}
+                />
+              </div>
+
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => stepHunk(-1)}
+                disabled={focusedHunk === 0}
+                className="ml-2 h-auto px-1 py-0.5 text-2xs text-sub hover:text-foreground"
+                tooltip="Previous conflict (Alt+Up)"
+              >
+                <ChevronUp size={12} />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => stepHunk(1)}
+                disabled={focusedHunk >= hunks.length - 1}
+                className="h-auto px-1 py-0.5 text-2xs text-sub hover:text-foreground"
+                tooltip="Next conflict (Alt+Down)"
+              >
+                <ChevronDown size={12} />
+              </Button>
+
+              <div className="ml-auto flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setPicking((v) => !v)}
+                  aria-pressed={picking}
+                  className={cn(
+                    'h-auto rounded-[3px] px-1.5 py-0.5 text-2xs font-semibold',
+                    picking ? 'bg-soft text-accent-text' : 'text-sub hover:text-foreground'
+                  )}
+                  tooltip="Pick individual lines from either side"
+                >
+                  Pick lines
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowBase((v) => !v)}
+                  aria-pressed={showBase}
+                  className={cn(
+                    'h-auto rounded-[3px] px-1.5 py-0.5 text-2xs font-semibold',
+                    showBase ? 'bg-soft text-accent-text' : 'text-sub hover:text-foreground'
+                  )}
+                  tooltip="Show what the line looked like before either change"
+                >
+                  Original
+                </Button>
+                <span className="mx-0.5 text-2xs text-muted-foreground">Take all:</span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => takeAll('ours')}
+                  className="h-auto rounded-[3px] px-1.5 py-0.5 text-2xs font-semibold text-added hover:bg-added/10"
+                >
+                  Yours
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => takeAll('theirs')}
+                  className="h-auto rounded-[3px] px-1.5 py-0.5 text-2xs font-semibold text-modified hover:bg-modified/10"
+                >
+                  Theirs
+                </Button>
+              </div>
+            </div>
+
+            <div ref={hunkListRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5">
+              {hunks.map((section, i) => (
+                <HunkCard
+                  key={section.id}
+                  section={section}
+                  index={i + 1}
+                  total={hunks.length}
+                  choice={choices[section.id]}
+                  onChoose={(choice) => setChoice(section.id, choice)}
+                  focused={i === focusedHunk}
+                  onFocus={() => setFocusedHunk(i)}
+                  showBase={showBase}
+                  picking={picking}
+                />
+              ))}
+
+              {allDecided && (
+                <div className="flex items-center gap-2 rounded border border-added/40 bg-added/[.06] px-3 py-2">
+                  <Check size={14} className="flex-none text-added" />
+                  <span className="text-xs text-foreground">
+                    Every conflict in this file is settled.
+                  </span>
+                  <Button
+                    size="sm"
+                    className="ml-auto h-7 gap-1.5 text-2xs"
+                    disabled={busy}
+                    onClick={() => markResolved()}
+                  >
+                    {activeResolution === 'manual' ? <PendingIndicator /> : <Check size={13} />}
+                    Mark resolved
+                  </Button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {data && !data.binary && mode === 'file' && (
           <div ref={vSplitRef} className="flex min-h-0 flex-1 flex-col">
-            {/* Ours / Theirs reference panes, split left-to-right */}
+            {/* Both versions, side by side */}
             <div
               ref={hSplitRef}
               className="flex min-h-0"
               style={{ flex: `${conflictResultSplit} 1 0%` }}
             >
               <div
-                className="relative flex min-h-0 min-w-0 border-r border-border"
+                className="relative flex min-h-0 min-w-0 flex-col border-r border-border"
                 style={{ flex: `${conflictSideSplit} 1 0%` }}
               >
-                <SidePanel
-                  title="OURS (current)"
-                  tone="ours"
-                  text={data.ours}
-                  deleted={data.ours_deleted}
-                />
+                <div className="flex-none border-b border-border px-3 py-1.5 text-2xs font-bold tracking-[.05em] text-added">
+                  YOURS (current)
+                </div>
+                {data.ours_deleted ? (
+                  <div className="flex-1 px-3 py-2 font-mono text-2xs italic text-removed">
+                    This side deleted the file. Choosing it removes the file.
+                  </div>
+                ) : (
+                  <div className="min-h-0 flex-1">
+                    <ConflictEditor
+                      text={data.ours}
+                      path={data.path}
+                      side="ours"
+                      changedLines={sideChanges.ours}
+                      ariaLabel="Your version of the file"
+                    />
+                  </div>
+                )}
                 <ResizeHandle
-                  ariaLabel="Resize ours and theirs panes"
+                  ariaLabel="Resize the two version panes"
                   value={conflictSideSplit}
                   min={MIN_CONFLICT_SIDE_SPLIT}
                   max={MAX_CONFLICT_SIDE_SPLIT}
                   defaultValue={DEFAULT_CONFLICT_SIDE_SPLIT}
                   onChange={setConflictSideSplit}
-                  toValue={pixelsToSideSplit}
+                  toValue={(pixels) => {
+                    const width = hSplitRef.current?.clientWidth ?? 0
+                    return width > 0 ? (pixels / width) * 100 : 0
+                  }}
                   className="-right-1"
                 />
               </div>
               <div
-                className="flex min-h-0 min-w-0"
+                className="flex min-h-0 min-w-0 flex-col"
                 style={{ flex: `${100 - conflictSideSplit} 1 0%` }}
               >
-                <SidePanel
-                  title="THEIRS (incoming)"
-                  tone="theirs"
-                  text={data.theirs}
-                  deleted={data.theirs_deleted}
-                />
+                <div className="flex-none border-b border-border px-3 py-1.5 text-2xs font-bold tracking-[.05em] text-modified">
+                  THEIRS (incoming)
+                </div>
+                {data.theirs_deleted ? (
+                  <div className="flex-1 px-3 py-2 font-mono text-2xs italic text-removed">
+                    This side deleted the file. Choosing it removes the file.
+                  </div>
+                ) : (
+                  <div className="min-h-0 flex-1">
+                    <ConflictEditor
+                      text={data.theirs}
+                      path={data.path}
+                      side="theirs"
+                      changedLines={sideChanges.theirs}
+                      ariaLabel="Their version of the file"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Editable merged result */}
+            {/* The editable result */}
             <div
               className="relative flex min-h-0 flex-col border-t border-border"
               style={{ flex: `${100 - conflictResultSplit} 1 0%` }}
@@ -348,30 +722,56 @@ export function ConflictView() {
                 max={100 - MIN_CONFLICT_RESULT_SPLIT}
                 defaultValue={100 - DEFAULT_CONFLICT_RESULT_SPLIT}
                 onChange={(v) => setConflictResultSplit(100 - v)}
-                toValue={pixelsToResultSplit}
+                toValue={(pixels) => {
+                  const height = vSplitRef.current?.clientHeight ?? 0
+                  return height > 0 ? (pixels / height) * 100 : 0
+                }}
                 className="-top-1"
               />
-              <div className="flex-none border-b border-border bg-panel2 px-3 py-1.5 text-2xs font-bold tracking-[.05em] text-sub">
-                RESULT — edit to resolve, then “Mark resolved”
+              <div className="flex flex-none items-center gap-2 border-b border-border bg-panel2 px-3 py-1.5">
+                <span className="text-2xs font-bold tracking-[.05em] text-sub">
+                  RESULT — this is what gets saved
+                </span>
+                {hasMarkers(resultText) && (
+                  <span className="text-2xs font-semibold text-removed">
+                    still has conflict markers
+                  </span>
+                )}
               </div>
-              <div className="flex min-h-0 flex-1">
-                <ResultGutter count={draftLineCount} scrollTop={resultScrollTop} />
-                <textarea
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onScroll={(e) => setResultScrollTop(e.currentTarget.scrollTop)}
-                  spellCheck={false}
-                  wrap="off"
-                  className={cn(
-                    'min-h-0 flex-1 resize-none bg-background px-3 py-2 text-foreground outline-none',
-                    CODE_LINE
-                  )}
+              <div className="min-h-0 flex-1">
+                <ConflictEditor
+                  text={resultText}
+                  path={data.path}
+                  markers
+                  onChange={(text) => {
+                    setDraft(text)
+                    setHandEdited(true)
+                  }}
+                  ariaLabel="Resolved file"
                 />
               </div>
             </div>
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={markerWarning}
+        onOpenChange={setMarkerWarning}
+        title="This file still has conflict markers"
+        description={
+          <>
+            Lines starting with <code className="font-mono">{'<<<<<<<'}</code>,{' '}
+            <code className="font-mono">=======</code> or{' '}
+            <code className="font-mono">{'>>>>>>>'}</code> are still in the file. They
+            are not code — saving now writes them into your project, which usually breaks
+            the file.
+          </>
+        }
+        confirmLabel="Save anyway"
+        destructive
+        onConfirm={() => markResolved(true)}
+      />
     </div>
   )
 }
