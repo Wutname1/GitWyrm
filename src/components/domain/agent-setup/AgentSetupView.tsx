@@ -44,7 +44,15 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
   const differingCount = entries.filter(hasAnyDifference).length
 
   return (
-    <section aria-label="Agent setup manager" className="flex h-full min-h-0 flex-col bg-panel">
+    // `min-w-0 flex-1`, not just `h-full`: this sits in a flex ROW beside the
+    // chat list, and without them it sizes to its own content and draws over
+    // the list instead of taking the space left beside it. `min-w-0` is the
+    // half that is easy to miss -- a flex child will not shrink below its
+    // content width without it, so the wide table pushes it over the sidebar.
+    <section
+      aria-label="Agent setup manager"
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel"
+    >
       <div className="flex flex-none flex-wrap items-start gap-3 border-b border-border px-4.5 py-3">
         <div>
           <div className="text-sm font-semibold text-foreground">Agent setup</div>

@@ -27,7 +27,9 @@ export function ImportPicker() {
   const [selectedAdapterId, setSelectedAdapterId] = useState<string | null>(null)
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-hidden p-3">
+    // Same flex-row reasoning as `AgentSetupView`: without `min-w-0 flex-1`
+    // this would draw over the chat list beside it.
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden p-3">
       <div>
         <h2 className="text-sm font-semibold text-foreground">Import chats</h2>
         <p className="text-xs text-muted-foreground">
