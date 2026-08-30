@@ -127,6 +127,33 @@ exists. Leaving it undecided means the feature works by luck.
 Not urgent, and explicitly not "delete it": it fails safe, and it costs nothing when a
 model writes prose instead.
 
+### 6. Hosting other agents' skills and connectors
+
+Closed 2026-08-29, in two halves.
+
+**Skills are read.** The Skills tab rendered "no skills found" for its whole
+existence -- `ItemKind::Skill` existed but no reader ever produced one, because
+skills are folders and every reader could only read a key out of a settings
+file. `agent_config/skills.rs` scans them; verified against the 13 real skills
+on the development machine. Front matter is parsed by hand rather than with a
+YAML crate: two fields do not justify the dependency, and a strict parser would
+reject a whole file over a mistake elsewhere in it.
+
+**Clients are a table.** `agent_config/registry.rs` replaces five parallel
+`match client` lists with one row per client. Adding a sixth is a row rather
+than five edits. Behaviour is unchanged and pinned by tests: the same clients
+read, the same two write, the same ones stay read-only.
+
+Still open here:
+
+- **Skills can be read but not copied**, on any client, and a test holds that
+  line. They are folders of files while the writers can only edit one member of
+  a JSON object. Copying one means a file-tree writer, which is a bigger and
+  riskier piece of work than the JSON path.
+- **Only Claude Code has a verified skills folder.** The others have no path
+  checked against a real install, and a guessed one would produce an empty list
+  that reads as "none installed" rather than "not looked at".
+
 ### 5. Snip is backend-only
 
 `snip_detect` and `snip_gain` exist and are in the bindings, but nothing in the UI calls
