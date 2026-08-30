@@ -10,6 +10,14 @@ type CenterView = 'conversation' | 'openspec' | 'setup' | 'import'
  * draws the drag region and window buttons, matching `DeskTitleBar` and the
  * main window's chrome.
  */
+/** The window's sections, in the order they are shown. */
+const SECTIONS: { id: CenterView; label: string }[] = [
+  { id: 'conversation', label: 'Chats' },
+  { id: 'openspec', label: 'OpenSpec' },
+  { id: 'setup', label: 'Agent setup' },
+  { id: 'import', label: 'Import chats' },
+]
+
 export function AgentDeskTitleBar({
   repoName,
   repoId,
@@ -34,59 +42,32 @@ export function AgentDeskTitleBar({
       </span>
 
       {/* Task 2.3: OpenSpec's change list/tasks/handoff actions stay one
-          click away instead of disappearing into the new session shell. */}
-      <div className="ml-4 flex h-full items-stretch gap-0.5 self-stretch">
-        <button
-          type="button"
-          onClick={() => onChangeCenterView('conversation')}
-          disabled={!repoId}
-          className={cn(
-            'border-b-2 px-1 text-2xs font-semibold transition-colors',
-            centerView === 'conversation'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-sub hover:text-foreground'
-          )}
-        >
-          Chats
-        </button>
-        <button
-          type="button"
-          onClick={() => onChangeCenterView('openspec')}
-          disabled={!repoId}
-          className={cn(
-            'border-b-2 px-1 text-2xs font-semibold transition-colors',
-            centerView === 'openspec'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-sub hover:text-foreground'
-          )}
-        >
-          OpenSpec
-        </button>
-        <button
-          type="button"
-          onClick={() => onChangeCenterView('setup')}
-          className={cn(
-            'border-b-2 px-1 text-2xs font-semibold transition-colors',
-            centerView === 'setup'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-sub hover:text-foreground'
-          )}
-        >
-          Agent setup
-        </button>
-        <button
-          type="button"
-          onClick={() => onChangeCenterView('import')}
-          className={cn(
-            'border-b-2 px-1 text-2xs font-semibold transition-colors',
-            centerView === 'import'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-sub hover:text-foreground'
-          )}
-        >
-          Import chats
-        </button>
-      </div>
+          click away instead of disappearing into the new session shell.
+
+          Sized to be seen. These were 10px text with a hairline underline,
+          which read as decoration next to the window controls and left people
+          not realising the window had sections at all. The active one now
+          carries a filled background rather than only a rule, because an
+          underline that thin is the first thing lost against a dark panel. */}
+      <nav aria-label="Agent Desk sections" className="ml-5 flex items-center gap-1">
+        {SECTIONS.map((section) => (
+          <button
+            key={section.id}
+            type="button"
+            onClick={() => onChangeCenterView(section.id)}
+            disabled={!repoId}
+            aria-current={centerView === section.id ? 'page' : undefined}
+            className={cn(
+              'rounded-md px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-40',
+              centerView === section.id
+                ? 'bg-soft text-accent-text'
+                : 'text-sub hover:bg-panel3 hover:text-foreground'
+            )}
+          >
+            {section.label}
+          </button>
+        ))}
+      </nav>
 
       <div className="ml-auto flex h-full items-center gap-2 pl-3">
         <Button size="sm" variant="secondary" onClick={onNewChat} disabled={!repoId}>
