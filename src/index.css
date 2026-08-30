@@ -382,18 +382,21 @@
  * handle on the commit panel so the resting size is the user's choice; the
  * cap always stays at least that tall so dragging taller cannot make the box
  * scroll a message it was already showing.
+ *
+ * The fallback lives in the var() call, not as a declaration on this rule: a
+ * declaration here would be more specific than the inherited value the panel
+ * sets, pinning the box at two lines and making the drag do nothing.
  */
 .wyrm-commit-description {
-  --wyrm-commit-desc-lines: 2;
   /* 1rem line box, 8px padding each side, 1px border each side. */
   --wyrm-commit-desc-chrome: 18px;
   field-sizing: content;
   height: auto;
   min-height: calc(
-    var(--wyrm-commit-desc-lines) * 1rem + var(--wyrm-commit-desc-chrome)
+    var(--wyrm-commit-desc-lines, 2) * 1rem + var(--wyrm-commit-desc-chrome)
   );
   max-height: calc(
-    max(5, var(--wyrm-commit-desc-lines)) * 1rem +
+    max(5, var(--wyrm-commit-desc-lines, 2)) * 1rem +
       var(--wyrm-commit-desc-chrome)
   );
   overflow-y: auto;
