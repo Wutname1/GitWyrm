@@ -174,14 +174,22 @@ fn diff3_text(
 
     // `MergeFileResult::content()` calls `slice::from_raw_parts` on the raw
     // pointer with no null check, so calling it on a result libgit2 left empty
-    // is instant undefined behaviour -- it aborted the process, not just this
-    // call. libgit2 leaves that pointer null when there is nothing to write,
-    // which happens for an automergeable file: the exact case reached by
-    // re-reading a path whose conflict was just resolved.
+    // is instant undefined behaviour -- it aborts the whole process, not just
+    // this call. A crash log caught it in the wild:
     //
-    // A merge that came back clean is also not a conflict worth showing, so
-    // both conditions bail to the caller's fallback.
-    if result.is_automergeable() {
+    //   git2-0.21.0/src/merge.rs:382: unsafe precondition(s) violated:
+    //   slice::from_raw_parts requires the pointer to be aligned and non-null
+    //
+    // `is_automergeable()` covers the common case (a clean merge is not a
+    // conflict worth showing) but is NOT sufficient on its own -- the crash
+    // above happened anyway. Testing emptiness afterwards is far too late,
+    // because `content()` has already dereferenced the pointer by then.
+    //
+    // `path_bytes()` reads the sibling pointer through `opt_bytes`, which is
+    // null-checked and returns Option. libgit2 leaves `path` and `ptr` unset
+    // together, so a null path means a null content pointer -- which makes this
+    // a safe way to ask the question without dereferencing anything.
+    if result.is_automergeable() || result.path_bytes().is_none() {
         return None;
     }
     let content = result.content();
@@ -218,8 +226,7 @@ pub fn conflict_content(
 
     // Prefer regenerated diff3 markers; fall back to whatever is on disk when
     // the file cannot be merged as text.
-    let conflict_text =
-        diff3_text(path, &base, &ours, &theirs).unwrap_or_else(|| merged.clone());
+    let conflict_text = diff3_text(path, &base, &ours, &theirs).unwrap_or_else(|| merged.clone());
 
     Ok(ConflictContent {
         path: path.to_string(),
