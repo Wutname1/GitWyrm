@@ -31,3 +31,27 @@ pub mod submodule;
 pub mod tutorial;
 pub mod updates;
 pub mod worktree;
+
+/// A progress sink that emits `git-progress` events for a local operation.
+///
+/// Lives here rather than in `git::progress` so that module stays free of Tauri
+/// types -- linking `tauri` under `git/` breaks the lib test harness.
+pub fn progress_sink(
+    app: tauri::AppHandle,
+) -> std::sync::Arc<dyn Fn(crate::git::progress::ProgressUpdate<'_>) + Send + Sync> {
+    use tauri::Emitter;
+    std::sync::Arc::new(move |u: crate::git::progress::ProgressUpdate<'_>| {
+        let _ = app.emit(
+            "git-progress",
+            crate::commands::remote::GitProgressPayload {
+                repo_id: u.repo_id.to_string(),
+                operation: u.operation.to_string(),
+                line: u.line,
+                // Zero total means "size not known yet"; the frontend shows an
+                // indeterminate indicator rather than a 0% bar.
+                completed: (u.total > 0).then_some(u.completed),
+                total: (u.total > 0).then_some(u.total),
+            },
+        );
+    })
+}

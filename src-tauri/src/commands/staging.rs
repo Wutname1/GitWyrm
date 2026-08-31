@@ -1,8 +1,9 @@
 use std::path::Path;
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::error::AppError;
+use crate::git::progress::LocalProgress;
 use crate::git::submodule::{is_submodule, sync_submodule_workdirs};
 use crate::state::RepoManager;
 
@@ -280,13 +281,18 @@ pub async fn discard_files(
 pub fn discard_everything(
     repo: &git2::Repository,
     reset_submodules: bool,
+    progress: &LocalProgress,
 ) -> Result<(), git2::Error> {
     // Reset the index to HEAD so staged changes are dropped too.
+    progress.begin("Finding changes to discard");
     let head = repo.head()?.peel(git2::ObjectType::Commit)?;
     repo.reset(&head, git2::ResetType::Mixed, None)?;
     // Force the working tree back to HEAD and delete untracked files.
     let mut builder = git2::build::CheckoutBuilder::new();
-    builder.force().remove_untracked(true);
+    builder
+        .force()
+        .remove_untracked(true)
+        .progress(|_, completed, total| progress.report(completed, total));
     repo.checkout_head(Some(&mut builder))?;
     // After the index reset each submodule's recorded id is HEAD's, so this moves
     // the nested checkouts to where the parent now says they belong.
@@ -300,14 +306,25 @@ pub fn discard_everything(
 #[tauri::command]
 #[specta::specta]
 pub async fn discard_all(
+    app: AppHandle,
     manager: State<'_, RepoManager>,
     repo_id: String,
     reset_submodules: bool,
 ) -> Result<(), AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let timing = std::sync::Arc::new(crate::perf::CommandTiming::start(
+            "discard_all",
+            "git.discard",
+        ));
+        let progress = LocalProgress::with_timing(
+            Some(super::progress_sink(app)),
+            Some(timing.clone()),
+            &repo_id,
+            "discard",
+        );
         let repo = open.repo.lock().unwrap();
-        discard_everything(&repo, reset_submodules).map_err(AppError::Git)
+        discard_everything(&repo, reset_submodules, &progress).map_err(AppError::Git)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?

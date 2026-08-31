@@ -30,6 +30,7 @@ import { PushTagsModal } from '@/components/modals/PushTagsModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
 import { noteRepoAvailability } from '@/hooks/useRepoActions'
+import { useLocalGitProgress } from '@/hooks/useLocalGitProgress'
 import { useRepoWatcher } from '@/hooks/useRepoWatcher'
 import { useAiRunListener } from '@/hooks/useAiRun'
 import { useAutoFetch } from '@/hooks/useAutoFetch'
@@ -87,6 +88,8 @@ async function shouldShowOnboarding(seen: boolean): Promise<boolean> {
 
 function AppInner() {
   useRepoWatcher()
+  // Live progress for merge/discard, which otherwise freeze the window silently.
+  useLocalGitProgress()
   // One listener for the window. Each surface that shows a run reads the shared
   // store rather than subscribing itself.
   useAiRunListener()

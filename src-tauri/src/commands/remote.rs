@@ -109,6 +109,11 @@ pub struct GitProgressPayload {
     pub repo_id: String,
     pub operation: String,
     pub line: String,
+    /// Steps finished, when the operation reports countable progress. `None`
+    /// for git's own stderr lines, which are free text.
+    pub completed: Option<u32>,
+    /// Total steps, when known. `None` means show an indeterminate indicator.
+    pub total: Option<u32>,
 }
 
 /// git writes progress, informational notes, and real errors all to stderr, so
@@ -387,6 +392,8 @@ fn run_streaming_with(
                         repo_id: repo_id.to_string(),
                         operation: operation.to_string(),
                         line: part.to_string(),
+                        completed: None,
+                        total: None,
                     },
                 );
             }

@@ -31,6 +31,10 @@ pub struct CommandTiming {
     name: &'static str,
     started: Instant,
     tx: sentry::TransactionOrSpan,
+    /// How much work the command turned out to be (files touched), when it
+    /// knows. Duration alone cannot separate "slow per file" from "a lot of
+    /// files", which is the first question asked of every hang report.
+    scale: std::sync::atomic::AtomicU64,
 }
 
 impl CommandTiming {
@@ -40,17 +44,43 @@ impl CommandTiming {
             name,
             started: Instant::now(),
             tx: tx.into(),
+            scale: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// Record how many files this operation covered.
+    ///
+    /// Cheap enough to call from a progress callback: it is a relaxed store, and
+    /// only the final value is read. Callers pass the running total, so the last
+    /// call wins.
+    pub fn set_scale(&self, files: u64) {
+        self.scale
+            .store(files, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
 impl Drop for CommandTiming {
     fn drop(&mut self) {
         let ms = self.started.elapsed().as_millis();
+        let files = self.scale.load(std::sync::atomic::Ordering::Relaxed);
         // 250ms is roughly where an interaction stops feeling immediate. Below
         // that the log would be pure noise, since these run on every screen.
         if ms >= 250 {
-            log::warn!("{}: slow, took {ms}ms", self.name);
+            if files > 0 {
+                // Per-file cost is the number that makes two reports
+                // comparable across repositories of different sizes.
+                let per_file = ms as f64 / files as f64;
+                log::warn!(
+                    "{}: slow, took {ms}ms for {files} files ({per_file:.1}ms/file)",
+                    self.name
+                );
+            } else {
+                log::warn!("{}: slow, took {ms}ms", self.name);
+            }
+        }
+        if files > 0 {
+            self.tx
+                .set_data("files", sentry::protocol::Value::from(files));
         }
         self.tx.clone().finish();
     }

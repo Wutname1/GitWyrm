@@ -3845,7 +3845,16 @@ export type GitIdentitySnapshot = { name: string; email: string; signingKey: str
  * True when the repository's own config sets the identity.
  */
 overridden: boolean }
-export type GitProgressPayload = { repo_id: string; operation: string; line: string }
+export type GitProgressPayload = { repo_id: string; operation: string; line: string; 
+/**
+ * Steps finished, when the operation reports countable progress. `None`
+ * for git's own stderr lines, which are free text.
+ */
+completed: number | null; 
+/**
+ * Total steps, when known. `None` means show an indeterminate indicator.
+ */
+total: number | null }
 export type GithubRepoRef = { owner: string; repo: string }
 export type GithubRepository = { full_name: string; clone_url: string; html_url: string; description: string | null; private: boolean; pushed_at: string; starred: boolean }
 /**

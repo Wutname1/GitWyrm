@@ -6,6 +6,7 @@ pub mod history;
 pub mod identity;
 pub mod merge_ops;
 pub mod profiles;
+pub mod progress;
 pub mod refs;
 pub mod remote_url;
 pub mod rename_detect;
