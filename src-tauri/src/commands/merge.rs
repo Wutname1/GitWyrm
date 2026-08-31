@@ -46,7 +46,7 @@ pub async fn merge_analysis(
 ) -> Result<MergeAnalysis, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
+        let repo = open.read();
         let annotated = resolve_annotated(&repo, &reference)?;
         let (analysis, _pref) = repo.merge_analysis(&[&annotated])?;
         Ok(MergeAnalysis {
@@ -237,7 +237,7 @@ pub async fn get_merge_state(
 ) -> Result<MergeState, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
+        let repo = open.read();
         merge_ops::merge_state(&repo)
     })
     .await
@@ -289,7 +289,7 @@ pub async fn get_conflict(
     let open = manager.get(&repo_id)?;
     let workdir = open.path.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
+        let repo = open.read();
         merge_ops::conflict_content(&repo, &workdir, &path)
     })
     .await

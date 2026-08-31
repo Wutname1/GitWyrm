@@ -287,7 +287,7 @@ pub async fn get_log(
 ) -> Result<LogPage, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
+        let repo = open.read();
 
         let head_oid = repo
             .head()
@@ -389,7 +389,7 @@ pub async fn get_commit_stats(
 ) -> Result<HashMap<String, CommitStats>, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
+        let repo = open.read();
         let mut out = HashMap::with_capacity(shas.len());
         for sha in shas {
             let Ok(oid) = Oid::from_str(&sha) else {
