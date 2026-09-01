@@ -10,6 +10,7 @@
 //! CLI, spawning it with the tools it may not use, and naming what went wrong.
 
 pub mod acp;
+pub mod claude;
 pub mod cli_agent;
 pub mod codex;
 pub mod copilot_cli;

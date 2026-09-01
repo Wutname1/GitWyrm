@@ -201,11 +201,19 @@ impl CliAgent {
                 conn.start_session(&self.cwd, read_only).await?;
                 Ok(super::wire::Connection::Codex(conn))
             }
-            super::registry::Protocol::ClaudeStreamJson => Err(AgentError::TransportUnavailable {
-                transport: super::transport::Transport::Cli,
-                detail: "GitWyrm cannot talk to Claude Code yet. Pick a different AI tool for now."
-                    .into(),
-            }),
+            super::registry::Protocol::ClaudeStreamJson => {
+                let args: Vec<String> =
+                    self.spec.launch_args(&denied).into_iter().collect();
+                let read_only = denied.contains(&"write");
+                let conn = super::claude::ClaudeConnection::spawn(
+                    &self.program,
+                    &self.cwd,
+                    &args,
+                    read_only,
+                )
+                .await?;
+                Ok(super::wire::Connection::Claude(conn))
+            }
         }
     }
 }

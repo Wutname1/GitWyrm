@@ -153,6 +153,8 @@ pub struct TurnOutcome {
 pub enum Connection {
     /// Agent Client Protocol over stdio. Copilot and Gemini speak this.
     Acp(super::acp::AcpConnection),
+    /// Claude Code's own newline-JSON stream. See `super::claude`.
+    Claude(super::claude::ClaudeConnection),
     /// Codex's own app-server, which is not ACP. See `super::codex`.
     Codex(super::codex::CodexConnection),
 }
@@ -167,6 +169,7 @@ impl Connection {
     pub fn take_incoming(&mut self) -> Option<tokio::sync::mpsc::UnboundedReceiver<Incoming>> {
         match self {
             Connection::Acp(c) => c.take_incoming(),
+            Connection::Claude(c) => c.take_incoming(),
             Connection::Codex(c) => c.take_incoming(),
         }
     }
@@ -175,6 +178,7 @@ impl Connection {
     pub async fn prompt(&self, text: &str) -> Result<TurnOutcome, super::transport::AgentError> {
         match self {
             Connection::Acp(c) => c.prompt(text).await,
+            Connection::Claude(c) => c.prompt(text).await,
             Connection::Codex(c) => c.prompt(text).await,
         }
     }
@@ -187,6 +191,7 @@ impl Connection {
     pub async fn ask(&mut self, text: &str) -> Result<String, super::transport::AgentError> {
         match self {
             Connection::Acp(c) => c.ask(text).await,
+            Connection::Claude(c) => c.ask(text).await,
             Connection::Codex(c) => c.ask(text).await,
         }
     }
@@ -195,6 +200,7 @@ impl Connection {
     pub async fn cancel(&self) -> Result<(), super::transport::AgentError> {
         match self {
             Connection::Acp(c) => c.cancel().await,
+            Connection::Claude(c) => c.cancel().await,
             Connection::Codex(c) => c.cancel().await,
         }
     }
@@ -203,6 +209,7 @@ impl Connection {
     pub async fn shutdown(self) {
         match self {
             Connection::Acp(c) => c.shutdown().await,
+            Connection::Claude(c) => c.shutdown().await,
             Connection::Codex(c) => c.shutdown().await,
         }
     }
@@ -222,7 +229,10 @@ mod tests {
             StopReason::Cancelled,
             StopReason::Unknown,
         ] {
-            assert!(!other.is_success(), "{other:?} was treated as a finished turn");
+            assert!(
+                !other.is_success(),
+                "{other:?} was treated as a finished turn"
+            );
         }
     }
 
