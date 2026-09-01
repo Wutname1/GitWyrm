@@ -156,7 +156,7 @@ jobs:
       - name: Check linked libraries
         run: ldd src-tauri/target/release/gitwyrm
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gitwyrm-linux-x86_64
           path: |
