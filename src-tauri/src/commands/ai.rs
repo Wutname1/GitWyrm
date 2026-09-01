@@ -6,7 +6,7 @@ use serde::Serialize;
 use specta::Type;
 use tauri::State;
 
-use crate::ai::{auth, catalog, client, copilot, copilot_sdk, models, prompt};
+use crate::ai::{auth, catalog, copilot, copilot_sdk, local_cli, models, prompt};
 use crate::error::AppError;
 use crate::git::shell::run_git;
 use crate::settings;
@@ -25,20 +25,38 @@ pub struct AiProviderStatus {
 pub async fn ai_get_catalog(
     app: tauri::AppHandle,
 ) -> Result<Vec<catalog::CatalogProvider>, AppError> {
-    catalog::get(&app).await
+    let mut providers = match catalog::get(&app).await {
+        Ok(providers) => providers,
+        Err(error) => {
+            // An installed Codex works without the remote models.dev list.
+            // Keep that useful path visible when the computer is offline.
+            log::warn!("could not refresh the remote AI catalog: {error}");
+            Vec::new()
+        }
+    };
+    providers.push(local_cli::codex_provider());
+    Ok(providers)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn ai_list_configured(app: tauri::AppHandle) -> Result<Vec<AiProviderStatus>, AppError> {
     tauri::async_runtime::spawn_blocking(move || {
-        Ok(auth::load_all(&app)?
+        let mut providers = auth::load_all(&app)?
             .into_keys()
             .map(|id| AiProviderStatus {
                 id,
                 configured: true,
             })
-            .collect())
+            .collect::<Vec<_>>();
+        if local_cli::codex_installed() {
+            providers.push(AiProviderStatus {
+                id: local_cli::CODEX_PROVIDER_ID.into(),
+                configured: true,
+            });
+        }
+        providers.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(providers)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
@@ -80,6 +98,9 @@ pub async fn ai_list_models(
     app: tauri::AppHandle,
     provider: String,
 ) -> Result<models::ModelList, AppError> {
+    if local_cli::is_local(&provider) {
+        return Ok(local_cli::model_list());
+    }
     let cat = catalog::find(&app, &provider).await?;
     Ok(models::list(&app, &cat).await)
 }
@@ -186,10 +207,6 @@ pub async fn generate_commit_message(
     let open = manager.get(&repo_id)?;
     let repo_path = open.path.to_string_lossy().into_owned();
 
-    let info = auth::get(&app, &provider)?
-        .ok_or_else(|| AppError::Other(format!("no API key configured for {provider}")))?;
-    let cat = catalog::find(&app, &provider).await?;
-
     // The user's editable guidance (empty falls back to the default), always
     // combined with the fixed format contract our parser depends on.
     let user_instruction = settings::read_settings(&app)?
@@ -224,22 +241,17 @@ pub async fn generate_commit_message(
         truncate_diff(&diff)
     );
 
-    let text = if provider == copilot_sdk::PROVIDER_ID {
-        // Copilot goes through the SDK rather than the HTTP dialects; our own
-        // OAuth app is not entitled to the chat endpoint. See ai/copilot_sdk.rs.
-        copilot_sdk::complete(bearer_for(&info), &model, &system, &user).await?
-    } else {
-        client::chat(client::ChatRequest {
-            provider: &cat,
-            bearer: bearer_for(&info),
-            model: &model,
-            system: &system,
-            user: &user,
-            max_tokens: 1024,
-            timeout: client::DEFAULT_TIMEOUT,
-        })
-        .await?
-    };
+    let text = crate::ai::complete::complete_with_in(
+        &app,
+        &provider,
+        &model,
+        &open.path,
+        &system,
+        &user,
+        1024,
+        crate::ai::client::DEFAULT_TIMEOUT,
+    )
+    .await?;
 
     Ok(split_message(&text))
 }

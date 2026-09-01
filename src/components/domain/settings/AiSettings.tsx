@@ -29,12 +29,15 @@ const selectClass =
 /** Curated providers surfaced at the top of the picker, in display order. */
 const POPULAR_PROVIDER_IDS = [
   'github-copilot',
+  'codex-cli',
   'anthropic',
   'openai',
   'google',
   'openrouter',
   'deepseek',
 ] as const
+
+const isInstalledProvider = (id: string) => id === 'codex-cli'
 
 export function AiSettings() {
   const catalog = useAiCatalog()
@@ -211,7 +214,9 @@ export function AiSettings() {
                     <div className="flex items-center gap-2">
                       <span className="flex items-center gap-1.5 text-xs text-sub">
                         <Check size={13} className="text-green-500" />
-                        {provider.id === 'github-copilot' ? (
+                        {isInstalledProvider(provider.id) ? (
+                          'Found - uses your Codex sign-in'
+                        ) : provider.id === 'github-copilot' ? (
                           copilotAccount.data ? (
                             <>
                               Connected as{' '}
@@ -243,17 +248,18 @@ export function AiSettings() {
                           {copilot.status.state === 'starting' ? 'Starting…' : 'Reconnect'}
                         </Button>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                        tooltip={
-                          provider.id === 'github-copilot' ? 'Disconnect' : 'Remove API key'
-                        }
-                        disabled={m.removeProvider.isPending}
-                        aria-busy={m.removeProvider.isPending || undefined}
-                        onClick={() =>
-                          m.removeProvider.mutate(provider.id, {
+                      {!isInstalledProvider(provider.id) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                          tooltip={
+                            provider.id === 'github-copilot' ? 'Disconnect' : 'Remove API key'
+                          }
+                          disabled={m.removeProvider.isPending}
+                          aria-busy={m.removeProvider.isPending || undefined}
+                          onClick={() =>
+                            m.removeProvider.mutate(provider.id, {
                             onSuccess: () => {
                               // Removing the default would otherwise leave the app
                               // pointed at a provider with no credentials, which
@@ -273,16 +279,17 @@ export function AiSettings() {
                               }
                             },
                             onError: (e) => toast.error(String(e)),
-                          })
-                        }
-                      >
-                        {m.removeProvider.isPending ? <PendingIndicator /> : <Trash2 size={12} />}
-                        {m.removeProvider.isPending
-                          ? 'Removing…'
-                          : provider.id === 'github-copilot'
-                            ? 'Disconnect'
-                            : 'Remove'}
-                      </Button>
+                            })
+                          }
+                        >
+                          {m.removeProvider.isPending ? <PendingIndicator /> : <Trash2 size={12} />}
+                          {m.removeProvider.isPending
+                            ? 'Removing…'
+                            : provider.id === 'github-copilot'
+                              ? 'Disconnect'
+                              : 'Remove'}
+                        </Button>
+                      )}
                     </div>
                     {provider.id === 'github-copilot' && copilot.status.state === 'error' && (
                       <div className="text-2xs text-destructive">{copilot.status.message}</div>
@@ -300,6 +307,11 @@ export function AiSettings() {
                       )}
                   </div>
                 )
+              ) : isInstalledProvider(provider.id) ? (
+                <div className="text-xs text-muted-foreground">
+                  Install Codex and sign in with the Codex app or command-line tool. GitWyrm will
+                  find it automatically.
+                </div>
               ) : provider.id === 'github-copilot' ? (
                 <div className="space-y-2">
                   {copilot.status.state === 'waiting' ? (

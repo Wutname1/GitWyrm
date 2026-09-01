@@ -10,6 +10,7 @@
 //! This is for one-shot completions. Multi-turn work with tool use belongs to
 //! `ai::agent`, which is a different shape entirely.
 
+use std::path::Path;
 use std::time::Duration;
 
 use crate::ai::{auth, catalog, client, copilot_sdk};
@@ -32,18 +33,20 @@ fn bearer_for(info: &auth::AuthInfo) -> &str {
     }
 }
 
-/// Send `system` + `user` to `provider`/`model` and return the reply text.
-pub async fn complete(
+/// `complete`, with the repository an installed AI tool is allowed to read.
+pub async fn complete_in(
     app: &tauri::AppHandle,
     provider: &str,
     model: &str,
+    cwd: &Path,
     system: &str,
     user: &str,
 ) -> Result<String, AppError> {
-    complete_with(
+    complete_with_in(
         app,
         provider,
         model,
+        cwd,
         system,
         user,
         DEFAULT_MAX_TOKENS,
@@ -52,17 +55,22 @@ pub async fn complete(
     .await
 }
 
-/// `complete`, with explicit limits for callers whose replies are small enough
-/// to want a shorter leash.
-pub async fn complete_with(
+/// `complete`, with explicit limits and the repository the local CLI is
+/// allowed to read.
+pub async fn complete_with_in(
     app: &tauri::AppHandle,
     provider: &str,
     model: &str,
+    cwd: &Path,
     system: &str,
     user: &str,
     max_tokens: u32,
     timeout: Duration,
 ) -> Result<String, AppError> {
+    if crate::ai::local_cli::is_local(provider) {
+        return crate::ai::local_cli::complete_codex(cwd, system, user, timeout).await;
+    }
+
     let info = auth::get(app, provider)?
         .ok_or_else(|| AppError::Other("Connect the selected AI provider first".into()))?;
 

@@ -5,5 +5,6 @@ pub mod client;
 pub mod complete;
 pub mod copilot;
 pub mod copilot_sdk;
+pub mod local_cli;
 pub mod models;
 pub mod prompt;

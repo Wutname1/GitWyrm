@@ -321,8 +321,15 @@ pub async fn openspec_draft_change(
     let (id, renamed) = draft::unique_change_id(&desired, &existing_ids);
 
     let user = draft::draft_user_prompt(&description, &capabilities, &recent_commits);
-    let response =
-        crate::ai::complete::complete(&app, &provider, &model, draft::SYSTEM_PROMPT, &user).await?;
+    let response = crate::ai::complete::complete_in(
+        &app,
+        &provider,
+        &model,
+        &root,
+        draft::SYSTEM_PROMPT,
+        &user,
+    )
+    .await?;
     draft::parse_draft(&response, &id, renamed)
 }
 
@@ -366,9 +373,10 @@ pub async fn openspec_draft_fix(
     model: String,
 ) -> Result<draft::DraftedArtifact, AppError> {
     let root = repo_root(&manager, &repo_id)?;
+    let root_for_read = root.clone();
     let change_for_read = change_id.clone();
     let proposal = tauri::async_runtime::spawn_blocking(move || {
-        let dir = openspec::openspec_dir(&root)
+        let dir = openspec::openspec_dir(&root_for_read)
             .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
         let path = dir
             .join("changes")
@@ -382,9 +390,15 @@ pub async fn openspec_draft_fix(
     .map_err(|e| AppError::Other(e.to_string()))??;
 
     let user = draft::fix_user_prompt(&change_id, &proposal, &validator_output);
-    let response =
-        crate::ai::complete::complete(&app, &provider, &model, draft::FIX_SYSTEM_PROMPT, &user)
-            .await?;
+    let response = crate::ai::complete::complete_in(
+        &app,
+        &provider,
+        &model,
+        &root,
+        draft::FIX_SYSTEM_PROMPT,
+        &user,
+    )
+    .await?;
     draft::parse_fix(&response)
 }
 
@@ -425,6 +439,7 @@ pub async fn openspec_ask(
 ) -> Result<ask::AskAnswer, AppError> {
     ask::check_question(&question)?;
     let root = repo_root(&manager, &repo_id)?;
+    let root_for_read = root.clone();
     let change_for_read = change_id.clone();
     // Decided before the question moves into the gathering closure, and from the
     // question alone: a proposal that says "make the change" must not turn every
@@ -436,7 +451,7 @@ pub async fn openspec_ask(
     // returned as a citable source, so a chip can never name something the model
     // was not actually given.
     let (prompt, sources) = tauri::async_runtime::spawn_blocking(move || {
-        let dir = openspec::openspec_dir(&root)
+        let dir = openspec::openspec_dir(&root_for_read)
             .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
         let change_dir = dir.join("changes").join(&change_for_read);
         if !change_dir.exists() {
@@ -497,8 +512,15 @@ pub async fn openspec_ask(
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;
 
-    let reply =
-        crate::ai::complete::complete(&app, &provider, &model, ask::SYSTEM_PROMPT, &prompt).await?;
+    let reply = crate::ai::complete::complete_in(
+        &app,
+        &provider,
+        &model,
+        &root,
+        ask::SYSTEM_PROMPT,
+        &prompt,
+    )
+    .await?;
     Ok(ask::parse_answer(&reply, &sources, asked_for_work))
 }
 
@@ -626,11 +648,12 @@ pub async fn openspec_draft_edit(
     let root = repo_root(&manager, &repo_id)?;
     let change_for_read = change_id.clone();
     let file_for_read = file.clone();
+    let root_for_read = root.clone();
 
     // Read the file and the proposal together, so the model sees what it is
     // editing and why the change exists.
     let (current, proposal) = tauri::async_runtime::spawn_blocking(move || {
-        let dir = openspec::openspec_dir(&root)
+        let dir = openspec::openspec_dir(&root_for_read)
             .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
         let current = write::read_change_file(&dir, &change_for_read, &file_for_read)?;
         // Context only: a change with no proposal still drafts fine.
@@ -642,9 +665,15 @@ pub async fn openspec_draft_edit(
     .map_err(|e| AppError::Other(e.to_string()))??;
 
     let user = edit_draft::user_prompt(&file, &current, &instruction, &proposal);
-    let reply =
-        crate::ai::complete::complete(&app, &provider, &model, edit_draft::SYSTEM_PROMPT, &user)
-            .await?;
+    let reply = crate::ai::complete::complete_in(
+        &app,
+        &provider,
+        &model,
+        &root,
+        edit_draft::SYSTEM_PROMPT,
+        &user,
+    )
+    .await?;
     edit_draft::parse_draft(&reply, &file)
 }
 

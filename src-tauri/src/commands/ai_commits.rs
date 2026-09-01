@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{Emitter, State};
 
-use crate::ai::{auth, prompt};
+use crate::ai::prompt;
 use crate::commands::patch::{self, SelectedLine};
 use crate::error::AppError;
 use crate::settings;
@@ -777,10 +777,6 @@ pub async fn generate_commits(
         )));
     }
 
-    // Fail before building a large prompt if the provider is not connected.
-    // ai::complete checks this too, but only once it is about to send.
-    auth::get(&app, &provider)?
-        .ok_or_else(|| AppError::Other("Connect the selected AI provider first".into()))?;
     let saved_instruction = settings::read_settings(&app)?
         .ai_instruction
         .unwrap_or_default();
@@ -823,10 +819,11 @@ Recent commit subjects:\n{}\n\nChange units:{}",
     );
     // Provider routing (including Copilot's CLI detour) lives in ai::complete, so
     // this and the spec drafter cannot drift apart.
-    let response = crate::ai::complete::complete_with(
+    let response = crate::ai::complete::complete_with_in(
         &app,
         &provider,
         &model,
+        Path::new(&repo_path),
         &system,
         &user,
         PLAN_MAX_TOKENS,
