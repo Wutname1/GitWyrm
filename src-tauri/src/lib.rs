@@ -28,6 +28,9 @@ pub use ai::agent::copilot_cli as agent_copilot_cli;
 pub use commands::staging::discard_everything;
 pub use error::AppError;
 pub use git::graph as git_graph;
+/// Exposed alongside [`discard_everything`], which now takes a progress sink:
+/// the integration test cannot call it without being able to build one.
+pub use git::progress as git_progress;
 pub use git::history as git_history;
 pub use git::merge_ops as git_merge_ops;
 pub use git::refs as git_refs;

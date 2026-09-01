@@ -391,7 +391,7 @@ fn discard_all_resets_a_moved_submodule_when_asked() {
     gitwyrm_lib::discard_everything(
         &repo,
         false,
-        &gitwyrm_lib::git::progress::LocalProgress::new(None, "repo", "discard"),
+        &gitwyrm_lib::git_progress::LocalProgress::new(None, "repo", "discard"),
     )
     .unwrap();
     assert!(
@@ -413,7 +413,7 @@ fn discard_all_resets_a_moved_submodule_when_asked() {
     gitwyrm_lib::discard_everything(
         &repo,
         true,
-        &gitwyrm_lib::git::progress::LocalProgress::new(None, "repo", "discard"),
+        &gitwyrm_lib::git_progress::LocalProgress::new(None, "repo", "discard"),
     )
     .unwrap();
     assert_eq!(
