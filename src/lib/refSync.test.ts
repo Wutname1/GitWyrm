@@ -23,9 +23,10 @@ const branches: BranchList = {
 }
 
 describe('resolveDropPair direction', () => {
-  // The whole point of the pair is WHICH branch moves. Getting it backwards
-  // merges the wrong way round, and nothing downstream would catch it.
-  it('makes the dragged branch the one that moves, when both are local', () => {
+  // The whole point of the pair is WHICH branch receives. Getting it backwards
+  // merges the wrong way round and checks out the branch the user dragged --
+  // which fails outright when another worktree holds it.
+  it('brings a dragged local branch into the local branch it lands on', () => {
     const pair = resolveDropPair(
       { name: 'main', type: 'head' },
       { name: 'feature/pr', type: 'branch' },
@@ -34,8 +35,8 @@ describe('resolveDropPair direction', () => {
 
     expect(pair).toEqual({
       kind: 'branches',
-      source: { name: 'feature/pr', type: 'branch' },
-      target: { name: 'main', type: 'head' },
+      source: { name: 'main', type: 'head' },
+      target: { name: 'feature/pr', type: 'branch' },
     })
   })
 

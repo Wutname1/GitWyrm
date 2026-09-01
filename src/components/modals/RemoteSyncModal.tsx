@@ -141,9 +141,15 @@ export function RemoteSyncModal() {
   const active: PreviewMode | null = mode && modes.includes(mode) ? mode : (modes.at(-1) ?? null)
 
   // Names. For a tracking pair "ours" is the local branch; for a branch pair it
-  // is the branch that moves (the target), which is the one the copy is about.
+  // is the branch that receives (the target), which is the one the copy is
+  // about and the one a merge checks out.
   const ourName = pair?.kind === 'tracking' ? pair.branch.name : (branchPair?.target.name ?? '')
   const theirName = pair?.kind === 'tracking' ? pair.upstream : (branchPair?.source.name ?? '')
+  // The chips read the way the merge runs: commits leave `source` and land in
+  // `target`. They are not ours/theirs -- for a branch pair "ours" is the
+  // receiving side, so using it as FROM would draw the arrow backwards.
+  const fromName = branchPair?.source.name ?? theirName
+  const intoName = branchPair?.target.name ?? ourName
 
   // Reset only re-points HEAD's branch, so it is offered only when the branch
   // that would move IS the checked-out one.
@@ -256,14 +262,14 @@ export function RemoteSyncModal() {
               drag that went the wrong way without re-dragging. */}
           <div className="flex min-w-0 items-center gap-2.5 rounded-md border border-border bg-panel2 px-2.5 py-2">
             <div className="min-w-0">
-              <Chip name={ourName || syncSource || ''} tone="source" />
+              <Chip name={fromName || syncSource || ''} tone="source" />
               <span className="mt-0.5 block text-center text-2xs uppercase tracking-[.06em] text-muted-foreground">
                 from
               </span>
             </div>
             <ArrowRight size={15} className="-mt-3 flex-none text-sub" />
             <div className="min-w-0">
-              <Chip name={theirName || syncTarget || ''} tone="target" />
+              <Chip name={intoName || syncTarget || ''} tone="target" />
               <span className="mt-0.5 block text-center text-2xs uppercase tracking-[.06em] text-muted-foreground">
                 into
               </span>

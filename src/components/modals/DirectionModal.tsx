@@ -100,11 +100,11 @@ export function DirectionModal() {
   // it, so blend / stack / replace are chosen in one place with the outcome
   // drawn. Hand the chosen direction over rather than merging directly here.
   //
-  // `target` is the branch that receives, which is the side the Sync window
-  // treats as the mover, so it goes first -- the same order a drag uses.
+  // Hand over the same source -> target order the arrow shows, which is the
+  // order the Sync window resolves a drag in.
   const doMerge = () => {
     if (!other) return
-    openRemoteSync(target, source, 'blend')
+    openRemoteSync(source, target, 'blend')
   }
 
   return (

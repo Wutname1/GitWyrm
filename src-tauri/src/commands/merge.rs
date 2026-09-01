@@ -246,17 +246,10 @@ pub async fn merge_directional(
             == Some(target.clone());
 
         if !on_target {
-            if refs::tracked_changes_present(&repo)? {
-                return Err(AppError::Other(
-                    "working tree has changes; commit or stash before switching to merge".into(),
-                ));
-            }
-            let (object, reference) = repo.revparse_ext(&target)?;
-            repo.checkout_tree(&object, None)?;
-            match reference {
-                Some(r) => repo.set_head(r.name().unwrap_or("HEAD"))?,
-                None => repo.set_head_detached(object.id())?,
-            }
+            // Check the worktree lock before checkout touches the index or any
+            // files. Git rejects set_head for a branch held elsewhere, but that
+            // rejection comes too late if checkout_tree has already run.
+            merge_ops::checkout_directional_target(&repo, &target, &source)?;
         }
 
         do_merge(&repo, &source, &progress)

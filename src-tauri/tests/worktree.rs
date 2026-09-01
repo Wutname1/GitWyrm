@@ -292,6 +292,7 @@ fn remove_leaves_the_branch_and_reports_whether_it_is_merged() {
         RemoveOutcome::Removed {
             branch,
             branch_merged,
+            ..
         } => {
             assert_eq!(branch.as_deref(), Some("feature"));
             // feature is at main's tip with no commits of its own, so it is safe.

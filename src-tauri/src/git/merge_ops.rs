@@ -11,6 +11,41 @@ use crate::error::AppError;
 use crate::git::refs;
 use crate::git::types::{ConflictContent, MergeState, OperationKind};
 
+/// Refuse a directional merge before checkout changes any files when its
+/// receiving branch is already checked out in another worktree.
+///
+/// Git itself catches this at `set_head`, but a checkout performed first has
+/// already replaced the index and working files by then. That turns a safe
+/// refusal into hundreds of staged changes on the wrong branch.
+pub fn checkout_directional_target(
+    repo: &Repository,
+    target: &str,
+    source: &str,
+) -> Result<(), AppError> {
+    if let Some(holder) = crate::git::worktree::holder_of_branch(repo, target) {
+        if !holder.is_current {
+            return Err(AppError::Other(format!(
+                "{target} is already open in the {} folder, so it can't be switched to here. Open that folder to bring {source} into {target}, or swap the direction to bring {target} into this branch instead.",
+                holder.folder_name
+            )));
+        }
+    }
+
+    if refs::tracked_changes_present(repo)? {
+        return Err(AppError::Other(
+            "working tree has changes; commit or stash before switching to merge".into(),
+        ));
+    }
+
+    let (object, reference) = repo.revparse_ext(target)?;
+    repo.checkout_tree(&object, None)?;
+    match reference {
+        Some(r) => repo.set_head(r.name().unwrap_or("HEAD"))?,
+        None => repo.set_head_detached(object.id())?,
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Resolution {
