@@ -4,7 +4,7 @@ import type { RefInfo, RefKind, RemoteInfo } from '@/lib/bindings'
 import { TooltipHint } from '@/components/ui/tooltip'
 import { detectProvider, providerLabel } from '@/lib/remoteProvider'
 import { resolveDropPair, type DraggedRef } from '@/lib/refSync'
-import { remoteName, shortName, syncedPair } from '@/lib/refStack'
+import { MAX_INLINE_CHIPS, groupRefs, remoteName, shortName } from '@/lib/refStack'
 import { cn } from '@/lib/utils'
 import { useBranches, useRemotes } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
@@ -101,14 +101,29 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
     setOpen(false)
   }
 
-  // A local branch and its remote sitting together needs no stack or popover.
+  // Fold each local branch together with its own remote-tracking ref. A commit
+  // sitting at the tip of two synced branches is two chips, not a four-row
+  // popover -- there is no choice to make between `main` and `origin/main`.
   // Checked after the hooks above so hook order stays stable across renders.
-  const synced = syncedPair(refs)
-  if (synced) {
+  const upstreamOf = (localName: string) =>
+    branches.data?.local.find((b) => b.name === localName)?.upstream
+  const { groups, tags } = groupRefs(refs, upstreamOf)
+  // Past a couple of chips the row stops being readable and the stack earns its
+  // place back. Every group must have collapsed, too: an uncollapsed group is a
+  // real choice, which is exactly what the popover is for.
+  const allCollapsed = groups.every((g) => g.syncedWith)
+  if (allCollapsed && groups.length > 0 && groups.length + tags.length <= MAX_INLINE_CHIPS) {
     return (
       <>
-        <RefBadge refTag={synced.local} syncedWith={synced.remote} expandOnHover />
-        {synced.rest.map((refTag) => (
+        {groups.map((group) => (
+          <RefBadge
+            key={`${group.primary.type}:${group.primary.name}`}
+            refTag={group.primary}
+            syncedWith={group.syncedWith ?? undefined}
+            expandOnHover
+          />
+        ))}
+        {tags.map((refTag) => (
           <RefBadge key={`${refTag.type}:${refTag.name}`} refTag={refTag} expandOnHover />
         ))}
       </>
