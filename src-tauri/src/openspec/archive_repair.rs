@@ -106,6 +106,10 @@ pub enum ArchiveProblem {
         /// The capability the delta would create.
         capability: String,
     },
+    /// The tool ran, found the specs already matched the change, and moved
+    /// nothing. Not a failure: the work is already in the specs, and only the
+    /// change folder is still sitting in `changes/`.
+    AlreadyInSync,
     /// Recognised as a failure, but not as one of the above. The user gets the
     /// tool's own words and no false promise of a fix.
     Unrecognised,
@@ -171,6 +175,20 @@ pub fn diagnose(change_id: &str, output: &str) -> ArchiveDiagnosis {
             // No safe automatic fix: which capability the requirement belongs to is a
             // judgement about intent, and guessing wrong would move someone's
             // requirement into the wrong spec.
+            fix_label: None,
+            fix_detail: None,
+        };
+    }
+
+    // The tool reports this on exit 0 having touched nothing, which the commit
+    // check then reads as "did not archive". Saying so plainly beats the blank
+    // "could not be archived" this used to fall through to.
+    if text.contains("already in sync") || text.contains("no files changed") {
+        return ArchiveDiagnosis {
+            problem: ArchiveProblem::AlreadyInSync,
+            summary: "This change's requirements are already in your specs.".into(),
+            detail: "The OpenSpec tool compared this change against your specs and found              nothing left to move, so it changed no files. The change folder is still in              changes/, which is why it does not look archived."
+                .into(),
             fix_label: None,
             fix_detail: None,
         };
@@ -253,7 +271,9 @@ pub fn repair(repo_root: &Path, problem: &ArchiveProblem) -> Result<(), AppError
             std::fs::remove_dir_all(&target)?;
             Ok(())
         }
-        ArchiveProblem::ModifiedInNewSpec { .. } | ArchiveProblem::Unrecognised => Err(
+        ArchiveProblem::ModifiedInNewSpec { .. }
+        | ArchiveProblem::AlreadyInSync
+        | ArchiveProblem::Unrecognised => Err(
             AppError::Other("There is nothing GitWyrm can safely fix for this one.".into()),
         ),
     }
@@ -271,6 +291,28 @@ Error: Archive '2026-07-30-add-ai-provider-surface' already exists.";
 app-windows: target spec does not exist; only ADDED requirements are allowed for new \
 specs. MODIFIED and RENAMED operations require an existing spec.\n\
 Aborted. No files were changed.";
+
+    /// The reported case. Exit 0 with nothing moved fell through to
+    /// `Unrecognised`, whose summary is a bare "could not be archived" -- which
+    /// is why the toast read "X was not archived. X could not be archived."
+    /// twice over and told the user nothing.
+    #[test]
+    fn an_already_synced_change_says_so_instead_of_nothing() {
+        const IN_SYNC: &str = "Task status: Complete
+Specs to update:
+  ai-provider: update
+Totals: + 0, ~ 0, - 0
+Specs already in sync; no files changed.";
+
+        let d = diagnose("add-thing", IN_SYNC);
+        assert_eq!(d.problem, ArchiveProblem::AlreadyInSync);
+        assert!(
+            !d.summary.contains("could not be archived"),
+            "the blank fallback is what made this useless: {}",
+            d.summary
+        );
+        assert!(d.summary.contains("already in your specs"), "{}", d.summary);
+    }
 
     /// The check that matters most. `--yes` silences the CLI's own guard, so a
     /// half-finished change archives with exit 0 and a warning nobody reads --

@@ -156,8 +156,15 @@ export function SpecRowActions({
           // The tool exited cleanly but nothing moved. Saying "Archived" here is
           // what made this look done while the change stayed put.
           if (attempt.kind === 'changedNothing') {
+            // The tool's own words are the only real explanation, and they were
+            // already being carried here and thrown away. Pointing at the Spec
+            // Desk instead was a dead end: that panel holds the output in local
+            // state, so opening it afterwards shows nothing at all.
+            const said = attempt.output?.trim()
             toast.error(`${change.id} was not archived.`, {
-              description: `${attempt.diagnosis.summary} Open the Spec Desk to see how to fix it.`,
+              description: said
+                ? `${attempt.diagnosis.summary} The OpenSpec tool said: ${said}`
+                : `${attempt.diagnosis.summary} The OpenSpec tool exited without saying why - see the log for details.`,
             })
             return
           }
