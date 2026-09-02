@@ -523,6 +523,9 @@ fn build_imported_session(
         active_execution_id: None,
         archived: false,
         graph_started_at: None,
+        preferred_provider: Some(adapter_id.to_string()),
+        preferred_mode: None,
+        preferred_team: None,
     };
 
     let mut session = AgentSession::new(header);

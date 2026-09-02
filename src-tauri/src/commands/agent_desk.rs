@@ -118,6 +118,9 @@ fn create_session_at(
         active_execution_id: None,
         archived: false,
         graph_started_at: None,
+        preferred_provider: None,
+        preferred_mode: None,
+        preferred_team: None,
     };
     let session = AgentSession::new(header);
 
@@ -538,6 +541,64 @@ pub async fn agent_session_rename(
     tauri::async_runtime::spawn_blocking(move || {
         update_session_at(&locks, &root, &session_id, |session| {
             session.header.title = title;
+        })
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Save the controls that belong to one chat. Keeping them beside the
+/// session, rather than in pane-local React state, prevents Split View from
+/// carrying one chat's authority or provider into another chat.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_set_preferences(
+    app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
+    session_id: SessionId,
+    mode: String,
+    team: String,
+    provider: Option<String>,
+) -> Result<UpdateSessionOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    let locks = locks.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        update_session_at(&locks, &root, &session_id, |session| {
+            session.header.preferred_mode = Some(mode);
+            session.header.preferred_team = Some(team);
+            session.header.preferred_provider = provider;
+        })
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Move a brand-new manual chat to another open project. The UI only offers
+/// this before the first message; the guard here keeps another caller from
+/// silently moving work that already has a transcript or execution history.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_set_project(
+    app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
+    session_id: SessionId,
+    repo_id: String,
+    repo_path: String,
+    repo_name: String,
+) -> Result<UpdateSessionOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    let locks = locks.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        update_session_at(&locks, &root, &session_id, |session| {
+            if session.messages.is_empty()
+                && session.executions.is_empty()
+                && matches!(session.header.source, SessionSource::Manual { .. })
+            {
+                session.header.repo_id = repo_id.clone();
+                session.header.repo_path = repo_path;
+                session.header.repo_name = repo_name;
+                session.header.source = SessionSource::Manual { repo_id };
+            }
         })
     })
     .await
@@ -3143,6 +3204,9 @@ mod tests {
             active_execution_id: None,
             archived: false,
             graph_started_at: graph_started_at.map(|s| s.to_string()),
+            preferred_provider: None,
+            preferred_mode: None,
+            preferred_team: None,
         }
     }
 
@@ -3392,6 +3456,9 @@ mod tests {
             active_execution_id: Some("exec-1".into()),
             archived: false,
             graph_started_at: None,
+            preferred_provider: None,
+            preferred_mode: None,
+            preferred_team: None,
         });
         session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
             "exec-1".into(),

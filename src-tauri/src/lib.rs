@@ -320,6 +320,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_desk::agent_session_list,
             commands::agent_desk::agent_session_get,
             commands::agent_desk::agent_session_rename,
+            commands::agent_desk::agent_session_set_preferences,
+            commands::agent_desk::agent_session_set_project,
             commands::agent_desk::agent_session_archive,
             commands::agent_desk::agent_session_delete,
             commands::agent_desk::agent_session_mark_read,

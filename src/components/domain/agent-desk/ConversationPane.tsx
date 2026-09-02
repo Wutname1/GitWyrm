@@ -686,7 +686,7 @@ export function ConversationPane({
           extracted to `SessionComposer` so this file's section-4/5 work
           (transcript, targets, auto-follow, history rail) is unaffected by
           composer changes and vice versa. */}
-      <SessionComposer sessionId={sessionId} isEmpty={messages.length === 0} />
+      <SessionComposer sessionId={sessionId} header={session?.header ?? null} isEmpty={messages.length === 0} />
     </div>
   )
 }

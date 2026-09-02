@@ -3156,6 +3156,32 @@ async agentSessionRename(sessionId: string, title: string) : Promise<Result<Upda
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Save the controls that belong to one chat. Keeping them beside the
+ * session, rather than in pane-local React state, prevents Split View from
+ * carrying one chat's authority or provider into another chat.
+ */
+async agentSessionSetPreferences(sessionId: string, mode: string, team: string, provider: string | null) : Promise<Result<UpdateSessionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_set_preferences", { sessionId, mode, team, provider }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Move a brand-new manual chat to another open project. The UI only offers
+ * this before the first message; the guard here keeps another caller from
+ * silently moving work that already has a transcript or execution history.
+ */
+async agentSessionSetProject(sessionId: string, repoId: string, repoPath: string, repoName: string) : Promise<Result<UpdateSessionOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_set_project", { sessionId, repoId, repoPath, repoName }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async agentSessionArchive(sessionId: string, archived: boolean) : Promise<Result<UpdateSessionOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_archive", { sessionId, archived }) };
@@ -3930,7 +3956,23 @@ updatedAt: string; unread: boolean; changedFileCount: number; activeExecutionId:
  * with a proposal that has zero ready-now helpers would otherwise look
  * identical to one that never proposed at all).
  */
-graphStartedAt?: string | null }
+graphStartedAt?: string | null; 
+/**
+ * The AI tool this chat should use. `None` keeps following GitWyrm's
+ * default. Stored on the compact header so the sidebar can identify a
+ * chat without loading its full transcript.
+ */
+preferredProvider?: string | null; 
+/**
+ * The last operating mode chosen for this chat. These are strings rather
+ * than execution-policy enums so old session files remain forward
+ * compatible when the policy grows another mode.
+ */
+preferredMode?: string | null; 
+/**
+ * The last team shape chosen for this chat (`solo` or `helpers`).
+ */
+preferredTeam?: string | null }
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
 /**

@@ -701,6 +701,9 @@ mod tests {
             active_execution_id: None,
             archived: false,
             graph_started_at: None,
+            preferred_provider: None,
+            preferred_mode: None,
+            preferred_team: None,
         }
     }
 

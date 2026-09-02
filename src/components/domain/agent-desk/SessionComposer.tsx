@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ArrowUp, Paperclip, Sparkles } from 'lucide-react'
-import { commands } from '@/lib/bindings'
+import { commands, type AgentSessionHeader } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError, log } from '@/lib/log'
@@ -19,6 +19,8 @@ import { cn } from '@/lib/utils'
 import { NewChatLanding } from './NewChatLanding'
 import { ProviderControl } from './ProviderControl'
 import { TeamShapeControl } from './TeamShapeControl'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
+import type { ChatProjectChoice } from './NewChatLanding'
 
 /**
  * The message composer: mode/team controls, the draft textarea, and Send.
@@ -52,10 +54,12 @@ import { TeamShapeControl } from './TeamShapeControl'
  */
 export function SessionComposer({
   sessionId,
+  header,
   /** True while this chat has nothing in it yet. */
   isEmpty = false,
 }: {
   sessionId: string | null
+  header: AgentSessionHeader | null
   isEmpty?: boolean
 }) {
   const qc = useQueryClient()
@@ -66,14 +70,17 @@ export function SessionComposer({
     if (sessionId) setDraftInStore(sessionId, text)
   }
   const [sending, setSending] = useState(false)
-  const [mode, setMode] = useState<ComposerMode>('Auto')
-  const [team, setTeam] = useState<ComposerTeam>('helpers')
+  const [mode, setMode] = useState<ComposerMode>(
+    header?.preferredMode === 'Ask' || header?.preferredMode === 'Plan' ? header.preferredMode : 'Auto'
+  )
+  const [team, setTeam] = useState<ComposerTeam>(header?.preferredTeam === 'solo' ? 'solo' : 'helpers')
   const [teamOpen, setTeamOpen] = useState(false)
   // `null` means "whatever the default is" -- deliberately not resolved to the
   // default tool's id, so a chat nobody gave a preference keeps following the
   // default if it ever changes.
-  const [provider, setProvider] = useState<string | null>(null)
+  const [provider, setProvider] = useState<string | null>(header?.preferredProvider ?? null)
   const [providerOpen, setProviderOpen] = useState(false)
+  const preferenceWrite = useRef<Promise<void>>(Promise.resolve())
   // Resolved to the tool's real name rather than its id: the landing would
   // otherwise read "copilot" where the rest of the app says "GitHub Copilot".
   const providerNames = useQuery({
@@ -84,6 +91,81 @@ export function SessionComposer({
   const providerLabel =
     providerNames.data?.providers.find((p) => p.id === provider)?.displayName ??
     (provider ?? 'Default AI')
+
+  const openRepos = useWorkspaceStore((s) => s.openRepos)
+  const recents = useWorkspaceStore((s) => s.recents)
+  const projects = useMemo<ChatProjectChoice[]>(() => {
+    const byPath = new Map<string, ChatProjectChoice>()
+    if (header) byPath.set(header.repoPath.toLowerCase(), { name: header.repoName, path: header.repoPath })
+    for (const repo of openRepos) byPath.set(repo.path.toLowerCase(), { name: repo.name, path: repo.path })
+    for (const recent of recents) {
+      if (!byPath.has(recent.path.toLowerCase())) byPath.set(recent.path.toLowerCase(), recent)
+    }
+    return [...byPath.values()]
+  }, [header, openRepos, recents])
+
+  // Controls are chat state, not pane state. A pane switch must restore the
+  // incoming chat's saved choices instead of carrying the previous chat's
+  // authority and provider across with the mounted composer component.
+  useEffect(() => {
+    setMode(header?.preferredMode === 'Ask' || header?.preferredMode === 'Plan' ? header.preferredMode : 'Auto')
+    setTeam(header?.preferredTeam === 'solo' ? 'solo' : 'helpers')
+    setProvider(header?.preferredProvider ?? null)
+  }, [header?.sessionId, header?.preferredMode, header?.preferredTeam, header?.preferredProvider])
+
+  const savePreferences = (nextMode: ComposerMode, nextTeam: ComposerTeam, nextProvider: string | null) => {
+    if (!sessionId) return
+    const targetSessionId = sessionId
+    // Keep rapid clicks in click order. Otherwise a slow first disk write can
+    // land after the user's newer choice and silently restore the old value.
+    preferenceWrite.current = preferenceWrite.current
+      .then(async () => {
+        const outcome = unwrap(
+          await commands.agentSessionSetPreferences(targetSessionId, nextMode, nextTeam, nextProvider)
+        )
+        if (outcome.kind === 'updated') {
+          void qc.invalidateQueries({ queryKey: keys.agentSession(targetSessionId) })
+          void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
+        } else {
+          throw new Error(outcome.kind)
+        }
+      })
+      .catch((e) => {
+        toast.error('Could not save that chat setting.', { description: describeError(e) })
+      })
+  }
+
+  const changeMode = (next: ComposerMode) => {
+    setMode(next)
+    savePreferences(next, team, provider)
+  }
+  const changeTeam = (next: ComposerTeam) => {
+    setTeam(next)
+    savePreferences(mode, next, provider)
+  }
+  const changeProvider = (next: string | null) => {
+    setProvider(next)
+    savePreferences(mode, team, next)
+  }
+
+  const changeProject = async (project: ChatProjectChoice) => {
+    if (!sessionId || !header || project.path.toLowerCase() === header.repoPath.toLowerCase()) return
+    try {
+      const target = unwrap(await commands.openRepo(project.path))
+      const outcome = unwrap(
+        await commands.agentSessionSetProject(sessionId, target.id, target.path, target.name)
+      )
+      if (outcome.kind === 'updated') {
+        void qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
+        void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
+        toast.success(`This chat now uses ${target.name}.`)
+      } else {
+        toast.error('Could not change this chat’s project.', { description: outcome.kind })
+      }
+    } catch (e) {
+      toast.error('Could not open that project.', { description: describeError(e) })
+    }
+  }
 
   const canSend = canSendComposerDraft({ draft, sessionId, sending })
 
@@ -177,15 +259,19 @@ export function SessionComposer({
       {isEmpty && (
         <NewChatLanding
           mode={mode}
-          onModeChange={setMode}
+          onModeChange={changeMode}
           team={team}
-          onTeamChange={setTeam}
+          onTeamChange={changeTeam}
           providerLabel={providerLabel}
           onOpenProviderPicker={() => setProviderOpen(true)}
+          projectPath={header?.repoPath ?? ''}
+          projectName={header?.repoName ?? 'Current project'}
+          projects={projects}
+          onProjectChange={(project) => void changeProject(project)}
         />
       )}
       <div className="rounded-lg border border-border bg-panel2 p-1.5">
-        <OperatingModeControl mode={mode} onChange={setMode} />
+        <OperatingModeControl mode={mode} onChange={changeMode} />
 
         <Textarea
           // Stable id so "New chat" can put the caret straight in here.
@@ -229,7 +315,7 @@ export function SessionComposer({
             {team === 'solo' ? 'One agent' : 'A lead agent, up to 3 helpers'}
           </span>
 
-          <TeamShapeControl team={team} onChange={setTeam} open={teamOpen} onOpenChange={setTeamOpen} />
+          <TeamShapeControl team={team} onChange={changeTeam} open={teamOpen} onOpenChange={setTeamOpen} />
 
           {/* Whether this chat is read-only is answered by the backend, not
               worked out here: the rule depends on the session's intent and
@@ -238,7 +324,7 @@ export function SessionComposer({
           <ProviderControl
             sessionId={sessionId}
             provider={provider}
-            onChange={setProvider}
+            onChange={changeProvider}
             open={providerOpen}
             onOpenChange={setProviderOpen}
           />

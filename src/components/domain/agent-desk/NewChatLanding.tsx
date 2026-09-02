@@ -1,7 +1,13 @@
-import { Bot, GitFork, Sparkles, User } from 'lucide-react'
+import { Bot, Check, ChevronDown, FolderGit2, GitFork, Sparkles, User } from 'lucide-react'
 import type { ComposerMode, ComposerTeam } from '@/lib/agentDeskComposer'
 import { MODE_NOTES } from '@/lib/agentDeskComposer'
 import { cn } from '@/lib/utils'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+
+export interface ChatProjectChoice {
+  path: string
+  name: string
+}
 
 /**
  * What a chat with nothing in it yet shows.
@@ -24,6 +30,10 @@ export function NewChatLanding({
   onTeamChange,
   providerLabel,
   onOpenProviderPicker,
+  projectPath,
+  projectName,
+  projects,
+  onProjectChange,
 }: {
   mode: ComposerMode
   onModeChange: (mode: ComposerMode) => void
@@ -32,6 +42,10 @@ export function NewChatLanding({
   /** The chosen tool's name, or the default's, already resolved. */
   providerLabel: string
   onOpenProviderPicker: () => void
+  projectPath: string
+  projectName: string
+  projects: ChatProjectChoice[]
+  onProjectChange: (project: ChatProjectChoice) => void
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-8">
@@ -46,6 +60,37 @@ export function NewChatLanding({
       </div>
 
       <div className="flex w-full max-w-lg flex-col gap-4">
+        <Section label="Which project?">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-left hover:bg-panel3"
+              >
+                <FolderGit2 size={15} className="flex-none text-accent-text" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium text-foreground">{projectName}</span>
+                  <span className="block truncate text-[10px] text-muted-foreground">{projectPath}</span>
+                </span>
+                <span className="text-2xs text-muted-foreground">Change</span>
+                <ChevronDown size={12} className="text-muted-foreground" aria-hidden />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[min(30rem,calc(100vw-3rem))]">
+              {projects.map((project) => (
+                <DropdownMenuItem key={project.path} onSelect={() => onProjectChange(project)}>
+                  <FolderGit2 />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{project.name}</span>
+                    <span className="block truncate text-[10px] text-muted-foreground">{project.path}</span>
+                  </span>
+                  {project.path.toLowerCase() === projectPath.toLowerCase() && <Check size={13} />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </Section>
+
         <Section label="How much can it do?">
           <div className="grid grid-cols-3 gap-1.5">
             {(['Ask', 'Plan', 'Auto'] as ComposerMode[]).map((m) => (

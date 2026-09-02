@@ -2,17 +2,9 @@ import { useState } from 'react'
 import {
   Archive,
   ArchiveRestore,
-  CircleAlert,
-  CircleDot,
-  FileCheck2,
-  FileDiff,
-  GitBranch,
-  GitCommitHorizontal,
-  GitPullRequest,
-  ListTree,
-  MessageSquareText,
   Pencil,
   Trash2,
+  Bot,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { AgentSessionHeader } from '@/lib/bindings'
@@ -27,21 +19,10 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { Input } from '@/components/ui/input'
+import { ProviderGlyph, providerLogo } from '@/lib/brandLogos'
 
 /** One session row's height, per tasks.md 3.1's stated 28-32px range. */
 export const SESSION_ROW_HEIGHT = 28
-
-const KIND_ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
-  manual: MessageSquareText,
-  issue: CircleDot,
-  pullRequest: GitPullRequest,
-  openSpecChange: FileCheck2,
-  openSpecTask: ListTree,
-  commit: GitCommitHorizontal,
-  diff: FileDiff,
-  workingChanges: GitBranch,
-  checkFailure: CircleAlert,
-}
 
 /**
  * One line in the session sidebar: leading kind icon, ellipsised title, and a
@@ -79,7 +60,6 @@ export function SessionRow({
   const [renaming, setRenaming] = useState(false)
   const [draftTitle, setDraftTitle] = useState(header.title)
 
-  const Icon = KIND_ICON[header.source.kind] ?? MessageSquareText
   const title = header.title.trim() || 'Untitled chat'
   const needsYou = header.state === 'needsInput'
   const working = header.state === 'working'
@@ -133,11 +113,17 @@ export function SessionRow({
             selected ? 'bg-soft text-foreground' : 'text-sub hover:bg-panel2 hover:text-foreground'
           )}
         >
-          <Icon
-            size={14}
-            className={cn('flex-none', selected ? 'text-accent-text' : 'text-muted-foreground')}
-            aria-label={sourceKindLabel(header.source.kind)}
-          />
+          <span
+            className={cn('flex h-[15px] w-[15px] items-center justify-center', selected ? 'text-accent-text' : 'text-muted-foreground')}
+            aria-label={header.preferredProvider ? `Uses ${header.preferredProvider}` : 'Uses the default AI'}
+            title={`${header.preferredProvider ?? 'Default AI'} · Started from ${sourceKindLabel(header.source.kind)}`}
+          >
+            {header.preferredProvider && providerLogo(header.preferredProvider) ? (
+              <ProviderGlyph id={header.preferredProvider} size={13} />
+            ) : (
+              <Bot size={13} aria-hidden />
+            )}
+          </span>
           <span
             className={cn(
               'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap',

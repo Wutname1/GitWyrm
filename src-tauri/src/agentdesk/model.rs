@@ -68,6 +68,19 @@ pub struct AgentSessionHeader {
     /// identical to one that never proposed at all).
     #[serde(default)]
     pub graph_started_at: Option<String>,
+    /// The AI tool this chat should use. `None` keeps following GitWyrm's
+    /// default. Stored on the compact header so the sidebar can identify a
+    /// chat without loading its full transcript.
+    #[serde(default)]
+    pub preferred_provider: Option<String>,
+    /// The last operating mode chosen for this chat. These are strings rather
+    /// than execution-policy enums so old session files remain forward
+    /// compatible when the policy grows another mode.
+    #[serde(default)]
+    pub preferred_mode: Option<String>,
+    /// The last team shape chosen for this chat (`solo` or `helpers`).
+    #[serde(default)]
+    pub preferred_team: Option<String>,
 }
 
 /// The full session file on disk: the header plus everything the transcript,
@@ -951,6 +964,9 @@ mod tests {
             active_execution_id: None,
             archived: false,
             graph_started_at: None,
+            preferred_provider: None,
+            preferred_mode: None,
+            preferred_team: None,
         }
     }
 

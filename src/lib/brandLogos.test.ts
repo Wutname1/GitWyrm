@@ -11,6 +11,12 @@ describe('providerLogo', () => {
     expect(providerLogo('  Anthropic ')).toBeTruthy()
   })
 
+  it('recognizes the short ids used by Agent Desk backends', () => {
+    expect(providerLogo('copilot')).toBe(providerLogo('github-copilot'))
+    expect(providerLogo('codex')).toBe(providerLogo('codex-cli'))
+    expect(providerLogo('claude')).toBe(providerLogo('anthropic'))
+  })
+
   /**
    * The catalog comes from models.dev and lists far more providers than we have
    * logos for, so a miss is ordinary and callers show the name alone.

@@ -51,8 +51,11 @@ const MONO_ICONS = [githubIcon, copilotIcon, openaiIcon, grokIcon, renovateIcon]
  */
 const providerLogos: Record<string, string> = {
   'github-copilot': copilotIcon,
+  copilot: copilotIcon,
   'codex-cli': openaiIcon,
+  codex: openaiIcon,
   anthropic: claudeIcon,
+  claude: claudeIcon,
   openai: openaiIcon,
   google: geminiIcon,
   deepseek: deepseekIcon,
