@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronRight, ExternalLink, Folder, GitBranch, Plus } from 'lucide-react'
+import { ChevronRight, ExternalLink, Folder, GitBranch, Plus, SlidersHorizontal } from 'lucide-react'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { cn } from '@/lib/utils'
 import type { RemoteBranchInfo, RemoteInfo } from '@/lib/bindings'
@@ -188,6 +188,7 @@ function RemoteNode({ remote }: { remote: RemoteInfo }) {
   const m = useGitMutations(repo?.id ?? null)
   const editRemotePrompt = useUiStore((s) => s.editRemotePrompt)
   const deleteRemotePrompt = useUiStore((s) => s.deleteRemotePrompt)
+  const openModal = useUiStore((s) => s.openModal)
   const tree = useMemo(
     () => buildBranchTreeFrom(remote.branches, (b) => b.name),
     [remote.branches]
@@ -243,6 +244,11 @@ function RemoteNode({ remote }: { remote: RemoteInfo }) {
               <ContextMenuSeparator />
             </>
           )}
+          <ContextMenuItem onSelect={() => openModal('branchManager')}>
+            <SlidersHorizontal />
+            Manage branches
+          </ContextMenuItem>
+          <ContextMenuSeparator />
           <ContextMenuItem onSelect={() => editRemotePrompt(remote.name)}>
             <Pencil />
             Edit
@@ -295,13 +301,13 @@ export function RemotesSection({
 }) {
   const open = useUiStore((s) => s.sectionOpen.remote)
   const toggleSection = useUiStore((s) => s.toggleSection)
+  const openModal = useUiStore((s) => s.openModal)
 
-  return (
-    <div className="group/section">
-      <div
-        onClick={() => toggleSection('remote')}
-        className="flex cursor-pointer select-none items-center gap-1.5 py-1.5 pl-2.5 pr-3 hover:bg-panel2"
-      >
+  const headerRow = (
+    <div
+      onClick={() => toggleSection('remote')}
+      className="flex cursor-pointer select-none items-center gap-1.5 py-1.5 pl-2.5 pr-3 hover:bg-panel2"
+    >
         <ChevronRight
           size={12}
           strokeWidth={2.4}
@@ -321,8 +327,28 @@ export function RemotesSection({
         >
           <Plus size={12} strokeWidth={2.4} />
         </TooltipButton>
-        <span className="ml-1.5 font-mono text-2xs text-muted-foreground">{remotes.length}</span>
-      </div>
+      <span className="ml-1.5 font-mono text-2xs text-muted-foreground">{remotes.length}</span>
+    </div>
+  )
+
+  return (
+    <div className="group/section">
+      {/* The hover buttons on this heading are easy to miss, so the same
+          actions answer a right-click -- the gesture people reach for first. */}
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{headerRow}</ContextMenuTrigger>
+        <ContextMenuContent className="w-48">
+          <ContextMenuItem onSelect={onManage}>
+            <Plus />
+            Add a remote
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => openModal('branchManager')}>
+            <SlidersHorizontal />
+            Manage branches
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {open && (
         <div className="pb-1">
           {remotes.length === 0 ? (

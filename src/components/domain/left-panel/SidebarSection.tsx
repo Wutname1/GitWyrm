@@ -1,5 +1,12 @@
 import type { ReactNode } from 'react'
 import { ChevronRight, Plus, RefreshCw, SlidersHorizontal } from 'lucide-react'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import type { SidebarSectionData, SectionItem } from '@/lib/types'
 import { useUiStore } from '@/stores/uiStore'
@@ -91,12 +98,16 @@ export function SidebarSection({
     return false
   }
 
-  return (
-    <div className="group/section">
-      <div
-        onClick={() => toggleSection(section.key)}
-        className="flex cursor-pointer select-none items-center gap-1.5 py-1.5 pl-2.5 pr-3 hover:bg-panel2"
-      >
+  // The header's own actions live in hover buttons, which are easy to miss and
+  // impossible to reach without a mouse hover. The same actions repeat here so
+  // right-clicking the heading -- the obvious gesture -- does something.
+  const headerMenu = onAdd || onManage
+
+  const headerRow = (
+    <div
+      onClick={() => toggleSection(section.key)}
+      className="flex cursor-pointer select-none items-center gap-1.5 py-1.5 pl-2.5 pr-3 hover:bg-panel2"
+    >
         <ChevronRight
           size={12}
           strokeWidth={2.4}
@@ -152,15 +163,43 @@ export function SidebarSection({
             <SlidersHorizontal size={11} strokeWidth={2.4} />
           </TooltipButton>
         )}
-        <span
-          className={cn(
-            'font-mono text-2xs text-muted-foreground',
-            onAdd || onRefresh || onManage ? 'ml-1.5' : 'ml-auto'
-          )}
-        >
-          {section.items.length}
-        </span>
-      </div>
+      <span
+        className={cn(
+          'font-mono text-2xs text-muted-foreground',
+          onAdd || onRefresh || onManage ? 'ml-1.5' : 'ml-auto'
+        )}
+      >
+        {section.items.length}
+      </span>
+    </div>
+  )
+
+  return (
+    <div className="group/section">
+      {headerMenu ? (
+        <ContextMenu>
+          {/* asChild is safe here: the child is a plain div, not a component
+              that would silently drop the ref and onContextMenu. */}
+          <ContextMenuTrigger asChild>{headerRow}</ContextMenuTrigger>
+          <ContextMenuContent className="w-48">
+            {onAdd && (
+              <ContextMenuItem onSelect={onAdd}>
+                <Plus />
+                {addLabel ?? 'Add'}
+              </ContextMenuItem>
+            )}
+            {onAdd && onManage && <ContextMenuSeparator />}
+            {onManage && (
+              <ContextMenuItem onSelect={onManage}>
+                <SlidersHorizontal />
+                {manageLabel ?? 'Manage'}
+              </ContextMenuItem>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
+      ) : (
+        headerRow
+      )}
       {open && (
         <div className="pb-1">
           {section.items.map((item) => {

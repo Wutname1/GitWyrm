@@ -299,7 +299,6 @@ export function BranchManagerModal() {
                               aria-label={`${row.name} on ${label}`}
                               onChange={() => {}}
                               onClick={(e) => {
-                                e.preventDefault()
                                 toggle(row, where, e.shiftKey)
                               }}
                               className="size-3 flex-none accent-[var(--gw-accent)]"
