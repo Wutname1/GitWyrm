@@ -670,6 +670,114 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  /**
+   * Delete several branches in one pass, locally and/or on their remote.
+   *
+   * Unlike cherryPickMany this does NOT stop at the first failure. Those steps
+   * build on each other, so continuing past a conflict would be wrong; branches
+   * are independent, and one branch held by a worktree is no reason to leave
+   * the other nine untouched. Every outcome is collected and reported together.
+   *
+   * Remote before local for each branch, matching deleteRemoteBranch: a failed
+   * local delete still leaves you able to retry, whereas the reverse can leave
+   * a published branch with no local copy to delete from.
+   */
+  const deleteBranchesMany = useMutation({
+    mutationFn: (
+      targets: { name: string; local: boolean; remote: string | null }[]
+    ) =>
+      asGitOperation(id, async () => {
+        const deleted: string[] = []
+        const held: { name: string; folder: string }[] = []
+        const failed: { name: string; reason: string }[] = []
+
+        for (const target of targets) {
+          try {
+            if (target.remote) {
+              await unwrap(await commands.deleteRemoteBranch(id, target.name, target.remote))
+            }
+            if (target.local) {
+              const outcome = unwrap(await commands.deleteBranch(id, target.name))
+              // A worktree holding the branch is a refusal, not a failure: the
+              // branch is still here and the user is told which folder has it.
+              if (outcome.kind === 'heldByWorktree') {
+                held.push({ name: target.name, folder: outcome.folder_name })
+                continue
+              }
+            }
+            deleted.push(target.name)
+          } catch (e) {
+            failed.push({ name: target.name, reason: (e as Error).message })
+            logQuietFailure(e as Error)
+          }
+        }
+        return { deleted, held, failed, total: targets.length }
+      }),
+    onSuccess: (r) => {
+      const trouble = r.held.length + r.failed.length
+      if (trouble === 0) {
+        toast(`Deleted ${plural(r.deleted.length, 'branch')}`)
+        return
+      }
+      if (r.deleted.length === 0 && r.held.length > 0 && r.failed.length === 0) {
+        toast.warning(
+          r.held.length === 1
+            ? `${r.held[0].name} is open in the ${r.held[0].folder} folder, so it was left alone`
+            : `${plural(r.held.length, 'branch')} are open in other folders, so they were left alone`
+        )
+        return
+      }
+      toast.warning(
+        `Deleted ${plural(r.deleted.length, 'branch')}; ${trouble} could not be deleted`,
+        {
+          description: [...r.held.map((h) => `${h.name}: open in ${h.folder}`), ...r.failed.map((f) => `${f.name}: ${f.reason}`)]
+            .slice(0, 3)
+            .join(' · '),
+        }
+      )
+    },
+    onError,
+    // Some deletions may have landed before a later one failed, so refresh on
+    // both outcomes or the sidebar would keep showing branches that are gone.
+    onSettled: () => invalidate(qc, id, REMOTE_REFS),
+  })
+
+  /**
+   * Bring several branches up to date without checking them out.
+   *
+   * Only fast-forwards, the same as the single-branch action -- a branch with
+   * its own commits needs a real merge and is reported rather than forced.
+   */
+  const pullBranchesMany = useMutation({
+    mutationFn: (branches: string[]) =>
+      asGitOperation(id, async () => {
+        const updated: string[] = []
+        const failed: { name: string; reason: string }[] = []
+        for (const branch of branches) {
+          try {
+            await unwrap(await commands.gitPullBranch(id, branch))
+            updated.push(branch)
+          } catch (e) {
+            failed.push({ name: branch, reason: (e as Error).message })
+            logQuietFailure(e as Error)
+          }
+        }
+        return { updated, failed, total: branches.length }
+      }),
+    onSuccess: (r) => {
+      if (r.failed.length === 0) {
+        toast(`Updated ${plural(r.updated.length, 'branch')}`)
+        return
+      }
+      toast.warning(
+        `Updated ${plural(r.updated.length, 'branch')}; ${r.failed.length} could not be updated`,
+        { description: r.failed.slice(0, 3).map((f) => `${f.name}: ${f.reason}`).join(' · ') }
+      )
+    },
+    onError,
+    onSettled: () => invalidate(qc, id, [...REFS, 'status']),
+  })
+
   const createTag = useMutation({
     mutationFn: async (args: {
       name: string
@@ -1608,6 +1716,8 @@ export function useGitMutations(repoId: string | null) {
     pushTag,
     deleteRemoteTag,
     deleteRemoteBranch,
+    deleteBranchesMany,
+    pullBranchesMany,
     revealInFileManager,
     openInEditor,
     openSolution,
