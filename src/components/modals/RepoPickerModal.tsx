@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Check,
+  ChevronDown,
   ChevronRight,
   ChevronUp,
   CircleDot,
@@ -39,6 +40,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { useGithubAuth, useGithubRepositories } from "@/hooks/useGithub";
@@ -60,13 +68,15 @@ import { isTauri } from "@/lib/env";
 import { describeError, log } from "@/lib/log";
 import { sortRepos as sortLibraryRepos } from "@/lib/repoSort";
 import { parseRepoUrlQuery } from "@/lib/repoUrlSearch";
-import { joinPath, normalizePath, pathKey, pathName } from "@/lib/paths";
+import { joinPath, normalizePath, pathKey, pathName, samePath } from "@/lib/paths";
 import { unwrap } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/uiStore";
 import {
+  primaryFirst,
   usePrimaryCodeFolder,
   useWorkspaceStore,
+  type CodeFolder,
   type RecentRepo,
   type RepoActivity,
   type RepoPickerSection,
@@ -1082,6 +1092,113 @@ function RepoDetails({
   );
 }
 
+/**
+ * The "where does this go" field: a path box, a dropdown of the folders the
+ * user already works in, and a Browse button.
+ *
+ * The dropdown is the point. Most people keep their projects in two or three
+ * places and switch between them constantly; without it, changing destination
+ * meant retyping a path or walking a file dialog every time. Watched folders
+ * are exactly that list, already curated, so they are offered directly.
+ *
+ * The box stays editable, because a destination that is not a watched folder
+ * has to remain possible.
+ */
+function DestinationField({
+  label,
+  value,
+  onChange,
+  folders,
+  browseTitle,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (path: string) => void;
+  folders: CodeFolder[];
+  /** Title on the native folder picker. */
+  browseTitle: string;
+  disabled: boolean;
+}) {
+  return (
+    <label className="grid gap-1.5 text-xs font-semibold text-sub">
+      {label}
+      <span className="flex gap-2">
+        <Input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={() => value.trim() && onChange(normalizePath(value))}
+          placeholder="Choose a parent folder"
+          className="h-9 bg-background font-mono text-xs font-normal"
+          disabled={disabled}
+        />
+        {folders.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-9 flex-none gap-1.5"
+                disabled={disabled}
+                aria-label="Choose one of your folders"
+              >
+                <FolderGit2 size={13} />
+                <ChevronDown size={12} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              <DropdownMenuLabel className="text-2xs text-muted-foreground">
+                Your folders
+              </DropdownMenuLabel>
+              {folders.map((folder) => {
+                const chosen = samePath(folder.path, value);
+                return (
+                  <DropdownMenuItem
+                    key={pathKey(folder.path)}
+                    onSelect={() => onChange(normalizePath(folder.path))}
+                    className="gap-2"
+                  >
+                    {folder.primary ? (
+                      <Star size={12} className="flex-none text-accent-text" />
+                    ) : (
+                      <Folder size={12} className="flex-none text-muted-foreground" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="block truncate text-xs">
+                        {folder.label ?? pathName(folder.path)}
+                      </span>
+                      <span className="block truncate font-mono text-2xs text-muted-foreground">
+                        {folder.path}
+                      </span>
+                    </span>
+                    {chosen && <Check size={12} className="flex-none text-accent-text" />}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="h-9 flex-none gap-1.5"
+          onClick={async () => {
+            const { open } = await import("@tauri-apps/plugin-dialog");
+            const directory = await open({ directory: true, title: browseTitle });
+            if (typeof directory === "string") onChange(normalizePath(directory));
+          }}
+          disabled={disabled}
+        >
+          <Folder size={13} />
+          Browse…
+        </Button>
+      </span>
+    </label>
+  );
+}
+
 function RepoPickerPanel({
   onDone,
   wiggleNonce = 0,
@@ -1177,6 +1294,26 @@ function RepoPickerPanel({
   const [initializing, setInitializing] = useState(false);
   const [projectPathStatus, setProjectPathStatus] =
     useState<ProjectPathStatus>("idle");
+
+  /**
+   * Folders offered in the destination dropdown: the watched ones, starred
+   * first. The last place the user actually saved a copy joins the list when it
+   * is not among them, so a one-off destination is still one click away the
+   * next time rather than something to retype.
+   */
+  const destinationFolders = useMemo(() => {
+    const watched = primaryFirst(codeFolders);
+    if (
+      !cloneDirectory?.trim() ||
+      watched.some((folder) => samePath(folder.path, cloneDirectory))
+    ) {
+      return watched;
+    }
+    return [
+      ...watched,
+      { path: normalizePath(cloneDirectory), label: null, primary: false },
+    ];
+  }, [cloneDirectory, codeFolders]);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const selectionAnchor = useRef<string | null>(null);
@@ -1919,44 +2056,14 @@ function RepoPickerPanel({
           autoFocus={autoFocus}
         />
       </label>
-      <label className="grid gap-1.5 text-xs font-semibold text-sub">
-        Save in
-        <span className="flex gap-2">
-          <Input
-            value={cloneDestination}
-            onChange={(event) =>
-              setCloneDestination(event.target.value)
-            }
-            onBlur={() =>
-              cloneDestination.trim() &&
-              setCloneDestination(normalizePath(cloneDestination))
-            }
-            placeholder="Choose a parent folder"
-            className="h-9 bg-background font-mono text-xs font-normal"
-            disabled={cloning}
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="h-9 gap-1.5"
-            onClick={async () => {
-              const { open } =
-                await import("@tauri-apps/plugin-dialog");
-              const directory = await open({
-                directory: true,
-                title: "Copy repository into…",
-              });
-              if (typeof directory === "string")
-                setCloneDestination(normalizePath(directory));
-            }}
-            disabled={cloning}
-          >
-            <Folder size={13} />
-            Browse…
-          </Button>
-        </span>
-      </label>
+      <DestinationField
+        label="Save in"
+        value={cloneDestination}
+        onChange={setCloneDestination}
+        folders={destinationFolders}
+        browseTitle="Copy repository into…"
+        disabled={cloning}
+      />
       <label className="grid gap-1.5 text-xs font-semibold text-sub">
         Folder name
         <Input
@@ -2739,42 +2846,14 @@ function RepoPickerPanel({
                   autoFocus
                 />
               </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-sub">
-                Create in
-                <span className="flex gap-2">
-                  <Input
-                    value={newDestination}
-                    onChange={(event) => setNewDestination(event.target.value)}
-                    onBlur={() =>
-                      newDestination.trim() &&
-                      setNewDestination(normalizePath(newDestination))
-                    }
-                    placeholder="Choose a parent folder"
-                    className="h-9 bg-background font-mono text-xs font-normal"
-                    disabled={initializing}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-9 gap-1.5"
-                    onClick={async () => {
-                      const { open } =
-                        await import("@tauri-apps/plugin-dialog");
-                      const directory = await open({
-                        directory: true,
-                        title: "Create repository in…",
-                      });
-                      if (typeof directory === "string")
-                        setNewDestination(normalizePath(directory));
-                    }}
-                    disabled={initializing}
-                  >
-                    <Folder size={13} />
-                    Browse…
-                  </Button>
-                </span>
-              </label>
+              <DestinationField
+                label="Create in"
+                value={newDestination}
+                onChange={setNewDestination}
+                folders={destinationFolders}
+                browseTitle="Create repository in…"
+                disabled={initializing}
+              />
               <fieldset className="grid gap-2">
                 <legend className="mb-1 text-xs font-semibold text-sub">
                   Starter
