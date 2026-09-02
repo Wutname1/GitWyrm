@@ -2008,9 +2008,17 @@ async repairWorktree(repoId: string, newPath: string | null) : Promise<Result<nu
     else return { status: "error", error: e  as any };
 }
 },
-async gitFetch(repoId: string) : Promise<Result<null, string>> {
+/**
+ * Fetch every remote.
+ * 
+ * `background` is true when a timer started this rather than the user. It keeps
+ * the auto-fetch sweep from opening a credential window over whatever they are
+ * doing: an unauthenticated background fetch fails silently and is logged,
+ * while a fetch the user asked for may still prompt.
+ */
+async gitFetch(repoId: string, background: boolean) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("git_fetch", { repoId }) };
+    return { status: "ok", data: await TAURI_INVOKE("git_fetch", { repoId, background }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2414,6 +2422,39 @@ async readRepoReadme(path: string) : Promise<Result<string | null, string>> {
 }
 },
 /**
+ * Finds which of `paths` already have `url` as one of their remotes.
+ * 
+ * Answers "do I already have this?" when a clone URL is pasted into the
+ * picker's search box, so the user opens the copy on disk instead of making a
+ * second one. Matching goes through `git::remote_url`, so the pasted URL does
+ * not have to be written the same way the repository has it: `.git` or not,
+ * https or ssh, any case.
+ */
+async findReposWithRemote(url: string, paths: string[]) : Promise<Result<RemoteMatch[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("find_repos_with_remote", { url, paths }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Everything the details panel shows about one repository, optionally after a
+ * fetch so the ahead/behind numbers are not stale.
+ * 
+ * The host counts reuse the same per-repository counter the library scan uses,
+ * so a repository selected here and a repository scanned in bulk can never
+ * report different numbers.
+ */
+async repoSnapshot(path: string, fetch: boolean) : Promise<Result<RepoSnapshot | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("repo_snapshot", { path, fetch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether the right-click entry is currently registered.
  * 
  * Reports `true` only when every target is present, so a half-written state
@@ -2546,6 +2587,23 @@ async generateCommitMessage(repoId: string, provider: string, model: string) : P
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Ask the configured model to resolve one conflicted file.
+ * 
+ * Returns the proposed file text and writes nothing: the caller loads it into
+ * the editor for review, and the existing `resolve_conflict` command stages it
+ * only once the user accepts. Keeping the model out of the write path is
+ * deliberate -- a resolution is a claim about intent that only the author can
+ * confirm, and a wrong one fails silently.
+ */
+async aiResolveConflict(repoId: string, path: string, provider: string, model: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ai_resolve_conflict", { repoId, path, provider, model }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async generateCommits(repoId: string, provider: string, model: string, commitCount: number, specialInstructions: string) : Promise<Result<AiCreatedCommit[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("generate_commits", { repoId, provider, model, commitCount, specialInstructions }) };
@@ -2566,6 +2624,21 @@ async generateCommits(repoId: string, provider: string, model: string, commitCou
 async hostingProviders() : Promise<Result<HostProviderInfo[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("hosting_providers") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Whether the GitHub CLI is installed and signed in.
+ * 
+ * Reported rather than inferred so the settings row can say which of the two
+ * is missing: "install it" and "sign into it" are different next steps, and a
+ * single "unavailable" would send half the users to the wrong one.
+ */
+async ghCliStatus() : Promise<Result<GhCliStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("gh_cli_status") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2687,6 +2760,23 @@ async githubListPrs(repoId: string | null, owner: string, repo: string) : Promis
 async githubListIssues(repoId: string | null, owner: string, repo: string) : Promise<Result<IssueSummary[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("github_list_issues", { repoId, owner, repo }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Counts open pull requests and issues for a list of repositories on disk.
+ * 
+ * Reads `origin` straight off each path rather than going through RepoManager:
+ * the picker's repositories are closed, so there is no open handle to ask.
+ * A repository that is not on a known host, or whose host errors, comes back
+ * with `checked: false` instead of failing the whole scan -- one unreachable
+ * remote must not cost the user every other count.
+ */
+async githubScanRepos(paths: string[]) : Promise<Result<RepoActivityCount[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("github_scan_repos", { paths }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -4106,6 +4196,12 @@ export type ArchiveProblem =
  */
 { kind: "modifiedInNewSpec"; capability: string } | 
 /**
+ * The tool ran, found the specs already matched the change, and moved
+ * nothing. Not a failure: the work is already in the specs, and only the
+ * change folder is still sitting in `changes/`.
+ */
+{ kind: "alreadyInSync" } | 
+/**
  * Recognised as a failure, but not as one of the above. The user gets the
  * tool's own words and no false promise of a fix.
  */
@@ -4616,6 +4712,18 @@ theirs: string;
  */
 merged: string; 
 /**
+ * Marker text regenerated from the index stages in diff3 style.
+ * 
+ * Not the same as `merged`, which is whatever is on disk. Git's default
+ * marker style merges adjacent edits into one block that also swallows the
+ * untouched lines between them; diff3 uses the common ancestor to keep
+ * them separate, which is what makes per-hunk resolution worth offering.
+ * Generated here rather than read from the file so it does not depend on
+ * the user's `merge.conflictStyle`, nor on the file still being pristine.
+ * Empty when the file is binary or the three-way merge could not be run.
+ */
+conflict_text: string; 
+/**
  * Any side is binary/undecodable; only ours/theirs whole-file choice is safe.
  */
 binary: boolean; 
@@ -4633,6 +4741,18 @@ theirs_deleted: boolean }
  * copy is silently preferred.
  */
 export type ConflictResolution = { kind: "keepHelper" } | { kind: "keepIntegrated" } | { kind: "useMerged"; text: string }
+/**
+ * How the conflict view presents a conflicted file.
+ */
+export type ConflictViewMode = 
+/**
+ * Only the contested regions, resolved one at a time.
+ */
+"hunks" | 
+/**
+ * The whole file, for conflicts that need the surrounding context.
+ */
+"file"
 /**
  * Something attached to a session's context beyond the messages themselves:
  * a pinned file, a pasted note, a linked OpenSpec task. Kept intentionally
@@ -5247,6 +5367,18 @@ export type GetSessionOutcome = { kind: "found"; session: AgentSession } |
  */
 { kind: "unavailable"; detail: string }
 /**
+ * What the GitHub CLI fallback can currently do, for the settings row.
+ */
+export type GhCliStatus = { 
+/**
+ * `gh` was found on this machine.
+ */
+installed: boolean; 
+/**
+ * `gh` is installed and has a working login, so the fallback can be used.
+ */
+signed_in: boolean }
+/**
  * Who git thinks the user is. Either field can be empty when git has never
  * been set up, which is the normal state on a fresh machine.
  */
@@ -5259,7 +5391,16 @@ export type GitIdentitySnapshot = { name: string; email: string; signingKey: str
  * True when the repository's own config sets the identity.
  */
 overridden: boolean }
-export type GitProgressPayload = { repo_id: string; operation: string; line: string }
+export type GitProgressPayload = { repo_id: string; operation: string; line: string; 
+/**
+ * Steps finished, when the operation reports countable progress. `None`
+ * for git's own stderr lines, which are free text.
+ */
+completed: number | null; 
+/**
+ * Total steps, when known. `None` means show an indeterminate indicator.
+ */
+total: number | null }
 export type GithubRepoRef = { owner: string; repo: string }
 export type GithubRepository = { full_name: string; clone_url: string; html_url: string; description: string | null; private: boolean; pushed_at: string; starred: boolean }
 /**
@@ -6269,6 +6410,18 @@ provider: RemoteProvider;
  */
 web_base: string | null }
 /**
+ * A local repository that already has the remote the user pasted.
+ */
+export type RemoteMatch = { name: string; path: string; 
+/**
+ * The name of the matching remote, e.g. `origin`.
+ */
+remote: string; 
+/**
+ * That remote's URL exactly as the repository has it configured.
+ */
+url: string }
+/**
  * The hosting product behind a remote. `SelfHosted` means the URL parsed fine
  * but the host isn't one we can build provider-specific deep links for.
  */
@@ -6295,8 +6448,14 @@ export type RemoveOutcome =
  * The worktree is gone. `branch` is what it had checked out, so the caller
  * can offer to delete it as a follow-on; `branch_merged` says whether that
  * offer is safe to make.
+ * 
+ * `branch_remote` names the remote the branch is published to, when it has
+ * an upstream. It is what lets the follow-on offer include "and on origin"
+ * rather than leaving a published branch behind that the user has to go
+ * and find later. None means the branch lives only on this computer, and
+ * the remote half of the offer is not shown at all.
  */
-{ kind: "removed"; branch: string | null; branch_merged: boolean } | 
+{ kind: "removed"; branch: string | null; branch_merged: boolean; branch_remote: string | null } | 
 /**
  * Refused: there is uncommitted work in it. Ask, then call again with a
  * decision.
@@ -6314,6 +6473,19 @@ export type RemoveOutcome =
  * lie.
  */
 { kind: "partiallyRemoved"; path: string }
+/**
+ * Open pull request and issue counts for one repository on disk.
+ * 
+ * `path` is echoed back exactly as it came in so the picker can match the row
+ * it asked about without re-normalising anything.
+ */
+export type RepoActivityCount = { path: string; prs: number; issues: number; 
+/**
+ * None when the repository has no remote on a host GitWyrm integrates
+ * with, or the host could not be reached. Distinct from a count of zero,
+ * which means the host answered and there is genuinely nothing open.
+ */
+checked: boolean }
 export type RepoChangedPayload = { repo_id: string }
 /**
  * The three numbers a repository tab badge shows.
@@ -6337,6 +6509,55 @@ behind: number;
 uncommitted: number }
 export type RepoIcon = { source_path: string; label: string; data_url: string; custom: boolean }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
+/**
+ * Headline numbers for one repository the picker has selected.
+ * 
+ * Every field is best-effort: a repository that cannot be opened, or a host
+ * that cannot be reached, reports what it could and leaves the rest empty
+ * rather than failing the whole panel.
+ */
+export type RepoSnapshot = { 
+/**
+ * Local branches.
+ */
+branches: number; 
+/**
+ * Remote-tracking branches, across every remote.
+ */
+remote_branches: number; 
+/**
+ * Tags.
+ */
+tags: number; 
+/**
+ * Current branch, or None when HEAD is detached or unreadable.
+ */
+head_branch: string | null; 
+/**
+ * How far the current branch leads its upstream. None when it has none.
+ */
+ahead: number | null; 
+/**
+ * How far the current branch trails its upstream. None when it has none.
+ */
+behind: number | null; 
+/**
+ * Files with uncommitted changes, staged or not.
+ */
+changes: number; 
+/**
+ * Open pull requests, or None when the host was not reached.
+ */
+prs: number | null; 
+/**
+ * Open issues, or None when the host does not have them or was not reached.
+ */
+issues: number | null; 
+/**
+ * Whether the fetch this snapshot asked for actually ran. False means the
+ * counts are from whatever was already on disk.
+ */
+fetched: boolean }
 export type RepositoryStarter = "blank" | "node" | "rust" | "csharp" | "all_in_one"
 export type RequestRevisionOutcome = { kind: "requested"; record: ResultRecord } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string }
 /**
@@ -6995,6 +7216,10 @@ left_panel_width?: number;
  */
 right_panel_width?: number; 
 /**
+ * Saved width of the repository details pane in the picker, in logical pixels.
+ */
+repo_details_width?: number; 
+/**
  * Saved height of the commit details drawer in logical pixels.
  */
 drawer_height?: number; 
@@ -7007,6 +7232,10 @@ drawer_commit_list_width?: number;
  */
 changes_split?: number; 
 /**
+ * Resting height of the commit description box, counted in lines (2-12).
+ */
+commit_description_lines?: number; 
+/**
  * Percent of the conflict view's width given to the OURS pane (20-80).
  */
 conflict_side_split?: number; 
@@ -7014,6 +7243,10 @@ conflict_side_split?: number;
  * Percent of the conflict view's height given to OURS/THEIRS (20-80).
  */
 conflict_result_split?: number; 
+/**
+ * Whether the conflict view shows hunks or the whole file.
+ */
+conflict_view_mode?: ConflictViewMode; 
 /**
  * Whether change size appears below the message or in its own column.
  */
@@ -7026,6 +7259,10 @@ show_change_indicator?: boolean;
  * Show exact added and removed line counts beside the size bar.
  */
 show_change_line_counts?: boolean; 
+/**
+ * Draw each commit's author picture as its node in the commit graph.
+ */
+show_graph_avatars?: boolean; 
 /**
  * Default action for the commit button: "commit" or "commit_push". None
  * falls back to plain commit. Validated on the frontend.
@@ -7075,6 +7312,22 @@ openspec_archive_without_asking?: boolean;
  */
 openspec_delete_without_asking?: boolean; 
 /**
+ * What to do with a worktree's branch once the folder is removed: "ask"
+ * (the default), "keep", or "delete". Set by the "Remember my choice" box
+ * in that dialog, and resettable from the Worktrees settings screen.
+ * 
+ * A remembered "delete" still never deletes a branch holding work that
+ * exists nowhere else -- an unmerged branch falls back to asking, because
+ * the remembered answer was given about a different, safe situation.
+ */
+worktree_branch_cleanup?: string; 
+/**
+ * Whether the "and delete it on the remote too" box in that dialog starts
+ * checked. Off by default: deleting a published branch affects everyone
+ * else on it, so it is opted into rather than out of.
+ */
+worktree_branch_delete_on_remote?: boolean; 
+/**
  * Reopen the tabs from the last session on launch. On by default; when off
  * the app starts with no repository open.
  */
@@ -7084,6 +7337,12 @@ restore_tabs?: boolean;
  * remote branches are current without the user asking. On by default.
  */
 auto_fetch?: boolean; 
+/**
+ * Fall back to the GitHub CLI when an organization blocks GitWyrm's own
+ * sign-in. On by default: the alternative is an empty pull request panel
+ * the user has no way to fix from inside the app.
+ */
+gh_cli_fallback?: boolean; 
 /**
  * Show the short explanations that teach a feature in the sidebar and
  * panels. On by default so the features get found; off leaves the controls
@@ -7240,6 +7499,17 @@ pinned_saved_group_ids?: string[] | null;
  * Repository-picker sections the user has hidden.
  */
 repo_picker_collapsed_sections?: string[]; 
+/**
+ * How the repository picker's table is sorted: "name", "activity",
+ * "branch", each optionally suffixed ":desc". None sorts by name.
+ * Validated on the frontend.
+ */
+repo_picker_sort?: string | null; 
+/**
+ * When every repository was last checked for issues and pull requests,
+ * as an RFC 3339 timestamp. None means never scanned.
+ */
+repo_scan_at?: string | null; 
 /**
  * What to do about local-only tags after a push: "ask", "always", "never".
  * None means ask. Validated on the frontend.

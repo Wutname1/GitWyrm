@@ -241,6 +241,7 @@ fn find_executable(spec: &AgentSpec) -> Option<PathBuf> {
 fn run_version(spec: &AgentSpec, path: &PathBuf) -> Option<String> {
     let mut cmd = Command::new(path);
     cmd.args(spec.version_args);
+    crate::process_env::scrub_bundled_env(&mut cmd);
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
 

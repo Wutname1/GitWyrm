@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import {
   COLUMNS,
@@ -43,6 +43,8 @@ export function GraphHeader({ scrollRef }: { scrollRef?: React.Ref<HTMLDivElemen
   const resetColumnWidth = useWorkspaceStore((s) => s.resetColumnWidth);
   const setChangeSizeDisplay = useWorkspaceStore((s) => s.setChangeSizeDisplay);
   const setShowChangeIndicator = useWorkspaceStore((s) => s.setShowChangeIndicator);
+  const showGraphAvatars = useWorkspaceStore((s) => s.showGraphAvatars);
+  const setShowGraphAvatars = useWorkspaceStore((s) => s.setShowGraphAvatars);
 
   const [dragId, setDragId] = useState<ColumnId | null>(null);
   const [overId, setOverId] = useState<ColumnId | null>(null);
@@ -136,7 +138,7 @@ export function GraphHeader({ scrollRef }: { scrollRef?: React.Ref<HTMLDivElemen
           const isVisible = isChanges ? !effectiveHidden.includes(id) : !hiddenSet.has(id);
           // Never let the user hide the last remaining column.
           const isLastVisible = isVisible && visible.length === 1;
-          return (
+          const item = (
             <ContextMenuCheckboxItem
               key={id}
               checked={isVisible}
@@ -159,6 +161,28 @@ export function GraphHeader({ scrollRef }: { scrollRef?: React.Ref<HTMLDivElemen
             >
               {COLUMNS[id].label}
             </ContextMenuCheckboxItem>
+          );
+
+          // Avatars are a property of the graph column rather than a column of
+          // their own, so the toggle is indented beneath it -- and hidden with
+          // it, since there is nothing to draw pictures on while it is off.
+          if (id !== 'graph') return item;
+          return (
+            <Fragment key={id}>
+              {item}
+              {isVisible && (
+                <ContextMenuCheckboxItem
+                  checked={showGraphAvatars}
+                  className="pl-12 [&>span:first-child]:left-6"
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setShowGraphAvatars(!showGraphAvatars);
+                  }}
+                >
+                  Avatars
+                </ContextMenuCheckboxItem>
+              )}
+            </Fragment>
           );
         })}
         <ContextMenuSeparator />

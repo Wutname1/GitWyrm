@@ -106,6 +106,9 @@ fn responds_to_version(program: &str) -> bool {
     let mut cmd = Command::new(program);
     cmd.arg("--version");
 
+    // Hand this child the system's libraries, not the AppImage's.
+    crate::process_env::scrub_bundled_env(&mut cmd);
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -302,6 +305,9 @@ pub fn resolve_ssh_keygen() -> Resolved {
 fn responds_to_help(program: &str) -> bool {
     let mut cmd = Command::new(program);
     cmd.arg("-?");
+
+    // Hand this child the system's libraries, not the AppImage's.
+    crate::process_env::scrub_bundled_env(&mut cmd);
 
     #[cfg(windows)]
     {

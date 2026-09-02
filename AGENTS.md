@@ -76,6 +76,37 @@ the prefix, and publishes it. Tags are read from the subject *and the body*.
 Write the first line for a user ("what changed for me?"), plain language,
 ~6th-grade reading level. Put technical detail - and the tags - in the body.
 
+**Who reads it:** someone with no idea this codebase exists and no interest in
+it - a middle schooler, or a math teacher who does not care how any of it works.
+They want one thing: **what bug, feature, or annoyance just got fixed or
+improved?** They are not impressed by the hard part. They do not know what a
+component is. They will never read the body.
+
+So the question before committing is never "does this describe the change?" It
+is **"would that person know what changed for them?"** Write it in everyday
+words - what they can now do, or what stopped going wrong. Every technical
+detail (component names, APIs, file paths, the how) goes in the body.
+
+**Never put these in a subject line:** component or class names
+(`InlineComposer`, `AuraContainer`), API or function names, file paths, internal
+jargon ("rehydration", "debounce", "memoize", "state driver", "keyboard-aware"),
+adjective piles that describe the code instead of the effect, or the names of
+other apps and addons.
+
+**Rewrites - the left column is what NOT to write:**
+
+| Don't | Do |
+| --- | --- |
+| `new: Keyboard-aware inline club composer rises above keyboard` | `new: The keyboard no longer covers the box you type in` |
+| `fixes: Debounce progress sync to avoid race on cold reload` | `fixes: Stop losing your place when the app restarts` |
+| `improved: Refactor AuraContainer to use declarative filters` | `improved: Buff icons update faster and use less memory` |
+| `new: Add RatingPromptActions component to notification tray` | `new: Rate a book right after you finish it` |
+| `fixes: Null-guard getBookByMediaId in absdb resolver` | `fixes: Books missing from your library no longer break the page` |
+
+Two tests. Read the subject to someone who does not code: if they ask "what does
+that mean?", it is not ready. And if it names something they have never seen on
+their own screen, it is not ready.
+
 ### Prefix -> changelog section
 
 Use one of these prefixes. The prefix is stripped from the published text.

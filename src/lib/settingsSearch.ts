@@ -124,6 +124,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['worktree', 'multiple branches', 'advanced'],
   },
   {
+    id: 'worktree-branch-cleanup',
+    section: 'general',
+    label: 'Branch left behind by a removed worktree',
+    hint: 'What happens to the branch when you remove the folder it was in.',
+    keywords: ['worktree', 'branch', 'delete', 'remove', 'cleanup', 'ask again', 'remember'],
+  },
+  {
     id: 'tutorial',
     section: 'general',
     label: 'Hands-on tour',
@@ -154,22 +161,6 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     // The words someone types when the text itself is the complaint, not the
     // feature it describes.
     keywords: ['tips', 'hints', 'help text', 'explanations', 'hide', 'dismiss', 'text', 'wordy', 'verbose'],
-  },
-  {
-    id: 'crash-reports',
-    section: 'behavior',
-    label: 'Crash reports',
-    hint: 'Send a report when GitWyrm hits an error, so the problem can be fixed.',
-    // "privacy", "telemetry" and "opt out" are what someone types when they
-    // want this off but do not know what we called it.
-    keywords: ['crash', 'error', 'report', 'sentry', 'privacy', 'telemetry', 'opt out', 'tracking'],
-  },
-  {
-    id: 'usage-telemetry',
-    section: 'behavior',
-    label: 'Usage data',
-    hint: 'Send timings so slow parts of GitWyrm can be found and fixed.',
-    keywords: ['usage', 'telemetry', 'analytics', 'performance', 'timing', 'privacy', 'opt out', 'tracking', 'data'],
   },
   {
     id: 'context-menu',
@@ -473,6 +464,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['lines changed', 'diff size', 'bar', 'insertions', 'deletions'],
   },
   {
+    id: 'graph-avatars',
+    section: 'appearance',
+    label: 'Commit author pictures',
+    hint: 'Show who wrote each commit as a picture in the graph.',
+    keywords: ['avatar', 'gravatar', 'photo', 'face', 'author', 'graph', 'dots', 'profile'],
+  },
+  {
     id: 'changes-view',
     section: 'appearance',
     label: 'Changed files',
@@ -568,6 +566,23 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     label: 'Deleting tags (this repository)',
     hint: 'Whether deleting a tag here also removes it from the remote.',
     keywords: ['tag', 'delete', 'remote', 'override'],
+  },
+
+  {
+    id: 'telemetry-level',
+    section: 'logs',
+    label: 'What GitWyrm reports',
+    hint: 'Choose how much GitWyrm sends: nothing, crashes and a daily count, or also speed data.',
+    // The words someone types when they want this off but do not know what we
+    // called it.
+    keywords: ['privacy', 'telemetry', 'crash', 'error', 'report', 'sentry', 'usage', 'analytics', 'timing', 'opt out', 'tracking', 'data', 'stats'],
+  },
+  {
+    id: 'legal-links',
+    section: 'about',
+    label: 'Privacy and terms',
+    hint: 'Open the privacy policy or the terms of service on gitwyrm.com.',
+    keywords: ['privacy', 'policy', 'terms', 'legal', 'license', 'tos', 'service'],
   },
 
   // ------------------------------------------------------------------ logs

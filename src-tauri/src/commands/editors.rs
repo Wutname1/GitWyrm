@@ -116,6 +116,8 @@ fn launcher(program: &str, args: &[&str]) -> Command {
     {
         let mut c = Command::new(program);
         c.args(args);
+        // The editor is a system app - it must not inherit our bundled libs.
+        crate::process_env::scrub_bundled_env(&mut c);
         c
     }
 }

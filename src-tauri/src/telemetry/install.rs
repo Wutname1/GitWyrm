@@ -29,11 +29,18 @@
 //! - **Once a day, by not asking.** The last ping date is stored locally; if it
 //!   is today, no request is made at all. The dedupe is the absence of a call,
 //!   not a call the server throws away.
+//! - **Unless the build changed.** The daily dedupe is also keyed on the version
+//!   and channel that were last reported. Otherwise an install that updates
+//!   after its ping keeps being counted on the old version until tomorrow, and a
+//!   release looks like it has no users on the day it ships.
 //! - **Never blocks or interrupts.** Spawned detached, short timeout, every
 //!   failure swallowed at debug level. A telemetry endpoint being down must
 //!   never be something the user can perceive.
 //! - **Never in development.** Debug builds return before doing anything, so
-//!   local runs stay out of the counts.
+//!   local runs stay out of the counts. Release-mode builds made outside CI are
+//!   caught too: only the release workflow stamps a real version over the
+//!   committed `0.0.0` placeholder, so that value means "nobody shipped this"
+//!   and is never reported.
 
 use crate::settings::{self, TelemetryLevel, UpdateChannel};
 use serde::Serialize;
@@ -41,6 +48,11 @@ use std::path::{Path, PathBuf};
 
 /// Where the ping goes. Same host as the changelog API the app already reads.
 const ENDPOINT: &str = "https://gitwyrm.com/api/v1/installs";
+
+/// The version committed to `Cargo.toml`. The release workflow overwrites it
+/// with the tag before building, so a binary still carrying it was built
+/// locally in release mode and is not a deployed build.
+const UNSTAMPED_VERSION: &str = "0.0.0";
 
 /// How long to wait before giving up. Short: nothing depends on the result, and
 /// a hung request should not keep a task alive across a whole session.
@@ -66,6 +78,14 @@ struct InstallState {
     /// being `None`, which is also the state after a first ping that failed.
     #[serde(default)]
     first_reported: bool,
+    /// The version reported by the last successful ping. `None` for state written
+    /// before this field existed, which counts as "changed" so the first launch
+    /// after updating re-reports.
+    #[serde(default)]
+    last_version: Option<String>,
+    /// The channel reported by the last successful ping.
+    #[serde(default)]
+    last_channel: Option<String>,
 }
 
 /// The payload. Flat and small on purpose: every field is one someone could
@@ -182,6 +202,21 @@ pub fn ping_on_launch(app: &tauri::AppHandle) {
     });
 }
 
+/// Whether a ping should be sent, given what was last reported.
+///
+/// Split out from the request so the dedupe can be tested without a network:
+/// this is the whole of the rule, and `send_if_due` does nothing but obey it.
+///
+/// An app restarted six times a day is one active install, and the way to make
+/// it one is to not make the other five requests. An update is the one thing
+/// that beats that: the count exists to say which build is deployed, and after
+/// an update the stored answer is wrong for the rest of the day.
+fn is_due(state: &InstallState, today: &str, version: &str, channel: &str) -> bool {
+    let same_build = state.last_version.as_deref() == Some(version)
+        && state.last_channel.as_deref() == Some(channel);
+    !same_build || state.last_ping.as_deref() != Some(today)
+}
+
 /// The decision and the request, kept separate from the Tauri handle so the
 /// gating and dedupe can be tested against a temporary directory.
 async fn send_if_due(dir: &Path, level: TelemetryLevel, channel: &str) {
@@ -190,22 +225,32 @@ async fn send_if_due(dir: &Path, level: TelemetryLevel, channel: &str) {
     }
 
     let today = today();
+    let version = env!("CARGO_PKG_VERSION");
+
+    // A release-mode build from a working tree never had the tag stamped over
+    // the placeholder, so it is a developer's own build rather than something
+    // anyone installed. Counting it puts a version nobody can download at the
+    // top of the public tracker. `debug_assertions` does not cover this: the
+    // build that produces it is a release build.
+    if version == UNSTAMPED_VERSION {
+        return;
+    }
+
     let mut state = read_state(dir).unwrap_or_else(|| InstallState {
         id: new_id(),
         last_ping: None,
         first_reported: false,
+        last_version: None,
+        last_channel: None,
     });
 
-    // Already counted today, so send nothing at all. An app that gets restarted
-    // six times is one active install, and the way to make it one is to not make
-    // the other five requests.
-    if state.last_ping.as_deref() == Some(today.as_str()) {
+    if !is_due(&state, &today, version, channel) {
         return;
     }
 
     let payload = Ping {
         install_id: &state.id,
-        version: env!("CARGO_PKG_VERSION"),
+        version,
         channel,
         os: os_name(),
         arch: arch_name(),
@@ -219,6 +264,8 @@ async fn send_if_due(dir: &Path, level: TelemetryLevel, channel: &str) {
         Ok(response) if response.status().is_success() => {
             state.last_ping = Some(today);
             state.first_reported = true;
+            state.last_version = Some(version.to_owned());
+            state.last_channel = Some(channel.to_owned());
             write_state(dir, &state);
         }
         // Not retried: the next launch tries again, and a missed count is not worth
@@ -258,25 +305,108 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_committed_version_is_the_placeholder_the_gate_checks() {
+        // The gate below is only meaningful while the working tree still carries
+        // the placeholder. If a real version is ever committed to Cargo.toml,
+        // this fails rather than letting the check quietly stop matching.
+        assert_eq!(
+            env!("CARGO_PKG_VERSION"),
+            UNSTAMPED_VERSION,
+            "Cargo.toml should hold the placeholder; the release workflow stamps the tag"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unstamped_build_does_not_report() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        // Reporting is fully on: the version is the only thing stopping this.
+        send_if_due(dir.path(), TelemetryLevel::Reports, "stable").await;
+        assert!(
+            read_state(dir.path()).is_none(),
+            "a build with no stamped version was never shipped and must not be counted"
+        );
+    }
+
+    /// State that looks like a successful ping earlier today on this build.
+    fn pinged_today(channel: &str) -> InstallState {
+        InstallState {
+            id: "fixed-id".to_owned(),
+            last_ping: Some(today()),
+            first_reported: true,
+            last_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+            last_channel: Some(channel.to_owned()),
+        }
+    }
+
     #[tokio::test]
     async fn a_ping_already_sent_today_is_not_repeated() {
         let dir = tempfile::tempdir().expect("temp dir");
-        write_state(
-            dir.path(),
-            &InstallState {
-                id: "fixed-id".to_owned(),
-                last_ping: Some(today()),
-                first_reported: true,
-            },
-        );
+        write_state(dir.path(), &pinged_today("stable"));
 
         // No network in tests: what is being asserted is that this returns without
         // attempting one, leaving the stored state untouched.
-        send_if_due(dir.path(), TelemetryLevel::Full, "stable").await;
+        send_if_due(dir.path(), TelemetryLevel::Reports, "stable").await;
 
         let after = read_state(dir.path()).expect("state should survive");
         assert_eq!(after.id, "fixed-id");
         assert_eq!(after.last_ping.as_deref(), Some(today().as_str()));
+    }
+
+    #[test]
+    fn a_second_launch_on_the_same_build_is_not_due() {
+        let state = pinged_today("stable");
+        assert!(!is_due(
+            &state,
+            &today(),
+            env!("CARGO_PKG_VERSION"),
+            "stable"
+        ));
+    }
+
+    #[test]
+    fn an_update_is_due_the_same_day() {
+        let mut state = pinged_today("stable");
+        state.last_version = Some("0.0.1-stale".to_owned());
+        assert!(
+            is_due(&state, &today(), env!("CARGO_PKG_VERSION"), "stable"),
+            "an install that updated today must re-report, not wait for tomorrow"
+        );
+    }
+
+    #[test]
+    fn switching_channel_is_due_the_same_day() {
+        let state = pinged_today("beta");
+        assert!(
+            is_due(&state, &today(), env!("CARGO_PKG_VERSION"), "stable"),
+            "moving off beta must show up on the same day"
+        );
+    }
+
+    #[test]
+    fn a_new_day_is_due_on_an_unchanged_build() {
+        let mut state = pinged_today("stable");
+        state.last_ping = Some("2000-01-01".to_owned());
+        assert!(is_due(
+            &state,
+            &today(),
+            env!("CARGO_PKG_VERSION"),
+            "stable"
+        ));
+    }
+
+    #[test]
+    fn state_from_before_version_tracking_is_due() {
+        // Every install in the field right now has state with no last_version, and
+        // it must re-report on its next launch rather than wait for a version bump.
+        let legacy = r#"{"id":"a","last_ping":"2026-08-20","first_reported":true}"#;
+        let state: InstallState = serde_json::from_str(legacy).expect("legacy state should parse");
+        assert!(is_due(
+            &state,
+            "2026-08-20",
+            env!("CARGO_PKG_VERSION"),
+            "stable"
+        ));
     }
 
     #[test]

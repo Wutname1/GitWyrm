@@ -521,13 +521,21 @@ mod tests {
         let openspec = dir.path();
         let archived = openspec.join("changes").join("archive").join("shipped");
         std::fs::create_dir_all(&archived).unwrap();
-        std::fs::write(archived.join("design.md"), "# Design
-").unwrap();
+        std::fs::write(
+            archived.join("design.md"),
+            "# Design
+",
+        )
+        .unwrap();
         // An active change the archive reader must not be able to reach.
         let active = openspec.join("changes").join("live");
         std::fs::create_dir_all(&active).unwrap();
-        std::fs::write(active.join("design.md"), "secret
-").unwrap();
+        std::fs::write(
+            active.join("design.md"),
+            "secret
+",
+        )
+        .unwrap();
 
         assert_eq!(
             read_archived_file(openspec, "shipped", "design.md").unwrap(),
@@ -535,7 +543,10 @@ mod tests {
 "
         );
         // A file the change never had reads as empty, not an error.
-        assert_eq!(read_archived_file(openspec, "shipped", "tasks.md").unwrap(), "");
+        assert_eq!(
+            read_archived_file(openspec, "shipped", "tasks.md").unwrap(),
+            ""
+        );
         // A multi-component id cannot walk back out to an active change.
         assert!(read_archived_file(openspec, "../live", "design.md").is_err());
         assert!(read_archived_file(openspec, "..", "design.md").is_err());

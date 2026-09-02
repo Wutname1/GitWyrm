@@ -38,8 +38,11 @@ Every requirement in `changes/` traces back to a behavior demonstrated there.
 - Components in `src/components/domain/`, views in `src/views/`, modals in
   `src/components/modals/`. Errors classified via `src/lib/errorClass.ts`; prefer typed
   outcome enums over throwing for expected conditions.
-- Commit messages: `new:` / `improved:` / `fixes:` prefixes, first line is user-facing
-  plain language (feeds the changelog).
+- Commit messages: `new:` / `improved:` / `fixes:` prefixes. The first line is
+  published verbatim to end users by the changelog, so write it for a
+  non-technical reader - what bug or annoyance got fixed, in everyday words. No
+  component names, APIs, file paths, or jargon in the subject; that goes in the
+  body. See AGENTS.md for the full rule and before/after examples.
 
 ### Architecture for this feature
 

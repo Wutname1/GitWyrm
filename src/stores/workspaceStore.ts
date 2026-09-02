@@ -58,6 +58,21 @@ export const DEFAULT_EDITOR: EditorKind = "vs_code";
 export type ChangeSizeDisplay = "row" | "column";
 /** How the changed-file lists are arranged: grouped by folder, or one flat row per file. */
 export type ChangesViewMode = "tree" | "list";
+/** How the conflict view presents a conflicted file. Mirrors the Rust enum. */
+export type ConflictViewMode = "hunks" | "file";
+/** Which column the repository picker's table is ordered by. */
+export type RepoPickerSortKey = "name" | "activity" | "branch";
+/** A column plus its direction, e.g. `activity` descending. */
+export interface RepoPickerSort {
+  key: RepoPickerSortKey;
+  desc: boolean;
+}
+/** Open issue and pull request counts for one repository, from the last scan. */
+export interface RepoActivity {
+  prs: number;
+  issues: number;
+}
+
 export type RepoPickerSection =
   | "pinned_groups"
   | "pinned_repositories"
@@ -73,6 +88,25 @@ const REPO_PICKER_SECTIONS = new Set<RepoPickerSection>([
 
 /** What to do about local-only tags after a push. */
 export type TagPushDefault = "ask" | "always" | "never";
+
+/**
+ * What to do with a worktree's branch once its folder is removed.
+ *
+ * "ask" shows the dialog every time. The other two are what "Remember my
+ * choice" records, so the dialog stops appearing for the ordinary case.
+ */
+export type WorktreeBranchCleanup = "ask" | "keep" | "delete";
+
+/**
+ * Read a stored branch-cleanup choice, falling back to asking.
+ *
+ * The value is a plain string in settings.json, so anything unrecognised -- a
+ * hand-edit, or a value written by a newer build -- must land on "ask". The
+ * fallback is the one option that cannot delete anything by surprise.
+ */
+function readBranchCleanup(value: unknown): WorktreeBranchCleanup {
+  return value === "keep" || value === "delete" ? value : "ask";
+}
 
 /**
  * A single repo's tag-setting overrides. Each field is optional: present means
@@ -225,6 +259,22 @@ export function clampLeftPanelWidth(width: number): number {
   );
 }
 
+/**
+ * Saved width limits for the repository details pane in the picker. Wider at
+ * the top end than the workspace panes because it renders a readme, which is
+ * prose and unreadable in a narrow column.
+ */
+export const MIN_REPO_DETAILS_WIDTH = 260;
+export const MAX_REPO_DETAILS_WIDTH = 640;
+export const DEFAULT_REPO_DETAILS_WIDTH = 340;
+
+export function clampRepoDetailsWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_REPO_DETAILS_WIDTH;
+  return Math.round(
+    Math.min(MAX_REPO_DETAILS_WIDTH, Math.max(MIN_REPO_DETAILS_WIDTH, width)),
+  );
+}
+
 export function clampRightPanelWidth(width: number): number {
   if (!Number.isFinite(width)) return DEFAULT_RIGHT_PANEL_WIDTH;
   return Math.round(
@@ -267,6 +317,22 @@ export function clampChangesSplit(split: number): number {
   if (!Number.isFinite(split)) return DEFAULT_CHANGES_SPLIT;
   return Math.round(
     Math.min(MAX_CHANGES_SPLIT, Math.max(MIN_CHANGES_SPLIT, split)),
+  );
+}
+
+/**
+ * Resting height of the commit description box, counted in lines of text. The
+ * box always grows on its own up to five lines; this is how tall it sits when
+ * empty, so someone who writes long descriptions can keep the room open.
+ */
+export const MIN_COMMIT_DESC_LINES = 2;
+export const MAX_COMMIT_DESC_LINES = 12;
+export const DEFAULT_COMMIT_DESC_LINES = 2;
+
+export function clampCommitDescLines(lines: number): number {
+  if (!Number.isFinite(lines)) return DEFAULT_COMMIT_DESC_LINES;
+  return Math.round(
+    Math.min(MAX_COMMIT_DESC_LINES, Math.max(MIN_COMMIT_DESC_LINES, lines)),
   );
 }
 
@@ -625,12 +691,16 @@ interface WorkspaceState {
   leftPanelWidth: number;
   /** Width of the changes and commit pane (persisted). */
   rightPanelWidth: number;
+  /** Saved width of the repository details pane in the picker (persisted). */
+  repoDetailsWidth: number;
   /** Height of the commit details drawer under the graph (persisted). */
   drawerHeight: number;
   /** Width of the commit list pane inside the multi-select drawer (persisted). */
   drawerListWidth: number;
   /** Percent of the changes pane given to the unstaged list (persisted). */
   changesSplit: number;
+  /** Resting height of the commit description box, in lines (persisted). */
+  commitDescLines: number;
   /** Percent of the conflict view's width given to the OURS pane (persisted). */
   conflictSideSplit: number;
   /** Percent of the conflict view's height given to OURS/THEIRS (persisted). */
@@ -641,6 +711,13 @@ interface WorkspaceState {
   showChangeIndicator: boolean;
   /** Whether the change-size indicator includes exact line counts (persisted). */
   showChangeLineCounts: boolean;
+  /**
+   * Whether commit graph nodes are drawn as the author's picture (persisted).
+   *
+   * The lane color does not go away when this is on: it becomes the ring around
+   * the picture, so a branch is still identifiable at a glance.
+   */
+  showGraphAvatars: boolean;
   /** Default action for the commit button (persisted). */
   commitButtonMode: CommitButtonMode;
   /** Editor the open-in-editor actions launch (persisted). */
@@ -700,10 +777,29 @@ interface WorkspaceState {
   openspecArchiveWithoutAsking: boolean;
   /** Delete a change from its row button without confirming first (persisted). */
   openspecDeleteWithoutAsking: boolean;
+  /**
+   * What to do with a worktree's branch after removing the folder (persisted).
+   *
+   * "ask" is the default. A remembered "delete" still does not apply to a
+   * branch with unmerged work: that case asks anyway, because the remembered
+   * answer was given about a branch that had nothing to lose.
+   */
+  worktreeBranchCleanup: WorktreeBranchCleanup;
+  /**
+   * Whether that dialog's "delete it on the remote too" box starts checked
+   * (persisted). Off by default -- deleting a published branch affects everyone
+   * else working on it.
+   */
+  worktreeBranchDeleteOnRemote: boolean;
   /** Reopen the last session's tabs on launch. Off starts with no tabs (persisted). */
   restoreTabs: boolean;
   /** Fetch open repositories in the background to keep remote state current (persisted). */
   autoFetch: boolean;
+  /**
+   * Use the GitHub CLI when an organization blocks GitWyrm's own sign-in
+   * (persisted). On by default; off means those repositories show nothing.
+   */
+  ghCliFallback: boolean;
   /**
    * Show the short explanations that teach a feature in the sidebar and panels
    * (persisted). Off hides the prose only: controls, counts, and the plain
@@ -800,6 +896,19 @@ interface WorkspaceState {
   pinnedSavedGroupIds: string[];
   /** Repository-picker sections the user has hidden (persisted). */
   repoPickerCollapsedSections: RepoPickerSection[];
+  /** How the repository picker's table is ordered (persisted). */
+  repoPickerSort: RepoPickerSort;
+  /**
+   * Open issue and pull request counts from the last scan, keyed by
+   * `pathKey(path)`.
+   *
+   * Deliberately in-memory only. These are a live view of what is open on the
+   * host, and a count restored from disk days later would be wrong in a way the
+   * user cannot see -- better to show "never scanned" and let them press Scan.
+   */
+  repoActivity: Record<string, RepoActivity>;
+  /** When the last scan finished, as epoch milliseconds. Null until one runs (persisted). */
+  repoScanAt: number | null;
   /**
    * Folders left open in the changes trees, keyed by `changeTreeKey(repo, tree)`.
    * Only open folders are stored, so a folder the user never touched stays
@@ -808,6 +917,8 @@ interface WorkspaceState {
   expandedChangeFolders: Record<string, string[]>;
   /** Whether the changed-file lists group by folder or show one flat row per file (persisted). */
   changesViewMode: ChangesViewMode;
+  /** Whether the conflict view shows one hunk at a time or the whole file (persisted). */
+  conflictViewMode: ConflictViewMode;
   /** True once settings.json has been read on launch. */
   hydrated: boolean;
 
@@ -820,6 +931,15 @@ interface WorkspaceState {
   /** Opens several repos as tabs at once without changing which tab is active. */
   addReposInBackground: (repos: RepoInfo[]) => void;
   removeRepo: (id: string) => void;
+  /**
+   * Drop one entry from the recent list.
+   *
+   * Only the list is touched. A recent row is a bookmark, not the repo, so this
+   * never deletes anything on disk - and it stays useful for the case it was
+   * added for, where the folder is already gone and the row is the last thing
+   * pointing at it.
+   */
+  removeRecent: (path: string) => void;
   setActiveRepo: (id: string) => void;
   /** Save the in-progress commit message for a repo. */
   setCommitDraft: (repoId: string, draft: Partial<CommitDraft>) => void;
@@ -878,8 +998,11 @@ interface WorkspaceState {
   setEnableSpecDesk: (enabled: boolean) => void;
   setOpenspecArchiveWithoutAsking: (skip: boolean) => void;
   setOpenspecDeleteWithoutAsking: (skip: boolean) => void;
+  setWorktreeBranchCleanup: (choice: WorktreeBranchCleanup) => void;
+  setWorktreeBranchDeleteOnRemote: (on: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
   setAutoFetch: (enabled: boolean) => void;
+  setGhCliFallback: (enabled: boolean) => void;
   setShowTips: (enabled: boolean) => void;
   setTelemetryLevel: (level: TelemetryLevel) => void;
   markOnboardingSeen: () => void;
@@ -932,6 +1055,10 @@ interface WorkspaceState {
   ) => void;
   togglePinnedSavedGroup: (groupId: string) => void;
   toggleRepoPickerSection: (section: RepoPickerSection) => void;
+  /** Sort by a column; picking the current column flips the direction. */
+  sortRepoPicker: (key: RepoPickerSortKey) => void;
+  /** Record the counts a scan came back with, and when it finished. */
+  setRepoActivity: (activity: Record<string, RepoActivity>) => void;
   /**
    * Replace the open-folder set for one changes tree. An empty list drops the
    * entry entirely so settings.json does not accumulate keys for repos whose
@@ -940,6 +1067,7 @@ interface WorkspaceState {
   setExpandedChangeFolders: (key: string, folders: string[]) => void;
   /** Switch the changed-file lists between the folder tree and the flat list. */
   setChangesViewMode: (mode: ChangesViewMode) => void;
+  setConflictViewMode: (mode: ConflictViewMode) => void;
   /**
    * Choose how tabs are arranged. Manual restores the user's dragged order.
    * Picking the sort that is already active flips its direction instead, so a
@@ -993,15 +1121,18 @@ interface WorkspaceState {
   resetColumnWidth: (id: ColumnId) => void;
   setLeftPanelWidth: (width: number) => void;
   setRightPanelWidth: (width: number) => void;
+  setRepoDetailsWidth: (width: number) => void;
   setDrawerHeight: (height: number) => void;
   setDrawerListWidth: (width: number) => void;
   setChangesSplit: (split: number) => void;
+  setCommitDescLines: (lines: number) => void;
   setConflictSideSplit: (split: number) => void;
   setConflictResultSplit: (split: number) => void;
   /** Put every draggable workspace panel back at its shipped size. */
   resetWorkspaceLayout: () => void;
   setChangeSizeDisplay: (display: ChangeSizeDisplay) => void;
   setShowChangeIndicator: (enabled: boolean) => void;
+  setShowGraphAvatars: (enabled: boolean) => void;
   setShowChangeLineCounts: (enabled: boolean) => void;
   /** Reads settings.json once and hydrates the store; returns the raw settings for launch-time restore. */
   hydrate: () => Promise<Settings>;
@@ -1056,14 +1187,17 @@ function toSettings(s: WorkspaceState): Settings {
     },
     left_panel_width: s.leftPanelWidth,
     right_panel_width: s.rightPanelWidth,
+    repo_details_width: s.repoDetailsWidth,
     drawer_height: s.drawerHeight,
     drawer_commit_list_width: s.drawerListWidth,
     changes_split: s.changesSplit,
+    commit_description_lines: s.commitDescLines,
     conflict_side_split: s.conflictSideSplit,
     conflict_result_split: s.conflictResultSplit,
     change_size_display: s.changeSizeDisplay,
     show_change_indicator: s.showChangeIndicator,
     show_change_line_counts: s.showChangeLineCounts,
+    show_graph_avatars: s.showGraphAvatars,
     commit_button_mode: s.commitButtonMode,
     default_editor: s.defaultEditor,
     tag_push_default: s.tagPushDefault,
@@ -1076,9 +1210,12 @@ function toSettings(s: WorkspaceState): Settings {
     enable_spec_desk: s.enableSpecDesk,
     openspec_archive_without_asking: s.openspecArchiveWithoutAsking,
     openspec_delete_without_asking: s.openspecDeleteWithoutAsking,
+    worktree_branch_cleanup: s.worktreeBranchCleanup,
+    worktree_branch_delete_on_remote: s.worktreeBranchDeleteOnRemote,
     restore_tabs: s.restoreTabs,
     show_tips: s.showTips,
     auto_fetch: s.autoFetch,
+    gh_cli_fallback: s.ghCliFallback,
     telemetry_level: s.telemetryLevel,
     onboarding_seen: s.onboardingSeen,
     signing_keys_published: s.signingKeysPublished,
@@ -1120,8 +1257,11 @@ function toSettings(s: WorkspaceState): Settings {
     pinned_repo_paths: s.pinnedRepoPaths,
     pinned_saved_group_ids: s.pinnedSavedGroupIds,
     repo_picker_collapsed_sections: s.repoPickerCollapsedSections,
+    repo_picker_sort: `${s.repoPickerSort.key}${s.repoPickerSort.desc ? ":desc" : ""}`,
+    repo_scan_at: s.repoScanAt == null ? null : new Date(s.repoScanAt).toISOString(),
     expanded_change_folders: s.expandedChangeFolders,
     changes_view_mode: s.changesViewMode,
+    conflict_view_mode: s.conflictViewMode,
   };
 }
 
@@ -1204,6 +1344,24 @@ function normalizeRepoPickerSections(
   return (sections ?? []).filter((section): section is RepoPickerSection =>
     REPO_PICKER_SECTIONS.has(section as RepoPickerSection),
   );
+}
+
+/** Validate a stored sort choice; anything unrecognised falls back to name ascending. */
+function normalizeRepoPickerSort(
+  sort: string | null | undefined,
+): RepoPickerSort {
+  const [key, direction] = (sort ?? "").split(":");
+  if (key !== "name" && key !== "activity" && key !== "branch") {
+    return { key: "name", desc: false };
+  }
+  return { key, desc: direction === "desc" };
+}
+
+/** Validate a stored scan timestamp; an unparseable one reads as never scanned. */
+function normalizeScanAt(at: string | null | undefined): number | null {
+  if (!at) return null;
+  const parsed = Date.parse(at);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 /** Validate a stored theme id; unknown/absent falls back to Auto. */
@@ -1378,6 +1536,7 @@ export const SETTINGS_DEFAULTS = {
   codeFolders: [],
   cloneDirectory: null,
   repoPickerCollapsedSections: [],
+  repoPickerSort: { key: "name", desc: false },
   gitExecutable: "",
   gpgExecutable: "",
   // Not in any per-screen group: only the global "Reset all" restores them.
@@ -1392,8 +1551,11 @@ export const SETTINGS_DEFAULTS = {
   enableSpecDesk: true,
   openspecArchiveWithoutAsking: false,
   openspecDeleteWithoutAsking: false,
+  worktreeBranchCleanup: "ask",
+  worktreeBranchDeleteOnRemote: false,
   restoreTabs: true,
   autoFetch: true,
+  ghCliFallback: true,
   showTips: true,
   // Deliberately outside the per-screen "behavior" group below: a privacy
   // choice must not change because the user reset an unrelated page of
@@ -1414,6 +1576,7 @@ export const SETTINGS_DEFAULTS = {
   changeSizeDisplay: "column",
   showChangeIndicator: false,
   showChangeLineCounts: false,
+  showGraphAvatars: false,
   uiScale: DEFAULT_UI_SCALE,
   fontFamily: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
@@ -1427,15 +1590,18 @@ export const SETTINGS_DEFAULTS = {
   horizontalTabRow: false,
   leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
   rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
+  repoDetailsWidth: DEFAULT_REPO_DETAILS_WIDTH,
   drawerHeight: DEFAULT_DRAWER_HEIGHT,
   drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
   changesSplit: DEFAULT_CHANGES_SPLIT,
+  commitDescLines: DEFAULT_COMMIT_DESC_LINES,
   conflictSideSplit: DEFAULT_CONFLICT_SIDE_SPLIT,
   conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
   verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
   changesViewMode: "tree",
-  showTabPrCount: false,
-  showTabIssueCount: false,
+  conflictViewMode: "hunks",
+  showTabPrCount: true,
+  showTabIssueCount: true,
 } satisfies Partial<WorkspaceState>;
 
 /** A resettable preference key. */
@@ -1451,12 +1617,17 @@ export const SETTINGS_GROUPS = {
     "defaultEditor",
     "enableWorktrees",
     "worktreesSettingTouched",
+    // Resetting General brings the branch-cleanup prompt back, which is the
+    // only way to undo a "Remember my choice" the user later regrets.
+    "worktreeBranchCleanup",
+    "worktreeBranchDeleteOnRemote",
     "tabLayout",
     "horizontalTabRow",
   ],
   behavior: [
     "restoreTabs",
     "autoFetch",
+    "ghCliFallback",
     "showTips",
     "discardResetsSubmodules",
   ],
@@ -1474,6 +1645,7 @@ export const SETTINGS_GROUPS = {
     "changeSizeDisplay",
     "showChangeIndicator",
     "showChangeLineCounts",
+    "showGraphAvatars",
     "uiScale",
     "fontFamily",
     "fontSize",
@@ -1520,14 +1692,17 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   columnWidths: {},
   leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
   rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
+  repoDetailsWidth: DEFAULT_REPO_DETAILS_WIDTH,
   drawerHeight: DEFAULT_DRAWER_HEIGHT,
   drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
   changesSplit: DEFAULT_CHANGES_SPLIT,
+  commitDescLines: DEFAULT_COMMIT_DESC_LINES,
   conflictSideSplit: DEFAULT_CONFLICT_SIDE_SPLIT,
   conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
   changeSizeDisplay: "column",
   showChangeIndicator: false,
   showChangeLineCounts: false,
+  showGraphAvatars: false,
   commitButtonMode: "commit",
   defaultEditor: DEFAULT_EDITOR,
   tagPushDefault: "ask",
@@ -1540,8 +1715,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   enableSpecDesk: true,
   openspecArchiveWithoutAsking: false,
   openspecDeleteWithoutAsking: false,
+  worktreeBranchCleanup: "ask",
+  worktreeBranchDeleteOnRemote: false,
   restoreTabs: true,
   autoFetch: true,
+  ghCliFallback: true,
   showTips: true,
   telemetryLevel: null,
   // Optimistic until the backend answers at startup; corrected by hydration
@@ -1563,8 +1741,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   repoIconRevisions: {},
   tabLayout: "vertical",
   horizontalTabRow: false,
-  showTabPrCount: false,
-  showTabIssueCount: false,
+  showTabPrCount: true,
+  showTabIssueCount: true,
   tabGroups: [],
   tabOrder: [],
   tabSort: "manual",
@@ -1575,8 +1753,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   pinnedRepoPaths: [],
   pinnedSavedGroupIds: [],
   repoPickerCollapsedSections: [],
+  repoPickerSort: { key: "name", desc: false },
+  repoActivity: {},
+  repoScanAt: null,
   expandedChangeFolders: {},
   changesViewMode: "tree",
+  conflictViewMode: "hunks",
   hydrated: false,
 
   addRepo: (repo) => {
@@ -1723,6 +1905,16 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         recents: recents.slice(0, 10),
         tabOrder,
       };
+    });
+    schedulePersist();
+  },
+  removeRecent: (path) => {
+    set((s) => {
+      const recents = s.recents.filter((r) => !samePath(r.path, path));
+      // Nothing matched, so skip the write rather than persisting an identical
+      // list and re-rendering every consumer of `recents`.
+      if (recents.length === s.recents.length) return s;
+      return { recents };
     });
     schedulePersist();
   },
@@ -2054,6 +2246,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ openspecDeleteWithoutAsking: skip });
     schedulePersist();
   },
+  setWorktreeBranchCleanup: (choice) => {
+    set({ worktreeBranchCleanup: choice });
+    schedulePersist();
+  },
+  setWorktreeBranchDeleteOnRemote: (on) => {
+    set({ worktreeBranchDeleteOnRemote: on });
+    schedulePersist();
+  },
   setRestoreTabs: (enabled) => {
     set({ restoreTabs: enabled });
     schedulePersist();
@@ -2068,6 +2268,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setAutoFetch: (enabled) => {
     set({ autoFetch: enabled });
+    schedulePersist();
+  },
+  setGhCliFallback: (enabled) => {
+    set({ ghCliFallback: enabled });
     schedulePersist();
   },
   setShowTips: (enabled) => {
@@ -2487,6 +2691,21 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }));
     schedulePersist();
   },
+  sortRepoPicker: (key) => {
+    set((s) => ({
+      repoPickerSort:
+        s.repoPickerSort.key === key
+          ? { key, desc: !s.repoPickerSort.desc }
+          : // A fresh column starts in the direction that is useful for it:
+            // most activity first, but names and branches A to Z.
+            { key, desc: key === "activity" },
+    }));
+    schedulePersist();
+  },
+  setRepoActivity: (activity) => {
+    set({ repoActivity: activity, repoScanAt: Date.now() });
+    schedulePersist();
+  },
   setExpandedChangeFolders: (key, folders) => {
     set((s) => {
       const next = { ...s.expandedChangeFolders };
@@ -2498,6 +2717,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setChangesViewMode: (mode) => {
     set({ changesViewMode: mode });
+    schedulePersist();
+  },
+  setConflictViewMode: (mode) => {
+    set({ conflictViewMode: mode });
     schedulePersist();
   },
   setTabSort: (sort) => {
@@ -2760,6 +2983,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ leftPanelWidth: clampLeftPanelWidth(width) });
     schedulePersist();
   },
+  setRepoDetailsWidth: (width) => {
+    set({ repoDetailsWidth: clampRepoDetailsWidth(width) });
+    schedulePersist();
+  },
   setRightPanelWidth: (width) => {
     set({ rightPanelWidth: clampRightPanelWidth(width) });
     schedulePersist();
@@ -2776,6 +3003,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ changesSplit: clampChangesSplit(split) });
     schedulePersist();
   },
+  setCommitDescLines: (lines) => {
+    set({ commitDescLines: clampCommitDescLines(lines) });
+    schedulePersist();
+  },
   setConflictSideSplit: (split) => {
     set({ conflictSideSplit: clampConflictSideSplit(split) });
     schedulePersist();
@@ -2788,9 +3019,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({
       leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
       rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
+      repoDetailsWidth: DEFAULT_REPO_DETAILS_WIDTH,
       drawerHeight: DEFAULT_DRAWER_HEIGHT,
       drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
       changesSplit: DEFAULT_CHANGES_SPLIT,
+      commitDescLines: DEFAULT_COMMIT_DESC_LINES,
       conflictSideSplit: DEFAULT_CONFLICT_SIDE_SPLIT,
       conflictResultSplit: DEFAULT_CONFLICT_RESULT_SPLIT,
       verticalTabWidth: DEFAULT_VERTICAL_TAB_WIDTH,
@@ -2807,6 +3040,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setShowChangeLineCounts: (enabled) => {
     set({ showChangeLineCounts: enabled });
+    schedulePersist();
+  },
+  setShowGraphAvatars: (enabled) => {
+    set({ showGraphAvatars: enabled });
     schedulePersist();
   },
 
@@ -2869,6 +3106,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         rightPanelWidth: clampRightPanelWidth(
           settings.right_panel_width ?? DEFAULT_RIGHT_PANEL_WIDTH,
         ),
+        repoDetailsWidth: clampRepoDetailsWidth(
+          settings.repo_details_width ?? DEFAULT_REPO_DETAILS_WIDTH,
+        ),
         drawerHeight: clampDrawerHeight(
           settings.drawer_height ?? DEFAULT_DRAWER_HEIGHT,
         ),
@@ -2877,6 +3117,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ),
         changesSplit: clampChangesSplit(
           settings.changes_split ?? DEFAULT_CHANGES_SPLIT,
+        ),
+        commitDescLines: clampCommitDescLines(
+          settings.commit_description_lines ?? DEFAULT_COMMIT_DESC_LINES,
         ),
         conflictSideSplit: clampConflictSideSplit(
           settings.conflict_side_split ?? DEFAULT_CONFLICT_SIDE_SPLIT,
@@ -2888,6 +3131,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.change_size_display === "row" ? "row" : "column",
         showChangeIndicator: settings.show_change_indicator ?? true,
         showChangeLineCounts: settings.show_change_line_counts ?? false,
+        showGraphAvatars: settings.show_graph_avatars ?? false,
         commitButtonMode:
           settings.commit_button_mode === "commit_push"
             ? "commit_push"
@@ -2915,8 +3159,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.openspec_archive_without_asking === true,
         openspecDeleteWithoutAsking:
           settings.openspec_delete_without_asking === true,
+        worktreeBranchCleanup: readBranchCleanup(
+          settings.worktree_branch_cleanup,
+        ),
+        worktreeBranchDeleteOnRemote:
+          settings.worktree_branch_delete_on_remote === true,
         restoreTabs: settings.restore_tabs ?? true,
         autoFetch: settings.auto_fetch ?? true,
+        ghCliFallback: settings.gh_cli_fallback ?? true,
         // Absent means on: a settings file written before this flag existed
         // belongs to someone who has been seeing the tips all along, so hiding
         // them on upgrade would look like the sidebar lost content.
@@ -2972,11 +3222,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         repoPickerCollapsedSections: normalizeRepoPickerSections(
           settings.repo_picker_collapsed_sections,
         ),
+        repoPickerSort: normalizeRepoPickerSort(settings.repo_picker_sort),
+        repoScanAt: normalizeScanAt(settings.repo_scan_at),
         expandedChangeFolders: normalizeExpandedChangeFolders(
           settings.expanded_change_folders,
         ),
         changesViewMode:
           settings.changes_view_mode === "list" ? "list" : "tree",
+        conflictViewMode:
+          settings.conflict_view_mode === "file" ? "file" : "hunks",
         hydrated: true,
       });
     }
@@ -3031,6 +3285,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         settings.openspec_archive_without_asking === true,
       openspecDeleteWithoutAsking:
         settings.openspec_delete_without_asking === true,
+      worktreeBranchCleanup: readBranchCleanup(settings.worktree_branch_cleanup),
+      worktreeBranchDeleteOnRemote:
+        settings.worktree_branch_delete_on_remote === true,
       openspecArchiveCommitTemplate:
         settings.openspec_archive_commit_template ?? null,
     });

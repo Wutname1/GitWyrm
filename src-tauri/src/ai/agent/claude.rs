@@ -45,6 +45,9 @@ impl ClaudeConnection {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        // Same as every other child GitWyrm spawns: an AppImage's bundled
+        // loader variables must not leak into a system binary.
+        crate::process_env::scrub_bundled_env(&mut cmd);
 
         #[cfg(windows)]
         cmd.creation_flags(crate::git::shell::CREATE_NO_WINDOW);

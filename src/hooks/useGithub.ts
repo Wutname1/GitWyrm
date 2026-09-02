@@ -34,6 +34,7 @@ export const githubKeys = {
 export const hostingKeys = {
   providers: ['hosting-providers'] as const,
   repoProvider: (repoId: string) => ['hosting-repo-provider', repoId] as const,
+  ghCli: ['gh-cli-status'] as const,
 }
 
 /**
@@ -51,6 +52,23 @@ export function useHostingProviders() {
     staleTime: 5 * 60 * 1000,
     retry: false,
     queryFn: async () => unwrap(await commands.hostingProviders()),
+  })
+}
+
+/**
+ * Whether the GitHub CLI is installed and signed in.
+ *
+ * Not cached for long: installing the CLI or running `gh auth login` is exactly
+ * what someone does after reading this row, and a stale "not installed" would
+ * keep saying so while the fix sat finished in another window.
+ */
+export function useGhCliStatus() {
+  return useQuery({
+    queryKey: hostingKeys.ghCli,
+    enabled: isTauri,
+    staleTime: 10 * 1000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.ghCliStatus()),
   })
 }
 
@@ -162,7 +180,11 @@ export function useGithubIssues(
   repoId?: string | null
 ) {
   return useQuery({
-    queryKey: githubKeys.issues(slug?.owner ?? '', slug?.repo ?? ''),
+    // `connected` belongs in the key, the same as it does for pull requests.
+    // Issues are gated on being signed in, so the signed-out run leaves an empty
+    // result cached; without this the signed-in query reads that same entry and
+    // the panel keeps showing no issues after connecting an account.
+    queryKey: [...githubKeys.issues(slug?.owner ?? '', slug?.repo ?? ''), connected],
     enabled: isTauri && slug != null && connected,
     staleTime: 60 * 1000,
     queryFn: async () =>
@@ -213,7 +235,7 @@ export function useRepoGithubCounts(repoId: string | null): RepoGithubCounts {
   })
 
   const issues = useQuery({
-    queryKey: githubKeys.issues(owner, repo),
+    queryKey: [...githubKeys.issues(owner, repo), connected],
     enabled: isTauri && showIssues && connected && slug.data != null,
     staleTime: 60 * 1000,
     retry: false,
@@ -489,6 +511,10 @@ export function useGithubMutations(
       // has to be refreshed alongside the auth query or the row keeps naming an
       // account that was just disconnected.
       qc.invalidateQueries({ queryKey: hostingKeys.providers })
+      // Drop what the old account could see, so signing out does not leave
+      // private issues and pull requests on screen.
+      qc.invalidateQueries({ queryKey: ['github-issues'] })
+      qc.invalidateQueries({ queryKey: ['github-prs'] })
       toast('Disconnected from GitHub')
     },
     onError,
@@ -509,6 +535,12 @@ export function useHostAuthMutations() {
   const refresh = () => {
     qc.invalidateQueries({ queryKey: hostingKeys.providers })
     qc.invalidateQueries({ queryKey: githubKeys.auth })
+    // Who is signed in decides what the host will show us, so anything already
+    // fetched under the old identity is no longer trustworthy -- a private repo
+    // that answered empty signed out has real contents once a token can see it.
+    // Matching on the prefix covers every owner/repo already cached.
+    qc.invalidateQueries({ queryKey: ['github-issues'] })
+    qc.invalidateQueries({ queryKey: ['github-prs'] })
   }
 
   const connect = useMutation({

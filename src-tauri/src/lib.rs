@@ -10,6 +10,7 @@ mod logs;
 mod missing_repos;
 mod openspec;
 mod perf;
+mod process_env;
 mod scrub;
 mod settings;
 mod snap_layouts;
@@ -31,6 +32,9 @@ pub use ai::agent::copilot_cli as agent_copilot_cli;
 pub use commands::staging::discard_everything;
 pub use error::AppError;
 pub use git::graph as git_graph;
+/// Exposed alongside [`discard_everything`], which now takes a progress sink:
+/// the integration test cannot call it without being able to build one.
+pub use git::progress as git_progress;
 pub use git::history as git_history;
 pub use git::merge_ops as git_merge_ops;
 pub use git::refs as git_refs;
@@ -254,6 +258,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::patch::discard_lines,
             commands::scan::scan_code_folder,
             commands::scan::read_repo_readme,
+            commands::scan::find_repos_with_remote,
+            commands::scan::repo_snapshot,
             commands::shell_integration::context_menu_registered,
             commands::shell_integration::set_context_menu_registered,
             commands::app::launch_repo_path,
@@ -267,8 +273,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::ai::ai_copilot_device_poll,
             commands::ai::ai_copilot_account,
             commands::ai::generate_commit_message,
+            commands::ai::ai_resolve_conflict,
             commands::ai_commits::generate_commits,
             commands::github::hosting_providers,
+            commands::github::gh_cli_status,
             commands::github::repo_host_provider,
             commands::github::host_connect_token,
             commands::github::host_sign_out,
@@ -280,6 +288,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::github::github_repo_slug,
             commands::github::github_list_prs,
             commands::github::github_list_issues,
+            commands::github::github_scan_repos,
             commands::github::github_pr_detail,
             commands::github::github_pr_files,
             commands::github::github_pr_commits,
@@ -464,6 +473,33 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
         options
     };
 
+    // Structured logs, so a forwarded `log::info!` is queryable in Sentry rather
+    // than only reaching gitwyrm.log on the user's disk.
+    //
+    // This was added after diagnostic tracing for the Credential Manager
+    // investigation turned out to be unreachable: `SentryLogger` maps info! to a
+    // breadcrumb, breadcrumbs only ride along on an error event from the same
+    // process, and the user's bug report is submitted by the FRONTEND SDK -- so
+    // the backend's diagnostics never travelled with it. Two gates were off at
+    // once: the `logs` cargo feature, and this option. With either missing,
+    // `Client::capture_log` returns early and the record is dropped, not queued.
+    //
+    // Gated on `reports_diagnostics` (Full), not on error reporting: logs are a
+    // per-record stream far chattier than events, and someone who opted into
+    // "report errors" did not ask to ship their activity. `before_send_log`
+    // scrubs on the way out, exactly as `before_send` does for events -- a log
+    // line embeds repo paths and provider error bodies just as readily.
+    let options = if level.reports_diagnostics() {
+        options
+            .enable_logs(true)
+            .before_send_log(|mut log: sentry::protocol::Log| {
+                log.body = scrub::scrub_text(&log.body);
+                Some(log)
+            })
+    } else {
+        options
+    };
+
     Some(sentry::init((SENTRY_DSN, options)))
 }
 
@@ -497,6 +533,66 @@ pub fn export_bindings(out_path: &str) -> Result<(), String> {
             out_path,
         )
         .map_err(|e| e.to_string())
+}
+
+/// Whether git launched this process to answer a credential request.
+///
+/// Re-exported so `main` can branch before Tauri starts. See
+/// [`git::credential_helper`] for why this is a separate process mode.
+pub fn is_credential_helper(args: &[String]) -> bool {
+    git::credential_helper::requested(args)
+}
+
+/// Answer one git credential request and return the process exit code.
+///
+/// On Windows the GUI binary is built with `windows_subsystem = "windows"`, so
+/// it starts with no standard handles at all and anything written to stdout is
+/// discarded. Git, however, spawns helpers with pipes it created, and a child
+/// inherits those -- so stdout is real here even though it is absent when the
+/// same binary is launched from Explorer. Nothing extra is needed for it to
+/// work, but the reason is worth stating: it looks like it should not.
+pub fn run_credential_helper(args: &[String]) -> i32 {
+    git::credential_helper::run(args, helper_data_dir())
+}
+
+/// The app data directory, resolved without Tauri.
+///
+/// The credential helper runs before Tauri initializes -- it must not build a
+/// window or trip the single-instance guard -- so it cannot ask an `AppHandle`
+/// where `auth.json` lives. This mirrors Tauri's own per-platform resolution
+/// for the `dev.gitwyrm.app` identifier; if the identifier or Tauri's layout
+/// ever changes, this must follow.
+fn helper_data_dir() -> std::path::PathBuf {
+    const IDENTIFIER: &str = "dev.gitwyrm.app";
+
+    #[cfg(target_os = "windows")]
+    {
+        // %APPDATA%\dev.gitwyrm.app
+        let base = std::env::var_os("APPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        base.join(IDENTIFIER)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        home.join("Library/Application Support").join(IDENTIFIER)
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // $XDG_CONFIG_HOME, else ~/.config -- matching Tauri's Linux resolution.
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(std::path::PathBuf::from)
+                    .map(|h| h.join(".config"))
+            })
+            .unwrap_or_default();
+        base.join(IDENTIFIER)
+    }
 }
 
 pub fn run() {
@@ -658,6 +754,11 @@ pub fn run() {
             // spawns and returns, so a slow or unreachable endpoint cannot delay
             // startup by even a frame.
             telemetry::install::ping_on_launch(app.handle());
+
+            // Note an AppImage launch before anything spawns. The library paths
+            // it exports would otherwise reach every child process; see
+            // process_env for the clone failure that caused.
+            process_env::log_launch_environment();
 
             // Tell the tool resolver where git and gpg live before any shell-out
             // happens. They are downloaded rather than installed with the app, and

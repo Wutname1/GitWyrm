@@ -11,6 +11,41 @@ use crate::error::AppError;
 use crate::git::refs;
 use crate::git::types::{ConflictContent, MergeState, OperationKind};
 
+/// Refuse a directional merge before checkout changes any files when its
+/// receiving branch is already checked out in another worktree.
+///
+/// Git itself catches this at `set_head`, but a checkout performed first has
+/// already replaced the index and working files by then. That turns a safe
+/// refusal into hundreds of staged changes on the wrong branch.
+pub fn checkout_directional_target(
+    repo: &Repository,
+    target: &str,
+    source: &str,
+) -> Result<(), AppError> {
+    if let Some(holder) = crate::git::worktree::holder_of_branch(repo, target) {
+        if !holder.is_current {
+            return Err(AppError::Other(format!(
+                "{target} is already open in the {} folder, so it can't be switched to here. Open that folder to bring {source} into {target}, or swap the direction to bring {target} into this branch instead.",
+                holder.folder_name
+            )));
+        }
+    }
+
+    if refs::tracked_changes_present(repo)? {
+        return Err(AppError::Other(
+            "working tree has changes; commit or stash before switching to merge".into(),
+        ));
+    }
+
+    let (object, reference) = repo.revparse_ext(target)?;
+    repo.checkout_tree(&object, None)?;
+    match reference {
+        Some(r) => repo.set_head(r.name().unwrap_or("HEAD"))?,
+        None => repo.set_head_detached(object.id())?,
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Resolution {
@@ -120,6 +155,88 @@ pub fn merge_state(repo: &Repository) -> Result<MergeState, AppError> {
     })
 }
 
+/// Marker text for a conflicted file, regenerated in diff3 style.
+///
+/// Git's default marker style collapses two independent edits into a single
+/// block that also swallows the identical lines between them, which makes
+/// per-hunk resolution useless -- the one "hunk" is the whole region. diff3
+/// consults the common ancestor and keeps them separate, and carries the
+/// ancestor text along for the view to show.
+///
+/// Built from the index stages rather than read off disk so the result is the
+/// same whatever the user set `merge.conflictStyle` to, and still correct after
+/// the working copy has been hand-edited. `None` when any side is binary or
+/// libgit2 declines the merge, in which case the caller falls back to the
+/// working-tree copy.
+fn diff3_text(
+    path: &str,
+    base: &Option<(Vec<u8>, bool)>,
+    ours: &Option<(Vec<u8>, bool)>,
+    theirs: &Option<(Vec<u8>, bool)>,
+) -> Option<String> {
+    // A deleted side has no text to merge, and a binary side has none we could
+    // usefully show; both are whole-file choices instead.
+    if [base, ours, theirs]
+        .iter()
+        .any(|s| matches!(s, Some((_, true))))
+    {
+        return None;
+    }
+
+    fn content(side: &Option<(Vec<u8>, bool)>) -> Vec<u8> {
+        side.as_ref().map(|(b, _)| b.clone()).unwrap_or_default()
+    }
+
+    // Borrowed by the inputs below, so these must outlive the merge call.
+    let base_bytes = content(base);
+    let ours_bytes = content(ours);
+    let theirs_bytes = content(theirs);
+
+    fn input<'a>(bytes: &'a [u8], path: &str) -> git2::MergeFileInput<'a> {
+        let mut input = git2::MergeFileInput::new();
+        input.content(bytes);
+        input.path(path);
+        input
+    }
+    let base_in = input(&base_bytes, path);
+    let ours_in = input(&ours_bytes, path);
+    let theirs_in = input(&theirs_bytes, path);
+
+    let mut opts = git2::MergeFileOptions::new();
+    opts.style_diff3(true);
+
+    let result = git2::merge_file(&base_in, &ours_in, &theirs_in, Some(&mut opts)).ok()?;
+
+    // `MergeFileResult::content()` calls `slice::from_raw_parts` on the raw
+    // pointer with no null check, so calling it on a result libgit2 left empty
+    // is instant undefined behaviour -- it aborts the whole process, not just
+    // this call. A crash log caught it in the wild:
+    //
+    //   git2-0.21.0/src/merge.rs:382: unsafe precondition(s) violated:
+    //   slice::from_raw_parts requires the pointer to be aligned and non-null
+    //
+    // `is_automergeable()` covers the common case (a clean merge is not a
+    // conflict worth showing) but is NOT sufficient on its own -- the crash
+    // above happened anyway. Testing emptiness afterwards is far too late,
+    // because `content()` has already dereferenced the pointer by then.
+    //
+    // `path_bytes()` reads the sibling pointer through `opt_bytes`, which is
+    // null-checked and returns Option. libgit2 leaves `path` and `ptr` unset
+    // together, so a null path means a null content pointer -- which makes this
+    // a safe way to ask the question without dereferencing anything.
+    if result.is_automergeable() || result.path_bytes().is_none() {
+        return None;
+    }
+    let content = result.content();
+    if content.is_empty() {
+        return None;
+    }
+
+    // Non-UTF-8 content survives the merge but cannot be shown as text; the
+    // whole-file choices still work for it.
+    String::from_utf8(content.to_vec()).ok()
+}
+
 /// Read the three sides of a conflicted file plus the marker text on disk.
 pub fn conflict_content(
     repo: &Repository,
@@ -142,12 +259,17 @@ pub fn conflict_content(
         .and_then(|p| std::fs::read_to_string(p).ok())
         .unwrap_or_default();
 
+    // Prefer regenerated diff3 markers; fall back to whatever is on disk when
+    // the file cannot be merged as text.
+    let conflict_text = diff3_text(path, &base, &ours, &theirs).unwrap_or_else(|| merged.clone());
+
     Ok(ConflictContent {
         path: path.to_string(),
         base: side_text(&base),
         ours: side_text(&ours),
         theirs: side_text(&theirs),
         merged,
+        conflict_text,
         binary,
         ours_deleted: ours.is_none(),
         theirs_deleted: theirs.is_none(),

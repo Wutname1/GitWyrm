@@ -70,6 +70,21 @@ export function useAiMutations() {
       mutationFn: async (v: { repoId: string; provider: string; model: string }) =>
         unwrap(await commands.generateCommitMessage(v.repoId, v.provider, v.model)),
     }),
+    /**
+     * Ask the model to resolve one conflicted file.
+     *
+     * Returns the proposed text and writes nothing -- the caller loads it into
+     * the editor for review. Nothing is invalidated because nothing changed on
+     * disk yet; staging it goes through `resolveConflict` as usual.
+     */
+    resolveConflict: useMutation({
+      mutationFn: async (v: {
+        repoId: string
+        path: string
+        provider: string
+        model: string
+      }) => unwrap(await commands.aiResolveConflict(v.repoId, v.path, v.provider, v.model)),
+    }),
     generateCommits: useMutation({
       mutationFn: async (v: {
         repoId: string

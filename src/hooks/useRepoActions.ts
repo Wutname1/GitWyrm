@@ -99,6 +99,53 @@ export function useRepoReadme(path: string | null) {
 }
 
 /**
+ * Headline numbers for the repository the picker has selected: branches, how
+ * far the current branch leads or trails its remote, uncommitted files, and
+ * open issues and pull requests.
+ *
+ * Fetches first so ahead/behind is answered against the remote as it is now
+ * rather than whenever the user last synced. That fetch is unattended in the
+ * backend -- selecting a row must never raise a login window -- and a remote
+ * that refuses simply leaves the counts as they were on disk.
+ *
+ * Held for five minutes because it costs a network round trip, and re-clicking
+ * between two rows is how people read this panel.
+ */
+export function useRepoSnapshot(path: string | null) {
+  return useQuery({
+    queryKey: ['repo-snapshot', path ? pathKey(path) : ''],
+    enabled: path != null,
+    staleTime: 300_000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.repoSnapshot(path as string, true)),
+  })
+}
+
+/**
+ * Which of `paths` already have `url` as one of their remotes.
+ *
+ * Backs the picker's answer to a pasted clone URL: before offering to make a
+ * second copy, check whether the repository is already on this computer. The
+ * search reads each repository's config as text without opening it, so running
+ * it across the whole library is cheap.
+ */
+export function useReposWithRemote(url: string | null, paths: string[]) {
+  // Sorted so the key does not change when the library list re-orders itself.
+  const sorted = useMemo(
+    () => [...new Set(paths.map(normalizePath))].sort(),
+    [paths],
+  )
+  return useQuery({
+    queryKey: ['repos-with-remote', url ?? '', sorted],
+    enabled: url != null && sorted.length > 0,
+    staleTime: 30_000,
+    retry: false,
+    queryFn: async () =>
+      unwrap(await commands.findReposWithRemote(url as string, sorted)),
+  })
+}
+
+/**
  * Icons for repositories GitWyrm has opened before, keyed by normalized path.
  *
  * Reads only what discovery already recorded, so listing a large library costs

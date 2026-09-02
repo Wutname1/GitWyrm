@@ -88,6 +88,34 @@ fn non_empty(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+/// Reads the credential for a provider straight from a data directory.
+///
+/// The twin of [`credential`] for the git credential helper process, which
+/// runs before Tauri initializes and so has no `AppHandle` to resolve paths
+/// with. Reading the file directly also means the helper cannot accidentally
+/// initialize app state.
+pub fn credential_from_dir(
+    dir: &std::path::Path,
+    provider: ProviderId,
+) -> Result<Option<StoredCredential>, AppError> {
+    let raw = match std::fs::read_to_string(dir.join("auth.json")) {
+        Ok(raw) => raw,
+        // No store yet is not an error: it means no account is connected, and
+        // the helper answers that with silence.
+        Err(_) => return Ok(None),
+    };
+    let all: std::collections::BTreeMap<String, crate::ai::auth::AuthInfo> =
+        serde_json::from_str(&raw).unwrap_or_default();
+    let Some(info) = all.get(provider.as_str()) else {
+        return Ok(None);
+    };
+    let stored = match info {
+        crate::ai::auth::AuthInfo::Api { key } => key.clone(),
+        crate::ai::auth::AuthInfo::Oauth { access, .. } => access.clone(),
+    };
+    Ok(Some(parse_credential(&stored)))
+}
+
 pub fn client() -> reqwest::Client {
     reqwest::Client::new()
 }
@@ -160,7 +188,63 @@ fn extract_message(body: &str, keys: &[&str]) -> Option<String> {
 /// the cache lives in memory, forgotten on relaunch.
 const PERMISSION_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
-/// Remembered permission refusals, keyed by host name.
+/// The cooldown key for one refusal: the host, narrowed to the repository the
+/// refused request was for.
+///
+/// Keying on the host alone was wrong, and wrong in a way that grew teeth once
+/// the `gh` fallback existed. `is_permission_refusal` matches any `refused:`
+/// message, so a single private repository the token cannot see -- an ordinary,
+/// permanent condition in any account with a few orgs -- benched the string
+/// `"GitHub"` for an hour. From then on every GitHub request in the workspace,
+/// for every repo, skipped HTTP and went out through two `gh` process spawns.
+/// The user's report was that the whole app got slow after enabling the CLI,
+/// and this is why.
+///
+/// The scope is the repository *and* the kind of resource asked for, because
+/// the refusal this exists for is narrower than a repository. Under OAuth app
+/// restrictions an org blocks issues and pull requests while the same token
+/// keeps working for the rest of that very repo -- contents, commits, checks.
+/// That is the case the CLI fallback was added for. Keyed by repo alone, one
+/// refused PR list would route that repo's every other call through `gh` too,
+/// each paying a process spawn to replace an HTTP call that was working.
+///
+/// Requests with no repository in their path -- `/user`, rate-limit probes --
+/// fall back to the bare host, which is the old behaviour for the small set of
+/// calls that really are account-wide.
+fn cooldown_key(host: &str, path: &str) -> String {
+    match repo_scope(path) {
+        Some(scope) => format!("{host}:{scope}"),
+        None => host.to_string(),
+    }
+}
+
+/// The `owner/repo` plus resource kind a GitHub API path addresses.
+///
+/// Paths look like `/repos/{owner}/{repo}/{kind}/...`, with or without a
+/// leading slash, and may carry a query string that must not become part of the
+/// key.
+///
+/// `issues` and `pulls` deliberately collapse to one bucket. They are the pair
+/// an org's OAuth app restrictions block together, and a PR *is* an issue in
+/// this API -- PR comments are fetched from `/issues/{n}/comments`. Splitting
+/// them would make a blocked PR list re-learn the same refusal when the comment
+/// call followed it a moment later.
+fn repo_scope(path: &str) -> Option<String> {
+    let rest = path.trim_start_matches('/').strip_prefix("repos/")?;
+    let rest = rest.split(['?', '#']).next()?;
+    let mut parts = rest.split('/').filter(|p| !p.is_empty());
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    let kind = match parts.next() {
+        Some("issues") | Some("pulls") => "issues+pulls",
+        // The repo endpoint itself, e.g. `/repos/o/r`.
+        Some(other) => other,
+        None => "",
+    };
+    Some(format!("{owner}/{repo}/{kind}"))
+}
+
+/// Remembered permission refusals, keyed by [`cooldown_key`].
 ///
 /// Deliberately not a `OnceLock`: reconnecting an account is exactly what a
 /// user does after reading the refusal, and a permanent cache would keep
@@ -183,24 +267,27 @@ fn is_permission_refusal(message: &str) -> bool {
         || low.contains("refused:")
 }
 
-/// The remembered refusal for `host`, if one is still within its cooldown.
-fn cooled_down(host: &str) -> Option<String> {
+/// The remembered refusal for `key`, if one is still within its cooldown.
+///
+/// `key` comes from [`cooldown_key`], so it names a repository's resource kind
+/// where the path had one and the bare host where it did not.
+fn cooled_down(key: &str) -> Option<String> {
     PERMISSION_COOLDOWNS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .as_ref()?
-        .get(host)
+        .get(key)
         .filter(|(at, _)| at.elapsed() < PERMISSION_COOLDOWN)
         .map(|(_, message)| message.clone())
 }
 
-fn remember_refusal(host: &str, message: &str) {
-    log::warn!("{host} refused on permissions; not asking again for an hour: {message}");
+fn remember_refusal(host: &str, key: &str, message: &str) {
+    log::warn!("{host} refused on permissions for {key}; not asking again for an hour: {message}");
     PERMISSION_COOLDOWNS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get_or_insert_with(HashMap::new)
-        .insert(host.to_string(), (Instant::now(), message.to_string()));
+        .insert(key.to_string(), (Instant::now(), message.to_string()));
 }
 
 /// Drops a host's cooldown so the next call goes out for real.
@@ -222,6 +309,178 @@ pub fn clear_cooldown(host: &str) {
     }
 }
 
+/// Enough about a GitHub request to reissue it through the `gh` CLI.
+///
+/// A built `reqwest::RequestBuilder` has already swallowed its method and path
+/// into an opaque object, so the fallback cannot recover them from it. Carrying
+/// them alongside is the smallest thing that works; only GitHub calls build one,
+/// and the other three hosts keep using plain [`send`] untouched.
+#[derive(Clone)]
+pub struct GhFallback {
+    pub method: &'static str,
+    pub path: String,
+    pub body: Option<serde_json::Value>,
+}
+
+impl GhFallback {
+    pub fn get(path: impl AsRef<str>) -> Self {
+        Self {
+            method: "GET",
+            path: path.as_ref().to_string(),
+            body: None,
+        }
+    }
+
+    pub fn write(method: &'static str, path: impl AsRef<str>, body: serde_json::Value) -> Self {
+        Self {
+            method,
+            path: path.as_ref().to_string(),
+            body: Some(body),
+        }
+    }
+}
+
+/// Whether the GitHub CLI fallback may be used, set from Settings at startup.
+///
+/// A process-global for the same reason `git::shell::GIT_PROGRAM` is one: the
+/// providers are deep in a call chain that would otherwise have to thread the
+/// setting through every method for a value that changes about once a year.
+static GH_FALLBACK_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_gh_fallback_enabled(enabled: bool) {
+    GH_FALLBACK_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn gh_fallback_enabled() -> bool {
+    GH_FALLBACK_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Send a GitHub request, retrying through the `gh` CLI if the token is refused.
+///
+/// The refusal this exists for is an organization blocking third-party OAuth
+/// apps. That is not something the user can fix from inside GitWyrm, but `gh`
+/// is usually approved where we are not, so the retry turns a dead panel into a
+/// working one. Everything else -- a rate limit, a timeout, a 404 -- is left
+/// exactly as it was, because `gh` would fail the same way.
+///
+/// A successful fallback deliberately does NOT record a cooldown: the request
+/// worked, and benching the host would stop the next one from even trying.
+pub async fn send_via_gh(
+    builder: reqwest::RequestBuilder,
+    host: &str,
+    message_keys: &[&str],
+    fallback: GhFallback,
+) -> Result<reqwest::Response, AppError> {
+    // Scoped to the resource this request is for, so a blocked PR list benches
+    // pull requests on that repo and nothing else.
+    let key = cooldown_key(host, &fallback.path);
+    // A remembered refusal is the signal to go straight to `gh`: the direct
+    // call is known to fail, so spending a round trip to confirm it is waste.
+    if let Some(remembered) = cooled_down(&key) {
+        return match try_gh(&fallback).await {
+            Some(Ok(res)) => Ok(res),
+            Some(Err(e)) => Err(e),
+            None => Err(AppError::Other(remembered)),
+        };
+    }
+
+    // `send_raw`, not `send`: the refusal is recorded here against the scoped
+    // key, and letting `send` also record it under the bare host would re-create
+    // the workspace-wide bench this scoping exists to remove.
+    let direct = send_raw(builder, host, message_keys).await;
+    let Err(AppError::Other(message)) = &direct else {
+        return direct;
+    };
+    if !is_permission_refusal(message) {
+        return direct;
+    }
+    remember_refusal(host, &key, message);
+    match try_gh(&fallback).await {
+        Some(Ok(res)) => Ok(res),
+        // `gh` was available and still failed. Its message is the more specific
+        // of the two -- it reached the API with a better credential and was told
+        // no anyway -- so it replaces ours rather than being appended.
+        Some(Err(e)) => Err(e),
+        None => direct,
+    }
+}
+
+/// Runs the fallback, or None when the CLI cannot help.
+///
+/// Returns a synthesized `reqwest::Response` so callers deserialize the body
+/// the same way regardless of which transport produced it.
+/// Runs [`try_gh_blocking`] on the blocking pool.
+///
+/// Every caller is async, and the work inside is a PATH walk plus up to two
+/// process spawns that block for as long as [`gh_cli`] allows. Doing that
+/// inline on an async task holds a runtime thread for the whole wait, and the
+/// git commands the UI runs -- `checkout_branch` and friends -- queue on that
+/// same pool. A GitHub panel falling back on several requests at once was
+/// enough to make switching branches feel stalled, which is how this surfaced.
+///
+/// [`gh_cli`]: super::gh_cli
+async fn try_gh(fallback: &GhFallback) -> Option<Result<reqwest::Response, AppError>> {
+    let fallback = fallback.clone();
+    match tauri::async_runtime::spawn_blocking(move || try_gh_blocking(&fallback)).await {
+        Ok(result) => result,
+        // The pool itself failed, which is not something the fallback can
+        // report usefully; leave the caller with its original error.
+        Err(e) => {
+            log::debug!("GitHub CLI fallback could not be scheduled: {e}");
+            None
+        }
+    }
+}
+
+fn try_gh_blocking(fallback: &GhFallback) -> Option<Result<reqwest::Response, AppError>> {
+    if !gh_fallback_enabled() {
+        return None;
+    }
+    let exe = match super::gh_cli::availability() {
+        Ok(exe) => exe,
+        Err(reason) => {
+            log::debug!("GitHub CLI fallback unavailable: {reason:?}");
+            return None;
+        }
+    };
+    log::info!(
+        "GitHub refused our token; retrying {} {} through the GitHub CLI",
+        fallback.method,
+        fallback.path
+    );
+    match super::gh_cli::api(
+        &exe,
+        fallback.method,
+        &fallback.path,
+        fallback.body.as_ref(),
+    ) {
+        Ok(body) => {
+            // A 204 has no body, and `serde_json` cannot parse an empty string.
+            // The write paths only check status, so an empty object satisfies
+            // both them and any caller that does deserialize.
+            let body = if body.trim().is_empty() {
+                "{}".to_string()
+            } else {
+                body
+            };
+            Some(Ok(http_response_from_body(body)))
+        }
+        Err(e) => Some(Err(e)),
+    }
+}
+
+/// Wraps a body string as a 200 response, so the `gh` path returns the same
+/// type as the HTTP path and every caller downstream stays unchanged.
+fn http_response_from_body(body: String) -> reqwest::Response {
+    reqwest::Response::from(
+        http::Response::builder()
+            .status(200)
+            .body(body)
+            .expect("a 200 with a string body cannot fail to build"),
+    )
+}
+
 pub async fn send(
     builder: reqwest::RequestBuilder,
     host: &str,
@@ -233,17 +492,73 @@ pub async fn send(
     if let Some(remembered) = cooled_down(host) {
         return Err(AppError::Other(remembered));
     }
+    let checked = send_raw(builder, host, message_keys).await;
+    if let Err(AppError::Other(message)) = &checked {
+        if is_permission_refusal(message) {
+            remember_refusal(host, host, message);
+        }
+    }
+    checked
+}
+
+/// Send and check, without touching the cooldown map.
+///
+/// For callers that own their own cooldown scope -- [`send_via_gh`] keys on the
+/// repository and resource kind, which this function cannot see.
+async fn send_raw(
+    builder: reqwest::RequestBuilder,
+    host: &str,
+    message_keys: &[&str],
+) -> Result<reqwest::Response, AppError> {
     let res = builder
         .send()
         .await
         .map_err(|e| AppError::Other(format!("could not reach {host}: {e}")))?;
-    let checked = check(res, host, message_keys).await;
-    if let Err(AppError::Other(message)) = &checked {
-        if is_permission_refusal(message) {
-            remember_refusal(host, message);
-        }
+    check(res, host, message_keys).await
+}
+
+/// Retry an already-failed GitHub request through the `gh` CLI.
+///
+/// For the call sites that inspect the response themselves (`list_prs` treats a
+/// 404 as "no pull requests") and so cannot hand [`send_via_gh`] an unsent
+/// builder. Takes the error they produced and either replaces it with the
+/// fallback's answer or gives it back unchanged.
+pub async fn retry_via_gh<T: DeserializeOwned>(
+    error: AppError,
+    host: &str,
+    fallback: GhFallback,
+) -> Result<T, AppError> {
+    let AppError::Other(message) = &error else {
+        return Err(error);
+    };
+    if !is_permission_refusal(message) {
+        return Err(error);
     }
-    checked
+    // The caller reached the API itself, so the refusal has not been recorded
+    // yet; record it against this resource before falling back.
+    remember_refusal(host, &cooldown_key(host, &fallback.path), message);
+    match try_gh(&fallback).await {
+        Some(Ok(res)) => res
+            .json()
+            .await
+            .map_err(|e| AppError::Other(format!("bad response from {host}: {e}"))),
+        Some(Err(e)) => Err(e),
+        None => Err(error),
+    }
+}
+
+/// Send and deserialize through the `gh`-fallback path.
+pub async fn send_json_via_gh<T: DeserializeOwned>(
+    builder: reqwest::RequestBuilder,
+    host: &str,
+    message_keys: &[&str],
+    fallback: GhFallback,
+) -> Result<T, AppError> {
+    send_via_gh(builder, host, message_keys, fallback)
+        .await?
+        .json()
+        .await
+        .map_err(|e| AppError::Other(format!("bad response from {host}: {e}")))
 }
 
 /// Send and deserialize, with the host named in any parse failure.
@@ -316,6 +631,59 @@ mod tests {
         ));
     }
 
+    /// The bug this scoping fixes: a work org blocks issues and pull requests
+    /// on its repos while every other call on the very same repo keeps working.
+    /// Keyed by host alone, one refused PR list sent the entire workspace --
+    /// every repo, every endpoint -- out through the `gh` CLI for an hour.
+    #[test]
+    fn a_refusal_is_scoped_to_one_repos_issues_and_pulls() {
+        let host = "ScopeTestHost";
+        let prs = cooldown_key(host, "/repos/work-org/api/pulls?per_page=50");
+        let issues = cooldown_key(host, "/repos/work-org/api/issues/12/comments");
+        let commits = cooldown_key(host, "/repos/work-org/api/commits");
+        let other_repo = cooldown_key(host, "/repos/work-org/other/pulls");
+
+        // Pull requests and issues share a bucket: a PR *is* an issue here.
+        assert_eq!(prs, issues, "issues and pulls must share one bucket");
+
+        remember_refusal(
+            host,
+            &prs,
+            "ScopeTestHost refused: OAuth App access restrictions",
+        );
+        assert!(
+            cooled_down(&prs).is_some(),
+            "the refused resource is benched"
+        );
+        assert!(
+            cooled_down(&commits).is_none(),
+            "contents on the same repo must keep using the working HTTP path"
+        );
+        assert!(
+            cooled_down(&other_repo).is_none(),
+            "a different repo must be unaffected"
+        );
+        assert!(
+            cooled_down(host).is_none(),
+            "the bare host must not be benched by one repo's refusal"
+        );
+        clear_cooldown(&prs);
+    }
+
+    /// Account-wide calls carry no repository, so they keep the old host key.
+    #[test]
+    fn pathless_calls_fall_back_to_the_bare_host() {
+        assert_eq!(cooldown_key("GitHub", "/user"), "GitHub");
+        assert_eq!(cooldown_key("GitHub", "/rate_limit"), "GitHub");
+        // A malformed repo path must not panic or invent a scope.
+        assert_eq!(cooldown_key("GitHub", "/repos/only-owner"), "GitHub");
+        assert_eq!(
+            cooldown_key("GitHub", "repos/o/r/pulls"),
+            "GitHub:o/r/issues+pulls",
+            "a missing leading slash must key the same as a present one"
+        );
+    }
+
     /// Remembering must be per-host: one org's restriction cannot silence a
     /// different host the user is legitimately connected to.
     #[test]
@@ -325,7 +693,7 @@ mod tests {
         let other = "CooldownOtherHost";
         assert!(cooled_down(host).is_none(), "starts clean");
 
-        remember_refusal(host, "TestHost refused: no access");
+        remember_refusal(host, host, "TestHost refused: no access");
         assert_eq!(
             cooled_down(host).as_deref(),
             Some("TestHost refused: no access")
@@ -340,6 +708,54 @@ mod tests {
             cooled_down(host).is_none(),
             "reconnecting must lift the bench immediately"
         );
+    }
+
+    /// The exact set of failures that reroute to `gh`.
+    ///
+    /// `send_via_gh` gates on `is_permission_refusal`, so this list IS the
+    /// fallback's trigger condition. Rerouting too widely would spawn a process
+    /// on every rate limit and timeout; too narrowly and the org-blocked case
+    /// this exists for never fires.
+    #[test]
+    fn only_permission_refusals_reroute_to_the_cli() {
+        // The case the fallback exists for.
+        assert!(is_permission_refusal(
+      "GitHub refused: Although you appear to have the correct authorization credentials, the `some-org` organization has enabled OAuth App access restrictions."
+    ));
+        // A token that lost its scopes: `gh` has its own and may well succeed.
+        assert!(is_permission_refusal(
+            "GitHub sign-in is no longer valid; connect GitHub again"
+        ));
+
+        // `gh` would hit the same rate limit from the same IP, and spawning a
+        // process to be told so again helps nobody.
+        assert!(!is_permission_refusal(
+            "GitHub rate limit reached; try again in a few minutes"
+        ));
+        // Offline is offline for both transports.
+        assert!(!is_permission_refusal("could not reach GitHub: timed out"));
+        // A real 404 is not an access problem; rerouting would turn a clear
+        // "renamed or deleted" into a confusing CLI error.
+        assert!(!is_permission_refusal(
+      "GitHub could not find that. It may be private, renamed, or your token may not cover it."
+    ));
+    }
+
+    /// The toggle has to actually gate the fallback, not merely be stored.
+    #[test]
+    fn the_setting_turns_the_fallback_off() {
+        // Restored at the end: the flag is process-global and other tests read it.
+        let original = gh_fallback_enabled();
+
+        set_gh_fallback_enabled(false);
+        assert!(
+            // The blocking half: `try_gh` only wraps it in `spawn_blocking`,
+            // and the gate under test lives here.
+            try_gh_blocking(&GhFallback::get("/repos/o/r/pulls")).is_none(),
+            "a disabled fallback must not run the CLI at all"
+        );
+
+        set_gh_fallback_enabled(original);
     }
 
     #[test]

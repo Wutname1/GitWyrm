@@ -43,11 +43,11 @@ export function BranchMenu({ branch, opInProgress, showWebLink = true }: BranchM
   // does, so blend / stack / replace are offered together with the resulting
   // shape drawn, instead of each menu item quietly picking one.
   //
-  // Argument order matches a drag: the FIRST ref is the one "picked up", which
-  // for two local branches is the one that moves. The menu reads "merge <other>
-  // into <current>", so current is the branch that moves and goes first.
+  // Argument order matches a drag: the FIRST ref is the one "picked up", and
+  // for two local branches that is the source whose commits travel. The menu
+  // reads "merge <other> into <current>", so the other branch goes first.
   const onMerge = (name: string, mode?: PreviewMode) =>
-    openRemoteSync(currentBranch, name, mode)
+    openRemoteSync(name, currentBranch, mode)
 
   return (
     <BranchMenuItems

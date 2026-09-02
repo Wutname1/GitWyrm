@@ -79,6 +79,9 @@ impl CodexConnection {
             // The child must not outlive us: an orphan holds a subscription
             // slot and keeps writing to a repository nobody is watching.
             .kill_on_drop(true);
+        // Same as every other child GitWyrm spawns: an AppImage's bundled
+        // loader variables must not leak into a system binary.
+        crate::process_env::scrub_bundled_env(&mut cmd);
 
         #[cfg(windows)]
         cmd.creation_flags(crate::git::shell::CREATE_NO_WINDOW);

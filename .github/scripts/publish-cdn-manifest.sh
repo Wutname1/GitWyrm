@@ -68,7 +68,6 @@ ARTIFACTS = {
     "windows-aarch64": "GitWyrm-Setup-ARM64.exe",
     "linux-x86_64-appimage": "GitWyrm-x86_64.AppImage",
     "linux-x86_64-deb": "GitWyrm-amd64.deb",
-    "linux-x86_64-rpm": "GitWyrm-x86_64.rpm",
     # Older updater clients and unqualified Linux installs use the AppImage.
     "linux-x86_64": "GitWyrm-x86_64.AppImage",
 }
@@ -109,7 +108,6 @@ required = {
     "windows-aarch64",
     "linux-x86_64-appimage",
     "linux-x86_64-deb",
-    "linux-x86_64-rpm",
 }
 missing = sorted(required - covered)
 if missing:

@@ -35,6 +35,16 @@ interface Rule {
  */
 const RULES: Rule[] = [
   {
+    // A branch already checked out in another worktree folder. The backend
+    // treats this as an expected refusal, so without a rule here the two layers
+    // disagreed: the backend stayed quiet while the frontend logged raw
+    // libgit2 wording at error severity and filed it as a crash.
+    match: (r) => r.includes('current head of a linked repository'),
+    severity: 'warning',
+    message:
+      'That branch is already open in another worktree. A branch can only be checked out in one folder at a time.',
+  },
+  {
     // "nothing to stash" -- clean working tree. Not a failure.
     match: (r) => r.includes('nothing to stash') || r.includes('class=stash') && r.includes('code=notfound'),
     severity: 'info',

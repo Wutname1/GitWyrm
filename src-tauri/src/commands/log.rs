@@ -287,7 +287,12 @@ pub async fn get_log(
 ) -> Result<LogPage, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
+        // The graph reload is the most-repeated expensive command in the app, and
+        // its cost splits between the number of refs and the depth of history. The
+        // scale below is the ref count, so a slow load can be told apart from a
+        // load of a repo that simply has a great many branches.
+        let timing = crate::perf::CommandTiming::start("get_log", "git.log");
+        let repo = open.read();
 
         let head_oid = repo
             .head()
@@ -302,6 +307,9 @@ pub async fn get_log(
         }
 
         let refs = collect_refs(&repo);
+        // Total refs, not commits carrying one: several branches on the same
+        // commit each cost a pass, and it is that count the walk scales with.
+        timing.set_scale(refs.values().map(|v| v.len() as u64).sum());
         // Memoized on HEAD plus the ref tips: this comparison runs over every ref
         // and dominates the cost of a page, but its answer is identical for every
         // page of the same scroll. See `OpenRepo::primary_lane`.
@@ -389,7 +397,7 @@ pub async fn get_commit_stats(
 ) -> Result<HashMap<String, CommitStats>, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
+        let repo = open.read();
         let mut out = HashMap::with_capacity(shas.len());
         for sha in shas {
             let Ok(oid) = Oid::from_str(&sha) else {

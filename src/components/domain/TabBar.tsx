@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { WindowControls } from "@/components/domain/WindowControls";
@@ -31,6 +32,7 @@ import {
   useWyrmEasterEgg,
 } from "@/components/domain/WyrmEasterEgg";
 import logoUrl from "@/assets/logo.png";
+import { useIsBetaBuild } from "@/hooks/useIsBetaBuild";
 import { useOpenRepo } from "@/hooks/useRepoActions";
 import { useUpdater } from "@/hooks/useUpdater";
 import { measureToPaint } from "@/lib/perf";
@@ -68,16 +70,49 @@ import {
 
 const DOCS_URL = "https://docs.gitwyrm.com/";
 
-function Wordmark() {
+const WORDMARK_FONT = {
+  fontFamily: "var(--font-wordmark)",
+  fontWeight: 600,
+  letterSpacing: "-0.035em",
+} as const;
+
+/**
+ * On a beta build the mark stacks "Wyrm" over "BETA" beside a full-height
+ * "Git", so the channel is legible in the app bar without stealing width from
+ * the tabs. The stacked half is sized so both lines together match the height of
+ * the "Git" beside them, keeping the mark inside the app bar.
+ */
+function Wordmark({ beta }: { beta: boolean }) {
+  if (beta) {
+    return (
+      <span
+        data-tauri-drag-region
+        className="wyrm-spring flex origin-left items-center gap-[4px] text-[1rem] leading-none"
+        style={WORDMARK_FONT}
+      >
+        <span data-tauri-drag-region style={{ color: "var(--gw-text)" }}>
+          Git
+        </span>
+        <span
+          data-tauri-drag-region
+          className="flex flex-col text-[0.6875rem] leading-[1.15]"
+        >
+          <span data-tauri-drag-region style={{ color: "var(--gw-accent)" }}>
+            Wyrm
+          </span>
+          <span data-tauri-drag-region style={{ color: "var(--gw-red)" }}>
+            BETA
+          </span>
+        </span>
+      </span>
+    );
+  }
+
   return (
     <span
       data-tauri-drag-region
-      className="text-[0.84375rem] leading-none"
-      style={{
-        fontFamily: "var(--font-wordmark)",
-        fontWeight: 600,
-        letterSpacing: "-0.035em",
-      }}
+      className="wyrm-spring origin-left text-[0.84375rem] leading-none"
+      style={WORDMARK_FONT}
     >
       <span data-tauri-drag-region style={{ color: "var(--gw-text)" }}>
         Git
@@ -99,6 +134,7 @@ function BrandMark() {
   const showSettings = useUiStore((state) => state.showSettings);
   const checkAndInstall = useUpdater((s) => s.checkAndInstall);
   const { onLogoClick, bounceNonce, blast } = useWyrmEasterEgg();
+  const isBeta = useIsBetaBuild();
 
   return (
     <>
@@ -109,17 +145,22 @@ function BrandMark() {
             onClick={onLogoClick}
             aria-label="GitWyrm"
             data-tauri-drag-region
-            className="flex items-center gap-[7px] outline-none"
+            className="flex items-center gap-[7px] rounded-[5px] px-1 -mx-1 outline-none transition-[background-color,opacity] hover:bg-panel2 active:bg-panel3 active:opacity-80"
           >
-            <img
+            <span
               key={bounceNonce}
-              src={logoUrl}
-              alt=""
-              draggable={false}
               data-tauri-drag-region
-              className="size-[18px] flex-none wyrm-spring"
-            />
-            <Wordmark />
+              className="flex items-center gap-[7px]"
+            >
+              <img
+                src={logoUrl}
+                alt=""
+                draggable={false}
+                data-tauri-drag-region
+                className="size-[25px] flex-none wyrm-spring"
+              />
+              <Wordmark beta={isBeta} />
+            </span>
           </button>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48">
@@ -148,15 +189,17 @@ function RepoRow({
   path,
   icon,
   onSelect,
+  onForget,
 }: {
   name: string;
   path: string;
   icon: ReactNode;
   onSelect: () => void;
+  onForget?: () => void;
 }) {
   return (
     <DropdownMenuItem
-      className="flex-col items-start gap-0 text-xs text-sub"
+      className="group/repo flex-col items-start gap-0 text-xs text-sub"
       onSelect={onSelect}
     >
       <span className="flex w-full items-center gap-2">
@@ -164,6 +207,24 @@ function RepoRow({
         <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
           {name}
         </span>
+        {onForget && (
+          <button
+            type="button"
+            aria-label={`Remove ${name} from Recent`}
+            title={`Remove ${name} from Recent`}
+            // The row opens the repo, so the click must not reach it -- and a
+            // folder that has been renamed or deleted can only be removed here,
+            // where opening it is exactly what fails.
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onForget();
+            }}
+            className="grid size-5 shrink-0 place-items-center rounded-[5px] text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground group-hover/repo:opacity-100 focus:opacity-100"
+          >
+            <X size={11} />
+          </button>
+        )}
       </span>
       <span className="w-full overflow-hidden text-ellipsis whitespace-nowrap pl-[21px] font-mono text-2xs text-muted-foreground">
         {path}
@@ -233,7 +294,8 @@ function TabSortPicker() {
         {TAB_SORT_OPTIONS.map((option) => {
           const selected = tabSort === option.value;
           const canReverse = option.reverseHint != null;
-          const reversed = selected && canReverse && tabSortDirection === "reverse";
+          const reversed =
+            selected && canReverse && tabSortDirection === "reverse";
           const hint = reversed ? option.reverseHint! : option.hint;
           return (
             <button
@@ -287,15 +349,17 @@ function TabSortPicker() {
                   {selected && canReverse && " · click to reverse"}
                 </span>
               </span>
-              {selected && <Check size={13} strokeWidth={2.4} className="flex-none" />}
+              {selected && (
+                <Check size={13} strokeWidth={2.4} className="flex-none" />
+              )}
             </button>
           );
         })}
       </div>
       {pinnedCount > 0 && (
         <p className="px-1.5 pt-1 text-2xs text-muted-foreground">
-          {pinnedCount} pinned {pinnedCount === 1 ? "tab stays" : "tabs stay"} at
-          the front. Right-click a tab to pin or unpin it.
+          {pinnedCount} pinned {pinnedCount === 1 ? "tab stays" : "tabs stay"}{" "}
+          at the front. Right-click a tab to pin or unpin it.
         </p>
       )}
     </div>
@@ -307,6 +371,7 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
   const openRepos = useWorkspaceStore((state) => state.openRepos);
   const activeRepoId = useWorkspaceStore((state) => state.activeRepoId);
   const setActiveRepo = useWorkspaceStore((state) => state.setActiveRepo);
+  const removeRecent = useWorkspaceStore((state) => state.removeRecent);
   const openRepo = useOpenRepo();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -351,8 +416,8 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
               aria-label="Open and recent repositories"
               className={
                 compact
-                  ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
-                  : "flex items-center px-2 text-sub hover:text-foreground"
+                  ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub transition-colors hover:border-muted-foreground hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
+                  : "flex items-center rounded-[5px] px-2 text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground"
               }
             >
               <ChevronDown size={14} strokeWidth={2} />
@@ -429,6 +494,7 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
                 path={repo.path}
                 icon={<Clock size={13} strokeWidth={2} />}
                 onSelect={() => openRepo.mutate(repo.path)}
+                onForget={() => removeRecent(repo.path)}
               />
             ))}
           </div>
@@ -441,15 +507,17 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
 function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
   const showRepoPicker = useUiStore((state) => state.showRepoPicker);
   const closeRepoPicker = useUiStore((state) => state.closeRepoPicker);
-  const pickerShowing = useUiStore((state) => state.centerView === "repoPicker");
+  const pickerShowing = useUiStore(
+    (state) => state.centerView === "repoPicker",
+  );
   const openRepo = useOpenRepo();
   return (
     <TooltipButton
       onClick={() => (pickerShowing ? closeRepoPicker() : showRepoPicker())}
       className={
         compact
-          ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
-          : "flex items-center px-2 text-sub hover:text-foreground"
+          ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub transition-colors hover:border-muted-foreground hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
+          : "flex items-center rounded-[5px] px-2 text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground"
       }
       tooltip={pickerShowing ? "Close" : "Open or clone a repository"}
       disabled={openRepo.isPending}
@@ -475,7 +543,7 @@ function VerticalTabsButton() {
         setTabLayout("vertical");
         toast.success("Repository tabs moved to the left side");
       }}
-      className="flex items-center px-2 text-sub hover:text-foreground"
+      className="flex items-center rounded-[5px] px-2 text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground"
       tooltip="Use vertical tabs"
     >
       <PanelLeft size={15} strokeWidth={1.9} />
@@ -495,7 +563,7 @@ function SettingsButton() {
     <TooltipButton
       onClick={() => (inSettings ? showGraph() : showSettings())}
       className={cn(
-        "flex items-center px-2 hover:text-foreground",
+        "flex items-center rounded-[5px] px-2 transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground",
         inSettings ? "text-accent-text" : "text-sub",
       )}
       tooltip={inSettings ? "Close settings" : "Settings"}
@@ -642,7 +710,7 @@ export function VerticalTabRail() {
           <button
             type="button"
             onClick={() => useUiStore.getState().showRepoPicker()}
-            className="flex h-[31px] flex-1 items-center justify-center gap-1.5 rounded-[5px] border border-border bg-panel2 text-2xs text-foreground hover:border-muted-foreground hover:bg-panel3"
+            className="flex h-[31px] flex-1 items-center justify-center gap-1.5 rounded-[5px] border border-border bg-panel2 text-2xs text-foreground transition-colors hover:border-muted-foreground hover:bg-panel3 active:bg-panel"
           >
             <Plus size={13} />
             Open a repository
@@ -653,14 +721,14 @@ export function VerticalTabRail() {
             setTabLayout("horizontal");
             toast.success("Repository tabs moved to the top");
           }}
-          className="flex size-[31px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
+          className="flex size-[31px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub transition-colors hover:border-muted-foreground hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
           tooltip="Use top tabs"
         >
           <Columns3 size={14} />
         </TooltipButton>
         <TooltipButton
           onClick={() => showSettings()}
-          className="flex size-[31px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 hover:text-foreground"
+          className="flex size-[31px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub transition-colors hover:border-muted-foreground hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
           tooltip="Settings"
         >
           <Settings size={14} />

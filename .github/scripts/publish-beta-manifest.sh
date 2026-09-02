@@ -71,7 +71,6 @@ done
 # Filenames match the release workflow's "Upload versioned Linux packages" step.
 declare -A LINUX_ARTIFACTS=(
   ["linux-x86_64-deb"]="GitWyrm-amd64.deb"
-  ["linux-x86_64-rpm"]="GitWyrm-x86_64.rpm"
   ["linux-x86_64-appimage"]="GitWyrm-x86_64.AppImage"
   ["linux-x86_64"]="GitWyrm-x86_64.AppImage"
 )
@@ -132,7 +131,7 @@ for suffix in "" "-ARM64"; do
     --cache-control "no-cache, no-store"
 done
 
-for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb GitWyrm-x86_64.rpm; do
+for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb; do
   aws s3 cp \
     "s3://${BUCKET}/betas/${VERSION}/${file}" \
     "s3://${BUCKET}/betas/${file}" \

@@ -19,6 +19,7 @@ import {
 } from '@/lib/themes'
 import { cn } from '@/lib/utils'
 import { ChangeSizeSettings } from './ChangeSizeSettings'
+import { GraphAvatarSettings } from './GraphAvatarSettings'
 import { ResetToDefaults } from './ResetToDefaults'
 import {
   FontFamilySetting,
@@ -318,6 +319,13 @@ export function AppearanceSettings() {
           hint="Show added and removed line counts beside commits."
         >
           <ChangeSizeSettings />
+        </SettingRow>
+        <SettingRow
+          label="Commit author pictures"
+          searchId="graph-avatars"
+          hint="Draw each commit in the graph as the author's picture."
+        >
+          <GraphAvatarSettings />
         </SettingRow>
       </SettingsGroup>
 

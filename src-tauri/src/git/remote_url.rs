@@ -251,6 +251,22 @@ pub fn parse(url: &str) -> Option<ParsedRemote> {
     })
 }
 
+/// Whether two remote URLs point at the same repository on the same host.
+///
+/// Comparison is on host plus repository path, so every supported shape of the
+/// same remote matches: `https://host/o/r`, `https://host/o/r.git`,
+/// `git@host:o/r.git` and `ssh://git@host:22/o/r` are all one repository.
+/// Case is ignored in the path because hosts route case-insensitively while
+/// people type owner and repo names either way.
+pub fn same_repository(a: &str, b: &str) -> bool {
+    match (parse(a), parse(b)) {
+        (Some(left), Some(right)) => {
+            left.host == right.host && left.path.eq_ignore_ascii_case(&right.path)
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,6 +296,33 @@ mod tests {
                 "base for {url}"
             );
         }
+    }
+
+    #[test]
+    fn every_shape_of_one_remote_is_the_same_repository() {
+        for other in [
+            "https://github.com/Owner/Repo",
+            "git@github.com:owner/repo.git",
+            "ssh://git@github.com:22/owner/repo",
+        ] {
+            assert!(
+                same_repository("https://github.com/owner/repo.git", other),
+                "expected {other} to match"
+            );
+        }
+    }
+
+    #[test]
+    fn a_different_owner_or_host_is_not_the_same_repository() {
+        assert!(!same_repository(
+            "https://github.com/owner/repo",
+            "https://github.com/other/repo"
+        ));
+        assert!(!same_repository(
+            "https://github.com/owner/repo",
+            "https://gitlab.com/owner/repo"
+        ));
+        assert!(!same_repository("not a url", "https://github.com/owner/repo"));
     }
 
     /// The old parsers all broke on an explicit ssh port, each differently.

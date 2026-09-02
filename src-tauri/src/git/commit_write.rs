@@ -95,6 +95,9 @@ fn commit_tree_signed(
 
     apply_identity_env(&mut cmd, identity);
 
+    // Hand this child the system's libraries, not the AppImage's.
+    crate::process_env::scrub_bundled_env(&mut cmd);
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

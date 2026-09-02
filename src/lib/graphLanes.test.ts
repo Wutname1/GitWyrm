@@ -31,6 +31,21 @@ describe('laneGeometry', () => {
     expect(g.isOverflow(beyond)).toBe(true)
     expect(g.laneX(beyond)).toBe(g.laneX(g.lastVisibleLane))
   })
+
+  it('spaces lanes by a caller-supplied pitch', () => {
+    // Avatar nodes are wider than the default pitch and pass their own, so
+    // adjacent lanes do not overlap once the nodes become pictures.
+    const g = laneGeometry(400, 24)
+    expect(g.laneX(0)).toBe(LANE_X0)
+    expect(g.laneX(3)).toBe(LANE_X0 + 3 * 24)
+  })
+
+  it('fits fewer lanes at a wider pitch', () => {
+    // The trade for a readable node: the same column folds sooner.
+    expect(laneGeometry(400, 24).lastVisibleLane).toBeLessThan(
+      laneGeometry(400).lastVisibleLane,
+    )
+  })
 })
 
 describe('edgeShape', () => {

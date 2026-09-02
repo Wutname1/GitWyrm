@@ -84,6 +84,41 @@ export function hasUnrecoverableWork(dirt: DirtyCount): boolean {
   return dirt.untracked > 0
 }
 
+/** What should happen to the branch a removed worktree had checked out. */
+export type BranchCleanupPlan =
+  /** Nothing to offer: no branch, or the user has chosen to always keep them. */
+  | { kind: 'none' }
+  /** Show the dialog. `merged` decides how safe the wording can be. */
+  | { kind: 'ask'; branch: string; remote: string | null; merged: boolean }
+  /** A remembered "delete" applies: go straight to it, no dialog. */
+  | { kind: 'delete'; branch: string; remote: string | null }
+
+/**
+ * Decide what to do with the branch after a worktree is removed.
+ *
+ * Kept apart from the component so the one rule that matters is testable: a
+ * remembered "always delete" must never apply to a branch with unmerged work.
+ * That preference is given while looking at a finished branch with nothing to
+ * lose, and silently applying it to a branch whose commits exist nowhere else
+ * would destroy work the user never agreed to lose. Unmerged always asks.
+ *
+ * @param branch The branch the removed worktree had checked out, if any.
+ * @param merged Whether its commits exist elsewhere.
+ * @param remote The remote it is published to, if any.
+ * @param remembered The user's saved choice.
+ */
+export function planBranchCleanup(
+  branch: string | null,
+  merged: boolean,
+  remote: string | null,
+  remembered: 'ask' | 'keep' | 'delete'
+): BranchCleanupPlan {
+  if (!branch) return { kind: 'none' }
+  if (remembered === 'keep') return { kind: 'none' }
+  if (remembered === 'delete' && merged) return { kind: 'delete', branch, remote }
+  return { kind: 'ask', branch, remote, merged }
+}
+
 /** What the removal actually did, phrased as a result the user can act on. */
 export function removeOutcomeMessage(
   outcome: RemoveOutcome,

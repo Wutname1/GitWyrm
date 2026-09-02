@@ -4,11 +4,12 @@
 //! the repository is configured to sign.
 
 use git2::{build::CheckoutBuilder, MergeOptions, Oid, ResetType};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::error::AppError;
 use crate::git::commit_write::{self, CommitIdentity};
 use crate::git::merge_ops::{self, Resolution};
+use crate::git::progress::LocalProgress;
 use crate::git::refs;
 use crate::git::types::{ConflictContent, MergeAnalysis, MergeResult, MergeState};
 use crate::state::RepoManager;
@@ -46,7 +47,7 @@ pub async fn merge_analysis(
 ) -> Result<MergeAnalysis, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
+        let repo = open.read();
         let annotated = resolve_annotated(&repo, &reference)?;
         let (analysis, _pref) = repo.merge_analysis(&[&annotated])?;
         Ok(MergeAnalysis {
@@ -62,7 +63,11 @@ pub async fn merge_analysis(
 
 /// Merge `reference` into the current HEAD. Fast-forwards when possible,
 /// otherwise leaves conflicts in the index for the frontend to resolve.
-fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, AppError> {
+fn do_merge(
+    repo: &git2::Repository,
+    reference: &str,
+    progress: &LocalProgress,
+) -> Result<MergeResult, AppError> {
     let annotated = resolve_annotated(repo, reference)?;
     let (analysis, _pref) = repo.merge_analysis(&[&annotated])?;
 
@@ -76,6 +81,9 @@ fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, App
 
     // Anything past this point rewrites the working tree; refuse over
     // uncommitted work so a half-applied merge can't eat local changes.
+    // On a large repository this scan alone is slow enough to look like a
+    // freeze, so say what is happening before starting it.
+    progress.begin("Checking for local changes");
     if refs::tracked_changes_present(repo)? {
         return Err(AppError::Other(
             "working tree has changes; commit or stash before merging".into(),
@@ -86,7 +94,10 @@ fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, App
     if analysis.is_fast_forward() {
         let target_oid = annotated.id();
         let target = repo.find_object(target_oid, None)?;
-        repo.checkout_tree(&target, Some(CheckoutBuilder::new().safe()))?;
+        let mut ff = CheckoutBuilder::new();
+        ff.safe()
+            .progress(|_, completed, total| progress.report(completed, total));
+        repo.checkout_tree(&target, Some(&mut ff))?;
         match repo.head()?.name() {
             Ok(head_ref) => {
                 repo.reference(head_ref, target_oid, true, "fast-forward merge")?;
@@ -107,7 +118,15 @@ fn do_merge(repo: &git2::Repository, reference: &str) -> Result<MergeResult, App
     // Normal merge: write the merged result into the working tree/index.
     let mut opts = MergeOptions::new();
     let mut checkout = CheckoutBuilder::new();
-    checkout.allow_conflicts(true).conflict_style_merge(true);
+    // diff3 rather than the default style: it keeps two independent edits as two
+    // separate conflicts instead of one block spanning the untouched lines
+    // between them, which is what the per-hunk resolver needs. Writing the same
+    // style to disk that `conflict_content` regenerates also keeps the file the
+    // user might open in another editor consistent with what we show.
+    checkout
+        .allow_conflicts(true)
+        .conflict_style_diff3(true)
+        .progress(|_, completed, total| progress.report(completed, total));
     repo.merge(&[&annotated], Some(&mut opts), Some(&mut checkout))?;
 
     let conflicts = refs::conflicted_paths(repo)?;
@@ -170,14 +189,25 @@ fn merge_message(repo: &git2::Repository, reference: &str) -> String {
 #[tauri::command]
 #[specta::specta]
 pub async fn merge_branch(
+    app: AppHandle,
     manager: State<'_, RepoManager>,
     repo_id: String,
     reference: String,
 ) -> Result<MergeResult, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let timing = std::sync::Arc::new(crate::perf::CommandTiming::start(
+            "merge_branch",
+            "git.merge",
+        ));
+        let progress = LocalProgress::with_timing(
+            Some(super::progress_sink(app)),
+            Some(timing.clone()),
+            &repo_id,
+            "merge",
+        );
         let repo = open.repo.lock().unwrap();
-        do_merge(&repo, &reference)
+        do_merge(&repo, &reference, &progress)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
@@ -189,6 +219,7 @@ pub async fn merge_branch(
 #[tauri::command]
 #[specta::specta]
 pub async fn merge_directional(
+    app: AppHandle,
     manager: State<'_, RepoManager>,
     repo_id: String,
     target: String,
@@ -196,6 +227,16 @@ pub async fn merge_directional(
 ) -> Result<MergeResult, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let timing = std::sync::Arc::new(crate::perf::CommandTiming::start(
+            "merge_directional",
+            "git.merge",
+        ));
+        let progress = LocalProgress::with_timing(
+            Some(super::progress_sink(app)),
+            Some(timing.clone()),
+            &repo_id,
+            "merge",
+        );
         let repo = open.repo.lock().unwrap();
 
         let on_target = repo
@@ -205,20 +246,13 @@ pub async fn merge_directional(
             == Some(target.clone());
 
         if !on_target {
-            if refs::tracked_changes_present(&repo)? {
-                return Err(AppError::Other(
-                    "working tree has changes; commit or stash before switching to merge".into(),
-                ));
-            }
-            let (object, reference) = repo.revparse_ext(&target)?;
-            repo.checkout_tree(&object, None)?;
-            match reference {
-                Some(r) => repo.set_head(r.name().unwrap_or("HEAD"))?,
-                None => repo.set_head_detached(object.id())?,
-            }
+            // Check the worktree lock before checkout touches the index or any
+            // files. Git rejects set_head for a branch held elsewhere, but that
+            // rejection comes too late if checkout_tree has already run.
+            merge_ops::checkout_directional_target(&repo, &target, &source)?;
         }
 
-        do_merge(&repo, &source)
+        do_merge(&repo, &source, &progress)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
@@ -232,7 +266,7 @@ pub async fn get_merge_state(
 ) -> Result<MergeState, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
+        let repo = open.read();
         merge_ops::merge_state(&repo)
     })
     .await
@@ -284,7 +318,7 @@ pub async fn get_conflict(
     let open = manager.get(&repo_id)?;
     let workdir = open.path.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
+        let repo = open.read();
         merge_ops::conflict_content(&repo, &workdir, &path)
     })
     .await

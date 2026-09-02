@@ -50,6 +50,7 @@ export * from './domain/settings/AboutSettings';
 export * from './domain/settings/AiSettings';
 export * from './domain/settings/AppearanceSettings';
 export * from './domain/settings/ChangeSizeSettings';
+export * from './domain/settings/GraphAvatarSettings';
 export * from './domain/settings/GeneralSettings';
 export * from './domain/settings/LogActions';
 export * from './domain/settings/LogsSettings';

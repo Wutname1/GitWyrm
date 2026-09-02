@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
 use crate::git::refs;
+use crate::git::shell::Attended;
 use crate::git::submodule::follow_and_report;
 use crate::git::types::{
     PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo, RemoteTagInfo, UnpushedTag,
@@ -108,6 +109,11 @@ pub struct GitProgressPayload {
     pub repo_id: String,
     pub operation: String,
     pub line: String,
+    /// Steps finished, when the operation reports countable progress. `None`
+    /// for git's own stderr lines, which are free text.
+    pub completed: Option<u32>,
+    /// Total steps, when known. `None` means show an indeterminate indicator.
+    pub total: Option<u32>,
 }
 
 /// git writes progress, informational notes, and real errors all to stderr, so
@@ -174,12 +180,101 @@ fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
         return strip_remote(line).to_string();
     }
 
+    // Some git advisories carry no tag at all, so the fallback below would pick
+    // their last line - which for these is the *example command* git suggests,
+    // not the problem. A pull on a branch with no upstream prints:
+    //
+    //     There is no tracking information for the current branch.
+    //     Please specify which branch you want to merge with.
+    //     ...
+    //         git branch --set-upstream-to=<remote>/<branch> my-branch
+    //
+    // Reporting that trailing line gave users a command with literal `<remote>`
+    // in it and gave the classifier none of the words it matches on, so routine
+    // "this branch has no upstream" was filed as a crash.
+    //
+    // Matching the first line keeps the sentence that states the condition.
+    if let Some(line) = stderr_lines
+        .iter()
+        .find(|l| UNTAGGED_CAUSES.iter().any(|c| l.to_lowercase().contains(c)))
+    {
+        return strip_remote(line).to_string();
+    }
+
     stderr_lines
         .iter()
         .rev()
         .find(|l| !is_noise(l))
         .map(|l| strip_remote(l).to_string())
         .unwrap_or_else(|| stdout.trim().to_string())
+}
+
+/// Opening lines of git advisories that state a cause but carry no `error:` or
+/// `fatal:` tag, so ranking alone would miss them and report a trailing example
+/// command instead.
+const UNTAGGED_CAUSES: &[&str] = &[
+    "there is no tracking information for the current branch",
+    "you have divergent branches and need to specify how to reconcile them",
+    "you have not concluded your merge",
+    "not possible to fast-forward, aborting",
+];
+
+/// Rewrite git's credential failures into something a person can act on.
+///
+/// When git needs a username and has no terminal it says `could not read
+/// Username for 'https://github.com': No such file or directory`. The trailing
+/// errno is the real message's whole problem: it names a missing *file*, so the
+/// user goes looking for one, and every report of it arrived as a filesystem
+/// bug. With `GIT_TERMINAL_PROMPT=0` set the same condition reads `terminal
+/// prompts disabled`, which is accurate but describes our own setting rather
+/// than anything they can fix.
+///
+/// Both mean one thing: this remote needs a sign-in that did not happen.
+///
+/// The other shape is `Authentication failed for '<url>'` right after the
+/// server said `remote: Repository not found.` GitHub answers that way for a
+/// repository that was renamed or deleted, and for one the signed-in account
+/// cannot see -- with a sign-in that is perfectly good. Read literally, the
+/// user goes and signs in again, which changes nothing; and since git reacts
+/// to that answer by erasing the stored sign-in, they then have to. Naming the
+/// repository as the likely problem is what lets them fix the right thing.
+fn humanize_credential_failure(detail: &str, stderr_lines: &[String]) -> Option<String> {
+    let low = detail.to_lowercase();
+
+    if low.contains("authentication failed") {
+        let not_found = stderr_lines
+            .iter()
+            .any(|l| l.to_lowercase().contains("repository not found"));
+        if !not_found {
+            return None;
+        }
+        let url = detail
+            .split_once(" for '")
+            .and_then(|(_, rest)| rest.split_once('\''))
+            .map(|(u, _)| u.trim_end_matches('/'));
+        return Some(match url {
+            Some(url) => format!(
+                "Could not find {url} with your sign-in. It may have been moved or renamed, or your account may not have access to it."
+            ),
+            None => "Could not find this repository with your sign-in. It may have been moved or renamed, or your account may not have access to it.".to_string(),
+        });
+    }
+
+    if !low.contains("could not read username") && !low.contains("could not read password") {
+        return None;
+    }
+
+    // Keep the host: with several remotes configured, which one refused is the
+    // only part of the original worth saying back.
+    let host = detail
+        .split_once(" for '")
+        .and_then(|(_, rest)| rest.split_once('\''))
+        .map(|(h, _)| h);
+
+    Some(match host {
+        Some(host) => format!("Sign-in needed for {host}. Connect the account, then try again."),
+        None => "Sign-in needed for this remote. Connect the account, then try again.".to_string(),
+    })
 }
 
 fn run_streaming(
@@ -189,19 +284,85 @@ fn run_streaming(
     operation: &str,
     args: &[&str],
 ) -> Result<String, AppError> {
+    run_streaming_with(app, repo_id, repo_path, operation, args, Attended::User)
+}
+
+fn run_streaming_with(
+    app: &AppHandle,
+    repo_id: &str,
+    repo_path: Option<&str>,
+    operation: &str,
+    args: &[&str],
+    attended: Attended,
+) -> Result<String, AppError> {
+    let cred_args = crate::git::shell::credential_args(attended);
     // Honor the user's configured git.exe, same as git::shell::run_git. Without
     // this, network operations ignore the Settings override that local ops respect.
     let mut cmd = Command::new(crate::git::shell::git_program_name());
     if let Some(path) = repo_path {
         cmd.arg("-C").arg(path);
     }
+    // Before the subcommand: `-c` overrides are global options and git rejects
+    // them after the verb. Collapses the doubled credential helper that makes a
+    // machine with both a system and a bundled git show two login windows.
+    cmd.args(&cred_args);
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    // Hand this child the system's libraries, not the AppImage's.
+    crate::process_env::scrub_bundled_env(&mut cmd);
+    crate::git::shell::prepare_git_env(&mut cmd);
+
+    // Background work never opens a login window: the user is typing somewhere
+    // else with no idea what asked. It fails at once and is logged instead.
+    if attended == Attended::Background {
+        crate::git::shell::apply_background_env(&mut cmd);
+    }
 
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
+
+    // ---------------------------------------------------------------- tracing
+    // Credential diagnostics for a machine we cannot reach.
+    //
+    // The Credential Manager prompt storm only reproduces on someone else's
+    // system, so the only way to see it is to have the app describe its own
+    // setup at the moment it authenticates and carry that back in a report.
+    // `info!` deliberately, not `debug!`: debug records are compiled out of
+    // release builds, which is precisely where this has to work.
+    //
+    // Nothing here can carry a secret. Which git, which helper binary, and
+    // whether a prompt was permitted are all facts about configuration, and the
+    // credential itself never enters this process.
+    //
+    // `effective` is the helper list this run actually passes with `-c`, which
+    // overrides everything `config-helpers` reports -- logging only the config
+    // view once sent an investigation down the wrong path. The helper binary's
+    // own decisions (answered / forwarded / refusal recorded) land in
+    // `credential-helper.log` next to auth.json, because that process runs
+    // before any logger exists.
+    log::info!(
+        "git {operation}: program={} source={:?} attended={} effective=[{}] config-helpers=[{}]",
+        crate::git::shell::git_program_name(),
+        crate::git::shell::git_source(),
+        if attended == Attended::Background {
+            "background"
+        } else {
+            "user"
+        },
+        // The exe path inside the value is the app's own install location; the
+        // scrubber's path rules apply on the way to Sentry as they do to every
+        // log line.
+        cred_args
+            .iter()
+            .filter(|a| a.starts_with("credential.helper=") && a.len() > "credential.helper=".len())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", "),
+        crate::git::shell::describe_credential_helpers(repo_path).join(", "),
+    );
 
     let mut child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -231,6 +392,8 @@ fn run_streaming(
                         repo_id: repo_id.to_string(),
                         operation: operation.to_string(),
                         line: part.to_string(),
+                        completed: None,
+                        total: None,
                     },
                 );
             }
@@ -241,30 +404,46 @@ fn run_streaming(
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
 
     if !output.status.success() {
-        return Err(AppError::Other(format!(
-            "git {operation} failed: {}",
-            failure_detail(&stderr_lines, &stdout)
-        )));
+        let detail = failure_detail(&stderr_lines, &stdout);
+        let detail = humanize_credential_failure(&detail, &stderr_lines).unwrap_or(detail);
+        return Err(AppError::Other(format!("git {operation} failed: {detail}")));
     }
     Ok(stdout)
 }
 
+/// Fetch every remote.
+///
+/// `background` is true when a timer started this rather than the user. It keeps
+/// the auto-fetch sweep from opening a credential window over whatever they are
+/// doing: an unauthenticated background fetch fails silently and is logged,
+/// while a fetch the user asked for may still prompt.
 #[tauri::command]
 #[specta::specta]
 pub async fn git_fetch(
     app: AppHandle,
     manager: State<'_, RepoManager>,
     repo_id: String,
+    background: bool,
 ) -> Result<(), AppError> {
     let open = manager.get(&repo_id)?;
     let path = open.path.to_string_lossy().into_owned();
+    let attended = if background {
+        Attended::Background
+    } else {
+        Attended::User
+    };
     tauri::async_runtime::spawn_blocking(move || {
-        run_streaming(
+        // Network commands are the slowest thing the app does, and until now the
+        // only measurement was the frontend's round-trip span -- which cannot tell
+        // a slow remote apart from a backed-up IPC queue. See `perf`.
+        let _timing = crate::perf::CommandTiming::start("git_fetch", "git.fetch");
+        run_with_stale_ref_retry(
             &app,
             &repo_id,
-            Some(&path),
+            &path,
             "fetch",
             &["fetch", "--all", "--prune", "--progress"],
+            attended,
         )?;
         Ok(())
     })
@@ -278,8 +457,45 @@ pub async fn git_fetch(
 /// ref, so anything else stays a real error.
 fn stale_remote_ref(message: &str) -> Option<String> {
     let rest = message.split("cannot lock ref '").nth(1)?;
-    let name = rest.split('\'').next()?;
+    // Require the closing quote: without it the message was truncated, and
+    // `split` would otherwise hand back the remainder as if it were a ref name.
+    let name = rest.split_once('\'')?.0;
     name.starts_with("refs/remotes/").then(|| name.to_string())
+}
+
+/// Run a network operation, and if it is blocked by a stale remote-tracking
+/// ref, clear that ref and run it once more.
+///
+/// "cannot lock ref 'refs/remotes/...': is at X but expected Y" means the
+/// tracking ref disagrees with itself -- a loose ref left behind by a crashed
+/// fetch, or one contradicting packed-refs. It never resolves on its own, so
+/// every later fetch, pull, or sync fails the same way until someone deletes
+/// the ref by hand. Deleting it is safe: it is a cache of the remote, and the
+/// retry recreates it.
+///
+/// Every ref-updating network call goes through here. Fixing this on the pull
+/// path alone left the identical failure reaching users through plain fetch.
+fn run_with_stale_ref_retry(
+    app: &AppHandle,
+    repo_id: &str,
+    repo_path: &str,
+    operation: &str,
+    args: &[&str],
+    attended: Attended,
+) -> Result<String, AppError> {
+    match run_streaming_with(app, repo_id, Some(repo_path), operation, args, attended) {
+        Ok(out) => Ok(out),
+        Err(e) => {
+            let Some(stale) = stale_remote_ref(&e.to_string()) else {
+                return Err(e);
+            };
+            log::warn!(
+                "{operation} blocked by stale tracking ref {stale}; clearing it and retrying"
+            );
+            crate::git::shell::run_git(Some(repo_path), &["update-ref", "-d", &stale])?;
+            run_streaming_with(app, repo_id, Some(repo_path), operation, args, attended)
+        }
+    }
 }
 
 #[tauri::command]
@@ -292,6 +508,7 @@ pub async fn git_pull(
     let open = manager.get(&repo_id)?;
     let path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
+        let _timing = crate::perf::CommandTiming::start("git_pull", "git.pull");
         let before = { tracking_state(&open.repo.lock().unwrap()) };
 
         // `--autostash` is what keeps a pull from ever failing just because the
@@ -304,20 +521,14 @@ pub async fn git_pull(
         // entry rather than dropping it, so the changes are always recoverable. It
         // also applies to both the merge and rebase forms, so it holds regardless of
         // the user's `pull.rebase` setting.
-        let pull_args = ["pull", "--progress", "--autostash"];
-        if let Err(e) = run_streaming(&app, &repo_id, Some(&path), "pull", &pull_args) {
-            // "cannot lock ref 'refs/remotes/...': is at X but expected Y" means
-            // the remote-tracking ref is stale or duplicated (a crashed fetch, or
-            // a loose ref disagreeing with packed-refs). It never fixes itself and
-            // would fail on every pull from then on. Deleting the tracking ref is
-            // always safe -- the retry's fetch recreates it from the remote.
-            let Some(stale) = stale_remote_ref(&e.to_string()) else {
-                return Err(e);
-            };
-            log::warn!("pull blocked by stale tracking ref {stale}; deleting it and retrying");
-            crate::git::shell::run_git(Some(&path), &["update-ref", "-d", &stale])?;
-            run_streaming(&app, &repo_id, Some(&path), "pull", &pull_args)?;
-        }
+        run_with_stale_ref_retry(
+            &app,
+            &repo_id,
+            &path,
+            "pull",
+            &["pull", "--progress", "--autostash"],
+            Attended::User,
+        )?;
 
         // A pulled commit can change which version of a submodule the project
         // pins, and git leaves the nested checkout on the old one -- surfacing it
@@ -413,6 +624,7 @@ pub async fn git_push(
     let open = manager.get(&repo_id)?;
     let path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
+        let _timing = crate::perf::CommandTiming::start("git_push", "git.push");
         let (before, publish) = {
             let repo = open.repo.lock().unwrap();
             let state = tracking_state(&repo);
@@ -655,7 +867,14 @@ pub async fn git_pull_branch(
     // `<branch>:<branch>` updates the local ref directly. git refuses this
     // when it would not be a fast-forward, which is the guard we want.
     let refspec = format!("{branch}:{branch}");
-    run_streaming(&app, &repo_id, Some(&path), "fetch", &["fetch", "--progress", &remote, &refspec])?;
+    run_with_stale_ref_retry(
+        &app,
+        &repo_id,
+        &path,
+        "fetch",
+        &["fetch", "--progress", &remote, &refspec],
+        Attended::User,
+    )?;
 
     let after = { branch_tracking_state(&open.repo.lock().unwrap(), Some(&branch)) };
     Ok(PullResult {
@@ -1388,6 +1607,37 @@ mod tests {
         assert_eq!(stale_remote_ref("could not resolve host: github.com"), None);
     }
 
+    /// The same corruption reaches us through fetch, not just pull, and git
+    /// wraps it in `update_ref failed for ref ...` so the phrase appears twice
+    /// on one line. Reproduced against a real repo by giving `update-ref` a
+    /// stale expected old-value; this is that message verbatim.
+    #[test]
+    fn a_stale_ref_is_recognized_in_gits_fetch_wording() {
+        assert_eq!(
+            stale_remote_ref(
+                "git fetch failed: fatal: update_ref failed for ref 'refs/remotes/origin/main': cannot lock ref 'refs/remotes/origin/main': is at 948e7d6c8f9137991bdeb5c3ab694de9cf5744f3 but expected 88706f9dec37d11da92b8872c1116599ba416552"
+            ),
+            Some("refs/remotes/origin/main".to_string())
+        );
+        // A remote other than origin, and a branch name containing a slash.
+        assert_eq!(
+            stale_remote_ref(
+                "error: cannot lock ref 'refs/remotes/upstream/feature/login': is at a but expected b"
+            ),
+            Some("refs/remotes/upstream/feature/login".to_string())
+        );
+        // Tags are not a remote-tracking cache; deleting one loses real data.
+        assert_eq!(
+            stale_remote_ref("error: cannot lock ref 'refs/tags/v1.0.0': is at a but expected b"),
+            None
+        );
+        // A malformed message must not yield a half-parsed ref name.
+        assert_eq!(
+            stale_remote_ref("cannot lock ref 'refs/remotes/origin/main"),
+            None
+        );
+    }
+
     /// Git's real stderr for a push refused because the remote moved on. The
     /// rejection line comes first and four `hint:` lines follow it.
     fn non_fast_forward_stderr() -> Vec<String> {
@@ -1689,5 +1939,141 @@ mod tests {
         let state = tracking_state(&repo);
         let err = publish_args(&state, &repo).expect_err("no remote");
         assert!(err.to_string().contains("no remote"), "got: {err}");
+    }
+}
+
+#[cfg(test)]
+mod advisory_detail_tests {
+    use super::failure_detail;
+
+    /// Git's no-upstream advisory carries no error:/fatal:/hint: tag, so the
+    /// old "last non-noise line" fallback reported the example command --
+    /// literal `<remote>/<branch>` and all. The cause is the first line.
+    #[test]
+    fn a_pull_with_no_upstream_reports_the_cause_not_the_example() {
+        let lines: Vec<String> = [
+            "There is no tracking information for the current branch.",
+            "Please specify which branch you want to merge with.",
+            "See git-pull(1) for details.",
+            "",
+            "    git pull <remote> <branch>",
+            "",
+            "If you wish to set tracking information for this branch you can do so with:",
+            "",
+            "    git branch --set-upstream-to=origin/<branch> agent-desk-docs-2f7a11",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let got = failure_detail(&lines, "");
+        assert_eq!(
+            got,
+            "There is no tracking information for the current branch."
+        );
+        assert!(crate::error::is_expected_for_tests(&got));
+    }
+
+    /// A tagged line still wins: the untagged scan must not outrank real errors.
+    #[test]
+    fn a_tagged_error_still_wins() {
+        let lines: Vec<String> = [
+            "There is no tracking information for the current branch.",
+            "fatal: could not read from remote repository",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            failure_detail(&lines, ""),
+            "fatal: could not read from remote repository"
+        );
+    }
+}
+
+#[cfg(test)]
+mod credential_message_tests {
+    use super::humanize_credential_failure;
+
+    /// The message users actually reported, verbatim from Sentry
+    /// (GITWYRM-BACKEND-2). The errno is the part that misleads.
+    #[test]
+    fn the_reported_errno_message_is_rewritten() {
+        let got = humanize_credential_failure(
+            "fatal: could not read Username for 'https://github.com': No such file or directory",
+            &[],
+        )
+        .expect("should be recognised");
+        assert!(got.contains("Sign-in needed"), "{got}");
+        assert!(got.contains("https://github.com"), "{got}");
+        // The misleading half must not survive into what the user sees.
+        assert!(!got.contains("No such file or directory"), "{got}");
+    }
+
+    /// With GIT_TERMINAL_PROMPT=0 git words the same condition differently.
+    #[test]
+    fn the_prompts_disabled_wording_is_also_rewritten() {
+        let got = humanize_credential_failure(
+            "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+            &[],
+        )
+        .expect("should be recognised");
+        assert!(got.contains("Sign-in needed"), "{got}");
+        assert!(!got.contains("terminal prompts disabled"), "{got}");
+    }
+
+    #[test]
+    fn a_password_prompt_counts_too() {
+        assert!(humanize_credential_failure(
+            "fatal: could not read Password for 'https://git.example.com': terminal prompts disabled",
+            &[],
+        )
+        .is_some());
+    }
+
+    /// Without a host the message still has to make sense.
+    #[test]
+    fn a_missing_host_still_produces_advice() {
+        let got = humanize_credential_failure("fatal: could not read Username", &[])
+            .expect("should be recognised");
+        assert!(got.contains("Sign-in needed"), "{got}");
+    }
+
+    /// Everything else must pass through untouched -- rewriting an unrelated
+    /// failure would hide the only detail that explains it.
+    #[test]
+    fn unrelated_failures_are_left_alone() {
+        for other in [
+            "fatal: repository 'https://github.com/x/y.git' not found",
+            "error: failed to push some refs",
+            // A bare authentication failure with no "not found" from the server
+            // really is a bad credential, and must say so.
+            "fatal: Authentication failed for 'https://github.com'",
+        ] {
+            assert!(humanize_credential_failure(other, &[]).is_none(), "{other}");
+        }
+    }
+
+    /// The exact pair of lines GitHub sends for a renamed repository (traced on
+    /// a live machine, where it was fetched by the background sweep for days).
+    /// The sign-in was fine; the repository name was not. Saying "authentication
+    /// failed" sent the user to sign in again, which fixed nothing.
+    #[test]
+    fn a_missing_repository_is_named_instead_of_blamed_on_the_sign_in() {
+        let stderr = vec![
+            "remote: Repository not found.".to_string(),
+            "fatal: Authentication failed for 'https://github.com/org/OldName.git/'".to_string(),
+        ];
+        let got = humanize_credential_failure(
+            "fatal: Authentication failed for 'https://github.com/org/OldName.git/'",
+            &stderr,
+        )
+        .expect("should be recognised");
+        assert!(got.contains("https://github.com/org/OldName.git"), "{got}");
+        assert!(got.contains("moved or renamed"), "{got}");
+        assert!(
+            !got.to_lowercase().contains("authentication failed"),
+            "{got}"
+        );
     }
 }

@@ -67,8 +67,13 @@ export function SpecContextMenu({ change, repoId, children }: SpecContextMenuPro
           }
           // Exited cleanly, moved nothing. Report it as the failure it is.
           if (attempt.kind === 'changedNothing') {
+            // See SpecRowActions: the tool's own output is the explanation, and
+            // the Spec Desk it used to point at holds nothing once reopened.
+            const said = attempt.output?.trim()
             toast.error(`${change.id} was not archived.`, {
-              description: `${attempt.diagnosis.summary} Open the Spec Desk to see how to fix it.`,
+              description: said
+                ? `${attempt.diagnosis.summary} The OpenSpec tool said: ${said}`
+                : `${attempt.diagnosis.summary} The OpenSpec tool exited without saying why - see the log for details.`,
             })
             return
           }

@@ -56,9 +56,9 @@ export function resolveSyncPair(
  * Branch-pair direction is set by which ref CAN move. A remote-tracking ref
  * can't be moved locally, so it is always the `source` (where commits come
  * from) and the local branch is the `target` (the one that catches up). When
- * both refs are local, the physical drag decides: dragging a branch onto
- * another reads as "put this branch here", so the DRAGGED branch is the target
- * that moves and the branch it landed on is the source.
+ * both refs are local the physical drag reads as "bring this branch into that
+ * one": the DRAGGED branch is the `source` whose commits travel, and the branch
+ * it was dropped on is the `target` that receives them and gets checked out.
  */
 export type DropPair =
   | ({ kind: 'tracking' } & RefSyncPair)
@@ -72,7 +72,8 @@ const isLocalBranch = (ref: DraggedRef, branches: BranchList) =>
  * `dragged` is the ref the user picked up; `droppedOn` is the ref it was
  * released over. For tracking pairs the two are handed to `resolveSyncPair`
  * as-is (its push/pull direction keys off which one was dragged). For branch
- * pairs the mover becomes the operation's `target` -- see DropPair.
+ * pairs the drag direction is kept as-is: dragged is `source`, dropped-on is
+ * `target` -- see DropPair.
  */
 export function resolveDropPair(
   dragged: DraggedRef,
@@ -99,8 +100,10 @@ export function resolveDropPair(
     return { kind: 'branches', source: dragged, target: droppedOn }
   }
   if (draggedLocal && droppedLocal) {
-    // Both local: the dragged branch is the one being placed.
-    return { kind: 'branches', source: droppedOn, target: dragged }
+    // Both local: bring the dragged branch into the one it landed on. Making
+    // the dragged branch the target instead checked IT out, which is how
+    // dragging main onto a worktree branch tried to switch to main.
+    return { kind: 'branches', source: dragged, target: droppedOn }
   }
 
   // Neither side is a local branch (e.g. remote onto remote): nothing to do.

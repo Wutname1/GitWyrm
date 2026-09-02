@@ -23,6 +23,11 @@ const LOCK_WAIT_WARN: Duration = Duration::from_secs(1);
 /// nothing recorded what was holding the lock. This is that record.
 const LOCK_HOLD_WARN: Duration = Duration::from_secs(5);
 
+/// Idle read handles kept per repository. Enough for the per-repo pollers to
+/// overlap; past this a handle is dropped rather than cached, since each one
+/// keeps its own mmapped pack files alive.
+const MAX_READ_HANDLES: usize = 8;
+
 /// The repository mutex, instrumented so stalls name their culprit.
 ///
 /// `lock()` behaves exactly like `Mutex<Repository>::lock()` -- same
@@ -174,6 +179,15 @@ pub struct OpenRepo {
     /// in as a lane forking off history that never branched, since lane zero was
     /// still reserved for the tip the pre-fetch answer named.
     pub primary_lane: Mutex<Option<(Oid, u64, Oid)>>,
+    /// Spare `Repository` handles for read-only work, so concurrent reads do not
+    /// queue behind each other on [`OpenRepo::repo`].
+    ///
+    /// `git2::Repository` is `Send` but NOT `Sync`, so one handle cannot be
+    /// shared by two threads at once and an `RwLock<Repository>` does not
+    /// compile. A handle each is the way to get real read concurrency. Opening
+    /// one costs ~14ms (see `open_repo` timings) and every reader already runs
+    /// inside `spawn_blocking`, so the pool is built lazily and reused.
+    read_handles: Mutex<Vec<Repository>>,
 }
 
 impl OpenRepo {
@@ -186,6 +200,7 @@ impl OpenRepo {
             status_read: Mutex::new(None),
             counts_read: Mutex::new(None),
             primary_lane: Mutex::new(None),
+            read_handles: Mutex::new(Vec::new()),
         }
     }
 
@@ -212,6 +227,95 @@ impl OpenRepo {
 
     pub fn store_primary_lane(&self, head: Oid, ref_tips: u64, primary: Oid) {
         *self.primary_lane.lock().unwrap() = Some((head, ref_tips, primary));
+    }
+
+    /// Runs `f` against a private read-only [`Repository`] handle, so it never
+    /// waits on -- and never blocks -- any other reader.
+    ///
+    /// The convoy this exists to break was mostly reads blocking reads: the
+    /// per-repo pollers (status, log, branches, stashes, merge state, worktrees)
+    /// all invalidate together, and under the single mutex each waited for every
+    /// other to finish an unrelated scan. Logs showed a cheap `get_merge_state`
+    /// poll waiting 145s behind a commit-log read.
+    ///
+    /// Read-only by contract, and unenforced by the type system: `f` gets a
+    /// `&Repository`, which is enough to call mutating git2 methods. It runs on
+    /// a handle no writer holds, so a mutation here would race the write lock
+    /// instead of being serialized by it. Anything that writes must use
+    /// [`RepoLock::lock`].
+    ///
+    /// Falls back to the shared lock when a handle cannot be opened, so a repo
+    /// that has become unreadable behaves exactly as it did before rather than
+    /// failing in a new way.
+    #[track_caller]
+    pub fn with_read<T>(&self, f: impl FnOnce(&Repository) -> T) -> T {
+        let caller = Location::caller();
+        let Some(handle) = self.checkout_read_handle() else {
+            let repo = self.repo.lock_at(caller).unwrap_or_else(|e| e.into_inner());
+            return f(&repo);
+        };
+
+        // Returned to the pool even if `f` panics, so a single failed read does
+        // not permanently shrink the pool.
+        let mut handle = ReadHandle {
+            owner: self,
+            repo: Some(handle),
+        };
+        let started = Instant::now();
+        let out = f(handle.repo.as_ref().expect("handle present"));
+        let held = started.elapsed();
+        if held >= LOCK_HOLD_WARN {
+            log::warn!("{caller}: read took {}ms", held.as_millis());
+        }
+        handle.give_back();
+        out
+    }
+
+    /// A private read-only handle, held for as long as the returned guard lives.
+    ///
+    /// The guard form of [`OpenRepo::with_read`], so a call site converts by
+    /// swapping `self.repo.lock().unwrap()` for `self.read()` and leaving the
+    /// body alone. Same read-only contract, same fallback to the shared lock.
+    #[track_caller]
+    pub fn read(&self) -> ReadGuard<'_> {
+        let caller = Location::caller();
+        match self.checkout_read_handle() {
+            Some(repo) => ReadGuard {
+                owner: Some(self),
+                repo: Some(repo),
+                shared: None,
+                caller,
+                acquired: Instant::now(),
+            },
+            // No handle: fall back to the shared lock so behaviour is unchanged
+            // on a repository we cannot reopen.
+            None => ReadGuard {
+                owner: None,
+                repo: None,
+                shared: Some(self.repo.lock_at(caller).unwrap_or_else(|e| e.into_inner())),
+                caller,
+                acquired: Instant::now(),
+            },
+        }
+    }
+
+    /// Take a spare handle, opening one if the pool is empty.
+    fn checkout_read_handle(&self) -> Option<Repository> {
+        if let Some(repo) = self
+            .read_handles
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop()
+        {
+            return Some(repo);
+        }
+        match Repository::open(&self.path) {
+            Ok(repo) => Some(repo),
+            Err(e) => {
+                log::warn!("read handle open failed, falling back to shared lock: {e}");
+                None
+            }
+        }
     }
 
     /// Runs `f` under the repository lock, but collapses concurrent callers that
@@ -293,6 +397,72 @@ impl OpenRepo {
         shared.publish(result.clone());
         abandon.done = true;
         result
+    }
+}
+
+/// A borrowed read-only repository handle. Derefs to [`Repository`]; returns
+/// itself to the pool on drop.
+pub struct ReadGuard<'a> {
+    owner: Option<&'a OpenRepo>,
+    repo: Option<Repository>,
+    /// Set only on the fallback path, where there was no spare handle.
+    shared: Option<RepoGuard<'a>>,
+    caller: &'static Location<'static>,
+    acquired: Instant,
+}
+
+impl Deref for ReadGuard<'_> {
+    type Target = Repository;
+    fn deref(&self) -> &Repository {
+        match (&self.repo, &self.shared) {
+            (Some(repo), _) => repo,
+            (None, Some(shared)) => shared,
+            (None, None) => unreachable!("read guard always holds one of the two"),
+        }
+    }
+}
+
+impl Drop for ReadGuard<'_> {
+    fn drop(&mut self) {
+        let held = self.acquired.elapsed();
+        if held >= LOCK_HOLD_WARN {
+            log::warn!("{}: read took {}ms", self.caller, held.as_millis());
+        }
+        if let (Some(owner), Some(repo)) = (self.owner, self.repo.take()) {
+            let mut pool = owner.read_handles.lock().unwrap_or_else(|e| e.into_inner());
+            if pool.len() < MAX_READ_HANDLES {
+                pool.push(repo);
+            }
+        }
+    }
+}
+
+/// Returns a borrowed read handle to its pool, panic or not.
+struct ReadHandle<'a> {
+    owner: &'a OpenRepo,
+    repo: Option<Repository>,
+}
+
+impl ReadHandle<'_> {
+    fn give_back(&mut self) {
+        if let Some(repo) = self.repo.take() {
+            let mut pool = self
+                .owner
+                .read_handles
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            // Cap the pool so a burst of parallel reads does not leave dozens of
+            // open handles (and their mmapped packs) alive for the session.
+            if pool.len() < MAX_READ_HANDLES {
+                pool.push(repo);
+            }
+        }
+    }
+}
+
+impl Drop for ReadHandle<'_> {
+    fn drop(&mut self) {
+        self.give_back();
     }
 }
 
@@ -397,6 +567,7 @@ impl RepoManager {
             status_read: Mutex::new(None),
             counts_read: Mutex::new(None),
             primary_lane: Mutex::new(None),
+            read_handles: Mutex::new(Vec::new()),
         });
         repos.insert(id.clone(), open.clone());
         Ok((id, open, false))
@@ -447,6 +618,56 @@ mod tests {
         let repo = Repository::init(dir.path()).expect("repo");
         let open = OpenRepo::for_test(repo);
         (dir, open)
+    }
+
+    /// The point of the read pool: two reads must be able to hold the repository
+    /// at the same time. Under the old single mutex the second would block until
+    /// the first returned, which is the convoy that made a cheap poll wait
+    /// minutes behind an unrelated scan.
+    #[test]
+    fn reads_overlap_instead_of_queueing() {
+        let (_dir, open) = temp_repo();
+        let open = Arc::new(open);
+
+        let both_inside = Arc::new(std::sync::Barrier::new(2));
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let open = open.clone();
+            let barrier = both_inside.clone();
+            handles.push(std::thread::spawn(move || {
+                let repo = open.read();
+                assert!(repo.workdir().is_some(), "read guard derefs to the repo");
+                // Only completes if BOTH threads are inside a read at once;
+                // a mutual-exclusion bug deadlocks here instead of failing late.
+                barrier.wait();
+            }));
+        }
+        for h in handles {
+            h.join().expect("reader thread");
+        }
+    }
+
+    /// Handles are returned after use rather than reopened every time.
+    #[test]
+    fn read_handles_return_to_the_pool() {
+        let (_dir, open) = temp_repo();
+        assert_eq!(open.read_handles.lock().unwrap().len(), 0, "starts empty");
+        {
+            let _repo = open.read();
+        }
+        assert_eq!(
+            open.read_handles.lock().unwrap().len(),
+            1,
+            "the handle is back in the pool"
+        );
+        {
+            let _repo = open.read();
+        }
+        assert_eq!(
+            open.read_handles.lock().unwrap().len(),
+            1,
+            "the pooled handle is reused rather than a second one opened"
+        );
     }
 
     /// The instrumented lock must behave exactly like the plain mutex it

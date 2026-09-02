@@ -108,6 +108,20 @@ fn default_change_size_display() -> ChangeSizeDisplay {
     ChangeSizeDisplay::Column
 }
 
+/// How the conflict view presents a conflicted file.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictViewMode {
+    /// Only the contested regions, resolved one at a time.
+    Hunks,
+    /// The whole file, for conflicts that need the surrounding context.
+    File,
+}
+
+fn default_conflict_view_mode() -> ConflictViewMode {
+    ConflictViewMode::Hunks
+}
+
 fn default_show_change_indicator() -> bool {
     true
 }
@@ -275,6 +289,9 @@ pub struct Settings {
     /// Saved width of the changes and commit pane in logical pixels.
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f64,
+    /// Saved width of the repository details pane in the picker, in logical pixels.
+    #[serde(default = "default_repo_details_width")]
+    pub repo_details_width: f64,
     /// Saved height of the commit details drawer in logical pixels.
     #[serde(default = "default_drawer_height")]
     pub drawer_height: f64,
@@ -284,12 +301,18 @@ pub struct Settings {
     /// Percent of the changes pane given to the unstaged list (30-70).
     #[serde(default = "default_changes_split")]
     pub changes_split: f64,
+    /// Resting height of the commit description box, counted in lines (2-12).
+    #[serde(default = "default_commit_description_lines")]
+    pub commit_description_lines: f64,
     /// Percent of the conflict view's width given to the OURS pane (20-80).
     #[serde(default = "default_conflict_side_split")]
     pub conflict_side_split: f64,
     /// Percent of the conflict view's height given to OURS/THEIRS (20-80).
     #[serde(default = "default_conflict_result_split")]
     pub conflict_result_split: f64,
+    /// Whether the conflict view shows hunks or the whole file.
+    #[serde(default = "default_conflict_view_mode")]
+    pub conflict_view_mode: ConflictViewMode,
     /// Whether change size appears below the message or in its own column.
     #[serde(default = "default_change_size_display")]
     pub change_size_display: ChangeSizeDisplay,
@@ -299,6 +322,9 @@ pub struct Settings {
     /// Show exact added and removed line counts beside the size bar.
     #[serde(default)]
     pub show_change_line_counts: bool,
+    /// Draw each commit's author picture as its node in the commit graph.
+    #[serde(default)]
+    pub show_graph_avatars: bool,
     /// Default action for the commit button: "commit" or "commit_push". None
     /// falls back to plain commit. Validated on the frontend.
     #[serde(default)]
@@ -340,6 +366,20 @@ pub struct Settings {
     /// throws the work away.
     #[serde(default)]
     pub openspec_delete_without_asking: bool,
+    /// What to do with a worktree's branch once the folder is removed: "ask"
+    /// (the default), "keep", or "delete". Set by the "Remember my choice" box
+    /// in that dialog, and resettable from the Worktrees settings screen.
+    ///
+    /// A remembered "delete" still never deletes a branch holding work that
+    /// exists nowhere else -- an unmerged branch falls back to asking, because
+    /// the remembered answer was given about a different, safe situation.
+    #[serde(default = "default_worktree_branch_cleanup")]
+    pub worktree_branch_cleanup: String,
+    /// Whether the "and delete it on the remote too" box in that dialog starts
+    /// checked. Off by default: deleting a published branch affects everyone
+    /// else on it, so it is opted into rather than out of.
+    #[serde(default)]
+    pub worktree_branch_delete_on_remote: bool,
     /// Reopen the tabs from the last session on launch. On by default; when off
     /// the app starts with no repository open.
     #[serde(default = "default_restore_tabs")]
@@ -348,6 +388,11 @@ pub struct Settings {
     /// remote branches are current without the user asking. On by default.
     #[serde(default = "default_auto_fetch")]
     pub auto_fetch: bool,
+    /// Fall back to the GitHub CLI when an organization blocks GitWyrm's own
+    /// sign-in. On by default: the alternative is an empty pull request panel
+    /// the user has no way to fix from inside the app.
+    #[serde(default = "default_gh_cli_fallback")]
+    pub gh_cli_fallback: bool,
     /// Show the short explanations that teach a feature in the sidebar and
     /// panels. On by default so the features get found; off leaves the controls
     /// and the plain empty-state labels, which is what a returning user wants.
@@ -487,6 +532,15 @@ pub struct Settings {
     /// Repository-picker sections the user has hidden.
     #[serde(default)]
     pub repo_picker_collapsed_sections: Vec<String>,
+    /// How the repository picker's table is sorted: "name", "activity",
+    /// "branch", each optionally suffixed ":desc". None sorts by name.
+    /// Validated on the frontend.
+    #[serde(default)]
+    pub repo_picker_sort: Option<String>,
+    /// When every repository was last checked for issues and pull requests,
+    /// as an RFC 3339 timestamp. None means never scanned.
+    #[serde(default)]
+    pub repo_scan_at: Option<String>,
     /// What to do about local-only tags after a push: "ask", "always", "never".
     /// None means ask. Validated on the frontend.
     #[serde(default)]
@@ -549,6 +603,10 @@ fn default_show_repo_icons() -> bool {
     true
 }
 
+fn default_worktree_branch_cleanup() -> String {
+    "ask".to_string()
+}
+
 fn default_enable_spec_desk() -> bool {
     true
 }
@@ -558,6 +616,10 @@ fn default_restore_tabs() -> bool {
 }
 
 fn default_auto_fetch() -> bool {
+    true
+}
+
+fn default_gh_cli_fallback() -> bool {
     true
 }
 
@@ -655,6 +717,10 @@ fn default_right_panel_width() -> f64 {
     320.0
 }
 
+fn default_repo_details_width() -> f64 {
+    340.0
+}
+
 fn default_drawer_height() -> f64 {
     212.0
 }
@@ -665,6 +731,10 @@ fn default_drawer_commit_list_width() -> f64 {
 
 fn default_changes_split() -> f64 {
     50.0
+}
+
+fn default_commit_description_lines() -> f64 {
+    2.0
 }
 
 fn default_conflict_side_split() -> f64 {
@@ -700,23 +770,30 @@ impl Default for Settings {
             column_layout: None,
             left_panel_width: default_left_panel_width(),
             right_panel_width: default_right_panel_width(),
+            repo_details_width: default_repo_details_width(),
             drawer_height: default_drawer_height(),
             drawer_commit_list_width: default_drawer_commit_list_width(),
             changes_split: default_changes_split(),
+            commit_description_lines: default_commit_description_lines(),
             conflict_side_split: default_conflict_side_split(),
             conflict_result_split: default_conflict_result_split(),
+            conflict_view_mode: default_conflict_view_mode(),
             change_size_display: default_change_size_display(),
             show_change_indicator: default_show_change_indicator(),
             show_change_line_counts: false,
+            show_graph_avatars: false,
             commit_button_mode: None,
             default_editor: None,
             enable_worktrees: false,
             worktrees_setting_touched: false,
             enable_spec_desk: default_enable_spec_desk(),
             openspec_archive_without_asking: false,
+            worktree_branch_cleanup: default_worktree_branch_cleanup(),
+            worktree_branch_delete_on_remote: false,
             openspec_delete_without_asking: false,
             restore_tabs: true,
             auto_fetch: true,
+            gh_cli_fallback: true,
             show_tips: true,
             // No stored choice; resolved per build by `telemetry_level_for`.
             telemetry_level: None,
@@ -749,6 +826,8 @@ impl Default for Settings {
             pinned_repo_paths: Vec::new(),
             pinned_saved_group_ids: None,
             repo_picker_collapsed_sections: Vec::new(),
+            repo_picker_sort: None,
+            repo_scan_at: None,
             expanded_change_folders: HashMap::new(),
             changes_view_mode: None,
             tag_push_default: None,
@@ -983,6 +1062,7 @@ pub async fn save_settings(app: tauri::AppHandle, mut settings: Settings) -> Res
     // restart. Every shell-out reads these globals.
     crate::git::shell::set_git_program(settings.git_executable.as_deref());
     crate::git::signing::set_gpg_program(settings.gpg_executable.as_deref());
+    crate::hosting::http::set_gh_fallback_enabled(settings.gh_cli_fallback);
 
     tauri::async_runtime::spawn_blocking(move || {
         let dir = app_data_dir(&app)?;
@@ -999,6 +1079,7 @@ pub fn apply_startup_git_executable(app: &tauri::AppHandle) {
     if let Ok(settings) = read_settings(app) {
         crate::git::shell::set_git_program(settings.git_executable.as_deref());
         crate::git::signing::set_gpg_program(settings.gpg_executable.as_deref());
+        crate::hosting::http::set_gh_fallback_enabled(settings.gh_cli_fallback);
     }
 }
 
@@ -1156,6 +1237,7 @@ mod tests {
         assert_eq!(settings.drawer_height, 212.0);
         assert_eq!(settings.drawer_commit_list_width, 280.0);
         assert_eq!(settings.changes_split, 50.0);
+        assert_eq!(settings.commit_description_lines, 2.0);
         assert_eq!(settings.change_size_display, ChangeSizeDisplay::Column);
         assert!(settings.show_change_indicator);
         assert!(!settings.show_change_line_counts);
@@ -1553,6 +1635,23 @@ mod tests {
     }
 
     #[test]
+    fn graph_avatars_round_trip_through_settings_json() {
+        let settings = Settings {
+            show_graph_avatars: true,
+            ..Settings::default()
+        };
+
+        let json = serde_json::to_string(&settings).expect("settings should serialize");
+        let restored: Settings = serde_json::from_str(&json).expect("settings should deserialize");
+
+        assert!(restored.show_graph_avatars);
+        assert!(
+            !Settings::default().show_graph_avatars,
+            "avatars stay off until the user turns them on"
+        );
+    }
+
+    #[test]
     fn resized_layout_round_trips_through_settings_json() {
         let mut widths = HashMap::new();
         widths.insert("graph".to_string(), 184.0);
@@ -1565,6 +1664,7 @@ mod tests {
             left_panel_width: 276.0,
             right_panel_width: 388.0,
             changes_split: 64.0,
+            commit_description_lines: 5.0,
             ..Settings::default()
         };
 
@@ -1574,6 +1674,7 @@ mod tests {
         assert_eq!(restored.left_panel_width, 276.0);
         assert_eq!(restored.right_panel_width, 388.0);
         assert_eq!(restored.changes_split, 64.0);
+        assert_eq!(restored.commit_description_lines, 5.0);
         assert_eq!(
             restored.column_layout.unwrap().widths.get("graph"),
             Some(&184.0)

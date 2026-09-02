@@ -1,8 +1,28 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useId, useMemo } from 'react'
 import type { CommitEntry, StashInfo } from '@/lib/bindings'
-import { laneColor } from '@/lib/gitDisplay'
+import { authorColor, laneColor } from '@/lib/gitDisplay'
 import { laneGeometry } from '@/lib/graphLanes'
+import { useAvatarUrls } from '@/lib/useAvatarUrls'
 import { useUiStore } from '@/stores/uiStore'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
+
+/**
+ * Geometry of an avatar node: a 22px node made of an 18px picture inside a 2px
+ * ring, which is the size a face stays recognisable at.
+ *
+ * The ring sits flush on the picture rather than separated from it. A gap was
+ * tried and cost 6px of face to buy separation the extra size provides anyway.
+ *
+ * 22px is wider than the 20px lane pitch, so `AVATAR_LANE_WIDTH` widens the
+ * pitch whenever avatars are on -- otherwise adjacent lanes would overlap.
+ */
+const AVATAR_OUTER_R = 11
+/** Width of the lane-colored ring. */
+const AVATAR_RING = 2
+/** Radius of the picture itself. */
+const AVATAR_R = AVATAR_OUTER_R - AVATAR_RING
+/** Lane pitch while avatars are on: the node's width plus breathing room. */
+const AVATAR_LANE_WIDTH = AVATAR_OUTER_R * 2 + 2
 
 /**
  * Route an edge like a rail line: change lanes close to an endpoint, then run
@@ -185,13 +205,47 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
     setStashTracks(Object.fromEntries(stashTrackBySha))
   }, [stashTrackBySha, setStashTracks])
 
+  const showAvatars = useWorkspaceStore((s) => s.showGraphAvatars)
+
+  // Only the authors actually on screen are resolved. Walking every loaded row
+  // would fire hundreds of lookups the moment a large repo finishes paging,
+  // for faces that are nowhere near the viewport.
+  const visibleEmails = useMemo(() => {
+    if (!showAvatars) return []
+    const out: string[] = []
+    const lo = Math.max(0, startIndex - 30)
+    const hi = Math.min(rows.length - 1, endIndex + 30)
+    for (let i = lo; i <= hi; i++) {
+      const r = rows[i]
+      if (r.kind === 'commit') out.push(r.commit.author_email)
+    }
+    return out
+  }, [showAvatars, rows, startIndex, endIndex])
+
+  // Doubled for crisp rendering on high-DPI displays, the same trade `Avatar`
+  // makes for the author column.
+  const avatarUrls = useAvatarUrls(visibleEmails, Math.round(AVATAR_R * 4))
+
+  // Clip paths are referenced by id, so two graphs on screen at once (a diff
+  // view beside the log) must not collide on the same names. React's ids are
+  // wrapped in colons, which are legal in an id but not in the `url(#...)`
+  // reference that reads it back, so they are stripped.
+  const clipPrefix = useId().replace(/:/g, '')
+
   // Lanes keep a fixed width so a branch sits in the same column no matter how
   // wide the graph is, and widening the column reveals more lanes instead of
   // re-spacing the ones already drawn. Lanes that do not fit are folded onto
   // the last visible column rather than compressing every lane to fit; that
   // column then reads as "and more branches out here", which stays legible
   // where 20-odd hairline rails would not.
-  const { laneX, isOverflow } = useMemo(() => laneGeometry(width), [width])
+  // Avatar nodes are wider than the default pitch, so the pitch widens with
+  // them. Turning avatars on therefore folds a few more lanes into the
+  // overflow column at the same graph width, which is the trade for a node big
+  // enough to recognise a face in.
+  const { laneX, isOverflow } = useMemo(
+    () => laneGeometry(width, showAvatars ? AVATAR_LANE_WIDTH : undefined),
+    [width, showAvatars],
+  )
 
   // Rows occupied by each lane, ascending, so a lane running off the loaded
   // region can stop before reaching a commit that is not its parent. Built once
@@ -461,11 +515,148 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
         // and hollow, so a stack of them reads as "more branches out here"
         // rather than as several unrelated branches sharing one column.
         const overflow = isOverflow(c.lane)
+        const x = laneX(c.lane)
+        const y = rowCenterY(i)
+
+        // A picture only replaces the dot once it has actually resolved.
+        // Swapping in an empty disc first would flash a hole in the lane on
+        // every scroll.
+        //
+        // Overflow commits stay dots regardless: at 3.5px a face is a smudge,
+        // and shrinking that column is what makes it read as "more out here".
+        const lookedUp = showAvatars && !overflow
+        const avatar = lookedUp ? avatarUrls.get(c.author_email.trim().toLowerCase()) : undefined
+
+        // Resolved to nothing: this author has no picture anywhere, so the node
+        // carries their initials instead. Sizing the node the same either way
+        // keeps the lane pitch steady, so a repo where only some people have
+        // pictures does not draw a ragged column of big and small nodes.
+        if (avatar === null) {
+          const tint = authorColor(c.author_email || c.author_name)
+          const ringR = AVATAR_OUTER_R - AVATAR_RING / 2
+          return (
+            <g key={c.sha}>
+              <circle cx={x} cy={y} r={AVATAR_OUTER_R} fill="var(--gw-bg)" />
+              <circle cx={x} cy={y} r={AVATAR_R} fill={tint} fillOpacity={0.17} />
+              <text
+                x={x}
+                y={y}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={AVATAR_R * 0.95}
+                fontWeight={700}
+                fill={tint}
+                // The node sits under the pointer target for the row, and a
+                // caret dragged across the graph selecting stray letters is
+                // noise the dots never produced.
+                style={{ userSelect: 'none' }}
+              >
+                {c.author_initials}
+              </text>
+              <circle
+                cx={x}
+                cy={y}
+                r={ringR}
+                fill="none"
+                stroke={sel ? 'var(--gw-text)' : col}
+                strokeWidth={AVATAR_RING}
+              />
+            </g>
+          )
+        }
+
+        if (avatar) {
+          const clipId = `${clipPrefix}-${c.sha}`
+          const maskId = `${clipPrefix}-m${c.sha}`
+          // The stroke straddles its path, so the ring is centred half a width
+          // inside the outer edge to keep the node at its stated size.
+          const ringR = AVATAR_OUTER_R - AVATAR_RING / 2
+          // A tool mark is a flat glyph, not a photo: it has no background of
+          // its own and does not fill a circle. It gets a dark disc to sit on
+          // -- the same treatment the author column gives it -- and is inset so
+          // the glyph is not cropped by the round clip.
+          const glyphR = avatar.bot ? AVATAR_R * 0.62 : AVATAR_R
+          return (
+            <g key={c.sha}>
+              <defs>
+                <clipPath id={clipId}>
+                  <circle cx={x} cy={y} r={AVATAR_R} />
+                </clipPath>
+                {avatar.mono && (
+                  // A silhouette is drawn as `currentColor`, which inside an
+                  // <image> resolves against that image's own document and
+                  // comes out black -- invisible here. Used as a mask instead,
+                  // the art is only a stencil and the fill is ours.
+                  //
+                  // `mask-type="alpha"` is what makes that work. An SVG mask
+                  // defaults to *luminance*, so it weighs how bright the art is
+                  // -- and this art is solid black, luminance zero, which masks
+                  // everything away and leaves an empty dark disc. The shape we
+                  // want is carried entirely by the alpha channel: opaque where
+                  // the glyph is, transparent everywhere else. Reading alpha
+                  // instead makes the black paint irrelevant, which is the whole
+                  // point of using it as a stencil.
+                  //
+                  // The CSS `mask-image` in `MonoMark` is alpha-based already,
+                  // which is why the same icon renders correctly in the author
+                  // column and only the graph came out black on black.
+                  <mask id={maskId} maskUnits="userSpaceOnUse" style={{ maskType: 'alpha' }}>
+                    <image
+                      href={avatar.url}
+                      x={x - glyphR}
+                      y={y - glyphR}
+                      width={glyphR * 2}
+                      height={glyphR * 2}
+                      preserveAspectRatio="xMidYMid meet"
+                    />
+                  </mask>
+                )}
+              </defs>
+              {/* A transparent PNG, or a glyph narrower than its box, lands on
+                  a solid ground rather than on whatever rail runs behind. */}
+              <circle
+                cx={x}
+                cy={y}
+                r={AVATAR_OUTER_R}
+                fill={avatar.bot ? '#000' : 'var(--gw-bg)'}
+              />
+              {avatar.mono ? (
+                <rect
+                  x={x - glyphR}
+                  y={y - glyphR}
+                  width={glyphR * 2}
+                  height={glyphR * 2}
+                  fill="#fff"
+                  mask={`url(#${maskId})`}
+                />
+              ) : (
+                <image
+                  href={avatar.url}
+                  x={x - glyphR}
+                  y={y - glyphR}
+                  width={glyphR * 2}
+                  height={glyphR * 2}
+                  clipPath={avatar.bot ? undefined : `url(#${clipId})`}
+                  preserveAspectRatio={avatar.bot ? 'xMidYMid meet' : 'xMidYMid slice'}
+                />
+              )}
+              <circle
+                cx={x}
+                cy={y}
+                r={ringR}
+                fill="none"
+                stroke={sel ? 'var(--gw-text)' : col}
+                strokeWidth={AVATAR_RING}
+              />
+            </g>
+          )
+        }
+
         return (
           <circle
             key={c.sha}
-            cx={laneX(c.lane)}
-            cy={rowCenterY(i)}
+            cx={x}
+            cy={y}
             r={sel ? 7.5 : overflow ? 3.5 : 6}
             fill={c.is_merge || overflow ? 'var(--gw-bg)' : col}
             stroke={sel ? 'var(--gw-text)' : c.is_merge || overflow ? col : 'var(--gw-bg)'}

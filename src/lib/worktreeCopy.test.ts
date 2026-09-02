@@ -9,6 +9,7 @@ import {
   hasUnrecoverableWork,
   linkedWorktrees,
   looksLikeMovedRepository,
+  planBranchCleanup,
   removeConfirmCopy,
   removeOutcomeMessage,
   sectionVisibility,
@@ -152,10 +153,51 @@ describe('remove confirm copy', () => {
   })
 })
 
+describe('branch cleanup after removal', () => {
+  it('offers nothing when the worktree had no branch', () => {
+    expect(planBranchCleanup(null, true, null, 'ask')).toEqual({ kind: 'none' })
+  })
+
+  it('asks by default, merged or not', () => {
+    expect(planBranchCleanup('feature', true, null, 'ask')).toEqual({
+      kind: 'ask',
+      branch: 'feature',
+      remote: null,
+      merged: true,
+    })
+    expect(planBranchCleanup('feature', false, null, 'ask')).toMatchObject({ kind: 'ask' })
+  })
+
+  it('stays silent when the user chose to always keep branches', () => {
+    expect(planBranchCleanup('feature', true, 'origin', 'keep')).toEqual({ kind: 'none' })
+  })
+
+  it('deletes without asking once that choice is remembered', () => {
+    expect(planBranchCleanup('feature', true, 'origin', 'delete')).toEqual({
+      kind: 'delete',
+      branch: 'feature',
+      remote: 'origin',
+    })
+  })
+
+  it('still asks about an unmerged branch even when delete is remembered', () => {
+    // The remembered answer was given about a finished branch. Applying it to
+    // commits that exist nowhere else would destroy work never offered up.
+    expect(planBranchCleanup('feature', false, 'origin', 'delete')).toMatchObject({
+      kind: 'ask',
+      merged: false,
+    })
+  })
+
+  it('carries the remote through so the dialog can offer to delete it there', () => {
+    expect(planBranchCleanup('feature', true, 'origin', 'ask')).toMatchObject({ remote: 'origin' })
+  })
+})
+
 describe('removal outcomes', () => {
   it('reports success and reminds the branch is kept', () => {
     const msg = removeOutcomeMessage(
-      { kind: 'removed', branch: 'feature', branch_merged: true },
+      { kind: 'removed', branch: 'feature', branch_merged: true, branch_remote: null },
       'project-feature'
     )
     expect(msg.tone).toBe('success')

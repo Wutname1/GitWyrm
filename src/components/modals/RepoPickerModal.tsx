@@ -1,20 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   Check,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
+  CircleDot,
   Clock3,
   Code2,
   Download,
   Eye,
   Folder,
   FolderGit2,
+  GitBranch,
+  GitPullRequest,
   FolderPlus,
   FolderSearch,
   GripVertical,
   Layers3,
   Loader2,
+  Pencil,
   Pin,
   Plus,
   RefreshCw,
@@ -36,8 +44,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { TooltipButton } from "@/components/ui/tooltip";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
+import { TooltipButton, TooltipHint } from "@/components/ui/tooltip";
 import { useGithubAuth, useGithubRepositories } from "@/hooks/useGithub";
 import {
   useCachedRepoIcons,
@@ -45,6 +61,8 @@ import {
   useOpenRepo,
   useOpenRepos,
   useRepoReadme,
+  useReposWithRemote,
+  useRepoSnapshot,
 } from "@/hooks/useRepoActions";
 import { Markdown } from "@/components/ui/markdown";
 import {
@@ -53,15 +71,26 @@ import {
   type RepositoryStarter,
 } from "@/lib/bindings";
 import { isTauri } from "@/lib/env";
-import { joinPath, normalizePath, pathKey, pathName } from "@/lib/paths";
+import { describeError, log } from "@/lib/log";
+import { sortRepos as sortLibraryRepos } from "@/lib/repoSort";
+import { parseRepoUrlQuery } from "@/lib/repoUrlSearch";
+import { joinPath, normalizePath, pathKey, pathName, samePath } from "@/lib/paths";
 import { unwrap } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/uiStore";
 import {
+  DEFAULT_REPO_DETAILS_WIDTH,
+  MAX_REPO_DETAILS_WIDTH,
+  MIN_REPO_DETAILS_WIDTH,
+  primaryFirst,
   usePrimaryCodeFolder,
   useWorkspaceStore,
+  type CodeFolder,
   type RecentRepo,
+  type RepoActivity,
   type RepoPickerSection,
+  type RepoPickerSort,
+  type RepoPickerSortKey,
   type SavedTabGroup,
 } from "@/stores/workspaceStore";
 import { CodeFoldersSetting } from "@/components/domain/settings/CodeFoldersSetting";
@@ -280,6 +309,147 @@ function RouteButton({
 }
 
 /**
+ * "a moment ago", "about 3 hours ago", "yesterday" -- how long since the scan.
+ *
+ * Written out rather than reusing the terse commit-graph form ("3h ago"),
+ * because this one sits inside a sentence.
+ */
+function describeScanTime(at: number, now = Date.now()): string {
+  const minutes = Math.max(0, Math.round((now - at) / 60_000));
+  if (minutes < 2) return "a moment ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `about ${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  return new Date(at).toLocaleDateString();
+}
+
+/**
+ * The issues and pull requests column: two counts, or a quiet dash.
+ *
+ * A repository with nothing open shows nothing rather than "0 0" -- a screen of
+ * zeroes is noise, and the counts that matter should be the only ones that draw
+ * the eye. A repository that has never been scanned looks the same as one with
+ * nothing open, which is why the header carries the "last checked" line.
+ */
+function RepoActivityCell({
+  activity,
+  scanning,
+}: {
+  activity?: RepoActivity;
+  scanning: boolean;
+}) {
+  if (scanning && !activity) {
+    return (
+      <span className="hidden w-20 flex-none justify-end min-[900px]:flex">
+        <Loader2 size={11} className="animate-spin text-muted-foreground" />
+      </span>
+    );
+  }
+  const issues = activity?.issues ?? 0;
+  const prs = activity?.prs ?? 0;
+  return (
+    <span className="hidden w-20 flex-none items-center justify-end gap-2 min-[900px]:flex">
+      {issues > 0 && (
+        <span
+          title={`${issues} open ${issues === 1 ? "issue" : "issues"}`}
+          className="flex items-center gap-0.5 font-mono text-2xs text-sub"
+        >
+          <CircleDot size={10} className="text-muted-foreground" />
+          {issues}
+        </span>
+      )}
+      {prs > 0 && (
+        <span
+          title={`${prs} open ${prs === 1 ? "pull request" : "pull requests"}`}
+          className="flex items-center gap-0.5 font-mono text-2xs text-sub"
+        >
+          <GitPullRequest size={10} className="text-muted-foreground" />
+          {prs}
+        </span>
+      )}
+      {issues === 0 && prs === 0 && (
+        <span className="font-mono text-2xs text-muted-foreground/60">—</span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The column headings above a repository list.
+ *
+ * Laid out to line up with `RepoLibraryRow`'s own three-column grid, so the
+ * headings sit over the values they name without either side hard-coding the
+ * other's widths beyond the two fixed columns on the right.
+ */
+function RepoTableHeader({
+  sort,
+  onSort,
+}: {
+  sort: RepoPickerSort;
+  /** Undefined leaves the headings inert, for a list with a fixed order. */
+  onSort?: (key: RepoPickerSortKey) => void;
+}) {
+  const heading = (key: RepoPickerSortKey, label: string, width: string) => {
+    const active = sort.key === key;
+    const body = (
+      <>
+        {label}
+        {active && onSort && (
+          <ChevronUp
+            size={9}
+            className={cn("transition-transform", sort.desc && "rotate-180")}
+          />
+        )}
+      </>
+    );
+    const classes = cn(
+      "flex items-center gap-1 text-[9px] font-bold uppercase tracking-[.09em]",
+      width,
+      active && onSort ? "text-accent-text" : "text-muted-foreground",
+    );
+    if (!onSort) return <span className={classes}>{body}</span>;
+    return (
+      <button
+        type="button"
+        onClick={() => onSort(key)}
+        aria-label={`Sort by ${label.toLowerCase()}`}
+        className={cn(classes, "rounded hover:text-foreground")}
+      >
+        {body}
+      </button>
+    );
+  };
+
+  // Mirrors RepoLibraryRow's outer grid so the headings land over their
+  // values: a spacer for the checkbox column, the row's own padding and icon
+  // width on the left, and the trailing controls' width on the right.
+  return (
+    <div className="mb-1 grid min-h-6 grid-cols-[auto_minmax(0,1fr)_auto] items-end border-b border-border/60 pr-1.5">
+      <span aria-hidden className="ml-2.5 size-6" />
+      <span className="flex min-w-0 items-center gap-2.5 px-2.5 pb-1">
+        <span aria-hidden className="size-8 flex-none" />
+        {heading("name", "Repository", "min-w-0 flex-1")}
+        {heading(
+          "activity",
+          "Open work",
+          "hidden w-20 flex-none justify-end min-[900px]:flex",
+        )}
+        {heading(
+          "branch",
+          "Branch",
+          "hidden w-28 flex-none justify-end min-[1100px]:flex",
+        )}
+      </span>
+      {/* Matches the pin, remove and open controls the row keeps on its right. */}
+      <span aria-hidden className="w-[5.6rem]" />
+    </div>
+  );
+}
+
+/**
  * Drag-to-reorder wiring handed to a pinned repo row. Only pinned rows get
  * this; every other row renders without drag handlers.
  */
@@ -300,6 +470,8 @@ function RepoLibraryRow({
   iconUrl,
   pinned,
   openRepoId,
+  activity,
+  scanning,
   selected,
   checked,
   busy,
@@ -308,12 +480,16 @@ function RepoLibraryRow({
   onTogglePin,
   onOpen,
   onJump,
+  onForget,
   reorder,
 }: {
   repo: LibraryRepo;
   iconUrl?: string;
   pinned: boolean;
   openRepoId?: string;
+  /** Counts from the last scan, or undefined when this repo has none yet. */
+  activity?: RepoActivity;
+  scanning: boolean;
   selected: boolean;
   checked: boolean;
   busy: boolean;
@@ -322,6 +498,12 @@ function RepoLibraryRow({
   onTogglePin: () => void;
   onOpen: () => void;
   onJump: () => void;
+  /**
+   * Drop this row from the recent list. Only passed for rows that came from
+   * recents: a pinned or scanned repo is not the list's to remove, and an X on
+   * one would read as "delete this repository".
+   */
+  onForget?: () => void;
   reorder?: PinnedReorderRow;
 }) {
   return (
@@ -382,23 +564,24 @@ function RepoLibraryRow({
       >
         <RepoRowIcon dataUrl={iconUrl} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-semibold text-foreground">
-            {repo.name}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-xs font-semibold text-foreground">
+              {repo.name}
+            </span>
+            {openRepoId && (
+              <span className="flex-none rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold text-accent-text">
+                Open
+              </span>
+            )}
           </span>
           <span className="block truncate font-mono text-2xs text-muted-foreground">
             {repo.path}
           </span>
         </span>
-        {repo.headBranch && (
-          <span className="hidden flex-none font-mono text-2xs text-sub min-[1100px]:block">
-            {repo.headBranch}
-          </span>
-        )}
-        {openRepoId && (
-          <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold text-accent-text">
-            Open
-          </span>
-        )}
+        <RepoActivityCell activity={activity} scanning={scanning} />
+        <span className="hidden w-28 flex-none truncate text-right font-mono text-2xs text-sub min-[1100px]:block">
+          {repo.headBranch}
+        </span>
       </button>
       <div className="flex items-center gap-0.5">
         <TooltipButton
@@ -414,6 +597,15 @@ function RepoLibraryRow({
         >
           <Pin size={12} fill={pinned ? "currentColor" : "none"} />
         </TooltipButton>
+        {onForget && (
+          <TooltipButton
+            tooltip={`Remove ${repo.name} from Recent`}
+            onClick={onForget}
+            className="grid size-7 place-items-center rounded-[5px] text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground group-hover/repo:opacity-100 focus:opacity-100"
+          >
+            <X size={12} />
+          </TooltipButton>
+        )}
         <Button
           variant={selected ? "secondary" : "ghost"}
           size="sm"
@@ -723,6 +915,194 @@ function RepoReadme({ path }: { path: string }) {
   );
 }
 
+/**
+ * One number in the repository details panel: an icon in its own tinted well,
+ * the count, and a label beneath.
+ *
+ * Colour carries the meaning, and it is the same vocabulary the repository tabs
+ * already use -- blue to push, red to pull, amber uncommitted -- so a number
+ * here reads the same as the badge on the tab it opens.
+ *
+ * A count of zero drains all of that away to plain muted text. Nothing is
+ * waiting, so nothing should catch the eye; only the tiles that actually want
+ * attention keep their colour. Unknown goes further and shows a dash, because
+ * "never pushed" is a different answer from "up to date".
+ */
+function RepoStat({
+  icon,
+  label,
+  value,
+  color,
+  hint,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number | null | undefined;
+  /** CSS colour used when the count is above zero. */
+  color?: string;
+  hint: string;
+}) {
+  const known = value != null;
+  const lit = known && value > 0 && color != null;
+  return (
+    <TooltipHint label={hint}>
+      <div
+        className={cn(
+          "flex min-w-0 items-center gap-2 rounded-lg border px-2 py-1.5 transition-colors",
+          lit
+            ? "border-transparent"
+            : "border-border bg-background/60 hover:border-border-bright",
+        )}
+        style={
+          lit
+            ? {
+                backgroundColor: `color-mix(in srgb, ${color} 10%, transparent)`,
+                borderColor: `color-mix(in srgb, ${color} 30%, transparent)`,
+              }
+            : undefined
+        }
+      >
+        <span
+          className={cn(
+            "grid size-6 flex-none place-items-center rounded-md",
+            lit ? "" : "bg-panel3 text-muted-foreground",
+          )}
+          style={
+            lit
+              ? {
+                  color,
+                  backgroundColor: `color-mix(in srgb, ${color} 18%, transparent)`,
+                }
+              : undefined
+          }
+        >
+          {icon}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span
+            className={cn(
+              "block truncate text-sm font-semibold leading-tight tabular-nums",
+              lit ? "" : known ? "text-sub" : "text-muted-foreground",
+            )}
+            style={lit ? { color } : undefined}
+          >
+            {known ? value : "-"}
+          </span>
+          <span className="block truncate text-[9px] uppercase tracking-[.08em] text-muted-foreground">
+            {label}
+          </span>
+        </span>
+      </div>
+    </TooltipHint>
+  );
+}
+
+/**
+ * The numbers at the top of the repository details panel, in two bands.
+ *
+ * The split is the point. The first band is work in the user's own hands --
+ * what they have not pushed, pulled or committed -- and the second is what the
+ * host holds: the shape of the repository, and other people's work waiting on
+ * them. Mixing the two into one flat grid makes six numbers the reader has to
+ * sort out themselves.
+ *
+ * Loads on selection and fetches first, so ahead and behind are true right now.
+ * The row keeps its shape while that is in flight rather than collapsing, so
+ * the panel below does not jump as each repository is clicked.
+ */
+function RepoStats({ path }: { path: string }) {
+  const snapshot = useRepoSnapshot(path);
+  const data = snapshot.data;
+  const loading = snapshot.isPending;
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center gap-2">
+        <span className="text-2xs font-bold uppercase tracking-[.09em] text-muted-foreground">
+          At a glance
+        </span>
+        {loading ? (
+          <Loader2 size={11} className="animate-spin text-muted-foreground" />
+        ) : (
+          data?.fetched && (
+            <TooltipHint label="The remote was checked just now, so these are current">
+              <span className="flex items-center gap-1 text-[9px] uppercase tracking-[.08em] text-accent-text">
+                <RefreshCw size={9} />
+                Current
+              </span>
+            </TooltipHint>
+          )
+        )}
+        <span className="flex-1" />
+        {data?.head_branch && (
+          <span className="flex min-w-0 items-center gap-1 font-mono text-2xs text-sub">
+            <GitBranch size={10} className="flex-none text-muted-foreground" />
+            <span className="truncate">{data.head_branch}</span>
+          </span>
+        )}
+      </div>
+
+      <div className="mt-2 grid grid-cols-3 gap-1.5">
+        <RepoStat
+          icon={<ArrowUp size={13} strokeWidth={2.4} />}
+          label="To push"
+          value={data?.ahead}
+          color="var(--gw-blue)"
+          hint="Commits on your branch the remote does not have yet"
+        />
+        <RepoStat
+          icon={<ArrowDown size={13} strokeWidth={2.4} />}
+          label="To pull"
+          value={data?.behind}
+          color="var(--gw-red)"
+          hint="Commits on the remote you do not have yet"
+        />
+        <RepoStat
+          icon={<Pencil size={12} strokeWidth={2.4} />}
+          label="Changes"
+          value={data?.changes}
+          color="var(--gw-amber)"
+          hint="Files with uncommitted changes"
+        />
+      </div>
+
+      <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+        <RepoStat
+          icon={<GitBranch size={12} strokeWidth={2.2} />}
+          label="Branches"
+          value={data?.branches}
+          hint="Branches on this computer"
+        />
+        <RepoStat
+          icon={<CircleDot size={12} strokeWidth={2.2} />}
+          label="Issues"
+          value={data?.issues}
+          color="var(--gw-purple)"
+          hint="Open issues on the host"
+        />
+        <RepoStat
+          icon={<GitPullRequest size={12} strokeWidth={2.2} />}
+          label="Requests"
+          value={data?.prs}
+          color="var(--gw-green)"
+          hint="Open pull requests on the host"
+        />
+      </div>
+
+      {!loading && data == null && (
+        <p className="mt-2 text-2xs text-muted-foreground">
+          Could not read this folder.
+        </p>
+      )}
+      {!loading && data != null && data.issues == null && (
+        <p className="mt-2 text-2xs text-muted-foreground">
+          Issues and requests need a connected host.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function RepoDetails({
   selected,
   repositories,
@@ -874,6 +1254,7 @@ function RepoDetails({
             </span>
           )}
         </div>
+        <RepoStats path={repo.path} />
         <div className="mt-5 border-t border-border pt-3">
           <button
             type="button"
@@ -885,27 +1266,135 @@ function RepoDetails({
           </button>
         </div>
         <RepoReadme path={repo.path} />
-        <span className="flex-1" />
-        {/* Stuck to the bottom of the panel: a long readme must never scroll
-            the way to open the repository off the screen. */}
-        <div className="sticky bottom-0 -mx-5 -mb-5 mt-5 grid bg-panel px-5 pb-5 pt-3">
-          <Button
-            className="gap-2"
-            onClick={() =>
-              openRepo ? onJumpToRepo(openRepo.id) : onOpenRepo(repo.path)
-            }
-            disabled={busy}
-          >
-            {busy ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <FolderGit2 size={14} />
-            )}
-            {openRepo ? `Open ${repo.name} tab` : `Open ${repo.name}`}
-          </Button>
-        </div>
+      </div>
+      {/* Outside the scroller, not stuck to the bottom of it: a sticky button
+          keeps its own band opaque but the readme still passes through the gaps
+          around it. Its own row means a long readme scrolls up to the border
+          and stops. */}
+      <div className="grid flex-none border-t border-border bg-panel px-5 py-4">
+        <Button
+          className="gap-2"
+          onClick={() =>
+            openRepo ? onJumpToRepo(openRepo.id) : onOpenRepo(repo.path)
+          }
+          disabled={busy}
+        >
+          {busy ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <FolderGit2 size={14} />
+          )}
+          {openRepo ? `Open ${repo.name} tab` : `Open ${repo.name}`}
+        </Button>
       </div>
     </>
+  );
+}
+
+/**
+ * The "where does this go" field: a path box, a dropdown of the folders the
+ * user already works in, and a Browse button.
+ *
+ * The dropdown is the point. Most people keep their projects in two or three
+ * places and switch between them constantly; without it, changing destination
+ * meant retyping a path or walking a file dialog every time. Watched folders
+ * are exactly that list, already curated, so they are offered directly.
+ *
+ * The box stays editable, because a destination that is not a watched folder
+ * has to remain possible.
+ */
+function DestinationField({
+  label,
+  value,
+  onChange,
+  folders,
+  browseTitle,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (path: string) => void;
+  folders: CodeFolder[];
+  /** Title on the native folder picker. */
+  browseTitle: string;
+  disabled: boolean;
+}) {
+  return (
+    <label className="grid gap-1.5 text-xs font-semibold text-sub">
+      {label}
+      <span className="flex gap-2">
+        <Input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={() => value.trim() && onChange(normalizePath(value))}
+          placeholder="Choose a parent folder"
+          className="h-9 bg-background font-mono text-xs font-normal"
+          disabled={disabled}
+        />
+        {folders.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-9 flex-none gap-1.5"
+                disabled={disabled}
+                aria-label="Choose one of your folders"
+              >
+                <FolderGit2 size={13} />
+                <ChevronDown size={12} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              <DropdownMenuLabel className="text-2xs text-muted-foreground">
+                Your folders
+              </DropdownMenuLabel>
+              {folders.map((folder) => {
+                const chosen = samePath(folder.path, value);
+                return (
+                  <DropdownMenuItem
+                    key={pathKey(folder.path)}
+                    onSelect={() => onChange(normalizePath(folder.path))}
+                    className="gap-2"
+                  >
+                    {folder.primary ? (
+                      <Star size={12} className="flex-none text-accent-text" />
+                    ) : (
+                      <Folder size={12} className="flex-none text-muted-foreground" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="block truncate text-xs">
+                        {folder.label ?? pathName(folder.path)}
+                      </span>
+                      <span className="block truncate font-mono text-2xs text-muted-foreground">
+                        {folder.path}
+                      </span>
+                    </span>
+                    {chosen && <Check size={12} className="flex-none text-accent-text" />}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="h-9 flex-none gap-1.5"
+          onClick={async () => {
+            const { open } = await import("@tauri-apps/plugin-dialog");
+            const directory = await open({ directory: true, title: browseTitle });
+            if (typeof directory === "string") onChange(normalizePath(directory));
+          }}
+          disabled={disabled}
+        >
+          <Folder size={13} />
+          Browse…
+        </Button>
+      </span>
+    </label>
   );
 }
 
@@ -917,6 +1406,7 @@ function RepoPickerPanel({
   wiggleNonce?: number;
 }) {
   const recents = useWorkspaceStore((state) => state.recents);
+  const removeRecent = useWorkspaceStore((state) => state.removeRecent);
   const openRepos = useWorkspaceStore((state) => state.openRepos);
   const codeFolders = useWorkspaceStore((state) => state.codeFolders);
   const primaryCodeFolder = usePrimaryCodeFolder();
@@ -952,8 +1442,17 @@ function RepoPickerPanel({
   const togglePinnedSavedGroup = useWorkspaceStore(
     (state) => state.togglePinnedSavedGroup,
   );
+  const repoPickerSort = useWorkspaceStore((state) => state.repoPickerSort);
+  const sortRepoPicker = useWorkspaceStore((state) => state.sortRepoPicker);
+  const repoActivity = useWorkspaceStore((state) => state.repoActivity);
+  const repoScanAt = useWorkspaceStore((state) => state.repoScanAt);
+  const setRepoActivity = useWorkspaceStore((state) => state.setRepoActivity);
   const toggleRepoPickerSection = useWorkspaceStore(
     (state) => state.toggleRepoPickerSection,
+  );
+  const repoDetailsWidth = useWorkspaceStore((state) => state.repoDetailsWidth);
+  const setRepoDetailsWidth = useWorkspaceStore(
+    (state) => state.setRepoDetailsWidth,
   );
   const openModal = useUiStore((state) => state.openModal);
 
@@ -969,6 +1468,7 @@ function RepoPickerPanel({
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [namingGroup, setNamingGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
+  const [scanning, setScanning] = useState(false);
   const [groupLibraryOpen, setGroupLibraryOpen] = useState(false);
   const [folderManagerOpen, setFolderManagerOpen] = useState(false);
   /** Which watched folder the library is filtered to; null means all of them. */
@@ -986,6 +1486,8 @@ function RepoPickerPanel({
   const [cloning, setCloning] = useState(false);
   const [cloneProgress, setCloneProgress] = useState("");
   const [onlineFilter, setOnlineFilter] = useState("");
+  /** Copy form shown even though the pasted address is already on this computer. */
+  const [copyAnyway, setCopyAnyway] = useState(false);
 
   const [newDestination, setNewDestination] = useState(defaultDestination);
   const [newName, setNewName] = useState("");
@@ -995,6 +1497,26 @@ function RepoPickerPanel({
   const [initializing, setInitializing] = useState(false);
   const [projectPathStatus, setProjectPathStatus] =
     useState<ProjectPathStatus>("idle");
+
+  /**
+   * Folders offered in the destination dropdown: the watched ones, starred
+   * first. The last place the user actually saved a copy joins the list when it
+   * is not among them, so a one-off destination is still one click away the
+   * next time rather than something to retype.
+   */
+  const destinationFolders = useMemo(() => {
+    const watched = primaryFirst(codeFolders);
+    if (
+      !cloneDirectory?.trim() ||
+      watched.some((folder) => samePath(folder.path, cloneDirectory))
+    ) {
+      return watched;
+    }
+    return [
+      ...watched,
+      { path: normalizePath(cloneDirectory), label: null, primary: false },
+    ];
+  }, [cloneDirectory, codeFolders]);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const selectionAnchor = useRef<string | null>(null);
@@ -1050,12 +1572,54 @@ function RepoPickerPanel({
     [libraryRepos, savedTabGroups],
   );
   const iconsByPath = useCachedRepoIcons(iconLookupPaths);
+
+  // Pasting a clone address into the search box asks "do I already have this?".
+  // Every repository GitWyrm knows about is checked for that remote; if none
+  // has it, the copy screen is offered with the address already filled in.
+  const urlQuery = useMemo(() => parseRepoUrlQuery(filter), [filter]);
+  const remoteSearchPaths = useMemo(
+    () => [...libraryRepos.map((repo) => repo.path), ...openRepos.map((repo) => repo.path)],
+    [libraryRepos, openRepos],
+  );
+  const remoteMatches = useReposWithRemote(
+    urlQuery?.url ?? null,
+    remoteSearchPaths,
+  );
+  const urlSearching = urlQuery != null && remoteMatches.isPending;
+  const urlMatchedRepos: LibraryRepo[] = (remoteMatches.data ?? []).map(
+    (match) =>
+      repoByPath.get(pathKey(match.path)) ?? {
+        name: match.name,
+        path: match.path,
+        headBranch: null,
+      },
+  );
+  const urlNotFound =
+    urlQuery != null && !urlSearching && urlMatchedRepos.length === 0;
+
+  // The address flows straight into the copy form, so it is ready to submit the
+  // moment the search says this project is not here yet. Typing over the search
+  // box replaces it; clearing the box leaves whatever was last there alone, so
+  // a half-filled copy form is never wiped out from under the user.
+  useEffect(() => {
+    if (!urlQuery) return;
+    setUrl(urlQuery.url);
+    setCloneNameTouched(false);
+    setCopyAnyway(false);
+    // Whatever was highlighted before is about a different repository, and the
+    // details panel reads from it. Drop it so the panel follows the address.
+    setSelectedItem(null);
+  }, [urlQuery?.url]);
+
   const query = filter.trim().toLowerCase();
   const matches = (repo: LibraryRepo) =>
     !query ||
     `${repo.name} ${repo.path} ${repo.headBranch ?? ""}`
       .toLowerCase()
       .includes(query);
+  const sortRepos = (repos: LibraryRepo[]) =>
+    sortLibraryRepos(repos, repoPickerSort, repoActivity);
+
   const pinnedRepos = pinnedRepoPaths.flatMap((path) => {
     const repo = repoByPath.get(pathKey(path));
     return repo && matches(repo) ? [repo] : [];
@@ -1072,6 +1636,7 @@ function RepoPickerPanel({
       const item = repoByPath.get(pathKey(repo.path));
       return item && matches(item) ? [item] : [];
     });
+  const sortedRecentRepos = sortRepos(recentRepos);
 
   const hiddenKeys = new Set(
     [...pinnedRepos, ...recentRepos].map((repo) => pathKey(repo.path)),
@@ -1087,12 +1652,14 @@ function RepoPickerPanel({
    */
   const folderSections = scopedFolders.map((folder) => ({
     folder,
-    repos: folder.repos
-      .flatMap((repo): LibraryRepo[] => {
-        const item = repoByPath.get(pathKey(repo.path));
-        return item ? [item] : [];
-      })
-      .filter((repo) => !hiddenKeys.has(pathKey(repo.path)) && matches(repo)),
+    repos: sortRepos(
+      folder.repos
+        .flatMap((repo): LibraryRepo[] => {
+          const item = repoByPath.get(pathKey(repo.path));
+          return item ? [item] : [];
+        })
+        .filter((repo) => !hiddenKeys.has(pathKey(repo.path)) && matches(repo)),
+    ),
   }));
 
   // Flat view of the same rows, for counts and shift-click ranges. De-duplicated
@@ -1109,7 +1676,7 @@ function RepoPickerPanel({
   // sections are left out so a range never reaches rows you cannot see.
   const visibleRowKeys = [
     ...(isSectionCollapsed("pinned_repositories") ? [] : pinnedRepos),
-    ...(isSectionCollapsed("recent") ? [] : recentRepos),
+    ...(isSectionCollapsed("recent") ? [] : sortedRecentRepos),
     ...(isSectionCollapsed("watched") ? [] : otherRepos),
   ].map((repo) => pathKey(repo.path));
 
@@ -1224,11 +1791,27 @@ function RepoPickerPanel({
 
   useEffect(() => {
     if (route !== "open" || selectedItem != null) return;
-    const firstGroup = pinnedGroups[0];
-    const firstRepo = pinnedRepos[0] ?? recentRepos[0] ?? otherRepos[0];
+    // An address with no copy here is about a repository that is in none of
+    // these lists, so picking a row would only put something unrelated beside
+    // it; the panel shows what copying will do instead. An address that IS
+    // here selects the copy it found, which is what the user just asked about.
+    if (urlQuery != null && urlMatchedRepos.length === 0) return;
+    const firstGroup = urlQuery == null ? pinnedGroups[0] : undefined;
+    const firstRepo =
+      urlQuery != null
+        ? urlMatchedRepos[0]
+        : (pinnedRepos[0] ?? recentRepos[0] ?? otherRepos[0]);
     if (firstGroup) setSelectedItem({ type: "group", id: firstGroup.id });
     else if (firstRepo) setSelectedItem({ type: "repo", path: firstRepo.path });
-  }, [otherRepos, pinnedGroups, pinnedRepos, recentRepos, route, selectedItem]);
+  }, [
+    otherRepos,
+    pinnedGroups,
+    pinnedRepos,
+    recentRepos,
+    route,
+    selectedItem,
+    urlQuery,
+  ]);
 
   const pickCodeFolder = async () => {
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -1573,17 +2156,63 @@ function RepoPickerPanel({
     }
   };
 
-  const renderRepoRow = (repo: LibraryRepo) => {
+  /**
+   * Check every repository in the library for open issues and pull requests.
+   *
+   * One pass over the whole list rather than a badge per row that fetches on
+   * its own: the counts are only useful when they can be compared, and a
+   * hundred quiet background requests every time this screen opens is not a
+   * trade worth making.
+   */
+  const scanLibrary = async () => {
+    const paths = [
+      ...new Map(libraryRepos.map((repo) => [pathKey(repo.path), repo.path])),
+    ].map(([, path]) => path);
+    if (paths.length === 0) {
+      toast("No repositories to check yet");
+      return;
+    }
+    setScanning(true);
+    try {
+      const counts = unwrap(await commands.githubScanRepos(paths));
+      const next: Record<string, RepoActivity> = {};
+      let reached = 0;
+      for (const count of counts) {
+        if (!count.checked) continue;
+        reached += 1;
+        next[pathKey(count.path)] = { prs: count.prs, issues: count.issues };
+      }
+      setRepoActivity(next);
+      toast(
+        reached === 0
+          ? "None of these repositories are on a connected host"
+          : `Checked ${reached} of ${paths.length} repositories`,
+      );
+    } catch (error) {
+      log.error(`repo picker scan failed: ${describeError(error)}`);
+      toast.error("Could not check for issues and pull requests");
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  // `fromRecent` rather than deriving it from the path: the same repo can also
+  // be pinned or scanned, and only the row drawn under RECENT should offer to
+  // remove it from that list.
+  const renderRepoRow = (repo: LibraryRepo, fromRecent = false) => {
     const key = pathKey(repo.path);
     const open = openByPath.get(key);
     return (
       <RepoLibraryRow
         key={key}
+        onForget={fromRecent ? () => removeRecent(repo.path) : undefined}
         reorder={pinnedReorder(repo)}
         repo={repo}
         iconUrl={iconsByPath.get(key)}
         pinned={pinnedRepoPaths.some((path) => pathKey(path) === key)}
         openRepoId={open?.id}
+        activity={repoActivity[key]}
+        scanning={scanning}
         selected={
           selectedItem?.type === "repo" && pathKey(selectedItem.path) === key
         }
@@ -1614,6 +2243,101 @@ function RepoPickerPanel({
   const starredRepositories = linkedRepositories.filter((repo) => repo.starred);
   const accessibleRepositories = linkedRepositories.filter(
     (repo) => !repo.starred,
+  );
+
+  /**
+   * The copy form. Rendered on the copy screen, and again inline under the
+   * search box when a pasted address turns out not to be on this computer --
+   * one definition so the two can never drift into different forms.
+   */
+  const renderCloneForm = (autoFocus: boolean) => (
+  <form
+    className="self-start rounded-lg border border-border bg-panel"
+    onSubmit={(event) => {
+      event.preventDefault();
+      void doClone();
+    }}
+  >
+    <div className="border-b border-border px-5 py-4">
+      <h2 className="text-sm font-semibold text-foreground">
+        Repository link
+      </h2>
+      <p className="mt-1 text-2xs text-muted-foreground">
+        GitWyrm uses your normal Git sign-in if the project is private.
+      </p>
+    </div>
+    <div className="grid gap-4 p-5">
+      <label className="grid gap-1.5 text-xs font-semibold text-sub">
+        Web address
+        <Input
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="https://github.com/team/project.git"
+          className="h-9 bg-background font-mono text-xs font-normal"
+          disabled={cloning}
+          autoFocus={autoFocus}
+        />
+      </label>
+      <DestinationField
+        label="Save in"
+        value={cloneDestination}
+        onChange={setCloneDestination}
+        folders={destinationFolders}
+        browseTitle="Copy repository into…"
+        disabled={cloning}
+      />
+      <label className="grid gap-1.5 text-xs font-semibold text-sub">
+        Folder name
+        <Input
+          value={cloneFolderName}
+          onChange={(event) => {
+            setCloneFolderName(event.target.value);
+            setCloneNameTouched(true);
+          }}
+          placeholder={suggestedCloneName || "project"}
+          className="h-9 bg-background font-mono text-xs font-normal"
+          disabled={cloning}
+        />
+      </label>
+      {clonePath && (
+        <div className="rounded-md border border-border bg-background px-3 py-2.5">
+          <small className="text-2xs font-semibold text-muted-foreground">
+            Will be saved to
+          </small>
+          <code className="mt-1 block break-all text-xs text-foreground">
+            {clonePath}
+          </code>
+        </div>
+      )}
+      <div className="flex min-h-8 items-center gap-2 border-t border-border pt-4">
+        <span className="min-w-0 flex-1 truncate font-mono text-2xs text-muted-foreground">
+          {cloning
+            ? cloneProgress
+            : url.trim()
+              ? "Ready to copy"
+              : "Waiting for a repository link"}
+        </span>
+        <Button
+          type="submit"
+          size="sm"
+          className="h-8 min-w-32 gap-1.5"
+          disabled={
+            !url.trim() ||
+            !finalCloneName ||
+            !cloneDestination.trim() ||
+            cloning
+          }
+        >
+          {cloning ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <Download size={13} />
+          )}
+          {cloning ? "Copying…" : "Copy repository"}
+        </Button>
+      </div>
+    </div>
+  </form>
   );
 
   const openScreen = (
@@ -1651,6 +2375,21 @@ function RepoPickerPanel({
             variant="secondary"
             size="sm"
             className="h-9 flex-none gap-1.5 text-xs"
+            onClick={() => void scanLibrary()}
+            disabled={scanning}
+            tooltip="Check every repository for open issues and pull requests"
+          >
+            {scanning ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <RefreshCw size={13} />
+            )}
+            {scanning ? "Checking…" : "Scan"}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-9 flex-none gap-1.5 text-xs"
             onClick={browseForRepositories}
             disabled={busy}
           >
@@ -1658,6 +2397,13 @@ function RepoPickerPanel({
             Browse…
           </Button>
         </div>
+        <p className="mt-2 text-2xs text-muted-foreground">
+          {scanning
+            ? "Checking every repository for open issues and pull requests…"
+            : repoScanAt == null
+              ? "Issues and pull requests have not been checked yet. Press Scan."
+              : `Issues and pull requests last checked ${describeScanTime(repoScanAt)}.`}
+        </p>
       </div>
 
       <button
@@ -1693,6 +2439,71 @@ function RepoPickerPanel({
           selectedOriginalPaths.length > 0 ? "pb-24" : "pb-6",
         )}
       >
+        {urlQuery && (
+          <div className="mx-auto mb-5 w-full max-w-[1600px]">
+            <section className="rounded-lg border border-border bg-panel p-4">
+              <p className="text-[9px] font-bold uppercase tracking-[.12em] text-accent-text">
+                That looks like a repository address
+              </p>
+              <p className="mt-1 truncate text-xs font-semibold text-foreground">
+                {urlQuery.slug ?? urlQuery.url}
+                <span className="ml-2 font-normal text-muted-foreground">
+                  on {urlQuery.host}
+                </span>
+              </p>
+
+              {urlSearching && (
+                <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 size={13} className="animate-spin" />
+                  Looking for it on this computer…
+                </p>
+              )}
+
+              {!urlSearching && urlMatchedRepos.length > 0 && (
+                <>
+                  <p className="mt-3 text-xs text-sub">
+                    You already have{" "}
+                    {urlMatchedRepos.length === 1
+                      ? "this project"
+                      : `${urlMatchedRepos.length} copies of this project`}{" "}
+                    here. Open it instead of copying it again.
+                  </p>
+                  <div className="mt-2 grid gap-0.5">
+                    {urlMatchedRepos.map((repo) => renderRepoRow(repo))}
+                  </div>
+                  {copyAnyway ? (
+                    <div className="mt-3 max-w-[680px]">
+                      {renderCloneForm(false)}
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-2 h-7 gap-1.5 text-2xs"
+                      onClick={() => setCopyAnyway(true)}
+                    >
+                      <Download size={12} />
+                      Make another copy anyway
+                    </Button>
+                  )}
+                </>
+              )}
+
+              {urlNotFound && (
+                <>
+                  <p className="mt-3 text-xs text-sub">
+                    You don't have this project on this computer yet. Copy it
+                    down to start working on it.
+                  </p>
+                  <div className="mt-3 max-w-[680px]">
+                    {renderCloneForm(false)}
+                  </div>
+                </>
+              )}
+            </section>
+          </div>
+        )}
+
         <div className="mx-auto grid w-full max-w-[1600px] gap-6 min-[2200px]:grid-cols-[minmax(0,1fr)_390px]">
           {pinnedGroups.length > 0 && (
             <section className="min-w-0 min-[2200px]:col-start-2 min-[2200px]:row-start-1">
@@ -1753,9 +2564,14 @@ function RepoPickerPanel({
                 Pinned repositories
               </SectionHeading>
               {!isSectionCollapsed("pinned_repositories") && (
-                <div className="grid gap-0.5">
-                  {pinnedRepos.map(renderRepoRow)}
-                </div>
+                <>
+                  {/* No sort control: pinned rows are in the order the user
+                      dragged them into, and a sort would quietly discard it. */}
+                  <RepoTableHeader sort={repoPickerSort} />
+                  <div className="grid gap-0.5">
+                    {pinnedRepos.map((repo) => renderRepoRow(repo))}
+                  </div>
+                </>
               )}
             </section>
           )}
@@ -1781,9 +2597,15 @@ function RepoPickerPanel({
               Recent
             </SectionHeading>
             {!isSectionCollapsed("recent") && (
-              <div className="grid gap-0.5">
-                {recentRepos.map(renderRepoRow)}
-              </div>
+              <>
+                <RepoTableHeader
+                  sort={repoPickerSort}
+                  onSort={sortRepoPicker}
+                />
+                <div className="grid gap-0.5">
+                  {sortedRecentRepos.map((repo) => renderRepoRow(repo, true))}
+                </div>
+              </>
             )}
           </section>
 
@@ -1917,9 +2739,15 @@ function RepoPickerPanel({
                           Finding repositories…
                         </div>
                       ) : (
-                        <div className="grid gap-0.5">
-                          {repos.map(renderRepoRow)}
-                        </div>
+                        <>
+                          <RepoTableHeader
+                            sort={repoPickerSort}
+                            onSort={sortRepoPicker}
+                          />
+                          <div className="grid gap-0.5">
+                            {repos.map((repo) => renderRepoRow(repo))}
+                          </div>
+                        </>
                       )}
                     </div>
                   );
@@ -2006,6 +2834,40 @@ function RepoPickerPanel({
     </>
   );
 
+  /**
+   * The side panel that stands in for repository details whenever the job on
+   * screen is copying a project down rather than picking one that is already
+   * here. Shown on the copy screen, and on the search screen once a pasted
+   * address takes over -- otherwise the panel would keep describing whichever
+   * repository happened to be selected before, which is no longer what the user
+   * is looking at.
+   */
+  const copyDetails = (
+    <>
+      <div className="border-b border-border px-5 py-4 text-2xs font-bold uppercase tracking-[.09em] text-muted-foreground">
+        What happens next
+      </div>
+      <div className="p-5">
+        <span className="grid size-10 place-items-center rounded-lg border border-accent/25 bg-accent/10 text-accent-text">
+          <Download size={19} />
+        </span>
+        <h2 className="mt-4 text-base font-semibold text-foreground">
+          Ready when the copy finishes
+        </h2>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          GitWyrm copies the files, remembers the parent folder, and opens the
+          repository in a new tab.
+        </p>
+        <div className="mt-5 border-t border-border pt-4">
+          <div className="flex items-center gap-2 text-xs text-sub">
+            <ShieldCheck size={13} className="text-accent-text" />
+            Uses your normal Git sign-in
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
   const cloneScreen = (
     <>
       <div className="border-b border-border px-5 py-5 min-[1200px]:px-7">
@@ -2021,123 +2883,7 @@ function RepoPickerPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-5 min-[1200px]:p-7">
         <div className="mx-auto grid w-full max-w-[1120px] gap-5 min-[1100px]:grid-cols-[minmax(420px,680px)_minmax(280px,360px)]">
-          <form
-            className="self-start rounded-lg border border-border bg-panel"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void doClone();
-            }}
-          >
-            <div className="border-b border-border px-5 py-4">
-              <h2 className="text-sm font-semibold text-foreground">
-                Repository link
-              </h2>
-              <p className="mt-1 text-2xs text-muted-foreground">
-                GitWyrm uses your normal Git sign-in if the project is private.
-              </p>
-            </div>
-            <div className="grid gap-4 p-5">
-              <label className="grid gap-1.5 text-xs font-semibold text-sub">
-                Web address
-                <Input
-                  value={url}
-                  onChange={(event) => setUrl(event.target.value)}
-                  placeholder="https://github.com/team/project.git"
-                  className="h-9 bg-background font-mono text-xs font-normal"
-                  disabled={cloning}
-                  autoFocus
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-sub">
-                Save in
-                <span className="flex gap-2">
-                  <Input
-                    value={cloneDestination}
-                    onChange={(event) =>
-                      setCloneDestination(event.target.value)
-                    }
-                    onBlur={() =>
-                      cloneDestination.trim() &&
-                      setCloneDestination(normalizePath(cloneDestination))
-                    }
-                    placeholder="Choose a parent folder"
-                    className="h-9 bg-background font-mono text-xs font-normal"
-                    disabled={cloning}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-9 gap-1.5"
-                    onClick={async () => {
-                      const { open } =
-                        await import("@tauri-apps/plugin-dialog");
-                      const directory = await open({
-                        directory: true,
-                        title: "Copy repository into…",
-                      });
-                      if (typeof directory === "string")
-                        setCloneDestination(normalizePath(directory));
-                    }}
-                    disabled={cloning}
-                  >
-                    <Folder size={13} />
-                    Browse…
-                  </Button>
-                </span>
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-sub">
-                Folder name
-                <Input
-                  value={cloneFolderName}
-                  onChange={(event) => {
-                    setCloneFolderName(event.target.value);
-                    setCloneNameTouched(true);
-                  }}
-                  placeholder={suggestedCloneName || "project"}
-                  className="h-9 bg-background font-mono text-xs font-normal"
-                  disabled={cloning}
-                />
-              </label>
-              {clonePath && (
-                <div className="rounded-md border border-border bg-background px-3 py-2.5">
-                  <small className="text-2xs font-semibold text-muted-foreground">
-                    Will be saved to
-                  </small>
-                  <code className="mt-1 block break-all text-xs text-foreground">
-                    {clonePath}
-                  </code>
-                </div>
-              )}
-              <div className="flex min-h-8 items-center gap-2 border-t border-border pt-4">
-                <span className="min-w-0 flex-1 truncate font-mono text-2xs text-muted-foreground">
-                  {cloning
-                    ? cloneProgress
-                    : url.trim()
-                      ? "Ready to copy"
-                      : "Waiting for a repository link"}
-                </span>
-                <Button
-                  type="submit"
-                  size="sm"
-                  className="h-8 min-w-32 gap-1.5"
-                  disabled={
-                    !url.trim() ||
-                    !finalCloneName ||
-                    !cloneDestination.trim() ||
-                    cloning
-                  }
-                >
-                  {cloning ? (
-                    <Loader2 size={13} className="animate-spin" />
-                  ) : (
-                    <Download size={13} />
-                  )}
-                  {cloning ? "Copying…" : "Copy repository"}
-                </Button>
-              </div>
-            </div>
-          </form>
+          {renderCloneForm(true)}
 
           <section className="min-w-0">
             {githubAuth.isLoading ? (
@@ -2356,42 +3102,14 @@ function RepoPickerPanel({
                   autoFocus
                 />
               </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-sub">
-                Create in
-                <span className="flex gap-2">
-                  <Input
-                    value={newDestination}
-                    onChange={(event) => setNewDestination(event.target.value)}
-                    onBlur={() =>
-                      newDestination.trim() &&
-                      setNewDestination(normalizePath(newDestination))
-                    }
-                    placeholder="Choose a parent folder"
-                    className="h-9 bg-background font-mono text-xs font-normal"
-                    disabled={initializing}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-9 gap-1.5"
-                    onClick={async () => {
-                      const { open } =
-                        await import("@tauri-apps/plugin-dialog");
-                      const directory = await open({
-                        directory: true,
-                        title: "Create repository in…",
-                      });
-                      if (typeof directory === "string")
-                        setNewDestination(normalizePath(directory));
-                    }}
-                    disabled={initializing}
-                  >
-                    <Folder size={13} />
-                    Browse…
-                  </Button>
-                </span>
-              </label>
+              <DestinationField
+                label="Create in"
+                value={newDestination}
+                onChange={setNewDestination}
+                folders={destinationFolders}
+                browseTitle="Create repository in…"
+                disabled={initializing}
+              />
               <fieldset className="grid gap-2">
                 <legend className="mb-1 text-xs font-semibold text-sub">
                   Starter
@@ -2577,7 +3295,18 @@ function RepoPickerPanel({
       )}
       onAnimationEnd={() => setWiggling(false)}
     >
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[224px_minmax(0,1fr)] lg:grid-rows-1 xl:grid-cols-[244px_minmax(0,1fr)_320px]">
+      {/* The details column is a grid track, so the saved width has to drive the
+          template: a width on the <aside> alone would lose to the track. Only
+          the xl breakpoint shows that column, hence the custom property rather
+          than a second hardcoded value. */}
+      <div
+        className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[224px_minmax(0,1fr)] lg:grid-rows-1 xl:grid-cols-[244px_minmax(0,1fr)_var(--repo-details-width)]"
+        style={
+          {
+            "--repo-details-width": `${repoDetailsWidth}px`,
+          } as React.CSSProperties
+        }
+      >
         <aside className="flex min-w-0 flex-col border-b border-border bg-panel px-3 py-3 lg:border-b-0 lg:border-r lg:px-3.5 lg:py-6">
           <div className="hidden px-2.5 lg:block">
             <h1 className="text-base font-semibold tracking-tight text-foreground">
@@ -2793,8 +3522,20 @@ function RepoPickerPanel({
               : newScreen}
         </main>
 
-        <aside className="hidden min-h-0 flex-col border-l border-border bg-panel xl:flex">
-          {route === "open" ? (
+        <aside className="relative hidden min-h-0 min-w-0 flex-col border-l border-border bg-panel xl:flex">
+          <ResizeHandle
+            ariaLabel="Resize repository details"
+            value={repoDetailsWidth}
+            min={MIN_REPO_DETAILS_WIDTH}
+            max={MAX_REPO_DETAILS_WIDTH}
+            defaultValue={DEFAULT_REPO_DETAILS_WIDTH}
+            direction={-1}
+            onChange={setRepoDetailsWidth}
+            className="-left-1"
+          />
+          {route === "open" && urlQuery && urlMatchedRepos.length === 0 ? (
+            copyDetails
+          ) : route === "open" ? (
             <RepoDetails
               selected={selectedItem}
               repositories={libraryRepos}
@@ -2813,29 +3554,7 @@ function RepoPickerPanel({
               onOpenGroup={(id) => void openSavedGroup(id)}
             />
           ) : route === "clone" ? (
-            <>
-              <div className="border-b border-border px-5 py-4 text-2xs font-bold uppercase tracking-[.09em] text-muted-foreground">
-                What happens next
-              </div>
-              <div className="p-5">
-                <span className="grid size-10 place-items-center rounded-lg border border-accent/25 bg-accent/10 text-accent-text">
-                  <Download size={19} />
-                </span>
-                <h2 className="mt-4 text-base font-semibold text-foreground">
-                  Ready when the copy finishes
-                </h2>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                  GitWyrm copies the files, remembers the parent folder, and
-                  opens the repository in a new tab.
-                </p>
-                <div className="mt-5 border-t border-border pt-4">
-                  <div className="flex items-center gap-2 text-xs text-sub">
-                    <ShieldCheck size={13} className="text-accent-text" />
-                    Uses your normal Git sign-in
-                  </div>
-                </div>
-              </div>
-            </>
+            copyDetails
           ) : (
             <>
               <div className="border-b border-border px-5 py-4 text-2xs font-bold uppercase tracking-[.09em] text-muted-foreground">

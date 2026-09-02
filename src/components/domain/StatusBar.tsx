@@ -34,7 +34,7 @@ function ZoomControl() {
             <button
               type="button"
               aria-label="App zoom"
-              className="titlebar-no-drag flex items-center gap-1 rounded px-1 text-sub hover:text-text"
+              className="titlebar-no-drag flex items-center gap-1 rounded px-1 text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
             >
               <Search className="size-3" />
               <span>{percent}%</span>
@@ -100,7 +100,7 @@ function ZoomControl() {
               type="button"
               aria-label="Reset zoom to 100%"
               onClick={() => setUiScale(DEFAULT_UI_SCALE)}
-              className="titlebar-no-drag flex items-center rounded px-1 text-sub hover:text-text"
+              className="titlebar-no-drag flex items-center rounded px-1 text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
             >
               <RotateCcw className="size-3" />
             </button>
@@ -211,7 +211,7 @@ function UpdateButton() {
       <button
         type="button"
         onClick={() => openModal()}
-        className="titlebar-no-drag pointer-events-auto flex h-[18px] items-center gap-1.5 rounded-full bg-blue-600 px-3 font-sans text-2xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-500"
+        className="titlebar-no-drag pointer-events-auto flex h-[18px] items-center gap-1.5 rounded-full bg-blue-600 px-3 font-sans text-2xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 active:bg-blue-700"
       >
         {busy ? (
           <Loader2 className="size-3 animate-spin" />
@@ -234,7 +234,7 @@ function FeedbackButton() {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="titlebar-no-drag flex items-center gap-1 rounded px-1 text-sub hover:text-text"
+            className="titlebar-no-drag flex items-center gap-1 rounded px-1 text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
           >
             <MessageSquare className="size-3" />
             <span>Send feedback</span>

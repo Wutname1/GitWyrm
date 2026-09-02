@@ -81,7 +81,8 @@ fn diverge(
 fn merge_expect_conflict(repo: &Repository, feat: git2::Oid) {
     let annotated = repo.find_annotated_commit(feat).unwrap();
     let mut checkout = CheckoutBuilder::new();
-    checkout.allow_conflicts(true).conflict_style_merge(true);
+    // Matches do_merge: diff3 keeps independent edits as separate conflicts.
+    checkout.allow_conflicts(true).conflict_style_diff3(true);
     repo.merge(
         &[&annotated],
         Some(&mut MergeOptions::new()),
@@ -462,6 +463,205 @@ fn abort_merge_restores_pre_merge_state() {
         "line1\nOURS\nline3\n",
         "our version restored"
     );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Two edits with untouched lines between them must stay two separately
+/// resolvable conflicts.
+///
+/// This is the whole reason `conflict_content` regenerates its marker text
+/// instead of reading the working copy. Git's default marker style reports this
+/// file as ONE conflict whose two sides each span the untouched middle lines,
+/// so a per-hunk resolver would offer a single choice over the entire region --
+/// exactly the thing the hunk view exists to avoid. diff3 consults the common
+/// ancestor, sees the middle was never contested, and splits them.
+#[test]
+fn independent_edits_stay_separate_conflicts() {
+    let (dir, repo) = scratch_repo("diff3-hunks");
+    let file = dir.join("f.txt");
+
+    fs::write(&file, "line1
+line2
+line3
+line4
+line5
+").unwrap();
+    let base = commit_all(&repo, "base");
+    let main = default_branch(&repo);
+
+    // Each side edits the first and last lines, leaving the middle alone.
+    let feat = diverge(
+        &repo,
+        base,
+        &main,
+        || fs::write(&file, "line1
+THEIRS-A
+line3
+line4
+THEIRS-B
+").unwrap(),
+        || fs::write(&file, "line1
+OURS-A
+line3
+line4
+OURS-B
+").unwrap(),
+    );
+    merge_expect_conflict(&repo, feat);
+
+    let content = conflict_content(&repo, &dir, "f.txt").unwrap();
+
+    let opens = content.conflict_text.matches("<<<<<<<").count();
+    assert_eq!(
+        opens, 2,
+        "expected two separate conflicts, got {opens}:
+{}",
+        content.conflict_text
+    );
+
+    // The ancestor section is what makes the split possible, and the view shows
+    // it, so it must actually be present.
+    assert!(
+        content.conflict_text.contains("|||||||"),
+        "diff3 markers should carry the common ancestor:
+{}",
+        content.conflict_text
+    );
+
+    // The untouched middle belongs to neither side: it must sit outside the
+    // markers rather than being duplicated into both.
+    let inside_first_conflict = content
+        .conflict_text
+        .split("<<<<<<<")
+        .nth(1)
+        .expect("a first conflict");
+    let first_block = inside_first_conflict
+        .split(">>>>>>>")
+        .next()
+        .expect("a closing marker");
+    assert!(
+        !first_block.contains("line4"),
+        "untouched lines should not be swallowed into a conflict:
+{}",
+        content.conflict_text
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// A binary conflict has no marker text to show; the whole-file choices carry it.
+#[test]
+fn binary_conflict_reports_no_marker_text() {
+    let (dir, repo) = scratch_repo("diff3-binary");
+    let file = dir.join("blob.bin");
+
+    fs::write(&file, [0u8, 159, 146, 150, 1, 2, 3]).unwrap();
+    let base = commit_all(&repo, "base");
+    let main = default_branch(&repo);
+
+    let feat = diverge(
+        &repo,
+        base,
+        &main,
+        || fs::write(&file, [0u8, 159, 146, 150, 9, 9, 9]).unwrap(),
+        || fs::write(&file, [0u8, 159, 146, 150, 7, 7, 7]).unwrap(),
+    );
+    merge_expect_conflict(&repo, feat);
+
+    let content = conflict_content(&repo, &dir, "blob.bin").unwrap();
+    assert!(content.binary, "should be detected as binary");
+    assert!(
+        !content.conflict_text.contains("<<<<<<<"),
+        "binary files should not produce marker text"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Reading a path that is no longer conflicted must not abort the process.
+///
+/// Regression: `conflict_content` built its diff3 marker text with
+/// `git2::merge_file` and then called `MergeFileResult::content()`
+/// unconditionally. That method hands the raw pointer to
+/// `slice::from_raw_parts` with no null check, and libgit2 leaves it null when
+/// the merge came back clean -- so the call was undefined behaviour that
+/// aborted the whole process (STATUS_STACK_BUFFER_OVERRUN), not a recoverable
+/// error. It fired in normal use: resolve one file, and the refetch of a
+/// sibling path re-read a now-automergeable file and killed the app.
+#[test]
+fn reading_an_automergeable_path_does_not_abort() {
+    let (dir, repo) = scratch_repo("automergeable-read");
+    let file = dir.join("f.txt");
+
+    fs::write(&file, "line1
+line2
+line3
+").unwrap();
+    let base = commit_all(&repo, "base");
+    let main = default_branch(&repo);
+
+    // Both sides edit, so the merge conflicts and the path enters the index...
+    let feat = diverge(
+        &repo,
+        base,
+        &main,
+        || fs::write(&file, "line1
+THEIRS
+line3
+").unwrap(),
+        || fs::write(&file, "line1
+OURS
+line3
+").unwrap(),
+    );
+    merge_expect_conflict(&repo, feat);
+
+    // ...then resolve it, which collapses the three stages to one.
+    apply_resolution(&repo, &dir, "f.txt", &Resolution::Ours).unwrap();
+
+    // The view refetches after resolving. Reading the settled path must return
+    // rather than abort; the marker text is empty because nothing conflicts.
+    let content = conflict_content(&repo, &dir, "f.txt").unwrap();
+    assert!(
+        !content.conflict_text.contains("<<<<<<<"),
+        "a resolved path has no conflict to describe"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Two sides that changed nothing relative to the base merge cleanly.
+#[test]
+fn identical_sides_produce_no_marker_text() {
+    let (dir, repo) = scratch_repo("identical-sides");
+    let file = dir.join("f.txt");
+
+    fs::write(&file, "same
+").unwrap();
+    let base = commit_all(&repo, "base");
+    let main = default_branch(&repo);
+
+    // Conflict on a second file so the merge stops, while f.txt stays clean.
+    let other = dir.join("other.txt");
+    fs::write(&other, "base
+").unwrap();
+    commit_all(&repo, "add other");
+
+    let feat = diverge(
+        &repo,
+        base,
+        &main,
+        || fs::write(&other, "theirs
+").unwrap(),
+        || fs::write(&other, "ours
+").unwrap(),
+    );
+    merge_expect_conflict(&repo, feat);
+
+    // f.txt was never conflicted; reading it must be safe.
+    let content = conflict_content(&repo, &dir, "f.txt").unwrap();
+    assert!(!content.conflict_text.contains("<<<<<<<"));
 
     let _ = fs::remove_dir_all(&dir);
 }

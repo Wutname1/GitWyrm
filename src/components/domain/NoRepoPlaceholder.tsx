@@ -1,4 +1,4 @@
-import { FolderOpen, Loader2, Plus } from 'lucide-react'
+import { FolderOpen, Loader2, Plus, X } from 'lucide-react'
 import logoUrl from '@/assets/logo.png'
 import { useOpenRepo } from '@/hooks/useRepoActions'
 import { useUiStore } from '@/stores/uiStore'
@@ -12,6 +12,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 export function NoRepoPlaceholder() {
   const showRepoPicker = useUiStore((s) => s.showRepoPicker)
   const recents = useWorkspaceStore((s) => s.recents)
+  const removeRecent = useWorkspaceStore((s) => s.removeRecent)
   const openRepo = useOpenRepo()
 
   return (
@@ -45,21 +46,36 @@ export function NoRepoPlaceholder() {
           </div>
           <div className="flex flex-col gap-0.5">
             {recents.slice(0, 5).map((repo) => (
-              <button
+              // The remove button cannot sit inside the open button, so the row
+              // is a wrapper holding the two as siblings.
+              <div
                 key={repo.path}
-                type="button"
-                onClick={() => openRepo.mutate(repo.path)}
-                disabled={openRepo.isPending}
-                className="flex w-full items-center gap-2 rounded-[5px] px-2.5 py-1.5 text-left hover:bg-panel2 disabled:opacity-60"
+                className="group/recent flex items-center rounded-[5px] hover:bg-panel2"
               >
-                <FolderOpen size={13} strokeWidth={2} className="flex-none text-sub" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs text-foreground">{repo.name}</span>
-                  <span className="block truncate font-mono text-2xs text-muted-foreground">
-                    {repo.path}
+                <button
+                  type="button"
+                  onClick={() => openRepo.mutate(repo.path)}
+                  disabled={openRepo.isPending}
+                  className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left disabled:opacity-60"
+                >
+                  <FolderOpen size={13} strokeWidth={2} className="flex-none text-sub" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs text-foreground">{repo.name}</span>
+                    <span className="block truncate font-mono text-2xs text-muted-foreground">
+                      {repo.path}
+                    </span>
                   </span>
-                </span>
-              </button>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${repo.name} from Recent`}
+                  title={`Remove ${repo.name} from Recent`}
+                  onClick={() => removeRecent(repo.path)}
+                  className="mr-1 grid size-6 flex-none place-items-center rounded text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground group-hover/recent:opacity-100 focus:opacity-100"
+                >
+                  <X size={12} />
+                </button>
+              </div>
             ))}
           </div>
         </div>

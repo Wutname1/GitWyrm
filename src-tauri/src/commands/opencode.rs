@@ -42,6 +42,7 @@ fn resolve_on_path(program: &str) -> Option<String> {
     let mut probe = {
         let mut c = Command::new("which");
         c.arg(program);
+        crate::process_env::scrub_bundled_env(&mut c);
         c
     };
 
@@ -242,11 +243,12 @@ pub fn launch(opencode: &str, path: &str, prompt: &str) -> Result<(), AppError> 
             if resolve_on_path(term).is_none() {
                 continue;
             }
-            let spawned = Command::new(term)
-                .arg(separator)
+            let mut cmd = Command::new(term);
+            cmd.arg(separator)
                 .args([opencode, path, "--prompt", prompt])
-                .current_dir(path)
-                .spawn();
+                .current_dir(path);
+            crate::process_env::scrub_bundled_env(&mut cmd);
+            let spawned = cmd.spawn();
             match spawned {
                 Ok(_) => return Ok(()),
                 Err(e) => log::warn!("{term} did not start: {e}"),
@@ -257,11 +259,12 @@ pub fn launch(opencode: &str, path: &str, prompt: &str) -> Result<(), AppError> 
         // first: it points at whatever is installed, so its argument convention is
         // unknowable, and `-e` is the only form every legacy terminal accepts.
         if resolve_on_path("x-terminal-emulator").is_some() {
-            let spawned = Command::new("x-terminal-emulator")
-                .arg("-e")
+            let mut cmd = Command::new("x-terminal-emulator");
+            cmd.arg("-e")
                 .args([opencode, path, "--prompt", prompt])
-                .current_dir(path)
-                .spawn();
+                .current_dir(path);
+            crate::process_env::scrub_bundled_env(&mut cmd);
+            let spawned = cmd.spawn();
             if spawned.is_ok() {
                 return Ok(());
             }

@@ -887,12 +887,20 @@ mod tests {
         let archive = dir.path().join("changes").join("archive");
         let shipped = archive.join("ship-it");
         std::fs::create_dir_all(&shipped).unwrap();
-        std::fs::write(shipped.join("proposal.md"), "# Change: Ship it
-").unwrap();
-        std::fs::write(shipped.join("tasks.md"), "- [x] one
+        std::fs::write(
+            shipped.join("proposal.md"),
+            "# Change: Ship it
+",
+        )
+        .unwrap();
+        std::fs::write(
+            shipped.join("tasks.md"),
+            "- [x] one
 - [x] two
 - [ ] three
-").unwrap();
+",
+        )
+        .unwrap();
         // A folder with nothing in it still lists, titled by its id.
         std::fs::create_dir_all(archive.join("bare")).unwrap();
 
