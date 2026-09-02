@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactElement } from 'react'
-import { ChevronDown, GitBranch } from 'lucide-react'
+import { ChevronDown, GitBranch, X } from 'lucide-react'
 import type { RefInfo, RefKind, RemoteInfo } from '@/lib/bindings'
 import { TooltipHint } from '@/components/ui/tooltip'
 import { detectProvider, providerLabel } from '@/lib/remoteProvider'
@@ -14,6 +14,21 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { RefBadge } from './RefBadge'
 import { RefContextMenu } from './RefContextMenu'
 
+const HINT_DISMISSED_KEY = 'gitwyrm:ref-stack-hint-dismissed'
+
+/**
+ * The hint teaches two gestures and is worth showing once, not forever. Kept in
+ * localStorage rather than settings because losing it costs a single line of
+ * help reappearing -- see the wrap preference in DiffView.
+ */
+function hintDismissed(): boolean {
+  try {
+    return window.localStorage.getItem(HINT_DISMISSED_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
 const kindOrder: Record<RefKind, number> = {
   head: 0,
   branch: 1,
@@ -25,21 +40,37 @@ function groupKey(refTag: RefInfo): string {
   return refTag.type === 'tag' ? `tag:${refTag.name}` : `branch:${shortName(refTag)}`
 }
 
-function sortedRefs(refs: RefInfo[], primary: RefInfo): RefInfo[] {
-  const primaryGroup = groupKey(primary)
-  return [...refs].sort((a, b) => {
-    const aPrimary = groupKey(a) === primaryGroup ? 0 : 1
-    const bPrimary = groupKey(b) === primaryGroup ? 0 : 1
-    return (
-      aPrimary - bPrimary ||
-      groupKey(a).localeCompare(groupKey(b)) ||
-      kindOrder[a.type] - kindOrder[b.type] ||
-      a.name.localeCompare(b.name)
-    )
-  })
+/** One popover row: a branch, plus the remote copy folded into it. */
+interface RefRow {
+  ref: RefInfo
+  syncedWith: RefInfo | null
 }
 
-function sourceDetails(refTag: RefInfo, remotes: RemoteInfo[]) {
+/** Chip order: the branch the chip is named after first, then by name. */
+function compareRefs(a: RefInfo, b: RefInfo, primary: RefInfo): number {
+  const primaryGroup = groupKey(primary)
+  const aPrimary = groupKey(a) === primaryGroup ? 0 : 1
+  const bPrimary = groupKey(b) === primaryGroup ? 0 : 1
+  return (
+    aPrimary - bPrimary ||
+    groupKey(a).localeCompare(groupKey(b)) ||
+    kindOrder[a.type] - kindOrder[b.type] ||
+    a.name.localeCompare(b.name)
+  )
+}
+
+function sourceDetails(refTag: RefInfo, remotes: RemoteInfo[], syncedWith?: RefInfo | null) {
+  // A folded row stands for both copies, so it has to name both -- otherwise
+  // "Branch on this computer" would quietly hide the remote it also covers.
+  if (syncedWith) {
+    const remote = remoteName(syncedWith)
+    const info = remotes.find((item) => item.name === remote)
+    const host = providerLabel(detectProvider(info))
+    const where = host ? `${host} · ${remote}` : (remote ?? 'the remote')
+    return refTag.type === 'head'
+      ? `Current branch, and on ${where}`
+      : `On this computer, and on ${where}`
+  }
   switch (refTag.type) {
     case 'head':
       return 'Current branch on this computer'
@@ -70,7 +101,17 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
   const m = useGitMutations(repo?.id ?? null)
   const draggingRef = useDragStore((s) => s.draggingRef)
   const [open, setOpen] = useState(false)
+  const [showHint, setShowHint] = useState(() => !hintDismissed())
   const branchMenuOpen = useRef(false)
+
+  const dismissHint = () => {
+    setShowHint(false)
+    try {
+      window.localStorage.setItem(HINT_DISMISSED_KEY, 'true')
+    } catch {
+      // Dismissing still works for this session when storage is unavailable.
+    }
+  }
 
   const branchMenuChanged = (nextOpen: boolean) => {
     branchMenuOpen.current = nextOpen
@@ -131,8 +172,15 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
   }
 
   const primary = refs.find((ref) => ref.type === 'head') ?? refs.find((ref) => ref.type === 'branch') ?? refs[0]
-  const ordered = sortedRefs(refs, primary)
-  const hiddenCount = refs.length - 1
+  // The popover lists one row per branch, not one per ref: a branch and its own
+  // remote-tracking copy are the same branch, so two rows reading `main` and
+  // `main` was noise the reader had to re-collapse in their head.
+  const rows: RefRow[] = [
+    ...groups.map((group) => ({ ref: group.primary, syncedWith: group.syncedWith })),
+    ...tags.map((refTag) => ({ ref: refTag, syncedWith: null })),
+  ].sort((a, b) => compareRefs(a.ref, b.ref, primary))
+  // Counts what the chip is hiding in the same units the popover shows.
+  const hiddenCount = rows.length - 1
   const label = shortName(primary)
 
   // When the only things folded away are tags, tint the count segment with the
@@ -207,17 +255,27 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
         onPointerDown={(event) => event.stopPropagation()}
         className="w-72 overflow-hidden border-border bg-panel2 p-0 shadow-[0_12px_36px_rgba(0,0,0,0.5)]"
       >
-        <div className="border-b border-border bg-panel px-3 py-2.5">
-          <div className="font-medium text-foreground">{refs.length} labels on this commit</div>
-          <div className="mt-0.5 text-2xs text-sub">
-            Double-click a branch to switch to it. Right-click for more options.
+        {showHint && (
+          <div className="flex items-start gap-2 border-b border-border bg-panel px-3 py-2.5">
+            <div className="mt-0.5 flex-1 text-2xs text-sub">
+              Double-click a branch to switch to it. Right-click for more options.
+            </div>
+            <button
+              type="button"
+              aria-label="Got it, stop showing this"
+              title="Got it, stop showing this"
+              onClick={dismissHint}
+              className="-mr-1 grid size-5 flex-none place-items-center rounded-[5px] text-muted-foreground hover:bg-panel3 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X aria-hidden size={11} />
+            </button>
           </div>
-        </div>
+        )}
         <div className="relative max-h-64 overflow-y-auto px-3 py-2">
           <div aria-hidden className="absolute top-3 bottom-3 left-[19px] w-px bg-border" />
           <div className="space-y-1">
-            {ordered.map((refTag) => {
-              const source = sourceDetails(refTag, remotes.data ?? [])
+            {rows.map(({ ref: refTag, syncedWith }) => {
+              const source = sourceDetails(refTag, remotes.data ?? [], syncedWith)
               const canSwitch = refTag.type === 'branch' || refTag.type === 'remote'
               // The hint sits outside RefContextMenu, whose trigger is `asChild`
               // -- nested inside, the tooltip would become the trigger's target
@@ -256,7 +314,7 @@ export function RefStack({ refs }: { refs: RefInfo[] }) {
                       />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <RefBadge refTag={refTag} withContextMenu={false} />
+                      <RefBadge refTag={refTag} syncedWith={syncedWith} withContextMenu={false} />
                       <div className="mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-sub">
                         {source}
                       </div>

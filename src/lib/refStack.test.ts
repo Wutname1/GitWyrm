@@ -130,3 +130,45 @@ describe('groupRefs', () => {
     expect(tags.map((t) => t.name)).toEqual(['v1.2.3'])
   })
 })
+
+/**
+ * The popover lists one row per branch, built from the same groups as the
+ * chips. Two rows both reading `main` was the reported noise -- a branch and
+ * its own remote copy are one branch, not two.
+ */
+describe('popover rows', () => {
+  const rowsFor = (refs: RefInfo[], upstreamOf?: (n: string) => string | null) => {
+    const { groups, tags } = groupRefs(refs, upstreamOf)
+    return [
+      ...groups.map((g) => ({ name: g.primary.name, synced: g.syncedWith?.name ?? null })),
+      ...tags.map((t) => ({ name: t.name, synced: null })),
+    ]
+  }
+
+  it('gives one row per branch, not one per ref', () => {
+    const rows = rowsFor([
+      { name: 'edge', type: 'head' },
+      { name: 'origin/edge', type: 'remote' },
+      { name: 'main', type: 'branch' },
+      { name: 'origin/main', type: 'remote' },
+    ])
+    expect(rows).toEqual([
+      { name: 'edge', synced: 'origin/edge' },
+      { name: 'main', synced: 'origin/main' },
+    ])
+  })
+
+  it('still lists a tag as its own row', () => {
+    const rows = rowsFor([head('main'), remote('origin/main'), tag('v1.2.3')])
+    expect(rows).toEqual([
+      { name: 'main', synced: 'origin/main' },
+      { name: 'v1.2.3', synced: null },
+    ])
+  })
+
+  it('keeps a genuine choice as separate rows', () => {
+    // Two servers offering the same branch is a real decision, so both show.
+    const rows = rowsFor([head('main'), remote('origin/main'), remote('upstream/main')])
+    expect(rows).toHaveLength(3)
+  })
+})
