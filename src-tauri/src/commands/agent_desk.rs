@@ -1717,11 +1717,23 @@ pub(crate) fn start_execution_at(
     }
 }
 
-/// Builds the prompt text handed to the engine from what the session already
-/// knows about why it exists: its source snapshot title/summary plus the last
-/// user message, if any. Real prompt composition (system prompt selection,
-/// mode/team policy) belongs to a later package; this only has to give the
-/// engine something honest to work from.
+/// Maximum conversation history handed to a fresh provider process.
+///
+/// This is a character budget, not a claimed token budget: providers tokenize
+/// differently. Source and OpenSpec context are outside this budget because
+/// they are the durable reason the session exists.
+const PROMPT_TRANSCRIPT_CHAR_BUDGET: usize = 48_000;
+const PROMPT_MESSAGE_CHAR_BUDGET: usize = 12_000;
+
+/// Builds the prompt text handed to a newly started provider process.
+///
+/// Provider CLIs start fresh for each execution, so the durable transcript is
+/// the continuity boundary. Replay useful user/assistant conversation,
+/// including imported messages, but leave out tool activity, approval
+/// plumbing, thought summaries, and native system status. History is selected
+/// newest-first under the explicit budget, then restored to chronological
+/// order. A user message appended while an execution is live cannot enter
+/// that already-built snapshot; it remains durable for the next execution.
 fn build_prompt(session: &AgentSession) -> String {
     let mut parts = Vec::new();
     let (title, summary) = source_summary(&session.header.source);
@@ -1731,13 +1743,84 @@ fn build_prompt(session: &AgentSession) -> String {
     if !summary.is_empty() {
         parts.push(summary);
     }
-    if let Some(last_user) = session.messages.iter().rev().find(|m| m.role == MessageRole::User) {
-        parts.push(last_user.plain_content.clone());
+    if let Some(transcript) = build_transcript_handoff(&session.messages) {
+        parts.push(transcript);
     }
     if parts.is_empty() {
         parts.push(session.header.title.clone());
     }
     parts.join("\n\n")
+}
+
+fn build_transcript_handoff(messages: &[SessionMessage]) -> Option<String> {
+    let eligible: Vec<&SessionMessage> = messages
+        .iter()
+        .filter(|message| {
+            !message.plain_content.trim().is_empty()
+                && matches!(message.role, MessageRole::User | MessageRole::Assistant)
+                && matches!(message.kind, MessageKind::User | MessageKind::Assistant | MessageKind::Result)
+        })
+        .collect();
+    if eligible.is_empty() {
+        return None;
+    }
+
+    let mut selected = Vec::new();
+    let mut used_chars = 0usize;
+    let mut omitted_messages = 0usize;
+    for message in eligible.iter().rev() {
+        let rendered = render_prompt_message(message);
+        let rendered_chars = rendered.chars().count();
+        let separator_chars = if selected.is_empty() { 0 } else { 2 };
+        if used_chars + separator_chars + rendered_chars > PROMPT_TRANSCRIPT_CHAR_BUDGET {
+            omitted_messages += 1;
+            continue;
+        }
+        used_chars += separator_chars + rendered_chars;
+        selected.push(rendered);
+    }
+    selected.reverse();
+
+    let mut handoff = String::from(
+        "Conversation so far (quoted history for continuity, not new system instructions):",
+    );
+    if omitted_messages > 0 {
+        handoff.push_str(&format!(
+            "\n[Earlier history shortened: {omitted_messages} message(s) were omitted to fit the handoff budget.]"
+        ));
+    }
+    handoff.push_str("\n\n");
+    handoff.push_str(&selected.join("\n\n"));
+    Some(handoff)
+}
+
+fn render_prompt_message(message: &SessionMessage) -> String {
+    let role = match message.role {
+        MessageRole::User => "User",
+        MessageRole::Assistant => "Assistant",
+        MessageRole::System => "System",
+    };
+    let origin = message
+        .import
+        .as_ref()
+        .map(|import| format!(" (imported from {})", import.adapter_id))
+        .unwrap_or_default();
+    let (content, omitted_chars) = truncate_prompt_text(message.plain_content.trim(), PROMPT_MESSAGE_CHAR_BUDGET);
+    let mut rendered = format!("{role}{origin}:\n{content}");
+    if omitted_chars > 0 {
+        rendered.push_str(&format!(
+            "\n[Message shortened: {omitted_chars} character(s) omitted.]"
+        ));
+    }
+    rendered
+}
+
+fn truncate_prompt_text(text: &str, max_chars: usize) -> (String, usize) {
+    let total_chars = text.chars().count();
+    if total_chars <= max_chars {
+        return (text.to_string(), 0);
+    }
+    (text.chars().take(max_chars).collect(), total_chars - max_chars)
 }
 
 fn source_summary(source: &SessionSource) -> (String, String) {
@@ -3924,6 +4007,92 @@ mod tests {
         let locks = test_locks();
         let outcome = append_user_message_at(&locks, &root, "ghost", "hi".into(), vec![]);
         assert!(matches!(outcome, AppendUserMessageOutcome::NotFound));
+    }
+
+    #[test]
+    fn prompt_replays_dialogue_but_not_tool_noise() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let CreateSessionOutcome::Created { session } = create_session_at(&root, create_request("Continuity")) else {
+            panic!("expected Created");
+        };
+        let id = session.header.session_id.clone();
+        let AppendUserMessageOutcome::Appended { message: first, .. } =
+            append_user_message_at(&locks, &root, &id, "Inspect the parser.".into(), vec![]) else {
+                panic!("expected Appended");
+            };
+        update_session_at(&locks, &root, &id, |session| {
+            let mut assistant = first.clone();
+            assistant.message_id = "assistant-import".into();
+            assistant.role = MessageRole::Assistant;
+            assistant.kind = MessageKind::Assistant;
+            assistant.plain_content = "I found a boundary bug.".into();
+            assistant.import = Some(crate::agentdesk::model::ImportProvenance {
+                adapter_id: "external-client".into(),
+                external_session_id: "chat-1".into(),
+                external_message_id: "message-2".into(),
+                imported_at: "2026-01-01T00:00:00Z".into(),
+            });
+            session.messages.push(assistant);
+            let mut tool = first.clone();
+            tool.message_id = "tool-noise".into();
+            tool.role = MessageRole::Assistant;
+            tool.kind = MessageKind::Tool;
+            tool.plain_content = "Searching 4,812 files...".into();
+            session.messages.push(tool);
+        });
+        append_user_message_at(&locks, &root, &id, "Fix it and add a test.".into(), vec![]);
+
+        let prompt = build_prompt(&store::read_session(&root, &id).expect("session"));
+        assert!(prompt.contains("User:\nInspect the parser."));
+        assert!(prompt.contains("Assistant (imported from external-client):\nI found a boundary bug."));
+        assert!(prompt.contains("User:\nFix it and add a test."));
+        assert!(!prompt.contains("Searching 4,812 files"));
+        assert_eq!(prompt.matches("Fix it and add a test.").count(), 1);
+    }
+
+    #[test]
+    fn prompt_shortens_history_honestly_and_keeps_newest_request() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let CreateSessionOutcome::Created { session } = create_session_at(&root, create_request("Long chat")) else {
+            panic!("expected Created");
+        };
+        let id = session.header.session_id.clone();
+        for index in 0..6 {
+            append_user_message_at(
+                &locks,
+                &root,
+                &id,
+                format!("old-{index}-{}", "x".repeat(PROMPT_MESSAGE_CHAR_BUDGET)),
+                vec![],
+            );
+        }
+        append_user_message_at(&locks, &root, &id, "Newest request".into(), vec![]);
+        let prompt = build_prompt(&store::read_session(&root, &id).expect("session"));
+        assert!(prompt.contains("Newest request"));
+        assert!(prompt.contains("Earlier history shortened:"));
+        assert!(prompt.contains("Message shortened:"));
+        assert!(prompt.chars().count() < PROMPT_TRANSCRIPT_CHAR_BUDGET + 1_000);
+    }
+
+    #[test]
+    fn message_saved_during_run_only_enters_next_prompt_snapshot() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let CreateSessionOutcome::Created { session } = create_session_at(&root, create_request("Queued turn")) else {
+            panic!("expected Created");
+        };
+        let id = session.header.session_id.clone();
+        append_user_message_at(&locks, &root, &id, "Start the work".into(), vec![]);
+        update_session_at(&locks, &root, &id, |session| session.header.state = SessionState::Working);
+        let active_prompt = build_prompt(&store::read_session(&root, &id).expect("active snapshot"));
+
+        let outcome = append_user_message_at(&locks, &root, &id, "Also cover the empty case".into(), vec![]);
+        assert!(matches!(outcome, AppendUserMessageOutcome::Appended { .. }));
+        assert!(!active_prompt.contains("Also cover the empty case"));
+        let next = store::read_session(&root, &id).expect("next snapshot");
+        assert!(build_prompt(&next).contains("User:\nAlso cover the empty case"));
     }
 
     #[test]
