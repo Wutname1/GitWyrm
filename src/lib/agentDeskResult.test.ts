@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type {
   CompleteOpenSpecTaskOutcome,
+  EscalateToFixOutcome,
   ResultChangedPath,
   ResultCheckOutcome,
   ResultRecord,
@@ -9,11 +10,13 @@ import type {
   ToggleOutcome,
 } from '@/lib/bindings'
 import {
+  canEscalateToFix,
   changedPathsSummaryLine,
   checksSummaryLine,
   explainAutoStartOutcome,
   explainCommitOutcome,
   explainCompleteOpenSpecTaskOutcome,
+  explainEscalateToFixOutcome,
   explainKeepOutcome,
   explainUndoOutcome,
   hasFailingCheck,
@@ -318,5 +321,29 @@ describe('explainCompleteOpenSpecTaskOutcome', () => {
       expect(m).toBeTruthy()
     }
     expect(new Set(messages).size).toBe(messages.length)
+  })
+})
+
+describe('canEscalateToFix', () => {
+  it('offers Fix this only for the read-only intents', () => {
+    expect(canEscalateToFix('ask')).toBe(true)
+    expect(canEscalateToFix('explain')).toBe(true)
+    expect(canEscalateToFix('review')).toBe(true)
+    expect(canEscalateToFix('summarize')).toBe(true)
+    expect(canEscalateToFix('fix')).toBe(false)
+    expect(canEscalateToFix('plan')).toBe(false)
+  })
+})
+
+describe('explainEscalateToFixOutcome', () => {
+  it('is silent for created and plain-language for every refusal', () => {
+    const session = {} as Extract<EscalateToFixOutcome, { kind: 'created' }>['session']
+    expect(explainEscalateToFixOutcome({ kind: 'created', session })).toBeNull()
+    expect(explainEscalateToFixOutcome({ kind: 'notFound' })).toBe('That chat could not be found.')
+    expect(explainEscalateToFixOutcome({ kind: 'notAReview', intent: 'fix' })).toContain('already make changes')
+    expect(explainEscalateToFixOutcome({ kind: 'nothingToFix', detail: 'The review has not said anything yet.' })).toBe(
+      'The review has not said anything yet.'
+    )
+    expect(explainEscalateToFixOutcome({ kind: 'failed', detail: 'disk full' })).toBe('Could not start a fix chat: disk full')
   })
 })

@@ -5704,3 +5704,42 @@ mod tests {
         }
     }
 }
+
+// -- Seams for `commands::agent_kickoff`'s "Fix this" escalation (source-kickoffs
+//    task 4.6). `update_session_at` and `append_user_message_at` stay private
+//    because their outcome enums carry UI-facing variants this module's own
+//    commands own; kickoff only needs "did it work, and if not, why" as a plain
+//    `Result`, the same shape `create_session_for_kickoff` already hands it. --
+
+/// `update_session_at`, flattened to a `Result` for `commands::agent_kickoff`.
+pub(crate) fn update_session_for_kickoff(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    mutate: impl FnOnce(&mut AgentSession),
+) -> Result<AgentSession, String> {
+    match update_session_at(locks, root, session_id, mutate) {
+        UpdateSessionOutcome::Updated { session } => Ok(session),
+        UpdateSessionOutcome::NotFound => Err("the chat could not be found".into()),
+        UpdateSessionOutcome::Damaged { reason } => Err(reason),
+        UpdateSessionOutcome::WriteFailed { detail } | UpdateSessionOutcome::Unavailable { detail } => Err(detail),
+    }
+}
+
+/// `append_user_message_at`, flattened to a `Result` for `commands::agent_kickoff`.
+/// The seeded message goes through the same path a typed one does, so it
+/// gets a segment, lifts the session out of `Draft`, and refreshes the index
+/// exactly like a message the person wrote by hand.
+pub(crate) fn append_user_message_for_kickoff(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    content: String,
+) -> Result<AgentSession, String> {
+    match append_user_message_at(locks, root, session_id, content, Vec::new()) {
+        AppendUserMessageOutcome::Appended { session, .. } => Ok(session),
+        AppendUserMessageOutcome::NotFound => Err("the chat could not be found".into()),
+        AppendUserMessageOutcome::Damaged { reason } => Err(reason),
+        AppendUserMessageOutcome::WriteFailed { detail } | AppendUserMessageOutcome::Unavailable { detail } => Err(detail),
+    }
+}

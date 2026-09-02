@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { commands } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { log } from '@/lib/log'
+import { explainEscalateToFixOutcome } from '@/lib/agentDeskResult'
 
 /**
  * Sidebar-scoped session mutations (rename, archive, delete) for task 3.5's
@@ -93,7 +94,28 @@ export function useAgentSessionMutations() {
     },
   })
 
-  return { rename, archive, markRead, remove }
+  // Source-kickoffs task 4.6: "Fix this" on a finished read-only chat. The
+  // backend creates a seeded Fix session and does NOT start it; the caller
+  // (`ResultReviewPanel`) opens it in the pane so the person can read the
+  // seeded message and press Send. Only the list is invalidated: the review
+  // session itself is untouched, and the new session has never been queried.
+  const escalateToFix = useMutation({
+    mutationFn: async (sessionId: string) => unwrap(await commands.agentSessionEscalateToFix(sessionId)),
+    onSuccess: (outcome, sessionId) => {
+      qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
+      const explanation = explainEscalateToFixOutcome(outcome)
+      if (explanation) {
+        log.warn(`agent session escalate-to-fix: ${outcome.kind} for ${sessionId}`)
+        toast.error('Could not start a fix chat.', { description: explanation })
+      }
+    },
+    onError: (e, sessionId) => {
+      log.error(`agent session escalate-to-fix threw for ${sessionId}: ${String(e)}`)
+      toast.error('Could not start a fix chat.')
+    },
+  })
+
+  return { rename, archive, markRead, remove, escalateToFix }
 }
 
 function renameFailureReason(kind: string): string {

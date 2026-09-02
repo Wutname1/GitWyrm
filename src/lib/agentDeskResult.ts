@@ -1,11 +1,13 @@
 import type {
   CommitResultOutcome,
   CompleteOpenSpecTaskOutcome,
+  EscalateToFixOutcome,
   KeepResultOutcome,
   ResultCheckOutcome,
   ResultChangedPath,
   ResultRecord,
   ResultState,
+  SessionIntent,
   SessionState,
   StartExecutionOutcome,
   UndoResultOutcome,
@@ -319,5 +321,37 @@ export function explainAutoStartOutcome(outcome: StartExecutionOutcome): string 
       // back to a different provider and let the user believe their choice
       // was used.
       return `GitWyrm cannot run ${outcome.requested} yet, so nothing was started. Pick a different assistant and try again.`
+  }
+}
+
+/**
+ * Source-kickoffs task 4.6 ("escalate a review into a fix"): whether a
+ * finished chat of this intent should offer "Fix this". Exactly the
+ * read-only intents -- a Fix or Plan chat can already make changes, so it
+ * has nothing to escalate to. Mirrors the backend's `can_escalate_to_fix`
+ * in `agent_kickoff.rs`; that check is the one that refuses, this one only
+ * decides whether to draw the button.
+ */
+export function canEscalateToFix(intent: SessionIntent): boolean {
+  return intent === 'ask' || intent === 'explain' || intent === 'review' || intent === 'summarize'
+}
+
+/**
+ * Plain-language explanation for `commands.agentSessionEscalateToFix`'s
+ * outcome, same shape as every other `explain*Outcome` helper here. `null`
+ * for `created` (the caller shows a positive toast and opens the new chat).
+ */
+export function explainEscalateToFixOutcome(outcome: EscalateToFixOutcome): string | null {
+  switch (outcome.kind) {
+    case 'created':
+      return null
+    case 'notFound':
+      return 'That chat could not be found.'
+    case 'notAReview':
+      return 'This chat can already make changes, so there is nothing to turn into a fix.'
+    case 'nothingToFix':
+      return outcome.detail
+    case 'failed':
+      return `Could not start a fix chat: ${outcome.detail}`
   }
 }

@@ -644,6 +644,173 @@ pub fn agent_intent_policy(intent: SessionIntent) -> policy::IntentPolicy {
     policy::for_intent(intent)
 }
 
+// -- Task 4.6: escalate a read-only review into a Fix chat --
+//
+// A Review/Explain/Summarize/Ask chat can never reach a write tool
+// (`agentdesk::policy::IntentPolicy::can_write`), and that stays true here:
+// escalation does not grant the review session anything. It opens a NEW
+// session with `SessionIntent::Fix`, on the same repo and the same source,
+// and seeds its first user message with the review's conclusion so the person
+// does not have to re-explain what was found. Nothing is started -- the
+// person reads the seeded message and presses Send themselves.
+
+/// What escalating a review to a fix found or did.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum EscalateToFixOutcome {
+    /// A new Fix session exists, seeded and waiting for Send. Not started.
+    Created { session: AgentSession },
+    NotFound,
+    /// The session's intent can already write (Fix/Plan), so there is nothing
+    /// to escalate -- the caller should not have offered the button.
+    NotAReview { intent: SessionIntent },
+    /// The review never produced a conclusion to carry over: no assistant
+    /// message with any text in it.
+    NothingToFix { detail: String },
+    /// The review could not be read, or the new session could not be written.
+    Failed { detail: String },
+}
+
+/// Which intents may be escalated: exactly the read-only ones. Mirrors the
+/// frontend's `canEscalateToFix` in `src/lib/agentDeskResult.ts`; the backend
+/// check is the one that actually refuses, the frontend one only hides the
+/// button.
+pub fn can_escalate_to_fix(intent: SessionIntent) -> bool {
+    matches!(
+        intent,
+        SessionIntent::Ask | SessionIntent::Explain | SessionIntent::Review | SessionIntent::Summarize
+    )
+}
+
+/// The new Fix session's title, from the review's. A review titled from its
+/// source ("Issue #12: login fails") becomes "Fix: Issue #12: login fails";
+/// a review with no title at all gets a plain fallback rather than "Fix: ".
+fn fix_title_from_review(review_title: &str) -> String {
+    let trimmed = review_title.trim();
+    if trimmed.is_empty() {
+        return "Fix what the review found".into();
+    }
+    // Do not stack prefixes when a review was itself titled "Fix: ..." by hand.
+    if trimmed.starts_with("Fix: ") {
+        return trimmed.to_string();
+    }
+    format!("Fix: {trimmed}")
+}
+
+/// The seeded first message: one plain line saying where the text came from,
+/// then the review's conclusion verbatim. The agent reads this as its task,
+/// so the intro is an instruction, not just a label.
+fn build_fix_seed(review_title: &str, conclusion: &str) -> String {
+    let title = review_title.trim();
+    let intro = if title.is_empty() {
+        "This came from a review chat. Please fix what it found:".to_string()
+    } else {
+        format!("This came from the review chat \"{title}\". Please fix what it found:")
+    };
+    format!("{intro}\n\n{}", conclusion.trim())
+}
+
+/// The review's conclusion: its last assistant-role, assistant-kind message
+/// with any text. Thought summaries and tool rows are skipped -- they are
+/// how the agent got there, not what it concluded.
+fn review_conclusion(session: &AgentSession) -> Option<&str> {
+    use crate::agentdesk::model::{MessageKind, MessageRole};
+    session
+        .messages
+        .iter()
+        .rev()
+        .filter(|m| m.role == MessageRole::Assistant && m.kind == MessageKind::Assistant)
+        .map(|m| m.plain_content.trim())
+        .find(|text| !text.is_empty())
+}
+
+/// The plain, testable half of `agent_session_escalate_to_fix`.
+///
+/// Three writes through `commands::agent_desk`'s own seams, in this order:
+/// create (a fresh `Draft` header), copy the review's provider/mode/team
+/// preferences onto it, then append the seed message (which lifts it to
+/// `Ready`). The preference copy runs before the append so the composer
+/// shows the right provider the moment the pane opens, with no flash of the
+/// default.
+pub(crate) fn escalate_review_to_fix_at(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    review_session_id: &str,
+) -> EscalateToFixOutcome {
+    use crate::agentdesk::model::SessionLoadError as E;
+
+    let review = match store::read_session(root, review_session_id) {
+        Ok(s) => s,
+        Err(E::NotFound) => return EscalateToFixOutcome::NotFound,
+        Err(e) => return EscalateToFixOutcome::Failed { detail: e.to_string() },
+    };
+
+    if !can_escalate_to_fix(review.header.intent) {
+        return EscalateToFixOutcome::NotAReview {
+            intent: review.header.intent,
+        };
+    }
+
+    let conclusion = match review_conclusion(&review) {
+        Some(text) => text.to_string(),
+        None => {
+            return EscalateToFixOutcome::NothingToFix {
+                detail: "The review has not said anything yet. Wait for it to finish, then try again.".into(),
+            }
+        }
+    };
+
+    let seed = build_fix_seed(&review.header.title, &conclusion);
+    let create_request = CreateSessionRequest {
+        repo_id: review.header.repo_id.clone(),
+        repo_path: review.header.repo_path.clone(),
+        repo_name: review.header.repo_name.clone(),
+        title: fix_title_from_review(&review.header.title),
+        source: review.header.source.clone(),
+        intent: SessionIntent::Fix,
+    };
+
+    let created = match super::agent_desk::create_session_for_kickoff(root, create_request) {
+        Ok(session) => session,
+        Err(detail) => return EscalateToFixOutcome::Failed { detail },
+    };
+    let new_id = created.header.session_id.clone();
+
+    let preferred_provider = review.header.preferred_provider.clone();
+    let preferred_mode = review.header.preferred_mode.clone();
+    let preferred_team = review.header.preferred_team.clone();
+    if let Err(detail) = super::agent_desk::update_session_for_kickoff(locks, root, &new_id, |session| {
+        session.header.preferred_provider = preferred_provider;
+        session.header.preferred_mode = preferred_mode;
+        session.header.preferred_team = preferred_team;
+    }) {
+        return EscalateToFixOutcome::Failed { detail };
+    }
+
+    match super::agent_desk::append_user_message_for_kickoff(locks, root, &new_id, seed) {
+        Ok(session) => EscalateToFixOutcome::Created { session },
+        Err(detail) => EscalateToFixOutcome::Failed { detail },
+    }
+}
+
+/// "Fix this" on a finished review: opens a seeded Fix chat, does not start
+/// it. See `escalate_review_to_fix_at`. Deliberately does not emit
+/// `SELECT_SESSION_EVENT`: the button lives inside the Desk window, and the
+/// pane that showed the review selects the new session itself.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_escalate_to_fix(
+    app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
+    session_id: String,
+) -> Result<EscalateToFixOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    let locks = locks.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || escalate_review_to_fix_at(&locks, &root, &session_id))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
 // -- Task 5: isolation for Fix, refused for everything else --
 //
 // architecture.md section 9: Fix's worktree policy is `Always` -- a worktree
@@ -1144,5 +1311,194 @@ mod tests {
             !repo_dir.path().join("fix.txt").exists(),
             "a write into the Fix worktree must never appear in the user's own checkout"
         );
+    }
+
+    // -- Task 4.6: escalate a review into a Fix chat --
+
+    fn assistant_message(text: &str) -> crate::agentdesk::model::SessionMessage {
+        use crate::agentdesk::model::{MessageKind, MessageRole, SessionMessage};
+        SessionMessage {
+            message_id: format!("m-{}", text.len()),
+            segment_id: "seg-1".into(),
+            role: MessageRole::Assistant,
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            plain_content: text.into(),
+            rendered_content: None,
+            provider: None,
+            model: None,
+            kind: MessageKind::Assistant,
+            execution_id: None,
+            sequence: None,
+            import: None,
+            targets: Vec::new(),
+        }
+    }
+
+    /// A finished Review session on issue #7 whose transcript ends with the
+    /// given assistant conclusion, plus a provider preference to carry over.
+    fn review_session_with_conclusion(root: &SessionStoreRoot, conclusion: Option<&str>) -> AgentSession {
+        let FoundOrCreatedSession::Created { mut session } =
+            find_or_create_agent_session_at(root, request(SessionIntent::Review, 7))
+        else {
+            panic!("expected the review to be created");
+        };
+        session.header.preferred_provider = Some("codex".into());
+        session.header.preferred_mode = Some("ask".into());
+        session.header.state = SessionState::Finished;
+        if let Some(text) = conclusion {
+            session.messages.push(assistant_message(text));
+        }
+        store::write_session(root, &session).expect("write review session");
+        session
+    }
+
+    #[test]
+    fn escalating_a_review_creates_a_seeded_fix_session_on_the_same_source() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        let review = review_session_with_conclusion(&root, Some("The login form drops the password on retry."));
+
+        let outcome = escalate_review_to_fix_at(&locks, &root, &review.header.session_id);
+        let EscalateToFixOutcome::Created { session } = outcome else {
+            panic!("expected Created, got {outcome:?}");
+        };
+
+        assert_ne!(session.header.session_id, review.header.session_id);
+        assert_eq!(session.header.intent, SessionIntent::Fix);
+        assert_eq!(session.header.repo_id, review.header.repo_id);
+        assert_eq!(session.header.source, review.header.source, "the fix must point at the same issue");
+        assert_eq!(session.header.title, "Fix: Issue #7");
+        assert_eq!(session.header.preferred_provider.as_deref(), Some("codex"));
+        assert_eq!(session.header.preferred_mode.as_deref(), Some("ask"));
+        // Seeded but not started: Ready (one user message), no execution.
+        assert_eq!(session.header.state, SessionState::Ready);
+        assert!(session.executions.is_empty());
+        assert_eq!(session.messages.len(), 1);
+        let seed = &session.messages[0];
+        assert_eq!(seed.role, crate::agentdesk::model::MessageRole::User);
+        assert!(
+            seed.plain_content.starts_with("This came from the review chat \"Issue #7\"."),
+            "{}",
+            seed.plain_content
+        );
+        assert!(
+            seed.plain_content.ends_with("The login form drops the password on retry."),
+            "{}",
+            seed.plain_content
+        );
+
+        // The review itself is untouched: still Review, still read-only.
+        let reread = store::read_session(&root, &review.header.session_id).expect("review still readable");
+        assert_eq!(reread.header.intent, SessionIntent::Review);
+        assert!(reread
+            .messages
+            .iter()
+            .all(|m| m.role != crate::agentdesk::model::MessageRole::User));
+    }
+
+    #[test]
+    fn escalation_uses_the_last_conclusion_not_the_first() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        let mut review = review_session_with_conclusion(&root, Some("First pass: looks fine."));
+        review.messages.push(assistant_message("Second pass: the retry path is broken."));
+        store::write_session(&root, &review).expect("write");
+
+        let EscalateToFixOutcome::Created { session } =
+            escalate_review_to_fix_at(&locks, &root, &review.header.session_id)
+        else {
+            panic!("expected Created");
+        };
+        assert!(session.messages[0]
+            .plain_content
+            .ends_with("Second pass: the retry path is broken."));
+    }
+
+    #[test]
+    fn escalation_refuses_a_fix_session() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        let FoundOrCreatedSession::Created { mut session } =
+            find_or_create_agent_session_at(&root, request(SessionIntent::Fix, 7))
+        else {
+            panic!("expected Created");
+        };
+        session.messages.push(assistant_message("Done, I fixed it."));
+        store::write_session(&root, &session).expect("write");
+
+        let outcome = escalate_review_to_fix_at(&locks, &root, &session.header.session_id);
+        assert!(
+            matches!(
+                outcome,
+                EscalateToFixOutcome::NotAReview {
+                    intent: SessionIntent::Fix
+                }
+            ),
+            "got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn escalation_refuses_a_review_with_no_assistant_message() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        let review = review_session_with_conclusion(&root, None);
+
+        let outcome = escalate_review_to_fix_at(&locks, &root, &review.header.session_id);
+        assert!(matches!(outcome, EscalateToFixOutcome::NothingToFix { .. }), "got {outcome:?}");
+        // Nothing was created for it.
+        let loaded = store::load_or_rebuild_index(&root);
+        assert_eq!(loaded.headers.len(), 1, "no Fix session may be left behind after a refusal");
+    }
+
+    #[test]
+    fn escalation_skips_thought_and_tool_rows_when_finding_the_conclusion() {
+        use crate::agentdesk::model::MessageKind;
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        let mut review = review_session_with_conclusion(&root, Some("Real conclusion."));
+        let mut thought = assistant_message("thinking about it");
+        thought.kind = MessageKind::ThoughtSummary;
+        review.messages.push(thought);
+        store::write_session(&root, &review).expect("write");
+
+        let EscalateToFixOutcome::Created { session } =
+            escalate_review_to_fix_at(&locks, &root, &review.header.session_id)
+        else {
+            panic!("expected Created");
+        };
+        assert!(session.messages[0].plain_content.ends_with("Real conclusion."));
+    }
+
+    #[test]
+    fn escalation_reports_not_found_for_an_unknown_session() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        assert!(matches!(
+            escalate_review_to_fix_at(&locks, &root, "no-such-session"),
+            EscalateToFixOutcome::NotFound
+        ));
+    }
+
+    #[test]
+    fn fix_title_handles_blank_and_already_prefixed_titles() {
+        assert_eq!(fix_title_from_review("Issue #3"), "Fix: Issue #3");
+        assert_eq!(fix_title_from_review("   "), "Fix what the review found");
+        assert_eq!(fix_title_from_review("Fix: Issue #3"), "Fix: Issue #3");
+    }
+
+    #[test]
+    fn every_read_only_intent_may_escalate_and_no_writing_intent_may() {
+        for intent in [
+            SessionIntent::Ask,
+            SessionIntent::Explain,
+            SessionIntent::Review,
+            SessionIntent::Summarize,
+        ] {
+            assert!(can_escalate_to_fix(intent), "{intent:?}");
+        }
+        for intent in [SessionIntent::Fix, SessionIntent::Plan] {
+            assert!(!can_escalate_to_fix(intent), "{intent:?}");
+        }
     }
 }

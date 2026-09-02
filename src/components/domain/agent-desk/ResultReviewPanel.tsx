@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CheckCircle2, CircleAlert, ExternalLink, FileDiff, GitCommitHorizontal, RotateCcw } from 'lucide-react'
+import { CheckCircle2, CircleAlert, ExternalLink, FileDiff, GitCommitHorizontal, RotateCcw, Wrench } from 'lucide-react'
 import { commands, type ResultRecord, type SessionIntent } from '@/lib/bindings'
 import { invalidateAfterResultLanding, keys, unwrap } from '@/lib/queryKeys'
 import { useCompleteOpenSpecTask } from '@/hooks/useOpenspecSessionSource'
+import { useAgentSessionMutations } from '@/hooks/useAgentSessionMutations'
+import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import {
+  canEscalateToFix,
   changedPathsSummaryLine,
   checksSummaryLine,
   explainCommitOutcome,
@@ -86,6 +89,14 @@ export function ResultReviewPanel({
   const record = records.find((r) => r.executionId === executionId) ?? null
 
   const completeTask = useCompleteOpenSpecTask(repoId)
+  const { escalateToFix } = useAgentSessionMutations()
+  // Which pane is showing this review. `ConversationPane` does not pass its
+  // pane id down, but the layout knows which session each pane holds, so
+  // the pane can be recovered from `sessionId`. Read here (not in the
+  // handler) so the lookup is a subscription, not a stale closure.
+  const secondarySessionId = useAgentDeskUiStore((s) => s.layout.secondarySessionId)
+  const setPaneSession = useAgentDeskUiStore((s) => s.setPaneSession)
+  const setActivePane = useAgentDeskUiStore((s) => s.setActivePane)
   const refresh = () => {
     invalidateAfterResultLanding(queryClient, repoId, sessionId)
   }
@@ -247,6 +258,34 @@ export function ResultReviewPanel({
     })
   }
 
+  /**
+   * Source-kickoffs task 4.6: a Review/Explain/Summarize/Ask chat is
+   * read-only by design. When its conclusion is worth acting on, this opens
+   * a NEW Fix chat on the same source, seeded with that conclusion, and
+   * lands the person in it. Nothing runs until they press Send -- the seed
+   * is theirs to read and edit first, which is why the toast tells them to
+   * do exactly that. Refusals are already toasted by the mutation hook.
+   */
+  async function handleFixThis() {
+    await withBusy(async () => {
+      let outcome
+      try {
+        outcome = await escalateToFix.mutateAsync(sessionId)
+      } catch {
+        // The hook's onError already logged and toasted this; a second
+        // "something went wrong" from withBusy would just be noise.
+        return
+      }
+      if (outcome.kind !== 'created') return
+      const pane = secondarySessionId === sessionId ? 'secondary' : 'primary'
+      setPaneSession(pane, outcome.session.header.sessionId)
+      setActivePane(pane)
+      toast.success('Started a fix chat from this review.', {
+        description: 'Read the message, then press Send.',
+      })
+    })
+  }
+
   async function handleDraftCommitMessage() {
     await withBusy(async () => {
       const message = unwrap(await commands.agentResultDraftCommitMessage(sessionId, executionId, taskText, provider))
@@ -376,6 +415,16 @@ export function ResultReviewPanel({
       )}
 
       <div className="flex flex-wrap gap-1.5">
+        {canEscalateToFix(intent) && (
+          <ActionButton
+            onClick={() => void handleFixThis()}
+            disabled={busy}
+            variant="primary"
+            icon={<Wrench size={12} aria-hidden />}
+          >
+            Fix this
+          </ActionButton>
+        )}
         {availability.canKeep && (
           <ActionButton onClick={handleKeep} disabled={busy}>
             Keep
