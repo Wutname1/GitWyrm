@@ -60,7 +60,7 @@ pub const FENCE_LANGUAGE: &str = "graph-proposal";
 pub fn plan_mode_instruction() -> String {
     format!(
         "You are in PLAN mode: propose a graph of work instead of doing it yet.\n\n\
-Do not edit any files. Instead, reply with a short plain-language summary of your plan, \
+Do not edit any files. Instead, reply with a short plain-language summary of your plan written as a Markdown task list, one step per line in the form `- [ ] step` (the app shows these as a checklist and ticks them as work lands), \
 then a single fenced code block written exactly as ```{FENCE_LANGUAGE} ... ``` containing ONE JSON object \
 with this exact shape (a lead summary plus 0-3 helper jobs; omit helpers entirely for solo work):\n\n\
 {{\n  \
@@ -404,6 +404,15 @@ mod tests {
         // read from `FENCE_LANGUAGE` so this is really a guard against a
         // future hand-edit of one without the other.
         assert!(plan_mode_instruction().contains(&format!("```{FENCE_LANGUAGE}")));
+    }
+
+    /// The checklist the Plan pane renders (`agentDeskPlan.ts`) reads
+    /// `- [ ] step` lines. Nothing asked the model for that shape, so the
+    /// pane worked only when a model happened to write it; the instruction
+    /// now asks, and this pins the exact marker the parser matches.
+    #[test]
+    fn plan_mode_asks_for_the_checklist_shape_the_pane_renders() {
+        assert!(plan_mode_instruction().contains("`- [ ] step`"));
     }
 
     #[test]

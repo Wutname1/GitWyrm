@@ -22,7 +22,7 @@ real run:
 | Conversation | Each turn sent only the newest user message | The whole transcript (user and assistant, imported messages included, tool noise excluded) is handed over every turn, shortened from the oldest end under a 48k-character budget with a visible note |
 | Chat identity | Mode, team and AI tool were pane state; new chats were bound to the open repo with no way to change | Saved on the session header; a new chat shows its project (changeable before the first message) and what started it; the sidebar shows the AI tool's logo |
 | Auto with helpers | One lead ran while the UI said "up to 3 helpers" | An Auto lead may return a helper plan and it starts immediately through the same launch path as Plan's Start button |
-| Auditor | Verdict assigned and never read; a correction turn's result was discarded and could hang on a permission request | Correction turns are driven like any turn, re-audited, and a still-hollow run ends Failed with reasons. Verified live 2026-09-02 (`auditor_catches_a_hollow_codex_run`): Codex was told to ship `is_even` returning True; the auditor found two problems, sent them back, the correction rewrote it as `n % 2 == 0` with the four tests, and the re-audit passed |
+| Auditor | Verdict assigned and never read; a correction turn's result was discarded and could hang on a permission request | Correction turns are driven like any turn, re-audited, and a still-hollow run ends Failed with reasons. Verified live 2026-09-02 (`auditor_catches_a_hollow_codex_run`): Codex was told to ship `is_even` returning True; the auditor found two problems, sent them back, the correction rewrote it as `n % 2 == 0` with the four tests, and the re-audit passed. The same scenario passes on Copilot (`GITWYRM_LIVE_PROVIDER=copilot`) |
 | Shell | Denied for every run | Follows the write decision: allowed on Auto, Fix and started Plan through the approval gate; denied for read-only chats. Network stays denied |
 | Claude Code | Launched with `--safe-mode` and an empty MCP config; every prompt auto-denied | Loads the user's own MCP servers and skills; prompts reach GitWyrm's gate over stdio; Bash restored on writing runs. Unverified live (login expired) |
 | Codex | Read-only chats launched `codex app-server --sandbox=read-only`, which the binary rejects; stderr unread; the chat "did nothing". Approvals were answered `approved`/`denied`, words Codex reads as a refusal, so every Allow still ended in "write access was denied" | Sandbox travels in `thread/start`; stderr tail is kept and shown; unknown server requests are declined instead of hanging the turn; approvals use the schema's own `accept`/`decline`/`cancel`, `item/permissions/requestApproval` is granted for the turn, and file-change gates name their files. Verified: a real read-only turn answered PONG and a real writing turn's edits landed |
@@ -115,9 +115,9 @@ and needs a real test.
 
 ### Plan checklist parser
 
-`agentDeskPlan.ts` renders CommonMark task lists when a model happens to write them.
-Nothing asks for that shape. Either request it in the Plan prompt or drive the checklist
-from the JSON proposal that already exists. Undecided, fails safe.
+Decided 2026-09-02: the Plan-mode instruction now asks the lead to write its summary as
+a Markdown task list (`- [ ] step`), the exact shape `agentDeskPlan.ts` parses, and a test
+pins the marker. The parser still fails safe when a model writes prose instead.
 
 ## Housekeeping the audit found
 
@@ -134,8 +134,8 @@ from the JSON proposal that already exists. Undecided, fails safe.
    signed in.
 2. Run the two ignored Claude tests on a signed-in machine; fix what they find.
 3. Verify Gemini's plan mode holds across a non-interactive `exit_plan_mode`.
-4. Repeat the live auditor run from the app, and against Copilot and Claude.
-5. Decide the plan-checklist parser and the quota question.
+4. Repeat the live auditor run from the app, and against Claude once signed in.
+5. Decide the quota question (per-provider scraping or none).
 
 ## Meaning of "ready"
 

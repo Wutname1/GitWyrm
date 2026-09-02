@@ -818,9 +818,13 @@ mod tests {
         assert!(Command::new("git").args(["add", "."]).current_dir(&root).status().unwrap().success());
         assert!(Command::new("git").args(["commit", "-q", "-m", "start"]).current_dir(&root).status().unwrap().success());
 
-        let policy = ExecutionPolicy::resolve(SessionIntent::Fix, ExecutionMode::Auto, ExecutionTeam::Solo, Some("codex"))
-            .expect("codex policy");
-        let agent = CliAgent::discover_for(&policy, true, root.clone()).expect("codex installed and signed in");
+        // `GITWYRM_LIVE_PROVIDER=copilot` (or claude) runs the same scenario
+        // on another tool; the default is Codex, which is signed in on the
+        // machine this was written on.
+        let provider = std::env::var("GITWYRM_LIVE_PROVIDER").unwrap_or_else(|_| "codex".into());
+        let policy = ExecutionPolicy::resolve(SessionIntent::Fix, ExecutionMode::Auto, ExecutionTeam::Solo, Some(&provider))
+            .expect("a known provider");
+        let agent = CliAgent::discover_for(&policy, true, root.clone()).expect("tool installed and signed in");
 
         let recorded: Arc<std::sync::Mutex<Vec<(RunState, RunStep)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink: Sink = {
