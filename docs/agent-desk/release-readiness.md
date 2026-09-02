@@ -123,10 +123,24 @@ pins the marker. The parser still fails safe when a model writes prose instead.
 
 - The branch was 63 commits behind `main` with conflicts in `copilot_cli.rs` and
   `ai/complete.rs`; merged 2026-09-02.
-- 78 unchecked tasks remain across the nine Agent Desk OpenSpec packages. Strict
-  validation proves the documents are well formed, not that the work is done. Those
-  boxes should be ticked or removed by whoever runs native acceptance, against what they
-  actually see.
+- The 78 unchecked tasks across the nine Agent Desk OpenSpec packages were reconciled
+  against the code on 2026-09-02, one by one. Seven were done and are ticked. Of the 71
+  left open, about 30 need a person in the built app or an evidence record, a handful are
+  implemented but missing one specific automated test, and these are genuinely not built:
+
+  | Package | Gap |
+  | --- | --- |
+  | review-and-landing | helper output and diff reachable from the graph node (2.2, 2.6); panels refreshed after Keep/undo/commit (2.7, 3.5; **closed 2026-09-02**); Update-PR half of 4.1; Spec Desk shell removal (6.5); acceptance checklist (6.1) |
+  | workspace-layout | select event carries no repo and nothing proves an already-open Desk selects (1.3) |
+  | agent-graphs | durable operation queue for integration (5.1); current action / model per node (6.2); orphaned helper worktrees when a helper dies before a result (6.4); `ChecksPass` / `FilesChanged` completion conditions never evaluated |
+  | source-kickoffs | typed retry/reconnect cards instead of toasts (2.4, 5.3); source enrichment after the Desk is visible (3.4, 4.4); escalate a review into a fix (4.6) |
+  | openspec-workflows | legacy Spec Desk runs never become durable executions (1.4); no path from Agent Desk to the spec draft/review writer (4.2) |
+  | configuration-sync | per-item destination selection in batch (2.2); writers for Codex, VS Code Copilot and OpenChamber (4.1, 4.4, 4.5) |
+  | conversation-shell | run-event links to diff/file/task are stubbed `unavailable` (4.4) |
+  | external-chat-import | OpenChamber adapter is detection-only (3.5); no unlink (4.3); no log redaction (5.2) |
+
+  Work on this list started the same day: graph node output/diff, escalate-to-fix, and
+  import unlink/redaction are in progress.
 
 ## Release order
 
