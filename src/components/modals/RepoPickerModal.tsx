@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   Check,
   ChevronDown,
   ChevronRight,
@@ -13,12 +15,14 @@ import {
   Eye,
   Folder,
   FolderGit2,
+  GitBranch,
   GitPullRequest,
   FolderPlus,
   FolderSearch,
   GripVertical,
   Layers3,
   Loader2,
+  Pencil,
   Pin,
   Plus,
   RefreshCw,
@@ -48,7 +52,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { TooltipButton } from "@/components/ui/tooltip";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
+import { TooltipButton, TooltipHint } from "@/components/ui/tooltip";
 import { useGithubAuth, useGithubRepositories } from "@/hooks/useGithub";
 import {
   useCachedRepoIcons,
@@ -74,6 +79,9 @@ import { unwrap } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/uiStore";
 import {
+  DEFAULT_REPO_DETAILS_WIDTH,
+  MAX_REPO_DETAILS_WIDTH,
+  MIN_REPO_DETAILS_WIDTH,
   primaryFirst,
   usePrimaryCodeFolder,
   useWorkspaceStore,
@@ -908,55 +916,99 @@ function RepoReadme({ path }: { path: string }) {
 }
 
 /**
- * One number in the repository details panel, with its label under it.
+ * One number in the repository details panel: an icon in its own tinted well,
+ * the count, and a label beneath.
  *
- * A dash rather than a zero when the number is not known: "no upstream" and
- * "in step with the remote" are different answers, and showing 0 for both would
- * say the wrong thing about a branch that was never pushed.
+ * Colour carries the meaning, and it is the same vocabulary the repository tabs
+ * already use -- blue to push, red to pull, amber uncommitted -- so a number
+ * here reads the same as the badge on the tab it opens.
+ *
+ * A count of zero drains all of that away to plain muted text. Nothing is
+ * waiting, so nothing should catch the eye; only the tiles that actually want
+ * attention keep their colour. Unknown goes further and shows a dash, because
+ * "never pushed" is a different answer from "up to date".
  */
 function RepoStat({
+  icon,
   label,
   value,
-  tone = "plain",
-  title,
+  color,
+  hint,
 }: {
+  icon: ReactNode;
   label: string;
   value: number | null | undefined;
-  /** `accent` for numbers that mean there is something to do. */
-  tone?: "plain" | "accent";
-  title?: string;
+  /** CSS colour used when the count is above zero. */
+  color?: string;
+  hint: string;
 }) {
   const known = value != null;
+  const lit = known && value > 0 && color != null;
   return (
-    <div
-      className="min-w-0 rounded-md border border-border bg-background px-2 py-1.5"
-      title={title}
-    >
+    <TooltipHint label={hint}>
       <div
         className={cn(
-          "truncate text-sm font-semibold tabular-nums",
-          known && tone === "accent" && value > 0
-            ? "text-accent-text"
-            : "text-foreground",
-          !known && "text-muted-foreground",
+          "flex min-w-0 items-center gap-2 rounded-lg border px-2 py-1.5 transition-colors",
+          lit
+            ? "border-transparent"
+            : "border-border bg-background/60 hover:border-border-bright",
         )}
+        style={
+          lit
+            ? {
+                backgroundColor: `color-mix(in srgb, ${color} 10%, transparent)`,
+                borderColor: `color-mix(in srgb, ${color} 30%, transparent)`,
+              }
+            : undefined
+        }
       >
-        {known ? value : "-"}
+        <span
+          className={cn(
+            "grid size-6 flex-none place-items-center rounded-md",
+            lit ? "" : "bg-panel3 text-muted-foreground",
+          )}
+          style={
+            lit
+              ? {
+                  color,
+                  backgroundColor: `color-mix(in srgb, ${color} 18%, transparent)`,
+                }
+              : undefined
+          }
+        >
+          {icon}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span
+            className={cn(
+              "block truncate text-sm font-semibold leading-tight tabular-nums",
+              lit ? "" : known ? "text-sub" : "text-muted-foreground",
+            )}
+            style={lit ? { color } : undefined}
+          >
+            {known ? value : "-"}
+          </span>
+          <span className="block truncate text-[9px] uppercase tracking-[.08em] text-muted-foreground">
+            {label}
+          </span>
+        </span>
       </div>
-      <div className="truncate text-[9px] uppercase tracking-[.08em] text-muted-foreground">
-        {label}
-      </div>
-    </div>
+    </TooltipHint>
   );
 }
 
 /**
- * The numbers row at the top of the repository details panel.
+ * The numbers at the top of the repository details panel, in two bands.
  *
- * Loads on selection and fetches first, so ahead/behind reflects the remote now
- * rather than the last time the user synced. While that is in flight the row
- * keeps its shape with placeholders instead of collapsing, so the panel below
- * it does not jump as each repository is clicked.
+ * The split is the point. The first band is work in the user's own hands --
+ * what they have not pushed, pulled or committed -- and the second is what the
+ * host holds: the shape of the repository, and other people's work waiting on
+ * them. Mixing the two into one flat grid makes six numbers the reader has to
+ * sort out themselves.
+ *
+ * Loads on selection and fetches first, so ahead and behind are true right now.
+ * The row keeps its shape while that is in flight rather than collapsing, so
+ * the panel below does not jump as each repository is clicked.
  */
 function RepoStats({ path }: { path: string }) {
   const snapshot = useRepoSnapshot(path);
@@ -969,56 +1021,82 @@ function RepoStats({ path }: { path: string }) {
         <span className="text-2xs font-bold uppercase tracking-[.09em] text-muted-foreground">
           At a glance
         </span>
-        {loading && (
+        {loading ? (
           <Loader2 size={11} className="animate-spin text-muted-foreground" />
+        ) : (
+          data?.fetched && (
+            <TooltipHint label="The remote was checked just now, so these are current">
+              <span className="flex items-center gap-1 text-[9px] uppercase tracking-[.08em] text-accent-text">
+                <RefreshCw size={9} />
+                Current
+              </span>
+            </TooltipHint>
+          )
         )}
         <span className="flex-1" />
-        {data?.fetched && (
-          <span className="text-[9px] uppercase tracking-[.08em] text-muted-foreground">
-            Just checked
+        {data?.head_branch && (
+          <span className="flex min-w-0 items-center gap-1 font-mono text-2xs text-sub">
+            <GitBranch size={10} className="flex-none text-muted-foreground" />
+            <span className="truncate">{data.head_branch}</span>
           </span>
         )}
       </div>
+
       <div className="mt-2 grid grid-cols-3 gap-1.5">
         <RepoStat
-          label="Ahead"
+          icon={<ArrowUp size={13} strokeWidth={2.4} />}
+          label="To push"
           value={data?.ahead}
-          tone="accent"
-          title="Commits on your branch the remote does not have yet"
+          color="var(--gw-blue)"
+          hint="Commits on your branch the remote does not have yet"
         />
         <RepoStat
-          label="Behind"
+          icon={<ArrowDown size={13} strokeWidth={2.4} />}
+          label="To pull"
           value={data?.behind}
-          tone="accent"
-          title="Commits on the remote you do not have yet"
+          color="var(--gw-red)"
+          hint="Commits on the remote you do not have yet"
         />
         <RepoStat
+          icon={<Pencil size={12} strokeWidth={2.4} />}
           label="Changes"
           value={data?.changes}
-          tone="accent"
-          title="Files with uncommitted changes"
-        />
-        <RepoStat
-          label="Branches"
-          value={data?.branches}
-          title="Branches on this computer"
-        />
-        <RepoStat
-          label="Issues"
-          value={data?.issues}
-          tone="accent"
-          title="Open issues on the host"
-        />
-        <RepoStat
-          label="Pull requests"
-          value={data?.prs}
-          tone="accent"
-          title="Open pull requests on the host"
+          color="var(--gw-amber)"
+          hint="Files with uncommitted changes"
         />
       </div>
+
+      <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+        <RepoStat
+          icon={<GitBranch size={12} strokeWidth={2.2} />}
+          label="Branches"
+          value={data?.branches}
+          hint="Branches on this computer"
+        />
+        <RepoStat
+          icon={<CircleDot size={12} strokeWidth={2.2} />}
+          label="Issues"
+          value={data?.issues}
+          color="var(--gw-purple)"
+          hint="Open issues on the host"
+        />
+        <RepoStat
+          icon={<GitPullRequest size={12} strokeWidth={2.2} />}
+          label="Requests"
+          value={data?.prs}
+          color="var(--gw-green)"
+          hint="Open pull requests on the host"
+        />
+      </div>
+
       {!loading && data == null && (
         <p className="mt-2 text-2xs text-muted-foreground">
           Could not read this folder.
+        </p>
+      )}
+      {!loading && data != null && data.issues == null && (
+        <p className="mt-2 text-2xs text-muted-foreground">
+          Issues and requests need a connected host.
         </p>
       )}
     </div>
@@ -1371,6 +1449,10 @@ function RepoPickerPanel({
   const setRepoActivity = useWorkspaceStore((state) => state.setRepoActivity);
   const toggleRepoPickerSection = useWorkspaceStore(
     (state) => state.toggleRepoPickerSection,
+  );
+  const repoDetailsWidth = useWorkspaceStore((state) => state.repoDetailsWidth);
+  const setRepoDetailsWidth = useWorkspaceStore(
+    (state) => state.setRepoDetailsWidth,
   );
   const openModal = useUiStore((state) => state.openModal);
 
@@ -3213,7 +3295,18 @@ function RepoPickerPanel({
       )}
       onAnimationEnd={() => setWiggling(false)}
     >
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[224px_minmax(0,1fr)] lg:grid-rows-1 xl:grid-cols-[244px_minmax(0,1fr)_320px]">
+      {/* The details column is a grid track, so the saved width has to drive the
+          template: a width on the <aside> alone would lose to the track. Only
+          the xl breakpoint shows that column, hence the custom property rather
+          than a second hardcoded value. */}
+      <div
+        className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[224px_minmax(0,1fr)] lg:grid-rows-1 xl:grid-cols-[244px_minmax(0,1fr)_var(--repo-details-width)]"
+        style={
+          {
+            "--repo-details-width": `${repoDetailsWidth}px`,
+          } as React.CSSProperties
+        }
+      >
         <aside className="flex min-w-0 flex-col border-b border-border bg-panel px-3 py-3 lg:border-b-0 lg:border-r lg:px-3.5 lg:py-6">
           <div className="hidden px-2.5 lg:block">
             <h1 className="text-base font-semibold tracking-tight text-foreground">
@@ -3429,7 +3522,17 @@ function RepoPickerPanel({
               : newScreen}
         </main>
 
-        <aside className="hidden min-h-0 flex-col border-l border-border bg-panel xl:flex">
+        <aside className="relative hidden min-h-0 min-w-0 flex-col border-l border-border bg-panel xl:flex">
+          <ResizeHandle
+            ariaLabel="Resize repository details"
+            value={repoDetailsWidth}
+            min={MIN_REPO_DETAILS_WIDTH}
+            max={MAX_REPO_DETAILS_WIDTH}
+            defaultValue={DEFAULT_REPO_DETAILS_WIDTH}
+            direction={-1}
+            onChange={setRepoDetailsWidth}
+            className="-left-1"
+          />
           {route === "open" && urlQuery && urlMatchedRepos.length === 0 ? (
             copyDetails
           ) : route === "open" ? (
