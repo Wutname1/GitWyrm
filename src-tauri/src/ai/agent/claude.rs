@@ -19,6 +19,8 @@ use super::transport::AgentError;
 use super::wire::{Incoming, StopReason, TurnOutcome};
 
 type Pending = Arc<Mutex<Option<oneshot::Sender<Result<TurnOutcome, AgentError>>>>>;
+type Complaints = Arc<Mutex<std::collections::VecDeque<String>>>;
+const COMPLAINT_LINES: usize = 8;
 
 pub struct ClaudeConnection {
     child: Arc<Mutex<Child>>,
@@ -73,11 +75,22 @@ impl ClaudeConnection {
         let pending: Pending = Arc::new(Mutex::new(None));
         let cancelling = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(read_loop(stdout, pending.clone(), tx, cancelling.clone()));
+        // Keep the last few lines Claude Code wrote to stderr. When it exits
+        // before answering -- an expired login, a flag it will not accept --
+        // that is the only account of why, and "stopped unexpectedly" on its
+        // own sends the person to the log for a line that, in release
+        // builds, was written at debug level and is not there.
+        let complaints: Complaints = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+        tokio::spawn(read_loop(stdout, pending.clone(), tx, cancelling.clone(), complaints.clone()));
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 log::debug!("Claude Code stream stderr: {line}");
+                let mut guard = complaints.lock().await;
+                if guard.len() >= COMPLAINT_LINES {
+                    guard.pop_front();
+                }
+                guard.push_back(line);
             }
         });
 
@@ -205,7 +218,10 @@ fn launch_args(base: &[String], read_only: bool) -> Vec<String> {
     args.push("--safe-mode".into());
     args.push("--strict-mcp-config".into());
     args.push("--mcp-config".into());
-    args.push("{}".into());
+    // A real, empty configuration -- not `{}`. The CLI validates the document
+    // and refuses to start on `{}` with "mcpServers: expected record, received
+    // undefined", which killed every Claude run on first launch.
+    args.push(r#"{"mcpServers":{}}"#.into());
     args
 }
 
@@ -214,6 +230,7 @@ async fn read_loop(
     pending: Pending,
     tx: mpsc::UnboundedSender<Incoming>,
     cancelling: Arc<AtomicBool>,
+    complaints: Complaints,
 ) {
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
@@ -241,9 +258,14 @@ async fn read_loop(
                 usage: None,
             })
         } else {
-            Err(AgentError::Failed {
-                detail: "Claude Code stopped unexpectedly".into(),
-            })
+            let said = complaints.lock().await.iter().cloned().collect::<Vec<_>>().join(" / ");
+            let detail = if said.trim().is_empty() {
+                "Claude Code stopped unexpectedly".to_string()
+            } else {
+                format!("Claude Code stopped unexpectedly: {said}")
+            };
+            log::warn!("{detail}");
+            Err(AgentError::Failed { detail })
         };
         let _ = done.send(result);
     }
