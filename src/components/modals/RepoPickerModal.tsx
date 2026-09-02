@@ -1166,6 +1166,8 @@ function RepoPickerPanel({
   const [cloning, setCloning] = useState(false);
   const [cloneProgress, setCloneProgress] = useState("");
   const [onlineFilter, setOnlineFilter] = useState("");
+  /** Copy form shown even though the pasted address is already on this computer. */
+  const [copyAnyway, setCopyAnyway] = useState(false);
 
   const [newDestination, setNewDestination] = useState(defaultDestination);
   const [newName, setNewName] = useState("");
@@ -1255,14 +1257,16 @@ function RepoPickerPanel({
   const urlNotFound =
     urlQuery != null && !urlSearching && urlMatchedRepos.length === 0;
 
-  // Jumping to the copy screen carries the address over, so the user never
-  // retypes what they already pasted.
-  const cloneThisUrl = () => {
+  // The address flows straight into the copy form, so it is ready to submit the
+  // moment the search says this project is not here yet. Typing over the search
+  // box replaces it; clearing the box leaves whatever was last there alone, so
+  // a half-filled copy form is never wiped out from under the user.
+  useEffect(() => {
     if (!urlQuery) return;
     setUrl(urlQuery.url);
     setCloneNameTouched(false);
-    setRoute("clone");
-  };
+    setCopyAnyway(false);
+  }, [urlQuery?.url]);
 
   const query = filter.trim().toLowerCase();
   const matches = (repo: LibraryRepo) =>
@@ -1882,6 +1886,131 @@ function RepoPickerPanel({
     (repo) => !repo.starred,
   );
 
+  /**
+   * The copy form. Rendered on the copy screen, and again inline under the
+   * search box when a pasted address turns out not to be on this computer --
+   * one definition so the two can never drift into different forms.
+   */
+  const renderCloneForm = (autoFocus: boolean) => (
+  <form
+    className="self-start rounded-lg border border-border bg-panel"
+    onSubmit={(event) => {
+      event.preventDefault();
+      void doClone();
+    }}
+  >
+    <div className="border-b border-border px-5 py-4">
+      <h2 className="text-sm font-semibold text-foreground">
+        Repository link
+      </h2>
+      <p className="mt-1 text-2xs text-muted-foreground">
+        GitWyrm uses your normal Git sign-in if the project is private.
+      </p>
+    </div>
+    <div className="grid gap-4 p-5">
+      <label className="grid gap-1.5 text-xs font-semibold text-sub">
+        Web address
+        <Input
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="https://github.com/team/project.git"
+          className="h-9 bg-background font-mono text-xs font-normal"
+          disabled={cloning}
+          autoFocus={autoFocus}
+        />
+      </label>
+      <label className="grid gap-1.5 text-xs font-semibold text-sub">
+        Save in
+        <span className="flex gap-2">
+          <Input
+            value={cloneDestination}
+            onChange={(event) =>
+              setCloneDestination(event.target.value)
+            }
+            onBlur={() =>
+              cloneDestination.trim() &&
+              setCloneDestination(normalizePath(cloneDestination))
+            }
+            placeholder="Choose a parent folder"
+            className="h-9 bg-background font-mono text-xs font-normal"
+            disabled={cloning}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={async () => {
+              const { open } =
+                await import("@tauri-apps/plugin-dialog");
+              const directory = await open({
+                directory: true,
+                title: "Copy repository into…",
+              });
+              if (typeof directory === "string")
+                setCloneDestination(normalizePath(directory));
+            }}
+            disabled={cloning}
+          >
+            <Folder size={13} />
+            Browse…
+          </Button>
+        </span>
+      </label>
+      <label className="grid gap-1.5 text-xs font-semibold text-sub">
+        Folder name
+        <Input
+          value={cloneFolderName}
+          onChange={(event) => {
+            setCloneFolderName(event.target.value);
+            setCloneNameTouched(true);
+          }}
+          placeholder={suggestedCloneName || "project"}
+          className="h-9 bg-background font-mono text-xs font-normal"
+          disabled={cloning}
+        />
+      </label>
+      {clonePath && (
+        <div className="rounded-md border border-border bg-background px-3 py-2.5">
+          <small className="text-2xs font-semibold text-muted-foreground">
+            Will be saved to
+          </small>
+          <code className="mt-1 block break-all text-xs text-foreground">
+            {clonePath}
+          </code>
+        </div>
+      )}
+      <div className="flex min-h-8 items-center gap-2 border-t border-border pt-4">
+        <span className="min-w-0 flex-1 truncate font-mono text-2xs text-muted-foreground">
+          {cloning
+            ? cloneProgress
+            : url.trim()
+              ? "Ready to copy"
+              : "Waiting for a repository link"}
+        </span>
+        <Button
+          type="submit"
+          size="sm"
+          className="h-8 min-w-32 gap-1.5"
+          disabled={
+            !url.trim() ||
+            !finalCloneName ||
+            !cloneDestination.trim() ||
+            cloning
+          }
+        >
+          {cloning ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <Download size={13} />
+          )}
+          {cloning ? "Copying…" : "Copy repository"}
+        </Button>
+      </div>
+    </div>
+  </form>
+  );
+
   const openScreen = (
     <>
       <div className="border-b border-border px-5 py-4 min-[1200px]:px-7 min-[1200px]:py-5">
@@ -2013,15 +2142,21 @@ function RepoPickerPanel({
                   <div className="mt-2 grid gap-0.5">
                     {urlMatchedRepos.map((repo) => renderRepoRow(repo))}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="mt-2 h-7 gap-1.5 text-2xs"
-                    onClick={cloneThisUrl}
-                  >
-                    <Download size={12} />
-                    Make another copy anyway
-                  </Button>
+                  {copyAnyway ? (
+                    <div className="mt-3 max-w-[680px]">
+                      {renderCloneForm(false)}
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-2 h-7 gap-1.5 text-2xs"
+                      onClick={() => setCopyAnyway(true)}
+                    >
+                      <Download size={12} />
+                      Make another copy anyway
+                    </Button>
+                  )}
                 </>
               )}
 
@@ -2031,14 +2166,9 @@ function RepoPickerPanel({
                     You don't have this project on this computer yet. Copy it
                     down to start working on it.
                   </p>
-                  <Button
-                    size="sm"
-                    className="mt-3 h-8 gap-1.5 text-xs"
-                    onClick={cloneThisUrl}
-                  >
-                    <Download size={13} />
-                    Copy it to this computer
-                  </Button>
+                  <div className="mt-3 max-w-[680px]">
+                    {renderCloneForm(false)}
+                  </div>
                 </>
               )}
             </section>
@@ -2390,123 +2520,7 @@ function RepoPickerPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-5 min-[1200px]:p-7">
         <div className="mx-auto grid w-full max-w-[1120px] gap-5 min-[1100px]:grid-cols-[minmax(420px,680px)_minmax(280px,360px)]">
-          <form
-            className="self-start rounded-lg border border-border bg-panel"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void doClone();
-            }}
-          >
-            <div className="border-b border-border px-5 py-4">
-              <h2 className="text-sm font-semibold text-foreground">
-                Repository link
-              </h2>
-              <p className="mt-1 text-2xs text-muted-foreground">
-                GitWyrm uses your normal Git sign-in if the project is private.
-              </p>
-            </div>
-            <div className="grid gap-4 p-5">
-              <label className="grid gap-1.5 text-xs font-semibold text-sub">
-                Web address
-                <Input
-                  value={url}
-                  onChange={(event) => setUrl(event.target.value)}
-                  placeholder="https://github.com/team/project.git"
-                  className="h-9 bg-background font-mono text-xs font-normal"
-                  disabled={cloning}
-                  autoFocus
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-sub">
-                Save in
-                <span className="flex gap-2">
-                  <Input
-                    value={cloneDestination}
-                    onChange={(event) =>
-                      setCloneDestination(event.target.value)
-                    }
-                    onBlur={() =>
-                      cloneDestination.trim() &&
-                      setCloneDestination(normalizePath(cloneDestination))
-                    }
-                    placeholder="Choose a parent folder"
-                    className="h-9 bg-background font-mono text-xs font-normal"
-                    disabled={cloning}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-9 gap-1.5"
-                    onClick={async () => {
-                      const { open } =
-                        await import("@tauri-apps/plugin-dialog");
-                      const directory = await open({
-                        directory: true,
-                        title: "Copy repository into…",
-                      });
-                      if (typeof directory === "string")
-                        setCloneDestination(normalizePath(directory));
-                    }}
-                    disabled={cloning}
-                  >
-                    <Folder size={13} />
-                    Browse…
-                  </Button>
-                </span>
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-sub">
-                Folder name
-                <Input
-                  value={cloneFolderName}
-                  onChange={(event) => {
-                    setCloneFolderName(event.target.value);
-                    setCloneNameTouched(true);
-                  }}
-                  placeholder={suggestedCloneName || "project"}
-                  className="h-9 bg-background font-mono text-xs font-normal"
-                  disabled={cloning}
-                />
-              </label>
-              {clonePath && (
-                <div className="rounded-md border border-border bg-background px-3 py-2.5">
-                  <small className="text-2xs font-semibold text-muted-foreground">
-                    Will be saved to
-                  </small>
-                  <code className="mt-1 block break-all text-xs text-foreground">
-                    {clonePath}
-                  </code>
-                </div>
-              )}
-              <div className="flex min-h-8 items-center gap-2 border-t border-border pt-4">
-                <span className="min-w-0 flex-1 truncate font-mono text-2xs text-muted-foreground">
-                  {cloning
-                    ? cloneProgress
-                    : url.trim()
-                      ? "Ready to copy"
-                      : "Waiting for a repository link"}
-                </span>
-                <Button
-                  type="submit"
-                  size="sm"
-                  className="h-8 min-w-32 gap-1.5"
-                  disabled={
-                    !url.trim() ||
-                    !finalCloneName ||
-                    !cloneDestination.trim() ||
-                    cloning
-                  }
-                >
-                  {cloning ? (
-                    <Loader2 size={13} className="animate-spin" />
-                  ) : (
-                    <Download size={13} />
-                  )}
-                  {cloning ? "Copying…" : "Copy repository"}
-                </Button>
-              </div>
-            </div>
-          </form>
+          {renderCloneForm(true)}
 
           <section className="min-w-0">
             {githubAuth.isLoading ? (
