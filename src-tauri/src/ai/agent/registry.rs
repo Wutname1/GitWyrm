@@ -255,15 +255,17 @@ impl AgentSpec {
                 // denial.
                 //
                 // "any denial" was wrong in a way that hid behind a passing
-                // test: `shell` and `url` are denied on every run, including
-                // Fix, so the flag was added unconditionally and a Fix
-                // session launched unable to edit a file -- the one thing it
-                // exists to do. The test only checked the empty-denial case,
-                // which production never produces.
+                // test: `url` is denied on every run, including Fix (and
+                // `shell` and `write` on read-only runs), so the flag was
+                // added unconditionally and a Fix session launched unable to
+                // edit a file -- the one thing it exists to do. The test only
+                // checked the empty-denial case, which production never
+                // produces.
                 //
                 // The cost of this narrower rule is that a Fix session on
-                // such a tool keeps shell and network access it was meant to
-                // lose. That is the honest trade for a tool with one switch,
+                // such a tool keeps network access it was meant to lose,
+                // and its commands run without the person's gate. That is
+                // the honest trade for a tool with one switch,
                 // and it is why `Denial::ReadOnlyMode` is not treated as
                 // equivalent to per-tool denial anywhere the promise matters.
                 if denied.contains(&"write") {

@@ -746,10 +746,10 @@ fn refusal_note(refusal: &crate::agentdesk::policy::ToolRefusal) -> String {
     use crate::agentdesk::policy::ToolRefusal;
     match refusal {
         ToolRefusal::ReadOnlyIntent { .. } => {
-            "This chat can only read and explain -- it can't make changes, so that request was turned down.".to_string()
+            "This chat can only read and explain -- it can't make changes or run commands, so that request was turned down.".to_string()
         }
         ToolRefusal::NotStartedYet { .. } => {
-            "This plan hasn't been started yet, so that change was turned down. Press Start to let it make changes.".to_string()
+            "This plan hasn't been started yet, so that request was turned down. Press Start to let it make changes and run commands.".to_string()
         }
         ToolRefusal::PathNotAllowed { path } => {
             format!("This helper can only change its own files, and \"{path}\" isn't one of them, so that change was turned down.")
@@ -1008,6 +1008,74 @@ mod tests {
         assert!(matches!(decision, PermissionDecision::AllowOnce { .. }));
         let recorded = log.lock().unwrap();
         assert!(recorded.iter().any(|(_, step)| matches!(step, RunStep::Gate { .. })));
+    }
+
+    // -- Shell requests follow the write decision --
+
+    /// A Fix run may run commands so the agent can test and build its own
+    /// edits, but never silently: the request is a real gate the person
+    /// answers, exactly like a file edit.
+    #[test]
+    fn fix_intent_gates_a_shell_request_through_the_approval_flow() {
+        let policy = policy_for(SessionIntent::Fix);
+        let (sink, log) = recording_sink();
+        let (answer_tx, mut answers) = mpsc::channel::<GateAnswer>();
+        let (item, mut decision_rx) = permission_request("execute");
+
+        answer_tx.send(GateAnswer::AllowOnce).unwrap();
+        handle(item, &sink, &mut answers, &policy, true);
+
+        let decision = decision_rx.try_recv().expect("a decision was sent");
+        assert!(
+            matches!(decision, PermissionDecision::AllowOnce { .. }),
+            "a Fix run's command must reach the person's gate, got {decision:?}"
+        );
+        let recorded = log.lock().unwrap();
+        assert!(recorded.iter().any(|(_, step)| matches!(step, RunStep::Gate { .. })));
+    }
+
+    /// A read-only chat cannot run commands at all, because a command can
+    /// change files and would be a way around the write refusal. Refused
+    /// before the answer channel is touched (it is closed here), with a
+    /// Note in the transcript and no Gate.
+    #[test]
+    fn ask_intent_refuses_a_shell_request_before_any_gate() {
+        let policy = policy_for(SessionIntent::Ask);
+        let (sink, log) = recording_sink();
+        let mut answers = closed_answers();
+        let (item, mut decision_rx) = permission_request("execute");
+
+        handle(item, &sink, &mut answers, &policy, false);
+
+        let decision = decision_rx.try_recv().expect("a decision was sent");
+        assert!(
+            matches!(decision, PermissionDecision::RejectOnce { .. }),
+            "expected a reject decision, got {decision:?}"
+        );
+        let recorded = log.lock().unwrap();
+        assert!(recorded.iter().any(|(_, step)| matches!(step, RunStep::Note { .. })));
+        assert!(
+            !recorded.iter().any(|(_, step)| matches!(step, RunStep::Gate { .. })),
+            "a refused command must never surface as something the person is asked to approve"
+        );
+    }
+
+    /// Plan before Start: same refusal path as an edit, for the same reason
+    /// (`NotStartedYet`). After Start the shell request would gate like Fix.
+    #[test]
+    fn plan_before_start_refuses_a_shell_request() {
+        let policy = policy_for(SessionIntent::Plan);
+        let (sink, log) = recording_sink();
+        let mut answers = closed_answers();
+        let (item, mut decision_rx) = permission_request("execute");
+
+        handle(item, &sink, &mut answers, &policy, false);
+
+        let decision = decision_rx.try_recv().expect("a decision was sent");
+        assert!(matches!(decision, PermissionDecision::RejectOnce { .. }));
+        let recorded = log.lock().unwrap();
+        assert!(recorded.iter().any(|(_, step)| matches!(step, RunStep::Note { .. })));
+        assert!(!recorded.iter().any(|(_, step)| matches!(step, RunStep::Gate { .. })));
     }
 
     // -- R6.4: helper path-allowance enforcement inside handle() --

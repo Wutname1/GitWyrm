@@ -15,7 +15,7 @@ pub const SYSTEM_PROMPT: &str = "You are working inside a single git repository,
 
 Rules that are enforced by the tool, not just asked of you:
 - You can only read and change files inside this repository. Paths outside it are refused, as is the .git folder.
-- You cannot run shell commands or reach the network.
+- You can run commands only when this run is allowed to change files, and every command is shown to the person for approval before it runs. You can never reach the network.
 - You can never push. Your work stays local for the person to review.
 
 Work in small steps. Read before you change. When the task is done, tick its checkbox in the change's tasks.md -- that is the signal that ends the run.

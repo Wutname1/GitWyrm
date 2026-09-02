@@ -15,9 +15,9 @@ export type ComposerTeam = 'solo' | 'helpers'
  * `docs/agent-desk/agent-desk-mockup.html`.
  */
 export const MODE_NOTES: Record<ComposerMode, string> = {
-  Ask: 'Read and answer only; no helpers or file changes',
-  Plan: 'Lead may inspect and draft a graph; you start it',
-  Auto: 'Lead may use up to 3 helpers and asks before risky actions',
+  Ask: 'Read and answer only; no helpers, file changes or commands',
+  Plan: 'Lead may inspect and draft a team plan; you press Start',
+  Auto: 'Lead may use up to 3 helpers; asks before file changes or commands',
 }
 
 /** Maps the UI's three-way mode pill to the backend's `ExecutionMode`. */

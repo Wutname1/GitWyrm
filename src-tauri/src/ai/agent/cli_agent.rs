@@ -35,18 +35,26 @@ use super::transport::{AgentError, Transport};
 /// precedence is the property worth having: it cannot be widened by anything
 /// the model or a config file says later.
 ///
-/// `shell` and `url` are denied outright, always. Those are the side effects
-/// the engine gates itself, and a tool the CLI never has is one that cannot
-/// slip past a gate. `write` is NOT in this fixed list -- whether it is
-/// denied depends on the execution's own policy (see [`denied_tools_for`]):
-/// editing files is the job for Fix and a started Plan, but must be refused
-/// at CLI launch (not just at the engine's own permission-request handler,
-/// which only fires when the provider chooses to ask) for every read-only
-/// intent and for Plan before Start.
-const ALWAYS_DENIED_TOOLS: &[&str] = &["shell", "url"];
+/// Only `url` is denied outright, always: a managed run never reaches the
+/// network, because nothing in the run's job needs it and an outbound
+/// request is the one side effect the person cannot review afterwards.
+///
+/// `shell` and `write` are NOT in this fixed list. Both follow the
+/// execution's own policy (see [`denied_tools_for`]): a run that may change
+/// files may also run commands, because tests and builds are how an agent
+/// checks its own edits, and each command still passes through the person's
+/// approval gate before it runs. A run that must never change files is
+/// refused both at CLI launch (not just at the engine's own
+/// permission-request handler, which only fires when the provider chooses
+/// to ask), for every read-only intent and for Plan before Start.
+const ALWAYS_DENIED_TOOLS: &[&str] = &["url"];
 
 /// The full `--deny-tool` set for one execution: [`ALWAYS_DENIED_TOOLS`] plus
-/// `"write"` whenever this execution's policy says it must never write.
+/// `"shell"` and `"write"` whenever this execution's policy says it must
+/// never write. Shell follows the write decision rather than having a
+/// capability of its own because a command can change files anyway, so a
+/// separate answer for shell could only ever be weaker than the write
+/// answer, never stronger.
 ///
 /// This is the actual P0 fix for "read-only is advisory when the provider
 /// does not ask": before this function existed, `DENIED_TOOLS` was a single
@@ -75,6 +83,7 @@ pub fn denied_tools_for(policy: &ExecutionPolicy, started: bool) -> Vec<&'static
         .check_tool_capability(started, crate::agentdesk::policy::ToolCapability::EditFile)
         .is_ok();
     if !write_allowed {
+        tools.push("shell");
         tools.push("write");
     }
     tools
@@ -229,18 +238,56 @@ mod tests {
             .expect("no provider override, cannot fail")
     }
 
+    const ALL_INTENTS: [SessionIntent; 6] = [
+        SessionIntent::Ask,
+        SessionIntent::Explain,
+        SessionIntent::Summarize,
+        SessionIntent::Review,
+        SessionIntent::Plan,
+        SessionIntent::Fix,
+    ];
+
     #[test]
-    fn shell_and_network_access_are_always_denied() {
-        // The engine gates side effects itself; a tool the CLI never has cannot
-        // slip past a gate at all. Guards against a denial being dropped, for
-        // every intent regardless of write authority.
-        for intent in [SessionIntent::Review, SessionIntent::Fix] {
+    fn network_access_is_always_denied() {
+        // Nothing a managed run does needs the network, and an outbound
+        // request is the one side effect the person cannot review after the
+        // fact. Guards against the denial being dropped for any intent,
+        // regardless of write authority.
+        for intent in ALL_INTENTS {
             for started in [false, true] {
                 let denied = denied_tools_for(&policy_for(intent), started);
-                assert!(denied.contains(&"shell"), "the CLI must not run shell commands");
-                assert!(denied.contains(&"url"), "the CLI must not reach the network");
+                assert!(
+                    denied.contains(&"url"),
+                    "{intent:?} (started={started}) must not reach the network, got {denied:?}"
+                );
             }
         }
+    }
+
+    /// Shell follows the write decision exactly, in both directions, for
+    /// every intent and both `started` states. Auto and Fix agents need to
+    /// run tests and builds to check their own edits, and each command still
+    /// goes through the person's approval gate; a read-only intent (and Plan
+    /// before Start) cannot run commands at all, because a command can
+    /// change files and would otherwise be a way around the write denial.
+    #[test]
+    fn shell_is_denied_exactly_when_write_is() {
+        for intent in ALL_INTENTS {
+            for started in [false, true] {
+                let denied = denied_tools_for(&policy_for(intent), started);
+                assert_eq!(
+                    denied.contains(&"shell"),
+                    denied.contains(&"write"),
+                    "{intent:?} (started={started}): shell and write must be denied together, got {denied:?}"
+                );
+            }
+        }
+        // Spot checks so a bug that denies or allows both everywhere cannot
+        // pass on symmetry alone.
+        assert!(denied_tools_for(&policy_for(SessionIntent::Ask), true).contains(&"shell"));
+        assert!(!denied_tools_for(&policy_for(SessionIntent::Fix), false).contains(&"shell"));
+        assert!(denied_tools_for(&policy_for(SessionIntent::Plan), false).contains(&"shell"));
+        assert!(!denied_tools_for(&policy_for(SessionIntent::Plan), true).contains(&"shell"));
     }
 
     /// THE core proof for P0-B (task: "deny write at provider launch for

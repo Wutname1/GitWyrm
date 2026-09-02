@@ -501,8 +501,11 @@ impl ToolCapability {
     /// or a future ACP kind this build has not seen yet, must be refused
     /// under a read-only intent rather than waved through because this
     /// function guessed "read." `execute` (arbitrary shell) is likewise
-    /// treated as a write: `cli_agent::ALWAYS_DENIED_TOOLS` already blocks
-    /// `shell` at the CLI's own launch flags for every execution, but this
+    /// treated as a write, because a command can change files: it is gated
+    /// exactly as an edit is, so a run that may edit may also run commands
+    /// (each one through the person's approval gate) and a read-only run
+    /// can do neither. `cli_agent::denied_tools_for` denies `shell` at the
+    /// CLI's own launch flags for the same read-only runs, but this
     /// classifier does not assume that denial is in effect -- it gates on
     /// what the tool call itself claims to be.
     pub fn from_acp_kind(kind: Option<&str>) -> ToolCapability {
@@ -971,6 +974,28 @@ mod tests {
             ToolCapability::from_acp_kind(Some("some_future_kind_this_build_has_never_seen")),
             ToolCapability::EditFile
         );
+    }
+
+    /// A shell request (`execute`) gets the same answer as a file edit for
+    /// every intent, before and after Start. Fix and a started Plan may run
+    /// commands (through the person's gate) so the agent can test and build
+    /// its own edits; every read-only intent and Plan before Start cannot,
+    /// because a command can change files and would be a way around the
+    /// write refusal.
+    #[test]
+    fn a_shell_request_is_gated_exactly_like_a_file_edit() {
+        let shell = ToolCapability::from_acp_kind(Some("execute"));
+        for intent in all_intents() {
+            let policy = ExecutionPolicy::resolve(intent, ExecutionMode::Auto, ExecutionTeam::Lead, None)
+                .expect("no provider override, cannot fail");
+            for started in [false, true] {
+                assert_eq!(
+                    policy.check_tool_capability(started, shell),
+                    policy.check_tool_capability(started, ToolCapability::EditFile),
+                    "{intent:?} (started={started}): shell and edit must be gated identically"
+                );
+            }
+        }
     }
 
     // -- ExecutionPolicy::resolve_for_helper / check_path_allowance (R6.4) --

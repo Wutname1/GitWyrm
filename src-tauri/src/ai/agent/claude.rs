@@ -205,6 +205,20 @@ impl ClaudeConnection {
     }
 }
 
+/// Flags added to every managed Claude Code run, on top of the registry's
+/// base arguments (stream-json in and out, `--disallowedTools`).
+///
+/// The user's own agent configuration is loaded on purpose. Agent Desk hosts
+/// that configuration (the Skills and MCP manager in `agent_config`), so a
+/// managed run is expected to see the same MCP servers and skills the person
+/// set up there; stripping them with `--strict-mcp-config` / `--safe-mode`
+/// made the run a different, weaker agent than the one they configured.
+///
+/// Shell is a separate matter on Claude Code: `--restricted` removes Bash
+/// regardless of what the denial list says, so a writing run still cannot
+/// run commands here even though the policy would allow it. Giving Claude
+/// shell needs `--tools` plus a permission bridge so each command reaches
+/// the person's gate, which is its own feature and not attempted here.
 fn launch_args(base: &[String], read_only: bool) -> Vec<String> {
     let mut args = base.to_vec();
     args.push("--permission-mode".into());
@@ -212,16 +226,6 @@ fn launch_args(base: &[String], read_only: bool) -> Vec<String> {
     // Keeps file access inside the run's isolated working directory and asks
     // Claude Code itself to guard Git/settings/tool-configuration files.
     args.push("--restricted".into());
-    // Agent Desk supplies the task, policy and OpenSpec context itself. Local
-    // hooks, plugins and MCP servers would be an unreviewed second execution
-    // path around those gates, so do not load them for a managed run.
-    args.push("--safe-mode".into());
-    args.push("--strict-mcp-config".into());
-    args.push("--mcp-config".into());
-    // A real, empty configuration -- not `{}`. The CLI validates the document
-    // and refuses to start on `{}` with "mcpServers: expected record, received
-    // undefined", which killed every Claude run on first launch.
-    args.push(r#"{"mcpServers":{}}"#.into());
     args
 }
 
@@ -415,11 +419,26 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--permission-mode", "plan"]));
         assert!(read_only.contains(&"--restricted".to_string()));
-        assert!(read_only.contains(&"--safe-mode".to_string()));
-        assert!(read_only.contains(&"--strict-mcp-config".to_string()));
         let writing = launch_args(&base, false);
         assert!(writing
             .windows(2)
             .any(|pair| pair == ["--permission-mode", "acceptEdits"]));
+    }
+
+    /// The person's own MCP servers and skills must reach a managed run,
+    /// because Agent Desk is where they configure them. These three flags
+    /// each strip that configuration, so none may come back.
+    #[test]
+    fn managed_runs_load_the_users_own_agent_configuration() {
+        let base = vec!["--print".to_string()];
+        for read_only in [true, false] {
+            let args = launch_args(&base, read_only);
+            for stripped in ["--safe-mode", "--strict-mcp-config", "--mcp-config"] {
+                assert!(
+                    !args.contains(&stripped.to_string()),
+                    "{stripped} would hide the user's MCP servers and skills from the run (read_only={read_only})"
+                );
+            }
+        }
     }
 }
