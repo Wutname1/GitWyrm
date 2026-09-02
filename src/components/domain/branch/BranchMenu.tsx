@@ -4,6 +4,8 @@ import { useBranches } from '@/hooks/useGitQueries'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { BranchMenuItems } from './BranchMenuItems'
+import { toast } from 'sonner'
+import { useBranchVisibilityStore } from '@/stores/branchVisibilityStore'
 
 interface BranchMenuProps {
   /** The branch to act on, or its name -- looked up when only a name is known. */
@@ -30,6 +32,9 @@ export function BranchMenu({ branch, opInProgress, showWebLink = true }: BranchM
   const openRemoteSync = useUiStore((s) => s.openRemoteSync)
   const renameBranchPrompt = useUiStore((s) => s.renameBranchPrompt)
   const deleteBranchPrompt = useUiStore((s) => s.deleteBranchPrompt)
+  const hideBranch = useBranchVisibilityStore((s) => s.hideBranch)
+  const focusBranch = useBranchVisibilityStore((s) => s.focusBranch)
+  const showAllBranches = useBranchVisibilityStore((s) => s.showAllBranches)
 
   const resolved =
     typeof branch === 'string'
@@ -60,6 +65,21 @@ export function BranchMenu({ branch, opInProgress, showWebLink = true }: BranchM
         onMerge,
         onRename: renameBranchPrompt,
         onDelete: deleteBranchPrompt,
+        onHide: (name) => {
+          if (!repo) return
+          hideBranch(repo.id, name)
+          toast(`${name} hidden from the graph`)
+        },
+        onFocus: (name) => {
+          if (!repo) return
+          focusBranch(repo.id, name)
+          toast(`Showing only ${name}`)
+        },
+        onShowAll: () => {
+          if (!repo) return
+          showAllBranches(repo.id)
+          toast('All branches shown')
+        },
       }}
     />
   )

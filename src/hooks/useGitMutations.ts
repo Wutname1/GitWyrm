@@ -778,6 +778,98 @@ export function useGitMutations(repoId: string | null) {
     onSettled: () => invalidate(qc, id, [...REFS, 'status']),
   })
 
+  /**
+   * Send several named local branches to their configured remote. A branch
+   * without an upstream is published to the default remote, matching the
+   * single-branch Send action.
+   */
+  const pushBranchesMany = useMutation({
+    mutationFn: (branches: string[]) =>
+      asGitOperation(id, async () => {
+        const sent: string[] = []
+        const failed: { name: string; reason: string }[] = []
+        for (const branch of branches) {
+          try {
+            await unwrap(await commands.gitPushBranch(id, branch))
+            sent.push(branch)
+          } catch (e) {
+            failed.push({ name: branch, reason: (e as Error).message })
+            logQuietFailure(e as Error)
+          }
+        }
+        return { sent, failed }
+      }),
+    onSuccess: (r) => {
+      if (r.failed.length === 0) {
+        toast(`Sent ${plural(r.sent.length, 'branch')}`)
+      } else {
+        toast.warning(
+          `Sent ${plural(r.sent.length, 'branch')}; ${r.failed.length} could not be sent`,
+          { description: r.failed.slice(0, 3).map((f) => `${f.name}: ${f.reason}`).join(' · ') },
+        )
+      }
+      void handleTagsAfterPush()
+    },
+    onError,
+    onSettled: () => invalidate(qc, id, REMOTE_REFS),
+  })
+
+  /**
+   * Turn remote-only branches into local branches without switching the
+   * working folder. Each new branch starts at the exact selected remote ref
+   * and is linked to that remote so its later Get and Send actions work.
+   */
+  const copyRemoteBranchesMany = useMutation({
+    mutationFn: (targets: { name: string; remote: string }[]) =>
+      asGitOperation(id, async () => {
+        const copied: string[] = []
+        const unlinked: { name: string; reason: string }[] = []
+        const failed: { name: string; reason: string }[] = []
+        for (const target of targets) {
+          try {
+            await unwrap(
+              await commands.createBranch(
+                id,
+                target.name,
+                `${target.remote}/${target.name}`,
+                false,
+              ),
+            )
+            copied.push(target.name)
+          } catch (e) {
+            failed.push({ name: target.name, reason: (e as Error).message })
+            logQuietFailure(e as Error)
+            continue
+          }
+          try {
+            await unwrap(await commands.setBranchUpstream(id, target.name, target.remote))
+          } catch (e) {
+            unlinked.push({ name: target.name, reason: (e as Error).message })
+            logQuietFailure(e as Error)
+          }
+        }
+        return { copied, unlinked, failed }
+      }),
+    onSuccess: (r) => {
+      const trouble = r.unlinked.length + r.failed.length
+      if (trouble === 0) {
+        toast(`Added ${plural(r.copied.length, 'branch')} to this computer`)
+        return
+      }
+      toast.warning(
+        `Added ${plural(r.copied.length, 'branch')}; ${trouble} need attention`,
+        {
+          description: [
+            ...r.unlinked.map((item) => `${item.name}: copied, but not linked`),
+            ...r.failed.map((item) => `${item.name}: ${item.reason}`),
+          ].slice(0, 3).join(' · '),
+        },
+      )
+    },
+    onError,
+    onSettled: () => invalidate(qc, id, REMOTE_REFS),
+  })
+
   const createTag = useMutation({
     mutationFn: async (args: {
       name: string
@@ -1718,6 +1810,8 @@ export function useGitMutations(repoId: string | null) {
     deleteRemoteBranch,
     deleteBranchesMany,
     pullBranchesMany,
+    pushBranchesMany,
+    copyRemoteBranchesMany,
     revealInFileManager,
     openInEditor,
     openSolution,

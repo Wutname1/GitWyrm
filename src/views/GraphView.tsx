@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { Eye, Focus } from 'lucide-react'
+import { toast } from 'sonner'
 import type { CommitEntry, StashInfo } from '@/lib/bindings'
 import { GRAPH_ROW_HEIGHT, GRAPH_ROW_WITH_CHANGES_HEIGHT } from '@/lib/gitDisplay'
-import { useCommitLog, useStashes, useStatus } from '@/hooks/useGitQueries'
+import { useBranches, useCommitLog, useRemotes, useStashes, useStatus } from '@/hooks/useGitQueries'
 import { usePendingRowHold } from '@/hooks/usePendingRowHold'
 import { useVisibleCommitStats } from '@/hooks/useVisibleCommitStats'
 import { useGraphLoadSpan } from '@/lib/perf'
@@ -14,6 +16,8 @@ import { StashRow } from '@/components/domain/graph/StashRow'
 import { GraphSvg, type GraphRow } from '@/components/domain/graph/GraphSvg'
 import { GraphHeader } from '@/components/domain/graph/GraphHeader'
 import { NoRepoPlaceholder } from '@/components/domain/NoRepoPlaceholder'
+import { Button } from '@/components/ui/button'
+import { branchVisibilityFor, useBranchVisibilityStore } from '@/stores/branchVisibilityStore'
 import {
   columnWidth,
   effectiveHiddenColumns,
@@ -27,6 +31,9 @@ export const WIP_SHA = '__wip__'
 
 export function GraphView() {
   const repo = useActiveRepo()
+  const visibility = useBranchVisibilityStore((s) => branchVisibilityFor(s.byRepo, repo?.id ?? null))
+  const showAllBranches = useBranchVisibilityStore((s) => s.showAllBranches)
+  const reconcileBranches = useBranchVisibilityStore((s) => s.reconcileBranches)
   const selectedSha = useUiStore((s) => s.selectedSha)
   const selectedShas = useUiStore((s) => s.selectedShas)
   const selectCommit = useUiStore((s) => s.selectCommit)
@@ -62,9 +69,26 @@ export function GraphView() {
     if (header) header.scrollLeft = scrollRef.current?.scrollLeft ?? 0
   }
 
-  const log = useCommitLog(repo?.id ?? null)
+  const branches = useBranches(repo?.id ?? null)
+  const remotes = useRemotes(repo?.id ?? null)
+  const log = useCommitLog(repo?.id ?? null, visibility.hidden, visibility.focused)
   const status = useStatus(repo?.id ?? null)
   const stashes = useStashes(repo?.id ?? null)
+
+  useEffect(() => {
+    if (!repo || !branches.data || !remotes.data) return
+    const names = new Set(branches.data.local.map((branch) => branch.name))
+    for (const remote of remotes.data) {
+      for (const branch of remote.branches) names.add(branch.name)
+    }
+    reconcileBranches(repo.id, [...names])
+  }, [repo, branches.data, remotes.data, reconcileBranches])
+
+  const hiddenBranchKey = visibility.hidden.join('\0')
+  useEffect(() => {
+    selectCommit(null)
+    scrollRef.current?.scrollTo({ top: 0 })
+  }, [visibility.focused, hiddenBranchKey, selectCommit])
 
   // Time the felt "opened a repo -> graph is on screen" gap that happens
   // entirely after open_repo returns: the commit-log fetch plus first paint.
@@ -111,7 +135,8 @@ export function GraphView() {
   const rows: GraphRow[] = useMemo(() => {
     const out: GraphRow[] = []
     if (pending) out.push({ kind: 'wip' })
-    const sorted = [...(stashes.data ?? [])].sort((a, b) => b.time - a.time)
+    const filtered = visibility.focused != null || visibility.hidden.length > 0
+    const sorted = filtered ? [] : [...(stashes.data ?? [])].sort((a, b) => b.time - a.time)
     const emitted = new Set<string>()
     const emit = (s: StashInfo) => {
       if (emitted.has(s.sha)) return
@@ -135,7 +160,7 @@ export function GraphView() {
     // exhausted, show whatever is left at the bottom.
     if (!hasMorePages) for (const s of sorted) emit(s)
     return out
-  }, [commits, stashes.data, pending, hasMorePages])
+  }, [commits, stashes.data, pending, hasMorePages, visibility.focused, visibility.hidden])
 
   // Row indices of commits matching the search text, in graph (top-down) order.
   // Null when not searching. A commit matches on its summary, author, or sha so
@@ -409,6 +434,29 @@ export function GraphView() {
   return (
     <>
       <GraphHeader scrollRef={headerRef} />
+
+      {(visibility.focused || visibility.hidden.length > 0) && (
+        <div className="flex h-8 flex-none items-center gap-2 border-b border-border bg-accent-text/5 px-3 text-2xs text-sub">
+          {visibility.focused ? <Focus aria-hidden size={12} /> : <Eye aria-hidden size={12} />}
+          <span className="min-w-0 flex-1 truncate">
+            {visibility.focused
+              ? `Focused on ${visibility.focused}`
+              : `${visibility.hidden.length} ${visibility.hidden.length === 1 ? 'branch' : 'branches'} hidden`}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-2xs"
+            onClick={() => {
+              if (!repo) return
+              showAllBranches(repo.id)
+              toast('All branches shown')
+            }}
+          >
+            Show all
+          </Button>
+        </div>
+      )}
 
       <div
         ref={scrollRef}

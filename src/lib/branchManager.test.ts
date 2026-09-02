@@ -8,6 +8,7 @@ import {
   rowCapabilities,
   riskyLocations,
   riskyRows,
+  selectedBranchActions,
   sortRows,
 } from './branchManager'
 
@@ -219,5 +220,59 @@ describe('per-location selection', () => {
     const [row] = buildBranchRows([local('wip', { kind: 'never_pushed' })], [])
     expect(riskyLocations([{ name: 'wip', where: 'local', row }])).toHaveLength(1)
     expect(riskyLocations([{ name: 'wip', where: 'origin', row }])).toHaveLength(0)
+  })
+})
+
+describe('selection-driven actions', () => {
+  it('offers to copy a remote-only branch onto this computer', () => {
+    const remote = remoteWith('origin', ['origin/topic'])
+    const [row] = buildBranchRows([], [remote])
+    const actions = selectedBranchActions(
+      [{ name: row.name, where: 'origin', row }],
+      [remote],
+    )
+    expect(actions.copyTargets).toEqual([{ name: 'topic', remote: 'origin' }])
+    expect(actions.pullable).toEqual([])
+  })
+
+  it('offers Send for a selected local-only branch', () => {
+    const [row] = buildBranchRows([local('topic', { kind: 'never_pushed' })], [])
+    const actions = selectedBranchActions(
+      [{ name: row.name, where: 'local', row }],
+      [],
+    )
+    expect(actions.sendable).toEqual(['topic'])
+  })
+
+  it('uses a selected linked remote as the source for Get latest', () => {
+    const remote = remoteWith('origin', ['origin/topic'], {
+      tracked_by: 'topic',
+      local_counterpart: 'topic',
+      ahead_of_local: 3,
+    })
+    const [row] = buildBranchRows(
+      [local('topic', { kind: 'diverged', ahead: 0, behind: 3 }, { upstream: 'origin/topic' })],
+      [remote],
+    )
+    const actions = selectedBranchActions(
+      [{ name: row.name, where: 'origin', row }],
+      [remote],
+    )
+    expect(actions.pullable).toEqual(['topic'])
+  })
+
+  it('requires one selected remote when the same branch exists in two places', () => {
+    const origin = remoteWith('origin', ['origin/topic'])
+    const fork = remoteWith('fork', ['fork/topic'])
+    const [row] = buildBranchRows([], [origin, fork])
+    const actions = selectedBranchActions(
+      [
+        { name: row.name, where: 'origin', row },
+        { name: row.name, where: 'fork', row },
+      ],
+      [origin, fork],
+    )
+    expect(actions.copyAmbiguous).toBe(true)
+    expect(actions.copyTargets).toEqual([])
   })
 })

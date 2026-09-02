@@ -1104,9 +1104,9 @@ async hideRepoIcon(repoPath: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async getLog(repoId: string, skip: number, limit: number) : Promise<Result<LogPage, string>> {
+async getLog(repoId: string, skip: number, limit: number, hiddenBranches: string[], focusedBranch: string | null) : Promise<Result<LogPage, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("get_log", { repoId, skip, limit }) };
+    return { status: "ok", data: await TAURI_INVOKE("get_log", { repoId, skip, limit, hiddenBranches, focusedBranch }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

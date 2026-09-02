@@ -2,7 +2,10 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { DiffSource } from './bindings'
 
 export const keys = {
-  log: (repoId: string) => ['log', repoId] as const,
+  log: (repoId: string, hiddenBranches: string[] = [], focusedBranch: string | null = null) =>
+    ['log', repoId, hiddenBranches, focusedBranch] as const,
+  /** Prefix: every branch-visibility view of one repository's graph. */
+  logAll: (repoId: string) => ['log', repoId] as const,
   status: (repoId: string) => ['status', repoId] as const,
   /** Tab badge totals. Cheap counterpart to `status`; see `useRepoTabStatus`. */
   repoCounts: (repoId: string) => ['repoCounts', repoId] as const,
@@ -104,10 +107,13 @@ export function invalidateOpenspec(qc: QueryClient, repoId: string) {
  * things anyway, and scrolling down reloads the rest on demand.
  */
 export function trimLogToFirstPage(qc: QueryClient, repoId: string) {
-  qc.setQueryData<{ pages: unknown[]; pageParams: unknown[] }>(keys.log(repoId), (data) => {
+  qc.setQueriesData<{ pages: unknown[]; pageParams: unknown[] }>(
+    { queryKey: keys.logAll(repoId) },
+    (data) => {
     if (!data || data.pages.length <= 1) return data
     return { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) }
-  })
+    },
+  )
 }
 
 /** Unwraps tauri-specta's Result<T, string> into T-or-throw for TanStack Query. */

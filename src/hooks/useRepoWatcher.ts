@@ -49,7 +49,7 @@ export function useRepoWatcher(onlyRepoId?: string | null) {
       // one reload of the finished state.
       if (!isGitOperationInFlight(repoId)) {
         trimLogToFirstPage(queryClient, repoId)
-        queryClient.invalidateQueries({ queryKey: keys.log(repoId) })
+        queryClient.invalidateQueries({ queryKey: keys.logAll(repoId) })
         queryClient.invalidateQueries({ queryKey: keys.branches(repoId) })
         queryClient.invalidateQueries({ queryKey: keys.stashes(repoId) })
         queryClient.invalidateQueries({ queryKey: keys.tags(repoId) })

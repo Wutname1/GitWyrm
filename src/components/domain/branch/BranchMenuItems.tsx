@@ -2,7 +2,10 @@ import {
   ArrowDown,
   ArrowUp,
   Copy,
+  Eye,
+  EyeOff,
   ExternalLink,
+  Focus,
   GitBranch,
   GitMerge,
   GitPullRequestArrow,
@@ -35,6 +38,7 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
 import type { PreviewMode } from '@/lib/syncPreview'
 import { BranchSpecLinkItems } from './BranchSpecLinkItems'
+import { branchVisibilityFor, useBranchVisibilityStore } from '@/stores/branchVisibilityStore'
 
 export interface BranchMenuHandlers {
   /**
@@ -45,6 +49,9 @@ export interface BranchMenuHandlers {
   onMerge: (name: string, mode?: PreviewMode) => void
   onRename: (name: string) => void
   onDelete: (name: string) => void
+  onHide: (name: string) => void
+  onFocus: (name: string) => void
+  onShowAll: () => void
 }
 
 interface BranchMenuItemsProps {
@@ -81,6 +88,8 @@ export function BranchMenuItems({
   const actions = branchActions(branch, host)
   const pr = useGithubPrForBranch(repoId, branch.name)
   const isCurrent = branch.is_head
+  const visibility = useBranchVisibilityStore((s) => branchVisibilityFor(s.byRepo, repoId))
+  const isFocused = visibility.focused === branch.name
 
   // How this branch relates to the checked-out one: ahead = commits only this
   // branch has, behind = commits only the current branch has. Drives the two
@@ -269,6 +278,24 @@ export function BranchMenuItems({
       <BranchSpecLinkItems branch={branch.name} repoId={repoId} />
       <ContextMenuSeparator />
 
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <Eye />
+          Visibility
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-52">
+          <ContextMenuItem
+            onSelect={() => isFocused ? handlers.onShowAll() : handlers.onFocus(branch.name)}
+          >
+            {isFocused ? <Eye /> : <Focus />}
+            {isFocused ? 'Show all branches' : 'Focus on this branch'}
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => handlers.onHide(branch.name)}>
+            <EyeOff />
+            Hide this branch
+          </ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
       <ContextMenuItem onSelect={() => handlers.onRename(branch.name)}>
         <PenLine />
         Rename branch…
