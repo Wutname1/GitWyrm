@@ -28,6 +28,7 @@ export type ModalKind =
   | 'addWorktree'
   | 'newChange'
   | 'aiSettings'
+  | 'branchManager'
   | null
 
 export interface GithubItemRef {

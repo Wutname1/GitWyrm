@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ChevronRight, Plus, RefreshCw } from 'lucide-react'
+import { ChevronRight, Plus, RefreshCw, SlidersHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SidebarSectionData, SectionItem } from '@/lib/types'
 import { useUiStore } from '@/stores/uiStore'
@@ -35,6 +35,9 @@ interface SidebarSectionProps {
   /** When set, a `+` button appears on hover in the section header. */
   onAdd?: () => void
   addLabel?: string
+  /** Opens a fuller view of everything in this section. */
+  onManage?: () => void
+  manageLabel?: string
   /** When set, a refresh button appears on hover in the section header. */
   onRefresh?: () => void
   refreshLabel?: string
@@ -59,6 +62,8 @@ export function SidebarSection({
   renderItem,
   onAdd,
   addLabel,
+  onManage,
+  manageLabel,
   onRefresh,
   refreshLabel,
   refreshing,
@@ -132,10 +137,25 @@ export function SidebarSection({
             />
           </TooltipButton>
         )}
+        {onManage && (
+          <TooltipButton
+            onClick={(e) => {
+              e.stopPropagation()
+              onManage()
+            }}
+            tooltip={manageLabel ?? 'Manage'}
+            className={cn(
+              'flex size-4 flex-none items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover/section:opacity-100',
+              onAdd || onRefresh ? 'ml-1' : 'ml-auto'
+            )}
+          >
+            <SlidersHorizontal size={11} strokeWidth={2.4} />
+          </TooltipButton>
+        )}
         <span
           className={cn(
             'font-mono text-2xs text-muted-foreground',
-            onAdd || onRefresh ? 'ml-1.5' : 'ml-auto'
+            onAdd || onRefresh || onManage ? 'ml-1.5' : 'ml-auto'
           )}
         >
           {section.items.length}

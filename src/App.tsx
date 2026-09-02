@@ -28,6 +28,7 @@ import { AiSettingsModal } from '@/components/modals/AiSettingsModal'
 import { UpdateModal } from '@/components/domain/UpdateModal'
 import { PushTagsModal } from '@/components/modals/PushTagsModal'
 import { RemotesModal } from '@/components/modals/RemotesModal'
+import { BranchManagerModal } from '@/components/modals/BranchManagerModal'
 import { GithubConnectModal } from '@/components/modals/GithubConnectModal'
 import { noteRepoAvailability } from '@/hooks/useRepoActions'
 import { useLocalGitProgress } from '@/hooks/useLocalGitProgress'
@@ -447,6 +448,7 @@ function AppInner() {
       <NewChangeModal />
       <PushTagsModal />
       <RemotesModal />
+      <BranchManagerModal />
       <GithubConnectModal />
       <AiSettingsModal />
       {/* Main window only. A detached repo window should not announce an
