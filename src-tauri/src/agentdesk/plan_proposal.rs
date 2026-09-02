@@ -85,6 +85,36 @@ include the fenced block at all."
     )
 }
 
+/// Prompt addendum for an Auto-mode lead. Unlike Plan mode, Auto has already
+/// been granted permission to work: it may complete a small task itself. When
+/// the task benefits from parallel or specialized work, it can instead return
+/// the same typed graph block Plan mode uses. There is intentionally no
+/// approval language here -- the completion path may launch a valid Auto graph
+/// immediately, whereas a Plan graph waits for the user's Start decision.
+pub fn auto_mode_instruction() -> String {
+    format!(
+        "You are the lead in AUTO mode. Work on the task directly when one agent is enough. \
+If parallel or specialized help would materially improve the result, stop before doing that helper work and reply with a short plain-language explanation followed by exactly one fenced \
+```{FENCE_LANGUAGE} block containing the same graph JSON shape shown below. A valid Auto graph may start immediately without a separate approval step. Do not include a graph merely to split up trivial work.\n\n\
+{{\n  \
+  \"leadSummary\": \"one paragraph describing the overall goal and why helpers are useful\",\n  \
+  \"helpers\": [\n    \
+    {{\n      \
+      \"nodeId\": \"short-id\",\n      \
+      \"title\": \"short title\",\n      \
+      \"description\": \"what this helper does\",\n      \
+      \"role\": \"researcher\" | \"builder\" | \"verifier\",\n      \
+      \"allowedPaths\": [\"repo-relative/glob/**\"],\n      \
+      \"dependsOn\": [\"other-node-id\"],\n      \
+      \"budget\": {{ \"maxTurns\": 20, \"maxSeconds\": 900 }},\n      \
+      \"completion\": {{ \"kind\": \"reportsResult\" }}\n    \
+    }}\n  \
+  ]\n\
+}}\n\n\
+Only one graph block may appear and it must be valid JSON. A builder, or any helper with non-empty allowedPaths, needs at least one path glob. If you solve the task directly, do not include a graph block."
+    )
+}
+
 /// What came back when a Plan-mode lead's final transcript text was checked
 /// for a graph proposal. Every variant is something the caller renders as a
 /// specific, visible outcome -- never collapsed into a bare `Option`, per
@@ -176,7 +206,9 @@ fn parse_one(body: &str) -> ProposalOutcome {
     let value: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => {
-            return ProposalOutcome::MalformedJson { detail: e.to_string() };
+            return ProposalOutcome::MalformedJson {
+                detail: e.to_string(),
+            };
         }
     };
     // `proposedAt` is OUR fact, not the model's: we know when we parsed this,
@@ -195,7 +227,9 @@ fn parse_one(body: &str) -> ProposalOutcome {
     let graph: ProposedGraph = match serde_json::from_value(value) {
         Ok(g) => g,
         Err(e) => {
-            return ProposalOutcome::SchemaMismatch { detail: e.to_string() };
+            return ProposalOutcome::SchemaMismatch {
+                detail: e.to_string(),
+            };
         }
     };
     if let Err(reason) = super::graph::validate_graph(&graph) {
@@ -238,7 +272,9 @@ mod tests {
 
     #[test]
     fn no_fence_at_all_is_reported_as_no_proposal_not_an_error() {
-        let outcome = extract_graph_proposal("I looked at the code and here is what I found. No graph needed.");
+        let outcome = extract_graph_proposal(
+            "I looked at the code and here is what I found. No graph needed.",
+        );
         assert_eq!(outcome, ProposalOutcome::NoProposalFound);
     }
 
@@ -266,7 +302,13 @@ mod tests {
                 assert_eq!(job.node_id, "fix-core");
                 assert_eq!(job.role, HelperRole::Builder);
                 assert_eq!(job.allowed_paths, vec!["src/**".to_string()]);
-                assert_eq!(job.budget, JobBudget { max_turns: 20, max_seconds: 900 });
+                assert_eq!(
+                    job.budget,
+                    JobBudget {
+                        max_turns: 20,
+                        max_seconds: 900
+                    }
+                );
                 assert_eq!(job.completion, CompletionCondition::ReportsResult);
             }
             other => panic!("expected Found, got {other:?}"),
@@ -276,7 +318,10 @@ mod tests {
     #[test]
     fn plain_prose_with_an_unrelated_code_fence_is_not_mistaken_for_a_proposal() {
         let text = "Here's a snippet:\n\n```rust\nfn main() {}\n```\n\nNo plan needed.";
-        assert_eq!(extract_graph_proposal(text), ProposalOutcome::NoProposalFound);
+        assert_eq!(
+            extract_graph_proposal(text),
+            ProposalOutcome::NoProposalFound
+        );
     }
 
     #[test]
@@ -321,7 +366,10 @@ mod tests {
             valid_json(true)
         );
         let outcome = extract_graph_proposal(&text);
-        assert_eq!(outcome, ProposalOutcome::MultipleProposalsFound { count: 2 });
+        assert_eq!(
+            outcome,
+            ProposalOutcome::MultipleProposalsFound { count: 2 }
+        );
     }
 
     #[test]
@@ -344,7 +392,10 @@ mod tests {
     #[test]
     fn the_fence_marker_must_match_exactly_not_a_generic_json_fence() {
         let text = format!("```json\n{}\n```", valid_json(false));
-        assert_eq!(extract_graph_proposal(&text), ProposalOutcome::NoProposalFound);
+        assert_eq!(
+            extract_graph_proposal(&text),
+            ProposalOutcome::NoProposalFound
+        );
     }
 
     #[test]
@@ -353,5 +404,14 @@ mod tests {
         // read from `FENCE_LANGUAGE` so this is really a guard against a
         // future hand-edit of one without the other.
         assert!(plan_mode_instruction().contains(&format!("```{FENCE_LANGUAGE}")));
+    }
+
+    #[test]
+    fn auto_mode_instruction_allows_direct_work_or_one_immediate_graph() {
+        let instruction = auto_mode_instruction();
+        assert!(instruction.contains("Work on the task directly"));
+        assert!(instruction.contains(&format!("```{FENCE_LANGUAGE}")));
+        assert!(instruction.contains("start immediately"));
+        assert!(!instruction.contains("Do not edit any files"));
     }
 }

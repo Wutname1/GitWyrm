@@ -525,7 +525,8 @@ fn route_to_agent_desk(app: &tauri::AppHandle, event: &RunEventKind) {
                     // mirrors `build_result_for_completed_execution`'s own
                     // early return.
                     if matches!(state, crate::agentdesk::model::SessionState::Finished) && !execution_id.is_empty() {
-                        crate::commands::agent_graph::finish_plan_mode_proposal(
+                        crate::commands::agent_graph::finish_lead_graph_proposal(
+                            app,
                             &locks,
                             &root,
                             &durable.session_id,

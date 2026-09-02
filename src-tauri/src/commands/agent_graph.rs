@@ -230,7 +230,10 @@ enum PlanProposalCompletion {
     NotApplicable,
     /// A proposal was found, validated, and persisted as a fresh
     /// `AwaitingStart` execution (`propose_graph_at`).
-    Proposed { execution_id: ExecutionId },
+    Proposed {
+        execution_id: ExecutionId,
+        auto_start: bool,
+    },
     /// The lead's reply did not contain a usable proposal -- `outcome`
     /// carries exactly why (`agentdesk::plan_proposal::ProposalOutcome`,
     /// minus the `Found` case, which would have taken the `Proposed` branch
@@ -275,7 +278,8 @@ fn finish_plan_mode_execution_at(
     if record.parent_execution_id.is_some() {
         return PlanProposalCompletion::NotApplicable;
     }
-    if record.mode.as_deref() != Some("Plan") || record.team.as_deref() != Some("Lead") {
+    let mode = record.mode.as_deref();
+    if !matches!(mode, Some("Plan" | "Auto")) || record.team.as_deref() != Some("Lead") {
         return PlanProposalCompletion::NotApplicable;
     }
 
@@ -291,7 +295,10 @@ fn finish_plan_mode_execution_at(
         crate::agentdesk::plan_proposal::ProposalOutcome::Found { graph } => {
             match propose_graph_at(locks, root, session_id, graph) {
                 ProposeGraphOutcome::AwaitingStart { execution_id, .. } => {
-                    PlanProposalCompletion::Proposed { execution_id }
+                    PlanProposalCompletion::Proposed {
+                        execution_id,
+                        auto_start: mode == Some("Auto"),
+                    }
                 }
                 other => PlanProposalCompletion::PersistFailed { outcome: other },
             }
@@ -398,7 +405,61 @@ fn append_system_note(locks: &crate::agentdesk::SessionLocks, root: &SessionStor
 /// once a durable execution reaches `Finished`: checks whether it was a
 /// Plan-mode lead turn and, if so, either persists its proposal or appends a
 /// visible refusal note explaining why none was started.
-pub(crate) fn finish_plan_mode_proposal(
+pub(crate) fn finish_lead_graph_proposal(
+    app: &AppHandle,
+    locks: &std::sync::Arc<crate::agentdesk::SessionLocks>,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    finished_execution_id: &str,
+) {
+    match finish_plan_mode_execution_at(locks, root, session_id, finished_execution_id) {
+        PlanProposalCompletion::NotApplicable => {}
+        PlanProposalCompletion::Proposed { auto_start: false, .. } => {}
+        PlanProposalCompletion::Proposed { auto_start: true, .. } => {
+            let links = app.state::<crate::agentdesk::RunSessionLinks>();
+            let executions = app.state::<crate::agentdesk::ExecutionRegistry>();
+            let manager = app.state::<RepoManager>();
+            let outcome = start_graph_and_launch(
+                app,
+                locks,
+                root,
+                links.inner(),
+                executions.inner(),
+                manager.inner(),
+                session_id,
+            );
+            if !matches!(outcome, StartGraphOutcome::Started { .. }) {
+                append_system_note(
+                    locks,
+                    root,
+                    session_id,
+                    "The helper plan was ready, but GitWyrm could not start it. Open the helper panel to review the plan and try again.",
+                );
+            }
+        }
+        PlanProposalCompletion::Refused { outcome } => {
+            if let Some(text) = plain_proposal_refusal(&outcome) {
+                append_system_note(locks, root, session_id, &text);
+            }
+        }
+        PlanProposalCompletion::PersistFailed { outcome } => {
+            let text = match outcome {
+                ProposeGraphOutcome::Invalid { reason } => format!(
+                    "This plan's proposed graph could not be started: {}",
+                    plain_validation_reason(&reason)
+                ),
+                _ => "This plan proposed a graph, but it could not be saved. Try asking again.".to_string(),
+            };
+            append_system_note(locks, root, session_id, &text);
+        }
+    }
+}
+
+/// Store-only completion hook retained for focused tests and callers that do
+/// not own an app handle. Auto launch is deliberately performed only by
+/// `finish_lead_graph_proposal`, the production event path above.
+#[cfg(test)]
+fn finish_plan_mode_proposal(
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
     session_id: &str,
@@ -491,31 +552,46 @@ pub async fn agent_session_start_graph(
     let root = resolve_root(&app)?;
     let locks_arc = locks.inner().clone();
     let manager_owned = manager.inner();
-    let outcome = start_graph_at(&locks_arc, &root, manager_owned, &session_id);
+    let outcome = start_graph_and_launch(
+        &app,
+        &locks_arc,
+        &root,
+        links.inner(),
+        executions.inner(),
+        manager_owned,
+        &session_id,
+    );
 
-    // R6.3: "Launch each dependency-ready helper through the same execution
-    // registry as solo runs." `start_graph_at` only PERSISTS the ready
-    // helpers as `Ready` records with a provisioned worktree -- nothing
-    // about writing that record starts a process. This is the actual launch
-    // step, mirroring `commands::agent_desk::start_execution_at`'s own tail
-    // (discover the transport, register in `ExecutionRegistry` before the
-    // first `Working` event, spawn `cli_run::run_task`) once per helper this
-    // call is responsible for starting.
+    Ok(outcome)
+}
+
+/// Consumes a persisted graph and launches every dependency-ready helper.
+/// Both the visible Plan-mode Start button and Auto mode use this one path,
+/// so automatic orchestration cannot drift from the reviewed/manual flow.
+fn start_graph_and_launch(
+    app: &AppHandle,
+    locks: &std::sync::Arc<crate::agentdesk::SessionLocks>,
+    root: &SessionStoreRoot,
+    links: &crate::agentdesk::RunSessionLinks,
+    executions: &crate::agentdesk::ExecutionRegistry,
+    manager: &RepoManager,
+    session_id: &str,
+) -> StartGraphOutcome {
+    let outcome = start_graph_at(locks, root, manager, session_id);
     if let StartGraphOutcome::Started { ref session, ref started_helpers, .. } = outcome {
         for helper_execution_id in started_helpers {
             launch_helper(
-                &app,
-                &locks_arc,
-                &root,
-                links.inner(),
-                executions.inner(),
+                app,
+                locks,
+                root,
+                links,
+                executions,
                 session,
                 helper_execution_id,
             );
         }
     }
-
-    Ok(outcome)
+    outcome
 }
 
 fn start_graph_at(
@@ -2941,6 +3017,9 @@ mod tests {
             active_execution_id: None,
             archived: false,
             graph_started_at: None,
+            preferred_provider: None,
+            preferred_mode: None,
+            preferred_team: None,
         };
         let session = AgentSession::new(header);
         store::write_session(root, &session).unwrap();
@@ -3133,6 +3212,9 @@ mod tests {
                 active_execution_id: None,
                 archived: false,
                 graph_started_at: None,
+                preferred_provider: None,
+                preferred_mode: None,
+                preferred_team: None,
             };
             store::write_session(session_root, &AgentSession::new(header)).unwrap();
 
@@ -4868,11 +4950,28 @@ mod tests {
     }
 
     #[test]
-    fn a_non_plan_mode_execution_is_not_applicable() {
+    fn an_auto_lead_proposal_is_marked_for_immediate_start() {
         let (_dir, root) = temp_root();
         let locks = crate::agentdesk::SessionLocks::new();
         seed_session(&root, "sess-1");
         let exec = seed_lead_turn(&root, "sess-1", "Auto", "Lead", &fenced_proposal());
+
+        let outcome = finish_plan_mode_execution_at(&locks, &root, "sess-1", &exec);
+        assert!(matches!(
+            outcome,
+            PlanProposalCompletion::Proposed {
+                auto_start: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn an_ask_mode_execution_is_not_applicable() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let exec = seed_lead_turn(&root, "sess-1", "Ask", "Lead", &fenced_proposal());
 
         let outcome = finish_plan_mode_execution_at(&locks, &root, "sess-1", &exec);
         assert!(matches!(outcome, PlanProposalCompletion::NotApplicable));
@@ -4923,7 +5022,10 @@ mod tests {
 
         let outcome = finish_plan_mode_execution_at(&locks, &root, "sess-1", &exec);
         match outcome {
-            PlanProposalCompletion::Proposed { execution_id } => {
+            PlanProposalCompletion::Proposed {
+                execution_id,
+                auto_start: false,
+            } => {
                 let session = store::read_session(&root, "sess-1").unwrap();
                 let proposed = session
                     .executions

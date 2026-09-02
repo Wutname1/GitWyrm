@@ -1286,14 +1286,19 @@ pub(crate) fn start_execution_at(
                 // half (parsing the reply back out once the run ends).
                 // Team::Lead only: a Plan-mode Solo run has no helpers to
                 // propose and stays an ordinary read/inspect turn.
-                if policy.mode == crate::agentdesk::policy::ExecutionMode::Plan
-                    && policy.team == crate::agentdesk::policy::ExecutionTeam::Lead
-                {
-                    prompt = format!(
-                        "{}\n\n{}",
-                        crate::agentdesk::plan_proposal::plan_mode_instruction(),
-                        prompt
-                    );
+                if policy.team == crate::agentdesk::policy::ExecutionTeam::Lead {
+                    let graph_instruction = match policy.mode {
+                        crate::agentdesk::policy::ExecutionMode::Plan => {
+                            Some(crate::agentdesk::plan_proposal::plan_mode_instruction())
+                        }
+                        crate::agentdesk::policy::ExecutionMode::Auto => {
+                            Some(crate::agentdesk::plan_proposal::auto_mode_instruction())
+                        }
+                        crate::agentdesk::policy::ExecutionMode::Ask => None,
+                    };
+                    if let Some(instruction) = graph_instruction {
+                        prompt = format!("{instruction}\n\n{prompt}");
+                    }
                 }
                 // R5.3: hash the text the agent actually read, so a later
                 // reader can tell whether the plan has moved underneath it.
