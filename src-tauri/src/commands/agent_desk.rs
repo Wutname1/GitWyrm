@@ -609,7 +609,11 @@ pub enum DeleteSessionOutcome {
 #[specta::specta]
 pub async fn agent_session_delete(
     app: AppHandle,
-    executions: tauri::State<'_, std::sync::Arc<crate::agentdesk::ExecutionRegistry>>,
+    // Bare, not `Arc<_>`: lib.rs manages `ExecutionRegistry` directly, and
+    // Tauri resolves state by exact type. Asking for the Arc compiled fine and
+    // then failed at the first click with "state not managed", which is a
+    // runtime error nothing in the build catches.
+    executions: tauri::State<'_, crate::agentdesk::ExecutionRegistry>,
     session_id: SessionId,
 ) -> Result<DeleteSessionOutcome, AppError> {
     let root = resolve_root(&app)?;
