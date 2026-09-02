@@ -782,9 +782,18 @@ pub async fn openspec_archive_change(
 fn settle_archive(change_id: &str, outcome: cli::CliOutcome, committed: bool) -> ArchiveAttempt {
     if let cli::CliOutcome::Ok { output } = &outcome {
         if !committed {
+            // The CLI's own words are the only evidence of why it did nothing --
+            // "already in sync" and a wrong-version refusal both arrive here as a
+            // silent exit 0. Logging the output is what makes those tellable
+            // apart from a bug report alone.
             log::warn!(
                 "openspec archive {change_id} exited 0 but changed nothing; \
-         reporting it as unarchived"
+         reporting it as unarchived. CLI said: {}",
+                if output.trim().is_empty() {
+                    "<no output>"
+                } else {
+                    output.trim()
+                }
             );
             return ArchiveAttempt::ChangedNothing {
                 diagnosis: archive_repair::diagnose(change_id, output),

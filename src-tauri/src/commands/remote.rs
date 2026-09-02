@@ -433,6 +433,10 @@ pub async fn git_fetch(
         Attended::User
     };
     tauri::async_runtime::spawn_blocking(move || {
+        // Network commands are the slowest thing the app does, and until now the
+        // only measurement was the frontend's round-trip span -- which cannot tell
+        // a slow remote apart from a backed-up IPC queue. See `perf`.
+        let _timing = crate::perf::CommandTiming::start("git_fetch", "git.fetch");
         run_with_stale_ref_retry(
             &app,
             &repo_id,
@@ -504,6 +508,7 @@ pub async fn git_pull(
     let open = manager.get(&repo_id)?;
     let path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
+        let _timing = crate::perf::CommandTiming::start("git_pull", "git.pull");
         let before = { tracking_state(&open.repo.lock().unwrap()) };
 
         // `--autostash` is what keeps a pull from ever failing just because the
@@ -619,6 +624,7 @@ pub async fn git_push(
     let open = manager.get(&repo_id)?;
     let path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
+        let _timing = crate::perf::CommandTiming::start("git_push", "git.push");
         let (before, publish) = {
             let repo = open.repo.lock().unwrap();
             let state = tracking_state(&repo);
