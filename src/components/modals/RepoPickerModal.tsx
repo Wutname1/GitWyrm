@@ -48,6 +48,7 @@ import {
   useOpenRepo,
   useOpenRepos,
   useRepoReadme,
+  useReposWithRemote,
 } from "@/hooks/useRepoActions";
 import { Markdown } from "@/components/ui/markdown";
 import {
@@ -58,6 +59,7 @@ import {
 import { isTauri } from "@/lib/env";
 import { describeError, log } from "@/lib/log";
 import { sortRepos as sortLibraryRepos } from "@/lib/repoSort";
+import { parseRepoUrlQuery } from "@/lib/repoUrlSearch";
 import { joinPath, normalizePath, pathKey, pathName } from "@/lib/paths";
 import { unwrap } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
@@ -1228,6 +1230,40 @@ function RepoPickerPanel({
     [libraryRepos, savedTabGroups],
   );
   const iconsByPath = useCachedRepoIcons(iconLookupPaths);
+
+  // Pasting a clone address into the search box asks "do I already have this?".
+  // Every repository GitWyrm knows about is checked for that remote; if none
+  // has it, the copy screen is offered with the address already filled in.
+  const urlQuery = useMemo(() => parseRepoUrlQuery(filter), [filter]);
+  const remoteSearchPaths = useMemo(
+    () => [...libraryRepos.map((repo) => repo.path), ...openRepos.map((repo) => repo.path)],
+    [libraryRepos, openRepos],
+  );
+  const remoteMatches = useReposWithRemote(
+    urlQuery?.url ?? null,
+    remoteSearchPaths,
+  );
+  const urlSearching = urlQuery != null && remoteMatches.isPending;
+  const urlMatchedRepos: LibraryRepo[] = (remoteMatches.data ?? []).map(
+    (match) =>
+      repoByPath.get(pathKey(match.path)) ?? {
+        name: match.name,
+        path: match.path,
+        headBranch: null,
+      },
+  );
+  const urlNotFound =
+    urlQuery != null && !urlSearching && urlMatchedRepos.length === 0;
+
+  // Jumping to the copy screen carries the address over, so the user never
+  // retypes what they already pasted.
+  const cloneThisUrl = () => {
+    if (!urlQuery) return;
+    setUrl(urlQuery.url);
+    setCloneNameTouched(false);
+    setRoute("clone");
+  };
+
   const query = filter.trim().toLowerCase();
   const matches = (repo: LibraryRepo) =>
     !query ||
@@ -1945,6 +1981,70 @@ function RepoPickerPanel({
           selectedOriginalPaths.length > 0 ? "pb-24" : "pb-6",
         )}
       >
+        {urlQuery && (
+          <div className="mx-auto mb-5 w-full max-w-[1600px]">
+            <section className="rounded-lg border border-border bg-panel p-4">
+              <p className="text-[9px] font-bold uppercase tracking-[.12em] text-accent-text">
+                That looks like a repository address
+              </p>
+              <p className="mt-1 truncate text-xs font-semibold text-foreground">
+                {urlQuery.slug ?? urlQuery.url}
+                <span className="ml-2 font-normal text-muted-foreground">
+                  on {urlQuery.host}
+                </span>
+              </p>
+
+              {urlSearching && (
+                <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 size={13} className="animate-spin" />
+                  Looking for it on this computer…
+                </p>
+              )}
+
+              {!urlSearching && urlMatchedRepos.length > 0 && (
+                <>
+                  <p className="mt-3 text-xs text-sub">
+                    You already have{" "}
+                    {urlMatchedRepos.length === 1
+                      ? "this project"
+                      : `${urlMatchedRepos.length} copies of this project`}{" "}
+                    here. Open it instead of copying it again.
+                  </p>
+                  <div className="mt-2 grid gap-0.5">
+                    {urlMatchedRepos.map((repo) => renderRepoRow(repo))}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2 h-7 gap-1.5 text-2xs"
+                    onClick={cloneThisUrl}
+                  >
+                    <Download size={12} />
+                    Make another copy anyway
+                  </Button>
+                </>
+              )}
+
+              {urlNotFound && (
+                <>
+                  <p className="mt-3 text-xs text-sub">
+                    You don't have this project on this computer yet. Copy it
+                    down to start working on it.
+                  </p>
+                  <Button
+                    size="sm"
+                    className="mt-3 h-8 gap-1.5 text-xs"
+                    onClick={cloneThisUrl}
+                  >
+                    <Download size={13} />
+                    Copy it to this computer
+                  </Button>
+                </>
+              )}
+            </section>
+          </div>
+        )}
+
         <div className="mx-auto grid w-full max-w-[1600px] gap-6 min-[2200px]:grid-cols-[minmax(0,1fr)_390px]">
           {pinnedGroups.length > 0 && (
             <section className="min-w-0 min-[2200px]:col-start-2 min-[2200px]:row-start-1">

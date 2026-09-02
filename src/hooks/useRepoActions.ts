@@ -99,6 +99,30 @@ export function useRepoReadme(path: string | null) {
 }
 
 /**
+ * Which of `paths` already have `url` as one of their remotes.
+ *
+ * Backs the picker's answer to a pasted clone URL: before offering to make a
+ * second copy, check whether the repository is already on this computer. The
+ * search reads each repository's config as text without opening it, so running
+ * it across the whole library is cheap.
+ */
+export function useReposWithRemote(url: string | null, paths: string[]) {
+  // Sorted so the key does not change when the library list re-orders itself.
+  const sorted = useMemo(
+    () => [...new Set(paths.map(normalizePath))].sort(),
+    [paths],
+  )
+  return useQuery({
+    queryKey: ['repos-with-remote', url ?? '', sorted],
+    enabled: url != null && sorted.length > 0,
+    staleTime: 30_000,
+    retry: false,
+    queryFn: async () =>
+      unwrap(await commands.findReposWithRemote(url as string, sorted)),
+  })
+}
+
+/**
  * Icons for repositories GitWyrm has opened before, keyed by normalized path.
  *
  * Reads only what discovery already recorded, so listing a large library costs

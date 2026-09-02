@@ -250,6 +250,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::patch::discard_lines,
             commands::scan::scan_code_folder,
             commands::scan::read_repo_readme,
+            commands::scan::find_repos_with_remote,
             commands::shell_integration::context_menu_registered,
             commands::shell_integration::set_context_menu_registered,
             commands::app::launch_repo_path,

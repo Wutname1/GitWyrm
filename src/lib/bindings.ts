@@ -2352,6 +2352,23 @@ async readRepoReadme(path: string) : Promise<Result<string | null, string>> {
 }
 },
 /**
+ * Finds which of `paths` already have `url` as one of their remotes.
+ * 
+ * Answers "do I already have this?" when a clone URL is pasted into the
+ * picker's search box, so the user opens the copy on disk instead of making a
+ * second one. Matching goes through `git::remote_url`, so the pasted URL does
+ * not have to be written the same way the repository has it: `.git` or not,
+ * https or ssh, any case.
+ */
+async findReposWithRemote(url: string, paths: string[]) : Promise<Result<RemoteMatch[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("find_repos_with_remote", { url, paths }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether the right-click entry is currently registered.
  * 
  * Reports `true` only when every target is present, so a half-written state
@@ -4349,6 +4366,18 @@ provider: RemoteProvider;
  * remote (a local path, an unknown scheme).
  */
 web_base: string | null }
+/**
+ * A local repository that already has the remote the user pasted.
+ */
+export type RemoteMatch = { name: string; path: string; 
+/**
+ * The name of the matching remote, e.g. `origin`.
+ */
+remote: string; 
+/**
+ * That remote's URL exactly as the repository has it configured.
+ */
+url: string }
 /**
  * The hosting product behind a remote. `SelfHosted` means the URL parsed fine
  * but the host isn't one we can build provider-specific deep links for.
