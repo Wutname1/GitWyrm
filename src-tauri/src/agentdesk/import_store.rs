@@ -112,6 +112,76 @@ pub fn already_imported_session<'a>(
     ledger.sessions.get(external_session_id)
 }
 
+/// The link between one GitWyrm session and the external session it was
+/// imported from, as the ledgers record it. Returned by
+/// [`find_link_for_session`] so unlink (task 4.3) can name the adapter in UI
+/// copy and remove exactly one ledger entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionLink {
+    pub adapter_id: String,
+    pub external_session_id: String,
+    pub record: ImportedSessionRecord,
+}
+
+/// Every adapter that has a ledger file on disk. Read from the directory
+/// rather than the adapter registry so a ledger left behind by an adapter
+/// that was later removed from the registry is still found (and can still
+/// be unlinked) instead of becoming an orphan nobody can clear.
+pub fn ledger_adapter_ids(root: &SessionStoreRoot) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(imports_dir(root)) else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.strip_suffix(".json").map(str::to_string)
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// Find which external session (if any) a GitWyrm session was imported
+/// from. Ledgers are keyed the other way round (external id -> GitWyrm id)
+/// because import and re-scan look up by external id; unlink is the one
+/// caller that starts from the GitWyrm side, and it is rare enough that a
+/// linear scan over every ledger is fine.
+pub fn find_link_for_session(root: &SessionStoreRoot, session_id: &str) -> Option<SessionLink> {
+    for adapter_id in ledger_adapter_ids(root) {
+        let ledger = read_ledger(root, &adapter_id);
+        if let Some((external_session_id, record)) = ledger
+            .sessions
+            .iter()
+            .find(|(_, r)| r.gitwyrm_session_id == session_id)
+        {
+            return Some(SessionLink {
+                adapter_id,
+                external_session_id: external_session_id.clone(),
+                record: record.clone(),
+            });
+        }
+    }
+    None
+}
+
+/// Remove one link from an adapter's ledger. Returns `Ok(false)` when there
+/// was nothing to remove so the caller can report "not linked" instead of
+/// pretending something changed. Only the ledger is touched here: the
+/// GitWyrm session and its imported messages are left exactly as they are.
+pub fn remove_link(
+    root: &SessionStoreRoot,
+    adapter_id: &str,
+    external_session_id: &str,
+) -> Result<bool, LedgerWriteError> {
+    let mut ledger = read_ledger(root, adapter_id);
+    if ledger.sessions.remove(external_session_id).is_none() {
+        return Ok(false);
+    }
+    write_ledger(root, adapter_id, &ledger)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +244,46 @@ mod tests {
         assert!(claude_ledger.sessions.is_empty());
         let codex_back = read_ledger(&root, "codex");
         assert_eq!(codex_back, codex_ledger);
+    }
+
+    fn record(session_id: &str) -> ImportedSessionRecord {
+        ImportedSessionRecord {
+            gitwyrm_session_id: session_id.into(),
+            last_imported_external_message_id: "m1".into(),
+            last_seen_external_updated_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn find_link_for_session_searches_every_adapter_ledger() {
+        let (_dir, root) = temp_root();
+        let mut codex = AdapterImportLedger::default();
+        codex.sessions.insert("ext-codex".into(), record("sess-a"));
+        write_ledger(&root, "codex", &codex).unwrap();
+        let mut claude = AdapterImportLedger::default();
+        claude.sessions.insert("ext-claude".into(), record("sess-b"));
+        write_ledger(&root, "claude-code", &claude).unwrap();
+
+        let link = find_link_for_session(&root, "sess-b").expect("sess-b is linked");
+        assert_eq!(link.adapter_id, "claude-code");
+        assert_eq!(link.external_session_id, "ext-claude");
+        assert!(find_link_for_session(&root, "sess-none").is_none());
+    }
+
+    #[test]
+    fn remove_link_drops_only_that_entry_and_reports_a_second_removal_as_absent() {
+        let (_dir, root) = temp_root();
+        let mut ledger = AdapterImportLedger::default();
+        ledger.sessions.insert("ext-1".into(), record("sess-1"));
+        ledger.sessions.insert("ext-2".into(), record("sess-2"));
+        write_ledger(&root, "codex", &ledger).unwrap();
+
+        assert!(remove_link(&root, "codex", "ext-1").unwrap());
+        let back = read_ledger(&root, "codex");
+        assert!(!back.sessions.contains_key("ext-1"));
+        assert!(back.sessions.contains_key("ext-2"));
+
+        assert!(!remove_link(&root, "codex", "ext-1").unwrap());
+        assert!(!remove_link(&root, "never-written", "ext-1").unwrap());
     }
 }

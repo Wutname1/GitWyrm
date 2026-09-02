@@ -3,9 +3,17 @@ import {
   canBrowseAdapter,
   continueExternallyLabel,
   detectionLabel,
+  linkedImportedSessionId,
   projectLabel,
+  unlinkConfirmCopy,
 } from './agentImportDisplay'
-import type { AdapterListEntry, ContinuationOutcome, ScannedExternalSession } from '@/lib/bindings'
+import type {
+  AdapterListEntry,
+  AgentSession,
+  ContinuationOutcome,
+  ImportSessionOutcome,
+  ScannedExternalSession,
+} from '@/lib/bindings'
 
 function entry(overrides: Partial<AdapterListEntry> = {}): AdapterListEntry {
   return {
@@ -31,6 +39,7 @@ function scanned(overrides: Partial<ScannedExternalSession> = {}): ScannedExtern
     },
     project: { kind: 'resolved', repoId: 'repo-1', repoName: 'fixture-project', repoPath: 'C:/code/fixture-project' },
     alreadyImported: false,
+    importedSessionId: null,
     ...overrides,
   }
 }
@@ -135,5 +144,42 @@ describe('continueExternallyLabel', () => {
   it('returns null for adapterDisabled', () => {
     const outcome: ContinuationOutcome = { kind: 'adapterDisabled' }
     expect(continueExternallyLabel(outcome)).toBeNull()
+  })
+})
+
+describe('linkedImportedSessionId', () => {
+  // Only the header field the helper reads is filled in; the cast keeps the
+  // fixture honest about being a partial rather than mocking a full session.
+  const importedOutcome = (sessionId: string): ImportSessionOutcome => ({
+    kind: 'created',
+    session: { header: { sessionId } } as unknown as AgentSession,
+  })
+
+  it('is null for a never-imported row with no import result', () => {
+    expect(linkedImportedSessionId(scanned(), undefined)).toBeNull()
+  })
+
+  it('uses the ledger id the scan already knows', () => {
+    expect(
+      linkedImportedSessionId(scanned({ alreadyImported: true, importedSessionId: 'sess-1' }), undefined)
+    ).toBe('sess-1')
+  })
+
+  it("prefers this row's fresh import result over a stale scan", () => {
+    expect(linkedImportedSessionId(scanned(), importedOutcome('sess-new'))).toBe('sess-new')
+  })
+
+  it('ignores a failed import result', () => {
+    expect(linkedImportedSessionId(scanned(), { kind: 'sessionNotFound' })).toBeNull()
+  })
+})
+
+describe('unlinkConfirmCopy', () => {
+  it('names the client and promises the messages stay', () => {
+    const copy = unlinkConfirmCopy('Codex')
+    expect(copy.title).toBe('Unlink from Codex?')
+    expect(copy.description).toContain('stays in GitWyrm')
+    expect(copy.description).toContain('Codex')
+    expect(copy.description).not.toMatch(/type .* to confirm/i)
   })
 })

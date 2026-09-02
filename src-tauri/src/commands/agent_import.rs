@@ -23,8 +23,8 @@ use specta::Type;
 use tauri::AppHandle;
 
 use crate::agentdesk::adapters::{
-    self, AdapterDetectionResult, AdapterError, AdapterRegistry, ContinuationCapability,
-    DetectedClient, ExternalRole, ExternalSessionSummary,
+    self, redact_for_log, AdapterDetectionResult, AdapterError, AdapterRegistry,
+    ContinuationCapability, DetectedClient, ExternalRole, ExternalSessionSummary,
 };
 use crate::agentdesk::import_store::{self, ImportedSessionRecord};
 use crate::agentdesk::model::{
@@ -151,6 +151,11 @@ pub struct ScannedExternalSession {
     /// session per the import ledger, so the UI can offer "Open imported
     /// session" instead of "Import" (task 2.3).
     pub already_imported: bool,
+    /// The GitWyrm session this external session was imported into, when
+    /// `already_imported` is `true`. This is what "Continue here" and
+    /// "Unlink" (task 4.3) act on, so a row can offer them without a second
+    /// lookup.
+    pub imported_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -213,24 +218,39 @@ fn scan_at(
         };
     };
 
+    // Adapter errors can name the file that failed (`MissingPath`, I/O), so
+    // they only reach the log through `redact_for_log` (task 5.2).
     let detected = match adapter.detect() {
         Ok(Some(d)) => d,
         Ok(None) => return ImportScanOutcome::ClientNotDetected,
-        Err(e) => return ImportScanOutcome::Failed { error: e },
+        Err(e) => {
+            log::warn!(
+                "import detection for {adapter_id} failed: {}",
+                redact_for_log(&e.to_string())
+            );
+            return ImportScanOutcome::Failed { error: e };
+        }
     };
 
     let list = match adapter.list_sessions(&detected) {
         Ok(l) => l,
-        Err(e) => return ImportScanOutcome::Failed { error: e },
+        Err(e) => {
+            log::warn!(
+                "import scan for {adapter_id} failed: {}",
+                redact_for_log(&e.to_string())
+            );
+            return ImportScanOutcome::Failed { error: e };
+        }
     };
 
     let ledger = import_store::read_ledger(root, adapter_id);
     let sessions = list
         .into_iter()
         .map(|summary| {
-            let already_imported =
+            let imported_session_id =
                 import_store::already_imported_session(&ledger, &summary.external_session_id)
-                    .is_some();
+                    .map(|r| r.gitwyrm_session_id.clone());
+            let already_imported = imported_session_id.is_some();
             let project = reconcile::resolve_project_path(
                 summary.project_path.as_deref(),
                 known_repos,
@@ -240,6 +260,7 @@ fn scan_at(
                 summary,
                 project,
                 already_imported,
+                imported_session_id,
             }
         })
         .collect();
@@ -425,13 +446,19 @@ fn import_session_at(
                             last_seen_external_updated_at: detail.summary.updated_at.clone(),
                         },
                     );
-                    let _ = import_store::write_ledger(root, adapter_id, &ledger);
+                    write_ledger_logged(root, adapter_id, &ledger);
                     ImportSessionOutcome::Refreshed {
                         session,
                         new_message_count: new_count,
                     }
                 }
-                Err(e) => ImportSessionOutcome::WriteFailed { detail: e.to_string() },
+                Err(e) => {
+                    log::warn!(
+                        "refreshing an imported {adapter_id} chat failed: {}",
+                        redact_for_log(&e.to_string())
+                    );
+                    ImportSessionOutcome::WriteFailed { detail: e.to_string() }
+                }
             }
         }
         None => {
@@ -462,7 +489,7 @@ fn import_session_at(
                             last_seen_external_updated_at: detail.summary.updated_at.clone(),
                         },
                     );
-                    let _ = import_store::write_ledger(root, adapter_id, &ledger);
+                    write_ledger_logged(root, adapter_id, &ledger);
                     ImportSessionOutcome::Created { session }
                 }
                 Err(WriteError::Serialize { detail })
@@ -475,10 +502,32 @@ fn import_session_at(
                 // decided on here instead of silently becoming a write
                 // failure.
                 | Err(WriteError::Delete { detail, .. }) => {
+                    log::warn!(
+                        "importing a {adapter_id} chat failed: {}",
+                        redact_for_log(&detail)
+                    );
                     ImportSessionOutcome::WriteFailed { detail }
                 }
             }
         }
+    }
+}
+
+/// A ledger that fails to write is not fatal to the import (the session is
+/// already saved, and dedup falls back to message provenance), but it must
+/// not vanish silently either: the next scan would show "Import" again for a
+/// chat that is already here. The error text names the ledger path, so it is
+/// redacted before it reaches the log.
+fn write_ledger_logged(
+    root: &SessionStoreRoot,
+    adapter_id: &str,
+    ledger: &import_store::AdapterImportLedger,
+) {
+    if let Err(e) = import_store::write_ledger(root, adapter_id, ledger) {
+        log::warn!(
+            "import ledger for {adapter_id} could not be saved: {}",
+            redact_for_log(&e.to_string())
+        );
     }
 }
 
@@ -759,6 +808,131 @@ fn continue_here_at(
     })
 }
 
+/// Result of "Unlink from <client>" (task 4.3). Unlinking only forgets the
+/// ledger entry that ties a GitWyrm session to its external source; every
+/// imported message, and the provenance on each one, stays in the session.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum UnlinkOutcome {
+    #[serde(rename_all = "camelCase")]
+    Unlinked {
+        session: AgentSession,
+        adapter_id: String,
+        adapter_display_name: String,
+    },
+    /// The session exists but no ledger points at it (never imported, or
+    /// already unlinked), so there was nothing to change.
+    NotLinked,
+    NotFound,
+    Failed {
+        detail: String,
+    },
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_import_unlink(
+    app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<SessionLocks>>,
+    session_id: String,
+) -> Result<UnlinkOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    let locks = locks.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || unlink_at(&locks, &root, &session_id))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+fn adapter_display_name(adapter_id: &str) -> String {
+    AdapterRegistry::with_default_adapters()
+        .get(adapter_id)
+        .map(|a| a.display_name().to_string())
+        .unwrap_or_else(|| adapter_id.to_string())
+}
+
+fn unlink_at(locks: &SessionLocks, root: &SessionStoreRoot, session_id: &str) -> UnlinkOutcome {
+    locks.with_session_lock(session_id, || {
+        let mut session = match store::read_session(root, session_id) {
+            Ok(s) => s,
+            Err(_) => return UnlinkOutcome::NotFound,
+        };
+        let Some(link) = import_store::find_link_for_session(root, session_id) else {
+            return UnlinkOutcome::NotLinked;
+        };
+
+        // The ledger goes first: if it cannot be written, the session is left
+        // untouched and the user sees a failure rather than a session that
+        // says "unlinked" while a re-scan still refreshes it.
+        match import_store::remove_link(root, &link.adapter_id, &link.external_session_id) {
+            Ok(true) => {}
+            Ok(false) => return UnlinkOutcome::NotLinked,
+            Err(e) => {
+                log::warn!(
+                    "unlink of an imported chat from {} failed: {}",
+                    link.adapter_id,
+                    redact_for_log(&e.to_string())
+                );
+                return UnlinkOutcome::Failed {
+                    detail: e.to_string(),
+                };
+            }
+        }
+
+        let display_name = adapter_display_name(&link.adapter_id);
+        let now = now_rfc3339();
+        let segment_id = new_id();
+        // A durable, visible mark in the transcript is what tells both the
+        // UI and a future reader why this chat no longer refreshes from, or
+        // offers to open, the external client (Rule #1: every action shows).
+        session.segments.push(ConversationSegment {
+            segment_id: segment_id.clone(),
+            label: format!("Unlinked from {display_name}"),
+            started_at: now.clone(),
+        });
+        session.messages.push(SessionMessage {
+            message_id: new_id(),
+            segment_id,
+            role: MessageRole::System,
+            timestamp: now.clone(),
+            plain_content: format!(
+                "This chat is no longer linked to {display_name}. The messages above stay here \
+                 as they were imported. Importing the same {display_name} chat again will \
+                 create a new chat instead of adding to this one."
+            ),
+            rendered_content: None,
+            provider: None,
+            model: None,
+            kind: MessageKind::System,
+            execution_id: None,
+            sequence: None,
+            import: None,
+            targets: Vec::new(),
+        });
+        session.header.updated_at = now;
+
+        match store::write_session(root, &session) {
+            Ok(()) => {
+                let (headers, _) = store::rebuild_index_from_sessions(root);
+                let _ = store::write_index(root, &headers);
+                UnlinkOutcome::Unlinked {
+                    session,
+                    adapter_id: link.adapter_id,
+                    adapter_display_name: display_name,
+                }
+            }
+            Err(e) => {
+                log::warn!(
+                    "unlinked chat could not be saved: {}",
+                    redact_for_log(&e.to_string())
+                );
+                UnlinkOutcome::Failed {
+                    detail: e.to_string(),
+                }
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1007,5 +1181,117 @@ mod tests {
         let locks = test_locks();
         let outcome = continue_here_at(&locks, &root, "does-not-exist");
         assert!(matches!(outcome, ContinueHereOutcome::NotFound));
+    }
+
+    fn write_linked_session(root: &SessionStoreRoot, session_id: &str, external_id: &str) {
+        let detail = sample_detail(
+            external_id,
+            vec![
+                user_msg("m1", "2026-01-01T00:00:00Z", "hello"),
+                assistant_msg("m2", "2026-01-01T00:00:01Z", "hi back"),
+            ],
+        );
+        let session = build_imported_session(
+            session_id,
+            "repo-1",
+            "C:/code/fixture-project",
+            "fixture-project",
+            "codex",
+            external_id,
+            &detail,
+            "2026-01-01T00:00:05Z",
+        );
+        store::write_session(root, &session).unwrap();
+        let mut ledger = import_store::read_ledger(root, "codex");
+        ledger.sessions.insert(
+            external_id.to_string(),
+            ImportedSessionRecord {
+                gitwyrm_session_id: session_id.to_string(),
+                last_imported_external_message_id: "m2".into(),
+                last_seen_external_updated_at: "2026-01-01T00:00:02Z".into(),
+            },
+        );
+        import_store::write_ledger(root, "codex", &ledger).unwrap();
+    }
+
+    #[test]
+    fn unlink_removes_the_ledger_link_and_keeps_every_imported_message() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        write_linked_session(&root, "sess-unlink-1", "ext-1");
+
+        let outcome = unlink_at(&locks, &root, "sess-unlink-1");
+        let UnlinkOutcome::Unlinked {
+            session,
+            adapter_id,
+            adapter_display_name,
+        } = outcome
+        else {
+            panic!("expected Unlinked, got {outcome:?}");
+        };
+        assert_eq!(adapter_id, "codex");
+        assert_eq!(adapter_display_name, "Codex");
+
+        // The link is gone from the ledger...
+        assert!(import_store::find_link_for_session(&root, "sess-unlink-1").is_none());
+        let ledger = import_store::read_ledger(&root, "codex");
+        assert!(!ledger.sessions.contains_key("ext-1"));
+
+        // ...but the imported messages, with their provenance, are still there,
+        // followed by the visible unlink note in its own segment.
+        let imported: Vec<_> = session.messages.iter().filter(|m| m.import.is_some()).collect();
+        assert_eq!(imported.len(), 2);
+        assert_eq!(imported[0].plain_content, "hello");
+        assert_eq!(imported[1].plain_content, "hi back");
+        let note = session.messages.last().unwrap();
+        assert!(note.import.is_none());
+        assert!(note.plain_content.contains("no longer linked to Codex"));
+        assert_eq!(session.segments.last().unwrap().label, "Unlinked from Codex");
+
+        let back = store::read_session(&root, "sess-unlink-1").unwrap();
+        assert_eq!(back, session);
+    }
+
+    #[test]
+    fn unlinking_twice_reports_not_linked_without_touching_the_session_again() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        write_linked_session(&root, "sess-unlink-2", "ext-2");
+
+        assert!(matches!(
+            unlink_at(&locks, &root, "sess-unlink-2"),
+            UnlinkOutcome::Unlinked { .. }
+        ));
+        let after_first = store::read_session(&root, "sess-unlink-2").unwrap();
+
+        assert!(matches!(
+            unlink_at(&locks, &root, "sess-unlink-2"),
+            UnlinkOutcome::NotLinked
+        ));
+        let after_second = store::read_session(&root, "sess-unlink-2").unwrap();
+        assert_eq!(after_first, after_second, "a NotLinked outcome must not add a second note");
+    }
+
+    #[test]
+    fn unlinking_a_missing_session_is_not_found() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        assert!(matches!(
+            unlink_at(&locks, &root, "does-not-exist"),
+            UnlinkOutcome::NotFound
+        ));
+    }
+
+    #[test]
+    fn a_scan_row_carries_the_linked_gitwyrm_session_id() {
+        let (_dir, root) = temp_root();
+        write_linked_session(&root, "sess-scan-1", "ext-scan");
+        let ledger = import_store::read_ledger(&root, "codex");
+        let record = import_store::already_imported_session(&ledger, "ext-scan");
+        assert_eq!(
+            record.map(|r| r.gitwyrm_session_id.as_str()),
+            Some("sess-scan-1")
+        );
+        assert!(import_store::already_imported_session(&ledger, "ext-other").is_none());
     }
 }

@@ -1,4 +1,9 @@
-import type { AdapterListEntry, ContinuationOutcome, ScannedExternalSession } from '@/lib/bindings'
+import type {
+  AdapterListEntry,
+  ContinuationOutcome,
+  ImportSessionOutcome,
+  ScannedExternalSession,
+} from '@/lib/bindings'
 
 /**
  * Pure display-copy logic for the external chat import UI
@@ -72,5 +77,35 @@ export function continueExternallyLabel(outcome: ContinuationOutcome | undefined
     case 'clientNotDetected':
     case 'adapterDisabled':
       return null
+  }
+}
+
+/** The GitWyrm session one picker row is currently linked to, or `null`.
+ * A row is linked either because the scan already knew (`importedSessionId`
+ * from the ledger) or because this row's own Import just succeeded and the
+ * scan has not been refetched yet. After Unlink the caller resets the import
+ * result and the scan drops the id, so this returns `null` again and every
+ * linked-only action (Continue here, Open client, Unlink) disappears at
+ * once (task 4.3). */
+export function linkedImportedSessionId(
+  session: ScannedExternalSession,
+  imported: ImportSessionOutcome | undefined
+): string | null {
+  if (imported?.kind === 'created' || imported?.kind === 'refreshed') {
+    return imported.session.header.sessionId
+  }
+  return session.importedSessionId ?? null
+}
+
+/** Plain-language copy for the Unlink confirmation. Kept here so the exact
+ * promise it makes (messages stay, refresh stops, a later import makes a
+ * new chat) is testable next to the backend behavior it describes. */
+export function unlinkConfirmCopy(adapterName: string): { title: string; description: string } {
+  return {
+    title: `Unlink from ${adapterName}?`,
+    description:
+      `This chat stays in GitWyrm with every message it already has. It just stops being tied to ${adapterName}: ` +
+      `Refresh will no longer pull in new messages from there, and the option to open ${adapterName} from this chat goes away. ` +
+      `If you import the same ${adapterName} chat again later, it becomes a new chat instead of adding to this one.`,
   }
 }

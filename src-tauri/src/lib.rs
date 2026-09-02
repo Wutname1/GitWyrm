@@ -355,6 +355,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_graph::agent_session_record_conflict,
             commands::agent_kickoff::agent_session_start,
             commands::agent_kickoff::agent_intent_policy,
+            commands::agent_kickoff::agent_session_escalate_to_fix,
             commands::agent_config::agent_config_scan,
             commands::agent_config::agent_config_detect_clients,
             commands::agent_config::agent_config_preview_copy,
@@ -380,6 +381,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_import::agent_import_session,
             commands::agent_import::agent_import_continuation_capability,
             commands::agent_import::agent_import_continue_here,
+            commands::agent_import::agent_import_unlink,
         ])
         .typ::<watcher::RepoChangedPayload>()
         .typ::<commands::remote::GitProgressPayload>()

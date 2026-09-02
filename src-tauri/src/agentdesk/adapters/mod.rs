@@ -224,6 +224,75 @@ pub struct DetectedClient {
     pub supported: bool,
 }
 
+/// Longest string [`redact_for_log`] lets through unchanged. Adapter ids,
+/// external session ids, error variant names and version strings all fit;
+/// a message body, a title typed by a person, or a serialized record does
+/// not, and those are exactly what must never reach the log (task 5.2).
+pub const REDACT_LOG_MAX_CHARS: usize = 96;
+
+/// Make a string safe to log from the import path. Imported chats belong to
+/// the user and their paths reveal where they keep their work, so nothing
+/// that could carry either is logged raw:
+///
+/// * any token that looks like an absolute path (Windows drive or UNC,
+///   POSIX, or `~/`) is replaced with `<path>`, even inside an OS error
+///   message such as "could not open C:\Users\me\.codex\x.jsonl";
+/// * anything longer than [`REDACT_LOG_MAX_CHARS`] after that is replaced
+///   entirely with a length marker, since long text in this path is almost
+///   always message content.
+///
+/// Short identifiers pass through untouched, so log lines stay useful for
+/// "which adapter, which outcome" without ever answering "what did they say".
+pub fn redact_for_log(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut first = true;
+    for token in input.split(' ') {
+        if !first {
+            out.push(' ');
+        }
+        first = false;
+        out.push_str(&redact_token(token));
+    }
+    let char_count = out.chars().count();
+    if char_count > REDACT_LOG_MAX_CHARS {
+        return format!("<redacted {char_count} chars>");
+    }
+    out
+}
+
+fn redact_token(token: &str) -> String {
+    // Punctuation an error message wraps a path in (quotes, parentheses, a
+    // trailing period or colon) is kept so the sentence still reads, and
+    // only the path inside it is replaced.
+    let leading: &[char] = &['"', '\'', '(', '[', '<', '`'];
+    let trailing: &[char] = &['"', '\'', ')', ']', '>', '`', ',', '.', ';', ':'];
+    let start = token.len() - token.trim_start_matches(leading).len();
+    let core_end = token.trim_end_matches(trailing).len().max(start);
+    let (prefix, rest) = token.split_at(start);
+    let (core, suffix) = rest.split_at(core_end - start);
+    if looks_like_path(core) {
+        format!("{prefix}<path>{suffix}")
+    } else {
+        token.to_string()
+    }
+}
+
+fn looks_like_path(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    // Windows drive path: C:\ or C:/
+    let drive = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/');
+    // UNC share: \\server\share
+    let unc = s.starts_with("\\\\") && s.len() > 2;
+    // POSIX absolute path: /home/x, /tmp/y. A bare "/" or "a/b" is not one.
+    let posix = s.starts_with('/') && s.len() > 1;
+    // Home-relative: ~/.config/x
+    let home = s.starts_with("~/") && s.len() > 2;
+    drive || unc || posix || home
+}
+
 /// Open a foreign path for reading only. This is the *only* sanctioned way
 /// adapter code touches a file inside a detected client's directory --
 /// [`std::fs::File::open`] itself already opens read-only, but this wrapper
@@ -741,5 +810,40 @@ mod tests {
                 visit(&path);
             }
         }
+    }
+
+    #[test]
+    fn redact_replaces_a_windows_drive_path() {
+        let out = redact_for_log(r"could not open C:\Users\me\.codex\sessions\a.jsonl for reading");
+        assert_eq!(out, "could not open <path> for reading");
+    }
+
+    #[test]
+    fn redact_replaces_a_posix_path_and_keeps_surrounding_punctuation() {
+        let out = redact_for_log("expected path is missing: \"/home/me/.claude/projects/x.jsonl\".");
+        assert_eq!(out, "expected path is missing: \"<path>\".");
+        assert_eq!(redact_for_log("~/.config/opencode/db"), "<path>");
+        assert_eq!(redact_for_log(r"\\server\share\file"), "<path>");
+    }
+
+    #[test]
+    fn redact_replaces_a_long_message_body_with_a_length_marker() {
+        let body = "Here is the whole conversation the user had about their private project, \
+                    repeated so that it is comfortably longer than the cap allows for logging.";
+        let out = redact_for_log(body);
+        assert!(out.starts_with("<redacted "), "got {out}");
+        assert!(out.ends_with(" chars>"));
+        assert!(!out.contains("private project"));
+    }
+
+    #[test]
+    fn redact_passes_a_short_adapter_id_and_outcome_through() {
+        assert_eq!(redact_for_log("codex"), "codex");
+        assert_eq!(
+            redact_for_log("client not detected on this machine"),
+            "client not detected on this machine"
+        );
+        // "and/or" and a lone slash are words, not paths.
+        assert_eq!(redact_for_log("either and/or / neither"), "either and/or / neither");
     }
 }

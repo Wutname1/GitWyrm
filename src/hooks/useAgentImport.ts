@@ -91,3 +91,23 @@ export function useContinueImportedSessionHere() {
     },
   })
 }
+
+/** "Unlink from <client>" (task 4.3): forget the tie between an imported
+ * session and its external source while keeping every imported message.
+ * Invalidates the session (the unlink note must render), the session list
+ * (updated_at moved), the adapter's scan (the row flips back to "Import",
+ * since a later import makes a new chat), and that external session's
+ * continuation probe (the row no longer offers to open the client). */
+export function useUnlinkImportedSession() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ sessionId }: { sessionId: string; adapterId: string; externalSessionId: string }) =>
+      unwrap(await commands.agentImportUnlink(sessionId)),
+    onSuccess: (_result, { sessionId, adapterId, externalSessionId }) => {
+      qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
+      qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
+      qc.invalidateQueries({ queryKey: keys.agentImportScan(adapterId) })
+      qc.invalidateQueries({ queryKey: keys.agentImportContinuation(adapterId, externalSessionId) })
+    },
+  })
+}

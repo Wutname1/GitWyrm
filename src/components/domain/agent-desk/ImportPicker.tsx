@@ -1,15 +1,24 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Download, ExternalLink, FolderOpen } from 'lucide-react'
+import { Download, ExternalLink, FolderOpen, Unlink } from 'lucide-react'
 import type { AdapterListEntry, ScannedExternalSession } from '@/lib/bindings'
+import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import {
   useAgentImportAdapters,
   useAgentImportContinuation,
   useAgentImportScan,
   useContinueImportedSessionHere,
   useImportExternalSession,
+  useUnlinkImportedSession,
 } from '@/hooks/useAgentImport'
-import { canBrowseAdapter, continueExternallyLabel, detectionLabel, projectLabel } from '@/lib/agentImportDisplay'
+import {
+  canBrowseAdapter,
+  continueExternallyLabel,
+  detectionLabel,
+  linkedImportedSessionId,
+  projectLabel,
+  unlinkConfirmCopy,
+} from '@/lib/agentImportDisplay'
 import { describeError, log } from '@/lib/log'
 import { cn } from '@/lib/utils'
 
@@ -25,6 +34,7 @@ import { cn } from '@/lib/utils'
 export function ImportPicker() {
   const adapters = useAgentImportAdapters()
   const [selectedAdapterId, setSelectedAdapterId] = useState<string | null>(null)
+  const selectedAdapter = adapters.data?.find((a) => a.adapterId === selectedAdapterId)
 
   return (
     // Same flex-row reasoning as `AgentSetupView`: without `min-w-0 flex-1`
@@ -53,12 +63,11 @@ export function ImportPicker() {
         ))}
       </div>
 
-      {selectedAdapterId && (
+      {selectedAdapter && (
         <SessionList
-          adapterId={selectedAdapterId}
-          enabled={
-            adapters.data?.find((a) => a.adapterId === selectedAdapterId)?.enabled ?? false
-          }
+          adapterId={selectedAdapter.adapterId}
+          adapterName={selectedAdapter.displayName}
+          enabled={selectedAdapter.enabled}
         />
       )}
     </div>
@@ -92,7 +101,15 @@ function AdapterRow({
   )
 }
 
-function SessionList({ adapterId, enabled }: { adapterId: string; enabled: boolean }) {
+function SessionList({
+  adapterId,
+  adapterName,
+  enabled,
+}: {
+  adapterId: string
+  adapterName: string
+  enabled: boolean
+}) {
   const scan = useAgentImportScan(adapterId, enabled)
 
   if (!enabled) {
@@ -120,21 +137,45 @@ function SessionList({ adapterId, enabled }: { adapterId: string; enabled: boole
   return (
     <div className="flex flex-col gap-1.5 overflow-y-auto">
       {scan.data.sessions.map((s) => (
-        <SessionRow key={s.summary.externalSessionId} adapterId={adapterId} session={s} />
+        <SessionRow
+          key={s.summary.externalSessionId}
+          adapterId={adapterId}
+          adapterName={adapterName}
+          session={s}
+        />
       ))}
     </div>
   )
 }
 
-function SessionRow({ adapterId, session }: { adapterId: string; session: ScannedExternalSession }) {
+function SessionRow({
+  adapterId,
+  adapterName,
+  session,
+}: {
+  adapterId: string
+  adapterName: string
+  session: ScannedExternalSession
+}) {
+  const externalSessionId = session.summary.externalSessionId
   const importMutation = useImportExternalSession()
   const continueHereMutation = useContinueImportedSessionHere()
-  const continuation = useAgentImportContinuation(adapterId, session.summary.externalSessionId)
+  const unlinkMutation = useUnlinkImportedSession()
+  const [confirmUnlinkOpen, setConfirmUnlinkOpen] = useState(false)
+
+  // One source of truth for "is this row tied to a GitWyrm chat right now".
+  // Every action that needs a GitWyrm session (Continue here, Open client,
+  // Unlink) hangs off this, so after Unlink they all disappear together.
+  const linkedSessionId = linkedImportedSessionId(session, importMutation.data)
+  const continuation = useAgentImportContinuation(
+    linkedSessionId ? adapterId : null,
+    linkedSessionId ? externalSessionId : null
+  )
   const project = projectLabel(session)
 
   const handleImport = () => {
     importMutation.mutate(
-      { adapterId, externalSessionId: session.summary.externalSessionId },
+      { adapterId, externalSessionId },
       {
         onSuccess: (result) => {
           if (result.kind === 'created' || result.kind === 'refreshed') {
@@ -152,9 +193,8 @@ function SessionRow({ adapterId, session }: { adapterId: string; session: Scanne
   }
 
   const handleContinueHere = () => {
-    if (importMutation.data?.kind !== 'created' && importMutation.data?.kind !== 'refreshed') return
-    const sessionId = importMutation.data.session.header.sessionId
-    continueHereMutation.mutate(sessionId, {
+    if (!linkedSessionId) return
+    continueHereMutation.mutate(linkedSessionId, {
       onSuccess: (result) => {
         if (result.kind === 'continued') {
           toast.success('Continuing this chat in GitWyrm')
@@ -165,11 +205,47 @@ function SessionRow({ adapterId, session }: { adapterId: string; session: Scanne
     })
   }
 
+  const handleUnlink = () => {
+    if (!linkedSessionId) return
+    unlinkMutation.mutate(
+      { sessionId: linkedSessionId, adapterId, externalSessionId },
+      {
+        onSuccess: (result) => {
+          switch (result.kind) {
+            case 'unlinked':
+              // Drop this row's own import result so the linked-only actions
+              // hide immediately instead of waiting for the scan refetch.
+              importMutation.reset()
+              toast.success(`Unlinked from ${result.adapterDisplayName}. The imported messages stay in GitWyrm.`)
+              break
+            case 'notLinked':
+              importMutation.reset()
+              toast.info('This chat was already unlinked')
+              break
+            case 'notFound':
+              importMutation.reset()
+              toast.error('Could not find this chat in GitWyrm')
+              break
+            case 'failed':
+              log.error(`unlink failed: ${result.detail}`)
+              toast.error('Could not unlink this chat')
+              break
+          }
+        },
+        onError: (error) => {
+          log.error(`unlink failed: ${String(error)}`)
+          toast.error('Could not unlink this chat')
+        },
+      }
+    )
+  }
+
   // "Continue session" is only ever offered when the adapter can genuinely
   // resume this exact session; everything else is "Open client" so the copy
   // never claims context transfer that did not happen (spec: "Continuation
   // is honest").
-  const continueExternalLabel = continueExternallyLabel(continuation.data)
+  const continueExternalLabel = linkedSessionId ? continueExternallyLabel(continuation.data) : null
+  const unlinkCopy = unlinkConfirmCopy(adapterName)
 
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border px-2.5 py-2 text-xs">
@@ -177,7 +253,7 @@ function SessionRow({ adapterId, session }: { adapterId: string; session: Scanne
         <span className="truncate font-medium text-foreground" title={session.summary.title}>
           {session.summary.title}
         </span>
-        {session.alreadyImported && (
+        {linkedSessionId && (
           <span className="inline-flex items-center gap-1 rounded-full bg-panel3 px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground">
             <Download size={9} aria-hidden />
             Imported
@@ -187,16 +263,16 @@ function SessionRow({ adapterId, session }: { adapterId: string; session: Scanne
       <span className={cn('text-[11px]', project.resolved ? 'text-muted-foreground' : 'text-[var(--gw-amber)]')}>
         {project.text}
       </span>
-      <div className="mt-1 flex items-center gap-2">
+      <div className="mt-1 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={handleImport}
           disabled={importMutation.isPending}
           className="rounded-md bg-accent px-2 py-1 text-[11px] font-medium text-accent-text hover:bg-accent-hover disabled:opacity-60"
         >
-          {session.alreadyImported ? 'Refresh' : 'Import'}
+          {linkedSessionId ? 'Refresh' : 'Import'}
         </button>
-        {(importMutation.data?.kind === 'created' || importMutation.data?.kind === 'refreshed') && (
+        {linkedSessionId && (
           <button
             type="button"
             onClick={handleContinueHere}
@@ -211,6 +287,17 @@ function SessionRow({ adapterId, session }: { adapterId: string; session: Scanne
             {continueExternalLabel}
           </span>
         )}
+        {linkedSessionId && (
+          <button
+            type="button"
+            onClick={() => setConfirmUnlinkOpen(true)}
+            disabled={unlinkMutation.isPending}
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-panel2 hover:text-foreground disabled:opacity-60"
+          >
+            <Unlink size={10} aria-hidden />
+            Unlink from {adapterName}
+          </button>
+        )}
         {project.offerLinking && (
           <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
             <FolderOpen size={10} aria-hidden />
@@ -218,6 +305,17 @@ function SessionRow({ adapterId, session }: { adapterId: string; session: Scanne
           </span>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmUnlinkOpen}
+        onOpenChange={setConfirmUnlinkOpen}
+        title={unlinkCopy.title}
+        description={unlinkCopy.description}
+        confirmLabel="Unlink"
+        pending={unlinkMutation.isPending}
+        pendingLabel="Unlinking…"
+        onConfirm={handleUnlink}
+      />
     </div>
   )
 }
