@@ -1403,6 +1403,9 @@ function RepoPickerPanel({
     setUrl(urlQuery.url);
     setCloneNameTouched(false);
     setCopyAnyway(false);
+    // Whatever was highlighted before is about a different repository, and the
+    // details panel reads from it. Drop it so the panel follows the address.
+    setSelectedItem(null);
   }, [urlQuery?.url]);
 
   const query = filter.trim().toLowerCase();
@@ -1585,11 +1588,27 @@ function RepoPickerPanel({
 
   useEffect(() => {
     if (route !== "open" || selectedItem != null) return;
-    const firstGroup = pinnedGroups[0];
-    const firstRepo = pinnedRepos[0] ?? recentRepos[0] ?? otherRepos[0];
+    // An address with no copy here is about a repository that is in none of
+    // these lists, so picking a row would only put something unrelated beside
+    // it; the panel shows what copying will do instead. An address that IS
+    // here selects the copy it found, which is what the user just asked about.
+    if (urlQuery != null && urlMatchedRepos.length === 0) return;
+    const firstGroup = urlQuery == null ? pinnedGroups[0] : undefined;
+    const firstRepo =
+      urlQuery != null
+        ? urlMatchedRepos[0]
+        : (pinnedRepos[0] ?? recentRepos[0] ?? otherRepos[0]);
     if (firstGroup) setSelectedItem({ type: "group", id: firstGroup.id });
     else if (firstRepo) setSelectedItem({ type: "repo", path: firstRepo.path });
-  }, [otherRepos, pinnedGroups, pinnedRepos, recentRepos, route, selectedItem]);
+  }, [
+    otherRepos,
+    pinnedGroups,
+    pinnedRepos,
+    recentRepos,
+    route,
+    selectedItem,
+    urlQuery,
+  ]);
 
   const pickCodeFolder = async () => {
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -2612,6 +2631,40 @@ function RepoPickerPanel({
     </>
   );
 
+  /**
+   * The side panel that stands in for repository details whenever the job on
+   * screen is copying a project down rather than picking one that is already
+   * here. Shown on the copy screen, and on the search screen once a pasted
+   * address takes over -- otherwise the panel would keep describing whichever
+   * repository happened to be selected before, which is no longer what the user
+   * is looking at.
+   */
+  const copyDetails = (
+    <>
+      <div className="border-b border-border px-5 py-4 text-2xs font-bold uppercase tracking-[.09em] text-muted-foreground">
+        What happens next
+      </div>
+      <div className="p-5">
+        <span className="grid size-10 place-items-center rounded-lg border border-accent/25 bg-accent/10 text-accent-text">
+          <Download size={19} />
+        </span>
+        <h2 className="mt-4 text-base font-semibold text-foreground">
+          Ready when the copy finishes
+        </h2>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          GitWyrm copies the files, remembers the parent folder, and opens the
+          repository in a new tab.
+        </p>
+        <div className="mt-5 border-t border-border pt-4">
+          <div className="flex items-center gap-2 text-xs text-sub">
+            <ShieldCheck size={13} className="text-accent-text" />
+            Uses your normal Git sign-in
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
   const cloneScreen = (
     <>
       <div className="border-b border-border px-5 py-5 min-[1200px]:px-7">
@@ -3256,7 +3309,9 @@ function RepoPickerPanel({
         </main>
 
         <aside className="hidden min-h-0 flex-col border-l border-border bg-panel xl:flex">
-          {route === "open" ? (
+          {route === "open" && urlQuery && urlMatchedRepos.length === 0 ? (
+            copyDetails
+          ) : route === "open" ? (
             <RepoDetails
               selected={selectedItem}
               repositories={libraryRepos}
@@ -3275,29 +3330,7 @@ function RepoPickerPanel({
               onOpenGroup={(id) => void openSavedGroup(id)}
             />
           ) : route === "clone" ? (
-            <>
-              <div className="border-b border-border px-5 py-4 text-2xs font-bold uppercase tracking-[.09em] text-muted-foreground">
-                What happens next
-              </div>
-              <div className="p-5">
-                <span className="grid size-10 place-items-center rounded-lg border border-accent/25 bg-accent/10 text-accent-text">
-                  <Download size={19} />
-                </span>
-                <h2 className="mt-4 text-base font-semibold text-foreground">
-                  Ready when the copy finishes
-                </h2>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                  GitWyrm copies the files, remembers the parent folder, and
-                  opens the repository in a new tab.
-                </p>
-                <div className="mt-5 border-t border-border pt-4">
-                  <div className="flex items-center gap-2 text-xs text-sub">
-                    <ShieldCheck size={13} className="text-accent-text" />
-                    Uses your normal Git sign-in
-                  </div>
-                </div>
-              </div>
-            </>
+            copyDetails
           ) : (
             <>
               <div className="border-b border-border px-5 py-4 text-2xs font-bold uppercase tracking-[.09em] text-muted-foreground">
