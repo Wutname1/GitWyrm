@@ -368,7 +368,7 @@ fn plain_validation_reason(reason: &GraphValidationError) -> String {
 /// segment-reuse shape, but writes a `System`-role/`System`-kind message
 /// with no `execution_id` -- it did not come from any execution's event
 /// stream.
-fn append_system_note(locks: &crate::agentdesk::SessionLocks, root: &SessionStoreRoot, session_id: &str, text: &str) {
+pub(crate) fn append_system_note(locks: &crate::agentdesk::SessionLocks, root: &SessionStoreRoot, session_id: &str, text: &str) {
     let _ = update_session_at(locks, root, session_id, |s| {
         let now = now_rfc3339();
         let segment_id = match s.segments.last() {

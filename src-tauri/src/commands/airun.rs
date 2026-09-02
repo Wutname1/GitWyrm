@@ -532,6 +532,13 @@ fn route_to_agent_desk(app: &tauri::AppHandle, event: &RunEventKind) {
                             &durable.session_id,
                             &execution_id,
                         );
+                        // A message the user sent while this turn was still
+                        // running was only saved to the transcript; nothing
+                        // else ever starts the turn that reads it. Runs after
+                        // the proposal hook so a graph it auto-started (or a
+                        // proposal now waiting on Start) is visible to the
+                        // idle check and wins.
+                        start_queued_follow_up(app, &locks, &root, &durable.session_id, &execution_id);
                     }
                 }
             }
@@ -951,4 +958,427 @@ The task:
         None,
         String::new(),
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Queued follow-up: a message sent while the agent was busy starts the next turn
+// ---------------------------------------------------------------------------
+
+/// What the next turn should run as when a queued message is picked up:
+/// the same mode/team/provider the turn that just ended used, so the user
+/// gets the behaviour they last chose rather than a silent reset to defaults.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct QueuedFollowUp {
+    pub mode: crate::agentdesk::policy::ExecutionMode,
+    pub team: crate::agentdesk::policy::ExecutionTeam,
+    pub provider: Option<String>,
+    pub queued_message_count: usize,
+}
+
+fn parse_rfc3339(s: &str) -> Option<time::OffsetDateTime> {
+    time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
+}
+
+/// Accepts both spellings in circulation: `ExecutionRecord::mode` is written
+/// as the enum's `Debug` name (`"Plan"`) while the composer stores the same
+/// choice on the header as it sends it, and nothing forces that casing on an
+/// older session file.
+fn parse_mode(s: &str) -> Option<crate::agentdesk::policy::ExecutionMode> {
+    use crate::agentdesk::policy::ExecutionMode;
+    match s.trim().to_ascii_lowercase().as_str() {
+        "ask" => Some(ExecutionMode::Ask),
+        "plan" => Some(ExecutionMode::Plan),
+        "auto" => Some(ExecutionMode::Auto),
+        _ => None,
+    }
+}
+
+/// `"helpers"` is the composer's own word for the lead-plus-helpers team
+/// (`agentDeskComposer.ts`'s `teamToExecutionTeam`), so a header preference
+/// carries that spelling while an execution record carries `"Lead"`.
+fn parse_team(s: &str) -> Option<crate::agentdesk::policy::ExecutionTeam> {
+    use crate::agentdesk::policy::ExecutionTeam;
+    match s.trim().to_ascii_lowercase().as_str() {
+        "solo" => Some(ExecutionTeam::Solo),
+        "lead" | "helpers" => Some(ExecutionTeam::Lead),
+        _ => None,
+    }
+}
+
+/// Decides, from the persisted session alone, whether the execution that
+/// just ended should be followed by a fresh turn that reads the messages the
+/// user sent while it was running.
+///
+/// A user message counts as queued when no lead/solo execution started at or
+/// after it: an execution's prompt is built from the whole transcript, so any
+/// turn that started later has already read it. The kickoff message for a
+/// turn is always appended before that turn's record is minted, so it is
+/// consumed by the very turn it started.
+///
+/// Returns `None` unless every one of these holds:
+/// - `ended_execution_id` names a lead/solo record (no `parent_execution_id`)
+///   that ended as `Finished`. A stopped or failed turn never restarts, so a
+///   turn that keeps failing cannot loop on the same message.
+/// - Nothing else is live: `live_execution_ids` (what the process registry
+///   still has, minus the ended execution itself, which is unregistered only
+///   after its final event is routed) is otherwise empty, no other record is
+///   in `Preparing`/`Working`/`NeedsInput`, and the session header is not in
+///   one of those states either (a Plan proposal waiting on Start leaves the
+///   header at `NeedsInput`).
+/// - At least one user message is queued by the rule above.
+pub(crate) fn queued_follow_up_for(
+    session: &crate::agentdesk::model::AgentSession,
+    ended_execution_id: &str,
+    live_execution_ids: &[String],
+) -> Option<QueuedFollowUp> {
+    use crate::agentdesk::model::{MessageRole, SessionState};
+    use crate::agentdesk::policy::{ExecutionMode, ExecutionTeam};
+
+    let ended = session
+        .executions
+        .iter()
+        .find(|e| e.execution_id == ended_execution_id)?;
+    if ended.parent_execution_id.is_some() || ended.state != SessionState::Finished {
+        return None;
+    }
+
+    let is_running = |state: SessionState| {
+        matches!(state, SessionState::Preparing | SessionState::Working | SessionState::NeedsInput)
+    };
+    if live_execution_ids.iter().any(|id| id != ended_execution_id) {
+        return None;
+    }
+    if session
+        .executions
+        .iter()
+        .any(|e| e.execution_id != ended_execution_id && is_running(e.state))
+    {
+        return None;
+    }
+    if is_running(session.header.state) {
+        return None;
+    }
+
+    let lead_starts: Vec<time::OffsetDateTime> = session
+        .executions
+        .iter()
+        .filter(|e| e.parent_execution_id.is_none())
+        .filter_map(|e| parse_rfc3339(&e.started_at))
+        .collect();
+    let queued_message_count = session
+        .messages
+        .iter()
+        .filter(|m| m.role == MessageRole::User)
+        .filter_map(|m| parse_rfc3339(&m.timestamp))
+        .filter(|sent_at| !lead_starts.iter().any(|started| started >= sent_at))
+        .count();
+    if queued_message_count == 0 {
+        return None;
+    }
+
+    let header = &session.header;
+    let mode = ended
+        .mode
+        .as_deref()
+        .and_then(parse_mode)
+        .or_else(|| header.preferred_mode.as_deref().and_then(parse_mode))
+        .unwrap_or(ExecutionMode::Auto);
+    let team = ended
+        .team
+        .as_deref()
+        .and_then(parse_team)
+        .or_else(|| header.preferred_team.as_deref().and_then(parse_team))
+        .unwrap_or(ExecutionTeam::Lead);
+    let provider = ended
+        .provider
+        .clone()
+        .or_else(|| header.preferred_provider.clone());
+
+    Some(QueuedFollowUp {
+        mode,
+        team,
+        provider,
+        queued_message_count,
+    })
+}
+
+/// Production half of the queued follow-up: reads the session the ended
+/// execution belongs to, asks [`queued_follow_up_for`], and if a turn is
+/// owed, notes why in the transcript and starts it through the same
+/// `start_execution_at` the composer's Send uses. Best-effort like every
+/// other durable-path step in this file: a failure here is logged and noted
+/// for the user, never turned into a run failure.
+fn start_queued_follow_up(
+    app: &tauri::AppHandle,
+    locks: &Arc<crate::agentdesk::SessionLocks>,
+    root: &crate::agentdesk::store::SessionStoreRoot,
+    session_id: &str,
+    ended_execution_id: &str,
+) {
+    let executions = app.state::<crate::agentdesk::ExecutionRegistry>();
+    let live = executions.live_executions_for_session(&session_id.to_string());
+    let session = match locks.with_session_lock(session_id, || {
+        crate::agentdesk::store::read_session(root, session_id)
+    }) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("agent desk: queued follow-up skipped, session {session_id} unreadable: {e}");
+            return;
+        }
+    };
+    let Some(follow_up) = queued_follow_up_for(&session, ended_execution_id, &live) else {
+        return;
+    };
+    log::info!(
+        "agent desk: session {session_id} has {} queued message(s); starting a follow-up turn",
+        follow_up.queued_message_count
+    );
+    crate::commands::agent_graph::append_system_note(
+        locks,
+        root,
+        session_id,
+        "Picking up the message you sent while the agent was busy.",
+    );
+
+    let links = app.state::<crate::agentdesk::RunSessionLinks>();
+    let manager = app.state::<crate::state::RepoManager>();
+    let outcome = crate::commands::agent_desk::start_execution_at(
+        app,
+        locks,
+        root,
+        links.inner(),
+        manager.inner(),
+        executions.inner(),
+        session_id,
+        follow_up.mode,
+        follow_up.team,
+        follow_up.provider,
+    );
+    if !matches!(outcome, crate::commands::agent_desk::StartExecutionOutcome::Started { .. }) {
+        log::warn!("agent desk: queued follow-up for session {session_id} did not start: {outcome:?}");
+        crate::commands::agent_graph::append_system_note(
+            locks,
+            root,
+            session_id,
+            "Your message is saved, but GitWyrm could not start a new turn for it. Send it again when you are ready.",
+        );
+    }
+}
+
+#[cfg(test)]
+mod queued_follow_up_tests {
+    use super::*;
+    use crate::agentdesk::model::{
+        AgentSession, AgentSessionHeader, ExecutionRecord, MessageKind, MessageRole, SessionIntent,
+        SessionMessage, SessionSource, SessionState, CURRENT_SCHEMA_VERSION,
+    };
+    use crate::agentdesk::policy::{ExecutionMode, ExecutionTeam};
+
+    const T0: &str = "2026-01-01T00:00:00Z";
+    const T1: &str = "2026-01-01T00:01:00Z";
+    const T2: &str = "2026-01-01T00:02:00Z";
+    const T3: &str = "2026-01-01T00:03:00Z";
+
+    fn session(state: SessionState) -> AgentSession {
+        AgentSession::new(AgentSessionHeader {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            session_id: "sess-1".into(),
+            repo_id: "repo-1".into(),
+            repo_path: "C:/code/widgets".into(),
+            repo_name: "widgets".into(),
+            title: "Fix the bug".into(),
+            source: SessionSource::Manual {
+                repo_id: "repo-1".into(),
+            },
+            intent: SessionIntent::Fix,
+            state,
+            created_at: T0.into(),
+            updated_at: T0.into(),
+            unread: false,
+            changed_file_count: 0,
+            active_execution_id: Some("lead-1".into()),
+            archived: false,
+            graph_started_at: None,
+            preferred_provider: None,
+            preferred_mode: None,
+            preferred_team: None,
+        })
+    }
+
+    fn user_message(at: &str) -> SessionMessage {
+        SessionMessage {
+            message_id: format!("m-{at}"),
+            segment_id: "seg-1".into(),
+            role: MessageRole::User,
+            timestamp: at.into(),
+            plain_content: "also do this".into(),
+            rendered_content: None,
+            provider: None,
+            model: None,
+            kind: MessageKind::User,
+            execution_id: None,
+            sequence: None,
+            import: None,
+            targets: Vec::new(),
+        }
+    }
+
+    fn lead(id: &str, state: SessionState, started_at: &str) -> ExecutionRecord {
+        let mut record = ExecutionRecord::minimal(
+            id.into(),
+            "sess-1".into(),
+            None,
+            state,
+            started_at.into(),
+            Some(T3.into()),
+            3,
+        );
+        record.mode = Some("Plan".into());
+        record.team = Some("Lead".into());
+        record.provider = Some("Codex".into());
+        record
+    }
+
+    /// The common case: kickoff message, turn starts, a second message lands
+    /// mid-turn, the turn finishes cleanly with nothing else running.
+    fn finished_with_queued_message() -> AgentSession {
+        let mut s = session(SessionState::Finished);
+        s.messages.push(user_message(T0));
+        s.executions.push(lead("lead-1", SessionState::Finished, T1));
+        s.messages.push(user_message(T2));
+        s
+    }
+
+    #[test]
+    fn a_message_sent_after_the_turn_started_is_queued() {
+        let s = finished_with_queued_message();
+        // The ended execution is still in the registry when its final event
+        // is routed; that alone must not read as "something else is live".
+        let follow_up = queued_follow_up_for(&s, "lead-1", &["lead-1".to_string()])
+            .expect("a message sent mid-turn owes a follow-up");
+        assert_eq!(follow_up.queued_message_count, 1, "the kickoff message was consumed by lead-1 itself");
+    }
+
+    #[test]
+    fn the_kickoff_message_alone_owes_nothing() {
+        let mut s = session(SessionState::Finished);
+        s.messages.push(user_message(T0));
+        s.executions.push(lead("lead-1", SessionState::Finished, T1));
+        assert_eq!(queued_follow_up_for(&s, "lead-1", &[]), None);
+    }
+
+    #[test]
+    fn a_message_already_read_by_a_later_turn_is_not_queued_again() {
+        let mut s = session(SessionState::Finished);
+        s.messages.push(user_message(T0));
+        s.executions.push(lead("lead-1", SessionState::Finished, T1));
+        s.messages.push(user_message(T2));
+        // The follow-up turn that picked up the T2 message; when IT ends there
+        // is nothing left to pick up, so the chain stops here.
+        s.executions.push(lead("lead-2", SessionState::Finished, T3));
+        assert_eq!(queued_follow_up_for(&s, "lead-2", &[]), None);
+    }
+
+    #[test]
+    fn no_restart_after_a_stopped_or_failed_turn() {
+        for state in [SessionState::Stopped, SessionState::Failed] {
+            let mut s = session(state);
+            s.messages.push(user_message(T0));
+            s.executions.push(lead("lead-1", state, T1));
+            s.messages.push(user_message(T2));
+            assert_eq!(
+                queued_follow_up_for(&s, "lead-1", &[]),
+                None,
+                "a {state:?} turn must never restart itself on a queued message"
+            );
+        }
+    }
+
+    #[test]
+    fn no_restart_while_a_helper_is_live_in_the_registry() {
+        let mut s = finished_with_queued_message();
+        s.executions.push(ExecutionRecord::minimal(
+            "helper-1".into(),
+            "sess-1".into(),
+            Some("lead-1".into()),
+            SessionState::Working,
+            T1.into(),
+            None,
+            0,
+        ));
+        assert_eq!(
+            queued_follow_up_for(&s, "lead-1", &["lead-1".to_string(), "helper-1".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn no_restart_while_a_helper_record_is_still_working_even_if_unregistered() {
+        let mut s = finished_with_queued_message();
+        s.executions.push(ExecutionRecord::minimal(
+            "helper-1".into(),
+            "sess-1".into(),
+            Some("lead-1".into()),
+            SessionState::Preparing,
+            T1.into(),
+            None,
+            0,
+        ));
+        assert_eq!(queued_follow_up_for(&s, "lead-1", &[]), None);
+    }
+
+    #[test]
+    fn no_restart_while_the_session_header_says_it_still_needs_input() {
+        let mut s = finished_with_queued_message();
+        s.header.state = SessionState::NeedsInput;
+        assert_eq!(queued_follow_up_for(&s, "lead-1", &[]), None);
+    }
+
+    #[test]
+    fn a_finished_helper_never_triggers_a_follow_up() {
+        let mut s = finished_with_queued_message();
+        s.executions.push(ExecutionRecord::minimal(
+            "helper-1".into(),
+            "sess-1".into(),
+            Some("lead-1".into()),
+            SessionState::Finished,
+            T1.into(),
+            Some(T3.into()),
+            0,
+        ));
+        assert_eq!(queued_follow_up_for(&s, "helper-1", &[]), None);
+    }
+
+    #[test]
+    fn the_follow_up_reuses_the_ended_turns_mode_team_and_provider() {
+        let s = finished_with_queued_message();
+        let follow_up = queued_follow_up_for(&s, "lead-1", &[]).unwrap();
+        assert_eq!(follow_up.mode, ExecutionMode::Plan);
+        assert_eq!(follow_up.team, ExecutionTeam::Lead);
+        assert_eq!(follow_up.provider.as_deref(), Some("Codex"));
+    }
+
+    #[test]
+    fn the_follow_up_falls_back_to_header_preferences_then_defaults() {
+        let mut s = finished_with_queued_message();
+        let ended = s.executions.iter_mut().find(|e| e.execution_id == "lead-1").unwrap();
+        ended.mode = None;
+        ended.team = None;
+        ended.provider = None;
+        s.header.preferred_mode = Some("Ask".into());
+        s.header.preferred_team = Some("solo".into());
+        s.header.preferred_provider = Some("claude".into());
+        let follow_up = queued_follow_up_for(&s, "lead-1", &[]).unwrap();
+        assert_eq!(follow_up.mode, ExecutionMode::Ask);
+        assert_eq!(follow_up.team, ExecutionTeam::Solo);
+        assert_eq!(follow_up.provider.as_deref(), Some("claude"));
+
+        s.header.preferred_mode = None;
+        s.header.preferred_team = Some("helpers".into());
+        s.header.preferred_provider = None;
+        let follow_up = queued_follow_up_for(&s, "lead-1", &[]).unwrap();
+        assert_eq!(follow_up.mode, ExecutionMode::Auto, "the composer's own default mode");
+        assert_eq!(follow_up.team, ExecutionTeam::Lead, "the composer's 'helpers' spelling maps to Lead");
+        assert_eq!(follow_up.provider, None, "no provider means GitWyrm's default, never an invented one");
+    }
 }

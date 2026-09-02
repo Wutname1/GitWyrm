@@ -211,9 +211,7 @@ export function SessionComposer({
             // or the lead's own next turn picking it up if the provider
             // happens to poll the transcript -- neither of which this call
             // caused). Say exactly that, rather than implying delivery.
-            toast.info('Saved for the next turn. The agent is still finishing its current one.', {
-              description: 'It will see this message once it stops or you send it again after that.',
-            })
+            toast.info('Saved. The agent will pick this up as soon as it finishes its current turn.')
           } else if (startOutcome.kind === 'sourceMissing') {
             toast.error('This chat needs its repository open to run.', { description: startOutcome.detail })
           } else if (startOutcome.kind === 'adapterUnsupported') {
