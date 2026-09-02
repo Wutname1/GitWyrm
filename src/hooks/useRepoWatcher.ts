@@ -36,16 +36,23 @@ export function useRepoWatcher(onlyRepoId?: string | null) {
       // branch switch made outside the app leaves them pointing at the wrong
       // content under an unchanged key. Drop them alongside status.
       queryClient.invalidateQueries({ queryKey: keys.fileDiffAll(repoId) })
-      trimLogToFirstPage(queryClient, repoId)
-      queryClient.invalidateQueries({ queryKey: keys.log(repoId) })
-      queryClient.invalidateQueries({ queryKey: keys.branches(repoId) })
-      queryClient.invalidateQueries({ queryKey: keys.stashes(repoId) })
-      queryClient.invalidateQueries({ queryKey: keys.tags(repoId) })
-      // Skipped while one of our own merges/picks is mid-flight: the writes
+      // Skipped while one of our own operations is mid-flight: the writes
       // waking this watcher are that operation's intermediate state, and
       // caching it would leave a banner describing a step already finished. The
       // mutation invalidates once it settles, so the real outcome still lands.
+      //
+      // The ref-derived queries are in here for cost, not just correctness. A
+      // push or a branch delete writes refs over several seconds, and each
+      // write wakes this watcher well inside that window -- so the graph was
+      // reloading two or three times per operation, each reload re-walking
+      // history from the start. Waiting for the mutation to settle makes that
+      // one reload of the finished state.
       if (!isGitOperationInFlight(repoId)) {
+        trimLogToFirstPage(queryClient, repoId)
+        queryClient.invalidateQueries({ queryKey: keys.log(repoId) })
+        queryClient.invalidateQueries({ queryKey: keys.branches(repoId) })
+        queryClient.invalidateQueries({ queryKey: keys.stashes(repoId) })
+        queryClient.invalidateQueries({ queryKey: keys.tags(repoId) })
         queryClient.invalidateQueries({ queryKey: keys.mergeState(repoId) })
       }
       // A worktree added or removed in a terminal lands in `.git/worktrees`,

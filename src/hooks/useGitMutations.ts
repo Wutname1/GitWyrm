@@ -47,11 +47,17 @@ interface FolderFilesArgs {
 }
 
 /**
- * Runs a merge/pick/revert with the repo marked busy, so the file watcher does
- * not cache the operation's own half-written state as the result. See
+ * Runs a git operation with the repo marked busy, so the file watcher does not
+ * cache the operation's own half-written state as the result, and does not pay
+ * for a graph reload of history the operation is still rewriting. See
  * `beginGitOperation`. Wraps the whole call including the throw path, or a
  * failure would leave the repo permanently marked busy and stop `mergeState`
  * ever refreshing from the watcher again.
+ *
+ * Network operations are wrapped too: a push writing refs over several seconds
+ * wakes the watcher repeatedly on its own intermediate writes, and each wake
+ * reloaded the graph. The mutation invalidates once it settles, so the real
+ * outcome still lands -- once, instead of three times.
  */
 async function asGitOperation<T>(repoId: string, run: () => Promise<T>): Promise<T> {
   const done = beginGitOperation(repoId)
@@ -758,22 +764,26 @@ export function useGitMutations(repoId: string | null) {
    * saying so is more honest than a blanket failure.
    */
   const deleteRemoteBranch = useMutation({
-    mutationFn: async (args: { name: string; remote: string; alsoLocal?: boolean }) => {
-      await unwrap(await commands.deleteRemoteBranch(id, args.name, args.remote))
-      let localFailed = false
-      if (args.alsoLocal) {
-        try {
-          const outcome = unwrap(await commands.deleteBranch(id, args.name))
-          // A worktree holding the branch is a refusal, not an error: the local
-          // copy is still here, which is exactly what `localFailed` reports.
-          if (outcome.kind === 'heldByWorktree') localFailed = true
-        } catch (e) {
-          localFailed = true
-          logQuietFailure(e as Error)
+    // Deleting on the remote and then locally is two ref-writing steps, and
+    // each one wakes the file watcher. Marked busy across both so the graph
+    // reloads once at the end rather than after every write.
+    mutationFn: async (args: { name: string; remote: string; alsoLocal?: boolean }) =>
+      asGitOperation(id, async () => {
+        await unwrap(await commands.deleteRemoteBranch(id, args.name, args.remote))
+        let localFailed = false
+        if (args.alsoLocal) {
+          try {
+            const outcome = unwrap(await commands.deleteBranch(id, args.name))
+            // A worktree holding the branch is a refusal, not an error: the local
+            // copy is still here, which is exactly what `localFailed` reports.
+            if (outcome.kind === 'heldByWorktree') localFailed = true
+          } catch (e) {
+            localFailed = true
+            logQuietFailure(e as Error)
+          }
         }
-      }
-      return { ...args, localFailed }
-    },
+        return { ...args, localFailed }
+      }),
     onSuccess: (args) => {
       invalidate(qc, id, REMOTE_REFS)
       const where = `${args.remote}/${args.name}`
@@ -935,7 +945,9 @@ export function useGitMutations(repoId: string | null) {
   const fetch = useMutation({
     mutationKey: syncKey(id, 'fetch'),
     mutationFn: async (options: { silent?: boolean } | undefined) => {
-      await timed('git.fetch', async () => unwrap(await commands.gitFetch(id, false)))
+      await asGitOperation(id, async () =>
+        timed('git.fetch', async () => unwrap(await commands.gitFetch(id, false))),
+      )
       return options
     },
     onSuccess: (options) => {
@@ -1008,7 +1020,8 @@ export function useGitMutations(repoId: string | null) {
 
   const pull = useMutation({
     mutationKey: syncKey(id, 'pull'),
-    mutationFn: async () => timed('git.pull', async () => unwrap(await commands.gitPull(id))),
+    mutationFn: async () =>
+      asGitOperation(id, async () => timed('git.pull', async () => unwrap(await commands.gitPull(id)))),
     onSuccess: (result) => {
       // A pull just fetched, so the auto-fetch clock restarts here too.
       noteManualFetch(id)
@@ -1031,7 +1044,8 @@ export function useGitMutations(repoId: string | null) {
 
   const push = useMutation({
     mutationKey: syncKey(id, 'push'),
-    mutationFn: async () => timed('git.push', async () => unwrap(await commands.gitPush(id))),
+    mutationFn: async () =>
+      asGitOperation(id, async () => timed('git.push', async () => unwrap(await commands.gitPush(id)))),
     onSuccess: (result) => {
       // REMOTE_REFS, not REFS: a first push publishes the branch, so the
       // sidebar's Remotes section has a new remote branch to show. That list
@@ -1048,7 +1062,9 @@ export function useGitMutations(repoId: string | null) {
   const pushBranch = useMutation({
     mutationKey: syncKey(id, 'pushBranch'),
     mutationFn: async (branch: string) =>
-      timed('git.pushBranch', async () => unwrap(await commands.gitPushBranch(id, branch))),
+      asGitOperation(id, async () =>
+        timed('git.pushBranch', async () => unwrap(await commands.gitPushBranch(id, branch))),
+      ),
     onSuccess: (result) => {
       // See `push`: publishing a branch adds a remote branch the sidebar reads
       // from the remotes query.
@@ -1104,7 +1120,10 @@ export function useGitMutations(repoId: string | null) {
 
   const pushForce = useMutation({
     mutationKey: syncKey(id, 'pushForce'),
-    mutationFn: async () => timed('git.pushForce', async () => unwrap(await commands.gitPushForce(id))),
+    mutationFn: async () =>
+      asGitOperation(id, async () =>
+        timed('git.pushForce', async () => unwrap(await commands.gitPushForce(id))),
+      ),
     onSuccess: (result) => {
       // See `push`: a force-push moves the remote branch tip the sidebar shows.
       invalidate(qc, id, REMOTE_REFS)
@@ -1268,8 +1287,19 @@ export function useGitMutations(repoId: string | null) {
       // `status` too, not just REFS: when the branch being moved is the one
       // checked out, the backend checks the new tree out as well, so the file
       // list and every cached diff are stale.
-      invalidate(qc, id, [...REFS, 'status', 'submodules'])
-      toast(`Caught ${move.branch} up to ${target}`)
+      // `stashes` too: uncommitted work is set aside to let the move happen, and
+      // a stash left behind has to show up in the list the user is told to look in.
+      invalidate(qc, id, [...REFS, 'status', 'submodules', 'stashes'])
+      // `stashed` means the work could not be put back cleanly, so it is still
+      // in the stash. Saying only "caught up" would leave the user looking for
+      // changes that are no longer in their files.
+      if (move.stashed) {
+        toast.warning(
+          `Caught ${move.branch} up to ${target}, but your uncommitted changes could not be put back automatically - they are safe in your most recent stash.`,
+        )
+      } else {
+        toast(`Caught ${move.branch} up to ${target}`)
+      }
       warnStrandedSubmodules(move.submodules)
     },
     onError,
