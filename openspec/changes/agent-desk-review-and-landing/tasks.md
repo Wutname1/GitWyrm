@@ -37,7 +37,7 @@
       window only) opens the worktree as a real repo tab via `commands.openRepo` and points
       the actual `uiStore.openDiff` at it -- the SAME `DiffView` an ordinary repo tab uses,
       not a second diff renderer.
-- [ ] 2.2 Let graph node Output/View diff open its helper-scoped result.
+- [x] 2.2 Let graph node Output/View diff open its helper-scoped result.
       (`agent_result_open_diff` command + `useAgentResultDiffListener` bridge; wiring
       the graph node's own button is owned by whoever builds `AgentGraphPanel.tsx`,
       which I do not own -- see final report)

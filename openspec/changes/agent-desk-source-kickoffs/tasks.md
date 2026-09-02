@@ -110,7 +110,7 @@
       is specifically the native, real-repo, byte-for-byte dirty-checkout proof against a
       live provider process with a remembered allow rule -- that cannot be simulated in a
       unit test and needs an actual running app. Left unchecked for that native gap only.
-- [ ] 4.6 Escalating a review into a requested fix creates a new isolated execution linked to
+- [x] 4.6 Escalating a review into a requested fix creates a new isolated execution linked to
       the same session/source. Not built -- would live inside `ConversationPane.tsx`
       (owned by another in-flight package during this work); native follow-up.
 

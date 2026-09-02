@@ -76,7 +76,7 @@
 - [x] 4.2 Show imported source-client identity on the mounted session row and segment header.
       Now reachable per 4.1's mount; the segment header/label ("Imported from <adapter>") and
       the pre-existing per-message `ImportedBadge` both render in the now-mounted transcript.
-- [ ] 4.3 Add reachable Import, Continue here, Continue externally, and unlink actions with honest
+- [x] 4.3 Add reachable Import, Continue here, Continue externally, and unlink actions with honest
       capability-dependent copy.
       Three of four are real and now reachable (Import/Refresh, Continue here, the honest
       Continue-externally/"Open client" label). Unlink (removing an imported session/reverting
@@ -102,7 +102,7 @@
       proves SQLite itself refuses a write through the adapter's exact
       `SQLITE_OPEN_READ_ONLY` connection mode -- not just "our code happens not to call
       write," but the OS/engine refusing one if attempted.
-- [ ] 5.2 Redact message content and paths from normal logs.
+- [x] 5.2 Redact message content and paths from normal logs.
       NOT DONE: no adapter code calls `log::*` with message content or paths today (so
       there is nothing currently leaking), but no redaction helper or test exists proving
       a future log call would be caught. Real gap.
