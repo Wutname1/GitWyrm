@@ -57,6 +57,14 @@ pub async fn create_commit(
     })?;
 
     let mut index = repo.index()?;
+    // An unresolved merge leaves conflict entries in the index, and writing a
+    // tree from those fails deep inside libgit2 with wording no one can act on.
+    // Refuse here with the same message the merge commit path uses.
+    if index.has_conflicts() {
+      return Err(AppError::Other(
+        "resolve all conflicts before committing".into(),
+      ));
+    }
     let tree_oid = index.write_tree()?;
     let tree = repo.find_tree(tree_oid)?;
 

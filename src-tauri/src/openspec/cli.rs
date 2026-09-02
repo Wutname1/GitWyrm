@@ -273,6 +273,13 @@ pub fn commit_archive(
     let repo_path_str = repo_path.to_string_lossy();
 
     let mut index = repo.index()?;
+    // Archiving commits on the user's behalf, so an unresolved merge would fail
+    // here with a libgit2 index error for an action they never asked for.
+    if index.has_conflicts() {
+        return Err(crate::error::AppError::Other(
+            "finish the merge in progress before archiving a change".into(),
+        ));
+    }
     index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
     index.write()?;
     let tree_oid = index.write_tree()?;

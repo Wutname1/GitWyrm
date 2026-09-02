@@ -102,9 +102,18 @@ export function CommitMessageForm() {
   const canAmend = headSha != null;
   // Amend can change just the message, so it does not require staged files.
   const hasWork = amend ? canAmend : stagedCount > 0;
+  // A conflicted file means the index still holds both sides, and git cannot
+  // build a commit from that. The backend refuses it, but the button used to
+  // stay enabled -- so the click just produced an error and invited another
+  // click, which is what filled the crash reports.
+  const hasConflicts =
+    status.data?.unstaged.some((f) => f.conflicted) ||
+    status.data?.staged.some((f) => f.conflicted) ||
+    false;
   const canCommit =
     hasWork &&
     msg.trim().length > 0 &&
+    !hasConflicts &&
     !m.createCommit.isPending &&
     !pushPending &&
     !ai.generate.isPending;
@@ -158,7 +167,9 @@ export function CommitMessageForm() {
       ? "Pushing…"
       : ai.generate.isPending
         ? "Waiting for the generated message"
-        : amend && !canAmend
+        : hasConflicts
+          ? "Resolve the conflicted files first"
+          : amend && !canAmend
           ? "No commit to amend"
           : !hasWork
             ? "Stage files to commit"
