@@ -2251,9 +2251,33 @@ pub struct SessionUsage {
     pub context_used: Option<UsageValue>,
     pub context_size: Option<UsageValue>,
     pub active_helper_count: Option<u32>,
+    /// One row per execution that reported any usage at all, in the order the
+    /// executions were recorded. Empty when nothing reported anything. The
+    /// session totals above already include these; this is the breakdown.
+    #[serde(default)]
+    pub agents: Vec<AgentUsageRow>,
     /// RFC 3339 UTC timestamp of when this data was produced, so the UI can
     /// show "as of" rather than implying it is live.
     pub data_timestamp: String,
+}
+
+/// What one execution (the lead, or a single helper) reported. Every figure
+/// is optional for the same reason as on [`SessionUsage`]: absent means the
+/// provider did not say, never zero. `u32` throughout because specta cannot
+/// export 64-bit integers, and that failure is silent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentUsageRow {
+    pub execution_id: ExecutionId,
+    /// `"Lead"` for the lead/solo execution, otherwise the helper's job title
+    /// (falling back to its execution id when a helper has none).
+    pub label: String,
+    pub is_lead: bool,
+    /// Input plus output tokens, when either was reported.
+    pub tokens: Option<u32>,
+    /// Provider-reported cost in millionths of a dollar.
+    pub cost_micro_usd: Option<u32>,
+    pub turns: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -2327,50 +2351,60 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
 
     // Turns, not messages. Counting messages counted every streamed note and
     // every tool activity row, so a three-turn run reported dozens of
-    // "turns". Each execution's own recorded turn count is the real figure.
-    //
-    // Falls back to the message count only when nothing recorded a turn at
-    // all, so a run whose provider reports no usage still shows something
-    // rather than dropping to zero -- but it is labelled `Measured` there,
-    // because a message count is genuinely what GitWyrm measured itself.
+    // "turns". Each execution's own recorded turn count is the only real
+    // figure, so when no execution recorded usage at all this stays `None`
+    // rather than falling back to a transcript row count dressed up as turns.
     let session_requests = {
-        let reported: u32 = session
+        let reported: Option<u32> = session
             .executions
             .iter()
             .filter_map(|e| e.usage.as_ref())
             .map(|u| u.turns)
-            .sum();
-        if reported > 0 {
-            Some(UsageValue {
-                value: f64::from(reported),
-                source: UsageSource::ProviderReported,
-            })
-        } else {
-            let n = session
-                .messages
-                .iter()
-                .filter(|m| m.execution_id.is_some())
-                .count();
-            if n == 0 {
-                None
-            } else {
-                Some(UsageValue {
-                    value: n as f64,
-                    source: UsageSource::Measured,
-                })
-            }
-        }
+            .fold(None, |acc: Option<u32>, turns| Some(acc.unwrap_or(0).saturating_add(turns)));
+        reported.map(|turns| UsageValue {
+            value: f64::from(turns),
+            source: UsageSource::ProviderReported,
+        })
     };
 
-    // The most recent context reading on the session. Deliberately not summed:
+    // The most recent context reading from the LEAD. Deliberately not summed:
     // two agents each holding 30k of their own 200k windows is not 60k of
-    // anything.
+    // anything. Helpers are skipped on purpose: the reading a person wants
+    // when asking "how close am I to a compaction" is the conversation they
+    // are typing into, and a helper that reported later would otherwise
+    // replace it.
     let latest_context = session
         .executions
         .iter()
+        .filter(|e| e.parent_execution_id.is_none())
         .filter_map(|e| e.usage.as_ref())
         .filter_map(|u| Some((u.context_used?, u.context_size?)))
         .next_back();
+
+    let agents: Vec<AgentUsageRow> = session
+        .executions
+        .iter()
+        .filter_map(|e| {
+            let usage = e.usage.as_ref()?;
+            let is_lead = e.parent_execution_id.is_none();
+            let tokens = match (usage.input_tokens, usage.output_tokens) {
+                (None, None) => None,
+                (a, b) => Some(a.unwrap_or(0).saturating_add(b.unwrap_or(0))),
+            };
+            Some(AgentUsageRow {
+                execution_id: e.execution_id.clone(),
+                label: if is_lead {
+                    "Lead".to_string()
+                } else {
+                    e.job_title.clone().unwrap_or_else(|| e.execution_id.clone())
+                },
+                is_lead,
+                tokens,
+                cost_micro_usd: usage.cost_micro_usd,
+                turns: Some(usage.turns),
+            })
+        })
+        .collect();
 
     // Summed across every execution on the session -- helpers included, since
     // a lead that spent its budget on five helpers cost the user all five.
@@ -2427,6 +2461,7 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
                 source: UsageSource::ProviderReported,
             }),
             active_helper_count,
+            agents,
             data_timestamp: now_rfc3339(),
         },
     }
@@ -5070,9 +5105,108 @@ mod tests {
         let SessionUsageOutcome::Available { usage } = outcome else {
             panic!("expected Available, got {outcome:?}");
         };
-        let requests = usage.session_requests.expect("a measured request count must be present");
-        assert_eq!(requests.value, 1.0);
-        assert_eq!(requests.source, UsageSource::Measured);
+        // A transcript row is not a turn. Before this fix a single streamed
+        // note was reported as "1 turn"; an unreported figure must stay absent.
+        assert!(usage.session_requests.is_none(), "transcript rows must never be counted as turns");
+        assert!(usage.agents.is_empty(), "no execution reported usage, so there is no breakdown");
+    }
+
+    /// Builds a session with a lead and one helper that both reported usage,
+    /// with the helper's report landing AFTER the lead's.
+    fn seed_lead_and_helper_usage(root: &SessionStoreRoot, locks: &crate::agentdesk::SessionLocks) -> (String, String, String) {
+        use crate::agentdesk::model::{ExecutionRecord, ExecutionUsage};
+        let CreateSessionOutcome::Created { session } = create_session_at(root, create_request("Team"))
+        else {
+            panic!("expected Created");
+        };
+        let session_id = session.header.session_id.clone();
+        let lead_id = crate::agentdesk::execution_id_for_run_session("lead");
+        let helper_id = crate::agentdesk::execution_id_for_run_session("helper");
+        update_session_at(locks, root, &session_id, |s| {
+            let mut lead = ExecutionRecord::minimal(
+                lead_id.clone(),
+                s.header.session_id.clone(),
+                None,
+                SessionState::Finished,
+                now_rfc3339(),
+                Some(now_rfc3339()),
+                3,
+            );
+            lead.usage = Some(ExecutionUsage {
+                input_tokens: Some(1_000),
+                output_tokens: Some(200),
+                cost_micro_usd: Some(4_500),
+                turns: 3,
+                context_used: Some(31_000),
+                context_size: Some(200_000),
+                ..ExecutionUsage::default()
+            });
+            let mut helper = ExecutionRecord::minimal(
+                helper_id.clone(),
+                s.header.session_id.clone(),
+                Some(lead_id.clone()),
+                SessionState::Finished,
+                now_rfc3339(),
+                Some(now_rfc3339()),
+                2,
+            );
+            helper.job_title = Some("Trace the crash".into());
+            helper.usage = Some(ExecutionUsage {
+                input_tokens: Some(500),
+                output_tokens: None,
+                cost_micro_usd: None,
+                turns: 2,
+                context_used: Some(90_000),
+                context_size: Some(128_000),
+                ..ExecutionUsage::default()
+            });
+            s.executions.push(lead);
+            s.executions.push(helper);
+        });
+        (session_id, lead_id, helper_id)
+    }
+
+    #[test]
+    fn usage_context_comes_from_the_lead_even_when_a_helper_reported_later() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let (session_id, _, _) = seed_lead_and_helper_usage(&root, &locks);
+
+        let SessionUsageOutcome::Available { usage } = session_usage_at(&root, &session_id) else {
+            panic!("expected Available");
+        };
+        assert_eq!(usage.context_used.map(|v| v.value), Some(31_000.0));
+        assert_eq!(usage.context_size.map(|v| v.value), Some(200_000.0));
+        // Totals still include the helper.
+        assert_eq!(usage.session_tokens.map(|v| v.value), Some(1_700.0));
+        assert_eq!(usage.session_requests.map(|v| v.value), Some(5.0));
+    }
+
+    #[test]
+    fn usage_breaks_down_per_agent_without_inventing_missing_figures() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let (session_id, lead_id, helper_id) = seed_lead_and_helper_usage(&root, &locks);
+
+        let SessionUsageOutcome::Available { usage } = session_usage_at(&root, &session_id) else {
+            panic!("expected Available");
+        };
+        assert_eq!(usage.agents.len(), 2);
+        let lead = &usage.agents[0];
+        assert_eq!(lead.execution_id, lead_id);
+        assert_eq!(lead.label, "Lead");
+        assert!(lead.is_lead);
+        assert_eq!(lead.tokens, Some(1_200));
+        assert_eq!(lead.cost_micro_usd, Some(4_500));
+        assert_eq!(lead.turns, Some(3));
+
+        let helper = &usage.agents[1];
+        assert_eq!(helper.execution_id, helper_id);
+        assert_eq!(helper.label, "Trace the crash");
+        assert!(!helper.is_lead);
+        assert_eq!(helper.tokens, Some(500), "input alone is still a real token figure");
+        assert_eq!(helper.cost_micro_usd, None, "an unreported cost stays absent, never zero");
+        assert_eq!(helper.turns, Some(2));
     }
 
     #[test]

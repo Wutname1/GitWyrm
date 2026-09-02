@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, TimerReset } from 'lucide-react'
 import { commands } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
-import { buildUsageRows } from '@/lib/agentDeskUsage'
+import { buildAgentUsageLines, buildUsageRows } from '@/lib/agentDeskUsage'
 import { cn } from '@/lib/utils'
 
 /**
@@ -34,6 +34,7 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
 
   const usage = query.data?.kind === 'available' ? query.data.usage : null
   const rows = usage ? buildUsageRows(usage) : []
+  const agentLines = usage ? buildAgentUsageLines(usage) : []
 
   return (
     <section className="rounded-md border border-border bg-panel2">
@@ -78,6 +79,18 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
                 </div>
               ))}
             </dl>
+          )}
+          {agentLines.length > 0 && (
+            <ul className="mt-1.5 flex flex-col gap-0.5 border-t border-border pt-1.5" aria-label="Usage by agent">
+              {agentLines.map((line) => (
+                <li key={line.key} className="flex items-baseline justify-between gap-2 text-[10px]">
+                  <span className="min-w-0 truncate text-muted-foreground">{line.label}</span>
+                  <span className="flex-none text-right text-foreground">
+                    {line.parts.length > 0 ? line.parts.join(' · ') : 'not reported'}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}

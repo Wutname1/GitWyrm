@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildUsageRows, hasAnyUsageData } from './agentDeskUsage'
-import type { SessionUsage } from '@/lib/bindings'
+import { buildAgentUsageLines, buildUsageRows, hasAnyUsageData } from './agentDeskUsage'
+import type { AgentUsageRow, SessionUsage } from '@/lib/bindings'
 
 const EMPTY: SessionUsage = {
   sessionTokens: null,
@@ -11,8 +11,54 @@ const EMPTY: SessionUsage = {
   activeHelperCount: null,
   contextUsed: null,
   contextSize: null,
+  agents: [],
   dataTimestamp: '2026-08-19T00:00:00Z',
 }
+
+const LEAD: AgentUsageRow = {
+  executionId: 'lead-1',
+  label: 'Lead',
+  isLead: true,
+  tokens: 1200,
+  costMicroUsd: 4500,
+  turns: 3,
+}
+
+const HELPER: AgentUsageRow = {
+  executionId: 'helper-1',
+  label: 'Trace the crash',
+  isLead: false,
+  tokens: 500,
+  costMicroUsd: null,
+  turns: 1,
+}
+
+describe('buildAgentUsageLines', () => {
+  it('shows nothing when a lone lead would only repeat the totals', () => {
+    expect(buildAgentUsageLines({ ...EMPTY, agents: [LEAD] })).toEqual([])
+    expect(buildAgentUsageLines(EMPTY)).toEqual([])
+    // Older session files predate the field entirely.
+    expect(buildAgentUsageLines({ ...EMPTY, agents: undefined })).toEqual([])
+  })
+
+  it('lists every agent once a helper exists', () => {
+    const lines = buildAgentUsageLines({ ...EMPTY, agents: [LEAD, HELPER] })
+    expect(lines.map((l) => l.label)).toEqual(['Lead', 'Trace the crash'])
+    expect(lines[0].parts).toEqual(['1.2k tokens', '3 turns', '$0.0045'])
+  })
+
+  it('shows a lone helper too, since the lead may not have reported yet', () => {
+    expect(buildAgentUsageLines({ ...EMPTY, agents: [HELPER] })).toHaveLength(1)
+  })
+
+  it('never invents a zero for a figure an agent did not report', () => {
+    const lines = buildAgentUsageLines({ ...EMPTY, agents: [LEAD, HELPER] })
+    expect(lines[1].parts).toEqual(['500 tokens', '1 turn'])
+    const silent: AgentUsageRow = { ...HELPER, executionId: 'helper-2', tokens: null, turns: null }
+    const quiet = buildAgentUsageLines({ ...EMPTY, agents: [LEAD, silent] })
+    expect(quiet[1].parts).toEqual([])
+  })
+})
 
 describe('buildUsageRows', () => {
   it('produces no rows at all when every field is unknown', () => {

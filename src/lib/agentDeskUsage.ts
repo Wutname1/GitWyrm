@@ -145,3 +145,33 @@ export function buildUsageRows(usage: SessionUsage): UsageRow[] {
 export function hasAnyUsageData(usage: SessionUsage): boolean {
   return buildUsageRows(usage).length > 0
 }
+
+/** One per-agent line under the totals: who, and what they reported. */
+export interface AgentUsageLine {
+  key: string
+  label: string
+  /** Already-formatted figures, one per reported field, in display order. */
+  parts: string[]
+}
+
+/**
+ * The per-agent breakdown, or an empty list when it would only repeat the
+ * totals. A single lead on its own IS the session total, so the breakdown
+ * appears only once there are two or more agents or any helper at all.
+ *
+ * Same honesty rule as `buildUsageRows`: a field the provider did not report
+ * produces no part, never a "0". An agent that reported nothing usable still
+ * gets a line naming it, so the list matches what actually ran.
+ */
+export function buildAgentUsageLines(usage: SessionUsage): AgentUsageLine[] {
+  const agents = usage.agents ?? []
+  const hasHelper = agents.some((a) => !a.isLead)
+  if (agents.length < 2 && !hasHelper) return []
+  return agents.map((agent) => {
+    const parts: string[] = []
+    if (agent.tokens != null) parts.push(formatTokens(agent.tokens))
+    if (agent.turns != null) parts.push(`${formatCount(agent.turns)} turn${agent.turns === 1 ? '' : 's'}`)
+    if (agent.costMicroUsd != null) parts.push(formatCost(agent.costMicroUsd / 1_000_000))
+    return { key: agent.executionId, label: agent.label, parts }
+  })
+}

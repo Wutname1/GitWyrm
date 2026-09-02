@@ -3973,6 +3973,26 @@ preferredMode?: string | null;
  * The last team shape chosen for this chat (`solo` or `helpers`).
  */
 preferredTeam?: string | null }
+/**
+ * What one execution (the lead, or a single helper) reported. Every figure
+ * is optional for the same reason as on [`SessionUsage`]: absent means the
+ * provider did not say, never zero. `u32` throughout because specta cannot
+ * export 64-bit integers, and that failure is silent.
+ */
+export type AgentUsageRow = { executionId: string; 
+/**
+ * `"Lead"` for the lead/solo execution, otherwise the helper's job title
+ * (falling back to its execution id when a helper has none).
+ */
+label: string; isLead: boolean; 
+/**
+ * Input plus output tokens, when either was reported.
+ */
+tokens: number | null; 
+/**
+ * Provider-reported cost in millionths of a dollar.
+ */
+costMicroUsd: number | null; turns: number | null }
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
 /**
@@ -6854,6 +6874,12 @@ export type SessionUsage = { sessionTokens: UsageValue | null; sessionRequests: 
  * over ACP's own `usage_update`; absent for agents that do not send one.
  */
 contextUsed: UsageValue | null; contextSize: UsageValue | null; activeHelperCount: number | null; 
+/**
+ * One row per execution that reported any usage at all, in the order the
+ * executions were recorded. Empty when nothing reported anything. The
+ * session totals above already include these; this is the breakdown.
+ */
+agents?: AgentUsageRow[]; 
 /**
  * RFC 3339 UTC timestamp of when this data was produced, so the UI can
  * show "as of" rather than implying it is live.
