@@ -91,6 +91,16 @@ pub async fn resolve(
     conflict_text: &str,
 ) -> Result<String, AppError> {
     let user = user_prompt(path, conflict_text);
+
+    // A model call is the one thing here with no progress and no upper bound
+    // the user can feel. Without a timing line, a two-minute wait leaves
+    // nothing in the log to explain it -- which is exactly how it gets
+    // reported as a hang.
+    log::info!(
+        "ai resolve: asking {provider}/{model} for {path} ({} bytes of conflict)",
+        conflict_text.len()
+    );
+    let started = std::time::Instant::now();
     let reply = crate::ai::complete::complete_with(
         app,
         provider,
@@ -100,7 +110,22 @@ pub async fn resolve(
         MAX_OUTPUT_TOKENS,
         TIMEOUT,
     )
-    .await?;
+    .await;
+    let elapsed = started.elapsed();
+    let reply = match reply {
+        Ok(reply) => {
+            log::info!(
+                "ai resolve: {provider}/{model} replied in {:?} ({} bytes)",
+                elapsed,
+                reply.len()
+            );
+            reply
+        }
+        Err(e) => {
+            log::warn!("ai resolve: {provider}/{model} failed after {elapsed:?}: {e}");
+            return Err(e);
+        }
+    };
 
     let resolved = strip_code_fence(&reply);
 
@@ -111,6 +136,7 @@ pub async fn resolve(
     }
 
     if has_conflict_markers(resolved) {
+        log::warn!("ai resolve: {provider}/{model} left conflict markers in {path}");
         return Err(AppError::Other(
             "The AI left conflict markers in the file, so its answer was discarded. \
              Try again, or resolve this one by hand."
@@ -126,14 +152,30 @@ pub async fn resolve(
 /// Matches on the line prefix, with the trailing `\r` of a CRLF file stripped
 /// first -- a marker in a CRLF file is `=======\r`, which no equality test
 /// against `"======="` would ever catch.
+///
+/// A longer run of the same character is NOT this marker: `========` is an
+/// ordinary comment divider, and plenty of real source files contain one.
+/// This must stay in step with `isMarker` in `src/lib/conflictHunks.ts`, which
+/// decides whether the UI shows "still has conflict markers" -- when the two
+/// disagree, one calls a file clean while the other calls it conflicted, and
+/// the user is told both at once.
 fn has_conflict_markers(text: &str) -> bool {
     text.lines().any(|raw| {
         let line = raw.strip_suffix('\r').unwrap_or(raw);
-        line.starts_with("<<<<<<<")
-            || line.starts_with("=======")
-            || line.starts_with(">>>>>>>")
-            || line.starts_with("|||||||")
+        is_marker(line, "<<<<<<<")
+            || is_marker(line, "=======")
+            || is_marker(line, ">>>>>>>")
+            || is_marker(line, "|||||||")
     })
+}
+
+/// A marker prefix, but only when not part of a longer run of that character.
+fn is_marker(line: &str, marker: &str) -> bool {
+    let Some(rest) = line.strip_prefix(marker) else {
+        return false;
+    };
+    let repeated = marker.as_bytes()[0];
+    !matches!(rest.as_bytes().first(), Some(&c) if c == repeated)
 }
 
 #[cfg(test)]
@@ -146,6 +188,16 @@ mod tests {
         assert!(has_conflict_markers("a\r\n=======\r\nb\r\n"));
         assert!(has_conflict_markers("a\n>>>>>>> other\n"));
         assert!(has_conflict_markers("a\n||||||| 1234567\n"));
+    }
+
+    /// A comment divider is not a conflict. Rejecting one would hand a correct
+    /// resolution back to the user as a failure.
+    #[test]
+    fn a_longer_run_of_the_same_character_is_not_a_marker() {
+        assert!(!has_conflict_markers("// ==========\nfn a() {}\n"));
+        assert!(!has_conflict_markers("<<<<<<<<<< not a marker\n"));
+        assert!(has_conflict_markers("=======\n"));
+        assert!(has_conflict_markers("<<<<<<< HEAD\n"));
     }
 
     #[test]
