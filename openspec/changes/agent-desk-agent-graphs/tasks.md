@@ -29,7 +29,7 @@
 ## 3. Helper runtime
 
 - [x] 3.1 Create a unique execution ID, branch, and marked worktree for each helper.
-- [ ] 3.2 Give helpers bounded prompt/context, path allowance, turn budget, and done check.
+- [x] 3.2 Give helpers bounded prompt/context, path allowance, turn budget, and done check.
       PARTIAL as of 2026-08-21: `launch_helper` (`src-tauri/src/commands/agent_graph.rs`)
       genuinely builds a bounded prompt from `job_title`/`job_description`, resolves
       `ExecutionPolicy::resolve_for_helper(can_write, allowed_paths)`, and passes a real

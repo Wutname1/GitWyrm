@@ -24,7 +24,7 @@
       the source has diverged since launch -- grepped `src/components/domain/agent-desk/*`
       and `src/lib/agentDesk*.ts`, zero hits. Left unchecked because the task bundles three
       things and the third (mark launch-vs-live differences) is not built.
-- [ ] 2.5 Render all repository markdown inertly.
+- [x] 2.5 Render all repository markdown inertly.
 
 ## 3. Plan integration
 
@@ -40,8 +40,8 @@
       start decision" -- there is no separate literal `AwaitingStart` variant; this
       NeedsInput-plus-proposed_graph combination IS that state) via a real locked
       `update_session_at` write, not a transient/in-memory value.
-- [ ] 3.3 Detect task/spec changes after draft and block Start until refreshed/accepted.
-- [ ] 3.4 Add Revise plan, Start, and Use solo actions with immediate visible state.
+- [x] 3.3 Detect task/spec changes after draft and block Start until refreshed/accepted.
+- [x] 3.4 Add Revise plan, Start, and Use solo actions with immediate visible state.
 
 ## 4. File-backed completion
 
@@ -67,7 +67,7 @@
 ## 5. No-AI continuity and proof
 
 - [x] 5.1 Keep copy handoff, editor, opencode, and manual editing actions available.
-- [ ] 5.2 Test repo without OpenSpec and repo without CLI.
+- [x] 5.2 Test repo without OpenSpec and repo without CLI.
 - [x] 5.3 Test task-number gaps/duplicates and starting a non-next task.
 - [ ] 5.4 Native-test exact-task restart and file-watcher refresh.
 - [ ] 5.5 Record Gate 4 evidence.

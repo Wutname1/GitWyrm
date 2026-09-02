@@ -81,7 +81,7 @@
       by the existing `agent_session_refresh_source` command and `SessionSourceBanner`
       cached/live states (owned by `agent-desk-conversation-shell`); no additional wiring
       added by this package.
-- [ ] 3.5 Derive branch/worktree suggestion through existing branch/worktree helpers.
+- [x] 3.5 Derive branch/worktree suggestion through existing branch/worktree helpers.
       `provision_kickoff_worktree` (task 5.1) derives the worktree at execution-start time;
       a pre-start branch-name *suggestion* shown in the UI before Fix is clicked was not
       built -- native follow-up if wanted.

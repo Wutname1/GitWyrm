@@ -57,7 +57,7 @@
 ## 5. Proof
 
 - [x] 5.1 Test concurrent destination edit refusal and byte-identical Undo.
-- [ ] 5.2 Test partial batch failure leaves completed receipts and untouched failed targets.
+- [x] 5.2 Test partial batch failure leaves completed receipts and untouched failed targets.
 - [x] 5.3 Test backup recovery after simulated replacement failure.
 - [x] 5.4 Test that secrets never appear in UI snapshots or normal logs.
 - [ ] 5.5 Record Gate 7 separately per client writer.
