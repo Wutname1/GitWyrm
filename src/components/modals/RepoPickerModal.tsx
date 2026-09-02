@@ -57,6 +57,7 @@ import {
   useOpenRepos,
   useRepoReadme,
   useReposWithRemote,
+  useRepoSnapshot,
 } from "@/hooks/useRepoActions";
 import { Markdown } from "@/components/ui/markdown";
 import {
@@ -906,6 +907,124 @@ function RepoReadme({ path }: { path: string }) {
   );
 }
 
+/**
+ * One number in the repository details panel, with its label under it.
+ *
+ * A dash rather than a zero when the number is not known: "no upstream" and
+ * "in step with the remote" are different answers, and showing 0 for both would
+ * say the wrong thing about a branch that was never pushed.
+ */
+function RepoStat({
+  label,
+  value,
+  tone = "plain",
+  title,
+}: {
+  label: string;
+  value: number | null | undefined;
+  /** `accent` for numbers that mean there is something to do. */
+  tone?: "plain" | "accent";
+  title?: string;
+}) {
+  const known = value != null;
+  return (
+    <div
+      className="min-w-0 rounded-md border border-border bg-background px-2 py-1.5"
+      title={title}
+    >
+      <div
+        className={cn(
+          "truncate text-sm font-semibold tabular-nums",
+          known && tone === "accent" && value > 0
+            ? "text-accent-text"
+            : "text-foreground",
+          !known && "text-muted-foreground",
+        )}
+      >
+        {known ? value : "-"}
+      </div>
+      <div className="truncate text-[9px] uppercase tracking-[.08em] text-muted-foreground">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The numbers row at the top of the repository details panel.
+ *
+ * Loads on selection and fetches first, so ahead/behind reflects the remote now
+ * rather than the last time the user synced. While that is in flight the row
+ * keeps its shape with placeholders instead of collapsing, so the panel below
+ * it does not jump as each repository is clicked.
+ */
+function RepoStats({ path }: { path: string }) {
+  const snapshot = useRepoSnapshot(path);
+  const data = snapshot.data;
+  const loading = snapshot.isPending;
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center gap-2">
+        <span className="text-2xs font-bold uppercase tracking-[.09em] text-muted-foreground">
+          At a glance
+        </span>
+        {loading && (
+          <Loader2 size={11} className="animate-spin text-muted-foreground" />
+        )}
+        <span className="flex-1" />
+        {data?.fetched && (
+          <span className="text-[9px] uppercase tracking-[.08em] text-muted-foreground">
+            Just checked
+          </span>
+        )}
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-1.5">
+        <RepoStat
+          label="Ahead"
+          value={data?.ahead}
+          tone="accent"
+          title="Commits on your branch the remote does not have yet"
+        />
+        <RepoStat
+          label="Behind"
+          value={data?.behind}
+          tone="accent"
+          title="Commits on the remote you do not have yet"
+        />
+        <RepoStat
+          label="Changes"
+          value={data?.changes}
+          tone="accent"
+          title="Files with uncommitted changes"
+        />
+        <RepoStat
+          label="Branches"
+          value={data?.branches}
+          title="Branches on this computer"
+        />
+        <RepoStat
+          label="Issues"
+          value={data?.issues}
+          tone="accent"
+          title="Open issues on the host"
+        />
+        <RepoStat
+          label="Pull requests"
+          value={data?.prs}
+          tone="accent"
+          title="Open pull requests on the host"
+        />
+      </div>
+      {!loading && data == null && (
+        <p className="mt-2 text-2xs text-muted-foreground">
+          Could not read this folder.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function RepoDetails({
   selected,
   repositories,
@@ -1057,6 +1176,7 @@ function RepoDetails({
             </span>
           )}
         </div>
+        <RepoStats path={repo.path} />
         <div className="mt-5 border-t border-border pt-3">
           <button
             type="button"

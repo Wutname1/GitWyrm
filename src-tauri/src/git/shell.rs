@@ -267,7 +267,26 @@ fn log_stderr(args: &[&str], out: &GitOutput) {
     }
 }
 
+/// `run_git` for work nobody asked for: same call, but Git Credential Manager is
+/// told it may not prompt.
+///
+/// Network commands started by a selection or a timer must fail rather than put
+/// a login window in front of someone who is doing something else. Callers pass
+/// `credential_args(Attended::Background)` themselves, because those are `-c`
+/// options that have to precede the subcommand.
+pub fn run_git_unattended(repo_path: Option<&str>, args: &[&str]) -> Result<GitOutput, AppError> {
+    run_git_with(repo_path, args, true)
+}
+
 pub fn run_git(repo_path: Option<&str>, args: &[&str]) -> Result<GitOutput, AppError> {
+    run_git_with(repo_path, args, false)
+}
+
+fn run_git_with(
+    repo_path: Option<&str>,
+    args: &[&str],
+    unattended: bool,
+) -> Result<GitOutput, AppError> {
     let mut cmd = Command::new(git_program_name());
     if let Some(path) = repo_path {
         cmd.arg("-C").arg(path);
@@ -277,6 +296,9 @@ pub fn run_git(repo_path: Option<&str>, args: &[&str]) -> Result<GitOutput, AppE
     // Hand this child the system's libraries, not the AppImage's.
     crate::process_env::scrub_bundled_env(&mut cmd);
     prepare_git_env(&mut cmd);
+    if unattended {
+        apply_background_env(&mut cmd);
+    }
 
     #[cfg(windows)]
     {

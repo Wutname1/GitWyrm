@@ -899,7 +899,7 @@ pub async fn github_scan_repos(
 
 /// One repository's counts. Never fails: an unreadable repository, an unknown
 /// host, or a host that errors all come back unchecked.
-async fn count_one(app: &tauri::AppHandle, path: String) -> RepoActivityCount {
+pub async fn count_one(app: &tauri::AppHandle, path: String) -> RepoActivityCount {
     let unchecked = |path: String| RepoActivityCount {
         path,
         prs: 0,

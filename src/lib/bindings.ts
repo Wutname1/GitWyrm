@@ -2369,6 +2369,22 @@ async findReposWithRemote(url: string, paths: string[]) : Promise<Result<RemoteM
 }
 },
 /**
+ * Everything the details panel shows about one repository, optionally after a
+ * fetch so the ahead/behind numbers are not stale.
+ * 
+ * The host counts reuse the same per-repository counter the library scan uses,
+ * so a repository selected here and a repository scanned in bulk can never
+ * report different numbers.
+ */
+async repoSnapshot(path: string, fetch: boolean) : Promise<Result<RepoSnapshot | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("repo_snapshot", { path, fetch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether the right-click entry is currently registered.
  * 
  * Reports `true` only when every target is present, so a half-written state
@@ -4466,6 +4482,55 @@ behind: number;
 uncommitted: number }
 export type RepoIcon = { source_path: string; label: string; data_url: string; custom: boolean }
 export type RepoInfo = { id: string; name: string; path: string; head_branch: string | null }
+/**
+ * Headline numbers for one repository the picker has selected.
+ * 
+ * Every field is best-effort: a repository that cannot be opened, or a host
+ * that cannot be reached, reports what it could and leaves the rest empty
+ * rather than failing the whole panel.
+ */
+export type RepoSnapshot = { 
+/**
+ * Local branches.
+ */
+branches: number; 
+/**
+ * Remote-tracking branches, across every remote.
+ */
+remote_branches: number; 
+/**
+ * Tags.
+ */
+tags: number; 
+/**
+ * Current branch, or None when HEAD is detached or unreadable.
+ */
+head_branch: string | null; 
+/**
+ * How far the current branch leads its upstream. None when it has none.
+ */
+ahead: number | null; 
+/**
+ * How far the current branch trails its upstream. None when it has none.
+ */
+behind: number | null; 
+/**
+ * Files with uncommitted changes, staged or not.
+ */
+changes: number; 
+/**
+ * Open pull requests, or None when the host was not reached.
+ */
+prs: number | null; 
+/**
+ * Open issues, or None when the host does not have them or was not reached.
+ */
+issues: number | null; 
+/**
+ * Whether the fetch this snapshot asked for actually ran. False means the
+ * counts are from whatever was already on disk.
+ */
+fetched: boolean }
 export type RepositoryStarter = "blank" | "node" | "rust" | "csharp" | "all_in_one"
 /**
  * How far a reset rewinds: ref only, ref+index, or ref+index+working tree.

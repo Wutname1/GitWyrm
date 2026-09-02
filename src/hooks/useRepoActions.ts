@@ -99,6 +99,29 @@ export function useRepoReadme(path: string | null) {
 }
 
 /**
+ * Headline numbers for the repository the picker has selected: branches, how
+ * far the current branch leads or trails its remote, uncommitted files, and
+ * open issues and pull requests.
+ *
+ * Fetches first so ahead/behind is answered against the remote as it is now
+ * rather than whenever the user last synced. That fetch is unattended in the
+ * backend -- selecting a row must never raise a login window -- and a remote
+ * that refuses simply leaves the counts as they were on disk.
+ *
+ * Held for five minutes because it costs a network round trip, and re-clicking
+ * between two rows is how people read this panel.
+ */
+export function useRepoSnapshot(path: string | null) {
+  return useQuery({
+    queryKey: ['repo-snapshot', path ? pathKey(path) : ''],
+    enabled: path != null,
+    staleTime: 300_000,
+    retry: false,
+    queryFn: async () => unwrap(await commands.repoSnapshot(path as string, true)),
+  })
+}
+
+/**
  * Which of `paths` already have `url` as one of their remotes.
  *
  * Backs the picker's answer to a pasted clone URL: before offering to make a
