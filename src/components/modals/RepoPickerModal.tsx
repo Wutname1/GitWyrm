@@ -1068,25 +1068,26 @@ function RepoDetails({
           </button>
         </div>
         <RepoReadme path={repo.path} />
-        <span className="flex-1" />
-        {/* Stuck to the bottom of the panel: a long readme must never scroll
-            the way to open the repository off the screen. */}
-        <div className="sticky bottom-0 -mx-5 -mb-5 mt-5 grid bg-panel px-5 pb-5 pt-3">
-          <Button
-            className="gap-2"
-            onClick={() =>
-              openRepo ? onJumpToRepo(openRepo.id) : onOpenRepo(repo.path)
-            }
-            disabled={busy}
-          >
-            {busy ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <FolderGit2 size={14} />
-            )}
-            {openRepo ? `Open ${repo.name} tab` : `Open ${repo.name}`}
-          </Button>
-        </div>
+      </div>
+      {/* Outside the scroller, not stuck to the bottom of it: a sticky button
+          keeps its own band opaque but the readme still passes through the gaps
+          around it. Its own row means a long readme scrolls up to the border
+          and stops. */}
+      <div className="grid flex-none border-t border-border bg-panel px-5 py-4">
+        <Button
+          className="gap-2"
+          onClick={() =>
+            openRepo ? onJumpToRepo(openRepo.id) : onOpenRepo(repo.path)
+          }
+          disabled={busy}
+        >
+          {busy ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <FolderGit2 size={14} />
+          )}
+          {openRepo ? `Open ${repo.name} tab` : `Open ${repo.name}`}
+        </Button>
       </div>
     </>
   );
