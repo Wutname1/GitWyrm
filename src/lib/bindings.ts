@@ -3241,6 +3241,12 @@ export type ArchiveProblem =
  */
 { kind: "modifiedInNewSpec"; capability: string } | 
 /**
+ * The tool ran, found the specs already matched the change, and moved
+ * nothing. Not a failure: the work is already in the specs, and only the
+ * change folder is still sitting in `changes/`.
+ */
+{ kind: "alreadyInSync" } | 
+/**
  * Recognised as a failure, but not as one of the above. The user gets the
  * tool's own words and no false promise of a fix.
  */
@@ -4831,6 +4837,10 @@ left_panel_width?: number;
  * Saved width of the changes and commit pane in logical pixels.
  */
 right_panel_width?: number; 
+/**
+ * Saved width of the repository details pane in the picker, in logical pixels.
+ */
+repo_details_width?: number; 
 /**
  * Saved height of the commit details drawer in logical pixels.
  */

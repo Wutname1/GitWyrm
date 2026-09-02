@@ -259,6 +259,22 @@ export function clampLeftPanelWidth(width: number): number {
   );
 }
 
+/**
+ * Saved width limits for the repository details pane in the picker. Wider at
+ * the top end than the workspace panes because it renders a readme, which is
+ * prose and unreadable in a narrow column.
+ */
+export const MIN_REPO_DETAILS_WIDTH = 260;
+export const MAX_REPO_DETAILS_WIDTH = 640;
+export const DEFAULT_REPO_DETAILS_WIDTH = 340;
+
+export function clampRepoDetailsWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_REPO_DETAILS_WIDTH;
+  return Math.round(
+    Math.min(MAX_REPO_DETAILS_WIDTH, Math.max(MIN_REPO_DETAILS_WIDTH, width)),
+  );
+}
+
 export function clampRightPanelWidth(width: number): number {
   if (!Number.isFinite(width)) return DEFAULT_RIGHT_PANEL_WIDTH;
   return Math.round(
@@ -675,6 +691,8 @@ interface WorkspaceState {
   leftPanelWidth: number;
   /** Width of the changes and commit pane (persisted). */
   rightPanelWidth: number;
+  /** Saved width of the repository details pane in the picker (persisted). */
+  repoDetailsWidth: number;
   /** Height of the commit details drawer under the graph (persisted). */
   drawerHeight: number;
   /** Width of the commit list pane inside the multi-select drawer (persisted). */
@@ -1103,6 +1121,7 @@ interface WorkspaceState {
   resetColumnWidth: (id: ColumnId) => void;
   setLeftPanelWidth: (width: number) => void;
   setRightPanelWidth: (width: number) => void;
+  setRepoDetailsWidth: (width: number) => void;
   setDrawerHeight: (height: number) => void;
   setDrawerListWidth: (width: number) => void;
   setChangesSplit: (split: number) => void;
@@ -1168,6 +1187,7 @@ function toSettings(s: WorkspaceState): Settings {
     },
     left_panel_width: s.leftPanelWidth,
     right_panel_width: s.rightPanelWidth,
+    repo_details_width: s.repoDetailsWidth,
     drawer_height: s.drawerHeight,
     drawer_commit_list_width: s.drawerListWidth,
     changes_split: s.changesSplit,
@@ -1570,6 +1590,7 @@ export const SETTINGS_DEFAULTS = {
   horizontalTabRow: false,
   leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
   rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
+  repoDetailsWidth: DEFAULT_REPO_DETAILS_WIDTH,
   drawerHeight: DEFAULT_DRAWER_HEIGHT,
   drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
   changesSplit: DEFAULT_CHANGES_SPLIT,
@@ -1671,6 +1692,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   columnWidths: {},
   leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
   rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
+  repoDetailsWidth: DEFAULT_REPO_DETAILS_WIDTH,
   drawerHeight: DEFAULT_DRAWER_HEIGHT,
   drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
   changesSplit: DEFAULT_CHANGES_SPLIT,
@@ -2961,6 +2983,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ leftPanelWidth: clampLeftPanelWidth(width) });
     schedulePersist();
   },
+  setRepoDetailsWidth: (width) => {
+    set({ repoDetailsWidth: clampRepoDetailsWidth(width) });
+    schedulePersist();
+  },
   setRightPanelWidth: (width) => {
     set({ rightPanelWidth: clampRightPanelWidth(width) });
     schedulePersist();
@@ -2993,6 +3019,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({
       leftPanelWidth: DEFAULT_LEFT_PANEL_WIDTH,
       rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
+      repoDetailsWidth: DEFAULT_REPO_DETAILS_WIDTH,
       drawerHeight: DEFAULT_DRAWER_HEIGHT,
       drawerListWidth: DEFAULT_DRAWER_LIST_WIDTH,
       changesSplit: DEFAULT_CHANGES_SPLIT,
@@ -3078,6 +3105,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ),
         rightPanelWidth: clampRightPanelWidth(
           settings.right_panel_width ?? DEFAULT_RIGHT_PANEL_WIDTH,
+        ),
+        repoDetailsWidth: clampRepoDetailsWidth(
+          settings.repo_details_width ?? DEFAULT_REPO_DETAILS_WIDTH,
         ),
         drawerHeight: clampDrawerHeight(
           settings.drawer_height ?? DEFAULT_DRAWER_HEIGHT,

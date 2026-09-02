@@ -289,6 +289,9 @@ pub struct Settings {
     /// Saved width of the changes and commit pane in logical pixels.
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f64,
+    /// Saved width of the repository details pane in the picker, in logical pixels.
+    #[serde(default = "default_repo_details_width")]
+    pub repo_details_width: f64,
     /// Saved height of the commit details drawer in logical pixels.
     #[serde(default = "default_drawer_height")]
     pub drawer_height: f64,
@@ -714,6 +717,10 @@ fn default_right_panel_width() -> f64 {
     320.0
 }
 
+fn default_repo_details_width() -> f64 {
+    340.0
+}
+
 fn default_drawer_height() -> f64 {
     212.0
 }
@@ -763,6 +770,7 @@ impl Default for Settings {
             column_layout: None,
             left_panel_width: default_left_panel_width(),
             right_panel_width: default_right_panel_width(),
+            repo_details_width: default_repo_details_width(),
             drawer_height: default_drawer_height(),
             drawer_commit_list_width: default_drawer_commit_list_width(),
             changes_split: default_changes_split(),
