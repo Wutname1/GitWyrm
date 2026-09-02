@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { GitBranch, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, CloudOff, GitBranch, Monitor, Search, Sparkles } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,32 +11,69 @@ import { useGitMutations } from '@/hooks/useGitMutations'
 import { formatRelativeTime, plural } from '@/lib/gitDisplay'
 import {
   buildBranchRows,
+  deleteTargets,
+  locationKey,
+  locationsOf,
   matchesQuery,
-  riskyRows,
+  riskyLocations,
   rowCapabilities,
   sortRows,
+  type BranchLocation,
   type BranchRow,
   type BranchSort,
+  type SelectedLocation,
 } from '@/lib/branchManager'
 import { DisabledHint } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
-/** Where a branch's copies live, in words rather than git's vocabulary. */
-function whereItLives(row: BranchRow): string {
-  if (row.local && row.remote) return `On this computer and on ${row.remote}`
-  if (row.local) return 'Only on this computer'
-  return `Only on ${row.remote ?? 'the server'}`
-}
-
-/** The one-line state badge, or null when there is nothing worth saying. */
-function statusOf(row: BranchRow): { text: string; tone: string } | null {
-  if (row.isCurrent) return { text: 'current', tone: 'text-accent-text' }
-  if (row.neverPushed) return { text: 'never sent', tone: 'text-modified' }
-  if (row.upstreamGone) return { text: 'server copy gone', tone: 'text-modified' }
-  if (row.ahead && row.behind) return { text: `${row.ahead} to send, ${row.behind} to get`, tone: 'text-modified' }
-  if (row.ahead) return { text: `${plural(row.ahead, 'commit')} to send`, tone: 'text-modified' }
-  if (row.behind) return { text: `${plural(row.behind, 'commit')} to get`, tone: 'text-sub' }
-  return null
+/**
+ * The sync counts, as something you can spot without reading.
+ *
+ * These were plain grey text among other grey text, which is exactly the state
+ * a person is scanning for when deciding what to clean up. Arrows carry the
+ * direction and colour carries the urgency: green for work only you have,
+ * amber for work you have not taken yet.
+ */
+function SyncBadges({ row }: { row: BranchRow }) {
+  if (row.neverPushed) {
+    return (
+      <span className="inline-flex flex-none items-center gap-1 rounded-sm bg-[var(--gw-green)]/15 px-1.5 py-0.5 font-mono text-2xs text-[var(--gw-green)]">
+        <Sparkles aria-hidden size={10} />
+        never sent
+      </span>
+    )
+  }
+  if (row.upstreamGone) {
+    return (
+      <span className="inline-flex flex-none items-center gap-1 rounded-sm bg-modified/15 px-1.5 py-0.5 font-mono text-2xs text-modified">
+        <CloudOff aria-hidden size={10} />
+        server copy gone
+      </span>
+    )
+  }
+  if (!row.ahead && !row.behind) return null
+  return (
+    <span className="flex flex-none items-center gap-1">
+      {row.ahead > 0 && (
+        <span
+          title={`${row.ahead} commit${row.ahead === 1 ? '' : 's'} here that the server does not have`}
+          className="inline-flex items-center gap-0.5 rounded-sm bg-[var(--gw-green)]/15 px-1.5 py-0.5 font-mono text-2xs font-semibold text-[var(--gw-green)]"
+        >
+          <ArrowUp aria-hidden size={10} strokeWidth={2.6} />
+          {row.ahead}
+        </span>
+      )}
+      {row.behind > 0 && (
+        <span
+          title={`${row.behind} commit${row.behind === 1 ? '' : 's'} on the server you do not have yet`}
+          className="inline-flex items-center gap-0.5 rounded-sm bg-modified/15 px-1.5 py-0.5 font-mono text-2xs font-semibold text-modified"
+        >
+          <ArrowDown aria-hidden size={10} strokeWidth={2.6} />
+          {row.behind}
+        </span>
+      )}
+    </span>
+  )
 }
 
 export function BranchManagerModal() {
@@ -74,62 +111,84 @@ export function BranchManagerModal() {
     [rows, query, sort],
   )
 
-  // A branch that disappeared (deleted, or filtered out) must not stay counted.
-  const selected = useMemo(
-    () => visible.filter((r) => checked.has(r.name) && !r.isCurrent),
-    [visible, checked],
-  )
+  // Every ticked copy, resolved back to the row it belongs to. A copy that
+  // vanished (deleted, or filtered out) must not stay counted.
+  const selected: SelectedLocation[] = useMemo(() => {
+    const out: SelectedLocation[] = []
+    for (const row of visible) {
+      for (const where of locationsOf(row)) {
+        if (checked.has(locationKey(row.name, where))) out.push({ name: row.name, where, row })
+      }
+    }
+    return out
+  }, [visible, checked])
   const busy = m.deleteBranchesMany.isPending || m.pullBranchesMany.isPending
 
-  const toggle = (row: BranchRow, mods: { shift: boolean; ctrl: boolean }) => {
-    // The current branch cannot be deleted or pulled onto, so it is not
-    // selectable -- offering a checkbox that does nothing is worse than none.
-    if (row.isCurrent) return
+  /** Every copy that may be ticked, in display order, for range selection. */
+  const allKeys = useMemo(
+    () =>
+      visible.flatMap((row) =>
+        locationsOf(row)
+          // The checked-out branch cannot be deleted, so its local copy is not
+          // selectable -- a checkbox that does nothing is worse than none.
+          .filter((where) => !(where === 'local' && row.isCurrent))
+          .map((where) => locationKey(row.name, where)),
+      ),
+    [visible],
+  )
+
+  const toggle = (row: BranchRow, where: BranchLocation, shift: boolean) => {
+    if (where === 'local' && row.isCurrent) return
+    const key = locationKey(row.name, where)
     const next = new Set(checked)
-    if (mods.shift && anchor.current) {
-      const names = visible.map((r) => r.name)
-      const from = names.indexOf(anchor.current)
-      const to = names.indexOf(row.name)
+    if (shift && anchor.current) {
+      const from = allKeys.indexOf(anchor.current)
+      const to = allKeys.indexOf(key)
       if (from !== -1 && to !== -1) {
         const [lo, hi] = from < to ? [from, to] : [to, from]
-        for (const r of visible.slice(lo, hi + 1)) {
-          if (!r.isCurrent) next.add(r.name)
-        }
+        for (const k of allKeys.slice(lo, hi + 1)) next.add(k)
         setChecked(next)
         return
       }
     }
-    if (next.has(row.name)) next.delete(row.name)
-    else next.add(row.name)
-    anchor.current = row.name
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    anchor.current = key
     setChecked(next)
   }
 
-  const selectable = visible.filter((r) => !r.isCurrent)
-  const allSelected = selectable.length > 0 && selectable.every((r) => checked.has(r.name))
+  const allSelected = allKeys.length > 0 && allKeys.every((k) => checked.has(k))
   const toggleAll = () => {
-    setChecked(allSelected ? new Set() : new Set(selectable.map((r) => r.name)))
+    setChecked(allSelected ? new Set() : new Set(allKeys))
     anchor.current = null
   }
 
-  const pullable = selected.filter((r) => rowCapabilities(r).canPull)
-  const atRisk = riskyRows(selected)
+  // Only a local copy can be brought up to date, and only as a fast-forward.
+  const pullable = useMemo(() => {
+    const names = new Set<string>()
+    for (const item of selected) {
+      if (item.where === 'local' && rowCapabilities(item.row).canPull) names.add(item.name)
+    }
+    return [...names]
+  }, [selected])
+  const atRisk = riskyLocations(selected)
+  // Counted separately so the confirmation can say what happens where, rather
+  // than lumping a local tidy-up together with a deletion everyone else sees.
+  const localCount = selected.filter((item) => item.where === 'local').length
+  const serverCount = selected.length - localCount
 
   const doPull = () => {
     if (pullable.length === 0) return
-    m.pullBranchesMany.mutate(pullable.map((r) => r.name))
+    m.pullBranchesMany.mutate(pullable)
   }
 
   const doDelete = () => {
-    m.deleteBranchesMany.mutate(
-      selected.map((r) => ({ name: r.name, local: !!r.local, remote: r.remote })),
-      {
-        onSuccess: () => {
-          setChecked(new Set())
-          setConfirmDelete(false)
-        },
+    m.deleteBranchesMany.mutate(deleteTargets(selected), {
+      onSuccess: () => {
+        setChecked(new Set())
+        setConfirmDelete(false)
       },
-    )
+    })
   }
 
   return (
@@ -171,7 +230,7 @@ export function BranchManagerModal() {
                 size="sm"
                 className="h-8 text-2xs"
                 onClick={toggleAll}
-                disabled={selectable.length === 0}
+                disabled={allKeys.length === 0}
               >
                 {allSelected ? 'Clear all' : 'Select all'}
               </Button>
@@ -186,42 +245,74 @@ export function BranchManagerModal() {
             )}
             <div className="space-y-1">
               {visible.map((row) => {
-                const status = statusOf(row)
-                const isChecked = checked.has(row.name)
+                const places = locationsOf(row)
                 return (
                   <div
                     key={row.name}
-                    onClick={(e) => toggle(row, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
-                    className={cn(
-                      'flex items-center gap-3 rounded-md border border-border bg-panel px-3 py-2',
-                      row.isCurrent ? 'opacity-70' : 'cursor-pointer hover:bg-panel3',
-                      isChecked && 'border-accent-text/40 bg-panel3',
-                    )}
+                    className="rounded-md border border-border bg-panel px-3 py-2"
                   >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      disabled={row.isCurrent}
-                      aria-label={`Select ${row.name}`}
-                      onChange={() => {}}
-                      onClick={(e) => e.stopPropagation()}
-                      onPointerDown={(e) => {
-                        e.stopPropagation()
-                        toggle(row, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })
-                      }}
-                      className="size-3.5 flex-none accent-[var(--gw-accent)]"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs">
-                          {row.name}
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs">
+                        {row.name}
+                      </span>
+                      {row.isCurrent && (
+                        <span className="flex-none rounded-sm bg-accent-text/15 px-1.5 py-0.5 text-2xs text-accent-text">
+                          current
                         </span>
-                        {status && <span className={cn('flex-none text-2xs', status.tone)}>{status.text}</span>}
-                      </div>
-                      <div className="mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap text-2xs text-sub">
-                        {whereItLives(row)}
-                        {row.time != null && ` · ${formatRelativeTime(row.time)}`}
-                      </div>
+                      )}
+                      <SyncBadges row={row} />
+                      {row.time != null && (
+                        <span className="flex-none text-2xs text-muted-foreground">
+                          {formatRelativeTime(row.time)}
+                        </span>
+                      )}
+                    </div>
+                    {/* One checkbox per copy. A branch on this computer and two
+                        remotes is three things that can be deleted separately,
+                        and a single row-level tick could only ever mean all. */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      {places.map((where) => {
+                        const key = locationKey(row.name, where)
+                        const isChecked = checked.has(key)
+                        const locked = where === 'local' && row.isCurrent
+                        const label = where === 'local' ? 'This computer' : where
+                        return (
+                          <label
+                            key={key}
+                            title={
+                              locked
+                                ? 'This is the branch you are on, so it cannot be deleted'
+                                : `Select the copy on ${label}`
+                            }
+                            className={cn(
+                              'inline-flex select-none items-center gap-1.5 rounded-[5px] border px-2 py-1 text-2xs',
+                              locked
+                                ? 'cursor-not-allowed border-border/60 text-muted-foreground opacity-60'
+                                : 'cursor-pointer border-border hover:bg-panel3',
+                              isChecked && 'border-accent-text/50 bg-accent-text/10 text-foreground',
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              disabled={locked}
+                              aria-label={`${row.name} on ${label}`}
+                              onChange={() => {}}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                toggle(row, where, e.shiftKey)
+                              }}
+                              className="size-3 flex-none accent-[var(--gw-accent)]"
+                            />
+                            {where === 'local' ? (
+                              <Monitor aria-hidden size={10} className="flex-none" />
+                            ) : (
+                              <GitBranch aria-hidden size={10} className="flex-none" />
+                            )}
+                            {label}
+                          </label>
+                        )
+                      })}
                     </div>
                   </div>
                 )
@@ -231,7 +322,7 @@ export function BranchManagerModal() {
 
           <div className="flex items-center gap-2 border-t border-border px-5 py-3">
             <span className="text-2xs text-sub">
-              {selected.length > 0 ? `${plural(selected.length, 'branch')} selected` : 'Nothing selected'}
+              {selected.length > 0 ? `${plural(selected.length, 'copy', 'copies')} selected` : 'Nothing selected'}
             </span>
             <div className="ml-auto flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={() => closeModal()} disabled={busy}>
@@ -271,7 +362,7 @@ export function BranchManagerModal() {
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         destructive
-        title={`Delete ${plural(selected.length, 'branch')}?`}
+        title={`Delete ${plural(selected.length, 'copy', 'copies')}?`}
         confirmLabel="Delete"
         pending={m.deleteBranchesMany.isPending}
         pendingLabel="Deleting…"
@@ -279,16 +370,18 @@ export function BranchManagerModal() {
         onConfirm={doDelete}
         description={
           <div className="space-y-2">
-          <p>
-            {selected.some((r) => r.remote) ? (
-              <>
-                Some of these will be removed from the server, so they disappear{' '}
-                <span className="text-removed">for everyone using them</span>.
-              </>
-            ) : (
-              <>These will be removed from this computer.</>
-            )}
-          </p>
+          {localCount > 0 && (
+            <p>
+              {plural(localCount, 'branch')} will be removed from this computer.
+            </p>
+          )}
+          {serverCount > 0 && (
+            <p>
+              {plural(serverCount, 'copy', 'copies')} will be removed from the server, so
+              {' '}
+              <span className="text-removed">they disappear for everyone using them</span>.
+            </p>
+          )}
           {atRisk.length > 0 && (
             // The single-branch confirm only hedged with "may become hard to
             // find". Deleting ten at once is a much larger blast radius, so the

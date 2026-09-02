@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { BranchInfo, RemoteInfo, SyncState } from '@/lib/bindings'
 import {
   buildBranchRows,
+  deleteTargets,
+  locationsOf,
   matchesQuery,
   rowCapabilities,
+  riskyLocations,
   riskyRows,
   sortRows,
 } from './branchManager'
@@ -58,7 +61,7 @@ describe('buildBranchRows', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].name).toBe('main')
     expect(rows[0].local).not.toBeNull()
-    expect(rows[0].remote).toBe('origin')
+    expect(rows[0].remotes).toEqual(['origin'])
     expect(rows[0].isCurrent).toBe(true)
   })
 
@@ -76,7 +79,7 @@ describe('buildBranchRows', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].name).toBe('dev')
     expect(rows[0].local).toBeNull()
-    expect(rows[0].remote).toBe('origin')
+    expect(rows[0].remotes).toEqual(['origin'])
   })
 
   it('reads counts from sync, not the raw ahead/behind fields', () => {
@@ -153,5 +156,68 @@ describe('matchesQuery', () => {
     expect(matchesQuery(row, 'login')).toBe(true)
     expect(matchesQuery(row, 'nope')).toBe(false)
     expect(matchesQuery(row, '  ')).toBe(true)
+  })
+})
+
+/**
+ * A branch that lives in several places is several things a person may want to
+ * delete, and they rarely mean all of them. One checkbox per row made it
+ * impossible to drop a stale copy from one remote while keeping the rest.
+ */
+describe('per-location selection', () => {
+  const twoRemotes = () =>
+    buildBranchRows(
+      [local('main', inSync, { upstream: 'origin/main' })],
+      [remoteWith('origin', ['origin/main']), remoteWith('fork', ['fork/main'])],
+    )
+
+  it('records every remote a branch is on', () => {
+    const [row] = twoRemotes()
+    expect(row.remotes).toEqual(['origin', 'fork'])
+  })
+
+  it('offers one tickable copy per place it lives', () => {
+    const [row] = twoRemotes()
+    expect(locationsOf(row)).toEqual(['local', 'origin', 'fork'])
+  })
+
+  it('deletes only the copy that was ticked', () => {
+    const [row] = twoRemotes()
+    const targets = deleteTargets([{ name: 'main', where: 'fork', row }])
+    expect(targets).toEqual([{ name: 'main', local: false, remote: 'fork' }])
+  })
+
+  it('splits a branch ticked on two remotes into one push each', () => {
+    const [row] = twoRemotes()
+    const targets = deleteTargets([
+      { name: 'main', where: 'origin', row },
+      { name: 'main', where: 'fork', row },
+    ])
+    expect(targets).toHaveLength(2)
+    expect(targets.map((t) => t.remote)).toEqual(['origin', 'fork'])
+  })
+
+  it('deletes the local copy once, not once per remote', () => {
+    const [row] = twoRemotes()
+    const targets = deleteTargets([
+      { name: 'main', where: 'local', row },
+      { name: 'main', where: 'origin', row },
+      { name: 'main', where: 'fork', row },
+    ])
+    expect(targets.filter((t) => t.local)).toHaveLength(1)
+  })
+
+  it('handles a local-only tick with no remote', () => {
+    const [row] = buildBranchRows([local('wip', { kind: 'never_pushed' })], [])
+    expect(deleteTargets([{ name: 'wip', where: 'local', row }])).toEqual([
+      { name: 'wip', local: true, remote: null },
+    ])
+  })
+
+  it('only warns about losing work when the local copy is ticked', () => {
+    // Removing a server copy while keeping the one here loses nothing.
+    const [row] = buildBranchRows([local('wip', { kind: 'never_pushed' })], [])
+    expect(riskyLocations([{ name: 'wip', where: 'local', row }])).toHaveLength(1)
+    expect(riskyLocations([{ name: 'wip', where: 'origin', row }])).toHaveLength(0)
   })
 })
