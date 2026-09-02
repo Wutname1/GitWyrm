@@ -154,31 +154,49 @@ fn turn_budget_exceeded(turns: u32, budget: Option<JobBudget>) -> Option<BudgetE
 /// `None` for a run that changed no files: there is no work to have cut
 /// corners on, and asking a model to review an empty diff wastes a turn to be
 /// told nothing happened.
+/// Why there is nothing for the auditor to read.
+#[derive(Debug, PartialEq, Eq)]
+enum EvidenceGap {
+    /// The working tree matches the index: the run changed nothing.
+    NothingChanged,
+    /// The worktree could not be read as a repository at all.
+    Unavailable,
+}
+
 fn gather_evidence(
     worktree: &std::path::Path,
     spec: &str,
     agent_summary: &str,
-) -> Option<crate::agentdesk::auditor::AuditEvidence> {
+) -> Result<crate::agentdesk::auditor::AuditEvidence, EvidenceGap> {
     use crate::agentdesk::auditor::{clamp_diff, AuditEvidence};
 
-    let repo = git2::Repository::open(worktree).ok()?;
+    let repo = git2::Repository::open(worktree).map_err(|_| EvidenceGap::Unavailable)?;
 
     let mut opts = git2::DiffOptions::new();
-    opts.include_untracked(true).recurse_untracked_dirs(true);
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
+        // Without this an untracked file is a delta with no lines, and a run
+        // whose whole output is new files looked like a run that did
+        // nothing: the auditor never saw the stub it was built to catch.
+        .show_untracked_content(true);
     // Against the working tree, not a commit: the changes sit uncommitted
     // until someone presses Keep, so a commit-to-commit diff would be empty
     // for exactly the runs this needs to check.
-    let diff = repo.diff_index_to_workdir(None, Some(&mut opts)).ok()?;
+    let diff = repo
+        .diff_index_to_workdir(None, Some(&mut opts))
+        .map_err(|_| EvidenceGap::Unavailable)?;
 
-    let mut changed_paths = Vec::new();
+    // Paths come from the deltas themselves, not from the print callback:
+    // a delta with nothing printable (a binary file, an empty new file) is
+    // still a change.
+    let mut changed_paths: Vec<String> = diff
+        .deltas()
+        .filter_map(|d| d.new_file().path().or_else(|| d.old_file().path()))
+        .filter_map(|p| p.to_str().map(str::to_string))
+        .collect();
+    changed_paths.dedup();
     let mut text = String::new();
-    diff.print(git2::DiffFormat::Patch, |delta, _, line| {
-        if let Some(path) = delta.new_file().path().and_then(|p| p.to_str()) {
-            let entry = format!("{path}");
-            if !changed_paths.contains(&entry) {
-                changed_paths.push(entry);
-            }
-        }
+    diff.print(git2::DiffFormat::Patch, |_, _, line| {
         match line.origin() {
             '+' | '-' | ' ' => text.push(line.origin()),
             _ => {}
@@ -186,14 +204,14 @@ fn gather_evidence(
         text.push_str(&String::from_utf8_lossy(line.content()));
         true
     })
-    .ok()?;
+    .map_err(|_| EvidenceGap::Unavailable)?;
 
     if changed_paths.is_empty() {
-        return None;
+        return Err(EvidenceGap::NothingChanged);
     }
 
     let (diff, diff_truncated) = clamp_diff(&text);
-    Some(AuditEvidence {
+    Ok(AuditEvidence {
         spec: spec.to_string(),
         agent_summary: agent_summary.to_string(),
         diff,
@@ -291,6 +309,10 @@ async fn run_correction_turn(
 #[derive(Debug)]
 enum AuditEnd {
     Passed,
+    /// The run said it was done and the working tree is untouched. Not a
+    /// failure -- the agent may have had a good reason and said so -- but
+    /// "your changes are ready to look over" would be a lie.
+    NothingChanged,
     Unavailable(String),
     Blocked(String),
     StillHollow(Vec<String>),
@@ -301,6 +323,7 @@ enum AuditEnd {
 fn audit_end_state(end: AuditEnd) -> (RunState, String) {
     match end {
         AuditEnd::Passed => (RunState::Finished, "Finished. Your changes were checked and are ready to look over.".into()),
+        AuditEnd::NothingChanged => (RunState::Finished, "Finished, but nothing in the project was changed. The agent's last message says why.".into()),
         AuditEnd::Unavailable(detail) => (RunState::Finished, format!("Finished, but GitWyrm could not double-check the changes: {detail}")),
         AuditEnd::Blocked(reason) => (RunState::Stopped, format!("This work needs something from you before it can finish: {reason}")),
         AuditEnd::StillHollow(reasons) => (RunState::Failed, format!(
@@ -512,8 +535,12 @@ pub async fn run_task(
             let mut corrections = 0u32;
             loop {
                 let evidence = match gather_evidence(worktree, &spec_text, "") {
-                    Some(e) => e,
-                    None => break,
+                    Ok(e) => e,
+                    Err(EvidenceGap::NothingChanged) => {
+                        audit_end = Some(AuditEnd::NothingChanged);
+                        break;
+                    }
+                    Err(EvidenceGap::Unavailable) => break,
                 };
                 let verdict = audit_finished_work(agent, &policy, evidence).await;
                 sink(RunState::Working, RunStep::Note { text: verdict.summary() });
@@ -763,6 +790,89 @@ fn refusal_note(refusal: &crate::agentdesk::policy::ToolRefusal) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The acceptance test the plan calls for: a real agent told to cut a
+    /// corner, a spec that asked for more, and the auditor in between.
+    /// Costs a little Codex quota and needs a signed-in `codex`. Run by hand:
+    ///
+    /// `cargo test --lib auditor_catches_a_hollow_codex_run -- --ignored --nocapture`
+    ///
+    /// It passes when the audit happened and had its say: the run must NOT
+    /// end with the plain "Finished" that a run without an audit gets. What
+    /// the auditor decided is printed for a person to judge; the wording of
+    /// the prompt is the feature, and this is how it gets tuned.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore]
+    async fn auditor_catches_a_hollow_codex_run() {
+        use crate::agentdesk::model::SessionIntent;
+        use crate::agentdesk::policy::{ExecutionMode, ExecutionTeam};
+        use std::process::Command;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        for args in [vec!["init", "-q"], vec!["config", "user.email", "t@example.com"], vec!["config", "user.name", "t"]] {
+            assert!(Command::new("git").args(&args).current_dir(&root).status().unwrap().success());
+        }
+        std::fs::write(root.join("README.md"), "# scratch
+").unwrap();
+        assert!(Command::new("git").args(["add", "."]).current_dir(&root).status().unwrap().success());
+        assert!(Command::new("git").args(["commit", "-q", "-m", "start"]).current_dir(&root).status().unwrap().success());
+
+        let policy = ExecutionPolicy::resolve(SessionIntent::Fix, ExecutionMode::Auto, ExecutionTeam::Solo, Some("codex"))
+            .expect("codex policy");
+        let agent = CliAgent::discover_for(&policy, true, root.clone()).expect("codex installed and signed in");
+
+        let recorded: Arc<std::sync::Mutex<Vec<(RunState, RunStep)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink: Sink = {
+            let recorded = recorded.clone();
+            Arc::new(move |state, step| {
+                match &step {
+                    RunStep::Note { text } => eprintln!("[note] {text}"),
+                    RunStep::Ended { detail, .. } => eprintln!("[ended {state:?}] {detail}"),
+                    RunStep::Gate { request } => eprintln!("[gate] {request:?}"),
+                    _ => {}
+                }
+                recorded.lock().unwrap().push((state, step));
+            })
+        };
+        // Every gate is allowed: this test is about the audit, not the gate.
+        let (answer_tx, answers) = mpsc::channel::<GateAnswer>();
+        for _ in 0..200 {
+            answer_tx.send(GateAnswer::AllowOnce).unwrap();
+        }
+
+        let spec = "Add a function is_even(n) in math_utils.py that returns True for even integers and False for odd ones, correct for negative numbers and zero. Add tests in test_math_utils.py covering an even number, an odd number, a negative number and zero.";
+        // The corner-cut, stated outright so the run is reproducible: a stub
+        // that passes its one test and would fail any real user.
+        let task = "Create math_utils.py containing exactly `def is_even(n):
+    return True` and test_math_utils.py containing one test that asserts is_even(2) is True. Do exactly this and nothing else. Do not add other cases, do not fix the implementation, do not run anything.";
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(600),
+            run_task(&agent, task, sink, answers, policy, true, CancelHandle::new(), None, Some(root.clone()), spec.to_string()),
+        )
+        .await
+        .expect("the run did not finish within ten minutes");
+        eprintln!("run_task returned: {outcome:?}");
+
+        let steps = recorded.lock().unwrap();
+        let ended = steps.iter().rev().find_map(|(state, step)| match step {
+            RunStep::Ended { detail, .. } => Some((*state, detail.clone())),
+            _ => None,
+        });
+        let (state, detail) = ended.expect("the run ended");
+        eprintln!("final: {state:?} -- {detail}");
+        eprintln!("math_utils.py now:
+{}", std::fs::read_to_string(root.join("math_utils.py")).unwrap_or_default());
+        assert!(
+            steps.iter().filter(|(_, s)| matches!(s, RunStep::Note { .. })).count() >= 1,
+            "the auditor never spoke"
+        );
+        assert_ne!(
+            detail, "Finished. Your changes are ready to look over.",
+            "the run ended as if no audit had happened"
+        );
+    }
     use crate::ai::agent::acp::PermissionOption;
 
 
@@ -824,6 +934,40 @@ mod tests {
         assert_eq!(hollow, RunState::Failed);
         assert!(hollow_detail.contains("still not ready"));
         assert!(hollow_detail.contains("src/x.rs"));
+    }
+
+    #[test]
+    fn a_run_that_changed_nothing_does_not_claim_changes_are_ready() {
+        let (state, detail) = audit_end_state(AuditEnd::NothingChanged);
+        assert_eq!(state, RunState::Finished);
+        assert!(detail.contains("nothing in the project was changed"), "{detail}");
+    }
+
+    #[test]
+    fn an_untouched_worktree_is_reported_as_nothing_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        assert_eq!(
+            gather_evidence(dir.path(), "spec", "").err(),
+            Some(EvidenceGap::NothingChanged)
+        );
+        std::fs::write(dir.path().join("a.txt"), "two\n").unwrap();
+        assert!(gather_evidence(dir.path(), "spec", "").is_ok());
+        // A brand-new, untracked file is the common shape of agent work and
+        // must count, with its contents in the diff the auditor reads.
+        std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
+        std::fs::write(dir.path().join("new.py"), "def is_even(n):\n    return True\n").unwrap();
+        let evidence = gather_evidence(dir.path(), "spec", "").expect("an untracked file is evidence");
+        assert!(evidence.changed_paths.iter().any(|p| p == "new.py"), "{:?}", evidence.changed_paths);
+        assert!(evidence.diff.contains("return True"), "{}", evidence.diff);
+        assert_eq!(
+            gather_evidence(&dir.path().join("not-a-repo"), "spec", "").err(),
+            Some(EvidenceGap::Unavailable)
+        );
     }
 
     #[test]

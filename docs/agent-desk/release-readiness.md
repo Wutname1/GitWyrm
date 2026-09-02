@@ -22,10 +22,10 @@ real run:
 | Conversation | Each turn sent only the newest user message | The whole transcript (user and assistant, imported messages included, tool noise excluded) is handed over every turn, shortened from the oldest end under a 48k-character budget with a visible note |
 | Chat identity | Mode, team and AI tool were pane state; new chats were bound to the open repo with no way to change | Saved on the session header; a new chat shows its project (changeable before the first message) and what started it; the sidebar shows the AI tool's logo |
 | Auto with helpers | One lead ran while the UI said "up to 3 helpers" | An Auto lead may return a helper plan and it starts immediately through the same launch path as Plan's Start button |
-| Auditor | Verdict assigned and never read; a correction turn's result was discarded and could hang on a permission request | Correction turns are driven like any turn, re-audited, and a still-hollow run ends Failed with reasons |
+| Auditor | Verdict assigned and never read; a correction turn's result was discarded and could hang on a permission request | Correction turns are driven like any turn, re-audited, and a still-hollow run ends Failed with reasons. Verified live 2026-09-02 (`auditor_catches_a_hollow_codex_run`): Codex was told to ship `is_even` returning True; the auditor found two problems, sent them back, the correction rewrote it as `n % 2 == 0` with the four tests, and the re-audit passed |
 | Shell | Denied for every run | Follows the write decision: allowed on Auto, Fix and started Plan through the approval gate; denied for read-only chats. Network stays denied |
 | Claude Code | Launched with `--safe-mode` and an empty MCP config; every prompt auto-denied | Loads the user's own MCP servers and skills; prompts reach GitWyrm's gate over stdio; Bash restored on writing runs. Unverified live (login expired) |
-| Codex | Read-only chats launched `codex app-server --sandbox=read-only`, which the binary rejects; stderr unread; the chat "did nothing" | Sandbox travels in `thread/start`; stderr tail is kept and shown; unknown server requests are declined instead of hanging the turn. Verified: a real read-only Codex turn answered PONG |
+| Codex | Read-only chats launched `codex app-server --sandbox=read-only`, which the binary rejects; stderr unread; the chat "did nothing". Approvals were answered `approved`/`denied`, words Codex reads as a refusal, so every Allow still ended in "write access was denied" | Sandbox travels in `thread/start`; stderr tail is kept and shown; unknown server requests are declined instead of hanging the turn; approvals use the schema's own `accept`/`decline`/`cancel`, `item/permissions/requestApproval` is granted for the turn, and file-change gates name their files. Verified: a real read-only turn answered PONG and a real writing turn's edits landed |
 | Queued messages | A message sent during a turn was saved and never read | A clean Finish with nothing else live starts the next turn with the same mode/team/tool after a note in the chat. Stopped or Failed turns never restart |
 | Usage | Transcript rows counted as "turns"; helper context could replace the lead's | Turns only when reported; context from the lead; per-agent rows for team runs; unreported figures stay blank |
 | Deleting a chat | Failed every time (wrong Tauri state type) | Works |
@@ -39,9 +39,9 @@ The automated baseline is healthy: TypeScript, the frontend suite (827), the Rus
 No unit fixture substitutes for these. Each is a path a person walks in the built app.
 
 1. Open a chat on each of Copilot, Claude Code and Codex with nothing extra installed and
-   get a reply. Codex is verified by an ignored real-binary test; Claude is blocked on the
-   development machine by an expired login; Copilot has not been re-run since the
-   transport refactor.
+   get a reply. Codex and Copilot are verified by real-binary tests (`codex_answers_a_real_turn`,
+   `tests/copilot_acp.rs`, both re-run 2026-09-02); Claude is blocked on the development
+   machine by an expired login.
 2. Send a second message while a turn is running and watch the follow-up turn start on
    its own when the first finishes, and NOT start after pressing Stop.
 3. An Auto chat whose lead proposes helpers: the helpers appear and run without a Start
@@ -49,7 +49,10 @@ No unit fixture substitutes for these. Each is a path a person walks in the buil
 4. A run whose agent runs a command: the approval gate appears, Allow runs it, Reject
    refuses it, and a read-only chat never shows the gate at all.
 5. The auditor against a deliberately under-specified task where the agent ticks every
-   box and ships a stub. The run must end Failed with the auditor's reasons visible.
+   box and ships a stub. Done once, from a test harness rather than the app: see the
+   Auditor row above. Repeat it from the app so the notes and the final state are seen
+   where a person would see them. A run that changed nothing now ends "Finished, but
+   nothing in the project was changed" instead of claiming changes are ready.
 6. The original list: dirty checkouts, two simultaneous same-repo sessions, two real
    uncommitted helpers, delete/rename/binary changes, conflict and restart, child-process
    cleanup, window focus, Split View cross-repo behaviour, scaling, keyboard and
@@ -131,7 +134,7 @@ from the JSON proposal that already exists. Undecided, fails safe.
    signed in.
 2. Run the two ignored Claude tests on a signed-in machine; fix what they find.
 3. Verify Gemini's plan mode holds across a non-interactive `exit_plan_mode`.
-4. Live auditor run against a corner-cutting task; tune the prompt on what it misses.
+4. Repeat the live auditor run from the app, and against Copilot and Claude.
 5. Decide the plan-checklist parser and the quota question.
 
 ## Meaning of "ready"
