@@ -4,10 +4,32 @@
 //! open on stdin and emit one JSON object per line on stdout, so GitWyrm talks
 //! to that stream directly and translates it into [`super::wire`]. The UI
 //! remains a conversation and activity feed; no terminal is exposed.
+//!
+//! # Permissions over the same stream
+//!
+//! Print mode auto-denies any tool that would need a prompt, which is why an
+//! earlier version of this adapter could never run a command or gate an edit.
+//! The Agent SDK avoids that by passing `--permission-prompt-tool stdio`, after
+//! which the CLI writes each prompt as a `control_request` frame and waits for
+//! a `control_response`. Nothing about that is documented; the shapes below
+//! were read out of the CLI binary (2.1.251) and the SDK code bundled in it:
+//!
+//! - request: `{"type":"control_request","request_id":ID,"request":{"subtype":
+//!   "can_use_tool","tool_name":"Bash","input":{...},"tool_use_id":...,
+//!   "description":...,"permission_suggestions":[...]}}`
+//! - answer: `{"type":"control_response","response":{"subtype":"success",
+//!   "request_id":ID,"response":{"behavior":"allow","updatedInput":{...}}}}`
+//!   or `{"behavior":"deny","message":"..."}`.
+//! - interrupt: `{"type":"control_request","request_id":ID,"request":
+//!   {"subtype":"interrupt"}}`, which ends the turn with a `result` frame.
+//!
+//! Every other `control_request` subtype (hooks, MCP relays, dialogs) is
+//! answered with an error frame so the CLI never waits on something GitWyrm
+//! will not provide.
 
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
@@ -16,7 +38,8 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use super::transport::AgentError;
-use super::wire::{Incoming, StopReason, TurnOutcome};
+use super::wire::{Incoming, PermissionDecision, PermissionRequest, StopReason, TurnOutcome};
+use crate::agentdesk::policy::ToolCapability;
 
 type Pending = Arc<Mutex<Option<oneshot::Sender<Result<TurnOutcome, AgentError>>>>>;
 type Complaints = Arc<Mutex<std::collections::VecDeque<String>>>;
@@ -28,6 +51,9 @@ pub struct ClaudeConnection {
     pending: Pending,
     incoming: Option<mpsc::UnboundedReceiver<Incoming>>,
     cancelling: Arc<AtomicBool>,
+    /// Ids for the control requests GitWyrm sends (initialize, interrupt).
+    /// The CLI echoes them back; nothing here waits on the echo.
+    next_control_id: AtomicU64,
 }
 
 impl ClaudeConnection {
@@ -84,7 +110,15 @@ impl ClaudeConnection {
         // own sends the person to the log for a line that, in release
         // builds, was written at debug level and is not there.
         let complaints: Complaints = Arc::new(Mutex::new(std::collections::VecDeque::new()));
-        tokio::spawn(read_loop(stdout, pending.clone(), tx, cancelling.clone(), complaints.clone()));
+        let stdin = Arc::new(Mutex::new(stdin));
+        tokio::spawn(read_loop(
+            stdout,
+            stdin.clone(),
+            pending.clone(),
+            tx,
+            cancelling.clone(),
+            complaints.clone(),
+        ));
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -97,13 +131,19 @@ impl ClaudeConnection {
             }
         });
 
-        Ok(Self {
+        let conn = Self {
             child: Arc::new(Mutex::new(child)),
-            stdin: Arc::new(Mutex::new(stdin)),
+            stdin,
             pending,
             incoming: Some(rx),
             cancelling,
-        })
+            next_control_id: AtomicU64::new(1),
+        };
+        // The SDK opens every session with an `initialize` control request.
+        // Whether the CLI strictly needs it is unproven; sending it costs one
+        // line and matches the only client known to work.
+        conn.send_control(json!({ "subtype": "initialize" })).await?;
+        Ok(conn)
     }
 
     pub fn take_incoming(&mut self) -> Option<mpsc::UnboundedReceiver<Incoming>> {
@@ -170,6 +210,17 @@ impl ClaudeConnection {
 
     pub async fn cancel(&self) -> Result<(), AgentError> {
         self.cancelling.store(true, Ordering::Release);
+        // An interrupt lets the CLI end the turn itself and write a `result`
+        // frame, so the turn resolves as Cancelled rather than as a process
+        // that vanished. Killing is the fallback when the pipe is already
+        // gone; `shutdown` kills anyway if the CLI ignores the interrupt.
+        if self
+            .send_control(json!({ "subtype": "interrupt" }))
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
         self.child
             .lock()
             .await
@@ -177,6 +228,16 @@ impl ClaudeConnection {
             .map_err(|e| AgentError::Failed {
                 detail: format!("could not stop Claude Code: {e}"),
             })
+    }
+
+    async fn send_control(&self, request: Value) -> Result<(), AgentError> {
+        let id = self.next_control_id.fetch_add(1, Ordering::Relaxed);
+        self.write_line(json!({
+            "type": "control_request",
+            "request_id": format!("gitwyrm-{id}"),
+            "request": request,
+        }))
+        .await
     }
 
     pub async fn shutdown(self) {
@@ -217,23 +278,36 @@ impl ClaudeConnection {
 /// set up there; stripping them with `--strict-mcp-config` / `--safe-mode`
 /// made the run a different, weaker agent than the one they configured.
 ///
-/// Shell is a separate matter on Claude Code: `--restricted` removes Bash
-/// regardless of what the denial list says, so a writing run still cannot
-/// run commands here even though the policy would allow it. Giving Claude
-/// shell needs `--tools` plus a permission bridge so each command reaches
-/// the person's gate, which is its own feature and not attempted here.
+/// Permissions are routed to GitWyrm (`--permission-prompt-tool stdio`, see
+/// the module notes) and the mode is left at `default` for a writing run, so
+/// both edits and commands come to the person's gate instead of being
+/// auto-accepted by `acceptEdits`. A read-only run stays in `plan`, where
+/// Claude Code refuses writes itself and the gate refuses anything that
+/// still gets through.
+///
+/// `--restricted` keeps file tools inside the run's working directory but
+/// also removes Bash "unless --tools names them", so a writing run adds
+/// `--tools default` to get commands back. Whether that spelling satisfies
+/// the exception is verified by the ignored real-binary test, not assumed.
 fn launch_args(base: &[String], read_only: bool) -> Vec<String> {
     let mut args = base.to_vec();
     args.push("--permission-mode".into());
-    args.push(if read_only { "plan" } else { "acceptEdits" }.into());
+    args.push(if read_only { "plan" } else { "default" }.into());
+    args.push("--permission-prompt-tool".into());
+    args.push("stdio".into());
     // Keeps file access inside the run's isolated working directory and asks
     // Claude Code itself to guard Git/settings/tool-configuration files.
     args.push("--restricted".into());
+    if !read_only {
+        args.push("--tools".into());
+        args.push("default".into());
+    }
     args
 }
 
 async fn read_loop(
     stdout: tokio::process::ChildStdout,
+    stdin: Arc<Mutex<ChildStdin>>,
     pending: Pending,
     tx: mpsc::UnboundedSender<Incoming>,
     cancelling: Arc<AtomicBool>,
@@ -245,6 +319,32 @@ async fn read_loop(
             continue;
         };
 
+        if message.get("type").and_then(Value::as_str) == Some("control_request") {
+            match permission_request_of(&message) {
+                ControlFrame::Permission { request_id, tool_name, input, capability, path, summary } => {
+                    let (respond, answer) = oneshot::channel();
+                    let request = PermissionRequest { capability, path, summary, respond };
+                    if tx.send(Incoming::PermissionRequest(request)).is_err() {
+                        return;
+                    }
+                    let stdin = stdin.clone();
+                    tokio::spawn(async move {
+                        let decision = answer.await.unwrap_or(PermissionDecision::Cancelled);
+                        let frame = permission_answer(&request_id, decision, &input);
+                        log::info!("Claude Code asked to use {tool_name}; answered {decision:?}");
+                        write_frame(&stdin, frame).await;
+                    });
+                }
+                ControlFrame::Other { request_id, subtype } => {
+                    // Left unanswered, the CLI would wait on it forever.
+                    log::info!("Claude Code sent a {subtype} control request GitWyrm does not handle; declining");
+                    write_frame(&stdin, control_error(&request_id, "GitWyrm does not handle this request")).await;
+                }
+                ControlFrame::Malformed => {}
+            }
+            continue;
+        }
+
         for incoming in classify(&message) {
             if tx.send(incoming).is_err() {
                 return;
@@ -253,7 +353,18 @@ async fn read_loop(
 
         if message.get("type").and_then(Value::as_str) == Some("result") {
             if let Some(done) = pending.lock().await.take() {
-                let _ = done.send(result_of(&message));
+                // After an interrupt the CLI still writes a `result`, usually
+                // flagged as an error. The person asked for that stop, so it
+                // is a cancellation, not a failure.
+                let outcome = if cancelling.load(Ordering::Acquire) {
+                    Ok(TurnOutcome {
+                        stop_reason: StopReason::Cancelled,
+                        usage: None,
+                    })
+                } else {
+                    result_of(&message)
+                };
+                let _ = done.send(outcome);
             }
         }
     }
@@ -276,6 +387,137 @@ async fn read_loop(
         };
         let _ = done.send(result);
     }
+}
+
+async fn write_frame(stdin: &Arc<Mutex<ChildStdin>>, frame: Value) {
+    let mut line = frame.to_string();
+    line.push('\n');
+    let mut guard = stdin.lock().await;
+    let _ = guard.write_all(line.as_bytes()).await;
+    let _ = guard.flush().await;
+}
+
+/// One `control_request` frame, sorted into what GitWyrm does with it.
+#[derive(Debug)]
+enum ControlFrame {
+    Permission {
+        request_id: Value,
+        tool_name: String,
+        input: Value,
+        capability: ToolCapability,
+        path: Option<String>,
+        summary: String,
+    },
+    Other {
+        request_id: Value,
+        subtype: String,
+    },
+    Malformed,
+}
+
+fn permission_request_of(message: &Value) -> ControlFrame {
+    let Some(request_id) = message.get("request_id").cloned() else {
+        return ControlFrame::Malformed;
+    };
+    let request = message.get("request").cloned().unwrap_or(Value::Null);
+    let subtype = request
+        .get("subtype")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if subtype != "can_use_tool" {
+        return ControlFrame::Other { request_id, subtype };
+    }
+    let tool_name = request
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let input = request.get("input").cloned().unwrap_or(Value::Null);
+    let path = input
+        .get("file_path")
+        .or_else(|| input.get("path"))
+        .or_else(|| input.get("notebook_path"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let summary = permission_summary(&tool_name, &input, request.get("description").and_then(Value::as_str));
+    ControlFrame::Permission {
+        request_id,
+        capability: ToolCapability::from_acp_kind(Some(claude_tool_kind(&tool_name))),
+        path,
+        summary,
+        tool_name,
+        input,
+    }
+}
+
+/// Claude Code's tool names in the ACP vocabulary `ToolCapability` already
+/// understands. Anything not listed is "other", which the classifier treats
+/// as a write, so an unfamiliar tool can never pass a read-only run.
+fn claude_tool_kind(tool_name: &str) -> &'static str {
+    match tool_name {
+        "Bash" | "PowerShell" | "BashOutput" | "KillShell" => "execute",
+        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => "edit",
+        "Read" | "Glob" | "Grep" | "LS" | "TodoWrite" | "Task" => "read",
+        "WebFetch" | "WebSearch" => "fetch",
+        _ => "other",
+    }
+}
+
+fn permission_summary(tool_name: &str, input: &Value, description: Option<&str>) -> String {
+    match claude_tool_kind(tool_name) {
+        "execute" => {
+            let command = input
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("a command");
+            format!("Run {command}")
+        }
+        "edit" => {
+            let path = input
+                .get("file_path")
+                .or_else(|| input.get("notebook_path"))
+                .and_then(Value::as_str)
+                .unwrap_or("a file");
+            format!("Change {path}")
+        }
+        _ => match description {
+            Some(d) if !d.trim().is_empty() => format!("{tool_name}: {d}"),
+            _ => tool_title(tool_name, input),
+        },
+    }
+}
+
+/// The `control_response` for one permission decision.
+///
+/// An allow echoes the input back as `updatedInput`: the SDK's own schema
+/// wants it there, and GitWyrm never rewrites what the model asked for. A
+/// deny carries a message the model sees, so it can choose another route
+/// instead of retrying the same call.
+fn permission_answer(request_id: &Value, decision: PermissionDecision, input: &Value) -> Value {
+    let response = match decision {
+        PermissionDecision::AllowOnce => json!({ "behavior": "allow", "updatedInput": input }),
+        PermissionDecision::RejectOnce => json!({
+            "behavior": "deny",
+            "message": "GitWyrm declined this action. Do not retry it unchanged; find another way or say plainly that you cannot.",
+        }),
+        PermissionDecision::Cancelled => json!({
+            "behavior": "deny",
+            "message": "The run was stopped.",
+            "interrupt": true,
+        }),
+    };
+    json!({
+        "type": "control_response",
+        "response": { "subtype": "success", "request_id": request_id, "response": response },
+    })
+}
+
+fn control_error(request_id: &Value, error: &str) -> Value {
+    json!({
+        "type": "control_response",
+        "response": { "subtype": "error", "request_id": request_id, "error": error },
+    })
 }
 
 fn classify(message: &Value) -> Vec<Incoming> {
@@ -378,6 +620,87 @@ fn parse_usage(message: &Value) -> Option<crate::agentdesk::model::TurnUsage> {
 mod tests {
     use super::*;
 
+    fn real_claude() -> (std::path::PathBuf, &'static super::super::registry::AgentSpec) {
+        let spec = super::super::registry::find("claude").expect("claude row");
+        match super::super::copilot_cli::detect_agent(spec).state {
+            super::super::copilot_cli::CliState::Ready { path, .. } => (std::path::PathBuf::from(path), spec),
+            other => panic!("Claude Code not usable on this machine: {other:?}"),
+        }
+    }
+
+    /// The whole path a chat walks against the Claude Code on this machine.
+    /// Needs a signed-in `claude`; run by hand:
+    ///
+    /// `cargo test --lib claude_answers_a_real_turn -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn claude_answers_a_real_turn() {
+        let (program, spec) = real_claude();
+        let cwd = std::env::temp_dir();
+        let mut conn = ClaudeConnection::spawn(&program, &cwd, &spec.launch_args(&["url", "shell", "write"]), true)
+            .await
+            .expect("spawn");
+        let said = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            conn.ask("Reply with exactly the word PONG and nothing else."),
+        )
+        .await
+        .expect("no reply within two minutes")
+        .expect("turn failed");
+        eprintln!("claude said: {said:?}");
+        conn.shutdown().await;
+        assert!(said.to_uppercase().contains("PONG"), "got {said:?}");
+    }
+
+    /// Proves two things at once against the real binary: `--tools default`
+    /// gives a writing run Bash back despite `--restricted`, and the command
+    /// arrives as a `can_use_tool` frame that GitWyrm's answer unblocks.
+    ///
+    /// `cargo test --lib claude_routes_a_command_through_the_gate -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn claude_routes_a_command_through_the_gate() {
+        let (program, spec) = real_claude();
+        let cwd = std::env::temp_dir();
+        let mut conn = ClaudeConnection::spawn(&program, &cwd, &spec.launch_args(&["url"]), false)
+            .await
+            .expect("spawn");
+        let mut incoming = conn.take_incoming().expect("incoming");
+        let mut gated = 0;
+        let mut said = String::new();
+        // Inner scope: the prompt future borrows `conn`, and `shutdown` below
+        // needs to take it by value once the turn is over.
+        {
+        let prompt = conn.prompt("Use the Bash tool to run exactly `echo GATE-PONG`, then reply with the command's output and nothing else.");
+        tokio::pin!(prompt);
+        let deadline = tokio::time::sleep(std::time::Duration::from_secs(180));
+        tokio::pin!(deadline);
+        loop {
+            tokio::select! {
+                result = &mut prompt => { result.expect("turn failed"); break; }
+                Some(item) = incoming.recv() => match item {
+                    Incoming::PermissionRequest(req) => {
+                        eprintln!("gate: {} ({:?}, {:?})", req.summary, req.capability, req.path);
+                        assert_eq!(req.capability, ToolCapability::EditFile);
+                        gated += 1;
+                        let _ = req.respond.send(PermissionDecision::AllowOnce);
+                    }
+                    Incoming::TextChunk(t) => said.push_str(&t),
+                    other => eprintln!("{other:?}"),
+                },
+                _ = &mut deadline => panic!("no result within three minutes"),
+            }
+        }
+        }
+        while let Ok(item) = incoming.try_recv() {
+            if let Incoming::TextChunk(t) = item { said.push_str(&t); }
+        }
+        conn.shutdown().await;
+        eprintln!("claude said: {said:?}; gated {gated} time(s)");
+        assert!(gated >= 1, "the Bash call never reached GitWyrm's gate");
+        assert!(said.contains("GATE-PONG"), "got {said:?}");
+    }
+
     #[test]
     fn assistant_text_and_tools_become_agent_desk_events() {
         let message = json!({
@@ -423,9 +746,123 @@ mod tests {
             .any(|pair| pair == ["--permission-mode", "plan"]));
         assert!(read_only.contains(&"--restricted".to_string()));
         let writing = launch_args(&base, false);
+        // `default`, not `acceptEdits`: edits must reach GitWyrm's gate like
+        // they do on Codex and Copilot, rather than being waved through by
+        // the CLI itself.
         assert!(writing
             .windows(2)
-            .any(|pair| pair == ["--permission-mode", "acceptEdits"]));
+            .any(|pair| pair == ["--permission-mode", "default"]));
+        for args in [&read_only, &writing] {
+            assert!(
+                args.windows(2).any(|pair| pair == ["--permission-prompt-tool", "stdio"]),
+                "without the stdio prompt route the CLI auto-denies every prompt: {args:?}"
+            );
+        }
+        assert!(
+            writing.windows(2).any(|pair| pair == ["--tools", "default"]),
+            "a writing run must name the tools back that --restricted removes"
+        );
+        assert!(
+            !read_only.contains(&"--tools".to_string()),
+            "a read-only run keeps Bash absent as a second line of defence"
+        );
+    }
+
+    /// Shape taken from the CLI binary (2.1.251): a Bash prompt names the
+    /// command in `input.command`; an edit names its file in `file_path`.
+    #[test]
+    fn a_bash_prompt_becomes_a_command_gate_and_an_edit_names_its_file() {
+        let bash = json!({
+            "type": "control_request",
+            "request_id": "req-1",
+            "request": { "subtype": "can_use_tool", "tool_name": "Bash",
+                         "input": { "command": "cargo test" }, "tool_use_id": "t1" }
+        });
+        match permission_request_of(&bash) {
+            ControlFrame::Permission { capability, path, summary, tool_name, .. } => {
+                assert_eq!(capability, ToolCapability::EditFile, "a command can change files");
+                assert_eq!(path, None);
+                assert_eq!(summary, "Run cargo test");
+                assert_eq!(tool_name, "Bash");
+            }
+            other => panic!("expected a permission frame, got {other:?}"),
+        }
+
+        let edit = json!({
+            "type": "control_request",
+            "request_id": "req-2",
+            "request": { "subtype": "can_use_tool", "tool_name": "Edit",
+                         "input": { "file_path": "src/lib.rs", "old_string": "a", "new_string": "b" } }
+        });
+        match permission_request_of(&edit) {
+            ControlFrame::Permission { capability, path, summary, .. } => {
+                assert_eq!(capability, ToolCapability::EditFile);
+                assert_eq!(path.as_deref(), Some("src/lib.rs"));
+                assert_eq!(summary, "Change src/lib.rs");
+            }
+            other => panic!("expected a permission frame, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_read_prompt_is_a_read_and_an_unknown_tool_is_a_write() {
+        let read = json!({ "type": "control_request", "request_id": 7,
+            "request": { "subtype": "can_use_tool", "tool_name": "Grep", "input": { "pattern": "todo" } } });
+        match permission_request_of(&read) {
+            ControlFrame::Permission { capability, .. } => assert_eq!(capability, ToolCapability::Read),
+            other => panic!("{other:?}"),
+        }
+        let unknown = json!({ "type": "control_request", "request_id": 8,
+            "request": { "subtype": "can_use_tool", "tool_name": "mcp__thing__do", "input": {} } });
+        match permission_request_of(&unknown) {
+            ControlFrame::Permission { capability, .. } => {
+                assert_eq!(capability, ToolCapability::EditFile, "unfamiliar tools cannot pass a read-only run")
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn other_control_requests_are_declined_not_ignored() {
+        let hook = json!({ "type": "control_request", "request_id": "h1",
+            "request": { "subtype": "hook_callback", "callback_id": "x" } });
+        match permission_request_of(&hook) {
+            ControlFrame::Other { subtype, request_id } => {
+                assert_eq!(subtype, "hook_callback");
+                let frame = control_error(&request_id, "no");
+                assert_eq!(frame["type"], "control_response");
+                assert_eq!(frame["response"]["subtype"], "error");
+                assert_eq!(frame["response"]["request_id"], "h1");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            permission_request_of(&json!({ "type": "control_request" })),
+            ControlFrame::Malformed
+        ));
+    }
+
+    /// The answer frames, as the SDK writes them (`UOe` in the bundled SDK):
+    /// success envelope, the decision under `response`, input echoed back on
+    /// allow.
+    #[test]
+    fn permission_answers_match_the_sdk_frames() {
+        let input = json!({ "command": "ls" });
+        let allow = permission_answer(&json!("req-1"), PermissionDecision::AllowOnce, &input);
+        assert_eq!(allow["type"], "control_response");
+        assert_eq!(allow["response"]["subtype"], "success");
+        assert_eq!(allow["response"]["request_id"], "req-1");
+        assert_eq!(allow["response"]["response"]["behavior"], "allow");
+        assert_eq!(allow["response"]["response"]["updatedInput"], input);
+
+        let deny = permission_answer(&json!("req-1"), PermissionDecision::RejectOnce, &input);
+        assert_eq!(deny["response"]["response"]["behavior"], "deny");
+        assert!(deny["response"]["response"]["message"].as_str().unwrap().contains("declined"));
+        assert!(deny["response"]["response"].get("interrupt").is_none());
+
+        let stopped = permission_answer(&json!("req-1"), PermissionDecision::Cancelled, &input);
+        assert_eq!(stopped["response"]["response"]["behavior"], "deny");
+        assert_eq!(stopped["response"]["response"]["interrupt"], true);
     }
 
     /// The person's own MCP servers and skills must reach a managed run,

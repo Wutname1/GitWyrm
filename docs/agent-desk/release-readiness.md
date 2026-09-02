@@ -24,15 +24,15 @@ real run:
 | Auto with helpers | One lead ran while the UI said "up to 3 helpers" | An Auto lead may return a helper plan and it starts immediately through the same launch path as Plan's Start button |
 | Auditor | Verdict assigned and never read; a correction turn's result was discarded and could hang on a permission request | Correction turns are driven like any turn, re-audited, and a still-hollow run ends Failed with reasons |
 | Shell | Denied for every run | Follows the write decision: allowed on Auto, Fix and started Plan through the approval gate; denied for read-only chats. Network stays denied |
-| Claude Code | Launched with `--safe-mode` and an empty MCP config | Loads the user's own MCP servers and skills. `--restricted` still removes Bash, so Claude cannot run commands yet |
+| Claude Code | Launched with `--safe-mode` and an empty MCP config; every prompt auto-denied | Loads the user's own MCP servers and skills; prompts reach GitWyrm's gate over stdio; Bash restored on writing runs. Unverified live (login expired) |
 | Codex | Read-only chats launched `codex app-server --sandbox=read-only`, which the binary rejects; stderr unread; the chat "did nothing" | Sandbox travels in `thread/start`; stderr tail is kept and shown; unknown server requests are declined instead of hanging the turn. Verified: a real read-only Codex turn answered PONG |
 | Queued messages | A message sent during a turn was saved and never read | A clean Finish with nothing else live starts the next turn with the same mode/team/tool after a note in the chat. Stopped or Failed turns never restart |
 | Usage | Transcript rows counted as "turns"; helper context could replace the lead's | Turns only when reported; context from the lead; per-agent rows for team runs; unreported figures stay blank |
 | Deleting a chat | Failed every time (wrong Tauri state type) | Works |
 | Windows | Restored off-screen after monitor changes | Clamped back onto a visible screen on load |
 
-The automated baseline is healthy: TypeScript, the frontend suite (718), the Rust suite
-(1354, 6 ignored), and strict OpenSpec validation pass.
+The automated baseline is healthy: TypeScript, the frontend suite (827), the Rust suite
+(1425, 9 ignored: real-binary runs), and strict OpenSpec validation pass.
 
 ## Still a claim: what native acceptance must cover
 
@@ -70,13 +70,13 @@ Denial is still per tool, because no protocol standardises it:
 | --- | --- | --- |
 | Copilot | `--deny-tool` at launch, outranks every allow rule | Yes (ACP `session/request_permission`) |
 | Gemini | `--approval-mode=plan` for the whole session | Yes, but `exit_plan_mode` is auto-allowed non-interactively; unverified whether plan mode holds |
-| Claude Code | `--disallowedTools` at launch | No. `--print` auto-denies anything needing a prompt, and `--restricted` removes Bash. Edits are gated by Claude's own `acceptEdits`, not by GitWyrm |
+| Claude Code | `--disallowedTools` at launch, `--permission-mode plan` for read-only | Yes, since 2026-09-02: `--permission-prompt-tool stdio` routes each prompt as a `control_request` frame that GitWyrm answers; writing runs use `--permission-mode default` plus `--tools default` so edits and commands both reach the gate. Protocol read from the CLI binary, not documented; live run blocked by an expired login on the dev machine |
 | Codex | `sandbox: "read-only"` on `thread/start` | Yes (`item/*/requestApproval`); command approvals map to the edit capability because no shell capability exists in policy |
 | opencode | None | Refused for read-only work by `select::choose` |
 
-The Claude row is the one that matters for autonomy: giving Claude shell needs `--tools`
-plus a permission bridge (`--permission-prompt-tool` or equivalent) so each command
-reaches the person. That is its own feature.
+The Claude bridge is the newest and least proven row. Two ignored real-binary tests
+(`claude_answers_a_real_turn`, `claude_routes_a_command_through_the_gate`) exist for the
+first signed-in machine; until one has passed, treat "Claude runs commands" as a claim.
 
 ### Usage and quota
 
@@ -129,7 +129,7 @@ from the JSON proposal that already exists. Undecided, fails safe.
 
 1. Native acceptance, in the order listed above, on a machine with all three tools
    signed in.
-2. Claude shell: `--tools` plus a permission bridge, then a real gated command.
+2. Run the two ignored Claude tests on a signed-in machine; fix what they find.
 3. Verify Gemini's plan mode holds across a non-interactive `exit_plan_mode`.
 4. Live auditor run against a corner-cutting task; tune the prompt on what it misses.
 5. Decide the plan-checklist parser and the quota question.
