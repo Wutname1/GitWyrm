@@ -3555,6 +3555,20 @@ async agentIntentPolicy(intent: SessionIntent) : Promise<IntentPolicy> {
     return await TAURI_INVOKE("agent_intent_policy", { intent });
 },
 /**
+ * "Fix this" on a finished review: opens a seeded Fix chat, does not start
+ * it. See `escalate_review_to_fix_at`. Deliberately does not emit
+ * `SELECT_SESSION_EVENT`: the button lives inside the Desk window, and the
+ * pane that showed the review selects the new session itself.
+ */
+async agentSessionEscalateToFix(sessionId: string) : Promise<Result<EscalateToFixOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_escalate_to_fix", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Read-only scan across every known client location, optionally scoped to
  * one open repo for repo-local configuration paths. Never writes anything
  * (task 1.2, spec "Scan").
@@ -3832,6 +3846,14 @@ async agentImportContinuationCapability(adapterId: string, externalSessionId: st
 async agentImportContinueHere(sessionId: string) : Promise<Result<ContinueHereOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_import_continue_here", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentImportUnlink(sessionId: string) : Promise<Result<UnlinkOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_import_unlink", { sessionId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -5009,6 +5031,28 @@ solutions: SolutionFile[] }
  */
 export type EditorKind = "vs_code" | "cursor" | "windsurf" | "jetbrains" | "zed"
 /**
+ * What escalating a review to a fix found or did.
+ */
+export type EscalateToFixOutcome = 
+/**
+ * A new Fix session exists, seeded and waiting for Send. Not started.
+ */
+{ kind: "created"; session: AgentSession } | { kind: "notFound" } | 
+/**
+ * The session's intent can already write (Fix/Plan), so there is nothing
+ * to escalate -- the caller should not have offered the button.
+ */
+{ kind: "notAReview"; intent: SessionIntent } | 
+/**
+ * The review never produced a conclusion to carry over: no assistant
+ * message with any text in it.
+ */
+{ kind: "nothingToFix"; detail: string } | 
+/**
+ * The review could not be read, or the new session could not be written.
+ */
+{ kind: "failed"; detail: string }
+/**
  * `ask | plan | auto`. Kept in this module (not re-exported from
  * `commands::agent_desk::ExecutionMode`) as the canonical definition;
  * `agent_session_start_execution`'s own `ExecutionMode` predates this policy
@@ -5414,7 +5458,19 @@ export type GraphNodeView = { executionId: string; parentExecutionId: string | n
  * -- lets the UI show "queued" vs. "waiting on X" distinctly even
  * though both map to the same underlying `Ready`/`Draft` state.
  */
-blockedOn: string[] }
+blockedOn: string[]; 
+/**
+ * What this node is doing right now (tasks.md 6.2): the first line of
+ * its newest tool activity or note. `None` until it has said anything.
+ */
+latestActivity?: string | null; 
+/**
+ * The execution id a `ResultRecord` exists under for this node (review
+ * tasks.md 2.2/2.6) -- always this node's own id when present. `None`
+ * until a result has been captured, so the UI can omit (not disable)
+ * its View changes / output controls.
+ */
+resultExecutionId?: string | null }
 /**
  * Every way a proposed graph can fail validation (tasks.md 1.2, 1.3 "fixture
  * tests for every invalid shape"). Exhaustive and typed -- never a bare
@@ -6961,7 +7017,14 @@ export type ScannedExternalSession = { adapterId: string; summary: ExternalSessi
  * session per the import ledger, so the UI can offer "Open imported
  * session" instead of "Import" (task 2.3).
  */
-alreadyImported: boolean }
+alreadyImported: boolean; 
+/**
+ * The GitWyrm session this external session was imported into, when
+ * `already_imported` is `true`. This is what "Continue here" and
+ * "Unlink" (task 4.3) act on, so a row can offer them without a second
+ * lookup.
+ */
+importedSessionId: string | null }
 export type ScannedRepo = { name: string; path: string; 
 /**
  * Current branch parsed from .git/HEAD as text (None when detached/unreadable).
@@ -8489,6 +8552,17 @@ export type UndoResultOutcome =
  * current state instead of retrying blindly.
  */
 { kind: "stateChanged"; record: ResultRecord }
+/**
+ * Result of "Unlink from <client>" (task 4.3). Unlinking only forgets the
+ * ledger entry that ties a GitWyrm session to its external source; every
+ * imported message, and the provenance on each one, stays in the session.
+ */
+export type UnlinkOutcome = { kind: "unlinked"; session: AgentSession; adapterId: string; adapterDisplayName: string } | 
+/**
+ * The session exists but no ledger points at it (never imported, or
+ * already unlinked), so there was nothing to change.
+ */
+{ kind: "notLinked" } | { kind: "notFound" } | { kind: "failed"; detail: string }
 /**
  * A local tag the given remote does not have, along with whether the remote
  * already holds the commit it points at. Tags on commits the remote lacks

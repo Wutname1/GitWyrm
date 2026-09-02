@@ -24,7 +24,8 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::model::{ExecutionId, ExecutionRecord, SessionState};
+use super::model::{ExecutionId, ExecutionRecord, MessageKind, MessageRole, SessionMessage, SessionState};
+use super::result::ResultRecord;
 
 /// Helpers may run at most this many at once (tasks.md 3.3, design.md "at
 /// most three concurrent helpers").
@@ -578,22 +579,42 @@ pub struct GraphNodeView {
     /// -- lets the UI show "queued" vs. "waiting on X" distinctly even
     /// though both map to the same underlying `Ready`/`Draft` state.
     pub blocked_on: Vec<ExecutionId>,
+    /// What this node is doing right now (tasks.md 6.2): the first line of
+    /// its newest tool activity or note. `None` until it has said anything.
+    #[serde(default)]
+    pub latest_activity: Option<String>,
+    /// The execution id a `ResultRecord` exists under for this node (review
+    /// tasks.md 2.2/2.6) -- always this node's own id when present. `None`
+    /// until a result has been captured, so the UI can omit (not disable)
+    /// its View changes / output controls.
+    #[serde(default)]
+    pub result_execution_id: Option<ExecutionId>,
 }
 
 /// Projects a session's executions plus the current schedule into the node
 /// list the Graph panel renders, lead first, helpers after in declaration
-/// order (tasks.md 6.1, 6.2).
-pub fn project_graph(executions: &[ExecutionRecord]) -> Vec<GraphNodeView> {
+/// order (tasks.md 6.1, 6.2). `messages` supplies each node's latest
+/// activity line and `results` which nodes already have a reviewable result.
+pub fn project_graph(
+    executions: &[ExecutionRecord],
+    messages: &[SessionMessage],
+    results: &[ResultRecord],
+) -> Vec<GraphNodeView> {
     let decision = schedule(executions);
     let blocked_by: HashMap<&str, &[ExecutionId]> = decision
         .blocked
         .iter()
         .map(|b| (b.execution_id.as_str(), b.waiting_on.as_slice()))
         .collect();
+    let result_ids: HashSet<&str> = results.iter().map(|r| r.execution_id.as_str()).collect();
 
     executions
         .iter()
         .map(|e| GraphNodeView {
+            latest_activity: latest_activity_for(messages, &e.execution_id),
+            result_execution_id: result_ids
+                .contains(e.execution_id.as_str())
+                .then(|| e.execution_id.clone()),
             execution_id: e.execution_id.clone(),
             parent_execution_id: e.parent_execution_id.clone(),
             is_lead: e.parent_execution_id.is_none(),
@@ -614,6 +635,25 @@ pub fn project_graph(executions: &[ExecutionRecord]) -> Vec<GraphNodeView> {
                 .unwrap_or_default(),
         })
         .collect()
+}
+
+/// The newest thing `execution_id` said about its own work: tool activity,
+/// notes, thought summaries, approvals and system lines all count; what the
+/// person typed and the final `Result` do not (the result is shown
+/// separately as the node's output). Newest is decided by `sequence`, with
+/// transcript order as the tie-break for messages that carry none. Only the
+/// first line is kept -- the node card has room for one line.
+fn latest_activity_for(messages: &[SessionMessage], execution_id: &str) -> Option<String> {
+    messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.execution_id.as_deref() == Some(execution_id))
+        .filter(|(_, m)| m.role != MessageRole::User && m.kind != MessageKind::Result)
+        .max_by_key(|(index, m)| (m.sequence, *index))
+        .and_then(|(_, m)| {
+            let line = m.plain_content.lines().map(str::trim).find(|l| !l.is_empty())?;
+            Some(line.to_string())
+        })
 }
 
 fn parse_role(s: &str) -> Option<HelperRole> {
@@ -897,11 +937,77 @@ mod tests {
             exec("h1", Some("lead"), SessionState::Working, &[]),
             exec("h2", Some("lead"), SessionState::Ready, &["h1"]),
         ];
-        let views = project_graph(&execs);
+        let views = project_graph(&execs, &[], &[]);
         let h2 = views.iter().find(|v| v.execution_id == "h2").unwrap();
         assert_eq!(h2.blocked_on, vec!["h1".to_string()]);
         let lead = views.iter().find(|v| v.execution_id == "lead").unwrap();
         assert!(lead.is_lead);
+        assert_eq!(lead.latest_activity, None);
+        assert_eq!(lead.result_execution_id, None);
+    }
+
+    fn message(
+        id: &str,
+        execution_id: Option<&str>,
+        sequence: Option<u32>,
+        role: MessageRole,
+        kind: MessageKind,
+        text: &str,
+    ) -> SessionMessage {
+        SessionMessage {
+            message_id: id.into(),
+            segment_id: "seg-1".into(),
+            role,
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            plain_content: text.into(),
+            rendered_content: None,
+            provider: None,
+            model: None,
+            kind,
+            execution_id: execution_id.map(|s| s.to_string()),
+            sequence,
+            import: None,
+            targets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn project_graph_carries_each_nodes_newest_activity_and_result_id() {
+        let execs = vec![
+            exec("lead", None, SessionState::Working, &[]),
+            exec("h1", Some("lead"), SessionState::Finished, &[]),
+            exec("h2", Some("lead"), SessionState::Working, &[]),
+        ];
+        let messages = vec![
+            // Out of transcript order on purpose: sequence decides "newest",
+            // not array position, so a late-arriving earlier event cannot
+            // overwrite what the node is doing now.
+            message("h1-2", Some("h1"), Some(2), MessageRole::Assistant, MessageKind::Tool, "Ran the tests: 3 passed\nsecond line"),
+            message("h1-1", Some("h1"), Some(1), MessageRole::Assistant, MessageKind::Tool, "Read src/lib.rs"),
+            // The node's final result is its output, not its activity.
+            message("h1-3", Some("h1"), Some(3), MessageRole::Assistant, MessageKind::Result, "All done"),
+            // What the person typed to h2 is not h2's own activity.
+            message("h2-9", Some("h2"), Some(9), MessageRole::User, MessageKind::User, "please hurry"),
+            message("h2-1", Some("h2"), Some(1), MessageRole::Assistant, MessageKind::Assistant, "  Looking at the crash log  "),
+            message("u-1", None, None, MessageRole::User, MessageKind::User, "start"),
+        ];
+        let results = vec![ResultRecord::new_reviewing(
+            "h1".into(),
+            super::super::result::ResultOutcomeKind::Finished,
+            "2026-01-01T00:00:05Z",
+        )];
+
+        let views = project_graph(&execs, &messages, &results);
+        let h1 = views.iter().find(|v| v.execution_id == "h1").unwrap();
+        assert_eq!(h1.latest_activity.as_deref(), Some("Ran the tests: 3 passed"));
+        assert_eq!(h1.result_execution_id.as_deref(), Some("h1"));
+
+        let h2 = views.iter().find(|v| v.execution_id == "h2").unwrap();
+        assert_eq!(h2.latest_activity.as_deref(), Some("Looking at the crash log"));
+        assert_eq!(h2.result_execution_id, None, "no result captured yet, so the UI omits its controls");
+
+        let lead = views.iter().find(|v| v.execution_id == "lead").unwrap();
+        assert_eq!(lead.latest_activity, None);
     }
 
     #[test]

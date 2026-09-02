@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { useQueryClient } from '@tanstack/react-query'
-import { GitFork } from 'lucide-react'
-import { commands, type AgentSession, type ExecutionRecord } from '@/lib/bindings'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { FileDiff, GitFork } from 'lucide-react'
+import { commands, type AgentSession, type ExecutionRecord, type ResultRecord } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { cn } from '@/lib/utils'
 import { buildGraphTree, graphSummary, nodeDotTone, nodeStatusLabel, type GraphTreeNode } from '@/lib/agentGraphProjection'
+import { canViewNodeChanges, latestActivityLine, resultForNode } from '@/lib/agentDeskGraph'
 import { AwaitingStartCard } from './AwaitingStartCard'
+import { ResultReviewPanel } from './ResultReviewPanel'
 
 const STATUS_TONE: Record<string, string> = {
   working: 'text-accent-text',
@@ -28,14 +30,17 @@ const DOT_TONE: Record<string, string> = {
 }
 
 /** One row in the graph tree: an L-shaped connector for helper rows, a
- * status dot, title + meta, and the status word (mockup `.ag-node-wrap`,
+ * status dot, title + meta, the node's latest activity line (tasks.md 6.2:
+ * what it is doing right now), and the status word (mockup `.ag-node-wrap`,
  * `.ag-node-dot`, `.ag-node-status`). */
 function GraphNodeRow({
   node,
+  activity,
   selected,
   onSelect,
 }: {
   node: GraphTreeNode
+  activity: string | null
   selected: boolean
   onSelect: () => void
 }) {
@@ -74,6 +79,11 @@ function GraphNodeRow({
         <span className="min-w-0 flex-1">
           <strong className="block truncate text-2xs font-semibold text-foreground">{title}</strong>
           <span className="block truncate text-[10px] text-muted-foreground">{meta || 'agent'}</span>
+          {activity ? (
+            <span className="block truncate text-[10px] text-foreground/80" title={activity}>
+              {activity}
+            </span>
+          ) : null}
         </span>
         <span className={cn('flex-none text-[10px] font-semibold', STATUS_TONE[status] ?? 'text-muted-foreground')}>
           {status}
@@ -84,19 +94,47 @@ function GraphNodeRow({
 }
 
 /** The persistent inspector card (mockup `.ag-inspector`): kicker, title,
- * description, files line, and Open conversation / Stop agent actions. */
+ * description, files line, latest activity, and -- once this node has a
+ * result -- View changes / Read output (tasks.md 6.2, review tasks.md 2.2
+ * and 2.6), plus Stop agent. The result controls are simply absent until
+ * `record` exists, never shown disabled. */
 function InspectorCard({
   node,
+  activity,
+  record,
   session,
   onStopped,
 }: {
   node: GraphTreeNode
+  activity: string | null
+  record: ResultRecord | null
   session: AgentSession
   onStopped: () => void
 }) {
   const qc = useQueryClient()
   const [stopping, setStopping] = useState(false)
+  const [showOutput, setShowOutput] = useState(false)
   const { execution, isLead } = node
+  const canViewChanges = canViewNodeChanges(record)
+
+  // Reuses the review-and-landing bridge (`agent_result_open_diff`): the
+  // main window opens this helper's worktree as a repo tab and shows its
+  // diff there. No diff viewer of its own in this window.
+  const viewChanges = async () => {
+    if (!record?.worktreePath) return
+    try {
+      const outcome = unwrap(await commands.agentResultOpenDiff(record.worktreePath, null))
+      if (outcome.kind === 'opened') {
+        toast.success('Showing the changes in the main GitWyrm window.')
+      } else {
+        toast.error('Open the main GitWyrm window first.')
+      }
+    } catch (e) {
+      const message = describeError(e)
+      log.error(`agent desk: could not open changes for ${execution.executionId}: ${message}`)
+      toast.error('Could not open the changes.', { description: message })
+    }
+  }
   const title = isLead ? 'Lead agent' : (execution.jobTitle ?? 'Helper')
   const description = isLead
     ? 'Owns the conversation, the source, and reviews every helper result before answering.'
@@ -193,6 +231,20 @@ function InspectorCard({
       <div className="mt-1 text-xs font-semibold text-foreground">{title}</div>
       <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">{description}</p>
       {filesLine ? <div className="mt-1.5 font-mono text-[10px] text-muted-foreground">{filesLine}</div> : null}
+      {activity ? (
+        <div className="mt-1.5">
+          <div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+            {canStop ? 'Right now' : 'Last activity'}
+          </div>
+          <p className="mt-0.5 text-2xs leading-relaxed text-foreground">{activity}</p>
+        </div>
+      ) : null}
+      {execution.outputSummary ? (
+        <div className="mt-1.5">
+          <div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Output</div>
+          <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">{execution.outputSummary}</p>
+        </div>
+      ) : null}
       {execution.conflict ? (
         <div className="mt-2 rounded border border-[var(--gw-amber)]/50 bg-panel2 p-2">
           <div className="text-[9px] font-bold uppercase tracking-wide text-[var(--gw-amber)]">
@@ -222,15 +274,27 @@ function InspectorCard({
           </div>
         </div>
       ) : null}
-      <div className="mt-2 flex gap-1.5">
-        <button
-          type="button"
-          disabled
-          title="A helper's own conversation cannot be opened yet"
-          className="rounded border border-border bg-panel2 px-1.5 py-1 text-[10px] font-semibold text-foreground opacity-40"
-        >
-          Open conversation
-        </button>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {canViewChanges ? (
+          <button
+            type="button"
+            onClick={() => void viewChanges()}
+            className="flex items-center gap-1 rounded border border-border bg-panel2 px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3"
+          >
+            <FileDiff size={11} aria-hidden />
+            View changes
+          </button>
+        ) : null}
+        {record ? (
+          <button
+            type="button"
+            onClick={() => setShowOutput((v) => !v)}
+            aria-expanded={showOutput}
+            className="rounded border border-border bg-panel2 px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3"
+          >
+            {showOutput ? 'Hide output' : 'Read output'}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => void stopThis()}
@@ -240,6 +304,22 @@ function InspectorCard({
           {stopping ? 'Stopping…' : 'Stop agent'}
         </button>
       </div>
+      {record && showOutput ? (
+        // The same review surface the conversation shows for a finished
+        // run, scoped to THIS node's result (review tasks.md 2.2: "graph
+        // node Output/View diff open that helper-scoped result").
+        <div className="mt-2 rounded border border-border bg-panel2">
+          <ResultReviewPanel
+            sessionId={session.header.sessionId}
+            repoId={session.header.repoId}
+            executionId={execution.executionId}
+            intent={session.header.intent}
+            taskText={execution.jobDescription ?? execution.jobTitle ?? session.header.title}
+            provider={execution.provider ?? 'copilot'}
+            isOpenSpecTask={session.header.source.kind === 'openSpecTask'}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -263,6 +343,15 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
 
   const executions = session.executions
   const tree = buildGraphTree(executions)
+  // Result records live in a sidecar the backend fills as each execution
+  // ends (`build_result_for_completed_execution`); same query key the
+  // conversation's review panel uses, so Keep/Commit there refreshes here.
+  const resultsQuery = useQuery({
+    queryKey: keys.agentResults(session.header.sessionId),
+    queryFn: async () => unwrap(await commands.agentResultList(session.header.sessionId)),
+    enabled: executions.length > 0,
+  })
+  const records = resultsQuery.data?.kind === 'found' ? resultsQuery.data.records : undefined
   const activeCount = executions.filter(
     (e) => e.state === 'working' || e.state === 'preparing' || e.state === 'needsInput'
   ).length
@@ -357,6 +446,7 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
           <GraphNodeRow
             key={node.execution.executionId}
             node={node}
+            activity={latestActivityLine(session.messages, node.execution.executionId)}
             selected={node.execution.executionId === selected?.execution.executionId}
             onSelect={() => setSelectedId(node.execution.executionId)}
           />
@@ -364,7 +454,14 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
       </div>
 
       {selected ? (
-        <InspectorCard session={session} node={selected} onStopped={() => void qc.invalidateQueries({ queryKey: keys.agentSession(session.header.sessionId) })} />
+        <InspectorCard
+          key={selected.execution.executionId}
+          session={session}
+          node={selected}
+          activity={latestActivityLine(session.messages, selected.execution.executionId)}
+          record={resultForNode(records, selected.execution.executionId)}
+          onStopped={() => void qc.invalidateQueries({ queryKey: keys.agentSession(session.header.sessionId) })}
+        />
       ) : null}
     </div>
   )

@@ -2721,9 +2721,15 @@ pub async fn agent_session_graph_view(
 ) -> Result<GraphViewOutcome, AppError> {
     let root = resolve_root(&app)?;
     Ok(match store::read_session(&root, &session_id) {
-        Ok(s) => GraphViewOutcome::Found {
-            nodes: graph::project_graph(&s.executions),
-        },
+        Ok(s) => {
+            // Results live in a sidecar file; a missing or unreadable one
+            // only means no node can offer View changes yet, never that the
+            // graph itself is unavailable.
+            let results = crate::agentdesk::result::read_results(&root, &session_id).unwrap_or_default();
+            GraphViewOutcome::Found {
+                nodes: graph::project_graph(&s.executions, &s.messages, &results),
+            }
+        }
         Err(SessionLoadError::NotFound) => GraphViewOutcome::NotFound,
         Err(SessionLoadError::Io { detail }) => GraphViewOutcome::Unavailable { detail },
         Err(reason) => GraphViewOutcome::Damaged {
@@ -3600,7 +3606,7 @@ mod tests {
         });
 
         let session = store::read_session(&root, "sess-1").unwrap();
-        let views = graph::project_graph(&session.executions);
+        let views = graph::project_graph(&session.executions, &session.messages, &[]);
         assert_eq!(views.len(), 2);
         let lead_view = views.iter().find(|v| v.execution_id == "lead").unwrap();
         assert!(lead_view.is_lead);
