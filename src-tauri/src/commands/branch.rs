@@ -405,8 +405,11 @@ pub async fn create_branch(
         if checkout {
             let refname = format!("refs/heads/{name}");
             let object = repo.revparse_single(&refname)?;
-            repo.checkout_tree(&object, None)?;
+            // Move HEAD first. `checkout_tree` rewrites the index and working
+            // files, so doing it first means a refusal from `set_head` leaves the
+            // tree already rewritten under a HEAD that never moved.
             repo.set_head(&refname)?;
+            repo.checkout_tree(&object, None)?;
             // Branching from an older commit can pin a submodule elsewhere, and the
             // checkout moves only the parent's pointer.
             follow_switched_pins(&repo, &repo_path);
@@ -814,8 +817,8 @@ pub async fn fast_forward_branch(
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         let repo_path = open.path.to_string_lossy().into_owned();
-        let repo = open.repo.lock().unwrap();
-        fast_forward_branch_to(&repo, &repo_path, &branch, &target)
+        let mut repo = open.repo.lock().unwrap();
+        fast_forward_branch_to(&mut repo, &repo_path, &branch, &target)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
@@ -824,7 +827,7 @@ pub async fn fast_forward_branch(
 /// Shared core for [`fast_forward_branch`], split out so it can be tested
 /// without a running app.
 fn fast_forward_branch_to(
-    repo: &git2::Repository,
+    repo: &mut git2::Repository,
     repo_path: &str,
     branch: &str,
     target: &str,
@@ -837,6 +840,10 @@ fn fast_forward_branch_to(
             .map_err(|_| AppError::Other(format!("{} has no commits to move.", branch.trim())))?
             .id();
         let target_oid = repo.revparse_single(target.trim())?.peel_to_commit()?.id();
+        // Read the ref name now and release the borrow: stashing needs `&mut repo`,
+        // and holding a reference object across it would pin an immutable borrow.
+        let branch_refname = branch_ref.get().name().ok().map(str::to_string);
+        drop(branch_ref);
 
         if branch_oid == target_oid {
             return Err(AppError::Other(format!(
@@ -870,17 +877,38 @@ fn fast_forward_branch_to(
         // Only the checked-out arm can move a nested checkout; a pure ref move
         // leaves the working tree alone and has nothing to report.
         let mut followed = Vec::new();
+        // Set to true only while a stash the user must be told about is still
+        // held; a clean re-apply clears it back to false.
+        let mut stashed = false;
 
         if is_head {
-            // The branch is checked out, so the working tree must move with it. Refuse
-            // over uncommitted changes - a fast-forward checkout would overwrite them.
+            // The branch is checked out, so the working tree must move with it.
+            // Uncommitted work used to be refused here, which made the user do by
+            // hand what git does for itself on pull: set the changes aside, move,
+            // put them back. A fast-forward only adds commits, so the changes
+            // almost always re-apply cleanly.
             if refs::tracked_changes_present(&repo)? {
-                return Err(AppError::Other(
-                    "working tree has changes; commit or stash before moving this branch".into(),
-                ));
+                let signature = repo.signature()?;
+                match repo.stash_save(
+                    &signature,
+                    &format!("gitwyrm: auto-stash before updating {}", branch.trim()),
+                    Some(git2::StashFlags::INCLUDE_UNTRACKED),
+                ) {
+                    Ok(_) => stashed = true,
+                    // Nothing could be stashed yet changes are present: the blocker is
+                    // un-stashable, so keep the original guidance rather than a raw error.
+                    Err(e)
+                        if e.class() == git2::ErrorClass::Stash
+                            && e.code() == git2::ErrorCode::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
             }
-            let object = repo.find_object(target_oid, None)?;
-            repo.checkout_tree(&object, Some(CheckoutBuilder::new().safe()))?;
+            // Scoped so the object's borrow ends here: restoring the stash below
+            // needs `&mut repo`.
+            {
+                let object = repo.find_object(target_oid, None)?;
+                repo.checkout_tree(&object, Some(CheckoutBuilder::new().safe()))?;
+            }
             let head_ref = repo.head()?;
             let name = head_ref.name().ok().map(str::to_string);
             drop(head_ref);
@@ -899,14 +927,25 @@ fn fast_forward_branch_to(
             // and rebase already do, and best-effort for the same reason: the
             // fast-forward itself has already landed.
             followed = submodule::follow_and_report(repo, repo_path, "fast-forward");
+
+            // Put the set-aside work back. stash_APPLY, never pop: git2's pop
+            // returns Ok and drops the entry even when the apply conflicted, which
+            // would destroy the backup at the exact moment it is needed. Drop only
+            // after a clean apply; otherwise the stash stays as the safety net and
+            // `stashed` tells the UI to say where the work went.
+            if stashed {
+                match repo.stash_apply(0, None) {
+                    Ok(()) if !repo.index().map(|i| i.has_conflicts()).unwrap_or(true) => {
+                        repo.stash_drop(0)?;
+                        stashed = false;
+                    }
+                    _ => {}
+                }
+            }
         } else {
             // Not checked out: a pure ref move. The working tree and HEAD are
             // untouched, so the user stays on their current branch.
-            let refname = branch_ref
-                .get()
-                .name()
-                .ok()
-                .map(str::to_string)
+            let refname = branch_refname
                 .ok_or_else(|| AppError::Other("could not read the branch reference".into()))?;
             repo.reference(&refname, target_oid, true, "fast-forward")?;
         }
@@ -914,7 +953,7 @@ fn fast_forward_branch_to(
         Ok(RefMove {
             branch: branch.trim().to_string(),
             previous_sha,
-            stashed: false,
+            stashed,
             submodules: followed,
         })
     }
@@ -1573,9 +1612,9 @@ mod tests {
     #[test]
     fn fast_forward_moves_the_submodule_checkout_too() {
         let f = parent_with_bumped_pin();
-        let repo = git2::Repository::open(&f.parent).unwrap();
+        let mut repo = git2::Repository::open(&f.parent).unwrap();
 
-        fast_forward_branch_to(&repo, &f.parent, &f.base_branch, "ahead").expect("fast-forward");
+        fast_forward_branch_to(&mut repo, &f.parent, &f.base_branch, "ahead").expect("fast-forward");
 
         assert_eq!(
             repo.head()
@@ -1703,6 +1742,52 @@ mod tests {
                 .iter()
                 .map(|s| (s.path().map(str::to_owned), s.status()))
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// The reported case: a branch that can fast-forward, with work in progress.
+    /// This used to refuse and tell the user to stash by hand, which is the step
+    /// git itself does for them on pull.
+    #[test]
+    fn fast_forward_over_dirty_tree_stashes_and_restores() {
+        let (dir, mut repo) = test_repo();
+        commit_file(&repo, "a.txt", "a", "base");
+        let ahead = commit_file(&repo, "b.txt", "b", "ahead");
+        // Put the checked-out branch behind, leaving `ahead` reachable to move onto.
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        repo.reference(
+            &format!("refs/heads/{branch}"),
+            repo.find_commit(ahead).unwrap().parent(0).unwrap().id(),
+            true,
+            "rewind",
+        )
+        .expect("rewind");
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .expect("checkout");
+
+        fs::write(dir.path().join("a.txt"), "work in progress").expect("dirty tree");
+        let path = dir.path().to_string_lossy().into_owned();
+
+        let result = fast_forward_branch_to(&mut repo, &path, &branch, &ahead.to_string())
+            .expect("fast-forward must not be refused over a dirty tree");
+
+        assert_eq!(
+            repo.head().unwrap().peel_to_commit().unwrap().id(),
+            ahead,
+            "the branch must actually move"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "work in progress",
+            "the in-progress work must come back"
+        );
+        assert!(
+            dir.path().join("b.txt").exists(),
+            "the fast-forwarded commit's files must be present"
+        );
+        assert!(
+            !result.stashed,
+            "a clean re-apply must drop the stash and report nothing held"
         );
     }
 
