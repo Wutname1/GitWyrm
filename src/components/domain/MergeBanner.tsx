@@ -6,14 +6,8 @@ import { useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
+import { incomingName } from '@/lib/conflictSides'
 import type { OperationKind } from '@/lib/bindings'
-
-/** Cleans up the state message's first line into just the branch/commit label. */
-function incomingName(label: string | null | undefined): string {
-  if (!label) return 'incoming changes'
-  const match = label.match(/Merge (?:branch|remote-tracking branch) '([^']+)'/)
-  return match ? match[1] : label
-}
 
 const COPY: Record<OperationKind, { verb: string; finish: string; abort: string }> = {
   Merge: { verb: 'Merging', finish: 'Commit merge', abort: 'Abort merge' },
@@ -45,7 +39,7 @@ export function MergeBanner() {
   if (remaining === 0 && !isRebase) return null
 
   const copy = COPY[state.operation]
-  const label = incomingName(state.incoming_label)
+  const label = incomingName(state.incoming_label) || 'incoming changes'
 
   const finishPending = m.commitMerge.isPending || m.rebaseContinue.isPending
   const abortPending = m.abortMerge.isPending || m.rebaseAbort.isPending

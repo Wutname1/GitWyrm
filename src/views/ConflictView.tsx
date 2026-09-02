@@ -9,11 +9,12 @@ import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { ConflictEditor } from '@/components/domain/conflict/ConflictEditor'
 import { HunkCard } from '@/components/domain/conflict/HunkCard'
 import { diffLines } from '@/lib/textDiff'
-import { useConflict, useMergeState } from '@/hooks/useGitQueries'
+import { useBranches, useConflict, useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useAiMutations } from '@/hooks/useAi'
 import { useAiSelection } from '@/hooks/useAiSelection'
 import { useUiStore } from '@/stores/uiStore'
+import { sideNames } from '@/lib/conflictSides'
 import {
   conflictsOf,
   detectEol,
@@ -77,12 +78,20 @@ export function ConflictView() {
   const showSettings = useUiStore((s) => s.showSettings)
 
   const merge = useMergeState(repo?.id ?? null)
+  const branches = useBranches(repo?.id ?? null)
   const conflict = useConflict(repo?.id ?? null, path)
   const m = useGitMutations(repo?.id ?? null)
   const ai = useAiMutations()
   const aiSelection = useAiSelection()
 
   const conflicts = useMemo(() => merge.data?.conflicts ?? [], [merge.data?.conflicts])
+
+  // "Yours"/"theirs" says nothing about WHERE either side came from, which is
+  // the one thing needed to resolve a conflict correctly. Name the branches.
+  const sides = useMemo(
+    () => sideNames(merge.data, branches.data?.local.find((b) => b.is_head)?.name),
+    [merge.data, branches.data]
+  )
 
   const viewMode = useWorkspaceStore((s) => s.conflictViewMode)
   const setViewMode = useWorkspaceStore((s) => s.setConflictViewMode)
@@ -331,7 +340,14 @@ export function ConflictView() {
           setDraft(text)
           setHandEdited(true)
           setViewMode('file')
-          toast.success('AI drafted a resolution - check it before marking resolved')
+          // The result pane judges the text itself, so a cheerful toast beside
+          // a "still has conflict markers" warning tells the user two opposite
+          // things at once. Let the same check decide the message.
+          if (hasMarkers(text)) {
+            toast.warning('The AI left conflict markers - finish this one by hand')
+          } else {
+            toast.success('AI drafted a resolution - check it before marking resolved')
+          }
         },
         onError: (e) => toast.error(String(e)),
       }
@@ -469,10 +485,10 @@ export function ConflictView() {
           >
             {activeResolution === 'ours' && <PendingIndicator />}
             {activeResolution === 'ours'
-              ? 'Using yours…'
+              ? `Using ${sides.ours}…`
               : data?.ours_deleted
-                ? 'Use yours (delete)'
-                : 'Use all yours'}
+                ? `Use ${sides.ours} (delete)`
+                : `Use all ${sides.ours}`}
           </Button>
           <Button
             size="sm"
@@ -483,10 +499,10 @@ export function ConflictView() {
           >
             {activeResolution === 'theirs' && <PendingIndicator />}
             {activeResolution === 'theirs'
-              ? 'Using theirs…'
+              ? `Using ${sides.theirs}…`
               : data?.theirs_deleted
-                ? 'Use theirs (delete)'
-                : 'Use all theirs'}
+                ? `Use ${sides.theirs} (delete)`
+                : `Use all ${sides.theirs}`}
           </Button>
           <Button
             size="sm"
@@ -507,8 +523,8 @@ export function ConflictView() {
         )}
         {data?.binary && (
           <div className="p-4 text-xs text-muted-foreground">
-            This file isn't text, so it can't be edited here — pick “Use all yours” or “Use
-            all theirs” to keep one whole version.
+            This file isn't text, so it can't be edited here — keep one whole version by
+            picking {sides.ours} or {sides.theirs}.
           </div>
         )}
         {data && !data.binary && deletedSide && (
@@ -587,17 +603,17 @@ export function ConflictView() {
                   size="sm"
                   variant="ghost"
                   onClick={() => takeAll('ours')}
-                  className="h-auto rounded-[3px] px-1.5 py-0.5 text-2xs font-semibold text-added hover:bg-added/10"
+                  className="h-auto max-w-[10rem] truncate rounded-[3px] px-1.5 py-0.5 text-2xs font-semibold text-added hover:bg-added/10"
                 >
-                  Yours
+                  {sides.ours}
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => takeAll('theirs')}
-                  className="h-auto rounded-[3px] px-1.5 py-0.5 text-2xs font-semibold text-modified hover:bg-modified/10"
+                  className="h-auto max-w-[10rem] truncate rounded-[3px] px-1.5 py-0.5 text-2xs font-semibold text-modified hover:bg-modified/10"
                 >
-                  Theirs
+                  {sides.theirs}
                 </Button>
               </div>
             </div>
@@ -615,6 +631,7 @@ export function ConflictView() {
                   onFocus={() => setFocusedHunk(i)}
                   showBase={showBase}
                   picking={picking}
+                  sides={sides}
                 />
               ))}
 
@@ -651,8 +668,13 @@ export function ConflictView() {
                 className="relative flex min-h-0 min-w-0 flex-col border-r border-border"
                 style={{ flex: `${conflictSideSplit} 1 0%` }}
               >
-                <div className="flex-none border-b border-border px-3 py-1.5 text-2xs font-bold tracking-[.05em] text-added">
-                  YOURS (current)
+                <div className="flex flex-none items-baseline gap-1.5 border-b border-border px-3 py-1.5 text-2xs font-bold tracking-[.05em] text-added">
+                  <span className="truncate">{sides.ours}</span>
+                  {sides.named && (
+                    <span className="font-normal tracking-normal text-muted-foreground">
+                      (yours)
+                    </span>
+                  )}
                 </div>
                 {data.ours_deleted ? (
                   <div className="flex-1 px-3 py-2 font-mono text-2xs italic text-removed">
@@ -687,8 +709,13 @@ export function ConflictView() {
                 className="flex min-h-0 min-w-0 flex-col"
                 style={{ flex: `${100 - conflictSideSplit} 1 0%` }}
               >
-                <div className="flex-none border-b border-border px-3 py-1.5 text-2xs font-bold tracking-[.05em] text-modified">
-                  THEIRS (incoming)
+                <div className="flex flex-none items-baseline gap-1.5 border-b border-border px-3 py-1.5 text-2xs font-bold tracking-[.05em] text-modified">
+                  <span className="truncate">{sides.theirs}</span>
+                  {sides.named && (
+                    <span className="font-normal tracking-normal text-muted-foreground">
+                      (incoming)
+                    </span>
+                  )}
                 </div>
                 {data.theirs_deleted ? (
                   <div className="flex-1 px-3 py-2 font-mono text-2xs italic text-removed">

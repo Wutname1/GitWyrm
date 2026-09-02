@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { diffWords, type WordSpan } from '@/lib/wordDiff'
 import { isDecided, type Choice, type ConflictSection, type LinePick } from '@/lib/conflictHunks'
+import type { SideNames } from '@/lib/conflictSides'
 
 /**
  * One contested region, with the choices that settle it.
@@ -47,6 +48,7 @@ type SideName = 'ours' | 'theirs' | 'base'
 /** One side's lines, each individually selectable. */
 function Side({
   label,
+  sublabel,
   tone,
   lines,
   spans,
@@ -59,6 +61,8 @@ function Side({
   picking,
 }: {
   label: string
+  /** The ours/theirs role, shown quietly beside the branch name. */
+  sublabel?: string
   tone: SideName
   lines: string[]
   spans?: Map<number, WordSpan[]>
@@ -94,7 +98,12 @@ function Side({
       className={cn('min-w-0 flex-1 border-l-2', whole ? toneBorder : 'border-l-transparent')}
     >
       <div className="flex items-center gap-2 px-2.5 py-1">
-        <span className={cn('text-2xs font-bold tracking-[.04em]', toneText)}>{label}</span>
+        <span className={cn('truncate text-2xs font-bold tracking-[.04em]', toneText)}>
+          {label}
+        </span>
+        {sublabel && (
+          <span className="flex-none text-2xs text-muted-foreground">({sublabel})</span>
+        )}
         <Button
           size="sm"
           variant="ghost"
@@ -179,6 +188,8 @@ export interface HunkCardProps {
   showBase: boolean
   /** Whether per-line picking is switched on for the file. */
   picking: boolean
+  /** Branch names for the two sides, so the columns say where text came from. */
+  sides: SideNames
 }
 
 export function HunkCard({
@@ -191,6 +202,7 @@ export function HunkCard({
   onFocus,
   showBase,
   picking,
+  sides,
 }: HunkCardProps) {
   const resolved = isDecided(choice)
   const picks: LinePick[] = typeof choice === 'object' ? choice.picks : []
@@ -317,9 +329,9 @@ export function HunkCard({
                 onChoose('both-ours-first')
               }}
               className="h-auto rounded-[3px] px-1.5 py-0.5 text-2xs font-semibold text-sub hover:text-foreground"
-              tooltip="Keep both versions, yours first"
+              tooltip={`Keep both versions, ${sides.ours} first`}
             >
-              Yours first
+              {sides.ours} first
             </Button>
             <Button
               size="sm"
@@ -329,9 +341,9 @@ export function HunkCard({
                 onChoose('both-theirs-first')
               }}
               className="h-auto rounded-[3px] px-1.5 py-0.5 text-2xs font-semibold text-sub hover:text-foreground"
-              tooltip="Keep both versions, theirs first"
+              tooltip={`Keep both versions, ${sides.theirs} first`}
             >
-              Theirs first
+              {sides.theirs} first
             </Button>
           </div>
         )}
@@ -339,7 +351,8 @@ export function HunkCard({
 
       <div className="flex flex-col divide-y divide-border sm:flex-row sm:divide-x sm:divide-y-0">
         <Side
-          label="YOURS (current)"
+          label={sides.ours}
+          sublabel={sides.named ? 'yours' : undefined}
           tone="ours"
           lines={section.ours}
           spans={wordSpans?.ours}
@@ -350,7 +363,8 @@ export function HunkCard({
           picking={picking}
         />
         <Side
-          label="THEIRS (incoming)"
+          label={sides.theirs}
+          sublabel={sides.named ? 'incoming' : undefined}
           tone="theirs"
           lines={section.theirs}
           spans={wordSpans?.theirs}
