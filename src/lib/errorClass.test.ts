@@ -84,3 +84,27 @@ describe('a backend message carrying diagnostics', () => {
     expect(message).toBe('Something ordinary broke.')
   })
 })
+
+/**
+ * The backend already lists this refusal as expected and stays quiet about it,
+ * but the frontend had no matching rule -- so it logged raw libgit2 wording at
+ * error severity and filed a crash report for a routine "that branch is open
+ * elsewhere". The two layers have to agree.
+ */
+describe('a branch held by another worktree', () => {
+  const RAW =
+    "git error: cannot set HEAD to reference 'refs/heads/main' as it is the current HEAD of a linked repository.; class=Repository (6)"
+
+  it('explains itself without libgit2 jargon', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toBe(
+      'That branch is already open in another worktree. A branch can only be checked out in one folder at a time.',
+    )
+    expect(message).not.toMatch(/HEAD/)
+    expect(message).not.toMatch(/class=/)
+  })
+
+  it('is a warning, so it never becomes a crash report', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+})
