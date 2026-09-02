@@ -604,6 +604,8 @@ export function LeftPanel() {
         renderItem={renderBranchItem}
         onAdd={addAction.local?.run}
         addLabel={addAction.local?.label}
+        onManage={() => openModal('branchManager')}
+        manageLabel="Manage branches"
         isItemPending={isItemPending}
         isItemDisabled={isItemDisabled}
         getPendingLabel={getPendingLabel}
