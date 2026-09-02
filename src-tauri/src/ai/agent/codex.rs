@@ -141,7 +141,7 @@ impl CodexConnection {
         let (tx, rx) = mpsc::unbounded_channel();
 
         log::info!("Codex: started {} {}", program.display(), args.join(" "));
-        tokio::spawn(read_loop(stdout, pending.clone(), stdin.clone(), tx, complaints));
+        tokio::spawn(read_loop(stdout, pending.clone(), stdin.clone(), tx, complaints, cwd.to_path_buf()));
 
         Ok(Self {
             child,
@@ -328,6 +328,7 @@ async fn read_loop(
     stdin: Arc<Mutex<ChildStdin>>,
     tx: mpsc::UnboundedSender<Incoming>,
     complaints: Complaints,
+    cwd: std::path::PathBuf,
 ) {
     let mut lines = BufReader::new(stdout).lines();
     // Paths per file-change item, learnt from `item/started`. The approval
@@ -342,6 +343,10 @@ async fn read_loop(
         let has_id = msg.get("id").is_some();
         if method == Some("item/started") {
             if let Some((id, paths)) = file_change_of(msg.get("params").unwrap_or(&Value::Null)) {
+                // Codex names files by absolute path. The approval card is
+                // read by a person who knows the project, so it shows the
+                // path inside it.
+                let paths = paths.into_iter().map(|p| relative_to(&cwd, &p)).collect();
                 file_change_paths.insert(id, paths);
             }
         }
@@ -636,6 +641,28 @@ fn approval_reply(method: &str, params: &Value, decision: PermissionDecision) ->
     json!({ "decision": word })
 }
 
+/// `path` inside `root` when it is inside it, otherwise unchanged. Compared
+/// case-insensitively and separator-insensitively on Windows, where Codex and
+/// the app can spell the same folder differently.
+fn relative_to(root: &std::path::Path, path: &str) -> String {
+    let sep = std::path::MAIN_SEPARATOR;
+    let norm = |text: &str| {
+        let slashed = text.replace(sep, "/");
+        if cfg!(windows) { slashed.to_lowercase() } else { slashed }
+    };
+    let root_n = norm(&root.to_string_lossy()).trim_end_matches('/').to_string();
+    let path_n = norm(path);
+    match path_n.strip_prefix(&root_n) {
+        Some(rest) if rest.starts_with('/') => {
+            // Cut the ORIGINAL text at the same length so the file's own
+            // casing survives; only the comparison was lowered.
+            let original = path.replace(sep, "/");
+            original[root_n.len() + 1..].to_string()
+        }
+        _ => path.to_string(),
+    }
+}
+
 /// `(item id, paths)` when an `item/started` notification is a file change.
 fn file_change_of(params: &Value) -> Option<(String, Vec<String>)> {
     let item = params.get("item")?;
@@ -762,6 +789,19 @@ mod tests {
         assert_eq!(two, "Change 2 files: src/a.rs, src/b.rs");
         let one = approval_summary("item/fileChange/requestApproval", &json!({}), &paths[..1]);
         assert_eq!(one, "Change src/a.rs");
+    }
+
+    #[test]
+    fn file_paths_are_shown_inside_the_project_when_they_are() {
+        let s = std::path::MAIN_SEPARATOR;
+        let root_text = format!("{s}work{s}repo");
+        let root = std::path::Path::new(&root_text);
+        assert_eq!(relative_to(root, &format!("{s}work{s}repo{s}src{s}Lib.rs")), "src/Lib.rs");
+        assert_eq!(relative_to(root, &format!("{s}work{s}repo2{s}x.rs")), format!("{s}work{s}repo2{s}x.rs"));
+        assert_eq!(relative_to(root, "elsewhere.rs"), "elsewhere.rs");
+        if cfg!(windows) {
+            assert_eq!(relative_to(root, &format!("{s}WORK{s}Repo{s}a.rs")), "a.rs", "case differs, same folder");
+        }
     }
 
     #[test]
