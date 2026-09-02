@@ -63,11 +63,39 @@ pub async fn complete_with(
     max_tokens: u32,
     timeout: Duration,
 ) -> Result<String, AppError> {
+    complete_streaming(app, provider, model, system, user, max_tokens, timeout, None).await
+}
+
+/// `complete_with`, reporting the reply while it is still being written.
+///
+/// Only the Copilot path can stream today: its SDK is event-based and already
+/// consumes a chunk stream internally. The HTTP dialects in `client.rs` send
+/// `stream: false`, so for those the sink simply never fires and the caller
+/// falls back to showing elapsed time. That is why the sink is optional rather
+/// than a required argument -- a caller must work either way.
+#[allow(clippy::too_many_arguments)]
+pub async fn complete_streaming(
+    app: &tauri::AppHandle,
+    provider: &str,
+    model: &str,
+    system: &str,
+    user: &str,
+    max_tokens: u32,
+    timeout: Duration,
+    on_progress: Option<copilot_sdk::ProgressSink<'_>>,
+) -> Result<String, AppError> {
     let info = auth::get(app, provider)?
         .ok_or_else(|| AppError::Other("Connect the selected AI provider first".into()))?;
 
     if provider == copilot_sdk::PROVIDER_ID {
-        return copilot_sdk::complete(bearer_for(&info), model, system, user).await;
+        return copilot_sdk::complete_streaming(
+            bearer_for(&info),
+            model,
+            system,
+            user,
+            on_progress,
+        )
+        .await;
     }
 
     let provider_config = catalog::find(app, provider).await?;

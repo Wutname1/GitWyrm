@@ -8,6 +8,7 @@ import { ResizeHandle } from '@/components/ui/ResizeHandle'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { ConflictEditor } from '@/components/domain/conflict/ConflictEditor'
 import { HunkCard } from '@/components/domain/conflict/HunkCard'
+import { AiResolveStream } from '@/components/domain/conflict/AiResolveStream'
 import { diffLines } from '@/lib/textDiff'
 import { useBranches, useConflict, useMergeState } from '@/hooks/useGitQueries'
 import { useGitMutations } from '@/hooks/useGitMutations'
@@ -514,6 +515,8 @@ export function ConflictView() {
             {activeResolution === 'manual' ? 'Marking resolved…' : 'Mark resolved'}
           </Button>
         </div>
+
+        <AiResolveStream path={path} running={aiPending} />
 
         {conflict.isLoading && (
           <div className="p-4 text-xs text-muted-foreground">Loading conflict…</div>

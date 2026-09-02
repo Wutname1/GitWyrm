@@ -7,7 +7,23 @@
 //! the file compiles, the tests pass, and a behaviour someone deliberately
 //! added is gone.
 
+use serde::Serialize;
+use tauri::Emitter;
+
 use crate::error::AppError;
+
+/// A live update from a running AI resolve, sent to the window as it happens.
+///
+/// `path` scopes the event: the conflict view only shows updates for the file
+/// it currently has open, so switching files mid-run cannot mix two streams.
+#[derive(Debug, Clone, Serialize)]
+pub struct AiResolveProgress {
+    pub path: String,
+    /// `starting`, `thinking`, or `answer`.
+    pub kind: String,
+    /// The chunk to append. Empty for `starting`.
+    pub text: String,
+}
 
 /// What the model is asked to do, and the shape the answer must arrive in.
 ///
@@ -101,7 +117,32 @@ pub async fn resolve(
         conflict_text.len()
     );
     let started = std::time::Instant::now();
-    let reply = crate::ai::complete::complete_with(
+
+    // Stream the model's thinking and answer to the window while it works.
+    // Emitting straight from the callback keeps no buffer here: the UI owns
+    // what it chooses to keep, and a dropped event costs a chunk of display
+    // text rather than any part of the result, which arrives separately.
+    let sink = {
+        let app = app.clone();
+        let path = path.to_string();
+        move |progress: crate::ai::copilot_sdk::Progress| {
+            let (kind, text) = match progress {
+                crate::ai::copilot_sdk::Progress::Starting => ("starting", String::new()),
+                crate::ai::copilot_sdk::Progress::Thinking(t) => ("thinking", t),
+                crate::ai::copilot_sdk::Progress::Answer(t) => ("answer", t),
+            };
+            let _ = app.emit(
+                "ai-resolve-progress",
+                AiResolveProgress {
+                    path: path.clone(),
+                    kind: kind.to_string(),
+                    text,
+                },
+            );
+        }
+    };
+
+    let reply = crate::ai::complete::complete_streaming(
         app,
         provider,
         model,
@@ -109,6 +150,7 @@ pub async fn resolve(
         &user,
         MAX_OUTPUT_TOKENS,
         TIMEOUT,
+        Some(&sink),
     )
     .await;
     let elapsed = started.elapsed();

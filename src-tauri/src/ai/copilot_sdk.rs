@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use github_copilot_sdk::handler::DenyAllHandler;
 use github_copilot_sdk::rpc::ModelsListRequest;
+use github_copilot_sdk::session_events::SessionEventType;
 use github_copilot_sdk::{Client, ClientOptions, MessageOptions, SessionConfig};
 
 use super::catalog::CatalogModel;
@@ -86,6 +87,27 @@ pub async fn list_models(github_token: &str) -> Result<Vec<CatalogModel>, AppErr
     Ok(models)
 }
 
+/// A live report from a model that is still working.
+///
+/// The SDK streams the reply as it is produced, so a caller that wants to show
+/// the wait can watch these instead of staring at a spinner for two minutes.
+#[derive(Debug, Clone)]
+pub enum Progress {
+    /// The subprocess is starting, or the session is being set up.
+    Starting,
+    /// The model's own reasoning, streamed as it thinks.
+    Thinking(String),
+    /// A chunk of the actual answer.
+    Answer(String),
+}
+
+/// Something that wants to hear about a request while it runs.
+///
+/// Boxed rather than generic so the streaming and non-streaming paths can share
+/// one function body; there is exactly one call per event, so the indirection
+/// costs nothing measurable.
+pub type ProgressSink<'a> = &'a (dyn Fn(Progress) + Send + Sync);
+
 /// One-shot prompt. Returns the assistant's text.
 ///
 /// The permission handler rejects everything: generating a commit message is a
@@ -96,6 +118,27 @@ pub async fn complete(
     system: &str,
     user: &str,
 ) -> Result<String, AppError> {
+    complete_streaming(github_token, model, system, user, None).await
+}
+
+/// [`complete`], reporting the reply as it arrives.
+///
+/// `send_and_wait` already consumes this same event stream internally and
+/// simply keeps the last message, so subscribing alongside it costs one extra
+/// receiver and changes nothing about how the request completes.
+pub async fn complete_streaming(
+    github_token: &str,
+    model: &str,
+    system: &str,
+    user: &str,
+    on_progress: Option<ProgressSink<'_>>,
+) -> Result<String, AppError> {
+    // Starting the bundled CLI is itself a slow step on a cold run, and it
+    // happens before the model is even asked -- so say so rather than showing
+    // an empty panel for the first few seconds.
+    if let Some(report) = on_progress {
+        report(Progress::Starting);
+    }
     let client = start().await?;
 
     let mut config = SessionConfig::default()
@@ -117,12 +160,63 @@ pub async fn complete(
         }
     };
 
+    // Subscribe BEFORE sending: events emitted between the send and the
+    // subscription would otherwise be missed, and the first reasoning chunk is
+    // the one that proves to the user that something is happening.
+    let pump = on_progress.map(|report| {
+        let mut events = session.subscribe();
+        // The callback borrows, so the pump has to stay on this thread rather
+        // than being spawned onto the runtime. Driving it with `select!`
+        // alongside the send keeps both making progress on one task.
+        async move {
+            while let Ok(event) = events.recv().await {
+                let text = |key: &str| {
+                    event
+                        .data
+                        .get(key)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                match event.parsed_type() {
+                    SessionEventType::AssistantReasoningDelta => {
+                        let chunk = text("deltaContent");
+                        if !chunk.is_empty() {
+                            report(Progress::Thinking(chunk));
+                        }
+                    }
+                    SessionEventType::AssistantMessageDelta => {
+                        let chunk = text("deltaContent");
+                        if !chunk.is_empty() {
+                            report(Progress::Answer(chunk));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    });
+
     // The SDK has no separate system-prompt slot, so the instruction is folded
     // into the message ahead of the payload.
     let prompt = format!("{system}\n\n{user}");
-    let result = session
-        .send_and_wait(MessageOptions::new(prompt).with_wait_timeout(SEND_TIMEOUT))
-        .await;
+    let send = session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(SEND_TIMEOUT));
+
+    let result = match pump {
+        Some(pump) => {
+            tokio::pin!(send);
+            tokio::pin!(pump);
+            // The pump only ends when the session closes, so the send is what
+            // decides when this is over.
+            loop {
+                tokio::select! {
+                    outcome = &mut send => break outcome,
+                    _ = &mut pump => break send.await,
+                }
+            }
+        }
+        None => send.await,
+    };
 
     session.disconnect().await.ok();
     client.stop().await.ok();
