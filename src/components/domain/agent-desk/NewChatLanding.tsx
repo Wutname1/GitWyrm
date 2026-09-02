@@ -1,6 +1,8 @@
-import { Bot, Check, ChevronDown, FolderGit2, GitFork, Sparkles, User } from 'lucide-react'
+import { Bot, Check, ChevronDown, FolderGit2, GitFork, Link2, User } from 'lucide-react'
+import type { SessionSource } from '@/lib/bindings'
 import type { ComposerMode, ComposerTeam } from '@/lib/agentDeskComposer'
 import { MODE_NOTES } from '@/lib/agentDeskComposer'
+import { sourceKindLabel } from '@/lib/agentSessionGrouping'
 import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
@@ -12,12 +14,14 @@ export interface ChatProjectChoice {
 /**
  * What a chat with nothing in it yet shows.
  *
- * The choices that shape a run -- which AI, how much authority it has, how
- * many agents -- were reachable only as small chips in the composer bar. They
- * are the first decisions someone makes and they were the least visible thing
- * on screen, which is backwards. Before a chat has any content there is
- * nothing to compete with them, so they get the middle of the pane and full
- * size; once messages exist the compact controls take over again.
+ * The order is the argument. Any agent client can offer a mode, a team size
+ * and a model picker, and leading with those made a new chat look like every
+ * other one. What only this app knows is which repository the chat belongs
+ * to and what started it (an issue, a pull request, a spec task, a failed
+ * check), so those come first and largest. Then the goal, which is the
+ * textarea directly below this landing. The AI tool comes after that, and
+ * how much authority the agent has is last and quietest: it is a dial on the
+ * run, not the point of it.
  *
  * Not a wizard. Every control here is the same state the composer edits, so
  * choosing nothing and simply typing is a complete path -- the defaults are
@@ -34,6 +38,7 @@ export function NewChatLanding({
   projectName,
   projects,
   onProjectChange,
+  source,
 }: {
   mode: ComposerMode
   onModeChange: (mode: ComposerMode) => void
@@ -46,17 +51,18 @@ export function NewChatLanding({
   projectName: string
   projects: ChatProjectChoice[]
   onProjectChange: (project: ChatProjectChoice) => void
+  /** What started this chat. `null` while the session is still loading. */
+  source: SessionSource | null
 }) {
+  const startedFrom = describeSource(source)
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-8">
       <div className="flex flex-col items-center gap-1.5 text-center">
         <span className="flex size-9 items-center justify-center rounded-full bg-soft">
-          <Sparkles size={17} className="text-accent-text" aria-hidden />
+          <FolderGit2 size={17} className="text-accent-text" aria-hidden />
         </span>
-        <h2 className="text-base font-semibold text-foreground">What do you need done?</h2>
-        <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
-          Describe it below, or start from an issue, pull request or spec task in the main window.
-        </p>
+        <h2 className="text-base font-semibold text-foreground">New chat in {projectName}</h2>
+        <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">Describe the goal below.</p>
       </div>
 
       <div className="flex w-full max-w-lg flex-col gap-4">
@@ -65,11 +71,11 @@ export function NewChatLanding({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-left hover:bg-panel3"
+                className="flex w-full items-center gap-2.5 rounded-md border border-border bg-panel2 px-3 py-2.5 text-left hover:bg-panel3"
               >
-                <FolderGit2 size={15} className="flex-none text-accent-text" aria-hidden />
+                <FolderGit2 size={17} className="flex-none text-accent-text" aria-hidden />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium text-foreground">{projectName}</span>
+                  <span className="block truncate text-sm font-semibold text-foreground">{projectName}</span>
                   <span className="block truncate text-[10px] text-muted-foreground">{projectPath}</span>
                 </span>
                 <span className="text-2xs text-muted-foreground">Change</span>
@@ -89,6 +95,35 @@ export function NewChatLanding({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+        </Section>
+
+        {/* Only shown when something concrete started the chat. A plain
+            manual chat has nothing to say here, and an empty "Started from:
+            Chat" row would be noise on the most common path. */}
+        {startedFrom && (
+          <Section label="What started this?">
+            <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
+              <Link2 size={15} className="flex-none text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium text-foreground">{startedFrom.title}</span>
+                {startedFrom.detail && (
+                  <span className="block truncate text-[10px] text-muted-foreground">{startedFrom.detail}</span>
+                )}
+              </span>
+            </div>
+          </Section>
+        )}
+
+        <Section label="Which AI?">
+          <button
+            type="button"
+            onClick={onOpenProviderPicker}
+            className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-left hover:bg-panel3"
+          >
+            <Bot size={15} className="flex-none text-muted-foreground" aria-hidden />
+            <span className="flex-1 text-xs font-medium text-foreground">{providerLabel}</span>
+            <span className="text-2xs text-muted-foreground">Change</span>
+          </button>
         </Section>
 
         <Section label="How much can it do?">
@@ -123,21 +158,40 @@ export function NewChatLanding({
             />
           </div>
         </Section>
-
-        <Section label="Which AI?">
-          <button
-            type="button"
-            onClick={onOpenProviderPicker}
-            className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-left hover:bg-panel3"
-          >
-            <Bot size={15} className="flex-none text-muted-foreground" aria-hidden />
-            <span className="flex-1 text-xs font-medium text-foreground">{providerLabel}</span>
-            <span className="text-2xs text-muted-foreground">Change</span>
-          </button>
-        </Section>
       </div>
     </div>
   )
+}
+
+/**
+ * The source in the words a person would use, with the one detail that
+ * identifies it (the issue number, the change id, the commit). Snapshot
+ * titles come from the backend at capture time, so they are safe to show as
+ * they are; a source with no snapshot title falls back to its kind.
+ */
+export function describeSource(source: SessionSource | null): { title: string; detail: string | null } | null {
+  if (!source || source.kind === 'manual') return null
+  const kind = sourceKindLabel(source.kind)
+  switch (source.kind) {
+    case 'issue':
+    case 'pullRequest':
+      return {
+        title: source.snapshot.title || `${kind} #${source.number}`,
+        detail: `${kind} #${source.number} in ${source.owner}/${source.repo}`,
+      }
+    case 'openSpecChange':
+      return { title: source.snapshot.title || source.changeId, detail: `${kind}: ${source.changeId}` }
+    case 'openSpecTask':
+      return { title: source.taskText || source.snapshot.title || kind, detail: `${kind} in ${source.changeId}` }
+    case 'commit':
+      return { title: source.snapshot.title || kind, detail: `${kind} ${source.oid.slice(0, 8)}` }
+    case 'diff':
+      return { title: source.snapshot.title || kind, detail: `${source.paths.length} file(s) changed` }
+    case 'workingChanges':
+      return { title: source.snapshot.title || kind, detail: `${source.paths.length} file(s) not yet committed` }
+    case 'checkFailure':
+      return { title: source.snapshot.title || kind, detail: `${kind} from ${source.provider}` }
+  }
 }
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {

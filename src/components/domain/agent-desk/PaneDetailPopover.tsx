@@ -3,6 +3,7 @@ import { GitFork, Link2, Gauge, PanelBottom, PanelLeft, PanelRight, X } from 'lu
 import type { AgentSession } from '@/lib/bindings'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+import { sessionHasGraph } from '@/lib/agentDeskGraph'
 import type { DockKind } from '@/lib/agentWorkspaceLayout'
 import { SessionSourcePanel } from './SessionSourcePanel'
 import { SessionContextPanel } from './SessionContextPanel'
@@ -61,26 +62,23 @@ export function PaneDetailPopover({
       {(Object.keys(DETAIL_META) as DockKind[]).map((kind) => {
         const { label, icon: Icon } = DETAIL_META[kind]
         const isOpen = open === kind
-        // tasks.md 6.7: a chat with no helpers has no graph to show, so the
-        // Graph button says so honestly (dimmed, with a reason on hover)
-        // rather than looking live and opening an empty panel. It stays
-        // clickable -- the panel itself explains how to get a graph -- but
-        // it no longer reads as "there is something here".
-        const graphEmpty = kind === 'graph' && (session?.executions.length ?? 0) === 0
+        // A chat with no helpers has no graph. The button used to stay, dimmed,
+        // and open a panel that explained the absence; that still read as a
+        // feature that did not work. Now it appears only once there is a
+        // graph to show (a helper, a proposed team, or a started graph).
+        if (kind === 'graph' && !sessionHasGraph(session)) return null
         return (
           <button
             key={kind}
             type="button"
-            aria-label={graphEmpty ? 'Show agent graph (no helpers yet)' : label}
+            aria-label={label}
             aria-pressed={isOpen}
-            title={graphEmpty ? 'This chat is running solo, so there is no agent graph yet.' : undefined}
             onClick={(e) => {
               lastTriggerRef.current = e.currentTarget
               setOpen(isOpen ? null : kind)
             }}
             className={cn(
               'flex h-[26px] w-[26px] flex-none items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-panel3 hover:text-foreground',
-              graphEmpty && 'opacity-45',
               isOpen && 'border-border bg-panel3 text-foreground'
             )}
           >

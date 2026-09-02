@@ -268,6 +268,7 @@ export function SessionComposer({
           projectName={header?.repoName ?? 'Current project'}
           projects={projects}
           onProjectChange={(project) => void changeProject(project)}
+          source={header?.source ?? null}
         />
       )}
       <div className="rounded-lg border border-border bg-panel2 p-1.5">

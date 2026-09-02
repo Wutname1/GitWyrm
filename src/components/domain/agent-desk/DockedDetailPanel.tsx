@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { DEFAULT_DOCK_SIZE_PX, MAX_DOCK_SIZE_PX, MIN_DOCK_SIZE_PX, type DockEdge, type DockKind, type LeftDockOrder } from '@/lib/agentWorkspaceLayout'
 import { ALL_DOCK_ZONES, type DockZone } from '@/lib/agentDeskDockPlacement'
+import { sessionHasGraph } from '@/lib/agentDeskGraph'
 import { useAgentDeskPanelDrag } from '@/hooks/useAgentDeskPanelDrag'
 import { SessionSourcePanel } from './SessionSourcePanel'
 import { SessionContextPanel } from './SessionContextPanel'
@@ -140,8 +141,16 @@ export function DockedDetailPanel({
           <SessionSourcePanel session={session} onOpenSource={onOpenSource} />
         ) : kind === 'context' ? (
           <SessionContextPanel session={session} />
-        ) : (
+        ) : sessionHasGraph(session) ? (
           <AgentGraphPanel session={session} />
+        ) : (
+          // The dock follows the active chat, so a pinned graph panel can
+          // land on a chat that has no graph. Say so instead of showing an
+          // empty diagram.
+          <p className="p-3 text-2xs leading-relaxed text-muted-foreground">
+            This chat is one agent working alone, so there is no team to show. Pick a chat with helpers, or unpin this
+            panel.
+          </p>
         )}
       </div>
 
