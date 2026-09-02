@@ -22,8 +22,16 @@
 //! - `thread/tokenUsage/updated` carries `tokenUsage.last` plus
 //!   `modelContextWindow`.
 //! - Approvals arrive as server-to-client REQUESTS -- `item/fileChange/
-//!   requestApproval` and `item/commandExecution/requestApproval` -- which
-//!   must be answered or the turn hangs.
+//!   requestApproval`, `item/commandExecution/requestApproval` and
+//!   `item/permissions/requestApproval` -- which must be answered or the
+//!   turn hangs. The answer vocabulary comes from the schema the binary
+//!   generates (`codex app-server generate-json-schema`): `accept` /
+//!   `decline` / `cancel`. An earlier build answered `approved` / `denied`,
+//!   which Codex treated as a refusal, so every write a person allowed was
+//!   still refused and the agent reported "write access was denied".
+//! - A file-change approval names no paths itself; they arrive earlier on
+//!   the `item/started` notification for the same `itemId`, so the read loop
+//!   remembers them per item.
 //!
 //! # The trap that cost an hour
 //!
@@ -322,6 +330,9 @@ async fn read_loop(
     complaints: Complaints,
 ) {
     let mut lines = BufReader::new(stdout).lines();
+    // Paths per file-change item, learnt from `item/started`. The approval
+    // request for the same item carries only its id.
+    let mut file_change_paths: HashMap<String, Vec<String>> = HashMap::new();
     while let Ok(Some(line)) = lines.next_line().await {
         let Ok(msg) = serde_json::from_str::<Value>(&line) else {
             continue;
@@ -329,6 +340,11 @@ async fn read_loop(
 
         let method = msg.get("method").and_then(Value::as_str);
         let has_id = msg.get("id").is_some();
+        if method == Some("item/started") {
+            if let Some((id, paths)) = file_change_of(msg.get("params").unwrap_or(&Value::Null)) {
+                file_change_paths.insert(id, paths);
+            }
+        }
 
         match (has_id, method) {
             // A reply to something we asked.
@@ -353,23 +369,31 @@ async fn read_loop(
             }
 
             // An approval request. Must be answered or the turn hangs.
-            (true, Some(m)) if m.ends_with("/requestApproval") => {
+            (true, Some(m)) if m.ends_with("Approval") => {
                 let id = msg.get("id").cloned().unwrap_or(Value::Null);
                 let params = msg.get("params").cloned().unwrap_or(Value::Null);
+                let item_paths = params
+                    .get("itemId")
+                    .and_then(Value::as_str)
+                    .and_then(|item| file_change_paths.get(item))
+                    .cloned()
+                    .unwrap_or_default();
 
                 let (respond, answer) = oneshot::channel();
                 let request = super::wire::PermissionRequest {
                     // A file change is a write; a command execution is one
-                    // too, because it can do anything. Anything else this
+                    // too, because it can do anything; a permission grant
+                    // widens what the sandbox allows. Anything else this
                     // build does not recognise is a write as well.
                     capability: crate::agentdesk::policy::ToolCapability::EditFile,
-                    path: params
-                        .get("fileChange")
-                        .and_then(|c| c.get("path"))
-                        .or_else(|| params.get("path"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                    summary: approval_summary(m, &params),
+                    // One path is a path. Several are not reduced to the
+                    // first: a path-scoped helper must be judged on all of
+                    // them, and `None` makes that check refuse.
+                    path: match item_paths.as_slice() {
+                        [only] => Some(only.clone()),
+                        _ => None,
+                    },
+                    summary: approval_summary(m, &params, &item_paths),
                     respond,
                 };
                 if tx.send(Incoming::PermissionRequest(request)).is_err() {
@@ -377,13 +401,13 @@ async fn read_loop(
                 }
 
                 let stdin = stdin.clone();
+                let method = m.to_string();
                 tokio::spawn(async move {
                     let decision = answer.await.unwrap_or(PermissionDecision::Cancelled);
-                    let approved = matches!(decision, PermissionDecision::AllowOnce);
                     let reply = json!({
                         "jsonrpc": "2.0",
                         "id": id,
-                        "result": { "decision": if approved { "approved" } else { "denied" } },
+                        "result": approval_reply(&method, &params, decision),
                     });
                     let mut line = reply.to_string();
                     line.push('\n');
@@ -509,21 +533,128 @@ fn classify(method: &str, params: &Value) -> Option<Incoming> {
 }
 
 /// One line describing what an approval is asking for.
-fn approval_summary(method: &str, params: &Value) -> String {
-    if method.contains("commandExecution") {
+fn approval_summary(method: &str, params: &Value, item_paths: &[String]) -> String {
+    if method.contains("commandExecution") || method == "execCommandApproval" {
         let command = params
             .get("command")
             .and_then(Value::as_str)
             .unwrap_or("a command");
         return format!("Run {command}");
     }
-    let path = params
-        .get("fileChange")
-        .and_then(|c| c.get("path"))
-        .or_else(|| params.get("path"))
-        .and_then(Value::as_str)
-        .unwrap_or("a file");
-    format!("Change {path}")
+    if method.contains("permissions") {
+        let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
+        let wants = permission_wants(params.get("permissions").unwrap_or(&Value::Null));
+        return match (wants.is_empty(), reason.is_empty()) {
+            (false, false) => format!("Allow {wants} ({reason})"),
+            (false, true) => format!("Allow {wants}"),
+            (true, false) => format!("Allow extra access ({reason})"),
+            (true, true) => "Allow extra access".to_string(),
+        };
+    }
+    match item_paths {
+        [] => {
+            // Older shapes and the legacy `applyPatchApproval` may still name
+            // a path inline; otherwise the honest summary is the plain one.
+            let path = params
+                .get("fileChange")
+                .and_then(|c| c.get("path"))
+                .or_else(|| params.get("path"))
+                .and_then(Value::as_str)
+                .unwrap_or("files");
+            format!("Change {path}")
+        }
+        [only] => format!("Change {only}"),
+        many => format!("Change {} files: {}", many.len(), many.join(", ")),
+    }
+}
+
+/// The permissions a request asks for, in words: the paths it wants to
+/// write and whether it wants the network.
+fn permission_wants(profile: &Value) -> String {
+    let mut parts = Vec::new();
+    let fs = profile.get("fileSystem").unwrap_or(&Value::Null);
+    let mut paths: Vec<String> = Vec::new();
+    for key in ["write", "read"] {
+        if let Some(list) = fs.get(key).and_then(Value::as_array) {
+            paths.extend(list.iter().filter_map(Value::as_str).map(|p| format!("{key} {p}")));
+        }
+    }
+    if let Some(entries) = fs.get("entries").and_then(Value::as_array) {
+        for e in entries {
+            let target = e
+                .get("path")
+                .and_then(|p| p.get("path").or_else(|| p.get("pattern")))
+                .and_then(Value::as_str)
+                .unwrap_or("a location");
+            let access = e.get("access").and_then(Value::as_str).unwrap_or("access to");
+            paths.push(format!("{access} {target}"));
+        }
+    }
+    if !paths.is_empty() {
+        parts.push(paths.join(", "));
+    }
+    if profile
+        .get("network")
+        .and_then(|n| n.get("enabled"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        parts.push("network access".to_string());
+    }
+    parts.join(" and ")
+}
+
+/// The `result` for one approval request, in the vocabulary that request
+/// expects. Three shapes exist in 0.151.0 and they do not share words:
+///
+/// - the v2 item requests take `accept` / `decline` / `cancel`;
+/// - the legacy `applyPatchApproval` / `execCommandApproval` take
+///   `approved` / `denied` / `abort`;
+/// - `item/permissions/requestApproval` takes no decision at all but a
+///   granted profile: echoing the requested one back is "yes", an empty
+///   one is "no". Grants are scoped to the turn, never the session: a
+///   person approved one thing once.
+fn approval_reply(method: &str, params: &Value, decision: PermissionDecision) -> Value {
+    if method.contains("permissions") {
+        return match decision {
+            PermissionDecision::AllowOnce => json!({
+                "permissions": params.get("permissions").cloned().unwrap_or_else(|| json!({})),
+                "scope": "turn",
+            }),
+            _ => json!({ "permissions": {} }),
+        };
+    }
+    let legacy = matches!(method, "applyPatchApproval" | "execCommandApproval");
+    let word = match (decision, legacy) {
+        (PermissionDecision::AllowOnce, false) => "accept",
+        (PermissionDecision::RejectOnce, false) => "decline",
+        (PermissionDecision::Cancelled, false) => "cancel",
+        (PermissionDecision::AllowOnce, true) => "approved",
+        (PermissionDecision::RejectOnce, true) => "denied",
+        (PermissionDecision::Cancelled, true) => "abort",
+    };
+    json!({ "decision": word })
+}
+
+/// `(item id, paths)` when an `item/started` notification is a file change.
+fn file_change_of(params: &Value) -> Option<(String, Vec<String>)> {
+    let item = params.get("item")?;
+    if item.get("type").and_then(Value::as_str) != Some("fileChange") {
+        return None;
+    }
+    let id = item.get("id").and_then(Value::as_str)?.to_string();
+    let paths = item
+        .get("changes")
+        .and_then(Value::as_array)
+        .map(|changes| {
+            changes
+                .iter()
+                .filter_map(|c| c.get("path").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    Some((id, paths))
 }
 
 /// Why a turn ended, from the completed turn Codex sent.
@@ -576,6 +707,61 @@ mod tests {
         eprintln!("codex said: {said:?}");
         conn.shutdown().await;
         assert!(said.to_uppercase().contains("PONG"), "got {said:?}");
+    }
+
+    /// The words Codex 0.151.0's schema requires, per request family. A
+    /// wrong word is not an error: Codex treats it as a refusal, which is how
+    /// a person's Allow turned into "write access was denied" in a live run.
+    #[test]
+    fn approval_replies_use_each_requests_own_vocabulary() {
+        let p = json!({});
+        for method in ["item/fileChange/requestApproval", "item/commandExecution/requestApproval"] {
+            assert_eq!(approval_reply(method, &p, PermissionDecision::AllowOnce)["decision"], "accept", "{method}");
+            assert_eq!(approval_reply(method, &p, PermissionDecision::RejectOnce)["decision"], "decline", "{method}");
+            assert_eq!(approval_reply(method, &p, PermissionDecision::Cancelled)["decision"], "cancel", "{method}");
+        }
+        for method in ["applyPatchApproval", "execCommandApproval"] {
+            assert_eq!(approval_reply(method, &p, PermissionDecision::AllowOnce)["decision"], "approved", "{method}");
+            assert_eq!(approval_reply(method, &p, PermissionDecision::RejectOnce)["decision"], "denied", "{method}");
+            assert_eq!(approval_reply(method, &p, PermissionDecision::Cancelled)["decision"], "abort", "{method}");
+        }
+    }
+
+    #[test]
+    fn a_permission_grant_echoes_the_request_for_one_turn_and_grants_nothing_on_refusal() {
+        let params = json!({
+            "itemId": "i1",
+            "reason": "write to the workspace",
+            "permissions": { "fileSystem": { "write": ["C:/work"] }, "network": { "enabled": false } }
+        });
+        let yes = approval_reply("item/permissions/requestApproval", &params, PermissionDecision::AllowOnce);
+        assert_eq!(yes["permissions"], params["permissions"]);
+        assert_eq!(yes["scope"], "turn", "never a session-wide grant from one Allow");
+        let no = approval_reply("item/permissions/requestApproval", &params, PermissionDecision::RejectOnce);
+        assert_eq!(no["permissions"], json!({}));
+        assert!(no.get("scope").is_none());
+
+        let summary = approval_summary("item/permissions/requestApproval", &params, &[]);
+        assert!(summary.contains("write C:/work"), "{summary}");
+        assert!(summary.contains("write to the workspace"), "{summary}");
+    }
+
+    /// A file-change approval names no paths; they come from the earlier
+    /// `item/started` for the same item.
+    #[test]
+    fn file_change_paths_are_learnt_from_item_started() {
+        let started = json!({ "item": { "type": "fileChange", "id": "fc-1", "status": "inProgress",
+            "changes": [ { "path": "src/a.rs", "kind": { "type": "update" }, "diff": "" },
+                         { "path": "src/b.rs", "kind": { "type": "add" }, "diff": "" } ] } });
+        let (id, paths) = file_change_of(&started).expect("a file change");
+        assert_eq!(id, "fc-1");
+        assert_eq!(paths, vec!["src/a.rs", "src/b.rs"]);
+        assert!(file_change_of(&json!({ "item": { "type": "commandExecution", "id": "c" } })).is_none());
+
+        let two = approval_summary("item/fileChange/requestApproval", &json!({ "itemId": "fc-1" }), &paths);
+        assert_eq!(two, "Change 2 files: src/a.rs, src/b.rs");
+        let one = approval_summary("item/fileChange/requestApproval", &json!({}), &paths[..1]);
+        assert_eq!(one, "Change src/a.rs");
     }
 
     #[test]
@@ -658,14 +844,14 @@ mod tests {
     #[test]
     fn an_approval_names_what_it_would_change() {
         let params = json!({ "fileChange": { "path": "src/main.rs" } });
-        assert!(approval_summary("item/fileChange/requestApproval", &params).contains("src/main.rs"));
+        assert!(approval_summary("item/fileChange/requestApproval", &params, &[]).contains("src/main.rs"));
         let cmd = json!({ "command": "rm -rf /" });
-        assert!(approval_summary("item/commandExecution/requestApproval", &cmd).contains("rm -rf /"));
+        assert!(approval_summary("item/commandExecution/requestApproval", &cmd, &[]).contains("rm -rf /"));
     }
 
     #[test]
     fn an_approval_with_nothing_named_still_reads_as_a_sentence() {
-        let s = approval_summary("item/fileChange/requestApproval", &json!({}));
+        let s = approval_summary("item/fileChange/requestApproval", &json!({}), &[]);
         assert!(!s.is_empty());
         assert!(s.contains("file"));
     }
