@@ -14,7 +14,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ai::agent::wire::{Incoming, PermissionDecision, StopReason};
+use crate::ai::agent::wire::{Connection, Incoming, PermissionDecision, StopReason, TurnOutcome};
 use crate::ai::agent::cli_agent::CliAgent;
 use crate::ai::agent::transport::AgentError;
 use crate::agentdesk::graph::JobBudget;
@@ -247,11 +247,80 @@ async fn audit_finished_work(
     }
 }
 
+/// Run a follow-up on the existing conversation while continuing to drain the
+/// one incoming stream owned by `run_task`. Awaiting `prompt` alone would
+/// deadlock when the correction asks for permission.
+async fn run_correction_turn(
+    conn: &Connection,
+    incoming: &mut tokio::sync::mpsc::UnboundedReceiver<Incoming>,
+    correction: &str,
+    sink: &Sink,
+    answers: &mut mpsc::Receiver<GateAnswer>,
+    policy: &ExecutionPolicy,
+    started: bool,
+    cancel: &CancelHandle,
+) -> Result<TurnOutcome, AgentError> {
+    let prompt = conn.prompt(correction);
+    tokio::pin!(prompt);
+    let mut cancel_requested = false;
+    let mut deadline = None;
+    loop {
+        let timeout = async {
+            match deadline {
+                Some(d) => tokio::time::sleep_until(d).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            result = &mut prompt => return result,
+            Some(item) = incoming.recv() => handle(item, sink, answers, policy, started),
+            _ = cancel.notify.notified(), if !cancel_requested => {
+                cancel_requested = true;
+                deadline = Some(tokio::time::Instant::now() + CANCEL_ACK_TIMEOUT);
+                let _ = conn.cancel().await;
+            }
+            _ = timeout, if deadline.is_some() => {
+                return Err(AgentError::Failed {
+                    detail: "the AI did not confirm it stopped in time".into(),
+                });
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+enum AuditEnd {
+    Passed,
+    Unavailable(String),
+    Blocked(String),
+    StillHollow(Vec<String>),
+    CorrectionFailed(String),
+    CorrectionStopped(StopReason),
+}
+
+fn audit_end_state(end: AuditEnd) -> (RunState, String) {
+    match end {
+        AuditEnd::Passed => (RunState::Finished, "Finished. Your changes were checked and are ready to look over.".into()),
+        AuditEnd::Unavailable(detail) => (RunState::Finished, format!("Finished, but GitWyrm could not double-check the changes: {detail}")),
+        AuditEnd::Blocked(reason) => (RunState::Stopped, format!("This work needs something from you before it can finish: {reason}")),
+        AuditEnd::StillHollow(reasons) => (RunState::Failed, format!(
+            "The changes are still not ready after {} correction passes: {}",
+            crate::agentdesk::auditor::MAX_CORRECTION_PASSES,
+            reasons.join("; ")
+        )),
+        AuditEnd::CorrectionFailed(detail) => (RunState::Failed, format!("The changes need more work, but the correction could not finish: {detail}")),
+        AuditEnd::CorrectionStopped(reason) => (
+            if reason == StopReason::Cancelled { RunState::Stopped } else { RunState::Failed },
+            format!("The changes need more work, and the correction stopped because {}.", reason.plain_reason()),
+        ),
+    }
+}
+
 pub async fn run_task(
     agent: &CliAgent,
     task: &str,
     sink: Sink,
-    answers: mpsc::Receiver<GateAnswer>,
+    mut answers: mpsc::Receiver<GateAnswer>,
     policy: ExecutionPolicy,
     started: bool,
     cancel: CancelHandle,
@@ -354,7 +423,7 @@ pub async fn run_task(
                   if matches!(item, Incoming::ToolCall { .. }) {
                       turns += 1;
                   }
-                  handle(item, &sink, &answers, &policy, started);
+                  handle(item, &sink, &mut answers, &policy, started);
                   // R6.4: a turn-count cutoff is checked right after the turn
                   // that crossed it, not on a timer -- the run must stop
                   // BEFORE its next tool call is answered, not merely at some
@@ -437,11 +506,11 @@ pub async fn run_task(
     // Every failure here lets the work through. An audit that could not run
     // knows nothing about the work, and stranding people behind a broken
     // check would be worse than the corner-cutting it exists to catch.
-    let mut audit_verdict: Option<crate::agentdesk::auditor::Verdict> = None;
+    let mut audit_end: Option<AuditEnd> = None;
     if matches!(outcome.as_ref().map(|o| o.stop_reason), Ok(StopReason::EndTurn)) {
         if let Some(worktree) = audit_target.as_deref() {
-            let mut pass = 0u32;
-            while pass < crate::agentdesk::auditor::MAX_CORRECTION_PASSES {
+            let mut corrections = 0u32;
+            loop {
                 let evidence = match gather_evidence(worktree, &spec_text, "") {
                     Some(e) => e,
                     None => break,
@@ -449,25 +518,47 @@ pub async fn run_task(
                 let verdict = audit_finished_work(agent, &policy, evidence).await;
                 sink(RunState::Working, RunStep::Note { text: verdict.summary() });
 
-                let crate::agentdesk::auditor::Verdict::Hollow { reasons } = &verdict else {
-                    audit_verdict = Some(verdict);
-                    break;
+                let reasons = match verdict {
+                    crate::agentdesk::auditor::Verdict::Passed { .. } => { audit_end = Some(AuditEnd::Passed); break; }
+                    crate::agentdesk::auditor::Verdict::Unavailable { detail } => { audit_end = Some(AuditEnd::Unavailable(detail)); break; }
+                    crate::agentdesk::auditor::Verdict::Blocked { reason } => { audit_end = Some(AuditEnd::Blocked(reason)); break; }
+                    crate::agentdesk::auditor::Verdict::Hollow { reasons } => reasons,
                 };
+
+                // Re-audit after the last correction. A final hollow verdict
+                // is not success merely because the retry count was used up.
+                if corrections >= crate::agentdesk::auditor::MAX_CORRECTION_PASSES {
+                    audit_end = Some(AuditEnd::StillHollow(reasons));
+                    break;
+                }
 
                 // Send it back. The correction runs on the SAME connection as
                 // the original work, so the agent still has the context it
                 // built up -- it is being asked to finish, not to start over.
-                let correction = crate::agentdesk::auditor::correction_prompt(reasons);
-                audit_verdict = Some(verdict);
-                if conn.prompt(&correction).await.is_err() {
-                    break;
+                let correction = crate::agentdesk::auditor::correction_prompt(&reasons);
+                match run_correction_turn(&conn, &mut incoming, &correction, &sink, &mut answers, &policy, started, &cancel).await {
+                    Ok(corrected) => {
+                        if let Some(usage) = corrected.usage {
+                            sink(RunState::Working, RunStep::Usage { usage });
+                        }
+                        if corrected.stop_reason != StopReason::EndTurn {
+                            audit_end = Some(AuditEnd::CorrectionStopped(corrected.stop_reason));
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        audit_end = Some(AuditEnd::CorrectionFailed(crate::ai::agent::select::plain_explanation(&e)));
+                        break;
+                    }
                 }
-                pass += 1;
+                corrections += 1;
             }
         }
     }
 
-    let (state, detail) = match outcome.map(|o| o.stop_reason) {
+    let (state, detail) = if let Some(end) = audit_end {
+        audit_end_state(end)
+    } else { match outcome.map(|o| o.stop_reason) {
         Ok(stop) => match stop {
             StopReason::EndTurn => (
                 RunState::Finished,
@@ -532,7 +623,7 @@ pub async fn run_task(
                 crate::ai::agent::select::plain_explanation(&e)
             ),
         ),
-    };
+    }};
 
     sink(state, RunStep::Ended { state, detail });
     conn.shutdown().await;
@@ -551,7 +642,7 @@ pub async fn run_task(
 fn handle(
     item: Incoming,
     sink: &Sink,
-    answers: &mpsc::Receiver<GateAnswer>,
+    answers: &mut mpsc::Receiver<GateAnswer>,
     policy: &ExecutionPolicy,
     started: bool,
 ) {
@@ -720,6 +811,36 @@ mod tests {
         (sink, log)
     }
 
+    #[test]
+    fn blocked_or_still_hollow_work_is_not_marked_finished() {
+        let (blocked, blocked_detail) =
+            audit_end_state(AuditEnd::Blocked("choose a database".into()));
+        assert_eq!(blocked, RunState::Stopped);
+        assert!(blocked_detail.contains("choose a database"));
+
+        let (hollow, hollow_detail) = audit_end_state(AuditEnd::StillHollow(vec![
+            "src/x.rs still returns a fixed value".into(),
+        ]));
+        assert_eq!(hollow, RunState::Failed);
+        assert!(hollow_detail.contains("still not ready"));
+        assert!(hollow_detail.contains("src/x.rs"));
+    }
+
+    #[test]
+    fn unavailable_audit_finishes_with_a_visible_warning() {
+        let (state, detail) = audit_end_state(AuditEnd::Unavailable("tool is offline".into()));
+        assert_eq!(state, RunState::Finished);
+        assert!(detail.contains("could not double-check"));
+        assert!(detail.contains("tool is offline"));
+    }
+
+    #[test]
+    fn correction_refusal_cannot_inherit_the_original_success() {
+        let (state, detail) = audit_end_state(AuditEnd::CorrectionStopped(StopReason::Refusal));
+        assert_eq!(state, RunState::Failed);
+        assert!(detail.contains("declined"));
+    }
+
     /// A request as an ADAPTER would hand it over: already classified.
     ///
     /// `kind` is still an ACP kind string so these tests keep exercising the
@@ -754,10 +875,10 @@ mod tests {
     fn ask_intent_refuses_a_write_request_before_touching_disk_or_the_answer_channel() {
         let policy = policy_for(SessionIntent::Ask);
         let (sink, log) = recording_sink();
-        let answers = closed_answers();
+        let mut answers = closed_answers();
         let (item, mut decision_rx) = permission_request("edit");
 
-        handle(item, &sink, &answers, &policy, false);
+        handle(item, &sink, &mut answers, &policy, false);
 
         let decision = decision_rx.try_recv().expect("a decision was sent");
         assert!(
@@ -780,10 +901,10 @@ mod tests {
         for intent in [SessionIntent::Explain, SessionIntent::Review, SessionIntent::Summarize] {
             let policy = policy_for(intent);
             let (sink, _log) = recording_sink();
-            let answers = closed_answers();
+            let mut answers = closed_answers();
             let (item, mut decision_rx) = permission_request("edit");
 
-            handle(item, &sink, &answers, &policy, false);
+            handle(item, &sink, &mut answers, &policy, false);
 
             let decision = decision_rx.try_recv().expect("a decision was sent");
             assert!(
@@ -799,10 +920,10 @@ mod tests {
     fn plan_before_start_refuses_a_write_request() {
         let policy = policy_for(SessionIntent::Plan);
         let (sink, _log) = recording_sink();
-        let answers = closed_answers();
+        let mut answers = closed_answers();
         let (item, mut decision_rx) = permission_request("edit");
 
-        handle(item, &sink, &answers, &policy, false);
+        handle(item, &sink, &mut answers, &policy, false);
 
         let decision = decision_rx.try_recv().expect("a decision was sent");
         assert!(matches!(decision, PermissionDecision::RejectOnce { .. }));
@@ -814,11 +935,11 @@ mod tests {
     fn plan_after_start_allows_a_write_request_to_reach_the_user() {
         let policy = policy_for(SessionIntent::Plan);
         let (sink, log) = recording_sink();
-        let (answer_tx, answers) = mpsc::channel::<GateAnswer>();
+        let (answer_tx, mut answers) = mpsc::channel::<GateAnswer>();
         let (item, mut decision_rx) = permission_request("edit");
 
         answer_tx.send(GateAnswer::AllowOnce).unwrap();
-        handle(item, &sink, &answers, &policy, true);
+        handle(item, &sink, &mut answers, &policy, true);
 
         let decision = decision_rx.try_recv().expect("a decision was sent");
         assert!(matches!(decision, PermissionDecision::AllowOnce { .. }));
@@ -836,11 +957,11 @@ mod tests {
         for kind in ["read", "search", "think", "fetch"] {
             let policy = policy_for(SessionIntent::Review);
             let (sink, log) = recording_sink();
-            let (answer_tx, answers) = mpsc::channel::<GateAnswer>();
+            let (answer_tx, mut answers) = mpsc::channel::<GateAnswer>();
             let (item, mut decision_rx) = permission_request(kind);
 
             answer_tx.send(GateAnswer::AllowOnce).unwrap();
-            handle(item, &sink, &answers, &policy, false);
+            handle(item, &sink, &mut answers, &policy, false);
 
             let decision = decision_rx.try_recv().expect("a decision was sent");
             assert!(
@@ -859,12 +980,12 @@ mod tests {
     fn a_tool_call_with_no_kind_at_all_is_refused_under_a_read_only_intent() {
         let policy = policy_for(SessionIntent::Ask);
         let (sink, _log) = recording_sink();
-        let answers = closed_answers();
+        let mut answers = closed_answers();
         // No kind at all: the adapter's classifier must call this a write, so
         // a tool GitWyrm does not understand cannot slip past a read-only run.
         let (item, mut decision_rx) = permission_request_with_path("", None);
 
-        handle(item, &sink, &answers, &policy, false);
+        handle(item, &sink, &mut answers, &policy, false);
 
         let decision = decision_rx.try_recv().expect("a decision was sent");
         assert!(matches!(decision, PermissionDecision::RejectOnce { .. }));
@@ -877,11 +998,11 @@ mod tests {
     fn fix_intent_still_gates_writes_through_the_normal_approval_flow() {
         let policy = policy_for(SessionIntent::Fix);
         let (sink, log) = recording_sink();
-        let (answer_tx, answers) = mpsc::channel::<GateAnswer>();
+        let (answer_tx, mut answers) = mpsc::channel::<GateAnswer>();
         let (item, mut decision_rx) = permission_request("edit");
 
         answer_tx.send(GateAnswer::AllowOnce).unwrap();
-        handle(item, &sink, &answers, &policy, true);
+        handle(item, &sink, &mut answers, &policy, true);
 
         let decision = decision_rx.try_recv().expect("a decision was sent");
         assert!(matches!(decision, PermissionDecision::AllowOnce { .. }));
@@ -901,10 +1022,10 @@ mod tests {
     fn a_helper_edit_outside_its_allowed_paths_is_refused_before_a_gate_is_shown() {
         let policy = ExecutionPolicy::resolve_for_helper(true, vec!["src/**".into()]);
         let (sink, log) = recording_sink();
-        let answers = closed_answers();
+        let mut answers = closed_answers();
         let (item, mut decision_rx) = permission_request_with_path("edit", Some("Cargo.toml"));
 
-        handle(item, &sink, &answers, &policy, true);
+        handle(item, &sink, &mut answers, &policy, true);
 
         let decision = decision_rx.try_recv().expect("a decision was sent");
         assert!(matches!(decision, PermissionDecision::RejectOnce { .. }));
@@ -919,11 +1040,11 @@ mod tests {
     fn a_helper_edit_inside_its_allowed_paths_reaches_the_approval_gate() {
         let policy = ExecutionPolicy::resolve_for_helper(true, vec!["src/**".into()]);
         let (sink, log) = recording_sink();
-        let (answer_tx, answers) = mpsc::channel::<GateAnswer>();
+        let (answer_tx, mut answers) = mpsc::channel::<GateAnswer>();
         let (item, mut decision_rx) = permission_request_with_path("edit", Some("src/lib.rs"));
 
         answer_tx.send(GateAnswer::AllowOnce).unwrap();
-        handle(item, &sink, &answers, &policy, true);
+        handle(item, &sink, &mut answers, &policy, true);
 
         let decision = decision_rx.try_recv().expect("a decision was sent");
         assert!(matches!(decision, PermissionDecision::AllowOnce { .. }));
