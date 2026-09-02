@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { CheckCircle2, CircleAlert, ExternalLink, FileDiff, GitCommitHorizontal, RotateCcw } from 'lucide-react'
 import { commands, type ResultRecord, type SessionIntent } from '@/lib/bindings'
-import { keys, unwrap } from '@/lib/queryKeys'
+import { invalidateAfterResultLanding, keys, unwrap } from '@/lib/queryKeys'
+import { useCompleteOpenSpecTask } from '@/hooks/useOpenspecSessionSource'
 import {
   changedPathsSummaryLine,
   checksSummaryLine,
@@ -50,6 +51,7 @@ import { cn } from '@/lib/utils'
  */
 export function ResultReviewPanel({
   sessionId,
+  repoId,
   executionId,
   intent,
   taskText,
@@ -57,6 +59,8 @@ export function ResultReviewPanel({
   isOpenSpecTask = false,
 }: {
   sessionId: string
+  /** The repository the result lands in; its views refresh after Keep/Undo/Commit. */
+  repoId: string
   executionId: string
   intent: SessionIntent
   taskText: string
@@ -81,8 +85,9 @@ export function ResultReviewPanel({
   const records = query.data?.kind === 'found' ? sortResultsNewestFirst(query.data.records) : []
   const record = records.find((r) => r.executionId === executionId) ?? null
 
+  const completeTask = useCompleteOpenSpecTask(repoId)
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: keys.agentResults(sessionId) })
+    invalidateAfterResultLanding(queryClient, repoId, sessionId)
   }
 
   if (query.isLoading) {
@@ -129,7 +134,10 @@ export function ResultReviewPanel({
       // make Keep itself look like it failed.
       if (isOpenSpecTask) {
         try {
-          const taskOutcome = unwrap(await commands.agentSessionCompleteOpenspecTask(sessionId, true))
+          // Through the mutation hook, not the raw command: the hook is what
+          // refreshes the task list and progress surfaces once the box is
+          // ticked. Calling the command directly left them stale.
+          const taskOutcome = await completeTask.mutateAsync({ sessionId, done: true })
           const taskExplanation = explainCompleteOpenSpecTaskOutcome(taskOutcome)
           if (taskExplanation) toast.warning(taskExplanation)
         } catch (e) {

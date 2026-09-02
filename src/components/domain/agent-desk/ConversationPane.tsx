@@ -670,6 +670,7 @@ export function ConversationPane({
         <div className="flex-none border-t border-border">
           <ResultReviewPanel
             sessionId={sessionId}
+            repoId={session.header.repoId}
             executionId={session.header.activeExecutionId!}
             intent={session.header.intent}
             taskText={session.header.title}

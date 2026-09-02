@@ -112,6 +112,33 @@ export function isGitOperationInFlight(repoId: string): boolean {
  * edit, because the files are the state: an agent or editor ticking a task has
  * to move the same counts our own click does.
  */
+/**
+ * Refresh everything a kept, undone or committed agent result can change.
+ *
+ * Keep/Undo/Commit used to refresh only the result list, so the graph panel,
+ * the session row, the OpenSpec task list, the working-changes view and the
+ * commit graph all kept showing the world from before the click until
+ * something else happened to poke them. The list below is the honest
+ * blast radius of landing agent work: the session (its state, graph nodes
+ * and unread flag), the OpenSpec surfaces (the task may just have been
+ * ticked), and the repository views that read the working tree and HEAD.
+ */
+export function invalidateAfterResultLanding(qc: QueryClient, repoId: string, sessionId: string) {
+  qc.invalidateQueries({ queryKey: keys.agentResults(sessionId) })
+  qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
+  qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
+  qc.invalidateQueries({ queryKey: keys.agentSessionOpenspecContext(sessionId) })
+  qc.invalidateQueries({ queryKey: keys.agentSessionOpenspecStatus(sessionId) })
+  qc.invalidateQueries({ queryKey: keys.agentSessionOpenspecContextDrift(sessionId) })
+  qc.invalidateQueries({ queryKey: keys.status(repoId) })
+  qc.invalidateQueries({ queryKey: keys.repoCounts(repoId) })
+  qc.invalidateQueries({ queryKey: keys.log(repoId) })
+  qc.invalidateQueries({ queryKey: keys.branches(repoId) })
+  qc.invalidateQueries({ queryKey: keys.worktrees(repoId) })
+  qc.invalidateQueries({ queryKey: keys.fileDiffAll(repoId) })
+  invalidateOpenspec(qc, repoId)
+}
+
 export function invalidateOpenspec(qc: QueryClient, repoId: string) {
   qc.invalidateQueries({ queryKey: keys.openspecStatus(repoId) })
   qc.invalidateQueries({ queryKey: keys.openspecChanges(repoId) })
