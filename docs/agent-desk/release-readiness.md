@@ -1,246 +1,143 @@
 # Agent Desk release readiness
 
-Revised 2026-08-28 after re-verifying the 2026-08-22 audit against the code. The previous
-revision of this document listed eight blockers as open; all eight have since been closed
-in code. This revision records what is actually true today, and what genuinely remains.
+Revised 2026-09-02 after a second outside audit and the build slice that answered it.
+The 2026-08-28 revision said "code-level release blockers are closed"; the audit that
+followed showed that was true of the original eight blockers and false of the product
+as a whole. This revision keeps score honestly: what landed, what is verified, and what
+is still a claim.
 
-Detailed evidence for the original findings is in `audit-2026-08-22.md`, which is now
+Detailed evidence for the original findings is in `audit-2026-08-22.md`, which is
 historical: read it for the reasoning, not for current status.
 
 ## Verdict
 
-**Code-level release blockers are closed. The remaining gate is native acceptance, plus
-two live-behaviour questions about the newly added providers and a few product gaps.**
+**Agent Desk now does the things its screens say it does, and none of it has been
+walked end to end in the native app by a person.** That second half is the gate.
 
-Note the shape of the risk has changed. The old blockers were about GitWyrm's own logic;
-what is left is mostly about whether other people's tools behave the way their
-documentation says. Those cannot be closed by reading code.
+What changed since the last revision, each verified by unit tests and, where noted, by a
+real run:
 
-The automated baseline is healthy: TypeScript, the frontend test suite, the Rust test
-suite, and the strict OpenSpec validations all pass. The end-to-end safety boundary that
-the previous revision said was open is now enforced in two independent layers.
+| Area | Before | Now |
+| --- | --- | --- |
+| Conversation | Each turn sent only the newest user message | The whole transcript (user and assistant, imported messages included, tool noise excluded) is handed over every turn, shortened from the oldest end under a 48k-character budget with a visible note |
+| Chat identity | Mode, team and AI tool were pane state; new chats were bound to the open repo with no way to change | Saved on the session header; a new chat shows its project (changeable before the first message) and what started it; the sidebar shows the AI tool's logo |
+| Auto with helpers | One lead ran while the UI said "up to 3 helpers" | An Auto lead may return a helper plan and it starts immediately through the same launch path as Plan's Start button |
+| Auditor | Verdict assigned and never read; a correction turn's result was discarded and could hang on a permission request | Correction turns are driven like any turn, re-audited, and a still-hollow run ends Failed with reasons |
+| Shell | Denied for every run | Follows the write decision: allowed on Auto, Fix and started Plan through the approval gate; denied for read-only chats. Network stays denied |
+| Claude Code | Launched with `--safe-mode` and an empty MCP config | Loads the user's own MCP servers and skills. `--restricted` still removes Bash, so Claude cannot run commands yet |
+| Codex | Read-only chats launched `codex app-server --sandbox=read-only`, which the binary rejects; stderr unread; the chat "did nothing" | Sandbox travels in `thread/start`; stderr tail is kept and shown; unknown server requests are declined instead of hanging the turn. Verified: a real read-only Codex turn answered PONG |
+| Queued messages | A message sent during a turn was saved and never read | A clean Finish with nothing else live starts the next turn with the same mode/team/tool after a note in the chat. Stopped or Failed turns never restart |
+| Usage | Transcript rows counted as "turns"; helper context could replace the lead's | Turns only when reported; context from the lead; per-agent rows for team runs; unreported figures stay blank |
+| Deleting a chat | Failed every time (wrong Tauri state type) | Works |
+| Windows | Restored off-screen after monitor changes | Clamped back onto a visible screen on load |
 
-## Previously blocking, now closed
+The automated baseline is healthy: TypeScript, the frontend suite (718), the Rust suite
+(1354, 6 ignored), and strict OpenSpec validation pass.
 
-Each row was verified by reading the implementation and its guarding tests.
+## Still a claim: what native acceptance must cover
 
-| Former blocker | How it is closed |
-| --- | --- |
-| Execution events not safely addressed (repository-keyed link could be overwritten) | `RunSessionLinks.inner` is `HashMap<execution_id, SessionId>`, documented "Never keyed by repository." Events for a superseded execution are dropped as `ExecutionSuperseded`. |
-| Read-only was advisory when the provider suppressed the permission request | `cli_agent::denied_tools_for` denies `write` at CLI launch for every read-only intent. Per `copilot help permissions`, a `--deny-tool` outranks every allow rule including `--allow-all-tools`, so it cannot be widened later. The runtime refusal in `airun::cli_run::handle` remains as defense in depth. |
-| Review and Summarize created a session but never ran | Kickoff runs them from their source action, with a regression test looping `[Review, Summarize, Fix]`. |
-| Kickoff choices did not reach the first run | Provider, mode, and team are carried durably through `agent_kickoff`. |
-| Plan had write authority before Start | `WorktreePolicy::NotUntilStart` plus the durable `graph_started_at` field. Durable, so it survives a restart. |
-| Graph integration targeted the user's checkout | `ensure_integration_worktree` provisions a dedicated integration worktree; the apply path never targets `session.header.repo_path`. |
-| Graph integration could not preserve file semantics | Typed `FileOperation::{Write, Delete, Rename}` and `FileContent::{Text, Binary, Symlink}` carry raw `Vec<u8>` (never UTF-8 decoded), plus a separate executable bit. |
-| Orphan reconciliation and losing-start cleanup unwired | `useOrphanResultReconciliation` runs at startup; `cleanup_unused_worktree` handles the losing race. |
+No unit fixture substitutes for these. Each is a path a person walks in the built app.
 
-## Actually open
+1. Open a chat on each of Copilot, Claude Code and Codex with nothing extra installed and
+   get a reply. Codex is verified by an ignored real-binary test; Claude is blocked on the
+   development machine by an expired login; Copilot has not been re-run since the
+   transport refactor.
+2. Send a second message while a turn is running and watch the follow-up turn start on
+   its own when the first finishes, and NOT start after pressing Stop.
+3. An Auto chat whose lead proposes helpers: the helpers appear and run without a Start
+   button; the same chat in Plan mode waits for Start.
+4. A run whose agent runs a command: the approval gate appears, Allow runs it, Reject
+   refuses it, and a read-only chat never shows the gate at all.
+5. The auditor against a deliberately under-specified task where the agent ticks every
+   box and ships a stub. The run must end Failed with the auditor's reasons visible.
+6. The original list: dirty checkouts, two simultaneous same-repo sessions, two real
+   uncommitted helpers, delete/rename/binary changes, conflict and restart, child-process
+   cleanup, window focus, Split View cross-repo behaviour, scaling, keyboard and
+   screen-reader use, performance.
 
-### 1. Native acceptance has not been run
+## Open by design decision, not by omission
 
-This is the real remaining gate and no amount of unit testing substitutes for it. It must
-cover: real provider allow rules, dirty checkouts, two simultaneous same-repo sessions,
-two real uncommitted helpers, delete/rename/binary changes, conflict and restart,
-child-process cleanup, window focus, Split View cross-repo behavior, scaling,
-keyboard/screen-reader use, and performance.
+### Transports
 
-No unit fixture that manually commits helper work may substitute for the production
-uncommitted-helper scenario.
+Five tools, one registry (`ai/agent/registry.rs`), three protocols: ACP over stdio for
+Copilot, Gemini and opencode; Codex's own app-server (JSON-RPC over stdio); Claude Code's
+`--print --input-format stream-json --output-format stream-json`. The bridge packages
+(`claude-agent-acp`, `codex-acp`) are gone: a tool that works in the terminal works here.
 
-### 2. ~~Usage and cost are absent from the durable model~~ Closed 2026-08-28
+Denial is still per tool, because no protocol standardises it:
 
-`ExecutionRecord::usage` now accumulates per-turn figures from the provider, and
-`agent_session_usage` sums them across every execution (helpers included) as
-`providerReported`. The numbers come from the `session/prompt` response, which
-`AcpConnection::prompt` previously discarded except for `stopReason`.
+| Tool | Read-only bound | Mid-run approval reaches GitWyrm's gate |
+| --- | --- | --- |
+| Copilot | `--deny-tool` at launch, outranks every allow rule | Yes (ACP `session/request_permission`) |
+| Gemini | `--approval-mode=plan` for the whole session | Yes, but `exit_plan_mode` is auto-allowed non-interactively; unverified whether plan mode holds |
+| Claude Code | `--disallowedTools` at launch | No. `--print` auto-denies anything needing a prompt, and `--restricted` removes Bash. Edits are gated by Claude's own `acceptEdits`, not by GitWyrm |
+| Codex | `sandbox: "read-only"` on `thread/start` | Yes (`item/*/requestApproval`); command approvals map to the edit capability because no shell capability exists in policy |
+| opencode | None | Refused for read-only work by `select::choose` |
 
-Two things remain true about this and are deliberate:
+The Claude row is the one that matters for autonomy: giving Claude shell needs `--tools`
+plus a permission bridge (`--permission-prompt-tool` or equivalent) so each command
+reaches the person. That is its own feature.
 
-- **Only what the provider reports is recorded.** ACP does not standardise usage.
-  Copilot CLI 1.0.80 reports `inputTokens`/`outputTokens`/`cachedReadTokens` but no
-  cost; an agent that reports nothing produces no rows at all. GitWyrm never multiplies
-  tokens by a price table of its own, so a cost figure appears only when a provider
-  states one.
-- **`plan_limit` and `plan_reset_at` still have no source, and may never get one.**
-  ACP exposes no plan quota. The obvious alternative -- asking GitHub directly -- is
-  blocked: Copilot only returns real entitlement data to OAuth apps on its approved
-  allowlist, and GitWyrm's app is not on it. The failure is silent (200 with a short
-  public list rather than an error), which makes it exactly the kind of source that
-  would produce a confident wrong number. See `ai/copilot_sdk.rs`. Reaching parity with
-  OpenChamber's 22-provider quota line would mean per-provider credential scraping of
-  the kind it and Orca both do.
-- **Context-window occupancy is reported** (added 2026-08-29) from ACP's own
-  `usage_update`, which GitWyrm was receiving and discarding. Distinct from spend: it
-  replaces rather than accumulates, and falls when the agent compacts.
+### Usage and quota
 
-### 3. ~~One transport, one provider~~ Partly closed 2026-08-28
+Only what a provider reports is recorded. `plan_limit` and `plan_reset_at` still have no
+source: ACP exposes no quota, and GitHub returns real entitlement data only to allowlisted
+OAuth apps, silently. Parity with OpenChamber's quota line means per-provider credential
+scraping, which is a decision to make deliberately rather than drift into.
 
-Discovery is now a registry (`ai/agent/registry.rs`) describing four tools: Copilot
-(default, unchanged), Gemini CLI, Claude Code via the `@agentclientprotocol/claude-agent-acp`
-adapter, and opencode. `Transport` deliberately keeps its single `Cli` variant: all four
-are the same transport (a subprocess speaking ACP over stdio) and what differs is data.
+### Plugins and remote access
 
-**The safety rule, and why it matters more than the count.** ACP standardises no tool
-denial at all, so each tool differs: Copilot takes `--deny-tool` (which outranks every
-allow rule), the Claude adapter takes `_meta.claudeCode.options.disallowedTools` on
-`session/new`, Gemini has only the whole-session `--approval-mode=plan`, and **opencode has
-no mechanism whatsoever**. `select::choose` refuses any tool that cannot enforce read-only
-for a read-only intent or a Plan before Start, so opencode cannot run Ask, Explain, Review
-or Summarize. The check reads the same `policy::check_tool_capability` the engine's own
-tool gate uses, so the two cannot drift, and it runs again at `connect`.
+Provider protocols are a compile-time enum on purpose; `agent_config` reconciles other
+tools' configuration but is not a runtime plugin framework. Remote and mobile clients need
+a headless Agent Desk service (authentication, durable jobs, event streaming, capability
+policy) to exist first, because today every command is an in-process Tauri call over
+local child processes and filesystem sessions. Neither is started. The constraints the
+user set for remote (no opened ports, outward-dialling rendezvous, thousands of hosts
+behind one IP, phone plainly dead when the desktop sleeps) are recorded in the plan file
+and unchanged.
 
-Still open here:
+### Skills and connectors
 
-- ~~**No picker.**~~ Closed 2026-08-28. `ProviderControl` sits beside the mode and team
-  controls, backed by `agent_providers_list`. It shows every known tool with its real
-  install state, and disables the ones that cannot run the current chat with the reason
-  attached rather than hiding them. Leaving it on "Default AI" stores no choice at all, so
-  a chat nobody had an opinion about keeps following the default.
-- **`Denial::ReadOnlyMode` is weaker than the other two and is currently treated as equal.**
-  Gemini's plan mode is genuinely enforced by its own policy engine, but its
-  `exit_plan_mode` tool is auto-allowed when running non-interactively, which is how
-  GitWyrm drives it. A Gemini read-only session could in principle leave plan mode without
-  ever raising a permission request. Either downgrade Gemini to `Denial::None` for
-  read-only work or watch for `switch_mode`.
-- **The Claude adapter's `_meta` key is unverified against a live adapter.** A wrong key
-  fails *open* (the adapter ignores unknown `_meta` and denies nothing), so this needs one
-  empirical check: attempt an `Edit` in a read-only Claude session and confirm refusal.
+Skills are read (folders with `SKILL.md` front matter; verified against 13 real skills)
+and shown, and clients are one table. Skills still cannot be copied: they are file trees
+and the writers edit one JSON member. Only Claude Code's skills folder is verified.
 
-### 4. `agentDeskPlan.ts` renders opportunistically, and nothing asks for what it reads
+### Snip
 
-Re-examined 2026-08-28. The earlier note called this "a format nothing produces", which
-overstates it: `parsePlanChecklist` reads ordinary CommonMark task lists (`- [x] Step`),
-optionally with a trailing `(Owner - status)`. Models write that shape unprompted often
-enough that the checklist does sometimes render.
+Backend-only (`snip_detect`, `snip_gain` in the bindings, nothing in the UI calls them).
+It works by rewriting commands inside the agent process through config the agent loads
+itself. Now that write-capable runs may run commands, its lever does apply to Agent Desk
+on those runs; whether Copilot's hooks fire under `--acp --stdio` is still undocumented
+and needs a real test.
 
-What is true is that nothing *guarantees* it. No prompt asks for the convention -- the
-structured plan proposal travels as JSON in a fenced block
-(`plan_proposal::plan_mode_instruction`), and `RunStep::Plan` is free-form prose. So the
-same plan renders as a tidy checklist or as a paragraph depending on how the model felt.
+### Plan checklist parser
 
-That is a coherent thing to be (progressive enhancement of a common Markdown shape), but
-it is not currently a decision anyone made. Either ask for the convention in the Plan
-prompt so it is reliable, or drive the checklist from the JSON proposal that already
-exists. Leaving it undecided means the feature works by luck.
+`agentDeskPlan.ts` renders CommonMark task lists when a model happens to write them.
+Nothing asks for that shape. Either request it in the Plan prompt or drive the checklist
+from the JSON proposal that already exists. Undecided, fails safe.
 
-Not urgent, and explicitly not "delete it": it fails safe, and it costs nothing when a
-model writes prose instead.
+## Housekeeping the audit found
 
-### 7. Autonomy: the adversarial auditor
-
-Landed 2026-08-29 (`agentdesk/auditor.rs`). A run that reports itself finished is
-read by a second agent whose brief is to find what is wrong with it, not to
-confirm it is done.
-
-The design differs deliberately from OpenChamber's verify loop, which asks
-whether progress happened. This assumes the spec is loose and the agent cut
-corners, and asks whether the work would survive a real user. `Verdict::Hollow`
-is a state neither "done" nor "blocked" can express: it is specifically "this
-looks finished and is not".
-
-Properties worth keeping when this is touched:
-
-- **The auditor cannot write.** `ExecutionPolicy::resolve_for_audit` uses
-  `SessionIntent::Review`, so the tool launches with writing denied. An auditor
-  that fixed what it found would stop being a second opinion.
-- **Failure lets work through.** An unreadable reply, a tool that will not
-  start, a rejection with no reasons -- all become `Unavailable`, never a
-  rejection. An audit that did not happen knows nothing about the work.
-- **It reads the real diff**, capped at 120 KB and cut on a line boundary.
-  A summary only catches an agent willing to admit it cut a corner.
-- **Corrections are bounded at two passes** and run on the same connection, so
-  the agent is finishing rather than starting over.
-
-Still open here:
-
-- **Not exercised against a real corner-cutting run.** The judgement is a model's,
-  so the prompt's wording is the feature. `audit_prompt_reads_well` (ignored)
-  prints it for a realistic stubbed-retry case; a live run against a
-  deliberately under-specified task is the acceptance test the plan calls for.
-- **Checks are not passed as evidence.** They live in the transcript rather
-  than in `AuditEvidence`; the prompt tells the auditor passing checks are weak
-  evidence anyway.
-
-### 6. Hosting other agents' skills and connectors
-
-Closed 2026-08-29, in two halves.
-
-**Skills are read.** The Skills tab rendered "no skills found" for its whole
-existence -- `ItemKind::Skill` existed but no reader ever produced one, because
-skills are folders and every reader could only read a key out of a settings
-file. `agent_config/skills.rs` scans them; verified against the 13 real skills
-on the development machine. Front matter is parsed by hand rather than with a
-YAML crate: two fields do not justify the dependency, and a strict parser would
-reject a whole file over a mistake elsewhere in it.
-
-**Clients are a table.** `agent_config/registry.rs` replaces five parallel
-`match client` lists with one row per client. Adding a sixth is a row rather
-than five edits. Behaviour is unchanged and pinned by tests: the same clients
-read, the same two write, the same ones stay read-only.
-
-Still open here:
-
-- **Skills can be read but not copied**, on any client, and a test holds that
-  line. They are folders of files while the writers can only edit one member of
-  a JSON object. Copying one means a file-tree writer, which is a bigger and
-  riskier piece of work than the JSON path.
-- **Only Claude Code has a verified skills folder.** The others have no path
-  checked against a real install, and a guessed one would produce an empty list
-  that reads as "none installed" rather than "not looked at".
-
-### 5. Snip is backend-only
-
-`snip_detect` and `snip_gain` exist and are in the bindings, but nothing in the UI calls
-them, so there is no user-walkable path yet.
-
-**Corrected 2026-08-28.** An earlier revision of this note said Snip could not reduce Agent
-Desk's token use at all, because the agent's shell calls happen inside the provider CLI.
-That was wrong about the mechanism. Snip integrates by rewriting the command *inside* the
-agent process, through config the agent loads itself: a `preToolUse` hook returning
-`modifiedArgs` for Copilot, and a third-party plugin (`opencode-snip`) hooking
-`tool.execute.before` for opencode. A host app installs nothing and wraps nothing -- its
-only lever is keeping `snip` on the spawned process's PATH.
-
-Three things still qualify that:
-
-- Whether Copilot's hooks fire under `--acp --stdio` is **undocumented**. "ACP" appears
-  nowhere in GitHub's hooks reference, and there is precedent for hooks being inert in a
-  non-interactive runtime (for the cloud agent, tool calls are pre-approved so the hook
-  "does not fire or has no effect"). This needs a real test, not more reading.
-- GitWyrm denies `shell` at launch for its own runs, so on the default path there are no
-  shell calls to compress regardless.
-- Snip passes pipes, redirects, heredocs and command substitution through unfiltered, so
-  real savings land well below its headline numbers.
-
-The lever that certainly applies to Agent Desk is the usage tracking in item 2: measuring
-cost is what makes any reduction provable.
-
-Two facts in `snip/gain.rs` are inferred from Go's naming defaults rather than a published
-schema: the `TotalTimeMs` spelling and the lite-build marker text. Both still want one
-capture from a real `snip gain --json` to settle, but neither can now hide a working
-install: the time field accepts either spelling, and every numeric field is defaulted, so a
-name that turns out to be wrong leaves a gap in the report rather than failing it. Tests
-cover both, on the summary and on the list rows.
-
-`snip init --agent` is deliberately not implemented: it merges into other tools' config
-files and its uninstall matches a substring that would strip unrelated hooks.
+- The branch was 63 commits behind `main` with conflicts in `copilot_cli.rs` and
+  `ai/complete.rs`; merged 2026-09-02.
+- 78 unchecked tasks remain across the nine Agent Desk OpenSpec packages. Strict
+  validation proves the documents are well formed, not that the work is done. Those
+  boxes should be ticked or removed by whoever runs native acceptance, against what they
+  actually see.
 
 ## Release order
 
-1. Native acceptance run against a real provider.
-2. Verify the two live-behaviour unknowns: the Claude adapter's `_meta` denial actually
-   refusing an `Edit`, and Gemini's plan mode holding across a non-interactive
-   `exit_plan_mode`.
-3. Resolve or remove the plan-checklist parser.
-
-Usage in the durable model is done.
+1. Native acceptance, in the order listed above, on a machine with all three tools
+   signed in.
+2. Claude shell: `--tools` plus a permission bridge, then a real gated command.
+3. Verify Gemini's plan mode holds across a non-interactive `exit_plan_mode`.
+4. Live auditor run against a corner-cutting task; tune the prompt on what it misses.
+5. Decide the plan-checklist parser and the quota question.
 
 ## Meaning of "ready"
 
-Agent Desk is ready when a user can click Fix/Review/Summarize, see the requested run start
-immediately, and trust that authority and session identity cannot leak. A graph is ready
-when helpers work in isolation, their actual changes combine without touching the user's
-checkout, the lead reviews one repository-true result, and landing remains an explicit user
-choice. The code now claims all of this; native acceptance is what converts the claim into
-evidence.
+Agent Desk is ready when a person can open a chat on any installed tool, describe a goal,
+watch the agent edit, run its checks and correct itself, be asked before anything risky,
+and trust that a follow-up message, a switch of chat, or a restart never loses the
+conversation or leaks one chat's authority into another. The code now claims all of this;
+native acceptance is what turns the claim into evidence.
