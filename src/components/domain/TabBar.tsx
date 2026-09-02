@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { WindowControls } from "@/components/domain/WindowControls";
@@ -188,15 +189,17 @@ function RepoRow({
   path,
   icon,
   onSelect,
+  onForget,
 }: {
   name: string;
   path: string;
   icon: ReactNode;
   onSelect: () => void;
+  onForget?: () => void;
 }) {
   return (
     <DropdownMenuItem
-      className="flex-col items-start gap-0 text-xs text-sub"
+      className="group/repo flex-col items-start gap-0 text-xs text-sub"
       onSelect={onSelect}
     >
       <span className="flex w-full items-center gap-2">
@@ -204,6 +207,24 @@ function RepoRow({
         <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
           {name}
         </span>
+        {onForget && (
+          <button
+            type="button"
+            aria-label={`Remove ${name} from Recent`}
+            title={`Remove ${name} from Recent`}
+            // The row opens the repo, so the click must not reach it -- and a
+            // folder that has been renamed or deleted can only be removed here,
+            // where opening it is exactly what fails.
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onForget();
+            }}
+            className="grid size-5 shrink-0 place-items-center rounded-[5px] text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground group-hover/repo:opacity-100 focus:opacity-100"
+          >
+            <X size={11} />
+          </button>
+        )}
       </span>
       <span className="w-full overflow-hidden text-ellipsis whitespace-nowrap pl-[21px] font-mono text-2xs text-muted-foreground">
         {path}
@@ -350,6 +371,7 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
   const openRepos = useWorkspaceStore((state) => state.openRepos);
   const activeRepoId = useWorkspaceStore((state) => state.activeRepoId);
   const setActiveRepo = useWorkspaceStore((state) => state.setActiveRepo);
+  const removeRecent = useWorkspaceStore((state) => state.removeRecent);
   const openRepo = useOpenRepo();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -472,6 +494,7 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
                 path={repo.path}
                 icon={<Clock size={13} strokeWidth={2} />}
                 onSelect={() => openRepo.mutate(repo.path)}
+                onForget={() => removeRecent(repo.path)}
               />
             ))}
           </div>
