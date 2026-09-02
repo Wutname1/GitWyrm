@@ -65,6 +65,16 @@ pub enum Denial {
         /// The complete flag, mode value included.
         flag: &'static str,
     },
+    /// The whole session is bounded by a parameter the protocol adapter sends
+    /// when it starts the session -- Codex's `sandbox: "read-only"` on
+    /// `thread/start`. Nothing goes on the command line.
+    ///
+    /// This used to be a [`Denial::ReadOnlyMode`] carrying
+    /// `--sandbox=read-only`, which `codex app-server` rejects outright
+    /// ("unexpected argument"). The process died before the handshake and,
+    /// with its stderr unread, every read-only Codex chat looked like a
+    /// message that went nowhere.
+    SessionSandbox,
     /// The tool offers no way at all to restrict what it may do.
     ///
     /// This is not a gap to be worked around with a prompt. A prompt is a
@@ -260,7 +270,7 @@ impl AgentSpec {
                     args.push(flag.to_string());
                 }
             }
-            Denial::SessionMeta | Denial::None => {}
+            Denial::SessionMeta | Denial::SessionSandbox | Denial::None => {}
         }
         args
     }
@@ -435,11 +445,10 @@ pub const AGENTS: &[AgentSpec] = &[
         unix_names: &["codex"],
         acp_args: &["app-server"],
         version_args: &["--version"],
-        // Codex sandboxes the whole session rather than naming tools:
-        // `--sandbox read-only` is a real bound, verified against 0.151.0.
-        denial: Denial::ReadOnlyMode {
-            flag: "--sandbox=read-only",
-        },
+        // Codex sandboxes the whole session rather than naming tools. The
+        // bound is real (verified against 0.151.0) but it is a `thread/start`
+        // parameter, not a launch flag -- see `codex.rs::start_session`.
+        denial: Denial::SessionSandbox,
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://developers.openai.com/codex/cli/",
         install_hint: "npm install -g @openai/codex",
@@ -668,23 +677,20 @@ mod tests {
     /// `shell` and `url` on every run), so a rule of "any denial turns on
     /// read-only mode" looked correct while silently making every Gemini Fix
     /// session unable to write.
-    /// Codex bounds the whole session rather than naming tools, so a
-    /// read-only chat has to reach it as a sandbox mode.
+    /// Codex bounds the whole session rather than naming tools, and the
+    /// bound travels in `thread/start`, never on the command line:
+    /// `codex app-server` rejects `--sandbox` and exits, so anything that
+    /// reaches the launch line kills the chat before it starts.
     #[test]
-    fn codex_takes_a_read_only_sandbox_when_writing_is_denied() {
+    fn codex_launches_with_nothing_but_app_server_whatever_is_denied() {
         let codex = find("codex").expect("codex is in the table");
-        let args = codex.launch_args(&["shell", "url", "write"]);
-        assert!(
-            args.iter().any(|a| a.contains("read-only")),
-            "no read-only bound reached the launch line: {args:?}"
-        );
-        // And a run that IS allowed to write must not be sandboxed shut, or
-        // Fix on Codex could never change a file.
-        let writing = codex.launch_args(&["shell", "url"]);
-        assert!(
-            !writing.iter().any(|a| a.contains("read-only")),
-            "a write-capable run was forced read-only: {writing:?}"
-        );
+        for denied in [&["shell", "url", "write"][..], &["shell", "url"][..], &[][..]] {
+            let args = codex.launch_args(denied);
+            assert_eq!(args, vec!["app-server".to_string()], "denied {denied:?} gave {args:?}");
+        }
+        // And it still counts as able to keep a read-only promise, because
+        // the adapter enforces it at session start.
+        assert!(codex.can_guarantee_read_only());
     }
 
     #[test]

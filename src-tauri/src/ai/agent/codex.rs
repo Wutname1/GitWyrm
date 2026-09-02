@@ -50,6 +50,8 @@ use super::wire::{Incoming, PermissionDecision, StopReason, TurnOutcome};
 use std::os::windows::process::CommandExt;
 
 type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, AgentError>>>>>;
+type Complaints = Arc<Mutex<std::collections::VecDeque<String>>>;
+const COMPLAINT_LINES: usize = 8;
 
 /// A live Codex app-server session.
 pub struct CodexConnection {
@@ -100,12 +102,35 @@ impl CodexConnection {
         let stdin = child.stdin.take().ok_or_else(|| AgentError::Failed {
             detail: "Codex started without an input stream".into(),
         })?;
+        let stderr = child.stderr.take().ok_or_else(|| AgentError::Failed {
+            detail: "Codex started without an error stream".into(),
+        })?;
+
+        // Keep the last few lines Codex wrote to stderr. When it dies before
+        // answering, this is the only account of why -- a bad flag, a missing
+        // login -- and without it the failure is just "stopped unexpectedly".
+        let complaints: Complaints = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+        {
+            let complaints = complaints.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    log::debug!("Codex stderr: {line}");
+                    let mut guard = complaints.lock().await;
+                    if guard.len() >= COMPLAINT_LINES {
+                        guard.pop_front();
+                    }
+                    guard.push_back(line);
+                }
+            });
+        }
 
         let stdin = Arc::new(Mutex::new(stdin));
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(read_loop(stdout, pending.clone(), stdin.clone(), tx));
+        log::info!("Codex: started {} {}", program.display(), args.join(" "));
+        tokio::spawn(read_loop(stdout, pending.clone(), stdin.clone(), tx, complaints));
 
         Ok(Self {
             child,
@@ -136,6 +161,7 @@ impl CodexConnection {
             params["sandbox"] = json!("read-only");
         }
 
+        log::info!("Codex: starting a conversation in {}", cwd.display());
         let res = self.request("thread/start", params).await?;
         let id = res
             .get("thread")
@@ -180,6 +206,7 @@ impl CodexConnection {
         )
         .await?;
 
+        log::debug!("Codex: turn sent, waiting for it to finish");
         let completed = done_rx.await.map_err(|_| AgentError::Failed {
             detail: "Codex stopped before finishing the turn".into(),
         })??;
@@ -289,6 +316,7 @@ async fn read_loop(
     pending: Pending,
     stdin: Arc<Mutex<ChildStdin>>,
     tx: mpsc::UnboundedSender<Incoming>,
+    complaints: Complaints,
 ) {
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
@@ -362,6 +390,26 @@ async fn read_loop(
                 });
             }
 
+            // Any other request FROM Codex. It is waiting for an answer, and a
+            // request nobody answers hangs the turn forever with nothing in
+            // the log to say why -- which reads, from the outside, as "I sent
+            // a message and nothing happened". Refuse it explicitly so the
+            // turn moves on and the refusal is visible.
+            (true, Some(m)) => {
+                log::info!("Codex asked something GitWyrm cannot answer ({m}); declining");
+                let id = msg.get("id").cloned().unwrap_or(Value::Null);
+                let reply = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": { "code": -32601, "message": "GitWyrm does not handle this request" },
+                });
+                let mut line = reply.to_string();
+                line.push('\n');
+                let mut guard = stdin.lock().await;
+                let _ = guard.write_all(line.as_bytes()).await;
+                let _ = guard.flush().await;
+            }
+
             // A notification.
             (false, Some(m)) => {
                 if m == "turn/completed" {
@@ -386,10 +434,19 @@ async fn read_loop(
     }
 
     // The stream ended. Anything still waiting would hang forever otherwise.
+    // Say why if Codex said why: its last words on stderr are the difference
+    // between a fixable report and a shrug.
+    let said = complaints.lock().await.iter().cloned().collect::<Vec<_>>().join(" / ");
+    let detail = if said.trim().is_empty() {
+        "Codex stopped unexpectedly".to_string()
+    } else {
+        format!("Codex stopped unexpectedly: {said}")
+    };
+    log::warn!("{detail}");
     let mut guard = pending.lock().await;
     for (_, sender) in guard.drain() {
         let _ = sender.send(Err(AgentError::Failed {
-            detail: "Codex stopped unexpectedly".into(),
+            detail: detail.clone(),
         }));
     }
 }
@@ -480,6 +537,43 @@ fn stop_reason_of(turn: &Value) -> StopReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The whole path a chat walks, against the Codex on this machine:
+    /// spawn, handshake, start a conversation, send one turn, get prose
+    /// back. Run it by hand when a Codex chat "does nothing":
+    ///
+    /// `cargo test --lib codex_answers_a_real_turn -- --ignored --nocapture`
+    ///
+    /// Ignored because it needs Codex installed and signed in, and spends a
+    /// (tiny) amount of someone's quota.
+    #[tokio::test]
+    #[ignore]
+    async fn codex_answers_a_real_turn() {
+        let spec = super::super::registry::find("codex").expect("codex row");
+        let found = super::super::copilot_cli::detect_agent(spec);
+        let program = match found.state {
+            super::super::copilot_cli::CliState::Ready { path, .. } => std::path::PathBuf::from(path),
+            other => panic!("codex not usable on this machine: {other:?}"),
+        };
+        let cwd = std::env::temp_dir();
+
+        let mut conn = CodexConnection::spawn(&program, &cwd, &spec.launch_args(&["write"]))
+            .await
+            .expect("spawn");
+        let thread = conn.start_session(&cwd, true).await.expect("start_session");
+        eprintln!("thread {thread}");
+
+        let said = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            conn.ask("Reply with exactly the word PONG and nothing else."),
+        )
+        .await
+        .expect("codex did not finish the turn within two minutes")
+        .expect("turn failed");
+        eprintln!("codex said: {said:?}");
+        conn.shutdown().await;
+        assert!(said.to_uppercase().contains("PONG"), "got {said:?}");
+    }
 
     #[test]
     fn agent_prose_arrives_as_text() {
