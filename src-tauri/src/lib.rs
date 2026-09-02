@@ -17,6 +17,7 @@ mod snip;
 mod state;
 mod telemetry;
 mod watcher;
+mod window_placement;
 
 /// Exposed for the openspec_real_tree integration test, which parses this
 /// repository's own plan folder -- the only fixture guaranteed to match how the
@@ -611,6 +612,14 @@ pub fn run() {
                 )
                 .build(),
         )
+        // Runs after the window-state plugin has put each window back where it
+        // was. If "where it was" is now off every screen -- a monitor unplugged,
+        // a laptop undocked -- pull it back to one you can see.
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                window_placement::ensure_on_screen(&webview.window());
+            }
+        })
         .setup(|app| {
             // `tauri_plugin_log` normally claims the global `log` logger for itself,
             // which left `log::error!` writing to the log file and nothing else --

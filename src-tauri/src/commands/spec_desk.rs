@@ -262,6 +262,9 @@ pub async fn open_spec_desk(
     if let Some((_, legacy_window)) = &migration_source {
         migrate_legacy_placement(legacy_window, &window);
     }
+    // Both the copied placement above and the plugin's own restore can land
+    // the window on a screen that is no longer there.
+    crate::window_placement::ensure_on_screen(&window.as_ref().window());
 
     // The URL above covers this window's first paint; the event covers every
     // kickoff after that (including this one, for a frontend that only wants
