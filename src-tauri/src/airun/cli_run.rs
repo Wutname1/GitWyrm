@@ -60,6 +60,12 @@ impl CancelHandle {
     pub fn cancel(&self) {
         self.notify.notify_one();
     }
+
+    /// Resolves when someone asks this run to stop. Lets callers outside
+    /// this module wait on a cancel without reaching into the `Notify`.
+    pub async fn cancelled(&self) {
+        self.notify.notified().await;
+    }
 }
 
 /// R6.4: which of a helper's two budget limits actually caused `run_task` to
@@ -182,8 +188,17 @@ fn gather_evidence(
     // Against the working tree, not a commit: the changes sit uncommitted
     // until someone presses Keep, so a commit-to-commit diff would be empty
     // for exactly the runs this needs to check.
+    // Against the run's starting commit, not the index. `diff_index_to_workdir`
+    // hides anything the agent staged, so an agent that ran `git add` was
+    // reported as having changed nothing and skipped the audit entirely --
+    // a one-command way around the whole check. Diffing HEAD's tree to the
+    // working directory sees staged and unstaged work alike.
+    let head_tree = repo
+        .head()
+        .ok()
+        .and_then(|h| h.peel_to_tree().ok());
     let diff = repo
-        .diff_index_to_workdir(None, Some(&mut opts))
+        .diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))
         .map_err(|_| EvidenceGap::Unavailable)?;
 
     // Paths come from the deltas themselves, not from the print callback:
@@ -239,6 +254,7 @@ async fn audit_finished_work(
     agent: &CliAgent,
     policy: &ExecutionPolicy,
     evidence: crate::agentdesk::auditor::AuditEvidence,
+    cancel: &CancelHandle,
 ) -> crate::agentdesk::auditor::Verdict {
     use crate::agentdesk::auditor::{audit_prompt, parse_verdict, Verdict};
 
@@ -256,7 +272,25 @@ async fn audit_finished_work(
         }
     };
 
-    let said = conn.ask(&audit_prompt(&evidence)).await;
+    // Stop has to reach the auditor too. It runs on its own fresh
+    // connection, so signalling the working agent's connection did nothing
+    // here: pressing Stop during the check left the run sitting until the
+    // auditor answered on its own. A cancelled audit is `Unavailable`, which
+    // lets the work through -- an audit that did not happen knows nothing
+    // about it either way.
+    let prompt = audit_prompt(&evidence);
+    let said = {
+        let ask = conn.ask(&prompt);
+        tokio::pin!(ask);
+        tokio::select! {
+            result = &mut ask => result,
+            _ = cancel.cancelled() => Err(AgentError::Failed {
+                detail: "the check was stopped".into(),
+            }),
+        }
+    };
+    // `shutdown` ends the process either way, so a cancelled check does not
+    // leave an auditor running against a worktree nobody is waiting on.
     conn.shutdown().await;
 
     match said {
@@ -542,7 +576,7 @@ pub async fn run_task(
                     }
                     Err(EvidenceGap::Unavailable) => break,
                 };
-                let verdict = audit_finished_work(agent, &policy, evidence).await;
+                let verdict = audit_finished_work(agent, &policy, evidence, &cancel).await;
                 sink(RunState::Working, RunStep::Note { text: verdict.summary() });
 
                 let reasons = match verdict {
@@ -947,18 +981,52 @@ mod tests {
         assert!(detail.contains("nothing in the project was changed"), "{detail}");
     }
 
-    #[test]
-    fn an_untouched_worktree_is_reported_as_nothing_changed() {
+    /// A repo with one committed file, the way every real run starts. The
+    /// audit diffs the run's starting commit against the working directory,
+    /// so a HEAD has to exist for the comparison to mean anything.
+    fn seeded_repo() -> (tempfile::TempDir, git2::Repository) {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
         std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
         let mut index = repo.index().unwrap();
         index.add_path(std::path::Path::new("a.txt")).unwrap();
         index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let who = git2::Signature::now("t", "t@example.com").unwrap();
+        repo.commit(Some("HEAD"), &who, &who, "start", &tree, &[]).unwrap();
+        drop(tree);
+        (dir, repo)
+    }
+
+    /// The one-command way around the whole audit: an agent that writes a
+    /// stub and runs `git add` was reported as having changed nothing, so
+    /// the check never ran on it.
+    #[test]
+    fn staged_changes_are_evidence_not_an_empty_worktree() {
+        let (dir, repo) = seeded_repo();
+        std::fs::write(dir.path().join("math_utils.py"), "def is_even(n):\n    return True\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("math_utils.py")).unwrap();
+        index.write().unwrap();
+
+        let evidence = gather_evidence(dir.path(), "spec", "").expect("staged work is still work");
+        assert!(
+            evidence.changed_paths.iter().any(|p| p == "math_utils.py"),
+            "{:?}",
+            evidence.changed_paths
+        );
+        assert!(evidence.diff.contains("return True"), "{}", evidence.diff);
+    }
+
+    #[test]
+    fn an_untouched_worktree_is_reported_as_nothing_changed() {
+        let (dir, _repo) = seeded_repo();
         assert_eq!(
             gather_evidence(dir.path(), "spec", "").err(),
             Some(EvidenceGap::NothingChanged)
         );
+        // An edit in the working directory is evidence.
         std::fs::write(dir.path().join("a.txt"), "two\n").unwrap();
         assert!(gather_evidence(dir.path(), "spec", "").is_ok());
         // A brand-new, untracked file is the common shape of agent work and
