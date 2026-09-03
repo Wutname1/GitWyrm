@@ -28,8 +28,6 @@ import { isRightDockSafeAtWidth, resolveDockVisibility, zoneToPlacement, type Do
 import type { DockKind } from '@/lib/agentWorkspaceLayout'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 
-type CenterView = 'conversation' | 'openspec' | 'setup' | 'import'
-
 /** Matches the Rust side's `agent-desk://select-target` in `spec_desk.rs`. */
 const SELECT_DESK_TARGET_EVENT = 'agent-desk://select-target'
 
@@ -290,7 +288,10 @@ export function AgentDeskView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const [centerView, setCenterView] = useState<CenterView>('conversation')
+  // In the store (not local state) so a message link inside a pane can open
+  // the Spec view -- see `agentDeskUiStore.centerView`.
+  const centerView = useAgentDeskUiStore((s) => s.centerView)
+  const setCenterView = useAgentDeskUiStore((s) => s.setCenterView)
   const [creating, setCreating] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth)

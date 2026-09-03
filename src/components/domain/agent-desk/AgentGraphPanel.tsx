@@ -8,6 +8,7 @@ import { describeError, log } from '@/lib/log'
 import { cn } from '@/lib/utils'
 import { buildGraphTree, graphSummary, nodeDotTone, nodeStatusLabel, type GraphTreeNode } from '@/lib/agentGraphProjection'
 import { canViewNodeChanges, latestActivityLine, resultForNode } from '@/lib/agentDeskGraph'
+import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { AwaitingStartCard } from './AwaitingStartCard'
 import { ResultReviewPanel } from './ResultReviewPanel'
 
@@ -339,7 +340,12 @@ function InspectorCard({
 export function AgentGraphPanel({ session }: { session: AgentSession }) {
   const qc = useQueryClient()
   const [stopping, setStopping] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Selection lives in the store so a "View in graph" message link can pick
+  // a node from the conversation, even before this panel is open.
+  const sessionId = session.header.sessionId
+  const selectedId = useAgentDeskUiStore((s) => s.graphSelection[sessionId] ?? null)
+  const selectGraphNode = useAgentDeskUiStore((s) => s.selectGraphNode)
+  const setSelectedId = (id: string | null) => selectGraphNode(sessionId, id)
 
   const executions = session.executions
   const tree = buildGraphTree(executions)

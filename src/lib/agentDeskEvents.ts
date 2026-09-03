@@ -22,6 +22,8 @@ import type { MessageTarget, SessionMessage } from '@/lib/bindings'
  */
 export interface EventStackItem {
   messageId: string
+  /** Execution that produced the event, so a file link opens in that helper's own worktree. */
+  executionId: string | null
   headline: string
   detail: string
   target: MessageTarget | null
@@ -90,6 +92,7 @@ export function groupEventStacks(messages: SessionMessage[]): EventStackGroup[] 
       const { headline, detail } = splitEventHeadline(message.plainContent)
       current.push({
         messageId: message.messageId,
+        executionId: message.executionId,
         headline,
         detail,
         target: message.targets[0] ?? null,

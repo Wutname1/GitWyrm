@@ -309,3 +309,34 @@ describe('agentDeskUiStore: session-scoped composer drafts', () => {
     expect(raw === null || !raw.includes('sensitive unsent prompt')).toBe(true)
   })
 })
+
+describe('agentDeskUiStore: centre view and graph selection', () => {
+  it('starts on the conversation and switches views without persisting them', () => {
+    useAgentDeskUiStore.getState().hydrate()
+    expect(useAgentDeskUiStore.getState().centerView).toBe('conversation')
+    useAgentDeskUiStore.getState().setCenterView('openspec')
+    expect(useAgentDeskUiStore.getState().centerView).toBe('openspec')
+    vi.advanceTimersByTime(1000)
+    flushPendingAgentDeskLayout()
+    const raw = storage.getItem('gitwyrm.agentDeskWorkspaceLayout.v1')
+    expect(raw === null || !raw.includes('openspec')).toBe(true)
+  })
+
+  it('keeps one graph selection per chat and clears it with null', () => {
+    const store = useAgentDeskUiStore.getState()
+    store.selectGraphNode('session-a', 'helper-1')
+    store.selectGraphNode('session-b', 'helper-9')
+    expect(useAgentDeskUiStore.getState().graphSelection['session-a']).toBe('helper-1')
+    expect(useAgentDeskUiStore.getState().graphSelection['session-b']).toBe('helper-9')
+    store.selectGraphNode('session-a', null)
+    expect(useAgentDeskUiStore.getState().graphSelection['session-a']).toBeUndefined()
+    expect(useAgentDeskUiStore.getState().graphSelection['session-b']).toBe('helper-9')
+  })
+
+  it('does not create a new state object when the same node is selected again', () => {
+    useAgentDeskUiStore.getState().selectGraphNode('session-a', 'helper-1')
+    const before = useAgentDeskUiStore.getState().graphSelection
+    useAgentDeskUiStore.getState().selectGraphNode('session-a', 'helper-1')
+    expect(useAgentDeskUiStore.getState().graphSelection).toBe(before)
+  })
+})

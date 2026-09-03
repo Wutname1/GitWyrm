@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, ExternalLink } from 'lucide-react'
+import { Download, ExternalLink, FileDiff, GitFork, ListChecks } from 'lucide-react'
 import { toast } from 'sonner'
 import { commands, type MessageTarget, type SessionMessage } from '@/lib/bindings'
 import { useAgentSession } from '@/hooks/useAgentSessions'
+import { useMessageTargetNav, type MessageTargetNav } from '@/hooks/useMessageTargetNav'
 import { cn } from '@/lib/utils'
 import { Markdown } from '@/components/ui/markdown'
 import { DisabledHint } from '@/components/ui/tooltip'
 import { isNearBottom } from '@/lib/agentDeskScroll'
-import { resolveMessageTarget } from '@/lib/agentDeskTargets'
 import { computeRailTicks, userMessagesForRail } from '@/lib/agentDeskRail'
 import { groupEventStacks, type EventStackGroup } from '@/lib/agentDeskEvents'
 import { parsePlanChecklist } from '@/lib/agentDeskPlan'
@@ -59,14 +59,26 @@ function avatarInitials(message: SessionMessage): string {
 }
 
 /**
- * One link to wherever a message points (tasks.md 4.4): `source` is
- * reachable today via `SessionSourceBanner`'s `onOpenSource`; every other
- * kind is honestly unavailable in this window rather than a dead-looking
- * button -- see `resolveMessageTarget` for why, and what makes each kind
- * reachable in the future.
+ * One link to wherever a message points (tasks.md 4.4). `source` goes
+ * through `onOpenSource` (shared with the source banner); every other kind
+ * goes through `useMessageTargetNav`, which opens the file's diff in the
+ * main window, highlights the node in the graph dock, or switches to the
+ * Spec view. A target the app genuinely cannot show renders disabled with
+ * the reason in a hover hint, never as a dead-looking live button -- see
+ * `resolveMessageTarget`.
  */
-function MessageTargetLink({ target, onOpenSource }: { target: MessageTarget; onOpenSource?: () => void }) {
-  const resolved = resolveMessageTarget(target)
+function MessageTargetLink({
+  target,
+  messageExecutionId,
+  targetNav,
+  onOpenSource,
+}: {
+  target: MessageTarget
+  messageExecutionId: string | null
+  targetNav: MessageTargetNav
+  onOpenSource?: () => void
+}) {
+  const resolved = targetNav.resolve(target, messageExecutionId)
   if (resolved.kind === 'source') {
     return (
       <button
@@ -80,17 +92,31 @@ function MessageTargetLink({ target, onOpenSource }: { target: MessageTarget; on
       </button>
     )
   }
+  if (resolved.kind === 'unavailable') {
+    return (
+      <DisabledHint disabled reason={resolved.reason}>
+        <button
+          type="button"
+          disabled
+          className="inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground disabled:cursor-not-allowed"
+        >
+          <Download size={11} className="flex-none rotate-180" aria-hidden />
+          <span className="truncate">{resolved.label}</span>
+        </button>
+      </DisabledHint>
+    )
+  }
+  const Icon = resolved.kind === 'graphNode' ? GitFork : resolved.kind === 'openSpecTask' ? ListChecks : FileDiff
   return (
-    <DisabledHint disabled reason={resolved.reason}>
-      <button
-        type="button"
-        disabled
-        className="inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground disabled:cursor-not-allowed"
-      >
-        <Download size={11} className="flex-none rotate-180" aria-hidden />
-        <span className="truncate">{resolved.label}</span>
-      </button>
-    </DisabledHint>
+    <button
+      type="button"
+      onClick={() => targetNav.open(resolved)}
+      title={resolved.label}
+      className="inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-accent-text hover:bg-soft"
+    >
+      <Icon size={11} className="flex-none" aria-hidden />
+      <span className="truncate">{resolved.label}</span>
+    </button>
   )
 }
 
@@ -194,6 +220,7 @@ function MessageRow({
   sessionId,
   message,
   flash,
+  targetNav,
   onOpenSource,
   thought,
   onEdit,
@@ -201,6 +228,7 @@ function MessageRow({
   sessionId: string
   message: SessionMessage
   flash: boolean
+  targetNav: MessageTargetNav
   onOpenSource?: () => void
   /**
    * A `thoughtSummary` message folded into this row, per
@@ -278,7 +306,13 @@ function MessageRow({
         {message.targets.length > 0 && (
           <div className="mt-1 flex flex-wrap items-center gap-1">
             {message.targets.map((target, i) => (
-              <MessageTargetLink key={`${message.messageId}-target-${i}`} target={target} onOpenSource={onOpenSource} />
+              <MessageTargetLink
+                key={`${message.messageId}-target-${i}`}
+                target={target}
+                messageExecutionId={message.executionId}
+                targetNav={targetNav}
+                onOpenSource={onOpenSource}
+              />
             ))}
           </div>
         )}
@@ -368,6 +402,7 @@ export function ConversationPane({
   paneLabel,
 }: ConversationPaneProps) {
   const { session, messages, state, isLoading, isError } = useAgentSession(sessionId)
+  const targetNav = useMessageTargetNav(session)
   const [flashId, setFlashId] = useState<string | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
   const setComposerDraft = useAgentDeskUiStore((s) => s.setDraft)
@@ -606,6 +641,7 @@ export function ConversationPane({
                     sessionId={sessionId}
                     message={m}
                     flash={flashId === m.messageId}
+                    targetNav={targetNav}
                     onOpenSource={onOpenSource}
                     thought={thoughtFor.get(m.messageId)}
                     onEdit={m.role === 'user' ? editMessage : undefined}
@@ -615,7 +651,14 @@ export function ConversationPane({
 
               const eventGroup = eventGroupsByAnchor.get(m.messageId)
               if (eventGroup) {
-                nodes.push(<EventStack key={`${m.messageId}-events`} items={eventGroup.items} onOpenSource={onOpenSource} />)
+                nodes.push(
+                  <EventStack
+                    key={`${m.messageId}-events`}
+                    items={eventGroup.items}
+                    targetNav={targetNav}
+                    onOpenSource={onOpenSource}
+                  />
+                )
               }
               return nodes
             })

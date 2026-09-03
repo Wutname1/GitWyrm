@@ -66,12 +66,28 @@ interface ComposerDraft {
   text: string
 }
 
+/** What fills the centre of the Agent Desk window: the chat panes, or one of the whole-window takeovers. */
+export type AgentDeskCenterView = 'conversation' | 'openspec' | 'setup' | 'import'
+
 interface AgentDeskUiState {
   /** False until `hydrate()` has run once; guards persistence like `workspaceStore.hydrated`. */
   hydrated: boolean
   layout: AgentWorkspaceLayout
   /** Session ID -> unsent composer text. Absent key means no draft. */
   drafts: Record<string, ComposerDraft | undefined>
+  /**
+   * Centre takeover, in the store rather than `AgentDeskView` local state so
+   * a message link deep inside a pane can switch to the Spec view without a
+   * callback threaded through every pane component. Never persisted: a
+   * window always reopens on the conversation.
+   */
+  centerView: AgentDeskCenterView
+  /**
+   * Session ID -> execution highlighted in that chat's Agent graph panel.
+   * Lives here (not in `AgentGraphPanel` state) so a "View in graph" link
+   * can pick a node before the panel has even been opened. Never persisted.
+   */
+  graphSelection: Record<string, string | undefined>
 
   /** Read persisted layout (if any) and mark the store ready to persist further changes. */
   hydrate: (windowBoundPx?: number) => void
@@ -103,6 +119,11 @@ interface AgentDeskUiState {
   getDraft: (sessionId: string) => string
   /** Called once a session's Send is accepted -- clears only that session's draft. */
   clearDraft: (sessionId: string) => void
+
+  // --- Centre view and graph selection (in-memory only) ------------------------------
+  setCenterView: (view: AgentDeskCenterView) => void
+  /** Highlight one execution in a chat's graph panel; null falls back to the panel's default (the lead). */
+  selectGraphNode: (sessionId: string, executionId: string | null) => void
 }
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null
@@ -127,6 +148,8 @@ export const useAgentDeskUiStore = create<AgentDeskUiState>((set, get) => ({
   hydrated: false,
   layout: DEFAULT_AGENT_WORKSPACE_LAYOUT,
   drafts: {},
+  centerView: 'conversation',
+  graphSelection: {},
 
   hydrate: (windowBoundPx) => {
     let layout = DEFAULT_AGENT_WORKSPACE_LAYOUT
@@ -270,6 +293,18 @@ export const useAgentDeskUiStore = create<AgentDeskUiState>((set, get) => ({
       const next = { ...s.drafts }
       delete next[sessionId]
       return { drafts: next }
+    })
+  },
+
+  setCenterView: (view) => set({ centerView: view }),
+
+  selectGraphNode: (sessionId, executionId) => {
+    set((s) => {
+      if ((s.graphSelection[sessionId] ?? null) === executionId) return s
+      const next = { ...s.graphSelection }
+      if (executionId === null) delete next[sessionId]
+      else next[sessionId] = executionId
+      return { graphSelection: next }
     })
   },
 }))

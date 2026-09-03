@@ -1,82 +1,136 @@
-import type { MessageTarget } from '@/lib/bindings'
+import type { ExecutionRecord, MessageTarget } from '@/lib/bindings'
 
 /**
  * Maps a `MessageTarget` (tasks.md 4.4) to the destination the Agent Desk
- * window can actually reach today, plus a plain-language label for the link.
+ * window can reach, plus a plain-language label for the link.
  *
- * Kept out of the component so the mapping itself -- which target kinds are
- * reachable and what they are called -- is covered by a fast `.test.ts` unit
+ * Kept out of the component so the mapping itself, which target kinds are
+ * reachable and what they are called, is covered by a fast `.test.ts` unit
  * test (this project's `vitest.config.ts` runs `src/**\/*.test.ts` in a Node
  * environment with no DOM, so component rendering itself is not testable
- * here; see `src/lib/agentSessionGrouping.ts` for the same pattern).
+ * here; see `src/lib/agentSessionGrouping.ts` for the same pattern). The
+ * resolver is pure: it decides WHAT to do and returns a description; the
+ * clicking is done by `src/hooks/useMessageTargetNav.ts`, which owns the
+ * commands, the store writes and the toasts.
  *
- * Agent Desk is a standalone webview window (see `AgentDeskView.tsx`) with no
- * embedded diff viewer, worktree browser, or graph panel today -- those are
- * `DiffView`/`GraphView`/the OpenSpec surfaces in the *main* GitWyrm window.
- * `source` is the one target kind Agent Desk can already open, via
- * `SessionSourceBanner`'s `onOpenSource`, which `AgentDeskView.tsx` now wires
- * to `commands.agentSessionOpenSource(sessionId)` (package `agent-desk-docs`)
- * -- that command focuses the main window and emits `agent-desk://open-source`,
- * which `useAgentDeskSourceListener.ts` (mounted in `App.tsx`'s `AppInner`)
- * catches and routes to the GitHub context panel, an OpenSpec selection, or
- * the diff view depending on the session's `SessionSource` kind
- * (`src/lib/agentDeskSourceNav.ts` is the pure per-kind mapping, unit tested
- * there). Every other `MessageTarget` kind below resolves to `unavailable`
- * here rather than a link that looks live and does nothing -- see the
- * mockup's `.ag-tool-link`/`data-open-setup` pattern for what a real link
- * looks like once a destination exists, and `common-pitfalls`-style "false
- * positive" guidance against building fake affordances.
+ * Every kind rides on navigation that already exists rather than a bridge
+ * built for this file:
+ *   - `source` -> `SessionSourceBanner`'s `onOpenSource`, which
+ *     `AgentDeskView.tsx` wires to `commands.agentSessionOpenSource` (the
+ *     main window then routes via `agentDeskSourceNav.ts`).
+ *   - `file`/`diff` -> `commands.agentResultOpenDiff(worktreePath, path)`,
+ *     the same bridge the review panel and the graph inspector use: the
+ *     main window opens `worktreePath` as a repo tab and shows the
+ *     working-tree diff for `path` (`useAgentResultDiff.ts`). A message from
+ *     a helper that runs in its own worktree opens THAT worktree; anything
+ *     else (the lead, a read-only helper, a note with no execution) falls
+ *     back to the session's own repository, so the link still lands on the
+ *     file the message is talking about.
+ *   - `graphNode` -> the Agent graph dock in this window
+ *     (`agentDeskUiStore.selectGraphNode` + `openDock('graph')`).
+ *   - `openSpecTask` -> this window's own Spec view
+ *     (`OpenSpecEmbeddedDetail`, via `selectChangeEverywhere` and
+ *     `agentDeskUiStore.setCenterView('openspec')`). There is no per-task
+ *     selection surface anywhere in the app (only per-change), so the link
+ *     honestly lands on the parent change and the toast says which task to
+ *     look for, matching `agentDeskSourceNav.ts`'s stance for task sources.
  *
- * A navigation bridge into the main window also EXISTS for one more
- * destination: `commands.agentResultOpenDiff(worktreePath, path)` (agent-
- * desk-review-and-landing tasks.md 2.2) focuses the main window and opens a
- * result's worktree diff there (`src/hooks/useAgentResultDiff.ts`'s
- * `agent-result://open-diff` listener, wired at `App.tsx`'s `AppInner`).
- * The `diff` case below stays `unavailable` because `MessageTarget::Diff`'s
- * `scope` field is not yet populated with a worktree path anywhere in the
- * backend (only test fixtures construct one, per
- * `src-tauri/src/agentdesk/model.rs`) -- there is nothing to resolve
- * `target.scope` INTO yet, not a missing destination. Once a real caller
- * attaches a `Diff` target carrying a worktree path (or the review panel
- * calls `agentResultOpenDiff` directly rather than through a message
- * target), route it through that same command instead of adding a second
- * bridge. `graphNode` becomes reachable once section 7's Graph panel exists
- * in this window; `file`/`openSpecTask` still need their own bridges (a
- * *message-target* `openSpecTask`, i.e. a chat reply linking to a specific
- * task -- distinct from a *session source* `openSpecTask`, which
- * `agentDeskSourceNav.ts` already routes to its parent change).
+ * `unavailable` is reserved for a target the app genuinely cannot show
+ * right now, and always carries a reason the UI can put in front of the
+ * user: a chat with no project has nowhere to open a file; a graph node for
+ * an agent the chat no longer lists, or for a chat with no team, has no
+ * panel that could highlight it.
  */
 export type ResolvedMessageTarget =
   | { kind: 'source'; label: string }
+  | {
+      kind: 'diff'
+      label: string
+      /** Absolute path the main window opens as a repo tab. */
+      worktreePath: string
+      /** Repo-relative file to show, or null to just bring that repo forward. */
+      path: string | null
+      /** Whether `worktreePath` is a helper's isolated worktree or the chat's own repository. */
+      location: 'helperWorktree' | 'repo'
+    }
+  | { kind: 'graphNode'; label: string; executionId: string }
+  | { kind: 'openSpecTask'; label: string; changeId: string; taskIndex: number }
   | { kind: 'unavailable'; label: string; reason: string }
 
-export function resolveMessageTarget(target: MessageTarget): ResolvedMessageTarget {
+export interface MessageTargetContext {
+  /** Absolute path of the chat's repository, or null when the chat has no project yet. */
+  repoPath: string | null
+  /** The chat's executions, for worktree lookup and graph membership. */
+  executions: ReadonlyArray<Pick<ExecutionRecord, 'executionId' | 'parentExecutionId' | 'worktreePath'>>
+  /** The execution the message came from, so a helper's file opens in that helper's worktree. */
+  messageExecutionId: string | null
+  /** Whether the chat has a team graph to show at all (`sessionHasGraph`). */
+  hasGraph: boolean
+}
+
+/** Characters that make a diff scope a pattern ("src/**") rather than one file the diff viewer can open. */
+const GLOB_CHARS = /[*?[\]{}]/
+
+/**
+ * A `diff` target's `scope` is free text from the backend: sometimes a file,
+ * sometimes a glob or a description. Only a concrete path can be handed to
+ * the diff viewer; anything else opens the repo without a file selected.
+ */
+export function diffScopePath(scope: string): string | null {
+  const trimmed = scope.trim()
+  if (trimmed.length === 0 || GLOB_CHARS.test(trimmed)) return null
+  return trimmed
+}
+
+/** Where a message's file should open: the sending helper's worktree if it has one, else the chat's repo. */
+function worktreeFor(ctx: MessageTargetContext): { worktreePath: string; location: 'helperWorktree' | 'repo' } | null {
+  if (ctx.messageExecutionId) {
+    const execution = ctx.executions.find((e) => e.executionId === ctx.messageExecutionId)
+    if (execution?.worktreePath) {
+      return { worktreePath: execution.worktreePath, location: 'helperWorktree' }
+    }
+  }
+  if (ctx.repoPath) return { worktreePath: ctx.repoPath, location: 'repo' }
+  return null
+}
+
+const NO_PROJECT_REASON = 'This chat is not linked to a project yet, so there is no file to open.'
+
+export function resolveMessageTarget(target: MessageTarget, ctx: MessageTargetContext): ResolvedMessageTarget {
   switch (target.kind) {
     case 'source':
       return { kind: 'source', label: 'Open the source' }
-    case 'file':
-      return {
-        kind: 'unavailable',
-        label: target.path,
-        reason: 'Opening files from a chat is not available in this window yet.',
+    case 'file': {
+      const where = worktreeFor(ctx)
+      if (!where) return { kind: 'unavailable', label: target.path, reason: NO_PROJECT_REASON }
+      return { kind: 'diff', label: target.path, path: target.path, ...where }
+    }
+    case 'diff': {
+      const where = worktreeFor(ctx)
+      const label = target.scope.trim() || 'View diff'
+      if (!where) return { kind: 'unavailable', label, reason: NO_PROJECT_REASON }
+      return { kind: 'diff', label, path: diffScopePath(target.scope), ...where }
+    }
+    case 'graphNode': {
+      const label = 'View in graph'
+      if (!ctx.executions.some((e) => e.executionId === target.executionId)) {
+        return { kind: 'unavailable', label, reason: 'That agent is no longer part of this chat.' }
       }
-    case 'diff':
-      return {
-        kind: 'unavailable',
-        label: target.scope || 'View diff',
-        reason: 'The diff viewer is not available in this window yet.',
+      if (!ctx.hasGraph) {
+        return {
+          kind: 'unavailable',
+          label,
+          reason: 'This chat is one agent working alone, so there is no team graph to show.',
+        }
       }
-    case 'graphNode':
-      return {
-        kind: 'unavailable',
-        label: 'View in graph',
-        reason: 'Open the Graph tab to see this agent’s work.',
-      }
+      return { kind: 'graphNode', label, executionId: target.executionId }
+    }
     case 'openSpecTask':
       return {
-        kind: 'unavailable',
+        kind: 'openSpecTask',
         label: `Task ${target.taskIndex + 1}`,
-        reason: 'Opening a specific task from a chat is not available yet.',
+        changeId: target.changeId,
+        taskIndex: target.taskIndex,
       }
   }
 }

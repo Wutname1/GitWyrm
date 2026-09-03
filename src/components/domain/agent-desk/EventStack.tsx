@@ -1,6 +1,6 @@
 import { FilePenLine, SearchCheck, ShieldCheck, Wrench } from 'lucide-react'
 import type { EventStackItem } from '@/lib/agentDeskEvents'
-import { resolveMessageTarget } from '@/lib/agentDeskTargets'
+import type { MessageTargetNav } from '@/hooks/useMessageTargetNav'
 import { DisabledHint } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
@@ -14,14 +14,14 @@ import { cn } from '@/lib/utils'
  * groups runs of consecutive `tool`-kind messages -- there is no dedicated
  * `MessageKind` for "event" (see that file's doc comment for why).
  *
- * The link reuses `resolveMessageTarget` (the same mapping `ConversationPane`
- * already uses for a message's own target links), so an event link is
- * honestly disabled -- with a reason, via `DisabledHint` -- whenever Agent
- * Desk cannot actually reach the destination yet, never a dead-looking
- * button.
+ * The link reuses the same `MessageTargetNav` `ConversationPane` uses for a
+ * message's own target links (`useMessageTargetNav`), so an event link opens
+ * the same place a message link would, and is honestly disabled, with a
+ * reason via `DisabledHint`, only when the app cannot show the destination.
  */
 export interface EventStackProps {
   items: EventStackItem[]
+  targetNav: MessageTargetNav
   onOpenSource?: () => void
 }
 
@@ -34,35 +34,48 @@ function iconForHeadline(headline: string) {
   return Wrench
 }
 
-function EventLink({ item, onOpenSource }: { item: EventStackItem; onOpenSource?: () => void }) {
+const LIVE_LINK_CLASS =
+  'flex-none max-w-[9rem] truncate text-[10.5px] font-medium text-accent-text hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline'
+
+function EventLink({
+  item,
+  targetNav,
+  onOpenSource,
+}: {
+  item: EventStackItem
+  targetNav: MessageTargetNav
+  onOpenSource?: () => void
+}) {
   if (!item.target) return null
-  const resolved = resolveMessageTarget(item.target)
+  const resolved = targetNav.resolve(item.target, item.executionId)
   if (resolved.kind === 'source') {
     return (
-      <button
-        type="button"
-        onClick={onOpenSource}
-        disabled={!onOpenSource}
-        className="flex-none text-[10.5px] font-medium text-accent-text hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
-      >
+      <button type="button" onClick={onOpenSource} disabled={!onOpenSource} className={LIVE_LINK_CLASS}>
         {resolved.label}
       </button>
     )
   }
+  if (resolved.kind === 'unavailable') {
+    return (
+      <DisabledHint disabled reason={resolved.reason}>
+        <button
+          type="button"
+          disabled
+          className="flex-none max-w-[9rem] truncate text-[10.5px] font-medium text-muted-foreground disabled:cursor-not-allowed"
+        >
+          {resolved.label}
+        </button>
+      </DisabledHint>
+    )
+  }
   return (
-    <DisabledHint disabled reason={resolved.reason}>
-      <button
-        type="button"
-        disabled
-        className="flex-none max-w-[9rem] truncate text-[10.5px] font-medium text-muted-foreground disabled:cursor-not-allowed"
-      >
-        {resolved.label}
-      </button>
-    </DisabledHint>
+    <button type="button" onClick={() => targetNav.open(resolved)} title={resolved.label} className={LIVE_LINK_CLASS}>
+      {resolved.label}
+    </button>
   )
 }
 
-export function EventStack({ items, onOpenSource }: EventStackProps) {
+export function EventStack({ items, targetNav, onOpenSource }: EventStackProps) {
   if (items.length === 0) return null
   return (
     <div aria-label="Recent agent activity" className="ml-9 mt-0.5 mb-2">
@@ -81,7 +94,7 @@ export function EventStack({ items, onOpenSource }: EventStackProps) {
               <strong className="font-semibold text-foreground">{item.headline}</strong>
               {item.detail && <> · {item.detail}</>}
             </span>
-            <EventLink item={item} onOpenSource={onOpenSource} />
+            <EventLink item={item} targetNav={targetNav} onOpenSource={onOpenSource} />
           </div>
         )
       })}

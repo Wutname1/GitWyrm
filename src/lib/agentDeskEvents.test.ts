@@ -104,6 +104,11 @@ describe('groupEventStacks', () => {
     expect(groups[0].items[1].target).toBeNull()
   })
 
+  it('carries each message execution id so a file link can open in that helper worktree', () => {
+    const groups = groupEventStacks([toolMessage('m1', 'Changed a file')])
+    expect(groups[0].items[0].executionId).toBe('exec-1')
+  })
+
   it('returns no groups for a transcript with no tool messages', () => {
     expect(groupEventStacks([assistantMessage('m1'), assistantMessage('m2')])).toEqual([])
   })
