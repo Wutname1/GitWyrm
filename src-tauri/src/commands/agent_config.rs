@@ -843,6 +843,64 @@ New
     }
 
     #[test]
+    fn a_connector_copied_into_codex_lands_as_real_toml_and_undoes_cleanly() {
+        // Codex is the one client whose file is not JSON, so this proves the
+        // whole pipeline -- plan, apply, backup, undo -- works on a format the
+        // rest of the tests never exercise. A writer that only passes its own
+        // unit tests is not yet a feature anyone can use.
+        let (dir, write_root) = write_root();
+        let config = dir.path().join("config.toml");
+        let original = "# my setup
+model = \"gpt-5\"
+";
+        std::fs::write(&config, original).unwrap();
+
+        let source_item = sample_item(ClientId::OpenCode, "github");
+        let proposed = crate::agent_config::writers::build_new_content(
+            ClientId::Codex,
+            source_item.kind,
+            &source_item.identity,
+            &source_item.extra,
+            original,
+        )
+        .expect("Codex writer must produce content");
+
+        let plan = CopyPlan {
+            plan_id: new_id(),
+            item_id: "McpConnector:github".to_string(),
+            source_item,
+            destinations: vec![DestinationPreview {
+                client: ClientId::Codex,
+                destination_path: config.to_string_lossy().into_owned(),
+                before_hash: Some(plan::hash_bytes(original.as_bytes())),
+                proposed_content: proposed,
+                redacted_diff_summary: vec![],
+                warnings: vec![],
+                write_supported: true,
+            }],
+            created_at: now_rfc3339(),
+        };
+        write_plan(&write_root, &plan).unwrap();
+
+        let outcome = apply_copy_at(&write_root, &plan.plan_id);
+        let DestinationApplyResult::Applied { operation_id, .. } = &outcome.results[0] else {
+            panic!("expected Applied, got {:?}", outcome.results[0]);
+        };
+
+        let applied = std::fs::read_to_string(&config).unwrap();
+        assert!(applied.contains("[mcp_servers.github]"), "{applied}");
+        assert!(applied.contains("# my setup"), "the comment must survive: {applied}");
+        assert!(applied.contains("model = \"gpt-5\""), "{applied}");
+        // The secret is redacted in the preview but written for real, which is
+        // the point of copying a connector at all.
+        assert!(applied.contains("abc123secret"), "{applied}");
+
+        let undo_outcome = undo_at(&write_root, operation_id);
+        assert!(matches!(undo_outcome, UndoOutcome::Restored { .. }));
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+    }
+
+    #[test]
     fn apply_refuses_a_destination_that_changed_since_preview_but_still_returns_a_result() {
         let (dir, write_root) = write_root();
         let dest = dir.path().join("dest.json");

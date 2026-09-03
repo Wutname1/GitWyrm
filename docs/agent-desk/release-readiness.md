@@ -131,8 +131,13 @@ sleeps) are now requirements with scenarios rather than notes in a plan file.
 ### Skills and connectors
 
 Skills are read (folders with `SKILL.md` front matter; verified against 13 real skills)
-and shown, and clients are one table. Skills still cannot be copied: they are file trees
-and the writers edit one JSON member. Only Claude Code's skills folder is verified.
+and shown, and clients are one table. A skill can be copied: the folder copy has the same
+hash gating, backup and undo as a connector. Only Claude Code's skills folder is verified,
+so the other clients' skill locations are still unproven.
+
+Connectors can be copied into all five clients. Four keep their servers in JSON, merged so
+every byte outside the edited member survives; Codex keeps its in TOML, merged through a
+real document model so a hand-written config keeps its comments and layout.
 
 ### Snip
 
@@ -165,7 +170,7 @@ pins the marker. The parser still fails safe when a model writes prose instead.
   | agent-graphs | durable operation queue for integration (5.1); model per node (6.2; current action and output link **closed 2026-09-02**); orphaned helper worktrees when a helper dies before a result (6.4; **closed 2026-09-02**); `ChecksPass` / `FilesChanged` completion conditions **enforced 2026-09-02** (`agentdesk/completion.rs`, judged from recorded checks and changed files before integration). Both prompts now offer `checksPass` and `filesChanged`, so a lead can ask for one. Still unproven end to end: no live run has yet produced a proposal using a stricter kind, which native acceptance should cover |
   | source-kickoffs | typed retry/reconnect cards instead of toasts (2.4, 5.3; **closed 2026-09-02**); source enrichment after the Desk is visible (3.4, 4.4); escalate a review into a fix (4.6; **closed 2026-09-02**) |
   | openspec-workflows | 4.2 **closed 2026-09-02**: a finished spec-sourced chat can draft an update to its tasks, proposal or design through the existing drafter (`openspec_draft_from_session`), landing as an unsaved edit the person saves. Legacy Spec Desk runs (1.4) **reopened**: the backend convergence is real (`ai_run_start`, `run_engine` and their worktree provisioning are deleted, and the spec view's task button opens an Agent Desk chat), but a second audit found the button silently did nothing in the spec window and a duplicate action beside it. Both are fixed; the task stays open because Spec Desk still projects the old run store (status bar, spec cards, AI tab) and because completion now means: from the real spec window, one click opens a durable chat, starts an isolated run, and leaves no legacy run state or duplicate action visible |
-  | configuration-sync | per-item destination selection in batch (2.2; **closed 2026-09-02**); the Codex writer (4.1), which needs a real TOML editor to avoid destroying comments and formatting. VS Code Copilot and OpenChamber (4.4, 4.5) **closed 2026-09-02**, writing into whichever server map the file already uses. Skill copying **closed 2026-09-02**: `agent_config/skill_write.rs` does the folder copy with hash gating, backup and undo, and is wired through the preview, apply and undo commands (`skill_copy_preview`, `apply_skill_destination`, `undo_skill_at`) with an end-to-end test |
+  | configuration-sync | per-item destination selection in batch (2.2; **closed 2026-09-02**); the Codex writer (4.1) **closed 2026-09-02**, merging into `[mcp_servers.<name>]` through `toml_edit` so comments and layout survive, with an end-to-end apply and undo against a real file. VS Code Copilot and OpenChamber (4.4, 4.5) **closed 2026-09-02**, writing into whichever server map the file already uses. Skill copying **closed 2026-09-02**: `agent_config/skill_write.rs` does the folder copy with hash gating, backup and undo, and is wired through the preview, apply and undo commands (`skill_copy_preview`, `apply_skill_destination`, `undo_skill_at`) with an end-to-end test |
   | conversation-shell | run-event links to diff/file/task (4.4; **closed 2026-09-02**) |
   | external-chat-import | OpenChamber adapter is detection-only (3.5; its Windows data path **fixed 2026-09-02** after reading OpenChamber's own `cli-paths.js`, which uses `~/.config/openchamber` everywhere); unlink (4.3) and log redaction (5.2) **closed 2026-09-02** |
 
