@@ -8,6 +8,7 @@
 pub mod adapters;
 pub mod auditor;
 pub mod bridge;
+pub mod completion;
 pub mod events;
 pub mod execution_registry;
 pub mod graph;

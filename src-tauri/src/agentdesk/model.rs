@@ -578,6 +578,14 @@ pub struct ExecutionRecord {
     /// nodes and for the lead (whose allowance is the whole repository).
     #[serde(default)]
     pub allowed_paths: Vec<String>,
+    /// What this helper has to achieve before its work counts as done.
+    ///
+    /// Copied from the proposal onto the record because the check happens at
+    /// runtime, when the helper finishes, and the proposal is long gone by
+    /// then. `None` on the lead, on older sessions written before this
+    /// existed, and wherever a helper simply reports its own result.
+    #[serde(default)]
+    pub completion: Option<crate::agentdesk::graph::CompletionCondition>,
     /// Absolute path of the isolated worktree this helper runs in. `None` for
     /// the lead (which runs against the session's own source) and for
     /// read-only helpers that never provision one.
@@ -709,6 +717,7 @@ impl ExecutionRecord {
             job_description: None,
             helper_role: None,
             allowed_paths: Vec::new(),
+            completion: None,
             worktree_path: None,
             branch: None,
             base_oid: None,

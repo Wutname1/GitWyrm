@@ -5120,6 +5120,15 @@ helperRole?: string | null;
  */
 allowedPaths?: string[]; 
 /**
+ * What this helper has to achieve before its work counts as done.
+ * 
+ * Copied from the proposal onto the record because the check happens at
+ * runtime, when the helper finishes, and the proposal is long gone by
+ * then. `None` on the lead, on older sessions written before this
+ * existed, and wherever a helper simply reports its own result.
+ */
+completion?: CompletionCondition | null; 
+/**
  * Absolute path of the isolated worktree this helper runs in. `None` for
  * the lead (which runs against the session's own source) and for
  * read-only helpers that never provision one.

@@ -1031,6 +1031,7 @@ fn commit_started_graph_if_still_proposed(
             record.job_description = Some(job.description.clone());
             record.helper_role = Some(role_label(job.role));
             record.allowed_paths = job.allowed_paths.clone();
+            record.completion = Some(job.completion.clone());
             record.worktree_path = worktree_path;
             record.branch = branch;
             // R6.7: the merge base `integrate_helper_result` diffs this
@@ -1383,6 +1384,25 @@ fn advance_graph_after_helper_completion(
     let session = match store::read_session(root, session_id) {
         Ok(s) => s,
         Err(_) => return,
+    };
+
+    // A helper is only done when it did what it was asked to do. Its
+    // `CompletionCondition` (make this check pass, change these files) was
+    // recorded on the proposal and then never evaluated, so a helper told to
+    // make the tests pass could stop early and still count as finished --
+    // and its work would be folded into the integration worktree on that
+    // basis. Judged BEFORE integration, so unmet work is not merged.
+    let session = match enforce_completion_condition(locks, root, session_id, finished_execution_id, session) {
+        Some(updated) => updated,
+        // Marked Failed instead: nothing to integrate, and the scheduler
+        // treats it like any other helper that ended badly.
+        None => match store::read_session(root, session_id) {
+            Ok(s) => {
+                maybe_start_review_or_finish_graph(app, locks, root, session_id, &s);
+                return;
+            }
+            Err(_) => return,
+        },
     };
 
     // P1 "serialize helper integration": one integration pass for this
@@ -2196,6 +2216,61 @@ fn maybe_start_review_or_finish_graph(
             finish_graph_with_combined_result(locks, root, session_id, session, &review_execution_id);
         }
     }
+}
+
+/// Judges a finished helper against its own completion condition.
+///
+/// Returns the session unchanged when the condition was met (or there was
+/// none). When it was not, the helper is marked `Failed` with the reason in
+/// plain words and `None` comes back, so the caller skips integration
+/// entirely: work that did not meet its condition must not be merged on the
+/// strength of the helper having stopped.
+///
+/// Only a `Finished` helper is judged. One that already failed or was
+/// stopped has its own reason, and re-labelling it here would replace a true
+/// account with a narrower one.
+fn enforce_completion_condition(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    helper_execution_id: &str,
+    session: AgentSession,
+) -> Option<AgentSession> {
+    use crate::agentdesk::completion::{judge, CompletionVerdict};
+
+    let helper = session
+        .executions
+        .iter()
+        .find(|e| e.execution_id == helper_execution_id)?;
+    if helper.state != SessionState::Finished || helper.parent_execution_id.is_none() {
+        return Some(session);
+    }
+    let condition = helper.completion.clone();
+    if condition.is_none() {
+        return Some(session);
+    }
+
+    let checks = crate::commands::agent_result::checks_for_execution(&session, helper_execution_id);
+    let results = crate::agentdesk::result::read_results(root, session_id).unwrap_or_default();
+    let result = results.iter().find(|r| r.execution_id == helper_execution_id);
+
+    let CompletionVerdict::Unmet { reason } = judge(condition.as_ref(), &checks, result) else {
+        return Some(session);
+    };
+
+    let title = helper
+        .job_title
+        .clone()
+        .unwrap_or_else(|| "A helper".to_string());
+    let _ = update_session_at(locks, root, session_id, |s| {
+        if let Some(helper) = s.executions.iter_mut().find(|e| e.execution_id == helper_execution_id) {
+            helper.state = SessionState::Failed;
+            helper.ended_at = Some(now_rfc3339());
+            helper.output_summary = Some(reason.clone());
+        }
+    });
+    append_system_note(locks, root, session_id, &format!("\"{title}\" stopped without finishing its job. {reason}"));
+    None
 }
 
 /// Marks every helper that can never start as `Failed`, and says why in the
@@ -5076,6 +5151,98 @@ mod tests {
     /// Seeds a lead `ExecutionRecord` with the given mode/team and a single
     /// assistant message carrying `reply_text` as that execution's own final
     /// content -- exactly what `finish_plan_mode_execution_at` reads back.
+    /// The failure this closes: a helper told to make a check pass could stop
+    /// without running it, be marked Finished, and have its work folded into
+    /// the integration worktree anyway. Now it is marked Failed with the
+    /// reason, and the caller skips integration entirely.
+    #[test]
+    fn a_helper_that_did_not_meet_its_condition_is_not_treated_as_finished() {
+        use crate::agentdesk::graph::CompletionCondition;
+
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+
+        let mut session = store::read_session(&root, "sess-1").unwrap();
+        let mut helper = ExecutionRecord::minimal(
+            "helper-1".into(),
+            "sess-1".into(),
+            Some("lead-1".into()),
+            SessionState::Finished,
+            now_rfc3339(),
+            Some(now_rfc3339()),
+            2,
+        );
+        helper.job_title = Some("Fix the parser".into());
+        helper.completion = Some(CompletionCondition::ChecksPass {
+            command: "cargo test".into(),
+        });
+        session.executions.push(helper);
+        store::write_session(&root, &session).unwrap();
+        let session = store::read_session(&root, "sess-1").unwrap();
+
+        // It never ran the check, so the condition is unmet.
+        let outcome = enforce_completion_condition(&locks, &root, "sess-1", "helper-1", session);
+        assert!(outcome.is_none(), "an unmet condition must stop integration");
+
+        let after = store::read_session(&root, "sess-1").unwrap();
+        let helper = after
+            .executions
+            .iter()
+            .find(|e| e.execution_id == "helper-1")
+            .unwrap();
+        assert_eq!(helper.state, SessionState::Failed);
+        let summary = helper.output_summary.clone().unwrap_or_default();
+        assert!(summary.contains("never ran that check"), "{summary}");
+        // And the chat says so, naming the helper.
+        assert!(
+            after
+                .messages
+                .iter()
+                .any(|m| m.plain_content.contains("Fix the parser") && m.plain_content.contains("cargo test")),
+            "the transcript should explain why"
+        );
+    }
+
+    /// A helper with no condition, or one that reports its own result, is
+    /// untouched -- the common case must not become stricter by accident.
+    #[test]
+    fn a_helper_with_nothing_to_prove_passes_straight_through() {
+        use crate::agentdesk::graph::CompletionCondition;
+
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+
+        for (id, completion) in [
+            ("helper-none", None),
+            ("helper-reports", Some(CompletionCondition::ReportsResult)),
+        ] {
+            let mut session = store::read_session(&root, "sess-1").unwrap();
+            let mut helper = ExecutionRecord::minimal(
+                id.into(),
+                "sess-1".into(),
+                Some("lead-1".into()),
+                SessionState::Finished,
+                now_rfc3339(),
+                Some(now_rfc3339()),
+                1,
+            );
+            helper.completion = completion;
+            session.executions.push(helper);
+            store::write_session(&root, &session).unwrap();
+            let session = store::read_session(&root, "sess-1").unwrap();
+
+            assert!(
+                enforce_completion_condition(&locks, &root, "sess-1", id, session).is_some(),
+                "{id} should carry on to integration"
+            );
+            let after = store::read_session(&root, "sess-1").unwrap();
+            let helper = after.executions.iter().find(|e| e.execution_id == id).unwrap();
+            assert_eq!(helper.state, SessionState::Finished, "{id}");
+        }
+    }
+
     fn seed_lead_turn(root: &SessionStoreRoot, session_id: &str, mode: &str, team: &str, reply_text: &str) -> String {
         let mut session = store::read_session(root, session_id).unwrap();
         let execution_id = new_id();
