@@ -31,8 +31,29 @@ real run:
 | Deleting a chat | Failed every time (wrong Tauri state type) | Works |
 | Windows | Restored off-screen after monitor changes | Clamped back onto a visible screen on load |
 
-The automated baseline is healthy: TypeScript, the frontend suite (827), the Rust suite
-(1425, 9 ignored: real-binary runs), and strict OpenSpec validation pass.
+The automated baseline is healthy: TypeScript, the frontend suite (873), the Rust suite
+(1474, 10 ignored: real-binary runs), the production frontend build, and strict OpenSpec
+validation (25 items) all pass. These numbers go stale on their own; treat the suites as
+the source of truth and re-read them before quoting.
+
+## Failure paths repaired 2026-09-02 (second outside audit)
+
+An outside audit read the failure paths rather than the normal ones and found six
+places where an unattended run could hang or report success it had not earned. All six
+are fixed, with a test each:
+
+| Finding | Was | Now |
+| --- | --- | --- |
+| A graph reported Finished without a valid result | Finished even when the lead's review failed or was stopped, or the combined result could not be saved; the reason went in a note | `graph_finish_outcome` ends the run Stopped or Failed with the reason; Finished requires a finished review AND a saved result |
+| Failed dependency stranded downstream helpers | A helper waiting on a Failed/Stopped/Interrupted helper stayed Draft forever, and completion refused to proceed because it was not terminal | The scheduler reports them as abandoned; each is marked Failed with a note naming what it waited for, so the run ends |
+| A zero-helper proposal parked the graph in Working | Start treated "no helpers" as a team, and completion saw nothing to do | Start reads it as the lead working alone: the plan is cleared and the chat handed back Ready |
+| Stop did not stop the auditor | The audit ran on its own fresh connection, so Stop reached only the working agent | The cancel handle reaches the audit; a cancelled check is Unavailable, which lets the work through |
+| The auditor missed staged changes | `diff_index_to_workdir` hid anything the agent had `git add`ed, so staging was a one-command way past the check | The diff runs from the run's starting commit to the working directory, seeing staged and unstaged alike |
+| Deleting an imported chat left a ghost | The results sidecar stayed on disk and the import ledger still pointed at the deleted session | Delete unlinks the import first, then removes the session and its sidecar |
+
+Two of these (the graph's own finalization and the dependency propagation) are only
+reachable through a real multi-helper run, so they remain unproven outside their unit
+tests until native acceptance covers a real Auto graph.
 
 ## Still a claim: what native acceptance must cover
 
@@ -53,7 +74,10 @@ No unit fixture substitutes for these. Each is a path a person walks in the buil
    Auditor row above. Repeat it from the app so the notes and the final state are seen
    where a person would see them. A run that changed nothing now ends "Finished, but
    nothing in the project was changed" instead of claiming changes are ready.
-6. The original list: dirty checkouts, two simultaneous same-repo sessions, two real
+6. The four paths the second audit could only reach in unit tests: a real Auto graph
+   that spawns helpers, Stop pressed during the after-run check, a helper whose
+   dependency fails, and deleting an imported chat.
+7. The original list: dirty checkouts, two simultaneous same-repo sessions, two real
    uncommitted helpers, delete/rename/binary changes, conflict and restart, child-process
    cleanup, window focus, Split View cross-repo behaviour, scaling, keyboard and
    screen-reader use, performance.
@@ -123,7 +147,8 @@ pins the marker. The parser still fails safe when a model writes prose instead.
 
 - The branch was 63 commits behind `main` with conflicts in `copilot_cli.rs` and
   `ai/complete.rs`; merged 2026-09-02.
-- The 78 unchecked tasks across the nine Agent Desk OpenSpec packages were reconciled
+- 63 Agent Desk OpenSpec tasks remain unchecked, and the 76-line acceptance checklist is
+  entirely unchecked. The 78 unchecked tasks across the nine packages were reconciled
   against the code on 2026-09-02, one by one. Seven were done and are ticked. Of the 71
   left open, about 30 need a person in the built app or an evidence record, a handful are
   implemented but missing one specific automated test, and these are genuinely not built:
