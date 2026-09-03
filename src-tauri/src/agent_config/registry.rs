@@ -54,6 +54,18 @@ pub enum WriterKind {
         /// The top-level key holding the server map, e.g. `mcpServers`.
         key: &'static str,
     },
+    /// The client accepts more than one place for its server map, and the
+    /// file decides which. VS Code reads three shapes depending on how it was
+    /// configured, so writing a fixed key would create a second map beside
+    /// the one already in use and quietly do nothing.
+    ///
+    /// `candidates` are checked in order against the document; the first one
+    /// already present wins, and `default_path` is used only when the file
+    /// has none of them.
+    JsonMcpMapFirstPresent {
+        candidates: &'static [&'static [&'static str]],
+        default_path: &'static [&'static str],
+    },
 }
 
 /// Everything GitWyrm knows about one agent client, as data.
@@ -171,10 +183,22 @@ pub const CLIENTS: &[ClientSpec] = &[
         personal_paths: &[&[".config", "Code", "User", "settings.json"]],
         repo_paths: &[&[".vscode", "settings.json"]],
         readable_kinds: &[ItemKind::McpConnector],
-        // The editor's general settings file holds far more than agent
-        // configuration, so the safe surface has to be proven with fixtures
-        // before anything writes here.
-        writer: None,
+        // The editor's settings file holds far more than agent configuration,
+        // so the write is deliberately narrow: one member of whichever server
+        // map the file already uses, merged byte-preserving, and nothing else
+        // in the document is touched. VS Code reads three shapes, so the
+        // writer follows the file rather than picking one.
+        writer: Some(WriterKind::JsonMcpMapFirstPresent {
+            candidates: &[
+                &["servers"],
+                &["mcp", "servers"],
+                &["github.copilot.chat.mcp.servers"],
+                &["mcpServers"],
+            ],
+            // What a fresh VS Code settings file gets: the modern key the
+            // editor documents for MCP servers.
+            default_path: &["mcp", "servers"],
+        }),
         empty_document: "{}\n",
     },
     ClientSpec {
@@ -184,7 +208,12 @@ pub const CLIENTS: &[ClientSpec] = &[
         personal_paths: &[&[".config", "openchamber", "config.json"]],
         repo_paths: &[],
         readable_kinds: &[ItemKind::McpConnector],
-        writer: None,
+        // Same JSON shape the reader accepts, following the file's own key so
+        // a config written by OpenChamber itself keeps working.
+        writer: Some(WriterKind::JsonMcpMapFirstPresent {
+            candidates: &[&["mcpServers"], &["mcp", "servers"]],
+            default_path: &["mcpServers"],
+        }),
         empty_document: "{}\n",
     },
 ];
@@ -265,11 +294,22 @@ mod tests {
     }
 
     #[test]
-    fn only_claude_and_opencode_declare_a_writer() {
+    fn exactly_the_json_clients_declare_a_writer() {
         // Guards the read-only promise: a new row must not silently become an
-        // apply destination just by being added to the table.
+        // apply destination just by being added to the table. Codex is the
+        // one client still read-only, because its config is TOML and writing
+        // it without a real TOML editor would lose comments and formatting.
         let writable: Vec<ClientId> = CLIENTS.iter().filter(|s| s.can_write()).map(|s| s.id).collect();
-        assert_eq!(writable, vec![ClientId::ClaudeCode, ClientId::OpenCode]);
+        assert_eq!(
+            writable,
+            vec![
+                ClientId::ClaudeCode,
+                ClientId::OpenCode,
+                ClientId::VsCodeCopilot,
+                ClientId::OpenChamber
+            ]
+        );
+        assert!(!spec(ClientId::Codex).can_write(), "Codex stays read-only until TOML editing exists");
     }
 
     #[test]

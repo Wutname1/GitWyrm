@@ -64,8 +64,43 @@ pub fn build_new_content(
         (Some(WriterKind::JsonMcpMap { key }), ItemKind::McpConnector) => {
             Ok(json_patch::set_path(current_text, &[key, identity], &value)?)
         }
+        (
+            Some(WriterKind::JsonMcpMapFirstPresent {
+                candidates,
+                default_path,
+            }),
+            ItemKind::McpConnector,
+        ) => {
+            let base = first_present_path(current_text, candidates).unwrap_or(default_path);
+            let mut path: Vec<&str> = base.to_vec();
+            path.push(identity);
+            Ok(json_patch::set_path(current_text, &path, &value)?)
+        }
         _ => Err(WriteContentError::Unsupported),
     }
+}
+
+/// Which of `candidates` this document already uses for its server map.
+///
+/// Writing a fixed key into a file that keeps its servers somewhere else
+/// would add a second map the client never reads: the write would appear to
+/// succeed and change nothing. Following the file is what makes that
+/// impossible.
+fn first_present_path<'a>(
+    current_text: &str,
+    candidates: &'a [&'a [&'a str]],
+) -> Option<&'a [&'a str]> {
+    let value: Value = serde_json::from_str(current_text).ok()?;
+    candidates.iter().copied().find(|path| {
+        let mut node = &value;
+        for segment in path.iter() {
+            match node.get(*segment) {
+                Some(next) => node = next,
+                None => return false,
+            }
+        }
+        node.is_object()
+    })
 }
 
 /// The empty-document text a writer starts from when the destination file
@@ -142,8 +177,57 @@ mod tests {
     fn is_supported_matches_the_writers_actually_implemented() {
         assert!(is_supported(ClientId::ClaudeCode));
         assert!(is_supported(ClientId::OpenCode));
+        assert!(is_supported(ClientId::VsCodeCopilot));
+        assert!(is_supported(ClientId::OpenChamber));
+        // TOML, and writing it without a real TOML editor would lose comments
+        // and formatting the person wrote themselves.
         assert!(!is_supported(ClientId::Codex));
-        assert!(!is_supported(ClientId::VsCodeCopilot));
-        assert!(!is_supported(ClientId::OpenChamber));
+    }
+
+    /// VS Code reads three different places for its server map depending on
+    /// how it was set up. Writing a fixed key into a file that uses another
+    /// one would add a second map the editor never reads: the write would
+    /// look like it worked and change nothing.
+    #[test]
+    fn the_writer_follows_the_map_the_file_already_uses() {
+        let item = extra(&[("command", json!("npx"))]);
+        let cases = [
+            (r#"{"servers":{"old":{"command":"x"}}}"#, "/servers/github"),
+            (r#"{"mcp":{"servers":{"old":{"command":"x"}}}}"#, "/mcp/servers/github"),
+            (r#"{"mcpServers":{"old":{"command":"x"}}}"#, "/mcpServers/github"),
+        ];
+        for (current, pointer) in cases {
+            let out =
+                build_new_content(ClientId::VsCodeCopilot, ItemKind::McpConnector, "github", &item, current)
+                    .unwrap();
+            let parsed: Value = serde_json::from_str(&out).unwrap();
+            assert!(parsed.pointer(pointer).is_some(), "{current} -> {pointer}: {out}");
+            // The map that was already there keeps its own entry.
+            assert!(out.contains("\"old\""), "an existing server was dropped: {out}");
+        }
+    }
+
+    #[test]
+    fn a_file_with_no_map_yet_gets_the_clients_documented_default() {
+        let item = extra(&[("command", json!("npx"))]);
+        let vs = build_new_content(ClientId::VsCodeCopilot, ItemKind::McpConnector, "github", &item, "{}").unwrap();
+        let parsed: Value = serde_json::from_str(&vs).unwrap();
+        assert!(parsed.pointer("/mcp/servers/github").is_some(), "{vs}");
+
+        let oc = build_new_content(ClientId::OpenChamber, ItemKind::McpConnector, "github", &item, "{}").unwrap();
+        let parsed: Value = serde_json::from_str(&oc).unwrap();
+        assert!(parsed.pointer("/mcpServers/github").is_some(), "{oc}");
+    }
+
+    /// Everything outside the one member being written survives untouched --
+    /// the whole reason these files are patched rather than re-serialised.
+    #[test]
+    fn unrelated_editor_settings_are_left_exactly_as_they_were() {
+        let current = "{\n  \"editor.fontSize\": 13,\n  \"servers\": {},\n  \"files.autoSave\": \"off\"\n}";
+        let item = extra(&[("command", json!("npx"))]);
+        let out =
+            build_new_content(ClientId::VsCodeCopilot, ItemKind::McpConnector, "github", &item, current).unwrap();
+        assert!(out.contains("\"editor.fontSize\": 13"), "{out}");
+        assert!(out.contains("\"files.autoSave\": \"off\""), "{out}");
     }
 }
