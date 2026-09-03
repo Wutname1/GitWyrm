@@ -122,6 +122,11 @@ interface AgentDeskUiState {
 
   // --- Centre view and graph selection (in-memory only) ------------------------------
   setCenterView: (view: AgentDeskCenterView) => void
+  /** Whether the usage card is rolled up. One choice for the window, not
+      per chat: it is a preference about how much detail to show, and having
+      it reset on every chat switch made it feel broken. */
+  usageCollapsed: boolean
+  setUsageCollapsed: (collapsed: boolean) => void
   /** Highlight one execution in a chat's graph panel; null falls back to the panel's default (the lead). */
   selectGraphNode: (sessionId: string, executionId: string | null) => void
 }
@@ -297,6 +302,8 @@ export const useAgentDeskUiStore = create<AgentDeskUiState>((set, get) => ({
   },
 
   setCenterView: (view) => set({ centerView: view }),
+  usageCollapsed: false,
+  setUsageCollapsed: (usageCollapsed) => set({ usageCollapsed }),
 
   selectGraphNode: (sessionId, executionId) => {
     set((s) => {

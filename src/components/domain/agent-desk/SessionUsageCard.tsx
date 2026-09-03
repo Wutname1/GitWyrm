@@ -5,6 +5,7 @@ import { commands } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { buildAgentUsageLines, buildUsageRows } from '@/lib/agentDeskUsage'
 import { cn } from '@/lib/utils'
+import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 
 /**
  * Collapsible session usage card (tasks.md 7.3/7.4).
@@ -18,12 +19,13 @@ import { cn } from '@/lib/utils'
  * `estimated` row as an estimate in its accessible label (never shown as if
  * it were measured).
  *
- * Collapsed state persists per session in component state for the life of
- * the mount; `defaultCollapsed` starts open the first time, matching the
+ * Rolled-up state is remembered for the window (`agentDeskUiStore`) rather
+ * than the mount, so it survives switching chats. Starts open, matching the
  * mockup's default (`.ag-usage-card` without `.is-collapsed`).
  */
 export function SessionUsageCard({ sessionId }: { sessionId: string }) {
-  const [collapsed, setCollapsed] = useState(false)
+  const collapsed = useAgentDeskUiStore((s) => s.usageCollapsed)
+  const setCollapsed = useAgentDeskUiStore((s) => s.setUsageCollapsed)
   const query = useQuery({
     queryKey: keys.agentSessionUsage(sessionId),
     queryFn: async () => unwrap(await commands.agentSessionUsage(sessionId)),
@@ -40,13 +42,16 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
     <section className="rounded-md border border-border bg-panel2">
       <button
         type="button"
-        onClick={() => setCollapsed((c) => !c)}
+        onClick={() => setCollapsed(!collapsed)}
         aria-expanded={!collapsed}
         className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
       >
         <TimerReset size={13} className="flex-none text-muted-foreground" aria-hidden />
         <strong className="text-2xs font-semibold text-foreground">Usage</strong>
-        <span className="flex-1 truncate text-[10px] text-muted-foreground">session + overall</span>
+        {/* Names what is actually here. Account-wide totals and plan quota
+            have no source yet, so promising "overall" described numbers that
+            were never going to appear. */}
+        <span className="flex-1 truncate text-[10px] text-muted-foreground">this chat and its agents</span>
         <ChevronDown size={13} className={cn('flex-none text-muted-foreground transition-transform', collapsed && '-rotate-90')} />
       </button>
 
