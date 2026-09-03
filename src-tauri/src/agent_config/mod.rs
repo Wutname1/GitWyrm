@@ -19,5 +19,6 @@ pub mod plan;
 pub mod readers;
 pub mod redact;
 pub mod registry;
+pub mod skill_write;
 pub mod skills;
 pub mod writers;
