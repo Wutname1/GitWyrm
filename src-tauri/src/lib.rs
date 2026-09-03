@@ -788,6 +788,12 @@ pub fn run() {
             // behind between sessions.
             logs::sweep(app.handle());
 
+            // Close out agent runs that were still marked as running when the app
+            // last exited, and offer their leftover work for review. Must run before
+            // the webview exists: opening a session lazily rewrites those records
+            // to Interrupted, and this sweep would then never see them.
+            commands::agent_result::recover_orphaned_executions_on_startup(app.handle());
+
             // Stash any folder Explorer passed us. The webview does not exist yet, so
             // this waits in a slot for the frontend to collect once it is ready.
             commands::app::set_pending_launch_path(commands::app::repo_path_from_args(

@@ -23,7 +23,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::model::{AgentSessionHeader, ExecutionRecord, SessionState};
+use super::model::{AgentSession, AgentSessionHeader, ExecutionId, ExecutionRecord, SessionState};
 
 /// States that only mean anything while their owning process is alive. A
 /// session or execution record found in one of these, when nothing in this
@@ -134,6 +134,173 @@ pub fn reconcile_executions(
         changed += 1;
     }
     changed
+}
+
+// ---------------------------------------------------------------------------
+// Startup recovery of executions that died with the app
+// ---------------------------------------------------------------------------
+
+/// Plain-language `output_summary` stamped on every execution the startup
+/// sweep marks `Failed`. Kept as a constant so the wording lives in one place
+/// and the no-jargon test below can pin it.
+pub const CLOSED_WHILE_RUNNING_DETAIL: &str = "GitWyrm was closed while this was running.";
+
+/// What the startup sweep found on disk for one orphaned execution. Decides
+/// both the wording of the note and whether a result record is worth
+/// building: only `WorktreePresent` has anything a person could Keep.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrphanWork {
+    /// The record never had a worktree (a lead running against the session's
+    /// own checkout, or a read-only helper).
+    NoWorktree,
+    /// A worktree was recorded but the folder is gone from disk.
+    WorktreeMissing { path: String },
+    /// The worktree folder still exists; `changed_file_count` is how many
+    /// files differ from its base right now.
+    WorktreePresent { path: String, changed_file_count: usize },
+}
+
+/// One execution the startup sweep moved to `Failed`, plus what the caller
+/// still has to do for it outside the session lock: build a result (if
+/// [`RecoveredOrphan::result_worktree_path`] is `Some`) and append `note` to
+/// the transcript.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecoveredOrphan {
+    pub execution_id: ExecutionId,
+    pub is_helper: bool,
+    pub work: OrphanWork,
+    /// Transcript note in plain language, already composed.
+    pub note: String,
+}
+
+impl RecoveredOrphan {
+    /// The worktree a result should be built against, or `None` when there is
+    /// nothing on disk to review.
+    pub fn result_worktree_path(&self) -> Option<&str> {
+        match &self.work {
+            OrphanWork::WorktreePresent { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+}
+
+fn orphan_note(job_title: Option<&str>, is_helper: bool, work: &OrphanWork) -> String {
+    let who = match (job_title, is_helper) {
+        (Some(title), _) if !title.trim().is_empty() => format!("The helper \"{}\"", title.trim()),
+        (_, true) => "A helper".to_string(),
+        (_, false) => "The lead".to_string(),
+    };
+    let what_remains = match work {
+        OrphanWork::NoWorktree => {
+            "It was not working in a separate folder, so there is nothing extra to keep or discard.".to_string()
+        }
+        OrphanWork::WorktreeMissing { .. } => {
+            "Its work folder is no longer on disk, so there is nothing to keep.".to_string()
+        }
+        OrphanWork::WorktreePresent {
+            changed_file_count: 0,
+            ..
+        } => "Its work folder is still here but has no changes in it.".to_string(),
+        OrphanWork::WorktreePresent {
+            changed_file_count: 1,
+            ..
+        } => "It left 1 changed file behind. Open its result to keep or discard that work.".to_string(),
+        OrphanWork::WorktreePresent {
+            changed_file_count, ..
+        } => format!("It left {changed_file_count} changed files behind. Open its result to keep or discard that work."),
+    };
+    format!("{who} stopped because GitWyrm was closed while it was running. {what_remains}")
+}
+
+/// Startup counterpart to [`reconcile_executions`]. That function runs lazily
+/// when a session is opened and only flips the state to `Interrupted`; it
+/// never looks at the worktree a dead helper left behind, so a helper that
+/// died before producing a result kept its folder on disk forever with no
+/// way to Keep or discard the work. This runs once at launch, before any
+/// session can be opened, and does the full cleanup: every execution still
+/// claiming a live-process state that nothing in this process backs is
+/// marked `Failed` (a terminal state, so the lazy path leaves it alone
+/// afterwards), its `ended_at` is set to now, the header's
+/// `active_execution_id` is cleared if it pointed at it, and the header
+/// itself moves to `Failed` once no execution in the session is running any
+/// more.
+///
+/// `is_live` answers per execution id, exactly as for
+/// [`reconcile_executions`]. `inspect_worktree` is handed a recorded
+/// worktree path and answers `None` if the folder is gone or `Some(changed
+/// file count)` if it is still there; it is a closure so this stays free of
+/// git and filesystem dependencies and directly testable.
+///
+/// Two kinds of `NeedsInput` are skipped on purpose because they wait on a
+/// person, not a process: a helper with a recorded `conflict` (same reason
+/// as in [`reconcile_executions`]) and a lead with a `proposed_graph` that
+/// is waiting for Start. Failing either would throw away the pending choice.
+///
+/// Returns what was recovered so the caller can build results and append
+/// notes outside the session lock. Empty means nothing was written.
+pub fn recover_orphaned_executions(
+    session: &mut AgentSession,
+    now: &str,
+    mut is_live: impl FnMut(&str) -> bool,
+    mut inspect_worktree: impl FnMut(&str) -> Option<usize>,
+) -> Vec<RecoveredOrphan> {
+    let mut recovered = Vec::new();
+    for execution in session.executions.iter_mut() {
+        if !is_live_process_state(execution.state) {
+            continue;
+        }
+        if execution.conflict.is_some() || execution.proposed_graph.is_some() {
+            continue;
+        }
+        if is_live(&execution.execution_id) {
+            continue;
+        }
+
+        // A lead in the middle of a graph has no worktree of its own but may
+        // have an integration worktree holding every helper's merged work;
+        // that is the folder worth offering to keep.
+        let recorded_path = execution
+            .worktree_path
+            .clone()
+            .or_else(|| execution.integration_worktree_path.clone());
+        let work = match recorded_path {
+            None => OrphanWork::NoWorktree,
+            Some(path) => match inspect_worktree(&path) {
+                None => OrphanWork::WorktreeMissing { path },
+                Some(changed_file_count) => OrphanWork::WorktreePresent {
+                    path,
+                    changed_file_count,
+                },
+            },
+        };
+
+        execution.state = SessionState::Failed;
+        execution.ended_at = Some(now.to_string());
+        if execution.output_summary.is_none() {
+            execution.output_summary = Some(CLOSED_WHILE_RUNNING_DETAIL.to_string());
+        }
+        if session.header.active_execution_id.as_deref() == Some(execution.execution_id.as_str()) {
+            session.header.active_execution_id = None;
+        }
+
+        let is_helper = execution.parent_execution_id.is_some();
+        recovered.push(RecoveredOrphan {
+            execution_id: execution.execution_id.clone(),
+            is_helper,
+            note: orphan_note(execution.job_title.as_deref(), is_helper, &work),
+            work,
+        });
+    }
+
+    if recovered.is_empty() {
+        return recovered;
+    }
+    session.header.updated_at = now.to_string();
+    let anything_still_running = session.executions.iter().any(|e| is_live_process_state(e.state));
+    if is_live_process_state(session.header.state) && !anything_still_running {
+        session.header.state = SessionState::Failed;
+    }
+    recovered
 }
 
 #[cfg(test)]
@@ -333,6 +500,243 @@ mod tests {
                 !INTERRUPTED_REASON.to_lowercase().contains(jargon),
                 "reason text must stay plain-language, found {jargon:?} in {INTERRUPTED_REASON:?}"
             );
+        }
+    }
+
+    // -- startup orphan recovery --
+
+    const NOW: &str = "2026-02-02T00:00:00Z";
+
+    fn session_with(executions: Vec<ExecutionRecord>) -> AgentSession {
+        let mut s = AgentSession::new(header(SessionState::Working));
+        s.executions = executions;
+        s
+    }
+
+    fn helper(execution_id: &str, state: SessionState, worktree_path: Option<&str>) -> ExecutionRecord {
+        let mut e = execution(execution_id, state);
+        e.parent_execution_id = Some("lead".into());
+        e.worktree_path = worktree_path.map(str::to_string);
+        e
+    }
+
+    fn never_live(_: &str) -> bool {
+        false
+    }
+
+    #[test]
+    fn a_working_helper_whose_worktree_still_has_changes_fails_and_gets_a_result() {
+        let mut s = session_with(vec![
+            execution("lead", SessionState::Finished),
+            helper("helper-1", SessionState::Working, Some("C:/wt/helper-1")),
+        ]);
+        s.header.active_execution_id = Some("lead".into());
+
+        let recovered = recover_orphaned_executions(&mut s, NOW, never_live, |path| {
+            assert_eq!(path, "C:/wt/helper-1");
+            Some(2)
+        });
+
+        assert_eq!(recovered.len(), 1);
+        let orphan = &recovered[0];
+        assert_eq!(orphan.execution_id, "helper-1");
+        assert!(orphan.is_helper);
+        assert_eq!(orphan.result_worktree_path(), Some("C:/wt/helper-1"));
+        assert!(orphan.note.contains("2 changed files"), "note was {:?}", orphan.note);
+        assert!(orphan.note.contains("keep or discard"), "note was {:?}", orphan.note);
+
+        let h = &s.executions[1];
+        assert_eq!(h.state, SessionState::Failed);
+        assert_eq!(h.ended_at.as_deref(), Some(NOW));
+        assert_eq!(h.output_summary.as_deref(), Some(CLOSED_WHILE_RUNNING_DETAIL));
+        assert_eq!(s.executions[0].state, SessionState::Finished, "finished lead untouched");
+        assert_eq!(
+            s.header.active_execution_id.as_deref(),
+            Some("lead"),
+            "active id pointed at the lead, not the helper, so it stays"
+        );
+    }
+
+    #[test]
+    fn a_working_helper_with_no_worktree_fails_with_a_note_and_no_result() {
+        let mut s = session_with(vec![helper("helper-1", SessionState::Working, None)]);
+
+        let recovered = recover_orphaned_executions(&mut s, NOW, never_live, |_| {
+            panic!("no worktree recorded, nothing to inspect")
+        });
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].work, OrphanWork::NoWorktree);
+        assert_eq!(recovered[0].result_worktree_path(), None);
+        assert!(recovered[0].note.contains("nothing extra to keep"), "note was {:?}", recovered[0].note);
+        assert_eq!(s.executions[0].state, SessionState::Failed);
+    }
+
+    #[test]
+    fn a_helper_whose_worktree_folder_is_gone_says_so_and_gets_no_result() {
+        let mut s = session_with(vec![helper("helper-1", SessionState::Preparing, Some("C:/wt/gone"))]);
+
+        let recovered = recover_orphaned_executions(&mut s, NOW, never_live, |_| None);
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(
+            recovered[0].work,
+            OrphanWork::WorktreeMissing {
+                path: "C:/wt/gone".into()
+            }
+        );
+        assert_eq!(recovered[0].result_worktree_path(), None);
+        assert!(recovered[0].note.contains("no longer on disk"), "note was {:?}", recovered[0].note);
+        assert_eq!(s.executions[0].state, SessionState::Failed);
+    }
+
+    #[test]
+    fn a_finished_execution_is_never_touched() {
+        let mut s = session_with(vec![
+            execution("lead", SessionState::Finished),
+            helper("helper-1", SessionState::Failed, Some("C:/wt/helper-1")),
+        ]);
+        s.header.state = SessionState::Finished;
+        let before = s.clone();
+
+        let recovered = recover_orphaned_executions(&mut s, NOW, never_live, |_| Some(5));
+
+        assert!(recovered.is_empty());
+        assert_eq!(s, before, "nothing may change when nothing is stuck");
+    }
+
+    #[test]
+    fn an_execution_that_is_live_in_the_registry_is_left_running() {
+        let mut s = session_with(vec![
+            execution("lead", SessionState::Working),
+            helper("helper-1", SessionState::Working, Some("C:/wt/helper-1")),
+        ]);
+        s.header.active_execution_id = Some("lead".into());
+        let live = ["lead".to_string(), "helper-1".to_string()];
+
+        let recovered = recover_orphaned_executions(&mut s, NOW, |id| live.iter().any(|l| l == id), |_| Some(1));
+
+        assert!(recovered.is_empty());
+        assert_eq!(s.executions[0].state, SessionState::Working);
+        assert_eq!(s.executions[1].state, SessionState::Working);
+        assert_eq!(s.header.state, SessionState::Working);
+        assert_eq!(s.header.active_execution_id.as_deref(), Some("lead"));
+    }
+
+    #[test]
+    fn a_dead_lead_clears_the_active_id_and_fails_the_header() {
+        let mut s = session_with(vec![
+            execution("lead", SessionState::Working),
+            helper("helper-1", SessionState::Working, None),
+        ]);
+        s.header.active_execution_id = Some("lead".into());
+
+        let recovered = recover_orphaned_executions(&mut s, NOW, never_live, |_| None);
+
+        assert_eq!(recovered.len(), 2);
+        assert!(!recovered[0].is_helper);
+        assert!(recovered[0].note.starts_with("The lead"), "note was {:?}", recovered[0].note);
+        assert_eq!(s.header.active_execution_id, None);
+        assert_eq!(s.header.state, SessionState::Failed);
+        assert_eq!(s.header.updated_at, NOW);
+    }
+
+    #[test]
+    fn a_dead_lead_mid_graph_offers_its_integration_worktree() {
+        let mut lead = execution("lead", SessionState::Working);
+        lead.integration_worktree_path = Some("C:/wt/integration".into());
+        let mut s = session_with(vec![lead]);
+
+        let recovered = recover_orphaned_executions(&mut s, NOW, never_live, |path| {
+            assert_eq!(path, "C:/wt/integration");
+            Some(3)
+        });
+
+        assert_eq!(recovered[0].result_worktree_path(), Some("C:/wt/integration"));
+    }
+
+    #[test]
+    fn the_header_stays_working_while_a_live_execution_remains() {
+        let mut s = session_with(vec![
+            execution("lead", SessionState::Working),
+            helper("helper-1", SessionState::Working, None),
+        ]);
+
+        let recovered = recover_orphaned_executions(&mut s, NOW, |id| id == "lead", |_| None);
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].execution_id, "helper-1");
+        assert_eq!(s.header.state, SessionState::Working, "the lead is still alive");
+    }
+
+    #[test]
+    fn a_conflicted_helper_and_a_proposal_waiting_on_start_are_skipped() {
+        let mut conflicted = helper("helper-1", SessionState::NeedsInput, Some("C:/wt/helper-1"));
+        conflicted.conflict = Some(crate::agentdesk::graph::IntegrationConflict {
+            path: "src/greet.rs".into(),
+            conflicting_with: "lead".into(),
+            base_text: "base".into(),
+            helper_text: "helper".into(),
+            integrated_text: "lead".into(),
+        });
+        let mut proposal = execution("lead", SessionState::NeedsInput);
+        proposal.proposed_graph = Some(crate::agentdesk::graph::ProposedGraph {
+            lead_summary: "Split the work".into(),
+            helpers: Vec::new(),
+            proposed_at: NOW.into(),
+        });
+        let mut s = session_with(vec![proposal, conflicted]);
+        s.header.state = SessionState::NeedsInput;
+
+        let recovered = recover_orphaned_executions(&mut s, NOW, never_live, |_| Some(1));
+
+        assert!(recovered.is_empty());
+        assert_eq!(s.executions[0].state, SessionState::NeedsInput);
+        assert_eq!(s.executions[1].state, SessionState::NeedsInput);
+        assert_eq!(s.header.state, SessionState::NeedsInput);
+    }
+
+    #[test]
+    fn a_titled_helper_is_named_in_its_note() {
+        let mut h = helper("helper-1", SessionState::Working, None);
+        h.job_title = Some("Rename the config loader".into());
+        let mut s = session_with(vec![h]);
+
+        let recovered = recover_orphaned_executions(&mut s, NOW, never_live, |_| None);
+
+        assert!(
+            recovered[0].note.starts_with("The helper \"Rename the config loader\" stopped"),
+            "note was {:?}",
+            recovered[0].note
+        );
+    }
+
+    #[test]
+    fn recovery_wording_is_plain_language_with_no_jargon() {
+        let mut s = session_with(vec![
+            execution("lead", SessionState::Working),
+            helper("helper-1", SessionState::Working, Some("C:/wt/a")),
+            helper("helper-2", SessionState::Working, Some("C:/wt/b")),
+            helper("helper-3", SessionState::Working, None),
+        ]);
+        let mut calls = 0;
+        let recovered = recover_orphaned_executions(&mut s, NOW, never_live, |_| {
+            calls += 1;
+            if calls == 1 {
+                Some(4)
+            } else {
+                None
+            }
+        });
+        let mut texts: Vec<String> = recovered.into_iter().map(|o| o.note).collect();
+        texts.push(CLOSED_WHILE_RUNNING_DETAIL.to_string());
+        for text in texts {
+            for jargon in ["orphan", "stale", "execution", "process", "worktree", "registry"] {
+                assert!(
+                    !text.to_lowercase().contains(jargon),
+                    "found {jargon:?} in {text:?}"
+                );
+            }
         }
     }
 }

@@ -1267,6 +1267,177 @@ pub async fn agent_result_find_orphaned_all(app: AppHandle) -> Result<Vec<Orphan
     .map_err(|e| AppError::Other(e.to_string()))
 }
 
+// -- agent-graphs 6.4: recover executions that died with the app --
+
+/// Answers `session_recovery::recover_orphaned_executions`'s
+/// `inspect_worktree` question from disk: `None` when the folder is gone,
+/// otherwise how many files its status walk reports as changed. A folder
+/// that exists but cannot be opened as a repository counts as present with
+/// no changes, so the person still gets a note about it rather than a
+/// silently skipped record.
+fn inspect_worktree_on_disk(path: &str) -> Option<usize> {
+    if !Path::new(path).is_dir() {
+        return None;
+    }
+    Some(changed_paths_for_worktree(Path::new(path)).map(|p| p.len()).unwrap_or(0))
+}
+
+/// Everything the result build needs from a recovered execution, captured
+/// while the session was still held under its lock so the build itself can
+/// run without it (matching `airun::build_result_for_completed_execution`,
+/// which reads the same provenance off the `ExecutionRecord`).
+struct RecoveredBuild {
+    orphan: crate::agentdesk::session_recovery::RecoveredOrphan,
+    branch: Option<String>,
+    base_oid: Option<String>,
+    checks: Vec<ResultCheckOutcome>,
+    openspec_change_id: Option<String>,
+}
+
+/// One session's startup recovery: marks every execution nothing in this
+/// process backs as `Failed`, builds a `Failed` result for each one whose
+/// worktree is still on disk (so the review panel offers Keep/discard for
+/// the work it left behind), and appends a plain note per execution to the
+/// transcript. Returns what was recovered; empty when nothing was stuck.
+///
+/// The session write happens in one critical section with the decision, the
+/// same shape as `agent_desk::get_session_at`. Result builds and notes run
+/// afterwards, each taking the lock on its own, because `build_result_at`
+/// and `append_system_note` already acquire it and the lock is not
+/// re-entrant.
+///
+/// `is_live` is passed in rather than read from `ExecutionRegistry` here so
+/// tests can simulate a live execution without an app handle.
+pub(crate) fn recover_orphaned_executions_at(
+    locks: &SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    is_live: impl FnMut(&str) -> bool,
+) -> Vec<crate::agentdesk::session_recovery::RecoveredOrphan> {
+    let now = now_rfc3339();
+    let builds: Vec<RecoveredBuild> = locks.with_session_lock(session_id, || {
+        let mut session = match crate::agentdesk::store::read_session(root, session_id) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("agent desk startup recovery: could not read session {session_id}: {e}");
+                return Vec::new();
+            }
+        };
+        let recovered = crate::agentdesk::session_recovery::recover_orphaned_executions(
+            &mut session,
+            &now,
+            is_live,
+            inspect_worktree_on_disk,
+        );
+        if recovered.is_empty() {
+            return Vec::new();
+        }
+        if let Err(e) = crate::agentdesk::store::write_session(root, &session) {
+            // Nothing else runs for this session: a note or result without the
+            // state change behind it would describe a failure the session file
+            // still denies. The next launch simply finds the same records.
+            log::warn!("agent desk startup recovery: could not write session {session_id}: {e}");
+            return Vec::new();
+        }
+        let openspec_change_id = crate::commands::agent_desk::openspec_change_id_of(&session.header.source);
+        recovered
+            .into_iter()
+            .map(|orphan| {
+                let record = session.executions.iter().find(|e| e.execution_id == orphan.execution_id);
+                RecoveredBuild {
+                    branch: record.and_then(|r| r.branch.clone()),
+                    base_oid: record.and_then(|r| r.base_oid.clone()),
+                    checks: checks_for_execution(&session, &orphan.execution_id),
+                    openspec_change_id: openspec_change_id.clone(),
+                    orphan,
+                }
+            })
+            .collect()
+    });
+
+    let mut recovered = Vec::with_capacity(builds.len());
+    for build in builds {
+        if let Some(worktree_path) = build.orphan.result_worktree_path() {
+            let outcome = build_result_at(
+                locks,
+                root,
+                session_id,
+                build.orphan.execution_id.clone(),
+                ResultOutcomeKind::Failed,
+                Some(worktree_path.to_string()),
+                build.branch,
+                build.base_oid,
+                build.checks,
+                build.openspec_change_id,
+            );
+            if !matches!(outcome, BuildResultOutcome::Built { .. }) {
+                log::warn!(
+                    "agent desk startup recovery: result for {} in session {session_id} not built: {outcome:?}",
+                    build.orphan.execution_id
+                );
+            }
+        }
+        crate::commands::agent_graph::append_system_note(locks, root, session_id, &build.orphan.note);
+        recovered.push(build.orphan);
+    }
+    recovered
+}
+
+/// Runs once from `lib.rs` setup, before the webview exists. It has to be
+/// before, not alongside: the first `agent_session_get` a mounted sidebar
+/// issues would otherwise reach `get_session_at`'s lazy reconciliation
+/// first, flip the same records to `Interrupted`, and this sweep would then
+/// find nothing to recover while the helper's worktree stayed on disk.
+///
+/// Only sessions whose header is still in a live-process state are read in
+/// full: the header mirrors the lead's state, and a helper only runs while
+/// its lead does, so a session that reads `Finished`/`Failed`/`Stopped` in
+/// the index has no execution this sweep would touch. That keeps the
+/// startup cost to one index load plus a session read per stuck session.
+pub(crate) fn recover_orphaned_executions_on_startup(app: &AppHandle) {
+    use tauri::Manager;
+
+    let root = match SessionStoreRoot::resolve(app) {
+        Ok(root) => root,
+        Err(e) => {
+            log::warn!("agent desk startup recovery skipped, store unavailable: {e}");
+            return;
+        }
+    };
+    let locks = app.state::<std::sync::Arc<SessionLocks>>();
+    let executions = app.state::<crate::agentdesk::ExecutionRegistry>();
+
+    let loaded = crate::agentdesk::store::load_or_rebuild_index(&root);
+    let mut recovered_total = 0usize;
+    let mut sessions_touched = 0usize;
+    for header in loaded
+        .headers
+        .iter()
+        .filter(|h| crate::agentdesk::session_recovery::is_live_process_state(h.state))
+    {
+        let session_id = header.session_id.clone();
+        let recovered = recover_orphaned_executions_at(&locks, &root, &session_id, |execution_id| {
+            executions.is_live(&session_id, &execution_id.to_string())
+        });
+        if !recovered.is_empty() {
+            sessions_touched += 1;
+            recovered_total += recovered.len();
+        }
+    }
+
+    if recovered_total > 0 {
+        // Header states moved, and the index is a projection of headers that
+        // `write_session` does not maintain (see `agent_desk::refresh_index`).
+        let (headers, _diagnostics) = crate::agentdesk::store::rebuild_index_from_sessions(&root);
+        if let Err(e) = crate::agentdesk::store::write_index(&root, &headers) {
+            log::warn!("agent desk startup recovery: index not refreshed: {e}");
+        }
+        log::info!(
+            "agent desk startup recovery: {recovered_total} run(s) across {sessions_touched} session(s) were still marked as running from a previous launch and were closed out"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1275,6 +1446,174 @@ mod tests {
         SessionState, CURRENT_SCHEMA_VERSION,
     };
     use crate::agentdesk::result::{CheckRunOutcome, ResultCheckOutcome};
+
+    // -- startup orphan recovery, end to end against the real store and git --
+
+    fn seed_session_with_helper(
+        root: &SessionStoreRoot,
+        session_id: &str,
+        helper_state: SessionState,
+        helper_worktree: Option<&str>,
+    ) {
+        let mut session = AgentSession::new(header(session_id));
+        session.header.active_execution_id = Some("lead".into());
+        session.executions.push(ExecutionRecord::minimal(
+            "lead".into(),
+            session_id.into(),
+            None,
+            SessionState::Finished,
+            "2026-01-01T00:00:00Z".into(),
+            Some("2026-01-01T00:10:00Z".into()),
+            0,
+        ));
+        let mut helper = ExecutionRecord::minimal(
+            "helper-1".into(),
+            session_id.into(),
+            Some("lead".into()),
+            helper_state,
+            "2026-01-01T00:00:00Z".into(),
+            None,
+            0,
+        );
+        helper.worktree_path = helper_worktree.map(str::to_string);
+        helper.branch = Some("agent/helper-1".into());
+        session.executions.push(helper);
+        crate::agentdesk::store::write_session(root, &session).unwrap();
+    }
+
+    fn system_notes(root: &SessionStoreRoot, session_id: &str) -> Vec<String> {
+        crate::agentdesk::store::read_session(root, session_id)
+            .unwrap()
+            .messages
+            .iter()
+            .filter(|m| m.role == crate::agentdesk::model::MessageRole::System)
+            .map(|m| m.plain_content.clone())
+            .collect()
+    }
+
+    #[test]
+    fn startup_recovery_fails_a_working_helper_and_builds_a_result_for_its_dirty_worktree() {
+        let (_dir, root) = temp_root();
+        let locks = SessionLocks::new();
+        let worktree = worktree_with_a_change();
+        let worktree_path = worktree.path().to_string_lossy().into_owned();
+        seed_session_with_helper(&root, "sess-1", SessionState::Working, Some(&worktree_path));
+
+        let recovered = recover_orphaned_executions_at(&locks, &root, "sess-1", |_| false);
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].execution_id, "helper-1");
+
+        let session = crate::agentdesk::store::read_session(&root, "sess-1").unwrap();
+        let helper = session.executions.iter().find(|e| e.execution_id == "helper-1").unwrap();
+        assert_eq!(helper.state, SessionState::Failed);
+        assert!(helper.ended_at.is_some());
+        assert_eq!(session.executions[0].state, SessionState::Finished, "finished lead untouched");
+
+        let records = result::read_results(&root, "sess-1").unwrap();
+        let record = result::find_result(&records, "helper-1").expect("a result must exist for the dirty worktree");
+        assert_eq!(record.outcome, ResultOutcomeKind::Failed);
+        assert_eq!(record.worktree_path.as_deref(), Some(worktree_path.as_str()));
+        assert_eq!(record.branch.as_deref(), Some("agent/helper-1"));
+        assert!(record.has_landable_changes(), "the uncommitted b.txt must show up as a change to keep");
+        assert!(record.changed_paths.iter().any(|p| p.path == "b.txt"));
+
+        let notes = system_notes(&root, "sess-1");
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("GitWyrm was closed"), "note was {:?}", notes[0]);
+        assert!(notes[0].contains("1 changed file"), "note was {:?}", notes[0]);
+    }
+
+    #[test]
+    fn startup_recovery_fails_a_working_helper_without_a_worktree_and_builds_no_result() {
+        let (_dir, root) = temp_root();
+        let locks = SessionLocks::new();
+        seed_session_with_helper(&root, "sess-1", SessionState::Working, None);
+
+        let recovered = recover_orphaned_executions_at(&locks, &root, "sess-1", |_| false);
+
+        assert_eq!(recovered.len(), 1);
+        let session = crate::agentdesk::store::read_session(&root, "sess-1").unwrap();
+        assert_eq!(session.executions[1].state, SessionState::Failed);
+
+        let records = result::read_results(&root, "sess-1").unwrap_or_default();
+        assert!(records.is_empty(), "no worktree means nothing to review, so no result");
+
+        let notes = system_notes(&root, "sess-1");
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("nothing extra to keep"), "note was {:?}", notes[0]);
+    }
+
+    #[test]
+    fn startup_recovery_notes_a_worktree_that_is_gone_from_disk() {
+        let (_dir, root) = temp_root();
+        let locks = SessionLocks::new();
+        let gone = tempfile::tempdir().unwrap();
+        let gone_path = gone.path().to_string_lossy().into_owned();
+        drop(gone);
+        seed_session_with_helper(&root, "sess-1", SessionState::Working, Some(&gone_path));
+
+        let recovered = recover_orphaned_executions_at(&locks, &root, "sess-1", |_| false);
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].result_worktree_path(), None);
+        assert!(result::read_results(&root, "sess-1").unwrap_or_default().is_empty());
+        let notes = system_notes(&root, "sess-1");
+        assert!(notes[0].contains("no longer on disk"), "note was {:?}", notes[0]);
+    }
+
+    #[test]
+    fn startup_recovery_leaves_a_finished_session_alone() {
+        let (_dir, root) = temp_root();
+        let locks = SessionLocks::new();
+        seed_session_with_helper(&root, "sess-1", SessionState::Finished, Some("C:/wt/whatever"));
+        let before = crate::agentdesk::store::read_session(&root, "sess-1").unwrap();
+
+        let recovered = recover_orphaned_executions_at(&locks, &root, "sess-1", |_| false);
+
+        assert!(recovered.is_empty());
+        let after = crate::agentdesk::store::read_session(&root, "sess-1").unwrap();
+        assert_eq!(after, before, "no write may happen when nothing is stuck");
+        assert!(result::read_results(&root, "sess-1").unwrap_or_default().is_empty());
+        assert!(system_notes(&root, "sess-1").is_empty());
+    }
+
+    #[test]
+    fn startup_recovery_leaves_a_live_execution_alone() {
+        let (_dir, root) = temp_root();
+        let locks = SessionLocks::new();
+        let worktree = worktree_with_a_change();
+        let worktree_path = worktree.path().to_string_lossy().into_owned();
+        seed_session_with_helper(&root, "sess-1", SessionState::Working, Some(&worktree_path));
+        let before = crate::agentdesk::store::read_session(&root, "sess-1").unwrap();
+
+        let live = ["helper-1".to_string()];
+        let recovered = recover_orphaned_executions_at(&locks, &root, "sess-1", |id| live.iter().any(|l| l == id));
+
+        assert!(recovered.is_empty());
+        let after = crate::agentdesk::store::read_session(&root, "sess-1").unwrap();
+        assert_eq!(after, before);
+        assert_eq!(after.executions[1].state, SessionState::Working);
+        assert!(result::read_results(&root, "sess-1").unwrap_or_default().is_empty());
+        assert!(system_notes(&root, "sess-1").is_empty());
+    }
+
+    #[test]
+    fn startup_recovery_is_idempotent_across_launches() {
+        let (_dir, root) = temp_root();
+        let locks = SessionLocks::new();
+        let worktree = worktree_with_a_change();
+        let worktree_path = worktree.path().to_string_lossy().into_owned();
+        seed_session_with_helper(&root, "sess-1", SessionState::Working, Some(&worktree_path));
+
+        let first = recover_orphaned_executions_at(&locks, &root, "sess-1", |_| false);
+        let second = recover_orphaned_executions_at(&locks, &root, "sess-1", |_| false);
+
+        assert_eq!(first.len(), 1);
+        assert!(second.is_empty(), "a second launch must find nothing left to recover");
+        assert_eq!(system_notes(&root, "sess-1").len(), 1, "no duplicate note");
+        assert_eq!(result::read_results(&root, "sess-1").unwrap().len(), 1, "no duplicate result");
+    }
 
     fn temp_root() -> (tempfile::TempDir, SessionStoreRoot) {
         let dir = tempfile::tempdir().unwrap();
