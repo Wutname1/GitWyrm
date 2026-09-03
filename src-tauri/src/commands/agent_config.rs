@@ -237,15 +237,116 @@ fn find_source_item<'a>(items: &'a [RawItem], item_id: &str) -> Option<&'a RawIt
         .min_by_key(|i| (i.location.scope != crate::agent_config::model::ConfigScope::Repo, i.location.client as u8))
 }
 
+/// The destination preview for one skill: which folder it would be copied
+/// into, whether something is already there, and what the copy would write.
+///
+/// Deliberately its own function rather than a branch threaded through the
+/// JSON path. Everything that path does -- read the destination file, merge
+/// one member, diff fields -- is meaningless for a folder, and pretending
+/// otherwise is what produced a preview that offered a copy it could not do.
+///
+/// `destination_path` names the skill's own folder, and `proposed_content`
+/// lists the files that would be written, so the review shows a person what
+/// they are agreeing to without inventing a file diff nobody asked for.
+fn skill_copy_preview(client: ClientId, source_item: &RawItem, repo_root: Option<&str>) -> DestinationPreview {
+    use crate::agent_config::{model::ConfigScope, skill_write, skills};
+
+    let home = crate::agent_config::locations::home_dir();
+    let repo_path = repo_root.map(std::path::Path::new);
+    let dirs = match &home {
+        Some(h) => skills::skill_dirs(h, repo_path, client),
+        None => Vec::new(),
+    };
+    // Prefer the source's own scope, so a repo skill lands in the repo and a
+    // personal one stays personal.
+    let chosen = dirs
+        .iter()
+        .find(|(_, scope)| *scope == source_item.location.scope)
+        .or_else(|| dirs.first());
+
+    let Some((skills_root, _scope)) = chosen else {
+        return DestinationPreview {
+            client,
+            destination_path: String::new(),
+            before_hash: None,
+            proposed_content: String::new(),
+            redacted_diff_summary: Vec::new(),
+            warnings: vec![PlanWarning {
+                kind: WarningKind::ClientNotDetected,
+                message: format!("{} does not keep skills, so there is nowhere to copy this.", client.label()),
+            }],
+            write_supported: false,
+        };
+    };
+
+    let destination_dir = skills_root.join(&source_item.identity);
+    let source_dir = std::path::Path::new(&source_item.location.path)
+        .parent()
+        .map(std::path::Path::to_path_buf);
+
+    let Some(source_dir) = source_dir else {
+        return DestinationPreview {
+            client,
+            destination_path: destination_dir.to_string_lossy().into_owned(),
+            before_hash: None,
+            proposed_content: String::new(),
+            redacted_diff_summary: Vec::new(),
+            warnings: vec![PlanWarning {
+                kind: WarningKind::UnsupportedField,
+                message: "This skill's folder could not be found.".to_string(),
+            }],
+            write_supported: false,
+        };
+    };
+
+    let mut warnings = Vec::new();
+    let (files, write_supported) = match skill_write::plan_skill_copy(&source_dir, &destination_dir) {
+        Ok(plan) => {
+            if plan.replaces_existing {
+                warnings.push(PlanWarning {
+                    kind: WarningKind::UnsupportedField,
+                    message: format!(
+                        "{} already has a skill called \"{}\". Applying replaces it, and Undo puts \
+the old one back.",
+                        client.label(),
+                        source_item.identity
+                    ),
+                });
+            }
+            (plan.files.keys().cloned().collect::<Vec<_>>(), true)
+        }
+        Err(e) => {
+            warnings.push(PlanWarning {
+                kind: WarningKind::UnsupportedField,
+                message: e.plain(),
+            });
+            (Vec::new(), false)
+        }
+    };
+
+    DestinationPreview {
+        client,
+        destination_path: destination_dir.to_string_lossy().into_owned(),
+        // A folder has no single before-hash; the copy re-checks every file's
+        // hash at apply time instead (`skill_write::apply_skill_copy`).
+        before_hash: None,
+        proposed_content: files.join("\n"),
+        redacted_diff_summary: Vec::new(),
+        warnings,
+        write_supported,
+    }
+}
+
 fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root: Option<&str>) -> DestinationPreview {
-    // Support is per client AND per kind. A skill is a folder of files, not a
-    // member of a JSON object, so the writer this path uses cannot copy one
-    // whichever client is asked; `agent_config::skill_write` is what copies a
-    // skill, and it is not wired into this single-file preview yet. Asking
-    // the client alone reported a skill as writable and then produced
-    // nothing, which is worse than saying so plainly here.
-    let write_supported = writers::is_supported(client)
-        && source_item.kind != crate::agent_config::model::ItemKind::Skill;
+    // Support is per client AND per kind. A skill is a folder of files rather
+    // than a member of a JSON object, so it does not go through the JSON
+    // writer at all: `skill_copy_preview` below builds its own destination and
+    // `apply_copy_at` sends it to `agent_config::skill_write`.
+    let is_skill = source_item.kind == crate::agent_config::model::ItemKind::Skill;
+    if is_skill {
+        return skill_copy_preview(client, source_item, repo_root);
+    }
+    let write_supported = writers::is_supported(client);
     let mut locs = locations::personal_locations(client);
     if let Some(root) = repo_root {
         locs.extend(locations::repo_locations(client, root));
@@ -294,15 +395,6 @@ fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root:
     let redacted_destination = destination_extra.map(|e| redact::redact_for_display(e, &[]));
     let redacted_diff_summary: Vec<ChangeSummaryLine> =
         redact::diff_fields(&redacted_source, redacted_destination.as_ref(), &source_item.secret_fields);
-
-    if source_item.kind == crate::agent_config::model::ItemKind::Skill {
-        warnings.push(PlanWarning {
-            kind: WarningKind::UnsupportedField,
-            message: "Copying a skill from here is not wired up yet. A skill is a folder of \
-                      files rather than one setting, so it needs its own copy step."
-                .to_string(),
-        });
-    }
 
     if !source_item.secret_fields.is_empty() {
         warnings.push(PlanWarning {
@@ -365,6 +457,88 @@ pub async fn agent_config_apply_copy(app: AppHandle, plan_id: String) -> Result<
         .map_err(|e| AppError::Other(e.to_string()))
 }
 
+/// Copies one skill folder for a plan destination.
+///
+/// Wraps `skill_write` in the same `DestinationApplyResult` the JSON path
+/// produces, so the review UI, the batch runner and undo all treat a skill
+/// exactly like anything else once it is applied. `OperationReceipt` is
+/// reused rather than given a parallel type: the fields it needs (what was
+/// written, where the backup went) mean the same thing for a folder, and a
+/// second receipt shape would need its own undo path to stay correct.
+fn apply_skill_destination(
+    write_root: &SafeWriteRoot,
+    plan: &CopyPlan,
+    destination: &DestinationPreview,
+    operation_id: &str,
+) -> DestinationApplyResult {
+    use crate::agent_config::skill_write;
+
+    let Some(source_dir) = Path::new(&plan.source_item.location.path).parent() else {
+        return DestinationApplyResult::WriteFailed {
+            client: destination.client,
+            detail: "this skill's folder could not be found".to_string(),
+        };
+    };
+    let destination_dir = Path::new(&destination.destination_path);
+
+    let copy_plan = match skill_write::plan_skill_copy(source_dir, destination_dir) {
+        Ok(p) => p,
+        Err(e) => {
+            return DestinationApplyResult::WriteFailed {
+                client: destination.client,
+                detail: e.plain(),
+            }
+        }
+    };
+
+    // Replacing is allowed because the preview said so in as many words and
+    // the person applied anyway; the old folder is still backed up first.
+    match skill_write::apply_skill_copy(&copy_plan, &write_root.backups_dir(), true) {
+        Ok(copied) => {
+            let receipt = crate::agent_config::model::OperationReceipt {
+                operation_id: operation_id.to_string(),
+                plan_id: plan.plan_id.clone(),
+                client: destination.client.key().to_string(),
+                destination_path: copied.destination_dir,
+                // A folder has no single hash. The copier re-checks every
+                // file's hash itself before writing, which is the same
+                // protection `before_hash` gives a single file. The empty
+                // `after_hash` is also how `undo_at` recognises a folder
+                // receipt and sends it to the folder undo.
+                before_hash: None,
+                after_hash: String::new(),
+                backup_path: copied.backup_dir,
+                applied_at: now_rfc3339(),
+                undone: false,
+            };
+            // Saved through the shared receipt store, or Undo would report
+            // this operation as unknown.
+            if let Err(e) = plan::save_receipt(write_root, &receipt) {
+                return DestinationApplyResult::WriteFailed {
+                    client: destination.client,
+                    detail: format!("the skill was copied but could not be recorded for undo: {e}"),
+                };
+            }
+            DestinationApplyResult::Applied {
+                client: destination.client,
+                operation_id: operation_id.to_string(),
+                receipt,
+            }
+        }
+        Err(skill_write::SkillCopyError::SourceChanged { .. }) => {
+            DestinationApplyResult::ConcurrentChangeRefused {
+                client: destination.client,
+                expected_hash: None,
+                actual_hash: None,
+            }
+        }
+        Err(e) => DestinationApplyResult::WriteFailed {
+            client: destination.client,
+            detail: e.plain(),
+        },
+    }
+}
+
 fn apply_copy_at(write_root: &SafeWriteRoot, plan_id: &str) -> ApplyOutcome {
     let Some(plan) = read_plan(write_root, plan_id) else {
         return ApplyOutcome {
@@ -383,6 +557,19 @@ fn apply_copy_at(write_root: &SafeWriteRoot, plan_id: &str) -> ApplyOutcome {
             continue;
         }
         let operation_id = new_id();
+        // A skill is a folder, so it goes to the folder copier rather than
+        // the single-file writer. Same guarantees either way: the source is
+        // re-hashed before anything is written, whatever was there is backed
+        // up first, and a receipt records enough to undo it.
+        if plan.source_item.kind == crate::agent_config::model::ItemKind::Skill {
+            results.push(apply_skill_destination(
+                write_root,
+                &plan,
+                destination,
+                &operation_id,
+            ));
+            continue;
+        }
         let result = plan::apply_write(
             write_root,
             &plan.plan_id,
@@ -451,6 +638,14 @@ pub async fn agent_config_undo(app: AppHandle, operation_id: String) -> Result<U
 }
 
 fn undo_at(write_root: &SafeWriteRoot, operation_id: &str) -> UndoOutcome {
+    // A skill was copied as a folder, so it is restored as one. Recognised by
+    // the empty `after_hash` a folder receipt carries: the single-file undo
+    // would try to read a directory as a file and fail.
+    if let Some(receipt) = plan::read_receipt(write_root, operation_id) {
+        if receipt.after_hash.is_empty() {
+            return undo_skill_at(write_root, receipt);
+        }
+    }
     match plan::undo_write(write_root, operation_id) {
         Ok(receipt) => UndoOutcome::Restored { receipt },
         Err(plan::UndoWriteError::NotFound) => UndoOutcome::OperationNotFound,
@@ -460,6 +655,32 @@ fn undo_at(write_root: &SafeWriteRoot, operation_id: &str) -> UndoOutcome {
         }
         Err(e) => UndoOutcome::RestoreFailed { detail: e.to_string() },
     }
+}
+
+/// Puts back whatever a skill copy replaced, and marks the receipt undone.
+fn undo_skill_at(
+    write_root: &SafeWriteRoot,
+    mut receipt: crate::agent_config::model::OperationReceipt,
+) -> UndoOutcome {
+    use crate::agent_config::skill_write;
+
+    if receipt.undone {
+        return UndoOutcome::AlreadyUndone;
+    }
+    let copy_receipt = skill_write::SkillCopyReceipt {
+        destination_dir: receipt.destination_path.clone(),
+        backup_dir: receipt.backup_path.clone(),
+        files_written: 0,
+    };
+    if let Err(e) = skill_write::undo_skill_copy(&copy_receipt) {
+        return UndoOutcome::RestoreFailed { detail: e.plain() };
+    }
+    if let Err(e) = plan::mark_receipt_undone(write_root, &mut receipt) {
+        return UndoOutcome::RestoreFailed {
+            detail: format!("the skill was put back but the record could not be updated: {e}"),
+        };
+    }
+    UndoOutcome::Restored { receipt }
 }
 
 #[cfg(test)]
@@ -492,6 +713,83 @@ mod tests {
             extra,
             content_hash: "h".into(),
         }
+    }
+
+    /// A skill is copied as a folder and undone as a folder, through the
+    /// same apply/undo commands everything else uses. Before this, the
+    /// preview offered a skill copy that produced nothing, and a folder
+    /// receipt would have gone to the single-file undo, which reads the
+    /// destination as a file and fails.
+    #[test]
+    fn a_skill_is_applied_and_undone_as_a_whole_folder() {
+        let (dir, write_root) = write_root();
+        let source_skill = dir.path().join("source").join(".claude").join("skills").join("demo");
+        std::fs::create_dir_all(source_skill.join("references")).unwrap();
+        std::fs::write(source_skill.join("SKILL.md"), "---
+name: demo
+---
+New
+").unwrap();
+        std::fs::write(source_skill.join("references").join("api.md"), "ref
+").unwrap();
+
+        let destination = dir.path().join("dest").join(".claude").join("skills").join("demo");
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(destination.join("SKILL.md"), "mine
+").unwrap();
+
+        let mut item = sample_item(ClientId::ClaudeCode, "demo");
+        item.kind = ItemKind::Skill;
+        item.location.path = source_skill.join("SKILL.md").to_string_lossy().into_owned();
+
+        let plan = CopyPlan {
+            plan_id: "plan-1".into(),
+            item_id: "Skill:demo".into(),
+            source_item: item,
+            destinations: vec![DestinationPreview {
+                client: ClientId::OpenCode,
+                destination_path: destination.to_string_lossy().into_owned(),
+                before_hash: None,
+                proposed_content: "SKILL.md
+references/api.md".into(),
+                redacted_diff_summary: Vec::new(),
+                warnings: Vec::new(),
+                write_supported: true,
+            }],
+            created_at: now_rfc3339(),
+        };
+        write_plan(&write_root, &plan).unwrap();
+
+        let outcome = apply_copy_at(&write_root, "plan-1");
+        let operation_id = match &outcome.results[..] {
+            [DestinationApplyResult::Applied { operation_id, .. }] => operation_id.clone(),
+            other => panic!("expected one applied destination, got {other:?}"),
+        };
+        assert_eq!(
+            std::fs::read_to_string(destination.join("SKILL.md")).unwrap(),
+            "---
+name: demo
+---
+New
+"
+        );
+        assert!(destination.join("references").join("api.md").is_file(), "nested files copy too");
+
+        // Undo restores exactly what was replaced, including removing the
+        // files the copy added.
+        match undo_at(&write_root, &operation_id) {
+            UndoOutcome::Restored { .. } => {}
+            other => panic!("expected Restored, got {other:?}"),
+        }
+        assert_eq!(std::fs::read_to_string(destination.join("SKILL.md")).unwrap(), "mine
+");
+        assert!(!destination.join("references").exists());
+
+        // And it is not undoable twice.
+        assert!(matches!(
+            undo_at(&write_root, &operation_id),
+            UndoOutcome::AlreadyUndone
+        ));
     }
 
     #[test]

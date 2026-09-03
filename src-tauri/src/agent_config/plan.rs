@@ -107,6 +107,13 @@ impl SafeWriteRoot {
         self.0.join("receipts").join(format!("{operation_id}.json"))
     }
 
+    /// Where replaced content is kept so an undo can restore it. Exposed for
+    /// the skill copier, which backs up a whole folder rather than one file
+    /// and so cannot use `backup_path`'s single-file name.
+    pub fn backups_dir(&self) -> PathBuf {
+        self.0.join("backups")
+    }
+
     /// Where in-flight (previewed, not-yet-applied) plans are stored.
     /// `pub(crate)` so the `agent_config` command layer can place plan files
     /// beside backups/receipts without this module knowing the plan shape
@@ -211,6 +218,24 @@ fn write_receipt(roots: &SafeWriteRoot, receipt: &OperationReceipt) -> Result<()
         | ApplyWriteError::Rename { detail } => ApplyWriteError::Receipt { detail },
         other => other,
     })
+}
+
+/// Persists a receipt the caller built.
+///
+/// Exposed for the skill copier: it does its own writing (a folder, not one
+/// file), but its result must be undoable through the same receipt store as
+/// everything else, or Undo would report the operation as unknown.
+pub fn save_receipt(roots: &SafeWriteRoot, receipt: &OperationReceipt) -> Result<(), ApplyWriteError> {
+    write_receipt(roots, receipt)
+}
+
+/// Marks a receipt undone after the caller restored what it describes.
+pub fn mark_receipt_undone(
+    roots: &SafeWriteRoot,
+    receipt: &mut OperationReceipt,
+) -> Result<(), ApplyWriteError> {
+    receipt.undone = true;
+    write_receipt_overwrite(roots, receipt)
 }
 
 pub fn read_receipt(roots: &SafeWriteRoot, operation_id: &str) -> Option<OperationReceipt> {

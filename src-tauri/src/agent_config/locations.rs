@@ -27,7 +27,7 @@ use super::registry;
 
 /// The user's home directory, resolved once per call so tests can override it
 /// without touching process-global state.
-fn home_dir() -> Option<PathBuf> {
+pub(crate) fn home_dir() -> Option<PathBuf> {
     dirs_home()
 }
 
