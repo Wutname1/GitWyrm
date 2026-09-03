@@ -12,7 +12,7 @@
 ## 2. Agent Setup UI
 
 - [x] 2.1 Add inventory table/list with source, per-client state, and filters by item kind.
-- [ ] 2.2 Let the user choose one item and one or more destinations; batch actions must use
+- [x] 2.2 Let the user choose one item and one or more destinations; batch actions must use
       the same explicit selection.
       PARTIAL as of 2026-08-21: the single-item flow (`CopyPreviewDialog.tsx`'s
       `DestinationPicker`) genuinely lets the user check/uncheck destinations. The batch flow
