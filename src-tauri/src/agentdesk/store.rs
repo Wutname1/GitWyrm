@@ -79,6 +79,13 @@ impl SessionStoreRoot {
         self.0.join(SESSIONS_DIR)
     }
 
+    /// Where `agentdesk::result` keeps one session's result records. Owned
+    /// here so deleting a session can take its sidecar with it without
+    /// depending on that module's private layout helpers.
+    pub fn results_path_for(&self, session_id: &str) -> PathBuf {
+        self.root_path().join("results").join(format!("{session_id}.json"))
+    }
+
     fn session_path(&self, session_id: &str) -> PathBuf {
         self.sessions_dir().join(format!("{session_id}.json"))
     }
@@ -186,6 +193,18 @@ pub fn delete_session(root: &SessionStoreRoot, session_id: &str) -> Result<(), W
                 path,
                 detail: e.to_string(),
             })
+        }
+    }
+    // The results sidecar is part of the session, and the doc comment above
+    // has always said so. Left behind, it was an orphan file keyed to a
+    // session id nothing could open again. Failure to remove it is not
+    // failure to delete the session: the session is gone either way, and
+    // reporting an error would send someone looking for something to fix
+    // that no longer affects them.
+    let sidecar = root.results_path_for(session_id);
+    if let Err(e) = std::fs::remove_file(&sidecar) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("could not remove the results file for a deleted chat: {e}");
         }
     }
     Ok(())
@@ -679,6 +698,26 @@ mod tests {
         let root = SessionStoreRoot::at(dir.path().join("agent-desk").join("v1"))
             .expect("init store root");
         (dir, root)
+    }
+
+    /// The doc comment on `delete_session` has always said it removes the
+    /// result sidecar; it did not, leaving an orphan file keyed to a session
+    /// id nothing could ever open again.
+    #[test]
+    fn deleting_a_session_takes_its_results_file_with_it() {
+        let (_dir, root) = temp_root();
+        let sidecar = root.results_path_for("sess-1");
+        std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        std::fs::write(&sidecar, b"{}").unwrap();
+        let session = AgentSession::new(header("sess-1", "2026-01-01T00:00:00Z"));
+        write_session(&root, &session).unwrap();
+
+        delete_session(&root, "sess-1").expect("delete");
+        assert!(!root.session_path("sess-1").exists());
+        assert!(!sidecar.exists(), "the results file outlived its chat");
+
+        // Deleting again is still a success, and still leaves nothing behind.
+        delete_session(&root, "sess-1").expect("a second delete is not an error");
     }
 
     fn header(session_id: &str, updated_at: &str) -> AgentSessionHeader {

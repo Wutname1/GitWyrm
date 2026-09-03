@@ -683,6 +683,23 @@ pub async fn agent_session_delete(
         if !registry.live_executions_for_session(&session_id).is_empty() {
             return DeleteSessionOutcome::StillRunning;
         }
+        // An imported chat is also a row in its adapter's ledger. Deleting
+        // the session alone left that row pointing at a session that no
+        // longer exists: the import picker still said "already imported",
+        // Continue here still offered itself, and refreshing failed because
+        // its target was gone. Unlinked BEFORE the delete, so a ledger write
+        // that fails leaves the session in place rather than half-removed.
+        if let Some(link) = crate::agentdesk::import_store::find_link_for_session(&root, &session_id) {
+            if let Err(e) = crate::agentdesk::import_store::remove_link(
+                &root,
+                &link.adapter_id,
+                &link.external_session_id,
+            ) {
+                return DeleteSessionOutcome::Failed {
+                    detail: format!("could not unlink the imported chat: {e}"),
+                };
+            }
+        }
         match store::delete_session(&root, &session_id) {
             Ok(()) => {
                 // The index is a projection: rebuilding it from what is on
