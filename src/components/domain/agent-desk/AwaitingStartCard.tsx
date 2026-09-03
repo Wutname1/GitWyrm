@@ -5,27 +5,14 @@ import { ListTodo, TriangleAlert } from 'lucide-react'
 import { commands, type AgentSession, type ExecutionRecord } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
-
-/** Plain-language reason a proposed graph failed to validate, matching
- * `GraphValidationError`'s cases without exposing internal field names. */
-function invalidGraphReason(reason: string): string {
-  switch (reason) {
-    case 'tooManyHelpers':
-      return 'This plan has more than 3 helpers, which is not allowed yet.'
-    case 'duplicateNodeId':
-      return 'Two helpers in this plan have the same id.'
-    case 'unknownDependency':
-      return "One helper depends on a step that isn't in this plan."
-    case 'cycle':
-      return 'Two or more helpers depend on each other in a loop.'
-    case 'emptyJob':
-      return 'One helper is missing a title or a real time budget.'
-    case 'missingAllowedPaths':
-      return "One helper can write files but wasn't told which ones it may touch."
-    default:
-      return 'This plan is no longer valid.'
-  }
-}
+import { useOpenRepo } from '@/hooks/useRepoActions'
+import {
+  startFailureCardForError,
+  startFailureCardForGraph,
+  type StartFailureAction,
+  type StartFailureCard as StartFailureCardModel,
+} from '@/lib/agentDeskStartFailure'
+import { StartFailureCard } from './StartFailureCard'
 
 /**
  * Plan mode's AwaitingStart card (tasks.md 2.2): shown when a lead execution
@@ -44,13 +31,18 @@ export function AwaitingStartCard({
   onRevise: () => void
 }) {
   const qc = useQueryClient()
-  const [busy, setBusy] = useState<'start' | 'solo' | 'accepting' | null>(null)
+  const [busy, setBusy] = useState<'start' | 'solo' | 'accepting' | 'opening' | null>(null)
   // Task 3.3 ("detect task/spec changes after draft and block Start until
   // refreshed or explicitly accepted"): when Start refuses with `stale`, this
   // card shows a warning and an explicit "Start anyway" action instead of the
   // ordinary Start button. Cleared on refresh (a fresh mount re-fetches the
   // lead, which no longer carries this outcome) and on a fresh Start attempt.
   const [stale, setStale] = useState<{ currentFingerprint: string } | null>(null)
+  // Source-kickoffs 2.4/5.3: a Start that failed for a fixable reason stays
+  // on this card (with Try again and the matching fix) instead of flashing
+  // past as a toast. Cleared when a Start succeeds or the person closes it.
+  const [failure, setFailure] = useState<StartFailureCardModel | null>(null)
+  const openRepo = useOpenRepo()
   const proposal = lead.proposedGraph
   if (!proposal) return null
 
@@ -63,42 +55,76 @@ export function AwaitingStartCard({
       const outcome = unwrap(await commands.agentSessionStartGraph(session.header.sessionId))
       if (outcome.kind === 'started') {
         setStale(null)
+        setFailure(null)
         refreshSession()
         toast.success(
           outcome.started_helpers.length > 0
             ? `Started the lead and ${outcome.started_helpers.length} helper${outcome.started_helpers.length === 1 ? '' : 's'}.`
             : 'Started the lead agent.'
         )
-      } else if (outcome.kind === 'stale') {
+        return
+      }
+      if (outcome.kind === 'stale') {
         // Refuses outright: no worktree was provisioned, nothing was
         // written. The user must refresh (re-plan) or explicitly accept the
         // drift before Start will proceed -- see the warning banner below.
+        setFailure(null)
         setStale({ currentFingerprint: outcome.current_fingerprint })
         toast.warning('The OpenSpec source changed since this plan was drafted.', {
           description: 'Review what changed, then start anyway or ask for a fresh plan.',
         })
+        return
+      }
+      const card = startFailureCardForGraph(outcome)
+      if (card) {
+        setFailure(card)
+        return
+      }
+      if (outcome.kind === 'alreadyStarted') {
+        // A racing click already won. Refresh so the view shows what it
+        // actually started; this card unmounts once the proposal is gone.
+        refreshSession()
+        toast.info('This plan was already started.')
       } else if (outcome.kind === 'noProposal') {
         toast.error('There is no plan waiting to start.')
-      } else if (outcome.kind === 'invalid') {
-        toast.error('This plan can no longer start.', { description: invalidGraphReason(outcome.reason.kind) })
-      } else if (outcome.kind === 'worktreeFailed') {
-        toast.error(`Could not set up a workspace for "${outcome.node_id}".`, { description: outcome.detail })
-      } else if (outcome.kind === 'sourceMissing') {
-        toast.error('This chat needs its repository open to start.', { description: outcome.detail })
       } else if (outcome.kind === 'notFound') {
         toast.error('This chat is gone. It may have been archived elsewhere.')
       } else if (outcome.kind === 'damaged') {
         toast.error('This chat file is damaged and could not start.', { description: outcome.reason })
-      } else {
-        toast.error('Could not start the plan.', { description: outcome.kind })
       }
     } catch (e) {
       const message = describeError(e)
       log.error(`agent desk: could not start graph: ${message}`)
-      toast.error('Could not start the plan.', { description: message })
+      setFailure(startFailureCardForError(message))
     } finally {
       setBusy(null)
     }
+  }
+
+  /**
+   * "Open project" on a sourceMissing card: open the chat's repository as a
+   * tab, then run the same `start()` every other Start uses. See
+   * `SessionComposer.openProjectAndStart` for why the start follows at once.
+   */
+  const openProjectAndStart = async () => {
+    if (busy) return
+    setBusy('opening')
+    try {
+      await openRepo.mutateAsync(session.header.repoPath)
+    } catch {
+      // `useOpenRepo` already toasted the reason; the card stays.
+      setBusy(null)
+      return
+    }
+    setBusy(null)
+    await start()
+  }
+
+  const onFailureAction = (action: StartFailureAction) => {
+    if (action === 'tryAgain') void start()
+    else if (action === 'openProject') void openProjectAndStart()
+    // 'pickProvider' is never offered for a graph start: the plan already
+    // fixed its tool when it was drafted, and the mapping does not emit it.
   }
 
   /**
@@ -183,6 +209,16 @@ export function AwaitingStartCard({
             The OpenSpec change changed since this plan was drafted. Revise the plan for a fresh
             read, or start anyway using this plan as drafted.
           </span>
+        </div>
+      )}
+      {failure && (
+        <div className="mt-2">
+          <StartFailureCard
+            card={failure}
+            busy={busy !== null}
+            onAction={onFailureAction}
+            onDismiss={() => setFailure(null)}
+          />
         </div>
       )}
       <div className="mt-2 flex gap-1.5">

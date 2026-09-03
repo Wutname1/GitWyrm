@@ -20,6 +20,14 @@ import { NewChatLanding } from './NewChatLanding'
 import { ProviderControl } from './ProviderControl'
 import { TeamShapeControl } from './TeamShapeControl'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useOpenRepo } from '@/hooks/useRepoActions'
+import {
+  startFailureCardForError,
+  startFailureCardForExecution,
+  type StartFailureAction,
+  type StartFailureCard as StartFailureCardModel,
+} from '@/lib/agentDeskStartFailure'
+import { StartFailureCard } from './StartFailureCard'
 import type { ChatProjectChoice } from './NewChatLanding'
 
 /**
@@ -33,8 +41,9 @@ import type { ChatProjectChoice } from './NewChatLanding'
  *   2. Only once the append has durably landed, ask the backend to start (or
  *      continue) an execution in the chosen mode/team. A failure here still
  *      leaves the user's message visible in the transcript; it is reported
- *      as its own toast rather than rolled back, since the message was
- *      genuinely saved.
+ *      as a card above the composer (`StartFailureCard`, with Try again and
+ *      the fix for that kind of failure) rather than rolled back, since the
+ *      message was genuinely saved.
  * `sending` gates only the Send affordance (disabled state + guard in
  * `canSendComposerDraft`), never the textarea itself, so the user's typing
  * is never dropped while a previous send is in flight.
@@ -80,6 +89,14 @@ export function SessionComposer({
   // default if it ever changes.
   const [provider, setProvider] = useState<string | null>(header?.preferredProvider ?? null)
   const [providerOpen, setProviderOpen] = useState(false)
+  // Source-kickoffs 2.4/5.3: the last failed start stays on screen as a card
+  // until the person acts on it or closes it. A toast alone was gone before
+  // anyone who stepped away could read it, leaving a saved message and no
+  // way forward. `retrying` gates the card's own buttons while a retry or
+  // project open is in flight.
+  const [startFailure, setStartFailure] = useState<StartFailureCardModel | null>(null)
+  const [retrying, setRetrying] = useState(false)
+  const openRepo = useOpenRepo()
   const preferenceWrite = useRef<Promise<void>>(Promise.resolve())
   // Resolved to the tool's real name rather than its id: the landing would
   // otherwise read "copilot" where the rest of the app says "GitHub Copilot".
@@ -112,6 +129,12 @@ export function SessionComposer({
     setTeam(header?.preferredTeam === 'solo' ? 'solo' : 'helpers')
     setProvider(header?.preferredProvider ?? null)
   }, [header?.sessionId, header?.preferredMode, header?.preferredTeam, header?.preferredProvider])
+
+  // A failure card belongs to the chat it happened in. Swapping this pane
+  // to another chat must not carry it across.
+  useEffect(() => {
+    setStartFailure(null)
+  }, [sessionId])
 
   const savePreferences = (nextMode: ComposerMode, nextTeam: ComposerTeam, nextProvider: string | null) => {
     if (!sessionId) return
@@ -169,6 +192,103 @@ export function SessionComposer({
 
   const canSend = canSendComposerDraft({ draft, sessionId, sending })
 
+  /**
+   * The start step, on its own so Send and the failure card's Try again run
+   * the exact same code. Uses the composer's current mode/team/provider:
+   * those are the chat's saved choices, so a retry re-runs "the same" start
+   * unless the person changed one on purpose (picking another AI tool from
+   * the card, say), in which case the change is what they want applied.
+   *
+   * Never throws. A typed refusal or a thrown error becomes the card; a
+   * success clears it.
+   */
+  const startExecution = async (targetSessionId: string): Promise<void> => {
+    try {
+      const startOutcome = unwrap(
+        await commands.agentSessionStartExecution(
+          targetSessionId,
+          modeToExecutionMode(mode),
+          teamToExecutionTeam(team),
+          provider
+        )
+      )
+      if (startOutcome.kind === 'started') {
+        setStartFailure(null)
+        void qc.invalidateQueries({ queryKey: keys.agentSession(targetSessionId) })
+        return
+      }
+      if (startOutcome.kind === 'alreadyRunning') {
+        // R3.6: this is the case the reset audit called out by name --
+        // "never claim the current run received a message when it did
+        // not." There is no real steering channel into a live ACP
+        // execution today (no queue the running process reads from
+        // mid-turn); `agentSessionAppendUserMessage` only wrote the
+        // message into this session's own transcript file, and
+        // `agentSessionStartExecution` refused to start a second engine
+        // on top of the one already running. The message is saved and
+        // visible, and the next turn starts from the queued follow-up on
+        // its own once the current one ends. Say exactly that, rather
+        // than implying delivery. Not a failure, so no card.
+        setStartFailure(null)
+        toast.info('Saved. The agent will pick this up as soon as it finishes its current turn.')
+        return
+      }
+      const card = startFailureCardForExecution(startOutcome)
+      if (card) {
+        setStartFailure(card)
+        return
+      }
+      // The chat itself is gone or unreadable: nothing on the card could
+      // help, so these stay one-shot toasts.
+      if (startOutcome.kind === 'notFound') {
+        toast.error('This chat is gone. It may have been archived elsewhere.')
+      } else if (startOutcome.kind === 'damaged') {
+        toast.error('This chat file is damaged and could not start.', { description: startOutcome.reason })
+      }
+    } catch (e) {
+      const message = describeError(e)
+      log.error(`agent desk: could not start execution: ${message}`)
+      setStartFailure(startFailureCardForError(message))
+    }
+  }
+
+  const tryStartAgain = async () => {
+    if (!sessionId || retrying) return
+    setRetrying(true)
+    try {
+      await startExecution(sessionId)
+    } finally {
+      setRetrying(false)
+    }
+  }
+
+  /**
+   * "Open project" on a sourceMissing card: opens the chat's repository as a
+   * tab (the same hook the sidebar and worktree list use, so it lands in the
+   * workspace store and toasts "Opened X"), then runs the start straight
+   * away. Stopping after the open would leave the person with the same card
+   * and one more click to make; if the start fails again the card updates.
+   */
+  const openProjectAndStart = async () => {
+    if (!sessionId || !header || retrying) return
+    setRetrying(true)
+    try {
+      await openRepo.mutateAsync(header.repoPath)
+      await startExecution(sessionId)
+    } catch {
+      // `useOpenRepo` already toasted the reason. The card stays so the
+      // person can try again once the folder is reachable.
+    } finally {
+      setRetrying(false)
+    }
+  }
+
+  const onFailureAction = (action: StartFailureAction) => {
+    if (action === 'tryAgain') void tryStartAgain()
+    else if (action === 'openProject') void openProjectAndStart()
+    else if (action === 'pickProvider') setProviderOpen(true)
+  }
+
   const send = async () => {
     if (!canSend || !sessionId) return
     setSending(true)
@@ -185,51 +305,7 @@ export function SessionComposer({
         void qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
         void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
 
-        try {
-          const startOutcome = unwrap(
-            await commands.agentSessionStartExecution(
-              sessionId,
-              modeToExecutionMode(mode),
-              teamToExecutionTeam(team),
-              provider
-            )
-          )
-          if (startOutcome.kind === 'started') {
-            void qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
-          } else if (startOutcome.kind === 'alreadyRunning') {
-            // R3.6: this is the case the reset audit called out by name --
-            // "never claim the current run received a message when it did
-            // not." There is no real steering channel into a live ACP
-            // execution today (no queue the running process reads from
-            // mid-turn); `agentSessionAppendUserMessage` above only wrote the
-            // message into this session's own transcript file, and
-            // `agentSessionStartExecution` refused to start a second engine
-            // on top of the one already running. The message is saved and
-            // visible, but the running agent has not seen it and will not
-            // until its current turn ends and something starts a fresh
-            // execution (the user sending another message once it is idle,
-            // or the lead's own next turn picking it up if the provider
-            // happens to poll the transcript -- neither of which this call
-            // caused). Say exactly that, rather than implying delivery.
-            toast.info('Saved. The agent will pick this up as soon as it finishes its current turn.')
-          } else if (startOutcome.kind === 'sourceMissing') {
-            toast.error('This chat needs its repository open to run.', { description: startOutcome.detail })
-          } else if (startOutcome.kind === 'adapterUnsupported') {
-            toast.error('That provider is not available right now.', { description: startOutcome.detail })
-          } else if (startOutcome.kind === 'providerReconnect') {
-            toast.error('Reconnect the provider to continue.', { description: startOutcome.detail })
-          } else if (startOutcome.kind === 'notFound') {
-            toast.error('This chat is gone. It may have been archived elsewhere.')
-          } else if (startOutcome.kind === 'damaged') {
-            toast.error('This chat file is damaged and could not start.', { description: startOutcome.reason })
-          } else {
-            toast.error('Your message was sent, but the agent could not start.', { description: startOutcome.kind })
-          }
-        } catch (e) {
-          const message = describeError(e)
-          log.error(`agent desk: could not start execution: ${message}`)
-          toast.error('Your message was sent, but the agent could not start.', { description: message })
-        }
+        await startExecution(sessionId)
       } else if (outcome.kind === 'notFound') {
         toast.error('This chat is gone. It may have been archived elsewhere.')
       } else if (outcome.kind === 'damaged') {
@@ -268,6 +344,16 @@ export function SessionComposer({
           onProjectChange={(project) => void changeProject(project)}
           source={header?.source ?? null}
         />
+      )}
+      {startFailure && (
+        <div className="mb-1.5">
+          <StartFailureCard
+            card={startFailure}
+            busy={retrying || sending}
+            onAction={onFailureAction}
+            onDismiss={() => setStartFailure(null)}
+          />
+        </div>
       )}
       <div className="rounded-lg border border-border bg-panel2 p-1.5">
         <OperatingModeControl mode={mode} onChange={changeMode} />
