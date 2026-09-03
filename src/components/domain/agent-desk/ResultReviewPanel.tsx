@@ -9,6 +9,8 @@ import { useSpecAi } from '@/hooks/useSpecAi'
 import { useSpecDraftStore } from '@/stores/specDraftStore'
 import { selectChangeEverywhere } from '@/lib/specSync'
 import { specReturnTargets } from '@/lib/agentDeskSpecReturn'
+import { useGithubPrForBranch } from '@/hooks/useGithub'
+import { PullRequestDraftDialog } from './PullRequestDraftDialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -552,7 +554,13 @@ export function ResultReviewPanel({
           </ActionButton>
         )}
         {availability.canDraftPullRequest && (
-          <PullRequestButton sessionId={sessionId} executionId={executionId} disabled={busy} />
+          <PullRequestButton
+            sessionId={sessionId}
+            repoId={repoId}
+            branch={record.branch}
+            executionId={executionId}
+            disabled={busy}
+          />
         )}
       </div>
     </div>
@@ -591,34 +599,56 @@ function ActionButton({
 }
 
 /**
- * Task 4: PR creation is a separate explicit action from Commit, and never
- * pushes -- it drafts editable title/body and, only on a second explicit
- * click, opens the host's own compare/new-PR page in the browser. GitWyrm
- * never calls a host write API or `git_push` from this button.
+ * Task 4: PR landing is a separate explicit action from Commit, and never
+ * pushes -- it drafts an editable title and body, shows them for review, and
+ * only then opens the host's own new-PR page with that text filled in.
+ * GitWyrm never calls a host write API or `git_push` from this button; the
+ * person presses the host's own button.
+ *
+ * Create and Update are the same control with different destinations. When
+ * the branch already has an open pull request, opening it goes to the one
+ * that exists rather than to a compare page that would offer to create a
+ * second. The title/body draft is still shown, because updating a
+ * description is the reason someone opens it.
+ *
+ * The draft used to appear only as a toast: the title flashed past, the body
+ * was discarded, and the host page opened blank. Everything the backend
+ * drafted was thrown away one line after it arrived.
  */
-function PullRequestButton({ sessionId, executionId, disabled }: { sessionId: string; executionId: string; disabled?: boolean }) {
+function PullRequestButton({
+  sessionId,
+  repoId,
+  branch,
+  executionId,
+  disabled,
+}: {
+  sessionId: string
+  repoId: string
+  /** The result's own branch, used to find an existing pull request. */
+  branch: string | null
+  executionId: string
+  disabled?: boolean
+}) {
   const [drafting, setDrafting] = useState(false)
+  const [draft, setDraft] = useState<{ title: string; body: string; compareUrl: string } | null>(null)
+  const existing = useGithubPrForBranch(repoId, branch)
 
   async function handleDraft() {
     setDrafting(true)
     try {
       const outcome = unwrap(await commands.agentResultDraftPullRequest(sessionId, executionId))
       if (outcome.kind !== 'drafted') {
-        toast.error('Could not prepare a pull request draft for this result.')
+        toast.error('Could not prepare a pull request for this result.')
         return
       }
       if (!outcome.draft.compareUrl) {
-        toast.error('This repository is not connected to a host GitWyrm recognizes.')
+        toast.error('This project is not connected to a host GitWyrm recognizes.')
         return
       }
-      toast('Review the pull request before it opens', {
-        description: outcome.draft.title,
-        action: {
-          label: 'Open on host',
-          onClick: () => {
-            void commands.agentResultOpenPullRequestPage(outcome.draft.compareUrl!)
-          },
-        },
+      setDraft({
+        title: outcome.draft.title,
+        body: outcome.draft.body,
+        compareUrl: outcome.draft.compareUrl,
       })
     } catch (e) {
       log.error(`draft pull request failed: ${describeError(e)}`)
@@ -629,8 +659,27 @@ function PullRequestButton({ sessionId, executionId, disabled }: { sessionId: st
   }
 
   return (
-    <ActionButton onClick={() => void handleDraft()} disabled={disabled || drafting} icon={<ExternalLink size={12} aria-hidden />}>
-      Create pull request
-    </ActionButton>
+    <>
+      <ActionButton
+        onClick={() => void handleDraft()}
+        disabled={disabled || drafting}
+        icon={<ExternalLink size={12} aria-hidden />}
+      >
+        {existing ? `Update pull request #${existing.number}` : 'Create pull request'}
+      </ActionButton>
+      {draft && (
+        <PullRequestDraftDialog
+          open
+          onOpenChange={(open) => !open && setDraft(null)}
+          compareUrl={draft.compareUrl}
+          initialTitle={draft.title}
+          initialBody={draft.body}
+          existingUrl={existing?.html_url ?? null}
+          onOpen={(url) => {
+            void commands.agentResultOpenPullRequestPage(url)
+          }}
+        />
+      )}
+    </>
   )
 }
