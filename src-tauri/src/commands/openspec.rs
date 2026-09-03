@@ -677,6 +677,122 @@ pub async fn openspec_draft_edit(
     edit_draft::parse_draft(&reply, &file)
 }
 
+/// What came back from asking a finished chat to update its spec.
+///
+/// A closed enum rather than an error string: "this chat has nothing to send
+/// back" is an ordinary answer with its own sentence and its own next step,
+/// not a failure. Only a genuinely broken read or a provider problem is an
+/// `Err` from this command.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SpecReturnDraft {
+    /// A proposed new body for one file of the change, for the person to
+    /// read and save. Nothing has been written.
+    Drafted {
+        change_id: String,
+        draft: edit_draft::DraftedEdit,
+    },
+    /// The chat cannot report back, and this says why in plain words.
+    NothingToSend { detail: String },
+    /// The chat could not be read.
+    SessionNotFound,
+}
+
+/// Draft an update to a change's spec file from what a finished chat actually
+/// did. **Writes nothing.**
+///
+/// This is the return half of the loop: an OpenSpec change starts the work,
+/// and the finished work reports back to the spec. Before this, that
+/// relationship ran one way, so the spec went stale the moment the work
+/// landed and someone had to notice by hand.
+///
+/// The instruction is built from facts the chat cannot overstate (the result
+/// record's changed files, the step it was given) plus the agent's own
+/// closing account, and then handed to `openspec_draft_edit`'s own drafter --
+/// the same one a hand-typed instruction uses. So there is one drafting
+/// prompt, one write path (`openspec_write_file`, after the person saves),
+/// and no way for an agent to reach a spec file on its own.
+#[tauri::command]
+#[specta::specta]
+pub async fn openspec_draft_from_session(
+    app: tauri::AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    session_id: String,
+    target: crate::agentdesk::spec_return::SpecReturnTarget,
+    provider: String,
+    model: String,
+) -> Result<SpecReturnDraft, AppError> {
+    use crate::agentdesk::spec_return::build_return_context;
+
+    let store_root = crate::agentdesk::store::SessionStoreRoot::resolve(&app)
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let session_for_read = session_id.clone();
+    let read = tauri::async_runtime::spawn_blocking(move || {
+        let session = crate::agentdesk::store::read_session(&store_root, &session_for_read)?;
+        // A missing results file is not an error: it is a chat that has not
+        // produced a result yet, which `build_return_context` answers with
+        // its own sentence.
+        let results =
+            crate::agentdesk::result::read_results(&store_root, &session_for_read).unwrap_or_default();
+        Ok::<_, crate::agentdesk::model::SessionLoadError>((session, results))
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?;
+
+    let (session, results) = match read {
+        Ok(pair) => pair,
+        Err(crate::agentdesk::model::SessionLoadError::NotFound) => {
+            return Ok(SpecReturnDraft::SessionNotFound)
+        }
+        Err(e) => return Err(AppError::Other(e.to_string())),
+    };
+
+    // The newest result is the one that describes the work as it stands.
+    let latest = results.last();
+    let context = match build_return_context(&session, latest, target) {
+        Ok(c) => c,
+        Err(refusal) => {
+            return Ok(SpecReturnDraft::NothingToSend {
+                detail: refusal.plain().to_string(),
+            })
+        }
+    };
+
+    let root = repo_root(&manager, &repo_id)?;
+    let root_for_read = root.clone();
+    let change_for_read = context.change_id.clone();
+    let file_for_read = context.file.clone();
+    let (current, proposal) = tauri::async_runtime::spawn_blocking(move || {
+        let dir = openspec::openspec_dir(&root_for_read)
+            .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
+        // A file that does not exist yet drafts from empty, which is how a
+        // change with no design.md gains one.
+        let current = write::read_change_file(&dir, &change_for_read, &file_for_read).unwrap_or_default();
+        let proposal =
+            write::read_change_file(&dir, &change_for_read, "proposal.md").unwrap_or_default();
+        Ok::<_, AppError>((current, proposal))
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))??;
+
+    let user = edit_draft::user_prompt(&context.file, &current, &context.instruction, &proposal);
+    let reply = crate::ai::complete::complete_in(
+        &app,
+        &provider,
+        &model,
+        &root,
+        edit_draft::SYSTEM_PROMPT,
+        &user,
+    )
+    .await?;
+    let draft = edit_draft::parse_draft(&reply, &context.file)?;
+    Ok(SpecReturnDraft::Drafted {
+        change_id: context.change_id,
+        draft,
+    })
+}
+
 /// Capability folder names under `openspec/specs/`, for the drafting prompt.
 fn capability_names(openspec_dir: &std::path::Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(openspec_dir.join("specs")) else {

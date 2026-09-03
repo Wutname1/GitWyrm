@@ -1,10 +1,20 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CheckCircle2, CircleAlert, ExternalLink, FileDiff, GitCommitHorizontal, RotateCcw, Wrench } from 'lucide-react'
+import { CheckCircle2, CircleAlert, ExternalLink, FileCheck2, FileDiff, GitCommitHorizontal, RotateCcw, Wrench } from 'lucide-react'
 import { commands, type ResultRecord, type SessionIntent } from '@/lib/bindings'
 import { invalidateAfterResultLanding, keys, unwrap } from '@/lib/queryKeys'
 import { useCompleteOpenSpecTask } from '@/hooks/useOpenspecSessionSource'
+import { useSpecAi } from '@/hooks/useSpecAi'
+import { useSpecDraftStore } from '@/stores/specDraftStore'
+import { selectChangeEverywhere } from '@/lib/specSync'
+import { specReturnTargets } from '@/lib/agentDeskSpecReturn'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useAgentSessionMutations } from '@/hooks/useAgentSessionMutations'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import {
@@ -89,6 +99,60 @@ export function ResultReviewPanel({
   const record = records.find((r) => r.executionId === executionId) ?? null
 
   const completeTask = useCompleteOpenSpecTask(repoId)
+  // The return half of the loop. An OpenSpec change starts the work; when the
+  // work finishes it can tell the spec what it found, instead of the spec
+  // quietly going stale while someone is expected to notice.
+  //
+  // A draft, never a write: the proposed text lands in the spec editor as an
+  // unsaved edit through the same store a hand edit uses, and the person
+  // saves it. That keeps one write path and one refusal, and means an agent
+  // never reaches a spec file on its own.
+  const specAi = useSpecAi()
+  const openDraft = useSpecDraftStore((s) => s.open)
+  const replaceDraft = useSpecDraftStore((s) => s.replace)
+  const setCenterView = useAgentDeskUiStore((s) => s.setCenterView)
+  const [returning, setReturning] = useState(false)
+
+  const sendBackToSpec = async (target: (typeof specReturnTargets)[number]) => {
+    if (returning || !specAi.configured) return
+    setReturning(true)
+    try {
+      const outcome = unwrap(
+        await commands.openspecDraftFromSession(
+          repoId,
+          sessionId,
+          target.id,
+          specAi.provider,
+          specAi.model
+        )
+      )
+      if (outcome.kind === 'nothingToSend') {
+        toast.info(outcome.detail)
+        return
+      }
+      if (outcome.kind === 'sessionNotFound') {
+        toast.error('This chat is gone, so there is nothing to send back.')
+        return
+      }
+      const changeId = outcome.change_id
+      const draft = outcome.draft
+      // Read what is on disk first, so the editor can show the real
+      // difference rather than diffing against whatever the model was shown.
+      const current = unwrap(await commands.openspecReadFile(repoId, changeId, draft.file))
+      openDraft(repoId, changeId, draft.file, current)
+      replaceDraft(repoId, changeId, draft.file, draft.body)
+      selectChangeEverywhere(changeId)
+      setCenterView('openspec')
+      toast.success(`Drafted an update to ${draft.file}.`, {
+        description: 'Read it in the spec view, then save it if it looks right.',
+      })
+    } catch (e) {
+      log.error(`spec return draft failed: ${describeError(e)}`)
+      toast.error('Could not draft that update.', { description: describeError(e) })
+    } finally {
+      setReturning(false)
+    }
+  }
   const { escalateToFix } = useAgentSessionMutations()
   // Which pane is showing this review. `ConversationPane` does not pass its
   // pane id down, but the layout knows which session each pane holds, so
@@ -429,6 +493,33 @@ export function ResultReviewPanel({
           <ActionButton onClick={handleKeep} disabled={busy}>
             Keep
           </ActionButton>
+        )}
+        {/* Only for a chat that came from a spec, and only once the AI is
+            set up: otherwise the loop does not apply, or cannot run. */}
+        {isOpenSpecTask && specAi.configured && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <ActionButton
+                onClick={() => {}}
+                disabled={busy || returning}
+                icon={<FileCheck2 size={12} aria-hidden />}
+              >
+                {returning ? 'Drafting…' : 'Tell the spec'}
+              </ActionButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-72">
+              {specReturnTargets.map((target) => (
+                <DropdownMenuItem key={target.id} onSelect={() => void sendBackToSpec(target)}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{target.label}</span>
+                    <span className="block truncate text-[10px] text-muted-foreground">
+                      {target.detail}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         {availability.canUndo && (
           <ActionButton onClick={handleUndo} disabled={busy} icon={<RotateCcw size={12} aria-hidden />}>

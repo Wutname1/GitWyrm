@@ -20,6 +20,7 @@ pub mod policy;
 pub mod reconcile;
 pub mod result;
 pub mod session_recovery;
+pub mod spec_return;
 pub mod store;
 
 #[allow(unused_imports)]

@@ -430,6 +430,30 @@ async openspecDraftEdit(repoId: string, changeId: string, file: string, instruct
 }
 },
 /**
+ * Draft an update to a change's spec file from what a finished chat actually
+ * did. **Writes nothing.**
+ * 
+ * This is the return half of the loop: an OpenSpec change starts the work,
+ * and the finished work reports back to the spec. Before this, that
+ * relationship ran one way, so the spec went stale the moment the work
+ * landed and someone had to notice by hand.
+ * 
+ * The instruction is built from facts the chat cannot overstate (the result
+ * record's changed files, the step it was given) plus the agent's own
+ * closing account, and then handed to `openspec_draft_edit`'s own drafter --
+ * the same one a hand-typed instruction uses. So there is one drafting
+ * prompt, one write path (`openspec_write_file`, after the person saves),
+ * and no way for an agent to reach a spec file on its own.
+ */
+async openspecDraftFromSession(repoId: string, sessionId: string, target: SpecReturnTarget, provider: string, model: string) : Promise<Result<SpecReturnDraft, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("openspec_draft_from_session", { repoId, sessionId, target, provider, model }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Delete one change's folder from the working tree.
  * 
  * The blunt counterpart to archiving: archive merges the change into the specs
@@ -7904,6 +7928,49 @@ text: string;
  * Scenario blocks as `(name, body)` -- rendered verbatim, never interpreted.
  */
 scenarios: ([string, string])[] }
+/**
+ * What came back from asking a finished chat to update its spec.
+ * 
+ * A closed enum rather than an error string: "this chat has nothing to send
+ * back" is an ordinary answer with its own sentence and its own next step,
+ * not a failure. Only a genuinely broken read or a provider problem is an
+ * `Err` from this command.
+ */
+export type SpecReturnDraft = 
+/**
+ * A proposed new body for one file of the change, for the person to
+ * read and save. Nothing has been written.
+ */
+{ kind: "drafted"; change_id: string; draft: DraftedEdit } | 
+/**
+ * The chat cannot report back, and this says why in plain words.
+ */
+{ kind: "nothingToSend"; detail: string } | 
+/**
+ * The chat could not be read.
+ */
+{ kind: "sessionNotFound" }
+/**
+ * Which file of the change a return draft is aimed at.
+ * 
+ * Deliberately a closed set rather than a free path: these are the three
+ * files a finished piece of work has something to say about, and each has a
+ * different question behind it. Anything else is a hand edit.
+ */
+export type SpecReturnTarget = 
+/**
+ * Tick off what the work completed, and add any step it turned out to
+ * need. The most common return: the tasks list is what goes stale first.
+ */
+"tasks" | 
+/**
+ * Record what the work revealed about how the change actually behaves.
+ */
+"proposal" | 
+/**
+ * Record a decision the work forced, or a design note it invalidated.
+ */
+"design"
 /**
  * One checkbox line from tasks.md.
  */
