@@ -1008,33 +1008,15 @@ export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: str
               // Confirmed first: this is the one ending action that destroys
               // work, and a misclick here costs the whole run.
               onUndo: () => setConfirmUndo(true),
-              // Restarts the run's own task, not whatever is selected now --
-              // the session carries its change and task for exactly this.
+              // Restarting means working on the task again, which is now
+              // one path: an Agent Desk chat. Starting a second, separate
+              // run here is exactly the parallel lifecycle this converged
+              // away from, so this clears the finished console and starts
+              // the task the same way the rail's button does.
               onRestart: () => {
                 void (async () => {
-                  const session = run.session;
-                  if (!session) return;
                   await run.clear();
-                  const res = await commands.aiRunStart(
-                    repoId,
-                    session.change_id,
-                    // The session does not carry the checkbox index, so the
-                    // next unticked task in this change is the target. That is
-                    // the same task unless it was ticked during the run.
-                    nextTask(change)?.index ?? 0,
-                    session.task_number,
-                    session.task_text,
-                    session.branch,
-                    // Restart the way the run was started. A run the user set
-                    // up to stay out of their files must not quietly start
-                    // editing them on a retry.
-                    session.worktree_path != null,
-                  );
-                  if (res.status !== "ok") {
-                    toast.error("That could not be restarted.", {
-                      description: res.error,
-                    });
-                  }
+                  await startRun();
                 })();
               },
               // These two can act for real: reconnecting is a settings trip,

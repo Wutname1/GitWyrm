@@ -203,7 +203,6 @@ export function DeskActionRail({
   } | null>(null);
   const { startRun, starting } = useStartRun(repoId, change);
   /** Run the task in its own copy of the project. Off by default. */
-  const [ownFolder, setOwnFolder] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   // A failed archive, with the change it belongs to. Carries its own id for the
   // same reason the drafted fix does: the user can select elsewhere while
@@ -515,28 +514,18 @@ export function DeskActionRail({
                     <RailButton
                       primary
                       icon={<Play size={12} strokeWidth={2.6} />}
-                      label={starting ? "Starting…" : "Run this task with AI"}
-                      onClick={() => void startRun(ownFolder)}
+                      label={starting ? "Starting…" : "Work on this task with AI"}
+                      onClick={() => void startRun()}
                     />
-                    {/* Off by default. A run already leaves the user's work
-                        untouched by setting it aside; a folder is only worth
-                        its cleanup cost when they want to keep editing the
-                        same files while it works. */}
-                    <label className="flex cursor-pointer items-start gap-1.5 px-0.5 text-2xs leading-relaxed text-sub hover:text-foreground">
-                      <input
-                        type="checkbox"
-                        checked={ownFolder}
-                        onChange={(e) => setOwnFolder(e.target.checked)}
-                        className="mt-0.5 size-3 flex-none accent-[var(--gw-accent)]"
-                      />
-                      <span>
-                        Run it in its own worktree so you can keep editing
-                        <span className="block text-muted-foreground">
-                          Checks this project out into a separate folder for the task, then shows
-                          you what changed before anything reaches your branch.
-                        </span>
-                      </span>
-                    </label>
+                    {/* The old "run it in its own worktree" checkbox is gone
+                        because the answer is now always yes: this opens an
+                        Agent Desk chat, and a chat that may change files
+                        always gets its own copy of the project. */}
+                    <p className="px-0.5 text-2xs leading-relaxed text-muted-foreground">
+                      Opens a chat in Agent Desk. It works in its own copy of the project, so you
+                      can keep editing yours, and shows you what changed before anything reaches
+                      your branch.
+                    </p>
                   </>
                 )}
                 {/* Ask shares the ✦ tab with runs, and only one session exists at

@@ -2888,21 +2888,6 @@ async githubSshKeyPairings() : Promise<Result<SshKeyPairing[], string>> {
 }
 },
 /**
- * Starts a real run: the engine, against the user's default provider.
- * 
- * Separate command from `ai_run_start_demo` on purpose. The demo replays a
- * script and must never be mistaken for this; this spends the user's AI
- * credits and edits their files.
- */
-async aiRunStart(repoId: string, changeId: string, taskIndex: number, taskNumber: number, taskText: string, branch: string, ownFolder: boolean) : Promise<Result<StartOutcome, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("ai_run_start", { repoId, changeId, taskIndex, taskNumber, taskText, branch, ownFolder }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Starts a scripted run, for building and checking the console.
  * 
  * Deliberately named `demo` at every layer, and every session it produces

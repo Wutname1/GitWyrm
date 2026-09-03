@@ -299,7 +299,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::github::github_close_pr,
             commands::github::github_close_issue,
             commands::github::github_ssh_key_pairings,
-            commands::airun::ai_run_start,
             commands::airun::ai_run_start_demo,
             commands::airun::ai_run_answer_gate,
             commands::airun::ai_run_note,
