@@ -717,7 +717,15 @@ export function ConversationPane({
             executionId={session.header.activeExecutionId!}
             intent={session.header.intent}
             taskText={session.header.title}
-            provider="copilot"
+            // The AI that actually ran this execution, not a constant. A
+            // hardcoded "copilot" put the wrong name in the drafted commit
+            // for every Codex, Claude, Gemini and opencode result.
+            provider={
+              session.executions.find((e) => e.executionId === session.header.activeExecutionId)
+                ?.provider ??
+              session.header.preferredProvider ??
+              'copilot'
+            }
             // P1-C wiring 1: lets Keep also check off the originating
             // OpenSpec task -- see `ResultReviewPanel`'s `isOpenSpecTask`
             // doc comment.
