@@ -1,0 +1,594 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-03T00:55:26Z",
+  "title": "Design System: GitWyrm",
+  "extensions": {
+    "colorMeta": {
+      "deep-mint": {
+        "role": "primary",
+        "displayName": "Deep Mint",
+        "canonical": "#1db584",
+        "tonalRamp": [
+          "#0b4230",
+          "#127253",
+          "#1aa377",
+          "#22d39a",
+          "#4be2b1",
+          "#7beac6",
+          "#b0f2dd",
+          "#e9fbf6"
+        ]
+      },
+      "mint-text": {
+        "role": "primary",
+        "displayName": "Mint Text",
+        "canonical": "#38b78e",
+        "tonalRamp": [
+          "#123b2d",
+          "#1f664f",
+          "#2c9070",
+          "#39bb91",
+          "#5fceaa",
+          "#8adbc1",
+          "#b9e9da",
+          "#ebf9f5"
+        ]
+      },
+      "mint-ink": {
+        "role": "primary",
+        "displayName": "Mint Ink",
+        "canonical": "#04120d",
+        "tonalRamp": [
+          "#0e3f2d",
+          "#186c4e",
+          "#229a70",
+          "#2dc891",
+          "#54d9a9",
+          "#82e3c0",
+          "#b4eed9",
+          "#eafaf5"
+        ]
+      },
+      "workshop-floor": {
+        "role": "neutral",
+        "displayName": "Workshop Floor",
+        "canonical": "#121212",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#5e5e5e",
+          "#7a7a7a",
+          "#969696",
+          "#b2b2b2",
+          "#d1d1d1",
+          "#f2f2f2"
+        ]
+      },
+      "bench": {
+        "role": "neutral",
+        "displayName": "Bench",
+        "canonical": "#1a1a1a",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#5e5e5e",
+          "#7a7a7a",
+          "#969696",
+          "#b2b2b2",
+          "#d1d1d1",
+          "#f2f2f2"
+        ]
+      },
+      "bench-raised": {
+        "role": "neutral",
+        "displayName": "Bench Raised",
+        "canonical": "#262626",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#5e5e5e",
+          "#7a7a7a",
+          "#969696",
+          "#b2b2b2",
+          "#d1d1d1",
+          "#f2f2f2"
+        ]
+      },
+      "bench-edge": {
+        "role": "neutral",
+        "displayName": "Bench Edge",
+        "canonical": "#2d2d2d",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#5e5e5e",
+          "#7a7a7a",
+          "#969696",
+          "#b2b2b2",
+          "#d1d1d1",
+          "#f2f2f2"
+        ]
+      },
+      "chalk": {
+        "role": "neutral",
+        "displayName": "Chalk",
+        "canonical": "#e5e5e5",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#5e5e5e",
+          "#7a7a7a",
+          "#969696",
+          "#b2b2b2",
+          "#d1d1d1",
+          "#f2f2f2"
+        ]
+      },
+      "chalk-dim": {
+        "role": "neutral",
+        "displayName": "Chalk Dim",
+        "canonical": "#9e9e9e",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#5e5e5e",
+          "#7a7a7a",
+          "#969696",
+          "#b2b2b2",
+          "#d1d1d1",
+          "#f2f2f2"
+        ]
+      },
+      "chalk-faint": {
+        "role": "neutral",
+        "displayName": "Chalk Faint",
+        "canonical": "#717171",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#5e5e5e",
+          "#7a7a7a",
+          "#969696",
+          "#b2b2b2",
+          "#d1d1d1",
+          "#f2f2f2"
+        ]
+      },
+      "signal-green": {
+        "role": "tertiary",
+        "displayName": "Signal Green",
+        "canonical": "#34d399",
+        "tonalRamp": [
+          "#0e3f2d",
+          "#186d4e",
+          "#229b6f",
+          "#2cc990",
+          "#53daa9",
+          "#81e4c0",
+          "#b4efd9",
+          "#eafaf4"
+        ]
+      },
+      "signal-red": {
+        "role": "tertiary",
+        "displayName": "Signal Red",
+        "canonical": "#f87171",
+        "tonalRamp": [
+          "#490404",
+          "#7e0606",
+          "#b40909",
+          "#e90c0c",
+          "#f53838",
+          "#f86d6d",
+          "#fba8a8",
+          "#fee7e7"
+        ]
+      },
+      "signal-amber": {
+        "role": "tertiary",
+        "displayName": "Signal Amber",
+        "canonical": "#fbbf24",
+        "tonalRamp": [
+          "#4b3701",
+          "#825f02",
+          "#b98703",
+          "#f0af04",
+          "#fbc332",
+          "#fcd369",
+          "#fde5a5",
+          "#fff8e6"
+        ]
+      },
+      "signal-blue": {
+        "role": "tertiary",
+        "displayName": "Signal Blue",
+        "canonical": "#60a5fa",
+        "tonalRamp": [
+          "#02234a",
+          "#043c81",
+          "#0655b7",
+          "#076eed",
+          "#348cf9",
+          "#6babfa",
+          "#a6cdfc",
+          "#e6f1fe"
+        ]
+      },
+      "signal-purple": {
+        "role": "tertiary",
+        "displayName": "Signal Purple",
+        "canonical": "#a78bfa",
+        "tonalRamp": [
+          "#150349",
+          "#24057f",
+          "#3308b5",
+          "#430aeb",
+          "#6737f6",
+          "#906cf9",
+          "#bca7fb",
+          "#ece7fe"
+        ]
+      },
+      "lane-mint": {
+        "role": "tertiary",
+        "displayName": "Lane Mint",
+        "canonical": "#2dd4a7",
+        "tonalRamp": [
+          "#0d3f32",
+          "#176e56",
+          "#209d7b",
+          "#2acba0",
+          "#51dbb6",
+          "#80e5ca",
+          "#b3efdf",
+          "#eafbf6"
+        ]
+      },
+      "lane-sky": {
+        "role": "tertiary",
+        "displayName": "Lane Sky",
+        "canonical": "#38bdf8",
+        "tonalRamp": [
+          "#03344a",
+          "#055a80",
+          "#0680b6",
+          "#08a6ec",
+          "#35bcf8",
+          "#6bcefa",
+          "#a6e2fc",
+          "#e6f7fe"
+        ]
+      },
+      "lane-amber": {
+        "role": "tertiary",
+        "displayName": "Lane Amber",
+        "canonical": "#f59e0b",
+        "tonalRamp": [
+          "#492f03",
+          "#7f5205",
+          "#b57507",
+          "#eb970a",
+          "#f7af36",
+          "#f9c56c",
+          "#fbdca7",
+          "#fef5e7"
+        ]
+      },
+      "lane-violet": {
+        "role": "tertiary",
+        "displayName": "Lane Violet",
+        "canonical": "#a78bfa",
+        "tonalRamp": [
+          "#150349",
+          "#24057f",
+          "#3308b5",
+          "#430aeb",
+          "#6737f6",
+          "#906cf9",
+          "#bca7fb",
+          "#ece7fe"
+        ]
+      },
+      "lane-rose": {
+        "role": "tertiary",
+        "displayName": "Lane Rose",
+        "canonical": "#fb7185",
+        "tonalRamp": [
+          "#4a020d",
+          "#810416",
+          "#b8051f",
+          "#ee0728",
+          "#f93450",
+          "#fb6a7f",
+          "#fca6b2",
+          "#fee6ea"
+        ]
+      },
+      "lane-lime": {
+        "role": "tertiary",
+        "displayName": "Lane Lime",
+        "canonical": "#a3e635",
+        "tonalRamp": [
+          "#2d4408",
+          "#4f760f",
+          "#70a815",
+          "#92da1b",
+          "#aae845",
+          "#c1ee77",
+          "#daf5ad",
+          "#f5fce8"
+        ]
+      },
+      "mint-haze": {
+        "role": "primary",
+        "displayName": "Mint Haze",
+        "canonical": "rgba(29, 181, 132, 0.13)",
+        "tonalRamp": [
+          "#0b4230",
+          "#127253",
+          "#1aa377",
+          "#22d39a",
+          "#4be2b1",
+          "#7beac6",
+          "#b0f2dd",
+          "#e9fbf6"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "The GitWyrm mark only (Sora SemiBold)."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Dialog titles."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The one heading on an empty state or landing pane."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Base inherited label size; transcript, rows, descriptions. Rem so the Text Size setting scales it."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Control labels, toolbar text, chips, small headings."
+      },
+      "micro": {
+        "displayName": "Micro",
+        "purpose": "The 11px floor: section eyebrows, tooltips, badge text, timestamps."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "SHAs, counts, paths, badge letters; a detail, never a voice."
+      }
+    },
+    "shadows": [
+      {
+        "name": "floating-menu",
+        "value": "0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -2px rgba(0,0,0,.1)",
+        "purpose": "Popovers and dropdown menus (Tailwind shadow-md)."
+      },
+      {
+        "name": "tooltip",
+        "value": "0 8px 24px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.04)",
+        "purpose": "Tooltips; the inset line is the lit top edge."
+      },
+      {
+        "name": "dialog",
+        "value": "0 10px 15px -3px rgba(0,0,0,.6), 0 4px 6px -4px rgba(0,0,0,.6)",
+        "purpose": "Modals over a 70% black overlay."
+      },
+      {
+        "name": "progress-panel",
+        "value": "0 10px 30px rgba(0,0,0,0.45)",
+        "purpose": "The progress modal panel; deepens to 0 14px 40px rgba(0,0,0,0.6) on failure."
+      },
+      {
+        "name": "lifted-chip",
+        "value": "0 2px 10px rgb(0 0 0 / 0.45)",
+        "purpose": "A branch chip expanding over the graph on hover."
+      },
+      {
+        "name": "drop-target",
+        "value": "0 0 0 2px #1db584",
+        "purpose": "Solid ring on a drag target; a pulsing 45% halo sits on ::after."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 3px rgba(29,181,132,0.5)",
+        "purpose": "Keyboard focus on every control."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state",
+        "value": "150ms ease-out",
+        "purpose": "Hover and colour changes on controls."
+      },
+      {
+        "name": "surface",
+        "value": "200ms ease-out",
+        "purpose": "Dialog fade + 95% zoom; overlay shares the duration so they never come apart."
+      },
+      {
+        "name": "panel",
+        "value": "260ms ease-out",
+        "purpose": "Progress panel border/background/shadow shifts; 300ms for the error-row reveal."
+      },
+      {
+        "name": "pulse",
+        "value": "1.1s to 1.6s ease-in-out infinite",
+        "purpose": "Drop-target halo (1.1s), tab status ring (1.6s), sync pulse."
+      },
+      {
+        "name": "spring",
+        "value": "0.42s cubic-bezier(0.34, 1.56, 0.64, 1)",
+        "purpose": "The wyrm logo bounce on click; the only bouncy easing."
+      },
+      {
+        "name": "ai-wake",
+        "value": "320ms ease-out, then 2.6s ease-in-out infinite",
+        "purpose": "The AI stage logo wakes, then thinks."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "prefers-reduced-motion: reduce -> transition: none; animate-none",
+        "purpose": "Every animation above is disabled for people who ask."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "window-min",
+        "value": "720x560"
+      },
+      {
+        "name": "dock-to-bottom",
+        "value": "900px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one action a screen exists for: Commit, Send, Keep, Allow it.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6 9 17l-5-5\"/></svg>Commit</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 16px;border:0;border-radius:6px;background:#1db584;color:#04120d;font-size:.84375rem;font-weight:500;font-family: \"IBM Plex Sans Variable\", Inter, system-ui, sans-serif;cursor:pointer;transition:background .15s,box-shadow .15s}.ds-btn-primary:hover{background:rgba(29,181,132,.9)}.ds-btn-primary:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(29,181,132,.5)}.ds-btn-primary:disabled{opacity:.5;pointer-events:none}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Toolbar and row actions: no fill at rest, Bench Edge on hover.",
+      "html": "<button class=\"ds-btn-ghost\">Find another way</button>",
+      "css": ".ds-btn-ghost{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:#9e9e9e;font-size:.84375rem;font-weight:500;font-family: \"IBM Plex Sans Variable\", Inter, system-ui, sans-serif;cursor:pointer;transition:background .15s,color .15s}.ds-btn-ghost:hover{background:#2d2d2d;color:#e5e5e5}.ds-btn-ghost:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(29,181,132,.5)}"
+    },
+    {
+      "name": "Link",
+      "kind": "button",
+      "refersTo": "button-link",
+      "description": "A green word. Mint Text, never the fill colour.",
+      "html": "<button class=\"ds-link\">Change</button>",
+      "css": ".ds-link{border:0;background:none;padding:0;color:#38b78e;font-size:.75rem;font-weight:500;font-family: \"IBM Plex Sans Variable\", Inter, system-ui, sans-serif;cursor:pointer;text-underline-offset:4px}.ds-link:hover{text-decoration:underline}.ds-link:focus-visible{outline:2px solid rgba(29,181,132,.5);outline-offset:2px;border-radius:3px}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Transparent field with the hairline border; mint ring on focus.",
+      "html": "<input class=\"ds-input\" placeholder=\"Branch name\" />",
+      "css": ".ds-input{width:240px;height:36px;padding:4px 12px;border:1px solid #2d2d2d;border-radius:6px;background:transparent;color:#e5e5e5;font-size:.84375rem;font-weight:450;font-family: \"IBM Plex Sans Variable\", Inter, system-ui, sans-serif;outline:0;transition:border-color .15s,box-shadow .15s}.ds-input::placeholder{color:#717171}.ds-input:focus-visible{border-color:#1db584;box-shadow:0 0 0 3px rgba(29,181,132,.5)}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "The 30px toolbar search on Bench Raised.",
+      "html": "<label class=\"ds-search\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/></svg><input placeholder=\"Search commits\" /></label>",
+      "css": ".ds-search{display:flex;align-items:center;gap:7px;height:30px;min-width:210px;padding:0 10px;border:1px solid #2d2d2d;border-radius:6px;background:#262626;color:#717171;font-family: \"IBM Plex Sans Variable\", Inter, system-ui, sans-serif;transition:border-color .15s}.ds-search:focus-within{border-color:#717171}.ds-search input{flex:1;min-width:0;border:0;background:transparent;color:#e5e5e5;font-size:.75rem;outline:0}.ds-search input::placeholder{color:#717171}"
+    },
+    {
+      "name": "Repository Tabs",
+      "kind": "nav",
+      "refersTo": "tab-active",
+      "description": "28px tab rows; the active tab fills Mint Haze and carries a 2px mint edge on top.",
+      "html": "<div class=\"ds-tabs\"><button class=\"ds-tab\">docs-site</button><button class=\"ds-tab ds-tab-active\">gitwyrm</button><button class=\"ds-tab\">website</button></div>",
+      "css": ".ds-tabs{display:flex;gap:2px;padding:4px;background:#1a1a1a;border-bottom:1px solid #2d2d2d}.ds-tab{position:relative;height:28px;padding:0 10px;border:0;border-radius:5px;background:transparent;color:#9e9e9e;font-size:.75rem;font-weight:500;font-family: \"IBM Plex Sans Variable\", Inter, system-ui, sans-serif;cursor:pointer;transition:background .15s,color .15s}.ds-tab:hover{background:#262626;color:#e5e5e5}.ds-tab-active{background:rgba(29,181,132,.13);color:#e5e5e5}.ds-tab-active::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:#1db584;border-radius:5px 5px 0 0}.ds-tab:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(29,181,132,.5)}"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "chip-status",
+      "description": "A 16px square with one mono letter in the signal colour: M modified, A added, D deleted.",
+      "html": "<span class=\"ds-badges\"><span class=\"ds-badge ds-badge-m\">M</span><span class=\"ds-badge ds-badge-a\">A</span><span class=\"ds-badge ds-badge-d\">D</span></span>",
+      "css": ".ds-badges{display:inline-flex;gap:6px}.ds-badge{display:inline-flex;width:16px;height:16px;align-items:center;justify-content:center;border:1px solid currentColor;border-radius:3px;font-family:'Geist Mono',ui-monospace,monospace;font-size:.6875rem;font-weight:700;line-height:1}.ds-badge-m{color:#fbbf24}.ds-badge-a{color:#34d399}.ds-badge-d{color:#f87171}"
+    },
+    {
+      "name": "Choice Card",
+      "kind": "card",
+      "refersTo": "choice-card",
+      "description": "Agent Desk mode and team picks; selected swaps the border for mint at 60% over Mint Haze.",
+      "html": "<div class=\"ds-choices\"><button class=\"ds-choice\"><b>Ask</b><span>Read and answer only; no helpers, file changes or commands</span></button><button class=\"ds-choice ds-choice-selected\" aria-pressed=\"true\"><b>Auto</b><span>Lead may use up to 3 helpers; asks before file changes or commands</span></button></div>",
+      "css": ".ds-choices{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:360px}.ds-choice{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid #2d2d2d;border-radius:6px;background:transparent;color:#e5e5e5;text-align:left;font-family: \"IBM Plex Sans Variable\", Inter, system-ui, sans-serif;cursor:pointer;transition:background .15s,border-color .15s}.ds-choice b{font-size:.75rem;font-weight:600}.ds-choice span{font-size:.65625rem;line-height:1.3;color:#9e9e9e}.ds-choice:hover{background:#2d2d2d}.ds-choice-selected{border-color:rgba(29,181,132,.6);background:rgba(29,181,132,.13)}.ds-choice:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(29,181,132,.5)}"
+    },
+    {
+      "name": "Tooltip",
+      "kind": "custom",
+      "refersTo": "tooltip",
+      "description": "Bench Edge body with the lit top edge; micro type.",
+      "html": "<span class=\"ds-tooltip\">Open the main GitWyrm window first.</span>",
+      "css": ".ds-tooltip{display:inline-block;max-width:288px;padding:6px 10px;border:1px solid #2d2d2d;border-radius:5px;background:#2d2d2d;color:#e5e5e5;font-size:.6875rem;line-height:1rem;font-family: \"IBM Plex Sans Variable\", Inter, system-ui, sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.42),inset 0 1px 0 rgba(255,255,255,.04)}"
+    },
+    {
+      "name": "Toast",
+      "kind": "custom",
+      "refersTo": "panel-raised",
+      "description": "Severity lives in the icon and a 3px left edge, never the whole surface.",
+      "html": "<div class=\"ds-toast ds-toast-error\"><span class=\"ds-toast-icon\">!</span><span class=\"ds-toast-body\">Could not delete that chat.<small>state not managed for field executions</small></span><button class=\"ds-toast-x\" aria-label=\"Close\">\u00d7</button></div>",
+      "css": ".ds-toast{display:flex;align-items:center;gap:10px;width:356px;padding:12px 8px 12px 14px;border:1px solid #2d2d2d;border-left-width:3px;border-radius:8px;background:#1a1a1a;color:#e5e5e5;font-family: \"IBM Plex Sans Variable\", Inter, system-ui, sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.42)}.ds-toast-error{border-left-color:#f87171}.ds-toast-error .ds-toast-icon{color:#f87171}.ds-toast-icon{width:18px;font-weight:700;text-align:center}.ds-toast-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:.8125rem}.ds-toast-body small{font-size:.6875rem;color:#9e9e9e}.ds-toast-x{width:24px;height:24px;border:0;border-radius:4px;background:transparent;color:#717171;font-size:16px;cursor:pointer;transition:background .15s,color .15s}.ds-toast-x:hover{background:#2d2d2d;color:#e5e5e5}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Night Workshop",
+    "overview": "GitWyrm looks like a workbench after hours. The surfaces are warm-dark, not cold-dark:\na near-black floor (#121212) with benches stepping up in tone rather than in shadow, so\na panel sits on the floor the way a tool sits on a bench, by being a shade lighter. A\nlot is laid out within reach (rows are 28 pixels, the smallest text is 11 pixels, the\nsidebar holds dozens of chats and branches) and none of it shouts. One signal light,\nDeep Mint, marks the thing that matters right now: the selected tab's edge, the one\nfilled button, the ring around a drop target, the pulse on a sync in progress.\n\nThe system is alive only in small places. Motion and glow appear where work is\nhappening and nowhere else: a sync badge pulses, the AI stage wakes, a dragged tab\nfinds its target, the logo springs when someone clicks it for fun. Everything at rest\nis still. Copy is honest and plain: state is shown as it is, in words a non-expert can\nread, and a control that cannot act says why rather than pretending.\n\nIt is not a raw terminal. Monospace is a detail (a SHA, a count, a badge), never the\nvoice; hierarchy comes from weight, size and tone, not from ALL CAPS and neon on black.\nFour surface themes (Slate, Onyx, Midnight, Paper) and a light mode exist, but the\nidentity is the dark Slate workshop with the mint light on.",
+    "keyCharacteristics": [
+      "Warm-dark tonal layering: four surface steps, one hairline border, no resting shadows.",
+      "One accent, two tokens: Deep Mint for fills and edges, a calmer Mint Text for words.",
+      "Dense rows, small calm type, an 11-pixel floor that nothing goes under.",
+      "Motion and glow only where something is happening.",
+      "Bright categorical palettes (graph lanes, authors, tab groups) that identify and are"
+    ],
+    "rules": [
+      {
+        "name": "The Two-Token Mint Rule",
+        "body": "Mint fills use Deep Mint; mint words use Mint Text. Never set text in the fill colour, and never use `text-primary` for green text.",
+        "section": "colors"
+      },
+      {
+        "name": "The Signal Light Rule",
+        "body": "The accent marks what is selected, focused, dropping or running. It never decorates. If two things on one screen are mint and neither is the current thing, one of them is wrong.",
+        "section": "colors"
+      },
+      {
+        "name": "The Identity Palette Rule",
+        "body": "Lane, author and tab-group colours are for telling things apart. They may be brighter than the accent, and they are never used as an accent.",
+        "section": "colors"
+      },
+      {
+        "name": "The 11px Floor Rule",
+        "body": "Nothing renders below `text-2xs` (0.6875rem). Need it smaller? It should not be on screen.",
+        "section": "typography"
+      },
+      {
+        "name": "The Rem Rule",
+        "body": "Every font size is rem. The Text Size setting scales the root; a pixel size anywhere breaks that promise.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tone-Not-Shadow Rule",
+        "body": "If it is part of the shell, it is flat. If it floats (menu, tooltip, dialog, dragged thing), it may cast one shadow. Cards never get shadows to look important.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Douse `text-accent-text` for any green word and `bg-primary` / `border-primary` for any mint fill or edge (the Two-Token Mint Rule).",
+      "Dokeep every font size in rem and never below `text-2xs`.",
+      "Doseparate regions with the hairline border and a tone step, not with gaps or shadows.",
+      "Doput motion only on a thing that is happening: a pulse while it runs, a glow where it lands, and stop it when it stops.",
+      "Doreserve the filled mint button for the one action a screen exists for, and make everything else ghost or secondary.",
+      "Dowrite labels a non-expert can read, and let a control that cannot act say why on hover."
+    ],
+    "donts": [
+      "Don'tset text in Deep Mint or use `text-primary` for words; it glares.",
+      "Don'tadd shadows to cards or panels at rest, or use a shadow to make something look important.",
+      "Don'treach for monospace as a voice. It marks a SHA, a count, a path; the raw terminal is the anti-reference.",
+      "Don'tuse a lane, author or tab-group colour as an accent, or dull them to match the accent; they identify.",
+      "Don'tput a second mint highlight on a screen that already has a current thing.",
+      "Don'tgate an action behind typing a word to confirm, and never leave an action without a visible response."
+    ]
+  }
+}
