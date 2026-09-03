@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import type { ApplyOutcome, InventoryEntry, RedactedCopyPlan } from '@/lib/bindings'
+import type { ApplyOutcome, ClientId, InventoryEntry, RedactedCopyPlan } from '@/lib/bindings'
 import { partitionBatchCandidates, clientLabel } from '@/lib/agentConfig'
 import { useApplyAgentConfigBatch, usePreviewAgentConfigCopy, useUndoAgentConfigCopy } from '@/hooks/useAgentConfig'
 import { Button } from '@/components/ui/button'
@@ -41,6 +41,14 @@ export function BatchReviewDialog({
   const [plans, setPlans] = useState<RedactedCopyPlan[]>([])
   const [skipped, setSkipped] = useState<InventoryEntry[]>([])
   const [outcomes, setOutcomes] = useState<ApplyOutcome[] | null>(null)
+  // Which apps each item is going to. The batch used to send every eligible
+  // destination without asking, while copying one item made the person pick
+  // -- so "match selected apps" could write to an app they never chose. The
+  // single flow's rule wins: a destination is included because it was
+  // selected, and every item starts with all of its own selected because
+  // that is what the button offers to do.
+  const [chosen, setChosen] = useState<Record<string, ClientId[]>>({})
+  const [rebuild, setRebuild] = useState(0)
 
   const preview = usePreviewAgentConfigCopy()
   const applyBatch = useApplyAgentConfigBatch(repoId)
@@ -56,8 +64,13 @@ export function BatchReviewDialog({
       const { candidates, skipped: skippedEntries } = partitionBatchCandidates(entries)
       const built: RedactedCopyPlan[] = []
       for (const { entry, destinations } of candidates) {
+        // An item with every destination unticked is not an error and not a
+        // skip: the person deliberately left it out, so it simply has no
+        // plan this time round.
+        const selected = chosen[entry.itemId] ?? destinations
+        if (selected.length === 0) continue
         try {
-          const outcome = await preview.mutateAsync({ repoId, itemId: entry.itemId, destinations })
+          const outcome = await preview.mutateAsync({ repoId, itemId: entry.itemId, destinations: selected })
           if (outcome.kind === 'ready' && outcome.plan.destinations.length > 0) {
             built.push(outcome.plan)
           } else {
@@ -77,8 +90,13 @@ export function BatchReviewDialog({
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- build once per dialog open, not on every entries/preview identity change
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuilds only when a destination is ticked, not on every entries/preview identity change
+  }, [rebuild])
+
+  // What each item COULD go to, from the same partition the build uses, so
+  // the checkboxes and the plans can never disagree about eligibility.
+  const eligibleFor = (itemId: string): ClientId[] =>
+    partitionBatchCandidates(entries).candidates.find((c) => c.entry.itemId === itemId)?.destinations ?? []
 
   const runApply = () => {
     if (plans.length === 0) return
@@ -131,7 +149,20 @@ export function BatchReviewDialog({
                         undoing={undo.isPending}
                       />
                     ) : (
-                      <PlanReview plan={plan} />
+                      <>
+                        <DestinationPicker
+                          itemId={plan.itemId}
+                          eligible={eligibleFor(plan.itemId)}
+                          selected={chosen[plan.itemId] ?? eligibleFor(plan.itemId)}
+                          disabled={applyBatch.isPending}
+                          onChange={(next) => {
+                            setChosen((prev) => ({ ...prev, [plan.itemId]: next }))
+                            setStage('building')
+                            setRebuild((n) => n + 1)
+                          }}
+                        />
+                        <PlanReview plan={plan} />
+                      </>
                     )}
                   </div>
                 )
@@ -153,5 +184,52 @@ export function BatchReviewDialog({
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Which apps one item is copied to.
+ *
+ * The same explicit choice the single-item flow asks for. Unticking the last
+ * destination leaves the item out of the batch entirely rather than sending
+ * it somewhere by default: "match selected apps" should never write to an
+ * app nobody selected.
+ */
+function DestinationPicker({
+  itemId,
+  eligible,
+  selected,
+  disabled,
+  onChange,
+}: {
+  itemId: string
+  eligible: ClientId[]
+  selected: ClientId[]
+  disabled?: boolean
+  onChange: (next: ClientId[]) => void
+}) {
+  if (eligible.length <= 1) return null
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span className="text-2xs font-semibold text-sub">Copy to</span>
+      {eligible.map((client) => {
+        const on = selected.includes(client)
+        return (
+          <label key={client} className="flex cursor-pointer items-center gap-1.5 text-2xs text-sub hover:text-foreground">
+            <input
+              type="checkbox"
+              checked={on}
+              disabled={disabled}
+              onChange={() =>
+                onChange(on ? selected.filter((c) => c !== client) : [...selected, client])
+              }
+              className="size-3 accent-[var(--gw-accent)]"
+              aria-label={`Copy ${itemId} to ${clientLabel(client)}`}
+            />
+            {clientLabel(client)}
+          </label>
+        )
+      })}
+    </div>
   )
 }
