@@ -5,7 +5,7 @@
 - [x] 1.1 Add OpenSpec change and exact-task source variants with cached context.
 - [x] 1.2 Build source identity from repo/change/task index, not task display number alone.
 - [x] 1.3 Route current Spec Desk selected change into Agent Desk source/detail.
-- [x] 1.4 Map current active run into a durable execution on the matching session.
+- [ ] 1.4 Map current active run into a durable execution on the matching session.
 - [ ] 1.5 Preserve old deep links for change ID and selected tab where possible.
 
 ## 2. Context builder
