@@ -58,7 +58,7 @@
       see `agent-desk-review-and-landing` tasks.md 2.7 for that specific, separate gap
       (invalidation, not the write itself) -- but this task's own text ("route ... through the
       existing task-line writer") is satisfied by the write path that ships.
-- [ ] 4.2 Route accepted spec edits through existing draft/review writer.
+- [x] 4.2 Route accepted spec edits through existing draft/review writer.
 - [ ] 4.3 Refresh all main/Desk progress surfaces after writes from the production flow.
 - [x] 4.4 Never tick a task solely because an execution emitted Finished; require existing
       review/completion policy.
