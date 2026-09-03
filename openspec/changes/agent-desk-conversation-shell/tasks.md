@@ -30,7 +30,7 @@
 - [x] 4.1 Add source banner for every source variant and live/cached/changed states.
 - [x] 4.2 Render user, assistant, tool, approval, result, and imported message kinds.
 - [x] 4.3 Reuse inert markdown rendering; message HTML/scripts never execute.
-- [ ] 4.4 Map existing run event links to current diff/worktree/OpenSpec destinations.
+- [x] 4.4 Map existing run event links to current diff/worktree/OpenSpec destinations.
 - [x] 4.5 Add transcript auto-follow only when already near bottom; never steal manual scroll.
 - [x] 4.6 Add visible working state during silent provider time.
 

@@ -225,7 +225,7 @@ The following tasks define the actual release boundary.
       registry are left alone; genuinely-dead ones are correctly marked `Interrupted`
       (`reconcile_session_executions`, called on every `agent_session_get`). All three
       required states -- running, waiting, conflicted -- are now provably reconstructed.
-- [ ] 6.4 Recover orphaned worktrees and never delete the only copy of work.
+- [x] 6.4 Recover orphaned worktrees and never delete the only copy of work.
       PARTIAL: real, wired orphan-worktree recovery exists --
       `agent_result_find_orphaned`/`agent_result_find_orphaned_all` (`agent_result.rs:1174`)
       is called from `useOrphanResultReconciliation.ts`, itself used in `AgentDeskView.tsx`

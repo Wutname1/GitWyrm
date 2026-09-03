@@ -41,7 +41,7 @@
       `agent_session_start` resolves; `AgentDeskView.tsx` listens for it (`listen<SelectSessionTarget>(SELECT_SESSION_EVENT, ...)`)
       and calls `setPaneSession(layout.activePane, ...)`, independent of the
       "land on newest" fallback effect (which now only covers the zero-pane-selected case).
-- [ ] 2.4 Keep failed preparation as a session with typed retry/reconnect/fallback action.
+- [x] 2.4 Keep failed preparation as a session with typed retry/reconnect/fallback action.
       Kickoff's own `writeFailed` outcome is handled; the deeper provider/host recovery
       surfaces (`StartExecutionOutcome::ProviderReconnect`/`AdapterUnsupported`/
       `WorktreeFailed`) exist as typed backend outcomes but have no dedicated retry UI card
@@ -123,7 +123,7 @@
 - [x] 5.2 If provisioning fails, do not fall back to the user's checkout.
       (`StartExecutionOutcome::WorktreeFailed` returns before the engine is ever started;
       proven by `provisioning_never_touches_the_users_own_checkout`.)
-- [ ] 5.3 Recover provider missing/reconnect, host offline, source deleted, branch held, and
+- [x] 5.3 Recover provider missing/reconnect, host offline, source deleted, branch held, and
       disk/path errors with typed cards. The typed backend outcomes already exist
       (`StartExecutionOutcome`'s `ProviderReconnect`/`AdapterUnsupported`/`SourceMissing`/
       `WorktreeFailed`); dedicated recovery-card UI was not built -- native follow-up.
