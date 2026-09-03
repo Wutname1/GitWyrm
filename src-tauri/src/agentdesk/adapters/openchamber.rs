@@ -53,26 +53,41 @@ impl OpenChamberAdapter {
         }
     }
 
-    /// The most plausible data directory given OpenChamber's own naming
-    /// (`openchamber`), following the same XDG-on-Unix /
-    /// `%APPDATA%`-on-Windows convention every other CLI-style client in
-    /// this change uses. Unverified -- see module doc.
+    /// OpenChamber's data directory, read from its own source rather than
+    /// guessed: `packages/web/bin/lib/cli-paths.js` resolves
+    /// `OPENCHAMBER_DATA_DIR` first and otherwise uses
+    /// `<home>/.config/openchamber` on EVERY platform, Windows included.
+    ///
+    /// This used to follow the usual `%APPDATA%` convention on Windows,
+    /// which is what every other client here does and what OpenChamber
+    /// happens not to do, so the probe looked in a folder that never
+    /// exists and the adapter reported "not installed" on a machine that
+    /// had it.
     fn data_dir(&self) -> Option<PathBuf> {
         if let Some(h) = &self.home_override {
             return Some(h.clone());
         }
-        #[cfg(windows)]
-        {
-            std::env::var_os("APPDATA")
-                .map(PathBuf::from)
-                .map(|a| a.join("openchamber"))
+        if let Some(explicit) = std::env::var_os("OPENCHAMBER_DATA_DIR") {
+            let trimmed = explicit.to_string_lossy().trim().to_string();
+            if !trimmed.is_empty() {
+                return Some(PathBuf::from(trimmed));
+            }
         }
-        #[cfg(not(windows))]
-        {
-            std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .map(|h| h.join(".config").join("openchamber"))
-        }
+        home_dir().map(|h| h.join(".config").join("openchamber"))
+    }
+}
+
+
+/// The user's home directory, the way OpenChamber's own `os.homedir()`
+/// resolves it: `USERPROFILE` on Windows, `HOME` elsewhere.
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
     }
 }
 
@@ -143,6 +158,42 @@ impl AgentClientAdapter for OpenChamberAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Read from OpenChamber's own `cli-paths.js`: the env override wins,
+    /// and otherwise it is `<home>/.config/openchamber` on every platform.
+    /// A `%APPDATA%` guess pointed at a folder OpenChamber never creates,
+    /// so the adapter reported "not installed" on machines that had it.
+    #[test]
+    fn the_data_directory_follows_openchambers_own_rule() {
+        let adapter = OpenChamberAdapter::default();
+        // The override is absolute, and trimmed: a stray space in an
+        // environment variable should not produce a relative path.
+        // Set directly: this crate has no env-scoping test helper, and the
+        // variable is restored before the assertions that must not see it.
+        let previous = std::env::var_os("OPENCHAMBER_DATA_DIR");
+        std::env::set_var("OPENCHAMBER_DATA_DIR", "  C:/oc-data  ");
+        let overridden = adapter.data_dir();
+        match &previous {
+            Some(v) => std::env::set_var("OPENCHAMBER_DATA_DIR", v),
+            None => std::env::remove_var("OPENCHAMBER_DATA_DIR"),
+        }
+        assert_eq!(
+            overridden,
+            Some(PathBuf::from("C:/oc-data")),
+            "the documented override must win, trimmed"
+        );
+
+        if previous.is_none() {
+            let dir = adapter.data_dir().expect("a home directory");
+            let tail: Vec<_> = dir
+                .components()
+                .rev()
+                .take(2)
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(tail, vec!["openchamber".to_string(), ".config".to_string()]);
+        }
+    }
 
     #[test]
     fn detects_a_present_directory_but_never_marks_it_supported() {
