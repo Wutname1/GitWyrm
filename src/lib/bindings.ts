@@ -3273,7 +3273,7 @@ async agentSessionSetPreferences(sessionId: string, mode: string, team: string, 
  * this before the first message; the guard here keeps another caller from
  * silently moving work that already has a transcript or execution history.
  */
-async agentSessionSetProject(sessionId: string, repoId: string, repoPath: string, repoName: string) : Promise<Result<UpdateSessionOutcome, string>> {
+async agentSessionSetProject(sessionId: string, repoId: string, repoPath: string, repoName: string) : Promise<Result<SetProjectOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_set_project", { sessionId, repoId, repoPath, repoName }) };
 } catch (e) {
@@ -7179,6 +7179,19 @@ agents?: AgentUsageRow[];
  */
 dataTimestamp: string }
 export type SessionUsageOutcome = { kind: "available"; usage: SessionUsage } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string }
+/**
+ * What happened when a chat was asked to move to another project.
+ * 
+ * `AlreadyStarted` is its own answer rather than a silent no-op: moving a
+ * chat that has begun would take its transcript and its running work to a
+ * different repository, so it is refused, and the person is told why
+ * instead of being shown a success message for nothing.
+ */
+export type SetProjectOutcome = { kind: "moved"; session: AgentSession } | 
+/**
+ * The chat already has messages, a run, or a source of its own.
+ */
+{ kind: "alreadyStarted" } | { kind: "notFound" } | { kind: "failed"; detail: string }
 export type Settings = { 
 /**
  * Paths of repos open in tabs, in tab order, so they can be reopened on launch.

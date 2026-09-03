@@ -585,24 +585,63 @@ pub async fn agent_session_set_project(
     repo_id: String,
     repo_path: String,
     repo_name: String,
-) -> Result<UpdateSessionOutcome, AppError> {
+) -> Result<SetProjectOutcome, AppError> {
     let root = resolve_root(&app)?;
     let locks = locks.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        update_session_at(&locks, &root, &session_id, |session| {
-            if session.messages.is_empty()
-                && session.executions.is_empty()
-                && matches!(session.header.source, SessionSource::Manual { .. })
-            {
-                session.header.repo_id = repo_id.clone();
-                session.header.repo_path = repo_path;
-                session.header.repo_name = repo_name;
-                session.header.source = SessionSource::Manual { repo_id };
+        // Checked BEFORE the write, and reported. The guard used to live
+        // inside the closure, so a session that had already started came
+        // back as `Updated` with nothing changed and the UI announced a
+        // move that never happened -- a race with the first message was
+        // enough to hit it.
+        let session = match store::read_session(&root, &session_id) {
+            Ok(s) => s,
+            Err(crate::agentdesk::model::SessionLoadError::NotFound) => {
+                return SetProjectOutcome::NotFound
             }
-        })
+            Err(e) => return SetProjectOutcome::Failed { detail: e.to_string() },
+        };
+        if !session.messages.is_empty()
+            || !session.executions.is_empty()
+            || !matches!(session.header.source, SessionSource::Manual { .. })
+        {
+            return SetProjectOutcome::AlreadyStarted;
+        }
+
+        let outcome = update_session_at(&locks, &root, &session_id, |session| {
+            session.header.repo_id = repo_id.clone();
+            session.header.repo_path = repo_path;
+            session.header.repo_name = repo_name;
+            session.header.source = SessionSource::Manual { repo_id };
+        });
+        match outcome {
+            UpdateSessionOutcome::Updated { session } => SetProjectOutcome::Moved { session },
+            UpdateSessionOutcome::NotFound => SetProjectOutcome::NotFound,
+            UpdateSessionOutcome::Damaged { reason } => SetProjectOutcome::Failed { detail: reason },
+            UpdateSessionOutcome::WriteFailed { detail }
+            | UpdateSessionOutcome::Unavailable { detail } => {
+                SetProjectOutcome::Failed { detail }
+            }
+        }
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// What happened when a chat was asked to move to another project.
+///
+/// `AlreadyStarted` is its own answer rather than a silent no-op: moving a
+/// chat that has begun would take its transcript and its running work to a
+/// different repository, so it is refused, and the person is told why
+/// instead of being shown a success message for nothing.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SetProjectOutcome {
+    Moved { session: AgentSession },
+    /// The chat already has messages, a run, or a source of its own.
+    AlreadyStarted,
+    NotFound,
+    Failed { detail: String },
 }
 
 #[tauri::command]

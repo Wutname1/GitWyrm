@@ -178,12 +178,20 @@ export function SessionComposer({
       const outcome = unwrap(
         await commands.agentSessionSetProject(sessionId, target.id, target.path, target.name)
       )
-      if (outcome.kind === 'updated') {
+      if (outcome.kind === 'moved') {
         void qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
         void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
         toast.success(`This chat now uses ${target.name}.`)
+      } else if (outcome.kind === 'alreadyStarted') {
+        // Said plainly rather than reported as a failure: nothing broke, the
+        // chat simply has work in it now and its project is settled.
+        toast.info('This chat has already started, so it stays with its project.', {
+          description: 'Start a new chat to work in another project.',
+        })
+      } else if (outcome.kind === 'notFound') {
+        toast.error('This chat is gone.')
       } else {
-        toast.error('Could not change this chat’s project.', { description: outcome.kind })
+        toast.error('Could not change this chat’s project.', { description: outcome.detail })
       }
     } catch (e) {
       toast.error('Could not open that project.', { description: describeError(e) })
