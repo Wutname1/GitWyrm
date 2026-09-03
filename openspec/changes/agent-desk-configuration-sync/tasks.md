@@ -50,8 +50,8 @@
 - [ ] 4.1 Codex merge writer and fixtures.
 - [x] 4.2 Claude Code merge writer and fixtures.
 - [x] 4.3 OpenCode merge writer and fixtures.
-- [ ] 4.4 VS Code Copilot writer only for documented safe settings surfaces.
-- [ ] 4.5 OpenChamber writer only where its schema is independently proven.
+- [x] 4.4 VS Code Copilot writer only for documented safe settings surfaces.
+- [x] 4.5 OpenChamber writer only where its schema is independently proven.
 - [x] 4.6 Keep read-only inventory when a writer is unsupported.
 
 ## 5. Proof
