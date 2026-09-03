@@ -112,16 +112,21 @@ source: ACP exposes no quota, and GitHub returns real entitlement data only to a
 OAuth apps, silently. Parity with OpenChamber's quota line means per-provider credential
 scraping, which is a decision to make deliberately rather than drift into.
 
-### Plugins and remote access
+### Beyond v1: three packages, written 2026-09-02
 
-Provider protocols are a compile-time enum on purpose; `agent_config` reconciles other
-tools' configuration but is not a runtime plugin framework. Remote and mobile clients need
-a headless Agent Desk service (authentication, durable jobs, event streaming, capability
-policy) to exist first, because today every command is an in-process Tauri call over
-local child processes and filesystem sessions. Neither is started. The constraints the
-user set for remote (no opened ports, outward-dialling rendezvous, thousands of hosts
-behind one IP, phone plainly dead when the desktop sleeps) are recorded in the plan file
-and unchanged.
+These were prose here, which meant nobody else could pick them up. Each is now a real
+OpenSpec change with a proposal, spec deltas, a design and tasks, and all three pass
+strict validation. None is started.
+
+| Package | What it is, and the decision that shapes it |
+| --- | --- |
+| `agent-desk-goal-continuation` | Keep taking turns toward a stated goal until it is met or a budget runs out. Continuation is a decision made BETWEEN turns from evidence (the auditor's verdict, a completion condition), never the agent's own claim, and it grants no authority the first turn did not have. Stop ends the goal, not one turn; a declined gate ends it too. |
+| `agent-desk-remote-access` | Watch and steer a run from a phone. Both ends dial outward to a rendezvous that routes sealed bytes it cannot read: no opened port, no hosted copy of anyone's code, identity per host and account rather than per address (thousands behind one VPN address must not collide). A sleeping desktop is reported plainly and answers are refused rather than queued. Largest package, sequenced last: there is no server, protocol, auth or streaming today. |
+| `agent-desk-plugin-compatibility` | Host what other agent tools already load rather than defining a GitWyrm plugin format. Show what a run will load, let one be excluded per session without editing the tool's own config, and carry one in through the existing copy path. Where a tool cannot enforce an exclusion, say so rather than showing a control that does nothing. |
+
+The standing constraints behind the remote package (no opened ports, outward-dialling
+rendezvous, thousands of hosts behind one address, phone plainly dead when the desktop
+sleeps) are now requirements with scenarios rather than notes in a plan file.
 
 ### Skills and connectors
 
