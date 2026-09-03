@@ -409,10 +409,18 @@ export function AgentDeskView() {
    * wrapper if the textarea is somehow absent, so focus still moves somewhere
    * sensible rather than nowhere.
    */
-  const focusComposer = () => {
+  const focusComposer = (sessionId: string | null) => {
     requestAnimationFrame(() => {
-      const box = document.querySelector<HTMLTextAreaElement>('[data-agent-desk-composer]')
-      if (box) box.focus()
+      // By session, not by document order. A plain
+      // `querySelector('[data-agent-desk-composer]')` always returns the
+      // FIRST composer, so in Split View selecting a chat in the second pane
+      // highlighted that pane while the caret landed in the other one.
+      // Every composer carries its own session id, so the right one can be
+      // named.
+      const box = sessionId
+        ? document.getElementById(`agent-desk-composer-${sessionId}`)
+        : null
+      if (box instanceof HTMLTextAreaElement) box.focus()
       else composerFocusRef.current?.focus()
     })
   }
@@ -433,7 +441,7 @@ export function AgentDeskView() {
     // refocusing) a session both highlights its pane (via `activePane`) and
     // moves focus into the composer so a keyboard user lands somewhere useful,
     // not on a stale focus target.
-    focusComposer()
+    focusComposer(sessionId)
   }
 
   // P1-C wiring 3: scan every session, once, for a Kept/CleanupNeeded result
@@ -510,7 +518,7 @@ export function AgentDeskView() {
         setPaneSession(layout.activePane, outcome.session.header.sessionId)
         void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
         toast.success('New chat started.')
-        focusComposer()
+        focusComposer(outcome.session.header.sessionId)
       } else {
         toast.error('Could not start a new chat.', { description: outcome.kind })
       }
