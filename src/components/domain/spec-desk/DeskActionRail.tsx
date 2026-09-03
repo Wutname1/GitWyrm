@@ -182,10 +182,15 @@ export function DeskActionRail({
   change,
   repoId,
   repoPath,
+  repo,
 }: {
   change: SpecChange;
   repoId: string;
   repoPath: string;
+  /** The repository this window already opened. Passed rather than looked
+      up: this webview's workspace store is empty, so a lookup finds
+      nothing and the button silently does nothing. */
+  repo: { path: string; name: string };
 }) {
   const ai = useSpecAi();
   const { validateChange, archiveChange, draftFix, addDraftedDelta } =
@@ -201,7 +206,7 @@ export function DeskActionRail({
     changeId: string;
     delta: DraftedArtifact;
   } | null>(null);
-  const { startRun, starting } = useStartRun(repoId, change);
+  const { startRun, starting } = useStartRun(repoId, change, repo);
   /** Run the task in its own copy of the project. Off by default. */
   const [confirmArchive, setConfirmArchive] = useState(false);
   // A failed archive, with the change it belongs to. Carries its own id for the
@@ -228,27 +233,27 @@ export function DeskActionRail({
   const remaining = change.progress.total - change.progress.done;
   const handoff = composeTaskHandoff(change, task);
 
-  // Package `agent-desk-openspec-workflows` tasks.md 1.1/1.3: opens (or
-  // focuses) a durable Agent Desk session for this exact task/change,
-  // alongside -- not instead of -- Spec Desk's own run/handoff actions
-  // above. `repoName` is not threaded through as a prop today, so it is
-  // derived from `repoPath` the same way the backend derives it for a fresh
-  // Agent Desk window title (`commands::spec_desk::open_spec_desk`'s
-  // `repo_name` from `path.file_name()`).
+  // Planning the whole change, for when there is no open task to work on.
+  // This is a different job from working a task, not a second way to do the
+  // same one: it opens a Plan session against the change itself.
+  //
+  // Working a task goes through `useStartRun` (the `startRun` above), which
+  // reaches the same durable Agent Desk session. There used to be a second
+  // button here doing exactly that with a different label, which presented a
+  // choice that no longer existed once execution converged.
   const { startSession, startingKey: agentDeskStartingKey } = useStartAgentSession();
-  const repoName = repoPath.split(/[\\/]/).filter(Boolean).pop() ?? repoPath;
-  const agentDeskKey = task ? `openSpecTask:${change.id}:${task.index}` : `openSpecChange:${change.id}`;
-  const openInAgentDesk = () => {
+  const planKey = `openSpecChange:${change.id}`;
+  const planWholeChange = () => {
     void startSession({
       repoId,
-      repoPath,
-      repoName,
-      intent: task ? "fix" : "plan",
-      key: agentDeskKey,
-      source: task ? openSpecTaskSourceInput(change, task) : openSpecChangeSourceInput(change),
+      repoPath: repo.path,
+      repoName: repo.name,
+      intent: "plan",
+      key: planKey,
+      source: openSpecChangeSourceInput(change),
     });
   };
-  const agentDeskStarting = agentDeskStartingKey === agentDeskKey;
+  const planning = agentDeskStartingKey === planKey;
 
   // Whether opencode can actually be launched. A machine-level fact, so it is
   // not keyed by repo. Assumed available until the probe answers, so the button
@@ -497,16 +502,16 @@ export function DeskActionRail({
           </p>
 
           <div className="mt-3 flex flex-col gap-2">
-            {/* Opens a durable Agent Desk session naming this exact task
-                (or the whole change, with no task open) as its source --
-                separate from Spec Desk's own inline run above, and
-                available whether or not Spec Desk itself has AI
-                configured, since Agent Desk resolves its own provider. */}
-            <RailButton
-              icon={<MessagesSquare size={12} strokeWidth={2.2} />}
-              label={agentDeskStarting ? "Starting…" : "Open in Agent Desk"}
-              onClick={openInAgentDesk}
-            />
+            {/* No open task: planning the change is the thing to do. With a
+                task, the one action below works it -- there is no separate
+                "open it somewhere else", because working it IS opening it. */}
+            {!task && (
+              <RailButton
+                icon={<MessagesSquare size={12} strokeWidth={2.2} />}
+                label={planning ? "Starting…" : "Plan this change with AI"}
+                onClick={planWholeChange}
+              />
+            )}
             {ai.configured ? (
               <>
                 {task && (
@@ -514,7 +519,7 @@ export function DeskActionRail({
                     <RailButton
                       primary
                       icon={<Play size={12} strokeWidth={2.6} />}
-                      label={starting ? "Starting…" : "Work on this task with AI"}
+                      label={starting ? "Starting…" : "Work on this task"}
                       onClick={() => void startRun()}
                     />
                     {/* The old "run it in its own worktree" checkbox is gone

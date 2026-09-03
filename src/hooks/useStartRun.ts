@@ -1,7 +1,6 @@
 import type { SpecChange } from '@/lib/bindings'
 import { nextTask } from '@/hooks/useOpenspec'
 import { useAskStore } from '@/stores/askStore'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useStartAgentSession } from '@/hooks/useStartAgentSession'
 import { openSpecTaskSourceInput } from '@/lib/agentDeskSources'
 
@@ -23,19 +22,29 @@ import { openSpecTaskSourceInput } from '@/lib/agentDeskSources'
  * keeps its editor and its browsing; what it no longer keeps is a private
  * way to run things.
  *
- * The isolated-folder choice goes away with it, and that is a real change
- * in behaviour rather than an oversight: an Agent Desk session on a Fix
- * intent always provisions its own worktree, so the thing the checkbox
+ * `repoPath` and `repoName` are PASSED IN rather than looked up. Spec Desk
+ * is its own webview with its own empty workspace store: it opens the
+ * repository directly and never adds it there. A first version of this hook
+ * resolved the repo through that store, found nothing, and returned without
+ * doing anything at all -- the primary button on the window, silently dead.
+ * The caller already holds this, so it hands it over.
+ *
+ * The isolated-folder choice went away with the old path, and that is a real
+ * change in behaviour rather than an oversight: an Agent Desk session on a
+ * Fix intent always provisions its own worktree, so the thing the checkbox
  * asked for is now what always happens.
  */
-export function useStartRun(repoId: string, change: SpecChange) {
+export function useStartRun(
+  repoId: string,
+  change: SpecChange,
+  repo: { path: string; name: string }
+) {
   const { startSession, starting } = useStartAgentSession()
   const clearAsk = useAskStore((s) => s.clear)
-  const repo = useWorkspaceStore((s) => s.openRepos.find((r) => r.id === repoId) ?? null)
   const task = nextTask(change)
 
   const startRun = async () => {
-    if (!task || starting || !repo) return
+    if (!task || starting) return
     // Any ask session ends here, and its epoch bump drops replies still in
     // flight. Without this an answer could land in the tab after the work
     // took it over, which is exactly the mode confusion this avoids.
@@ -51,5 +60,5 @@ export function useStartRun(repoId: string, change: SpecChange) {
     })
   }
 
-  return { startRun, starting, canStart: task != null && repo != null }
+  return { startRun, starting, canStart: task != null }
 }

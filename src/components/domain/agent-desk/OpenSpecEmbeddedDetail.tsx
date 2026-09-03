@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { DeskDetail } from '@/components/domain/spec-desk/DeskDetail'
 import { DeskActionRail } from '@/components/domain/spec-desk/DeskActionRail'
 import { DeskChangesList } from '@/components/domain/spec-desk/DeskChangesList'
@@ -23,6 +24,13 @@ import { useOpenspecChanges, useOpenspecStatus, useSelectedChange } from '@/hook
  * while the rest of the shell moves to the session model around it.
  */
 export function OpenSpecEmbeddedDetail({ repoId, repoPath }: { repoId: string; repoPath: string }) {
+  // The spec panes need a repo path and name to start work. Only the path
+  // reaches this component, so the name comes from the folder, the same way
+  // the backend names a fresh Agent Desk window.
+  const repo = useMemo(
+    () => ({ path: repoPath, name: repoPath.split(/[\/]/).filter(Boolean).pop() ?? repoPath }),
+    [repoPath]
+  )
   const status = useOpenspecStatus(repoId)
   const changesQuery = useOpenspecChanges(repoId)
   const { change } = useSelectedChange(repoId)
@@ -38,8 +46,8 @@ export function OpenSpecEmbeddedDetail({ repoId, repoPath }: { repoId: string; r
       />
       {change ? (
         <>
-          <DeskDetail change={change} repoId={repoId} />
-          <DeskActionRail change={change} repoId={repoId} repoPath={repoPath} />
+          <DeskDetail change={change} repoId={repoId} repo={repo} />
+          <DeskActionRail change={change} repoId={repoId} repoPath={repoPath} repo={repo} />
         </>
       ) : (
         <div className="col-span-2 flex items-center justify-center p-8">

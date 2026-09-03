@@ -436,11 +436,21 @@ const TABS: Array<{ key: Tab; label: string }> = [
  * Every tab renders the same change the header names -- the header is not allowed
  * to describe one change while the content below shows another.
  */
-export function DeskDetail({ change, repoId }: { change: SpecChange; repoId: string }) {
+export function DeskDetail({
+  change,
+  repoId,
+  repo,
+}: {
+  change: SpecChange
+  repoId: string
+  /** The repository this window opened. Passed, not looked up: this
+      webview's workspace store is empty. */
+  repo: { path: string; name: string }
+}) {
   const [tab, setTab] = useState<Tab>('tasks')
   const run = useAiRun(repoId)
   const askSession = useAskStore((s) => s.byRepo[repoId])
-  const { startRun, canStart: canStartRun } = useStartRun(repoId, change)
+  const { startRun, canStart: canStartRun } = useStartRun(repoId, change, repo)
   const ai = useSpecAi()
   const [confirmUndo, setConfirmUndo] = useState(false)
   /**

@@ -122,8 +122,8 @@ export function SpecDeskView() {
 
           {change ? (
             <>
-              <DeskDetail change={change} repoId={repo.id} />
-              <DeskActionRail change={change} repoId={repo.id} repoPath={repo.path} />
+              <DeskDetail change={change} repoId={repo.id} repo={repo} />
+              <DeskActionRail change={change} repoId={repo.id} repoPath={repo.path} repo={repo} />
             </>
           ) : (
             <div className="p-6">
