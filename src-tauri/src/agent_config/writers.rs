@@ -7,24 +7,22 @@
 //! reimplementing them per client.
 //!
 //! Only clients with a schema independently proven safe by fixtures get a
-//! writer: Claude Code and OpenCode ship here (JSON, merged through
-//! [`super::json_patch`], which preserves every byte outside the touched
-//! key). Codex (TOML) has no writer -- Codex stays read-only until a real
-//! TOML editor (`toml_edit`) is added as a dependency and proven with its own
-//! fixtures (task 4.1's "Codex merge writer" is intentionally NOT delivered
-//! in this pass; see the report). VS Code Copilot and OpenChamber also have
-//! no writer yet (tasks 4.4, 4.5): their settings surfaces were not
-//! independently reproduced against a real client in this pass, and writing
-//! to VS Code's general `settings.json` in particular risks corrupting
-//! unrelated editor configuration if the safe-surface boundary is guessed
-//! rather than proven. All three remain readable (task 4.6): the inventory
-//! shows their state as `Unsupported` and no apply path can target them.
+//! writer. The JSON clients merge through [`super::json_patch`] and Codex
+//! merges through [`super::toml_patch`]; both preserve every byte outside the
+//! key they touch, which is what makes writing to a file a person hand-edits
+//! defensible at all.
+//!
+//! A client with no writer stays readable: the inventory shows its state as
+//! `Unsupported` and no apply path can target it. That is a real state, not a
+//! gap to paper over -- writing to a surface whose boundary was guessed rather
+//! than proven is how unrelated configuration gets corrupted.
 
 use serde_json::Value;
 
 use super::json_patch::{self, PatchError};
 use super::model::{ClientId, ExtraFields, ItemKind};
 use super::registry::{self, WriterKind};
+use super::toml_patch::{self, TomlPatchError};
 
 /// Which clients currently have a working writer. Read-only clients still
 /// appear in the inventory and their detected presence is reported --
@@ -41,6 +39,8 @@ pub fn is_supported(client: ClientId) -> bool {
 pub enum WriteContentError {
     #[error("{0}")]
     Patch(#[from] PatchError),
+    #[error("{0}")]
+    TomlPatch(#[from] TomlPatchError),
     #[error("no writer is implemented for this client")]
     Unsupported,
 }
@@ -75,6 +75,9 @@ pub fn build_new_content(
             let mut path: Vec<&str> = base.to_vec();
             path.push(identity);
             Ok(json_patch::set_path(current_text, &path, &value)?)
+        }
+        (Some(WriterKind::TomlTableMap { key }), ItemKind::McpConnector) => {
+            Ok(toml_patch::set_path(current_text, &[key, identity], &value)?)
         }
         _ => Err(WriteContentError::Unsupported),
     }
@@ -141,10 +144,39 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_client_refuses_to_build_content() {
+    fn codex_writer_merges_into_the_toml_server_table() {
+        let current = "model = \"gpt-5\"
+";
+        let item = extra(&[("command", json!("linear-mcp"))]);
+        let out = build_new_content(ClientId::Codex, ItemKind::McpConnector, "linear", &item, current).unwrap();
+        assert!(out.contains("[mcp_servers.linear]"), "{out}");
+        assert!(out.contains("command = \"linear-mcp\""), "{out}");
+        // The setting that was already there is still there.
+        assert!(out.contains("model = \"gpt-5\""), "{out}");
+    }
+
+    #[test]
+    fn codex_refuses_a_kind_its_writer_does_not_handle() {
+        // Same guarantee as the JSON clients: a skill must not be written into
+        // the connector table just because the client is writable.
         let item = extra(&[("command", json!("x"))]);
-        let result = build_new_content(ClientId::Codex, ItemKind::McpConnector, "x", &item, "");
+        let result = build_new_content(ClientId::Codex, ItemKind::Skill, "x", &item, "");
         assert!(matches!(result, Err(WriteContentError::Unsupported)));
+    }
+
+    #[test]
+    fn a_client_with_no_writer_refuses_to_build_content() {
+        // Guards the mechanism rather than one client: whichever rows are
+        // read-only, none of them can produce content. The table decides.
+        let item = extra(&[("command", json!("x"))]);
+        for spec in super::registry::CLIENTS.iter().filter(|s| !s.can_write()) {
+            let result = build_new_content(spec.id, ItemKind::McpConnector, "x", &item, "{}");
+            assert!(
+                matches!(result, Err(WriteContentError::Unsupported)),
+                "{:?} has no writer and must refuse",
+                spec.id
+            );
+        }
     }
 
     #[test]
@@ -179,9 +211,9 @@ mod tests {
         assert!(is_supported(ClientId::OpenCode));
         assert!(is_supported(ClientId::VsCodeCopilot));
         assert!(is_supported(ClientId::OpenChamber));
-        // TOML, and writing it without a real TOML editor would lose comments
-        // and formatting the person wrote themselves.
-        assert!(!is_supported(ClientId::Codex));
+        // TOML, written through a real document model so the comments and
+        // formatting the person wrote themselves survive the merge.
+        assert!(is_supported(ClientId::Codex));
     }
 
     /// VS Code reads three different places for its server map depending on

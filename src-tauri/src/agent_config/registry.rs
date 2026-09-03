@@ -66,6 +66,13 @@ pub enum WriterKind {
         candidates: &'static [&'static [&'static str]],
         default_path: &'static [&'static str],
     },
+    /// MCP servers live in a TOML table, one sub-table per server. Edited
+    /// through a real TOML document model so the comments and layout of a
+    /// hand-written config survive the write.
+    TomlTableMap {
+        /// The parent table holding the servers, e.g. `mcp_servers`.
+        key: &'static str,
+    },
 }
 
 /// Everything GitWyrm knows about one agent client, as data.
@@ -148,10 +155,10 @@ pub const CLIENTS: &[ClientSpec] = &[
         // Codex has no project-local config file GitWyrm reads today.
         repo_paths: &[],
         readable_kinds: &[ItemKind::McpConnector],
-        // TOML, and round-tripping comments and formatting safely needs a
-        // real TOML editor rather than the narrow display-only parser the
-        // reader uses. Read-only until that exists.
-        writer: None,
+        // TOML, written through `toml_patch` rather than the narrow
+        // display-only parser the reader uses, so comments and layout in a
+        // hand-written config survive the merge.
+        writer: Some(WriterKind::TomlTableMap { key: "mcp_servers" }),
         empty_document: "",
     },
     ClientSpec {
@@ -295,21 +302,21 @@ mod tests {
 
     #[test]
     fn exactly_the_json_clients_declare_a_writer() {
-        // Guards the read-only promise: a new row must not silently become an
-        // apply destination just by being added to the table. Codex is the
-        // one client still read-only, because its config is TOML and writing
-        // it without a real TOML editor would lose comments and formatting.
+        // Guards the write surface: a new row must not silently become an
+        // apply destination just by being added to the table. Every client
+        // listed here has a writer proven against fixtures of its real file
+        // format.
         let writable: Vec<ClientId> = CLIENTS.iter().filter(|s| s.can_write()).map(|s| s.id).collect();
         assert_eq!(
             writable,
             vec![
+                ClientId::Codex,
                 ClientId::ClaudeCode,
                 ClientId::OpenCode,
                 ClientId::VsCodeCopilot,
                 ClientId::OpenChamber
             ]
         );
-        assert!(!spec(ClientId::Codex).can_write(), "Codex stays read-only until TOML editing exists");
     }
 
     #[test]

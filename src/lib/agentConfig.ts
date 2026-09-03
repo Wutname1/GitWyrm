@@ -91,10 +91,11 @@ export function isEligibleDestination(status: ClientSyncStatus): boolean {
     status.state !== 'same' &&
     status.state !== 'keptSeparate' &&
     status.state !== 'clientNotDetected' &&
-    // 'unsupported' means this client has no writer at all -- Codex, VS Code
-    // Copilot and OpenChamber are read-only today. Offering one as a
-    // destination would build a plan that can never be applied, which is
-    // exactly the kind of button-that-cannot-work this release is removing.
+    // 'unsupported' means this client has no writer at all. Which clients
+    // those are is the backend's registry to decide, not a list to repeat
+    // here. Offering one as a destination would build a plan that can never
+    // be applied, which is exactly the kind of button-that-cannot-work this
+    // release is removing.
     status.state !== 'unsupported'
   )
 }

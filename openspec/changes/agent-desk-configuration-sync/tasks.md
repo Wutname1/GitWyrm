@@ -47,7 +47,7 @@
 
 ## 4. Client writers
 
-- [ ] 4.1 Codex merge writer and fixtures.
+- [x] 4.1 Codex merge writer and fixtures.
 - [x] 4.2 Claude Code merge writer and fixtures.
 - [x] 4.3 OpenCode merge writer and fixtures.
 - [x] 4.4 VS Code Copilot writer only for documented safe settings surfaces.
@@ -132,3 +132,32 @@ a fix that hadn't landed at commit time. Re-read the current code:
 No other changes; 4.1/4.4/4.5/5.2/5.5 re-confirmed still missing per the prior pass's own
 evidence (no Codex/Copilot/OpenChamber writers, no partial-batch-failure test, no Gate 7
 record).
+
+## Status 2026-09-02 (Codex writer)
+
+4.1 ticked. `agent_config/toml_patch.rs` merges a connector into
+`[mcp_servers.<name>]` through `toml_edit`'s document model, and the registry row
+for Codex now declares `WriterKind::TomlTableMap`, which is what actually makes it
+reachable: the writer dispatches on the row, so a client with no row branch cannot
+produce content no matter what code exists.
+
+The reason this was deferred rather than difficult: writing TOML by hand would have
+reformatted a file people comment and lay out themselves. `toml_edit` was already in
+the dependency tree through the build stack, so naming it directly pinned a version
+rather than adding a supply-chain surface.
+
+Nine tests in `toml_patch.rs` cover the properties that matter rather than just the
+happy path: comments and unrelated settings survive a merge, replacing one connector
+leaves its neighbours alone, writing the same connector twice produces a byte-identical
+file, invalid TOML is refused rather than rewritten, and a null field is refused rather
+than being invented as an empty string. Two tests in `writers.rs` prove the merge is
+reachable through `build_new_content` and that Codex still refuses a skill.
+
+Two tests that asserted Codex was read-only were replaced rather than deleted. The
+guarantee they protected -- that a client with no writer cannot produce content -- is
+now checked against the registry table instead of a client name, so it keeps holding
+as rows change.
+
+Still open in this package: 2.2 (per-item destination selection in the batch flow),
+5.2 (partial-batch-failure test), and 5.5 (Gate evidence). Native acceptance for the
+Codex writer is not recorded: no run has written a real `~/.codex/config.toml`.

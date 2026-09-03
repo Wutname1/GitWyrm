@@ -21,4 +21,5 @@ pub mod redact;
 pub mod registry;
 pub mod skill_write;
 pub mod skills;
+pub mod toml_patch;
 pub mod writers;

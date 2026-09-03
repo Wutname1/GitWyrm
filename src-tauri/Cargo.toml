@@ -46,6 +46,11 @@ fern = "0.7"
 # file's name agreeing with the timestamps written inside it.
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 thiserror = "2"
+# Format-preserving TOML editing, for merging a connector into Codex's
+# config.toml without losing the comments and layout around it. Already in the
+# dependency tree via the build stack; naming it directly pins the version the
+# writer's fixtures were proven against.
+toml_edit = "0.25"
 git2 = "0.21"
 notify = "8"
 # Atomic session-file writes for Agent Desk (temp file + rename), not just a
