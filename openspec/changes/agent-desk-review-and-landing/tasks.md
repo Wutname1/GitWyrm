@@ -111,7 +111,7 @@
 
 ## 4. Host handoff
 
-- [ ] 4.1 Mount Create pull request/Update pull request as a separate result action.
+- [x] 4.1 Mount Create pull request/Update pull request as a separate result action.
       (`agent_result_draft_pull_request` + `PullRequestButton` in `ResultReviewPanel.tsx`;
       "Update" is out of scope -- no PR-creation host API exists anywhere in this
       codebase to update against, see final report)
