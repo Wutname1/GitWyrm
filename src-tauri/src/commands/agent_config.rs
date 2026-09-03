@@ -238,7 +238,14 @@ fn find_source_item<'a>(items: &'a [RawItem], item_id: &str) -> Option<&'a RawIt
 }
 
 fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root: Option<&str>) -> DestinationPreview {
-    let write_supported = writers::is_supported(client);
+    // Support is per client AND per kind. A skill is a folder of files, not a
+    // member of a JSON object, so the writer this path uses cannot copy one
+    // whichever client is asked; `agent_config::skill_write` is what copies a
+    // skill, and it is not wired into this single-file preview yet. Asking
+    // the client alone reported a skill as writable and then produced
+    // nothing, which is worse than saying so plainly here.
+    let write_supported = writers::is_supported(client)
+        && source_item.kind != crate::agent_config::model::ItemKind::Skill;
     let mut locs = locations::personal_locations(client);
     if let Some(root) = repo_root {
         locs.extend(locations::repo_locations(client, root));
@@ -287,6 +294,15 @@ fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root:
     let redacted_destination = destination_extra.map(|e| redact::redact_for_display(e, &[]));
     let redacted_diff_summary: Vec<ChangeSummaryLine> =
         redact::diff_fields(&redacted_source, redacted_destination.as_ref(), &source_item.secret_fields);
+
+    if source_item.kind == crate::agent_config::model::ItemKind::Skill {
+        warnings.push(PlanWarning {
+            kind: WarningKind::UnsupportedField,
+            message: "Copying a skill from here is not wired up yet. A skill is a folder of \
+                      files rather than one setting, so it needs its own copy step."
+                .to_string(),
+        });
+    }
 
     if !source_item.secret_fields.is_empty() {
         warnings.push(PlanWarning {
