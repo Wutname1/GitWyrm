@@ -64,6 +64,18 @@ export function AwaitingStartCard({
         )
         return
       }
+      if (outcome.kind === 'noHelpersRunSolo') {
+        // A plan with no helpers in it is the lead saying it will do the
+        // work itself. The plan is cleared and the chat is ready for its
+        // next message; nothing was started, and nothing went wrong.
+        setStale(null)
+        setFailure(null)
+        refreshSession()
+        toast.info('This plan has no helpers, so the agent will work on its own.', {
+          description: 'Send your next message when you are ready.',
+        })
+        return
+      }
       if (outcome.kind === 'stale') {
         // Refuses outright: no worktree was provisioned, nothing was
         // written. The user must refresh (re-plan) or explicitly accept the

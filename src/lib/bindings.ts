@@ -8131,6 +8131,14 @@ export type StartGraphOutcome =
  */
 { kind: "noProposal" } | 
 /**
+ * The proposal named no helpers, which is the lead saying it will do
+ * the work alone. The proposal is cleared and the session handed back
+ * as an ordinary solo chat, ready for its next message. Distinct from
+ * `Started`: nothing was launched, and from `Invalid`: nothing was
+ * wrong.
+ */
+{ kind: "noHelpersRunSolo"; session: AgentSession } | 
+/**
  * The proposal that was drafted no longer validates (e.g. a concurrent
  * edit corrupted it) -- re-checked here, not trusted from draft time
  * (tasks.md 2.3 "revalidate current source/policy/worktree capacity").

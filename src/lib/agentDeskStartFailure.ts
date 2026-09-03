@@ -146,6 +146,8 @@ export function startFailureCardForGraph(outcome: StartGraphOutcome): StartFailu
     case 'noProposal':
     case 'notFound':
     case 'damaged':
+    // The lead said it will work alone. Nothing failed, so no card.
+    case 'noHelpersRunSolo':
       return null
     case 'sourceMissing':
       return { ...SOURCE_MISSING, detail: outcome.detail }

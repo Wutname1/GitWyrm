@@ -166,6 +166,8 @@ pub(crate) fn propose_graph_at(
         return ProposeGraphOutcome::Invalid { reason };
     }
 
+
+
     let execution_id = new_id();
     let outcome = update_session_at(locks, root, session_id, |s| {
         s.header.state = SessionState::NeedsInput;
@@ -504,6 +506,12 @@ pub enum StartGraphOutcome {
     /// No `NeedsInput` proposal was found on this session -- Start was
     /// called with nothing to start.
     NoProposal,
+    /// The proposal named no helpers, which is the lead saying it will do
+    /// the work alone. The proposal is cleared and the session handed back
+    /// as an ordinary solo chat, ready for its next message. Distinct from
+    /// `Started`: nothing was launched, and from `Invalid`: nothing was
+    /// wrong.
+    NoHelpersRunSolo { session: AgentSession },
     /// The proposal that was drafted no longer validates (e.g. a concurrent
     /// edit corrupted it) -- re-checked here, not trusted from draft time
     /// (tasks.md 2.3 "revalidate current source/policy/worktree capacity").
@@ -626,6 +634,26 @@ fn start_graph_at(
 
     if let Err(reason) = graph::validate_graph(&proposed) {
         return StartGraphOutcome::Invalid { reason };
+    }
+
+    // A proposal with no helpers is the lead saying it will do this alone
+    // (the parser accepts that shape on purpose). Starting it as a team put
+    // the graph in Working with no helper that could ever become terminal,
+    // so the run never completed and Auto mode reached this by itself.
+    // Answered the same way the Use solo button answers it: drop the
+    // proposal and hand the session back as an ordinary solo chat.
+    if proposed.helpers.is_empty() {
+        return match update_session_at(locks, root, session_id, |s| {
+            s.executions.retain(|e| e.proposed_graph.is_none());
+            s.header.active_execution_id = None;
+            s.header.state = SessionState::Ready;
+        }) {
+            UpdateOutcome::Updated { session } => StartGraphOutcome::NoHelpersRunSolo { session },
+            UpdateOutcome::NotFound => StartGraphOutcome::NotFound,
+            UpdateOutcome::Damaged { reason } => StartGraphOutcome::Damaged { reason },
+            UpdateOutcome::WriteFailed { detail } => StartGraphOutcome::WriteFailed { detail },
+            UpdateOutcome::Unavailable { detail } => StartGraphOutcome::Unavailable { detail },
+        };
     }
 
     // Task 3.3 ("detect task/spec changes after draft and block Start until
@@ -1370,7 +1398,22 @@ fn advance_graph_after_helper_completion(
         Ok(s) => s,
         Err(_) => return,
     };
-    let decision = graph::schedule(&session.executions);
+    let mut decision = graph::schedule(&session.executions);
+    // A helper waiting on something that ended badly can never start. Left
+    // in Draft it is not terminal, so the graph never reaches its review and
+    // the run hangs. Mark it here, once, with the reason in plain words.
+    let session = if decision.abandoned.is_empty() {
+        session
+    } else {
+        mark_abandoned_helpers(locks, root, session_id, &decision.abandoned);
+        match store::read_session(root, session_id) {
+            Ok(s) => {
+                decision = graph::schedule(&s.executions);
+                s
+            }
+            Err(_) => return,
+        }
+    };
     if decision.ready.is_empty() {
         maybe_start_review_or_finish_graph(app, locks, root, session_id, &session);
         return;
@@ -2155,6 +2198,57 @@ fn maybe_start_review_or_finish_graph(
     }
 }
 
+/// Marks every helper that can never start as `Failed`, and says why in the
+/// transcript.
+///
+/// `Failed` rather than a state of its own: to everything downstream (the
+/// review gate, the graph's own completion, the recovery sweep) this is a
+/// helper that ended without doing its work, which is exactly what Failed
+/// already means. A new state would have to be taught to each of them.
+fn mark_abandoned_helpers(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    abandoned: &[crate::agentdesk::graph::AbandonedNode],
+) {
+    let mut notes: Vec<String> = Vec::new();
+    let _ = update_session_at(locks, root, session_id, |s| {
+        for node in abandoned {
+            let blockers: Vec<String> = node
+                .because_of
+                .iter()
+                .map(|dep| {
+                    s.executions
+                        .iter()
+                        .find(|e| &e.execution_id == dep)
+                        .and_then(|e| e.job_title.clone())
+                        .unwrap_or_else(|| "an earlier step".to_string())
+                })
+                .collect();
+            let Some(helper) = s.executions.iter_mut().find(|e| e.execution_id == node.execution_id) else {
+                continue;
+            };
+            if !matches!(helper.state, SessionState::Draft | SessionState::Ready) {
+                continue;
+            }
+            let title = helper.job_title.clone().unwrap_or_else(|| "A helper".to_string());
+            helper.state = SessionState::Failed;
+            helper.ended_at = Some(now_rfc3339());
+            helper.output_summary = Some(format!(
+                "Never started: it needed {} to finish first.",
+                blockers.join(" and ")
+            ));
+            notes.push(format!(
+                "\"{title}\" never started because {} did not finish.",
+                blockers.join(" and ")
+            ));
+        }
+    });
+    for note in notes {
+        append_system_note(locks, root, session_id, &note);
+    }
+}
+
 /// What [`start_or_check_lead_review`] found, and what its `AppHandle`-aware
 /// caller should do about it. A closed enum rather than an `Option` because
 /// "needs a review turn launched" and "the review turn already finished, go
@@ -2605,7 +2699,8 @@ fn finish_graph_with_combined_result(
         checks,
         openspec_change_id,
     );
-    if let crate::commands::agent_result::BuildResultOutcome::Built { .. } = &build {
+    let result_built = matches!(&build, crate::commands::agent_result::BuildResultOutcome::Built { .. });
+    if result_built {
         let _ = crate::agentdesk::result::link_helper_results(locks, root, session_id, &lead.execution_id, &linked_execution_ids);
     }
 
@@ -2614,28 +2709,93 @@ fn finish_graph_with_combined_result(
         .iter()
         .find(|e| e.execution_id == review_execution_id)
         .map(|e| e.state);
-    let review_note = match review_state {
-        Some(SessionState::Finished) => "The lead reviewed the combined result.".to_string(),
-        Some(SessionState::Failed) => "The lead's review could not complete, but every helper's own work is still here to review.".to_string(),
-        Some(SessionState::Stopped) => "The lead's review was stopped before finishing; every helper's own work is still here to review.".to_string(),
-        _ => "The lead's review ended without a clear outcome; every helper's own work is still here to review.".to_string(),
-    };
 
+    // Finished has one meaning in this app: reviewed work is sitting there
+    // ready to look over. Three things can each make that false, and each
+    // used to be papered over with a note while the graph still said
+    // Finished -- the exact failure an unattended run cannot detect.
+    let outcome = graph_finish_outcome(review_state, result_built, describe_build_failure(&build));
     let lead_execution_id = lead.execution_id.clone();
+    let helper_count = helpers.len();
     let _ = update_session_at(locks, root, session_id, |s| {
         if let Some(lead) = s.executions.iter_mut().find(|e| e.execution_id == lead_execution_id) {
             if lead.state != SessionState::Working {
                 return;
             }
-            lead.state = SessionState::Finished;
+            lead.state = outcome.state;
             lead.ended_at = Some(now_rfc3339());
             lead.output_summary = Some(format!(
-                "{finished_count} of {} helpers finished. {review_note}",
-                helpers.len()
+                "{finished_count} of {helper_count} helpers finished. {}",
+                outcome.note
             ));
         }
-        s.header.state = SessionState::Finished;
+        s.header.state = outcome.state;
     });
+}
+
+/// How a graph run actually ended, once the review turn and the combined
+/// result are both accounted for.
+#[derive(Debug, PartialEq, Eq)]
+struct GraphFinishOutcome {
+    state: SessionState,
+    note: String,
+}
+
+/// A one-line reason when the combined result could not be written, or
+/// `None` when it was.
+fn describe_build_failure(build: &crate::commands::agent_result::BuildResultOutcome) -> Option<String> {
+    use crate::commands::agent_result::BuildResultOutcome;
+    match build {
+        BuildResultOutcome::Built { .. } => None,
+        BuildResultOutcome::SessionNotFound => Some("the chat could not be found".into()),
+        BuildResultOutcome::ExecutionNotFound => Some("the run could not be found".into()),
+        BuildResultOutcome::SessionDamaged { reason } => Some(reason.clone()),
+        BuildResultOutcome::SessionUnavailable { detail } | BuildResultOutcome::WriteFailed { detail } => {
+            Some(detail.clone())
+        }
+    }
+}
+
+/// The honest end state for a finished graph.
+///
+/// `Finished` is reserved for the one case that earns it: the lead's review
+/// turn finished AND the combined result was written, so there is something
+/// reviewed to open. A review that failed or was stopped, or a result that
+/// could not be persisted, ends the graph as `Failed`/`Stopped` with the
+/// reason said plainly. The helpers' own work is still on disk either way,
+/// and the note says so, but the session never claims a review that did not
+/// happen.
+fn graph_finish_outcome(
+    review_state: Option<SessionState>,
+    result_built: bool,
+    build_failure: Option<String>,
+) -> GraphFinishOutcome {
+    const HELPERS_KEPT: &str = "Every helper's own work is still here to look over.";
+    if !result_built {
+        let detail = build_failure.unwrap_or_else(|| "the combined result could not be saved".into());
+        return GraphFinishOutcome {
+            state: SessionState::Failed,
+            note: format!("The combined result could not be saved ({detail}). {HELPERS_KEPT}"),
+        };
+    }
+    match review_state {
+        Some(SessionState::Finished) => GraphFinishOutcome {
+            state: SessionState::Finished,
+            note: "The lead reviewed the combined result.".into(),
+        },
+        Some(SessionState::Stopped) => GraphFinishOutcome {
+            state: SessionState::Stopped,
+            note: format!("The lead's review was stopped before finishing, so nothing was checked over. {HELPERS_KEPT}"),
+        },
+        Some(SessionState::Failed) => GraphFinishOutcome {
+            state: SessionState::Failed,
+            note: format!("The lead's review could not finish, so nothing was checked over. {HELPERS_KEPT}"),
+        },
+        _ => GraphFinishOutcome {
+            state: SessionState::Failed,
+            note: format!("The lead's review ended without a clear outcome, so nothing was checked over. {HELPERS_KEPT}"),
+        },
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4953,6 +5113,75 @@ mod tests {
     fn fenced_proposal() -> String {
         "Here's my plan.\n\n```graph-proposal\n{ \"leadSummary\": \"Just going to look\", \"helpers\": [] }\n```\n"
             .to_string()
+    }
+
+    /// Finished has one meaning: reviewed work is there to look over. Each
+    /// of these used to end as Finished with an explanatory note, which is
+    /// exactly the false success an unattended run cannot catch.
+    #[test]
+    fn a_graph_only_finishes_when_the_review_and_the_result_both_landed() {
+        let ok = graph_finish_outcome(Some(SessionState::Finished), true, None);
+        assert_eq!(ok.state, SessionState::Finished);
+        assert!(ok.note.contains("reviewed"), "{}", ok.note);
+
+        let stopped = graph_finish_outcome(Some(SessionState::Stopped), true, None);
+        assert_eq!(stopped.state, SessionState::Stopped);
+        assert!(stopped.note.contains("nothing was checked over"), "{}", stopped.note);
+        assert!(stopped.note.contains("still here"), "{}", stopped.note);
+
+        let failed = graph_finish_outcome(Some(SessionState::Failed), true, None);
+        assert_eq!(failed.state, SessionState::Failed);
+        assert!(failed.note.contains("could not finish"), "{}", failed.note);
+
+        let unclear = graph_finish_outcome(None, true, None);
+        assert_eq!(unclear.state, SessionState::Failed);
+
+        // A review that went perfectly cannot rescue a result nobody could
+        // save: there is nothing on disk to open.
+        let unsaved = graph_finish_outcome(
+            Some(SessionState::Finished),
+            false,
+            Some("the disk was full".into()),
+        );
+        assert_eq!(unsaved.state, SessionState::Failed);
+        assert!(unsaved.note.contains("the disk was full"), "{}", unsaved.note);
+        assert!(unsaved.note.contains("still here"), "{}", unsaved.note);
+    }
+
+    /// A proposal with no helpers has nothing to start. Started anyway it
+    /// moved the graph to Working with no helper that could ever become
+    /// terminal, so it never completed; Auto mode reached this on its own.
+    #[test]
+    fn a_team_with_no_helpers_is_refused_at_start() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let manager = crate::state::RepoManager::default();
+        let empty = crate::agentdesk::graph::ProposedGraph {
+            lead_summary: "nothing to split up".into(),
+            helpers: Vec::new(),
+            proposed_at: now_rfc3339(),
+        };
+        // The proposal itself is legitimate: zero helpers is how a lead says
+        // it will work alone, and the parser accepts that shape.
+        match propose_graph_at(&locks, &root, "sess-1", empty) {
+            ProposeGraphOutcome::AwaitingStart { .. } => {}
+            other => panic!("expected the proposal to persist, got {other:?}"),
+        }
+        match start_graph_at(&locks, &root, &manager, "sess-1") {
+            StartGraphOutcome::NoHelpersRunSolo { session } => {
+                assert_eq!(session.header.state, SessionState::Ready);
+                assert!(session.executions.iter().all(|e| e.proposed_graph.is_none()));
+            }
+            other => panic!("expected NoHelpersRunSolo, got {other:?}"),
+        }
+        let session = store::read_session(&root, "sess-1").unwrap();
+        assert_ne!(
+            session.header.state,
+            SessionState::Working,
+            "a team of nobody must never leave the chat running forever"
+        );
+        assert_eq!(session.header.state, SessionState::Ready);
     }
 
     #[test]
