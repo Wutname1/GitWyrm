@@ -78,6 +78,12 @@ with this exact shape (a lead summary plus 0-3 helper jobs; omit helpers entirel
     }}\n  \
   ]\n\
 }}\n\n\
+Set \"completion\" to what finishing actually means for that helper. \"reportsResult\" is the \
+default and means the helper simply finishes. Use {{ \"kind\": \"checksPass\", \"command\": \"cargo test\" }} \
+when it must leave a named check passing, or {{ \"kind\": \"filesChanged\", \"paths\": [\"src/parser.rs\"] }} \
+when it must have changed particular files. A helper that stops without meeting its condition is \
+reported as unfinished and its work is NOT merged, so ask for the stricter kinds only where that is \
+genuinely what done means.\n\n\
 Only ONE such fenced block may appear, and it must be valid JSON matching this shape exactly -- \
 field names are camelCase as shown. A helper with role \"builder\", or any non-empty allowedPaths, \
 needs at least one path glob. If you cannot produce a real plan, say so in plain language and do not \
@@ -111,6 +117,11 @@ If parallel or specialized help would materially improve the result, stop before
     }}\n  \
   ]\n\
 }}\n\n\
+Set \"completion\" to what finishing actually means for that helper. \"reportsResult\" is the \
+default and means the helper simply finishes. Use {{ \"kind\": \"checksPass\", \"command\": \"cargo test\" }} \
+when it must leave a named check passing, or {{ \"kind\": \"filesChanged\", \"paths\": [\"src/parser.rs\"] }} \
+when it must have changed particular files. A helper that stops without meeting its condition is \
+reported as unfinished and its work is NOT merged.\n\n\
 Only one graph block may appear and it must be valid JSON. A builder, or any helper with non-empty allowedPaths, needs at least one path glob. If you solve the task directly, do not include a graph block."
     )
 }
@@ -410,6 +421,20 @@ mod tests {
     /// `- [ ] step` lines. Nothing asked the model for that shape, so the
     /// pane worked only when a model happened to write it; the instruction
     /// now asks, and this pins the exact marker the parser matches.
+    /// Enforcement is worthless if nothing ever asks for the stricter kinds.
+    /// The prompt only ever showed `reportsResult`, so a lead had no way to
+    /// say "this helper is done when the tests pass".
+    #[test]
+    fn both_instructions_offer_the_stricter_completion_kinds() {
+        for instruction in [plan_mode_instruction(), auto_mode_instruction()] {
+            assert!(instruction.contains("checksPass"), "{instruction}");
+            assert!(instruction.contains("filesChanged"), "{instruction}");
+            // And it says what happens when one is not met, so the lead can
+            // weigh asking for it.
+            assert!(instruction.contains("NOT merged"), "{instruction}");
+        }
+    }
+
     #[test]
     fn plan_mode_asks_for_the_checklist_shape_the_pane_renders() {
         assert!(plan_mode_instruction().contains("`- [ ] step`"));
