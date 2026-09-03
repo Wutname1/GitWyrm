@@ -30,7 +30,6 @@ import { useStartAgentSession } from "@/hooks/useStartAgentSession";
 import { nextTask, useOpenspecMutations } from "@/hooks/useOpenspec";
 import { useSpecAi } from "@/hooks/useSpecAi";
 import { useAiSelection } from "@/hooks/useAiSelection";
-import { isActive, stateGlyph, stateLabel, useAiRun } from "@/hooks/useAiRun";
 import { useAskStore } from "@/stores/askStore";
 import { useStartRun } from "@/hooks/useStartRun";
 import { ConfirmDialog } from "@/components/modals/ConfirmDialog";
@@ -196,7 +195,6 @@ export function DeskActionRail({
   const { validateChange, archiveChange, draftFix, addDraftedDelta } =
     useOpenspecMutations(repoId);
   const selection = useAiSelection();
-  const run = useAiRun(repoId);
   const startAskSession = useAskStore((s) => s.start);
   const [result, setResult] = useState<CliOutcome | null>(null);
   // Which change `result` describes. Not always the selected one: the user can
@@ -299,18 +297,9 @@ export function DeskActionRail({
     });
   };
 
-  // Ask and runs share the ✦ tab and the one-session-at-a-time rule, so a
-  // working run holds the tab. `isActive` covers the states where a run is
-  // mid-flight or waiting on the user, not one that has already ended.
-  const runIsActive = isActive(run.state);
-
+  // Ask no longer competes with a run for this tab: work happens in an Agent
+  // Desk chat with its own window, so there is nothing here to take over.
   const startAsk = () => {
-    if (runIsActive) {
-      toast.info("A run is working right now.", {
-        description: "Open the ✦ tab to watch it, then ask once it finishes.",
-      });
-      return;
-    }
     startAskSession(repoId, change.id);
     toast.success("Ask is open in the ✦ tab.", {
       description: "It reads this change and the code, and changes nothing.",
@@ -479,7 +468,6 @@ export function DeskActionRail({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
-        <RunBanner repoId={repoId} />
         <section className="rounded-lg border border-primary/25 bg-soft px-3.5 py-3">
           <p className="text-2xs font-bold tracking-[.09em] text-accent-text">
             {task
@@ -533,18 +521,9 @@ export function DeskActionRail({
                     </p>
                   </>
                 )}
-                {/* Ask shares the ✦ tab with runs, and only one session exists at
-                    a time, so this is off while a run is working rather than
-                    quietly replacing what the user is watching. */}
                 <RailButton
                   icon={<MessageCircleQuestion size={12} strokeWidth={2.2} />}
                   label="Ask about this change"
-                  disabled={runIsActive}
-                  title={
-                    runIsActive
-                      ? "A run is working right now. Open the ✦ tab to watch it, then ask when it finishes."
-                      : undefined
-                  }
                   onClick={startAsk}
                 />
               </>
@@ -817,44 +796,3 @@ export function DeskActionRail({
   );
 }
 
-/**
- * The current run, shown in the rail so a gate is visible while the Desk is on
- * another tab. Silent when nothing is running.
- */
-function RunBanner({ repoId }: { repoId: string }) {
-  const run = useAiRun(repoId);
-  if (!run.session || !run.state) return null;
-  const needsYou = run.state === "needsYou";
-  return (
-    <div
-      className={cn(
-        "mb-3 rounded-lg border px-3 py-2",
-        needsYou
-          ? "border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/8"
-          : "border-border bg-panel2",
-      )}
-    >
-      <div className="flex items-center gap-1.5">
-        <span
-          className={cn(
-            "flex-none text-2xs",
-            needsYou && "text-[var(--gw-amber)]",
-          )}
-        >
-          {stateGlyph(run.state)}
-        </span>
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-2xs font-semibold",
-            needsYou ? "text-[var(--gw-amber)]" : "text-sub",
-          )}
-        >
-          {needsYou ? "This run needs you" : stateLabel(run.state)}
-        </span>
-      </div>
-      <p className="mt-0.5 line-clamp-2 text-2xs text-muted-foreground">
-        Task {run.session.task_number} · {run.session.task_text}
-      </p>
-    </div>
-  );
-}

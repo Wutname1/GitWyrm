@@ -10,8 +10,6 @@ import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import { nextStepHint, progressSentence } from '@/lib/specDisplay'
 import { copyTaskHandoff } from '@/lib/specHandoff'
 import { nextTask, useOpenspecHistory, useOpenspecMutations } from '@/hooks/useOpenspec'
-import { stateGlyph, useAiRun } from '@/hooks/useAiRun'
-import { AiRunTab } from '@/components/domain/ai-run/AiRunTab'
 import { AskTab } from '@/components/domain/ai-run/AskTab'
 import { useAskStore } from '@/stores/askStore'
 import { useStartRun } from '@/hooks/useStartRun'
@@ -448,19 +446,9 @@ export function DeskDetail({
   repo: { path: string; name: string }
 }) {
   const [tab, setTab] = useState<Tab>('tasks')
-  const run = useAiRun(repoId)
   const askSession = useAskStore((s) => s.byRepo[repoId])
   const { startRun, canStart: canStartRun } = useStartRun(repoId, change, repo)
   const ai = useSpecAi()
-  const [confirmUndo, setConfirmUndo] = useState(false)
-  /**
-   * Set when a discard found hand edits in the run's own folder, so the user is
-   * asked before it goes. Carries the counts, because deciding needs them.
-   */
-  const [handEdited, setHandEdited] = useState<
-    Extract<RunDiscardPlan, { kind: 'handEdited' }> | null
-  >(null)
-  const [undoing, setUndoing] = useState(false)
   /**
    * The file currently open in the editor, relative to the change folder, or
    * null when every tab is rendering read-only.
@@ -496,55 +484,6 @@ export function DeskDetail({
     setEditing(null)
   }, [change.id])
 
-  /**
-   * Throw away the AI's edits and put its task back to not-done.
-   *
-   * Order matters: discard first, un-tick second. A tick left standing over
-   * discarded work would claim a task was done when its changes are gone, which
-   * is worse than the reverse.
-   */
-  const undoRun = async (keepFolder = false) => {
-    const session = run.session
-    if (!session || undoing) return
-    setUndoing(true)
-    try {
-      // A run that worked in its own folder is undone by removing that folder,
-      // not by discarding changes in the user's checkout -- there are none
-      // there to discard, and discarding would throw away the user's own work.
-      const plan = unwrap(await commands.aiRunDiscardPlan(repoId))
-
-      if (plan.kind === 'noFolder') {
-        // Reset submodules too: undoing a run has to leave nothing of it
-        // behind, and a submodule it moved would otherwise survive.
-        unwrap(await commands.discardAll(repoId, true))
-      } else if (plan.kind === 'handEdited' && !keepFolder) {
-        // Ask before deleting a folder the user worked in. A discard is about
-        // throwing away the AI's result, not theirs.
-        setHandEdited(plan)
-        setUndoing(false)
-        return
-      } else if (!keepFolder) {
-        unwrap(await commands.removeWorktree(repoId, plan.path, 'discard'))
-      }
-
-      const line = change.tasks.find((t) => t.text === session.task_text)?.line
-      if (line != null) {
-        await commands.openspecToggleTask(repoId, session.change_id, line, false)
-      }
-      await run.clear()
-      setConfirmUndo(false)
-      setHandEdited(null)
-      toast.success(
-        keepFolder
-          ? 'Undone. The task is open again, and the worktree is kept in your Worktrees list.'
-          : "Undone. The AI's edits are gone and the task is open again."
-      )
-    } catch (e) {
-      toast.error('Could not undo that.', { description: describeError(e) })
-    } finally {
-      setUndoing(false)
-    }
-  }
   /**
    * Ask the AI for a rewrite of one file. Writes nothing.
    *
@@ -597,20 +536,19 @@ export function DeskDetail({
   // The AI tab only exists once there is something to show. An empty tab that is
   // always present invites clicking on nothing.
   //
-  // A run wins the tab when both exist: it is the mode with state to watch and
-  // possibly a gate waiting, and it is the one that can change files.
-  const hasRun = run.session != null
-  const askMode = asking && !hasRun
-  const showAiTab = hasRun || asking
-  const tabs = showAiTab
-    ? [...TABS, { key: 'ai' as Tab, label: askMode ? '✦ Ask AI' : '✦ AI' }]
+  // Only Ask lives here now. Work on a task opens an Agent Desk chat with its
+  // own window, transcript and result, so this tab no longer competes with it
+  // or mirrors its state.
+  const askMode = asking
+  const tabs = asking
+    ? [...TABS, { key: 'ai' as Tab, label: '✦ Ask AI' }]
     : TABS
 
   // Leaving the change the ask belongs to sends the tab back somewhere real,
   // rather than leaving an empty ✦ selected.
   useEffect(() => {
-    if (tab === 'ai' && !showAiTab) setTab('tasks')
-  }, [tab, showAiTab])
+    if (tab === 'ai' && !asking) setTab('tasks')
+  }, [tab, asking])
   const history = useOpenspecHistory(repoId, change.id, tab === 'tasks' || tab === 'history')
   const recent = (history.data ?? []).slice(0, 3)
 
@@ -671,22 +609,6 @@ export function DeskDetail({
             {t.key === "deltas" && (
               <span className="ml-1.5 rounded-full bg-panel3 px-1.5 font-mono text-2xs font-normal text-sub">
                 {change.deltas.length}
-              </span>
-            )}
-            {t.key === "ai" && run.state && (
-              <span
-                className={cn(
-                  "ml-1.5 font-normal",
-                  run.state === "needsYou"
-                    ? "text-[var(--gw-amber)]"
-                    : "text-sub",
-                )}
-                // The badge is how a gate reaches someone reading another tab.
-                aria-label={
-                  run.state === "needsYou" ? "This run needs you" : undefined
-                }
-              >
-                {stateGlyph(run.state)}
               </span>
             )}
           </button>
@@ -972,14 +894,7 @@ export function DeskDetail({
             // Promotion from read-only to write, as one explicit click. Absent
             // when every task is done, so the button is never offered with
             // nothing to run.
-            onStartRun={
-              canStartRun
-                ? () => {
-                    void startRun();
-                    setTab("ai");
-                  }
-                : undefined
-            }
+            onStartRun={canStartRun ? () => void startRun() : undefined}
             // Drafting an edit is offered only when a provider is resolved --
             // otherwise the button would be there with nothing behind it.
             onDraftEdit={
@@ -990,125 +905,12 @@ export function DeskDetail({
             deltaFiles={change.deltas.map((d) => d.file)}
           />
         )}
-        {tab === "ai" && !askMode && (
-          <AiRunTab
-            run={run}
-            // Names the AI on the commit's Assisted-by trailer. Absent when no
-            // provider is resolved, which makes the run fall back to the plain
-            // ending rather than drafting a commit that misattributes itself.
-            provider={ai.provider || undefined}
-            endingActions={{
-              // Keeping is the default state already: the edits are sitting in
-              // the changes list, so this just closes the run out.
-              onKeep: () => {
-                void run.clear();
-                toast.success("Kept. The changes are in your changes list.");
-              },
-              // The run is done once its work is committed. Clearing frees the
-              // repository to start the next task, which is an explicit click --
-              // runs never chain themselves.
-              onCommitted: (sha) => {
-                void run.clear();
-                toast.success(`Committed ${sha.slice(0, 7)}.`, {
-                  description:
-                    "The task is ticked and the commit is on your branch.",
-                });
-              },
-              // Throws the AI's edits away and puts the task back to not-done.
-              // Confirmed first: this is the one ending action that destroys
-              // work, and a misclick here costs the whole run.
-              onUndo: () => setConfirmUndo(true),
-              // Restarting means working on the task again, which is now
-              // one path: an Agent Desk chat. Starting a second, separate
-              // run here is exactly the parallel lifecycle this converged
-              // away from, so this clears the finished console and starts
-              // the task the same way the rail's button does.
-              onRestart: () => {
-                void (async () => {
-                  await run.clear();
-                  await startRun();
-                })();
-              },
-              // These two can act for real: reconnecting is a settings trip,
-              // and the handoff is the escape hatch that exists precisely for
-              // when the AI cannot run.
-              // Settings live in the main window, so this brings that window
-              // forward and says where to go rather than pretending the Desk
-              // can open a panel it does not have.
-              onReconnect: () => {
-                void (async () => {
-                  try {
-                    const { WebviewWindow } =
-                      await import("@tauri-apps/api/webviewWindow");
-                    const main = await WebviewWindow.getByLabel("main");
-                    await main?.unminimize();
-                    await main?.show();
-                    await main?.setFocus();
-                  } catch {
-                    // Falling through to the toast is fine: the instruction is
-                    // the useful part, not the focus change.
-                  }
-                  toast.info(
-                    "Open Settings > AI in the main window to sign in again.",
-                  );
-                })();
-              },
-              onCopyHandoff: () => {
-                const task = nextTask(change);
-                if (task) void copyTaskHandoff(change, task);
-              },
-              // Adding a note to a retry needs somewhere to type it, which is
-              // its own piece of UI. Restart plus the composer already covers
-              // the same ground, so this is left out rather than stubbed.
-              onRetryWithNote: undefined,
-            }}
-          />
-        )}
+        {/* The run console that used to live here is gone along with the run
+            lifecycle behind it. Working a task opens an Agent Desk chat, which
+            owns the transcript, the approvals, the result and the undo; a
+            second copy of that state here could only ever drift from it. */}
       </div>
 
-      <ConfirmDialog
-        open={confirmUndo}
-        onOpenChange={setConfirmUndo}
-        title="Undo the AI's edits?"
-        description={
-          <>
-            Every file the AI changed goes back to how it was, and its task is
-            marked not done again. Anything you changed yourself in those files
-            goes too, so this is worth a look at your changes list first.
-          </>
-        }
-        confirmLabel="Undo the edits"
-        destructive
-        pending={undoing}
-        pendingLabel="Undoing…"
-        onConfirm={() => void undoRun()}
-      />
-
-      {/* A run's folder the user worked in is never silently deleted. Discard
-          throws away the AI's result, not theirs. */}
-      <ConfirmDialog
-        open={handEdited != null}
-        onOpenChange={(o) => !o && setHandEdited(null)}
-        title="You've made your own edits in that worktree"
-        description={
-          handEdited && (
-            <>
-              The <span className="font-mono text-foreground">{handEdited.folder_name}</span>{' '}
-              worktree has{' '}
-              {handEdited.modified > 0 && `${handEdited.modified} file${handEdited.modified === 1 ? '' : 's'} you changed`}
-              {handEdited.modified > 0 && handEdited.untracked > 0 && ' and '}
-              {handEdited.untracked > 0 &&
-                `${handEdited.untracked} new file${handEdited.untracked === 1 ? '' : 's'} that ${handEdited.untracked === 1 ? 'has' : 'have'} never been saved anywhere`}
-              . Keeping it leaves an ordinary worktree in your Worktrees list that you can open or
-              remove whenever you like.
-            </>
-          )
-        }
-        confirmLabel="Keep the worktree"
-        pending={undoing}
-        pendingLabel="Undoing…"
-        onConfirm={() => void undoRun(true)}
-      />
     </div>
   );
 }
