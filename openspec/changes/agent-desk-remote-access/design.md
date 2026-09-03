@@ -41,8 +41,10 @@ precedent matters because it is a flow this codebase already gets right.
 
 ## What is exposed
 
-Roughly forty of the app's three hundred commands: the Agent Desk surface. Listing
-sessions, reading a transcript, answering a gate, stopping a run.
+The Agent Desk surface: 54 of the app's 316 registered commands, counted rather than
+estimated. Listing sessions, reading a transcript, answering a gate, stopping a run.
+Not all 54 need exposing; that count is the ceiling, and the allowlist should be the
+smaller set the phone actually uses.
 
 The git client is deliberately not exposed. Not because it is harder, but because
 "watch and steer a run" is a small, checkable surface and "drive my repository from my
