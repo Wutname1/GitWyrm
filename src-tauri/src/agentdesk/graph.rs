@@ -278,6 +278,11 @@ pub struct ScheduleDecision {
     pub ready: Vec<ExecutionId>,
     /// Execution ids still blocked, and on what.
     pub blocked: Vec<BlockedNode>,
+    /// Helpers that can never start because something they depend on ended
+    /// badly. Reported separately from `blocked`: a blocked node is waiting,
+    /// an abandoned one is waiting for something that will never come.
+    #[serde(default)]
+    pub abandoned: Vec<AbandonedNode>,
     /// How many concurrency slots remain after starting everything in
     /// `ready` (always `>= 0`; the scheduler never proposes more than fit).
     pub slots_remaining: u32,
@@ -288,6 +293,15 @@ pub struct ScheduleDecision {
 pub struct BlockedNode {
     pub execution_id: ExecutionId,
     pub waiting_on: Vec<ExecutionId>,
+}
+
+/// A helper whose dependency ended badly, so it will never be started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AbandonedNode {
+    pub execution_id: ExecutionId,
+    /// The dependencies that ended badly, so the note can name them.
+    pub because_of: Vec<ExecutionId>,
 }
 
 /// Given every execution on a session, decide which helper nodes (rows with
@@ -329,9 +343,21 @@ pub fn schedule(executions: &[ExecutionRecord]) -> ScheduleDecision {
         .filter(|e| e.state == SessionState::Finished)
         .map(|e| e.execution_id.as_str())
         .collect();
+    // A dependency that ended badly is never going to finish. Waiting only
+    // on `Finished` left every dependent stuck in Draft forever, and graph
+    // completion then refused to proceed because that Draft helper was not
+    // terminal: one failed helper hung the whole run with no way out.
+    // Ending badly is a different answer from finishing, so these are
+    // reported separately and the dependent is abandoned, not started.
+    let failed_dependencies: HashSet<&str> = executions
+        .iter()
+        .filter(|e| is_failed_dependency(e.state))
+        .map(|e| e.execution_id.as_str())
+        .collect();
 
     let mut ready = Vec::new();
     let mut blocked = Vec::new();
+    let mut abandoned = Vec::new();
 
     for helper in &helpers {
         // Only pending (not-yet-started) nodes are schedulable at all --
@@ -340,6 +366,20 @@ pub fn schedule(executions: &[ExecutionRecord]) -> ScheduleDecision {
         if helper.state != SessionState::Ready && helper.state != SessionState::Draft {
             continue;
         }
+        let dead: Vec<ExecutionId> = helper
+            .depends_on
+            .iter()
+            .filter(|dep| failed_dependencies.contains(dep.as_str()))
+            .cloned()
+            .collect();
+        if !dead.is_empty() {
+            abandoned.push(AbandonedNode {
+                execution_id: helper.execution_id.clone(),
+                because_of: dead,
+            });
+            continue;
+        }
+
         let waiting_on: Vec<ExecutionId> = helper
             .depends_on
             .iter()
@@ -368,8 +408,18 @@ pub fn schedule(executions: &[ExecutionRecord]) -> ScheduleDecision {
     ScheduleDecision {
         ready,
         blocked,
+        abandoned,
         slots_remaining: slots as u32,
     }
+}
+
+/// A dependency in this state will never finish, so anything waiting on it
+/// is waiting for something that cannot happen.
+fn is_failed_dependency(state: SessionState) -> bool {
+    matches!(
+        state,
+        SessionState::Failed | SessionState::Stopped | SessionState::Interrupted | SessionState::MissingSource
+    )
 }
 
 fn is_active(state: SessionState) -> bool {
@@ -809,6 +859,50 @@ mod tests {
         );
         e.depends_on = deps.iter().map(|s| s.to_string()).collect();
         e
+    }
+
+    /// A dependency that ended badly will never finish. Waiting only on
+    /// `Finished` left the dependent in Draft forever, and graph completion
+    /// then refused to proceed because that Draft helper was not terminal:
+    /// one failed helper hung the entire run.
+    #[test]
+    fn a_helper_waiting_on_a_dead_dependency_is_abandoned_not_blocked() {
+        for dead in [
+            SessionState::Failed,
+            SessionState::Stopped,
+            SessionState::Interrupted,
+            SessionState::MissingSource,
+        ] {
+            let executions = vec![
+                exec("lead-1", None, SessionState::Working, &[]),
+                exec("h1", Some("lead-1"), dead, &[]),
+                exec("h2", Some("lead-1"), SessionState::Draft, &["h1"]),
+            ];
+            let decision = schedule(&executions);
+            assert!(decision.ready.is_empty(), "{dead:?}: nothing may start on a dead dependency");
+            assert!(
+                decision.blocked.is_empty(),
+                "{dead:?}: an abandoned helper must not read as merely waiting"
+            );
+            assert_eq!(decision.abandoned.len(), 1, "{dead:?}");
+            assert_eq!(decision.abandoned[0].execution_id, "h2");
+            assert_eq!(decision.abandoned[0].because_of, vec!["h1".to_string()]);
+        }
+    }
+
+    /// A dependency that is still running is a different answer: that helper
+    /// is waiting, and its turn may yet come.
+    #[test]
+    fn a_helper_waiting_on_a_running_dependency_is_still_blocked() {
+        let executions = vec![
+            exec("lead-1", None, SessionState::Working, &[]),
+            exec("h1", Some("lead-1"), SessionState::Working, &[]),
+            exec("h2", Some("lead-1"), SessionState::Draft, &["h1"]),
+        ];
+        let decision = schedule(&executions);
+        assert!(decision.abandoned.is_empty());
+        assert_eq!(decision.blocked.len(), 1);
+        assert_eq!(decision.blocked[0].waiting_on, vec!["h1".to_string()]);
     }
 
     #[test]
