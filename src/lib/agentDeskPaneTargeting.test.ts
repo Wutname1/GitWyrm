@@ -116,3 +116,49 @@ describe('rapid selection (tasks.md 4.7)', () => {
     }
   })
 })
+
+describe('opening a chat while one pane is still empty', () => {
+  // Split View starts with the second pane empty and `activePane` still on
+  // the first, so the next sidebar click REPLACED the chat being read and
+  // left the new pane empty -- the opposite of what splitting is for.
+  //
+  // Recorded as G4 in pass 25 and deliberately left open: two fixes were
+  // possible and not equivalent. Moving `activePane` to the empty pane at
+  // open time reaches `resolveSplitCollapse`'s `secondarySessionId === null`
+  // promotion, which would DISCARD the chat being read when Split View is
+  // closed again. Preferring the empty pane here cannot: `activePane` never
+  // moves, so that path stays unreachable.
+  const base = { split: true, activePane: 'primary' as const, sessionId: 'new-chat' }
+
+  it('fills the empty pane instead of replacing the chat being read', () => {
+    expect(
+      resolvePaneTarget({ ...base, primarySessionId: 'being-read', secondarySessionId: null })
+    ).toEqual({ action: 'open', pane: 'secondary' })
+  })
+
+  it('fills an empty FIRST pane too, when that is the empty one', () => {
+    expect(
+      resolvePaneTarget({
+        ...base,
+        activePane: 'secondary',
+        primarySessionId: null,
+        secondarySessionId: 'being-read',
+      })
+    ).toEqual({ action: 'open', pane: 'primary' })
+  })
+
+  it('still replaces the active pane when both panes are full', () => {
+    // With nothing empty there is no better answer than the active pane, and
+    // silently picking the other one would move a chat the person did not ask
+    // to move.
+    expect(
+      resolvePaneTarget({ ...base, primarySessionId: 'a', secondarySessionId: 'b' })
+    ).toEqual({ action: 'open', pane: 'primary' })
+  })
+
+  it('still focuses a chat that is already open rather than opening it twice', () => {
+    expect(
+      resolvePaneTarget({ ...base, sessionId: 'b', primarySessionId: 'a', secondarySessionId: 'b' })
+    ).toEqual({ action: 'focus', pane: 'secondary' })
+  })
+})

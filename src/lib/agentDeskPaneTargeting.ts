@@ -31,8 +31,20 @@ export type PaneTargetingResult =
  *   - Split: if the session is already visible in either pane, focus that
  *     pane instead of opening a second copy of it -- even if the *other*
  *     pane is the active one right now.
- *   - Split, not already visible: open into the active pane, replacing
- *     whatever it currently shows.
+ *   - Split, one pane empty: open into the EMPTY one. Splitting exists to put
+ *     a second conversation up, and `openSplit` leaves the new pane blank with
+ *     `activePane` still on the old one -- so without this, the first click
+ *     after splitting replaced the chat being read and left the new pane
+ *     empty, the exact opposite of what was asked for.
+ *   - Split, both panes full: open into the active pane, replacing whatever it
+ *     currently shows. With nothing empty there is no better answer, and
+ *     picking the other pane would move a chat the person did not ask to move.
+ *
+ * Deliberately solved HERE rather than by pointing `activePane` at the new
+ * pane in `openSplit`. That reaches `resolveSplitCollapse`'s
+ * `secondarySessionId === null` promotion, so closing Split View before ever
+ * filling the pane would discard the chat being read. `activePane` never
+ * moves here, so that path stays unreachable.
  */
 export function resolvePaneTarget(input: PaneTargetingInput): PaneTargetingResult {
   if (!input.split) {
@@ -43,6 +55,12 @@ export function resolvePaneTarget(input: PaneTargetingInput): PaneTargetingResul
   }
   if (input.secondarySessionId === input.sessionId) {
     return { action: 'focus', pane: 'secondary' }
+  }
+  if (input.primarySessionId === null) {
+    return { action: 'open', pane: 'primary' }
+  }
+  if (input.secondarySessionId === null) {
+    return { action: 'open', pane: 'secondary' }
   }
   return { action: 'open', pane: input.activePane }
 }
