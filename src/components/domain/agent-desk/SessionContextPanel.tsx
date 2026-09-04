@@ -152,9 +152,21 @@ export function SessionContextPanel({ session }: { session: AgentSession }) {
         <div className="flex items-start gap-1.5 rounded-md border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10 px-2 py-1.5 text-2xs leading-relaxed text-[var(--gw-amber)]">
           <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            {/*
+              This used to say "Refresh it below", which promised the button
+              clears this banner. It does not: drift compares the live spec
+              against the fingerprint of what the agent READ, and refreshing
+              updates the cached copy without changing that. So the button
+              answered "Checked: the source had not changed after all" while
+              the banner stayed up -- two of the app's own surfaces
+              contradicting each other on screen.
+
+              The banner clears when an agent next reads the spec, which the
+              second sentence already said and which is the honest answer.
+            */}
             <span>
-              The spec changed since the last time an agent read it. Refresh it below, or just send a message: the
-              next turn reads the current files either way.
+              The spec changed since the last time an agent read it. Send a message and the next turn reads the
+              current files, which is what clears this.
             </span>
             <button
               type="button"
@@ -163,7 +175,7 @@ export function SessionContextPanel({ session }: { session: AgentSession }) {
               className="inline-flex w-fit items-center gap-1 rounded border border-[var(--gw-amber)]/50 px-1.5 py-0.5 text-2xs font-semibold hover:bg-[var(--gw-amber)]/15 disabled:opacity-60"
             >
               {refreshing ? <Loader2 size={11} className="animate-spin motion-reduce:animate-none" aria-hidden /> : null}
-              {refreshing ? 'Refreshing…' : 'Refresh the source'}
+              {refreshing ? 'Checking…' : 'Check the saved copy'}
             </button>
           </div>
         </div>

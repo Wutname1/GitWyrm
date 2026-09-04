@@ -307,3 +307,23 @@ describe('itemDisplayName', () => {
     expect(itemDisplayName(entries, 'Skill:unknown')).toBe('Skill:unknown')
   })
 })
+
+describe('describeConfigOperation names apps the way the user sees them', () => {
+  it('turns the stored key into the display name', () => {
+    // A receipt stores `vs-code-copilot`, deliberately, so a future build can
+    // still read it back to undo. The permanent record of what GitWyrm
+    // changed was printing that key at the person.
+    expect(describeConfigOperation({ client: 'vs-code-copilot', beforeHash: 'a', undone: false })).toBe(
+      'Changed settings for Copilot'
+    )
+    expect(describeConfigOperation({ client: 'open-chamber', beforeHash: null, undone: false })).toBe(
+      'Created settings for OpenChamber'
+    )
+  })
+  it('falls back to the key for a client this build does not know', () => {
+    // Which is exactly what a receipt from a future build would carry.
+    expect(describeConfigOperation({ client: 'some-new-tool', beforeHash: 'a', undone: false })).toMatch(
+      /some-new-tool/
+    )
+  })
+})

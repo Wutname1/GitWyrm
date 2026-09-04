@@ -75,6 +75,24 @@ export function clientLabel(client: ClientId): string {
 }
 
 /**
+ * The same label, for a client that reaches us as a plain string.
+ *
+ * A receipt stores its client as a string rather than the typed id, on purpose:
+ * a receipt outlives the release that wrote it, and a future build that no
+ * longer knows a client must still be able to read the receipt back to undo it.
+ * That is right -- but it meant the permanent record of what GitWyrm changed in
+ * other applications read "Changed settings for vs-code-copilot", naming apps
+ * by internal keys the person has never seen anywhere else in the product.
+ *
+ * Falls back to the key rather than to nothing: an unrecognised client is
+ * better named badly than not at all, and it is what a receipt from a future
+ * build would carry.
+ */
+export function clientLabelFromKey(key: string): string {
+  return (CLIENT_LABEL as Record<string, string>)[key] ?? key
+}
+
+/**
  * Every client column, in the fixed order the table shows them.
  *
  * Derived from `CLIENT_LABEL` rather than hand-listed. A hand-written list
@@ -193,7 +211,8 @@ export function describeConfigOperation(receipt: {
   undone: boolean
 }): string {
   const what = receipt.beforeHash === null ? 'Created settings for' : 'Changed settings for'
-  return receipt.undone ? `${what} ${receipt.client} (already put back)` : `${what} ${receipt.client}`
+  const client = clientLabelFromKey(receipt.client)
+  return receipt.undone ? `${what} ${client} (already put back)` : `${what} ${client}`
 }
 
 /**

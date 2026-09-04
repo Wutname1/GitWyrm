@@ -75,10 +75,19 @@ export function useApplyAgentConfigBatch(repoId: string | null) {
     // and nothing else happened, so a copy that did not run looked identical
     // to one that did. `useUndoAgentConfigCopy` below reports both outcomes;
     // this member of the same family simply omitted it.
+    // "Nothing was changed" was wrong here, and it was my own wording.
+    //
+    // `agent_config_apply_batch` maps over every plan and collects an outcome
+    // for each -- a per-item failure cannot make the command return `Err`. So
+    // this handler only fires when the call itself failed, which happens
+    // AFTER the loop has run and writes may already have landed. Telling
+    // someone nothing changed at the one moment GitWyrm cannot know that is
+    // the opposite of the honesty rule everywhere else in this surface.
     onError: (e) => {
       log.error(`agent config batch apply failed: ${describeError(e)}`)
-      toast.error('Those settings could not be copied.', {
-        description: 'Nothing was changed. You can try again.',
+      toast.error('Copying settings did not finish.', {
+        description:
+          'Some of them may already have been copied. Check "What GitWyrm changed" in Agent Setup before trying again.',
       })
     },
     onSettled: () => {
