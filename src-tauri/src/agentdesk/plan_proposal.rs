@@ -57,10 +57,19 @@ pub const FENCE_LANGUAGE: &str = "graph-proposal";
 /// convention [`extract_graph_proposal`] parses back out. Kept as a function
 /// of nothing (not a `const`) so a future version bump to the schema is one
 /// place to change, matching `SYSTEM_PROMPT`'s own plain-string shape.
+///
+/// The checklist wording used to promise the app "ticks them as work lands".
+/// It does not: `agentDeskPlan.ts` parses the marks out of the stored message
+/// body, and nothing rewrites that body once written, so every row stayed at
+/// whatever the model first typed -- and since this prompt only ever taught
+/// `- [ ]`, that meant permanently pending. The parser has always understood
+/// `x` and `~`; only the instruction withheld them. Teaching both, and
+/// promising only what actually happens, makes the checklist truthful without
+/// inventing a rewrite mechanism that does not exist.
 pub fn plan_mode_instruction() -> String {
     format!(
         "You are in PLAN mode: propose a graph of work instead of doing it yet.\n\n\
-Do not edit any files. Instead, reply with a short plain-language summary of your plan written as a Markdown task list, one step per line in the form `- [ ] step` (the app shows these as a checklist and ticks them as work lands), \
+Do not edit any files. Instead, reply with a short plain-language summary of your plan written as a Markdown task list, one step per line in the form `- [ ] step`, or `- [~] step` for a step already underway and `- [x] step` for one already done (the app shows these as a checklist exactly as you write them), \
 then a single fenced code block written exactly as ```{FENCE_LANGUAGE} ... ``` containing ONE JSON object \
 with this exact shape (a lead summary plus 0-3 helper jobs; omit helpers entirely for solo work):\n\n\
 {{\n  \
@@ -251,6 +260,18 @@ fn parse_one(body: &str) -> ProposalOutcome {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_plan_instruction_promises_only_what_the_app_does() {
+        let p = plan_mode_instruction();
+        // It used to say the app "ticks them as work lands". Nothing rewrites
+        // a stored message body, so that never happened -- and the prompt
+        // taught only the empty box, guaranteeing every row stayed pending.
+        assert!(!p.contains("ticks them"), "must not promise ticking it does not do");
+        // The parser has always understood these two marks; teach them.
+        assert!(p.contains("- [~] step"), "should teach the in-progress mark");
+        assert!(p.contains("- [x] step"), "should teach the done mark");
+    }
     use super::*;
     use crate::agentdesk::graph::{CompletionCondition, HelperRole, JobBudget};
 
