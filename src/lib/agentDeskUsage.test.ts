@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildAgentUsageLines, buildUsageRows, hasAnyUsageData } from './agentDeskUsage'
+import { buildAgentUsageLines, buildUsageRows, hasAnyUsageData, nodeUsageLine } from './agentDeskUsage'
 import type { AgentUsageRow, SessionUsage } from '@/lib/bindings'
 
 const EMPTY: SessionUsage = {
@@ -202,5 +202,35 @@ describe('buildUsageRows', () => {
     const rows = buildUsageRows(usage)
     expect(rows).toHaveLength(1)
     expect(rows[0].label).toBe('Resets')
+  })
+})
+
+describe('nodeUsageLine', () => {
+  it('says what one agent spent', () => {
+    const line = nodeUsageLine({ inputTokens: 1200, outputTokens: 800, turns: 3, costMicroUsd: 40000 })
+    expect(line).toMatch(/2.0k tokens/)
+    expect(line).toMatch(/3 turns/)
+    expect(line).toMatch(/\$0.04/)
+  })
+
+  it('uses the singular for one turn', () => {
+    expect(nodeUsageLine({ turns: 1 })).toBe('1 turn')
+  })
+
+  it('says nothing at all when the provider reported nothing', () => {
+    // The rule every usage surface follows: absent is not zero. A row of
+    // zeros would read as "measured, and free".
+    expect(nodeUsageLine(null)).toBeNull()
+    expect(nodeUsageLine(undefined)).toBeNull()
+    expect(nodeUsageLine({})).toBeNull()
+  })
+
+  it('leaves out the parts that were not reported', () => {
+    expect(nodeUsageLine({ turns: 2 })).toBe('2 turns')
+    expect(nodeUsageLine({ inputTokens: 500 })).toBe('500 tokens')
+  })
+
+  it('never rounds a real charge down to nothing', () => {
+    expect(nodeUsageLine({ costMicroUsd: 20 })).toBe('< $0.0001')
   })
 })

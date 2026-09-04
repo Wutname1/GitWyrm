@@ -1,4 +1,4 @@
-import type { SessionUsage, UsageValue } from '@/lib/bindings'
+import type { ExecutionUsage, SessionUsage, UsageValue } from '@/lib/bindings'
 
 /** One renderable row in the usage card: a label plus formatted value text. */
 export interface UsageRow {
@@ -174,4 +174,36 @@ export function buildAgentUsageLines(usage: SessionUsage): AgentUsageLine[] {
     if (agent.costMicroUsd != null) parts.push(formatCost(agent.costMicroUsd / 1_000_000))
     return { key: agent.executionId, label: agent.label, parts }
   })
+}
+
+/**
+ * What one agent in a team spent, as a single line, or `null` when its
+ * provider reported nothing.
+ *
+ * The whole argument for a lead with helpers is parallel work at an
+ * acceptable cost -- and the graph showed a node's job, files, dependencies
+ * and result but never what it spent. So the feature that costs the most
+ * money had the least visible cost, and a person looking at an expensive run
+ * could not tell WHICH helper was expensive, which is the fact that would let
+ * them change the team shape next time.
+ *
+ * Follows the same rule as every other usage surface: a field the provider
+ * did not report contributes nothing, rather than a zero that would read as
+ * "measured, and free".
+ */
+export function nodeUsageLine(usage: ExecutionUsage | null | undefined): string | null {
+  if (!usage) return null
+  const parts: string[] = []
+  const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+  if (usage.inputTokens != null || usage.outputTokens != null) parts.push(`${formatTokenCount(tokens)} tokens`)
+  if (usage.turns != null && usage.turns > 0) parts.push(`${usage.turns} turn${usage.turns === 1 ? '' : 's'}`)
+  if (usage.costMicroUsd != null) parts.push(formatCost(usage.costMicroUsd / 1_000_000))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+/** Compact token count: 1200 -> "1.2k". Kept local so the graph line matches the usage card. */
+function formatTokenCount(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
 }

@@ -5,6 +5,7 @@ import { FileDiff, GitFork } from 'lucide-react'
 import { commands, type AgentSession, type ExecutionRecord, type ResultRecord } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
+import { nodeUsageLine } from '@/lib/agentDeskUsage'
 import { cn } from '@/lib/utils'
 import { buildGraphTree, graphSummary, nodeDotTone, nodeStatusLabel, type GraphTreeNode } from '@/lib/agentGraphProjection'
 import { canViewNodeChanges, latestActivityLine, resultForNode } from '@/lib/agentDeskGraph'
@@ -172,6 +173,10 @@ function InspectorCard({
   // rather than a result.
   const stoppedBadly =
     execution.state === 'failed' || execution.state === 'missingSource' || execution.state === 'interrupted'
+  // What this agent spent. Absent when the provider reported nothing, which
+  // is a different fact from "it was free" -- so no line at all rather than a
+  // row of zeros.
+  const usageLine = nodeUsageLine(execution.usage)
   const canStop = execution.state === 'working' || execution.state === 'preparing' || execution.state === 'needsInput'
   const [resolving, setResolving] = useState<'helper' | 'integrated' | null>(null)
 
@@ -255,6 +260,11 @@ function InspectorCard({
       <div className="mt-1 text-xs font-semibold text-foreground">{title}</div>
       <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">{description}</p>
       {filesLine ? <div className="mt-1.5 font-mono text-[10px] text-muted-foreground">{filesLine}</div> : null}
+      {usageLine ? (
+        <div className="mt-1.5 font-mono text-[10px] text-muted-foreground" title="What this agent has spent so far">
+          {usageLine}
+        </div>
+      ) : null}
       {waitingFor.length > 0 ? (
         <div className="mt-1.5">
           <div className="text-2xs font-bold uppercase tracking-wide text-muted-foreground">Waiting for</div>
