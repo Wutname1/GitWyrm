@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Blocks, FolderGit2, GitBranch, Layers3, Link2, Loader2, TriangleAlert } from 'lucide-react'
 import { commands, type AgentSession } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
-import { sourceKindLabel } from '@/lib/agentSessionGrouping'
+import { conversationHandoffs, sourceKindLabel } from '@/lib/agentSessionGrouping'
 import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { explainRefreshSourceOutcome } from '@/lib/agentDeskSources'
 import { describeError, log } from '@/lib/log'
@@ -101,6 +101,7 @@ function sourceSummary(session: AgentSession): string {
  */
 export function SessionContextPanel({ session }: { session: AgentSession }) {
   const contextSourceCount = session.attachments.length
+  const handoffs = conversationHandoffs(session.segments)
   const isOpenSpecSource =
     session.header.source.kind === 'openSpecChange' || session.header.source.kind === 'openSpecTask'
   // tasks.md 2.4, third of three ("mark launch-vs-live differences"): a
@@ -209,7 +210,36 @@ export function SessionContextPanel({ session }: { session: AgentSession }) {
         {contextSourceCount > 0 && (
           <ContextRow icon={Layers3} label="Context sources" value={String(contextSourceCount)} />
         )}
-        <ContextRow icon={Blocks} label="Conversation segments" value={String(session.segments.length)} />
+        {/*
+          This was a count, labelled "Conversation segments" -- an internal
+          word for a row that told you a number and nothing else.
+
+          Every segment carries a label saying WHY the conversation changed
+          hands: "Imported from Claude", "Continued in GitWyrm", "Unlinked
+          from ...". Those labels are the honest-provenance promise written
+          down, and nothing rendered them. A person could not tell, anywhere
+          in the app, which part of a conversation came from somewhere else.
+
+          Plain "Conversation" segments are skipped: they mark an ordinary
+          start and would bury the ones that mean something.
+        */}
+        {handoffs.length > 0 && (
+          <div className="border-t border-border px-2 py-1.5">
+            <div className="flex items-center gap-2">
+              <Blocks size={13} className="flex-none text-muted-foreground" aria-hidden />
+              <strong className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+                Where this came from
+              </strong>
+            </div>
+            <ol className="mt-1 flex flex-col gap-0.5 pl-[21px]">
+              {handoffs.map((seg) => (
+                <li key={seg.segmentId} className="truncate text-2xs text-foreground" title={seg.label}>
+                  {seg.label}
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
       </section>
     </div>
   )

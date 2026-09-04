@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentSessionHeader, SessionSource, SessionState } from '@/lib/bindings'
 import {
   buildSidebarRows,
+  conversationHandoffs,
   diffBucketLabel,
   formatCompactAge,
   normalizeRepoPath,
@@ -301,5 +302,30 @@ describe('summarizeAgentActivity', () => {
 
   it('uses the singular for one', () => {
     expect(summarizeAgentActivity([h('working')]).label).toBe('1 chat is working')
+  })
+})
+
+describe('conversationHandoffs', () => {
+  const seg = (segmentId: string, label: string) => ({ segmentId, label })
+
+  it('keeps the labels that say where a conversation came from', () => {
+    // These are the exact strings the backend writes (agent_import.rs).
+    const out = conversationHandoffs([
+      seg('a', 'Imported from claude-code'),
+      seg('b', 'Continued in GitWyrm'),
+      seg('c', 'Unlinked from Claude'),
+    ])
+    expect(out.map((s) => s.segmentId)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('drops the plain start marker, which says nothing about origin', () => {
+    expect(conversationHandoffs([seg('a', 'Conversation')])).toEqual([])
+  })
+
+  it('keeps a label that merely starts with the same word', () => {
+    // Exact match, not a substring: a future "Conversation imported from X"
+    // is still a handoff and must survive.
+    const out = conversationHandoffs([seg('a', 'Conversation imported from Codex')])
+    expect(out).toHaveLength(1)
   })
 })

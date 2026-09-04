@@ -297,3 +297,23 @@ export function summarizeAgentActivity(
   }
   return { tone: null, count: 0, label: '' }
 }
+
+/**
+ * The points where a conversation changed hands, newest last.
+ *
+ * Every segment carries a label written by whichever code created it, and the
+ * ones that matter say why the conversation moved: "Imported from Claude",
+ * "Continued in GitWyrm", "Unlinked from ...". Those labels are the honest-
+ * provenance promise made concrete -- import, continue-here and continue-
+ * externally must never read as the same thing -- and until this existed
+ * nothing rendered them, so a person could not tell which part of a
+ * conversation came from somewhere else.
+ *
+ * A segment simply labelled "Conversation" marks an ordinary start and is
+ * dropped: it carries no origin information and would bury the ones that do.
+ * The check is an exact match rather than a substring so a future label like
+ * "Conversation imported from X" would still be shown.
+ */
+export function conversationHandoffs<T extends { segmentId: string; label: string }>(segments: readonly T[]): T[] {
+  return segments.filter((s) => s.label.trim() !== 'Conversation')
+}
