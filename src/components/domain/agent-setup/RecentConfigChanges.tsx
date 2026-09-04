@@ -1,4 +1,4 @@
-import { History, Loader2, Undo2 } from 'lucide-react'
+import { AlertTriangle, History, Loader2, Undo2 } from 'lucide-react'
 import { useAgentConfigRecentOperations, useUndoAgentConfigCopy } from '@/hooks/useAgentConfig'
 import { describeConfigOperation } from '@/lib/agentConfig'
 import { describeAge } from '@/lib/agentDeskSources'
@@ -38,6 +38,30 @@ export function RecentConfigChanges({ repoId }: { repoId: string | null }) {
         <Loader2 size={11} className="animate-spin" aria-hidden />
         Looking for recent changes…
       </p>
+    )
+  }
+
+  // A read that FAILED is not the same as nothing having been written, and
+  // this list is the record of what GitWyrm changed in other applications --
+  // so a false all-clear here is the worst version of that mistake.
+  if (receipts.isError) {
+    return (
+      <div className="mx-3 my-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+        <p className="flex items-center gap-1.5 text-2xs font-semibold text-destructive">
+          <AlertTriangle size={13} aria-hidden />
+          GitWyrm could not check what it has changed.
+        </p>
+        <p className="mt-1 text-2xs text-muted-foreground">
+          This is not the same as having changed nothing.
+        </p>
+        <button
+          type="button"
+          onClick={() => void receipts.refetch()}
+          className="mt-2 rounded border border-border px-2 py-1 text-2xs font-semibold hover:bg-panel3"
+        >
+          Try again
+        </button>
+      </div>
     )
   }
 

@@ -220,3 +220,25 @@ export function useIntentPolicy(intent: SessionIntent | null) {
     queryFn: async () => await commands.agentIntentPolicy(intent!),
   })
 }
+
+/**
+ * Whether one session still exists, asked of the backend rather than inferred.
+ *
+ * The pane-recovery check used to test membership of the session list, which is
+ * filtered (unarchived only) and paged (100 at a time). Both filters produced
+ * the same bug from different directions: a chat that was archived, or simply
+ * older than the newest hundred, read as deleted and its pane was silently
+ * swapped for a different chat.
+ *
+ * `agentSessionGet` answers the real question. Only `notFound` means gone --
+ * `damaged` and `unavailable` describe a file that cannot be read right now,
+ * which is not the same thing and must not evict a pane.
+ */
+export function useAgentSessionExistence(sessionId: string | null) {
+  const query = useQuery({
+    queryKey: keys.agentSession(sessionId ?? 'none'),
+    enabled: sessionId != null,
+    queryFn: async () => unwrap(await commands.agentSessionGet(sessionId!)),
+  })
+  return query.data
+}

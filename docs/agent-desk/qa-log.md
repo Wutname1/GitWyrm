@@ -107,4 +107,6 @@ competing sub-agents, the answer names the losing option too.
 | 99 | 2026-09-04 | Should every mutation without an onError handler get one? | No -- one of the three found was deliberately per-item, where a hook-level message would fire repeatedly for a single action. |
 | 100 | 2026-09-04 | Should "continue here" say why it failed? | Yes -- it is one of the three provenance paths the vision says must never look equivalent, and failing without a reason is a weaker version of the same problem. |
 | 101 | 2026-09-04 | Is title-casing an internal name enough to make it plain language? | No -- "Worktree failed" is still a code word with a space in it, so the common ones now have real sentences. |
+| 102 | 2026-09-04 | How should a pane decide whether its chat still exists? | By asking the backend about that one chat, not by looking for it in a list that is both filtered and paged. |
+| 103 | 2026-09-04 | Why did an older chat vanish when the window reopened? | It was past the hundred the list loads, so it was not found and the pane treated it as deleted. |
 

@@ -116,6 +116,13 @@ export function useUndoAgentConfigCopy(repoId: string | null) {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.agentConfigInventory(repoId) })
+      // The receipt list draws its Undo button from `undone`, so without this
+      // a successful "Put it back" changed nothing on screen: the row looked
+      // untouched and still invited another click. The backend refuses the
+      // second one, but the person is then warned about an action they had
+      // already completed. Both apply hooks above invalidate this list; this
+      // one -- the only mutation that changes `undone` -- did not.
+      qc.invalidateQueries({ queryKey: keys.agentConfigRecentOperations() })
     },
   })
 }

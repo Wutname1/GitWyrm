@@ -92,7 +92,7 @@ export function SessionSidebar({
     const id = setTimeout(() => setDebouncedSearch(search.trim()), 180)
     return () => clearTimeout(id)
   }, [search])
-  const { headers, isLoading, diagnostics } = useAgentSessionHeaders({
+  const { headers, isLoading, diagnostics, hasNextPage, isFetchingNextPage, fetchNextPage } = useAgentSessionHeaders({
     repoId: effectiveRepoId,
     projectPath: null,
     states: [],
@@ -283,6 +283,22 @@ export function SessionSidebar({
       />
       {isLoading && headers.length === 0 && (
         <p className="flex-none px-3 py-2 text-2xs text-muted-foreground">Loading chats…</p>
+      )}
+      {/*
+        The list is fetched a hundred at a time and nothing ever asked for the
+        next page, so someone with more chats than that simply stopped seeing
+        the older ones -- with no count, no notice, and no way to reach them.
+        Paging was already supported by the query; only the button was missing.
+      */}
+      {hasNextPage && (
+        <button
+          type="button"
+          onClick={() => void fetchNextPage()}
+          disabled={isFetchingNextPage}
+          className="flex-none px-3 py-2 text-left text-2xs font-semibold text-accent-text hover:bg-panel3 disabled:cursor-not-allowed disabled:text-muted-foreground"
+        >
+          {isFetchingNextPage ? 'Loading older chats…' : 'Show older chats'}
+        </button>
       )}
       {/*
         A chat whose file cannot be read used to disappear with no sign at all,

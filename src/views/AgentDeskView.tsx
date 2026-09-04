@@ -17,7 +17,7 @@ import { PaneDetailPopover } from '@/components/domain/agent-desk/PaneDetailPopo
 import { DockedDetailPanel } from '@/components/domain/agent-desk/DockedDetailPanel'
 import { AgentDeskDockDropZone } from '@/components/domain/agent-desk/AgentDeskDockDropZones'
 import { OpenSpecEmbeddedDetail } from '@/components/domain/agent-desk/OpenSpecEmbeddedDetail'
-import { useAgentSession, useAgentSessionHeaders } from '@/hooks/useAgentSessions'
+import { useAgentSession, useAgentSessionExistence, useAgentSessionHeaders } from '@/hooks/useAgentSessions'
 import { useOrphanResultReconciliation } from '@/hooks/useOrphanResultReconciliation'
 import { useContainerWidth } from '@/hooks/useContainerWidth'
 import { dockKindLabel, resolveDrop, resolveResponsiveMode, resolveSplitPresentation, shouldHideButtonLabels, zoneLabel } from '@/lib/agentDeskDock'
@@ -397,19 +397,16 @@ export function AgentDeskView() {
   const { headers, isLoading: sessionsLoading, isError: sessionsErrored } =
     useAgentSessionHeaders(filter)
 
-  // Archived chats, purely to decide whether a pane's session still EXISTS.
+  // Does each pane's session still exist? Asked of the backend, per session.
   //
-  // The validity check below used `headers`, which is `archived: false`, so an
-  // archived session read as deleted and the pane was swapped away the moment
-  // it was opened -- making the sidebar's Archived tab unreadable and the
-  // archive toast's "you can restore it from the Archived filter any time"
-  // undeliverable. The sidebar fixed this for its own list; this second copy
-  // of the same hardcoded filter was missed.
-  //
-  // Kept as a separate query rather than widening `filter`: `headers[0]` is
-  // also what a pane falls back TO, and falling back to an archived chat would
-  // undo the archiving in the user's eyes.
-  const { headers: archivedHeaders } = useAgentSessionHeaders({ ...filter, archived: true })
+  // Two earlier fixes went through the session LIST for this: first widening
+  // it to include archived chats, because an archived one read as deleted.
+  // That is the wrong question. The list is filtered and paged, so membership
+  // of it answers "is this chat in the first hundred unarchived ones", which
+  // is not what the pane needs to know. `agentSessionGet` answers the actual
+  // question and needs no filter to be kept in sync with it.
+  const primaryOutcome = useAgentSessionExistence(primarySessionId)
+  const secondaryOutcome = useAgentSessionExistence(layout.split ? secondarySessionId : null)
 
   // Land on the most recent session automatically so the window is never
   // just an empty pane the first time it opens with sessions already saved.
@@ -424,7 +421,18 @@ export function AgentDeskView() {
   // showing a dead reference forever.
   useEffect(() => {
     if (!hydrated || sessionsLoading) return
-    const validIds = new Set([...headers, ...archivedHeaders].map((h) => h.sessionId))
+    // Ask about THIS session rather than looking for it in the list.
+    //
+    // The list is paged at 100 and nothing here asks for a second page, so a
+    // pane restored onto an older chat was not in `headers` and read as
+    // deleted -- silently swapped for the newest chat, which to the person
+    // looks like their conversation was thrown away. Membership of a paged
+    // list is not the same question as existence, and only the second one
+    // matters here.
+    //
+    // `notFound` is the authoritative answer; `damaged` and `unavailable`
+    // deliberately do NOT evict, because a file that cannot be read right now
+    // is not a file that is gone, and the pane's own surfaces already say so.
     // `headers[0]` when there is one, otherwise null. This used to return
     // early whenever the list was empty, which is exactly the case of deleting
     // your LAST chat: the pane kept pointing at the session that had just been
@@ -433,17 +441,21 @@ export function AgentDeskView() {
     // reach it. Gated on `sessionsLoading` so a list that has not arrived yet
     // is never mistaken for a list with nothing in it.
     const fallback = headers.length > 0 ? headers[0].sessionId : null
-    if (primarySessionId && !validIds.has(primarySessionId)) {
+    if (primaryOutcome?.kind === 'notFound' && primarySessionId) {
       restorePaneToFallback('primary', fallback)
     }
-    if (layout.split && secondarySessionId && !validIds.has(secondarySessionId)) {
+    if (layout.split && secondaryOutcome?.kind === 'notFound' && secondarySessionId) {
       restorePaneToFallback('secondary', fallback)
     }
+    // The two outcomes are dependencies: they are what the effect now branches
+    // on, and leaving them out would run the check against whichever answer
+    // was current when the effect last ran.
   }, [
     hydrated,
     sessionsLoading,
     headers,
-    archivedHeaders,
+    primaryOutcome,
+    secondaryOutcome,
     primarySessionId,
     secondarySessionId,
     layout.split,
