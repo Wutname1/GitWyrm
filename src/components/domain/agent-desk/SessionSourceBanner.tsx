@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import type { SessionSource, SessionState } from '@/lib/bindings'
 import { describeSnapshotFreshness } from '@/lib/agentDeskSources'
+import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
 
 export const SOURCE_KIND_ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -76,6 +77,12 @@ export function describeSource(source: SessionSource): { kicker: string; title: 
         kicker: 'Started from working changes',
         title: source.snapshot.title,
         meta: `${source.paths.length} file${source.paths.length === 1 ? '' : 's'}`,
+      }
+    case 'imported':
+      return {
+        kicker: `Imported from ${adapterDisplayName(source.adapterId)}`,
+        title: source.snapshot.title,
+        meta: adapterDisplayName(source.adapterId),
       }
     case 'checkFailure':
       return {

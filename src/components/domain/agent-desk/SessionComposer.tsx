@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { ArrowUp, Paperclip, Sparkles, Square } from 'lucide-react'
 import { commands, type AgentSessionHeader } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
-import { runIsActive } from '@/lib/agentDeskResult'
+import { explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError, log } from '@/lib/log'
 import { Textarea } from '@/components/ui/textarea'
@@ -215,20 +215,15 @@ export function SessionComposer({
       // Same outcome handling as the Graph panel's Stop all, so the two
       // controls cannot report the same event differently.
       const outcome = unwrap(await commands.agentSessionStopExecution(sessionId, { kind: 'all' }))
+      // One explainer for all three Stop call sites. Each branched on
+      // `stopped.length` alone and ignored `timed_out`, so a hung agent --
+      // stopped: [], timed_out: [id] -- reported "Nothing was running."
       if (outcome.kind === 'stopped') {
         void qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
-        toast.success(
-          outcome.stopped.length > 0
-            ? `Stopped ${outcome.stopped.length} agent${outcome.stopped.length === 1 ? '' : 's'}; work already done was kept.`
-            : 'Nothing was running.'
-        )
-      } else if (outcome.kind === 'notFound') {
-        toast.error('This chat is gone. It may have been archived elsewhere.')
-      } else if (outcome.kind === 'damaged') {
-        toast.error('This chat file is damaged and could not be stopped.', { description: outcome.reason })
-      } else {
-        toast.error('Could not stop this chat.', { description: outcome.kind })
       }
+      const { message, ok } = explainStopOutcome(outcome)
+      if (ok) toast.success(message)
+      else toast.error(message)
     } catch (e) {
       const message = describeError(e)
       log.error(`agent desk: could not stop from the composer: ${message}`)

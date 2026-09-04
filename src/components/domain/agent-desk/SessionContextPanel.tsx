@@ -5,6 +5,7 @@ import { Blocks, FolderGit2, GitBranch, Layers3, Link2, Loader2, TriangleAlert }
 import { commands, type AgentSession } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
+import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { explainRefreshSourceOutcome } from '@/lib/agentDeskSources'
 import { describeError, log } from '@/lib/log'
 import { useOpenSpecContextDrift } from '@/hooks/useOpenspecSessionSource'
@@ -51,6 +52,8 @@ function sourceSummary(session: AgentSession): string {
       return `Working changes · ${source.paths.length} file${source.paths.length === 1 ? '' : 's'}`
     case 'checkFailure':
       return `${sourceKindLabel(source.kind)} · ${source.provider}`
+    case 'imported':
+      return `${sourceKindLabel(source.kind)} · ${adapterDisplayName(source.adapterId)}`
   }
 }
 

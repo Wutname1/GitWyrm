@@ -3,6 +3,7 @@ import type { SessionSource } from '@/lib/bindings'
 import type { ComposerMode, ComposerTeam } from '@/lib/agentDeskComposer'
 import { MODE_NOTES } from '@/lib/agentDeskComposer'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
+import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
@@ -191,6 +192,8 @@ export function describeSource(source: SessionSource | null): { title: string; d
       return { title: source.snapshot.title || kind, detail: `${source.paths.length} file(s) not yet committed` }
     case 'checkFailure':
       return { title: source.snapshot.title || kind, detail: `${kind} from ${source.provider}` }
+    case 'imported':
+      return { title: source.snapshot.title || kind, detail: `From ${adapterDisplayName(source.adapterId)}` }
   }
 }
 

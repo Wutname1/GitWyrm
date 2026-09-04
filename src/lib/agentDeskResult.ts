@@ -1,5 +1,6 @@
 import type {
   CleanupWorktreeOutcome,
+  StopExecutionOutcome,
   CommitResultOutcome,
   CompleteOpenSpecTaskOutcome,
   EscalateToFixOutcome,
@@ -593,5 +594,51 @@ export function resultStateTone(state: ResultState): string {
     case 'discarded':
     case 'cleanupFailed':
       return 'bg-destructive/15 text-destructive'
+  }
+}
+
+/**
+ * Plain-language result of stopping a chat's agents.
+ *
+ * Three call sites each branched on `stopped.length` alone and ignored
+ * `timed_out` -- the list the backend documents as agents that were force
+ * stopped without acknowledging. A hung agent produces `stopped: []` with
+ * `timed_out: [id]`, so the person pressing Stop on a runaway agent was told
+ * **"Nothing was running."** -- the opposite of the truth, at the moment they
+ * most needed it, in a way that invites them to walk away from a live agent.
+ *
+ * A forced stop still preserves the work: the CLI process is killed either
+ * way and the worktree is left exactly as an acknowledged stop leaves it, so
+ * the message says that rather than implying anything was lost.
+ */
+export function explainStopOutcome(outcome: StopExecutionOutcome): { message: string; ok: boolean } {
+  switch (outcome.kind) {
+    case 'stopped': {
+      const acked = outcome.stopped.length
+      const forced = outcome.timed_out.length
+      const plural = (n: number) => (n === 1 ? 'agent' : 'agents')
+      if (acked === 0 && forced === 0) return { message: 'Nothing was running.', ok: true }
+      if (forced === 0) {
+        return { message: `Stopped ${acked} ${plural(acked)}; work already done was kept.`, ok: true }
+      }
+      if (acked === 0) {
+        return {
+          message: `Force-stopped ${forced} ${plural(forced)} that did not answer; work already done was kept.`,
+          ok: true,
+        }
+      }
+      return {
+        message: `Stopped ${acked} ${plural(acked)}, and force-stopped ${forced} that did not answer; work already done was kept.`,
+        ok: true,
+      }
+    }
+    case 'notFound':
+      return { message: 'This chat is gone. It may have been archived elsewhere.', ok: false }
+    case 'damaged':
+      return { message: `This chat's file is damaged and could not be stopped: ${outcome.reason}`, ok: false }
+    case 'unavailable':
+      return { message: `This chat could not be read right now: ${outcome.detail}`, ok: false }
+    case 'writeFailed':
+      return { message: `Could not save the change: ${outcome.detail}`, ok: false }
   }
 }

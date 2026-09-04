@@ -7174,7 +7174,21 @@ sequence: number | null; import: ImportProvenance | null; targets: MessageTarget
  * clicked, and it is what the source banner falls back to when the live
  * source is gone (see spec `Deleted issue` scenario).
  */
-export type SessionSource = { kind: "manual"; repoId: string } | { kind: "issue"; hostId: string; owner: string; repo: string; number: number; url: string; snapshot: SourceSnapshot } | { kind: "pullRequest"; hostId: string; owner: string; repo: string; number: number; url: string; head: string; base: string; snapshot: SourceSnapshot } | { kind: "openSpecChange"; changeId: string; snapshot: SourceSnapshot } | { kind: "openSpecTask"; changeId: string; taskIndex: number; taskText: string; snapshot: SourceSnapshot } | { kind: "commit"; oid: string; snapshot: SourceSnapshot } | { kind: "diff"; scope: string; paths: string[]; snapshot: SourceSnapshot } | { kind: "workingChanges"; paths: string[]; snapshot: SourceSnapshot } | { kind: "checkFailure"; provider: string; checkId: string; url: string | null; snapshot: SourceSnapshot }
+export type SessionSource = { kind: "manual"; repoId: string } | { kind: "issue"; hostId: string; owner: string; repo: string; number: number; url: string; snapshot: SourceSnapshot } | { kind: "pullRequest"; hostId: string; owner: string; repo: string; number: number; url: string; head: string; base: string; snapshot: SourceSnapshot } | { kind: "openSpecChange"; changeId: string; snapshot: SourceSnapshot } | { kind: "openSpecTask"; changeId: string; taskIndex: number; taskText: string; snapshot: SourceSnapshot } | { kind: "commit"; oid: string; snapshot: SourceSnapshot } | { kind: "diff"; scope: string; paths: string[]; snapshot: SourceSnapshot } | { kind: "workingChanges"; paths: string[]; snapshot: SourceSnapshot } | { kind: "checkFailure"; provider: string; checkId: string; url: string | null; snapshot: SourceSnapshot } | 
+/**
+ * A conversation read out of another AI client.
+ * 
+ * Imported sessions were `Manual` -- indistinguishable from a chat the
+ * person started here. Provenance survived on every message (each one
+ * carries its own `ImportProvenance`, which is what the transcript's
+ * badge reads) but not on the session, so the sidebar row, the source
+ * filter and the grouping all called it "Chat".
+ * 
+ * The message-level design is the right one and this follows it: a
+ * source that says where the conversation came from, holding the same
+ * adapter id the messages carry so the two cannot disagree.
+ */
+{ kind: "imported"; adapterId: string; externalSessionId: string; snapshot: SourceSnapshot }
 /**
  * What a source surface actually knows at click time, before any network
  * round-trip -- architecture.md section 8: "Create from known row data,

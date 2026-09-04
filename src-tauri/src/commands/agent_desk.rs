@@ -1914,7 +1914,8 @@ fn source_summary(source: &SessionSource) -> (String, String) {
         | SessionSource::Commit { snapshot, .. }
         | SessionSource::Diff { snapshot, .. }
         | SessionSource::WorkingChanges { snapshot, .. }
-        | SessionSource::CheckFailure { snapshot, .. } => {
+        | SessionSource::CheckFailure { snapshot, .. }
+        | SessionSource::Imported { snapshot, .. } => {
             (snapshot.title.clone(), snapshot.summary.clone())
         }
     }
@@ -2667,6 +2668,11 @@ fn refresh_source_at(
             | SessionSource::Diff { snapshot, .. }
             | SessionSource::WorkingChanges { snapshot, .. }
             | SessionSource::CheckFailure { snapshot, .. } => Some(&mut snapshot.live_unavailable),
+            // An imported chat has no live source to re-read: its content is
+            // a copy taken from another client at import time, and the way to
+            // get newer messages is to import again, not to refresh. Marking
+            // it unavailable would claim something was lost when nothing was.
+            SessionSource::Imported { .. } => None,
         };
         if let Some(flag) = live_unavailable_ref {
             let new_value = !reachable;

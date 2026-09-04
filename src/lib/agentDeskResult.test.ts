@@ -15,6 +15,7 @@ import {
   changedPathsSummaryLine,
   describeCommitDestination,
   explainCleanupOutcome,
+  explainStopOutcome,
   failingCheckLines,
   runActivityLabel,
   runIsActive,
@@ -575,5 +576,45 @@ describe('runActivityLabel', () => {
       expect(runIsActive(state)).toBe(true)
       expect(runActivityLabel(state)).not.toBeNull()
     }
+  })
+})
+
+describe('explainStopOutcome', () => {
+  const session = {} as never
+
+  it('never says nothing was running when an agent was force-stopped', () => {
+    // The bug this exists for: three call sites branched on `stopped.length`
+    // alone, so a hung agent -- stopped: [], timed_out: [id] -- told the
+    // person "Nothing was running." at the moment they most needed the truth,
+    // inviting them to walk away from a live agent.
+    const out = explainStopOutcome({ kind: 'stopped', session, stopped: [], timed_out: ['h1'] })
+    expect(out.message).not.toMatch(/Nothing was running/)
+    expect(out.message).toMatch(/Force-stopped 1 agent/)
+    expect(out.message).toMatch(/work already done was kept/)
+  })
+
+  it('still says nothing was running when nothing was', () => {
+    expect(explainStopOutcome({ kind: 'stopped', session, stopped: [], timed_out: [] }).message).toBe(
+      'Nothing was running.'
+    )
+  })
+
+  it('counts both kinds when some answered and some did not', () => {
+    const out = explainStopOutcome({ kind: 'stopped', session, stopped: ['a', 'b'], timed_out: ['c'] })
+    expect(out.message).toMatch(/Stopped 2 agents/)
+    expect(out.message).toMatch(/force-stopped 1/)
+  })
+
+  it('uses the singular for one', () => {
+    expect(explainStopOutcome({ kind: 'stopped', session, stopped: ['a'], timed_out: [] }).message).toMatch(
+      /Stopped 1 agent;/
+    )
+  })
+
+  it('never shows a raw outcome name for a failure', () => {
+    const damaged = explainStopOutcome({ kind: 'damaged', reason: 'bad json' })
+    expect(damaged.ok).toBe(false)
+    expect(damaged.message).toMatch(/bad json/)
+    expect(damaged.message).not.toMatch(/damaged"/)
   })
 })

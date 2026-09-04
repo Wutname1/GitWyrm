@@ -179,6 +179,23 @@ pub enum SessionSource {
         url: Option<String>,
         snapshot: SourceSnapshot,
     },
+    /// A conversation read out of another AI client.
+    ///
+    /// Imported sessions were `Manual` -- indistinguishable from a chat the
+    /// person started here. Provenance survived on every message (each one
+    /// carries its own `ImportProvenance`, which is what the transcript's
+    /// badge reads) but not on the session, so the sidebar row, the source
+    /// filter and the grouping all called it "Chat".
+    ///
+    /// The message-level design is the right one and this follows it: a
+    /// source that says where the conversation came from, holding the same
+    /// adapter id the messages carry so the two cannot disagree.
+    #[serde(rename_all = "camelCase")]
+    Imported {
+        adapter_id: String,
+        external_session_id: String,
+        snapshot: SourceSnapshot,
+    },
 }
 
 impl SessionSource {
@@ -195,6 +212,7 @@ impl SessionSource {
             SessionSource::Diff { .. } => "diff",
             SessionSource::WorkingChanges { .. } => "workingChanges",
             SessionSource::CheckFailure { .. } => "checkFailure",
+            SessionSource::Imported { .. } => "imported",
         }
     }
 
@@ -249,6 +267,14 @@ impl SessionSource {
             SessionSource::CheckFailure {
                 provider, check_id, ..
             } => format!("checkFailure:{provider}:{check_id}"),
+            // Keyed by the external chat itself, so re-importing the same
+            // conversation focuses the session that already holds it rather
+            // than forking a second copy of the same history.
+            SessionSource::Imported {
+                adapter_id,
+                external_session_id,
+                ..
+            } => format!("imported:{adapter_id}:{external_session_id}"),
         }
     }
 }

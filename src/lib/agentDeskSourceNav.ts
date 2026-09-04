@@ -56,6 +56,14 @@ export function resolveSourceNav(source: SessionSource): SourceNavAction {
       return { kind: 'diff', path: source.paths[0] ?? null }
     case 'workingChanges':
       return { kind: 'diff', path: source.paths[0] ?? null }
+    case 'imported':
+      // The original lives in another application, which GitWyrm does not
+      // launch. The picker's "Open client" is the honest wording for that,
+      // and it is not a navigation this window can perform.
+      return {
+        kind: 'unreachable',
+        reason: 'This chat was copied from another app. Open it there to see the original.',
+      }
     case 'checkFailure':
       return {
         kind: 'unreachable',

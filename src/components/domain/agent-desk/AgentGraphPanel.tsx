@@ -6,7 +6,7 @@ import { commands, type AgentSession, type ExecutionRecord, type ResultRecord } 
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { nodeUsageLine } from '@/lib/agentDeskUsage'
-import { runIsActive } from '@/lib/agentDeskResult'
+import { explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
 import { cn } from '@/lib/utils'
 import { buildGraphTree, graphSummary, nodeDotTone, nodeStatusLabel, type GraphTreeNode } from '@/lib/agentGraphProjection'
 import { canViewNodeChanges, latestActivityLine, resultForNode } from '@/lib/agentDeskGraph'
@@ -231,12 +231,17 @@ function InspectorCard({
       )
       if (outcome.kind === 'stopped') {
         void qc.invalidateQueries({ queryKey: keys.agentSession(session.header.sessionId) })
+        // `timed_out` is the agent that had to be force-stopped because it
+        // never answered. Branching on `stopped` alone reported "That agent
+        // already finished." about one that was still running.
         toast.success(
           outcome.stopped.length > 0
             ? isLead
               ? 'Lead agent stopped; work already done was kept.'
               : 'Agent stopped; other work continues.'
-            : 'That agent already finished.'
+            : outcome.timed_out.length > 0
+              ? 'That agent did not answer, so it was force-stopped; work already done was kept.'
+              : 'That agent already finished.'
         )
         onStopped()
       } else if (outcome.kind === 'notFound') {
@@ -433,11 +438,7 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
       const outcome = unwrap(await commands.agentSessionStopExecution(session.header.sessionId, { kind: 'all' }))
       if (outcome.kind === 'stopped') {
         void qc.invalidateQueries({ queryKey: keys.agentSession(session.header.sessionId) })
-        toast.success(
-          outcome.stopped.length > 0
-            ? `Stopped ${outcome.stopped.length} agent${outcome.stopped.length === 1 ? '' : 's'}; work already done was kept.`
-            : 'Nothing was running.'
-        )
+        toast.success(explainStopOutcome(outcome).message)
       } else if (outcome.kind === 'notFound') {
         toast.error('This chat is gone. It may have been archived elsewhere.')
       } else if (outcome.kind === 'damaged') {

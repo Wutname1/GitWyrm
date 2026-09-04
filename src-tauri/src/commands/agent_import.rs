@@ -29,7 +29,7 @@ use crate::agentdesk::adapters::{
 use crate::agentdesk::import_store::{self, ImportedSessionRecord};
 use crate::agentdesk::model::{
     AgentSession, AgentSessionHeader, ConversationSegment, ImportProvenance, MessageKind,
-    MessageRole, SessionIntent, SessionMessage, SessionSource, SessionState,
+    MessageRole, SessionIntent, SessionMessage, SessionSource, SessionState, SourceSnapshot,
     CURRENT_SCHEMA_VERSION,
 };
 use crate::agentdesk::reconcile::{self, KnownRepo, ProjectResolution};
@@ -557,8 +557,23 @@ fn build_imported_session(
         repo_path: repo_path.to_string(),
         repo_name: repo_name.to_string(),
         title: detail.summary.title.clone(),
-        source: SessionSource::Manual {
-            repo_id: repo_id.to_string(),
+        // Says where this conversation came from. It was `Manual` --
+        // indistinguishable from a chat the person started here -- so the
+        // sidebar row, the source filter and the grouping all called an
+        // imported chat "Chat", while every message inside it carried honest
+        // provenance. The session now says the same thing its messages do.
+        source: SessionSource::Imported {
+            adapter_id: adapter_id.to_string(),
+            external_session_id: external_session_id.to_string(),
+            snapshot: SourceSnapshot {
+                title: detail.summary.title.clone(),
+                summary: format!("Imported from {adapter_id}"),
+                captured_at: imported_at.to_string(),
+                // Not "unavailable": the copy is complete and local. There is
+                // simply no live source to re-read, which `refresh_source`
+                // handles by declining rather than by flagging a loss.
+                live_unavailable: false,
+            },
         },
         intent: SessionIntent::Ask,
         state: SessionState::Finished,
@@ -572,7 +587,20 @@ fn build_imported_session(
         active_execution_id: None,
         archived: false,
         graph_started_at: None,
-        preferred_provider: Some(adapter_id.to_string()),
+        // NOT the adapter id. `preferred_provider` is an instruction for the
+        // next run -- it becomes the provider override when the person
+        // continues the chat -- and adapter ids live in a different namespace
+        // from provider ids. Only `codex` and `opencode` happen to appear in
+        // both; `claude-code`, `vscode-copilot` and `openchamber` are not
+        // providers at all, so continuing an imported chat from any of those
+        // three refused with UnsupportedProvider before it could start.
+        //
+        // `None` means "whatever this person's default is", which is the
+        // honest answer: GitWyrm cannot run the client the chat came from, it
+        // can only continue the conversation with a tool it does have. The
+        // origin is not lost -- every imported message carries its own
+        // `ImportProvenance`, which is what the transcript attributes from.
+        preferred_provider: None,
         preferred_mode: None,
         preferred_team: None,
     };
@@ -935,6 +963,33 @@ fn unlink_at(locks: &SessionLocks, root: &SessionStoreRoot, session_id: &str) ->
 
 #[cfg(test)]
 mod tests {
+
+    /// Adapter ids and provider ids are different namespaces, and an import
+    /// must not put one where the other is expected.
+    ///
+    /// `preferred_provider` on a session header is an instruction for the next
+    /// run: it becomes the provider override when someone continues the chat.
+    /// Import used to set it from the adapter id, and only `codex` and
+    /// `opencode` appear in both namespaces -- so continuing an imported
+    /// Claude Code, Copilot or OpenChamber chat refused with
+    /// `UnsupportedProvider` before it could start.
+    ///
+    /// This test pins the overlap so the two id sets cannot quietly converge
+    /// and make the old bug look harmless again.
+    #[test]
+    fn adapter_ids_are_not_provider_ids() {
+        use crate::agentdesk::policy::ExecutionProvider;
+        for id in ["claude-code", "vscode-copilot", "openchamber"] {
+            assert!(
+                ExecutionProvider::parse(id).is_none(),
+                "{id} is an adapter id, not a provider id -- if this now parses, \
+                 revisit why import stopped setting preferred_provider from it"
+            );
+        }
+        // The two that do overlap, recorded so the distinction stays visible.
+        assert!(ExecutionProvider::parse("codex").is_some());
+        assert!(ExecutionProvider::parse("opencode").is_some());
+    }
     use super::*;
     use crate::agentdesk::adapters::{ExternalMessage, ExternalSessionDetail};
 
