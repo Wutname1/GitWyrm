@@ -155,6 +155,12 @@ impl CliAgent {
                     )
                 },
             }),
+            CliState::FoundButUnresponsive { path } => Err(AgentError::TransportUnavailable {
+                transport: Transport::Cli,
+                detail: format!(
+                    "the {name} command-line tool is at {path} but did not answer when asked its version"
+                ),
+            }),
             CliState::NotFound => Err(AgentError::TransportUnavailable {
                 transport: Transport::Cli,
                 detail: format!("the {name} command-line tool is not installed"),

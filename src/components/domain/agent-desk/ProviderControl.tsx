@@ -144,6 +144,12 @@ export function blockedReason(row: AgentProvider, readOnly: boolean): string | u
   if (row.tooOld) {
     return `Found ${row.version ?? 'an older version'}, which is too old for GitWyrm to use. Updating it fixes this.`
   }
+  // Checked before `installed`, because an unresponsive tool reports
+  // `installed: false` and would otherwise be told to install something it can
+  // see on disk.
+  if (row.unresponsive) {
+    return 'Found on this computer, but it did not answer when GitWyrm asked its version. It may be busy, or need reinstalling.'
+  }
   if (!row.installed) {
     return 'Not installed on this computer.'
   }

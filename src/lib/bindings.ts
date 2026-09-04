@@ -4016,6 +4016,13 @@ version: string | null;
  */
 tooOld: boolean; 
 /**
+ * The tool is on disk but did not answer when asked its version.
+ * 
+ * Distinct from `installed: false`, which sends the person to install
+ * something they already have.
+ */
+unresponsive: boolean; 
+/**
  * Whether this tool can be told to leave files alone, which decides
  * whether it may run Ask, Explain, Review, Summarize, or a Plan before
  * Start.

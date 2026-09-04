@@ -9,6 +9,7 @@ const READY: AgentProvider = {
   installed: true,
   version: '1.0.80',
   tooOld: false,
+  unresponsive: false,
   canDoReadOnlyWork: true,
   readOnlyLimit: null,
   homepageUrl: 'https://example.invalid/install',
@@ -84,5 +85,24 @@ describe('detailFor', () => {
     // its limitation under an enabled row reads as a warning against
     // picking something that is perfectly fine here.
     expect(detailFor(limited, false)).not.toContain('only')
+  })
+})
+
+describe('blockedReason for a tool that did not answer', () => {
+  it('does not tell you to install something already on the machine', () => {
+    // The probe reports `installed: false` for an unresponsive tool, so
+    // without its own branch this said "Not installed on this computer."
+    // about a binary the person can see in their terminal.
+    const reason = blockedReason({ ...READY, installed: false, unresponsive: true }, false)
+    expect(reason).toMatch(/did not answer/i)
+    expect(reason).not.toMatch(/not installed/i)
+  })
+
+  it('still says not installed when it genuinely is not there', () => {
+    expect(blockedReason({ ...READY, installed: false, unresponsive: false }, false)).toMatch(/not installed/i)
+  })
+
+  it('lets too-old win, since that has a specific fix', () => {
+    expect(blockedReason({ ...READY, installed: false, tooOld: true, unresponsive: true }, false)).toMatch(/too old/i)
   })
 })

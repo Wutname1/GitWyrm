@@ -68,6 +68,13 @@ pub async fn complete_codex(
         copilot_cli::CliState::TooOld { .. } => {
             return Err(AppError::Other("Update Codex, then try this again.".into()));
         }
+        copilot_cli::CliState::FoundButUnresponsive { path } => {
+            // Telling someone to install a tool sitting at this exact path is
+            // worse than saying nothing.
+            return Err(AppError::Other(format!(
+                "Codex is at {path} but did not answer when GitWyrm asked its version. It may be busy or need reinstalling."
+            )));
+        }
         copilot_cli::CliState::NotFound => {
             return Err(AppError::Other(
                 "Install Codex and sign in, then try this again.".into(),

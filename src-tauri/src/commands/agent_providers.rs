@@ -30,6 +30,11 @@ pub struct AgentProvider {
     /// Set when the tool was found but is older than the floor GitWyrm has
     /// checked against. Distinct from not installed: updating fixes it.
     pub too_old: bool,
+    /// The tool is on disk but did not answer when asked its version.
+    ///
+    /// Distinct from `installed: false`, which sends the person to install
+    /// something they already have.
+    pub unresponsive: bool,
     /// Whether this tool can be told to leave files alone, which decides
     /// whether it may run Ask, Explain, Review, Summarize, or a Plan before
     /// Start.
@@ -150,10 +155,15 @@ fn list() -> Vec<AgentProvider> {
 
 fn row(spec: &'static registry::AgentSpec) -> AgentProvider {
     let probe = detect_agent(spec);
-    let (installed, version, too_old) = match &probe.state {
-        CliState::Ready { version, .. } => (true, Some(short_version(version)), false),
-        CliState::TooOld { version, .. } => (false, Some(short_version(version)), true),
-        CliState::NotFound => (false, None, false),
+    // `unresponsive` is separate from `installed` on purpose: the tool IS on
+    // disk, so telling the person to install it -- which is what an
+    // `installed: false` row does -- sends them to fix something that is not
+    // broken. Reported as its own state rather than folded into either.
+    let (installed, version, too_old, unresponsive) = match &probe.state {
+        CliState::Ready { version, .. } => (true, Some(short_version(version)), false, false),
+        CliState::TooOld { version, .. } => (false, Some(short_version(version)), true, false),
+        CliState::FoundButUnresponsive { .. } => (false, None, false, true),
+        CliState::NotFound => (false, None, false, false),
     };
 
     AgentProvider {
@@ -163,6 +173,7 @@ fn row(spec: &'static registry::AgentSpec) -> AgentProvider {
         installed,
         version,
         too_old,
+        unresponsive,
         can_do_read_only_work: spec.can_guarantee_read_only(),
         read_only_limit: read_only_limit(spec),
         homepage_url: spec.homepage_url.to_string(),

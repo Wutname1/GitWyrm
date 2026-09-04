@@ -128,4 +128,5 @@ competing sub-agents, the answer names the losing option too.
 | 120 | 2026-09-04 | Why did a failed settings copy show two different messages? | An error handler written for undo had been pasted into the copy hook, so it described putting a change back while the copy's own message said it could not be copied. |
 | 121 | 2026-09-04 | Did undoing a copied skill respect edits you had made to it? | No -- it deleted the folder outright, because the marker that identifies a folder receipt was the same empty field the safety check would have compared against. |
 | 122 | 2026-09-04 | Why did an approval you had already answered still ask again? | The answer was only held in the screen's memory, never written down, so any refresh brought the buttons back on a decision already made. |
+| 123 | 2026-09-04 | Why did GitWyrm say a tool was not installed when it was? | Any failure to read its version was recorded as "not found", so a busy or broken tool looked identical to a missing one. |
 

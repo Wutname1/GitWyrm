@@ -61,6 +61,15 @@ pub enum CliState {
     TooOld { version: String, minimum: String },
     /// Nothing on PATH or in a known install location.
     NotFound,
+    /// Found on disk, but the version probe timed out, exited non-zero, or
+    /// could not be parsed.
+    ///
+    /// This used to be reported as `NotFound`, which told the person to
+    /// install a tool they already had -- the log line right beside the return
+    /// even said "found at {path} but the version probe did not answer". The
+    /// same "a failed check reported as an absence" inversion the frontend has
+    /// a guard for, surviving here where that guard does not reach.
+    FoundButUnresponsive { path: String },
 }
 
 impl CliState {
@@ -174,7 +183,9 @@ fn probe(spec: &AgentSpec) -> CopilotCli {
             path.display()
         );
         return CopilotCli {
-            state: CliState::NotFound,
+            state: CliState::FoundButUnresponsive {
+                path: path.to_string_lossy().into_owned(),
+            },
         };
     };
 
