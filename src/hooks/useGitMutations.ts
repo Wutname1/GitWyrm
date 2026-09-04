@@ -59,6 +59,60 @@ interface FolderFilesArgs {
  * reloaded the graph. The mutation invalidates once it settles, so the real
  * outcome still lands -- once, instead of three times.
  */
+/**
+ * How far along a bulk branch operation is, for the progress readout.
+ *
+ * A module-level store rather than mutation state: the value changes once per
+ * item and must be readable while the single mutation promise is still
+ * pending, which `isPending` alone cannot express. Subscribers are notified so
+ * a component can render it without polling.
+ */
+export interface BulkProgress {
+  done: number
+  total: number
+  /** What is being worked on right now, for the label. */
+  current: string | null
+}
+
+let bulkProgress: BulkProgress | null = null
+const bulkListeners = new Set<() => void>()
+
+function setBulkProgress(next: BulkProgress | null) {
+  bulkProgress = next
+  for (const fn of bulkListeners) fn()
+}
+
+export function subscribeBulkProgress(fn: () => void): () => void {
+  bulkListeners.add(fn)
+  return () => bulkListeners.delete(fn)
+}
+
+export function getBulkProgress(): BulkProgress | null {
+  return bulkProgress
+}
+
+/**
+ * Runs a loop over `items`, reporting progress as it goes and always clearing
+ * it afterwards -- including when the loop throws, or the readout would stick
+ * at the item that failed.
+ */
+async function withBulkProgress<T, R>(
+  items: T[],
+  label: (item: T) => string,
+  run: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const out: R[] = []
+  try {
+    for (let i = 0; i < items.length; i++) {
+      setBulkProgress({ done: i, total: items.length, current: label(items[i]) })
+      out.push(await run(items[i], i))
+    }
+  } finally {
+    setBulkProgress(null)
+  }
+  return out
+}
+
 async function asGitOperation<T>(repoId: string, run: () => Promise<T>): Promise<T> {
   const done = beginGitOperation(repoId)
   try {
@@ -691,7 +745,10 @@ export function useGitMutations(repoId: string | null) {
         const held: { name: string; folder: string }[] = []
         const failed: { name: string; reason: string }[] = []
 
-        for (const target of targets) {
+        await withBulkProgress(
+          targets,
+          (t) => `${t.name} on ${t.remote ?? 'this computer'}`,
+          async (target) => {
           try {
             if (target.remote) {
               await unwrap(await commands.deleteRemoteBranch(id, target.name, target.remote))
@@ -702,7 +759,7 @@ export function useGitMutations(repoId: string | null) {
               // branch is still here and the user is told which folder has it.
               if (outcome.kind === 'heldByWorktree') {
                 held.push({ name: target.name, folder: outcome.folder_name })
-                continue
+                return
               }
             }
             deleted.push(target.name)
@@ -710,7 +767,17 @@ export function useGitMutations(repoId: string | null) {
             failed.push({ name: target.name, reason: (e as Error).message })
             logQuietFailure(e as Error)
           }
-        }
+          }
+        )
+        // A delete that git reported as done but that left the branch in place
+        // has no trace to follow afterwards, so record what was actually asked
+        // for. These are the user's own branch names in their own log, and it
+        // is the only way to tell a silent no-op apart from a refused push.
+        log.info(
+          `bulk delete: asked for ${targets.length} (${targets
+            .map((t) => `${t.name}@${t.remote ?? 'local'}${t.local && t.remote ? '+local' : ''}`)
+            .join(', ')}); deleted ${deleted.length}, held ${held.length}, failed ${failed.length}`
+        )
         return { deleted, held, failed, total: targets.length }
       }),
     onSuccess: (r) => {
@@ -788,7 +855,7 @@ export function useGitMutations(repoId: string | null) {
       asGitOperation(id, async () => {
         const sent: string[] = []
         const failed: { name: string; reason: string }[] = []
-        for (const branch of branches) {
+        await withBulkProgress(branches, (b) => b, async (branch) => {
           try {
             await unwrap(await commands.gitPushBranch(id, branch))
             sent.push(branch)
@@ -796,7 +863,7 @@ export function useGitMutations(repoId: string | null) {
             failed.push({ name: branch, reason: (e as Error).message })
             logQuietFailure(e as Error)
           }
-        }
+        })
         return { sent, failed }
       }),
     onSuccess: (r) => {
@@ -967,13 +1034,19 @@ export function useGitMutations(repoId: string | null) {
     // Deleting on the remote and then locally is two ref-writing steps, and
     // each one wakes the file watcher. Marked busy across both so the graph
     // reloads once at the end rather than after every write.
-    mutationFn: async (args: { name: string; remote: string; alsoLocal?: boolean }) =>
+    mutationFn: async (args: {
+      name: string
+      remote: string
+      alsoLocal?: boolean
+      /** Local branch to remove when it does not share the upstream's name. */
+      localName?: string
+    }) =>
       asGitOperation(id, async () => {
         await unwrap(await commands.deleteRemoteBranch(id, args.name, args.remote))
         let localFailed = false
         if (args.alsoLocal) {
           try {
-            const outcome = unwrap(await commands.deleteBranch(id, args.name))
+            const outcome = unwrap(await commands.deleteBranch(id, args.localName ?? args.name))
             // A worktree holding the branch is a refusal, not an error: the local
             // copy is still here, which is exactly what `localFailed` reports.
             if (outcome.kind === 'heldByWorktree') localFailed = true
@@ -987,12 +1060,13 @@ export function useGitMutations(repoId: string | null) {
     onSuccess: (args) => {
       invalidate(qc, id, REMOTE_REFS)
       const where = `${args.remote}/${args.name}`
+      const localName = args.localName ?? args.name
       if (args.localFailed) {
         toast.warning(
           `Deleted ${where} from the remote, but the copy on your computer could not be deleted - it may have commits that aren't saved anywhere else.`
         )
       } else if (args.alsoLocal) {
-        toast(`Deleted ${args.name} here and on ${args.remote}`)
+        toast(`Deleted ${localName} here and ${where} from the remote`)
       } else {
         toast(`Deleted ${where} from the remote`)
       }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, ChevronDown, Cloud, CloudOff, Eye, EyeOff, GitBranch, Lock, Monitor, Search, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -15,7 +15,7 @@ import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { useBranches, useRemotes } from '@/hooks/useGitQueries'
-import { useGitMutations } from '@/hooks/useGitMutations'
+import { getBulkProgress, subscribeBulkProgress, useGitMutations } from '@/hooks/useGitMutations'
 import { formatRelativeTime, plural } from '@/lib/gitDisplay'
 import {
   buildBranchRows,
@@ -237,6 +237,9 @@ export function BranchManagerModal() {
   const [sort, setSort] = useState<BranchSort>('name')
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // Progress for whichever bulk run is going, read from the mutations module
+  // so it updates per item rather than only when the whole run settles.
+  const progress = useSyncExternalStore(subscribeBulkProgress, getBulkProgress, getBulkProgress)
   // Anchor for shift-range selection, mirroring the graph's commit selection.
   const anchor = useRef<string | null>(null)
 
@@ -582,10 +585,29 @@ export function BranchManagerModal() {
           )}>
             <div className="min-w-0">
               <div className={cn('text-xs font-medium', selected.length === 0 && 'text-muted-foreground')}>
-                {selected.length > 0
-                  ? `${plural(selected.length, 'copy', 'copies')} selected across ${plural(selectedBranchCount, 'branch')}`
-                  : 'Select copies to see what you can do'}
+                {/* While a bulk run is going, the count of what is left matters
+                    far more than what is still ticked -- several pushes in a
+                    row look identical to a hang without it. */}
+                {progress
+                  ? `${progress.done + 1} of ${progress.total}: ${progress.current ?? ''}`
+                  : selected.length > 0
+                    ? `${plural(selected.length, 'copy', 'copies')} selected across ${plural(selectedBranchCount, 'branch')}`
+                    : 'Select copies to see what you can do'}
               </div>
+              {progress && (
+                <div
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={progress.total}
+                  aria-valuenow={progress.done}
+                  className="mt-1 h-1 w-40 overflow-hidden rounded-full bg-panel3"
+                >
+                  <div
+                    className="h-full rounded-full bg-accent-text transition-[width] duration-200"
+                    style={{ width: `${Math.round((progress.done / Math.max(progress.total, 1)) * 100)}%` }}
+                  />
+                </div>
+              )}
               {selected.length > 0 && (
                 <div className="mt-0.5 text-2xs text-muted-foreground">
                   {localCount > 0 && `${plural(localCount, 'copy', 'copies')} on this computer`}
