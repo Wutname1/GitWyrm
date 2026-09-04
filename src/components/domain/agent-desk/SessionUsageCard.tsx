@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, TimerReset } from 'lucide-react'
 import { commands } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
-import { buildAgentUsageLines, buildUsageRows, hasAnyUsageData } from '@/lib/agentDeskUsage'
+import { buildAgentUsageLines, explainUsageUnavailable, buildUsageRows, hasAnyUsageData } from '@/lib/agentDeskUsage'
 import { cn } from '@/lib/utils'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 
@@ -35,6 +35,12 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
   })
 
   const usage = query.data?.kind === 'available' ? query.data.usage : null
+  // Why there are no figures, when the reason is not simply "none recorded".
+  // A damaged file and a failed read used to collapse into the same `null` as
+  // an empty chat and render as "No usage data yet" -- a confident statement
+  // of absence standing in for an unanswered question, on the card whose whole
+  // job is that unknown stays unknown.
+  const unavailable = explainUsageUnavailable(query.data, query.isError)
   const rows = usage ? buildUsageRows(usage) : []
   const agentLines = usage ? buildAgentUsageLines(usage) : []
 
@@ -59,6 +65,17 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
         <div className="border-t border-border px-2 py-1.5">
           {query.isLoading ? (
             <p className="py-1 text-2xs text-muted-foreground">Loading usage…</p>
+          ) : unavailable ? (
+            <div className="py-1">
+              <p className="text-2xs leading-relaxed text-[var(--gw-amber)]">{unavailable}</p>
+              <button
+                type="button"
+                onClick={() => void query.refetch()}
+                className="mt-1.5 rounded border border-border px-2 py-1 text-2xs font-semibold hover:bg-panel3"
+              >
+                Try again
+              </button>
+            </div>
           ) : !usage || !hasAnyUsageData(usage) ? (
             // Usage honesty (tasks.md 7.4): nothing measured yet is stated
             // plainly, never rendered as a row of zeros.

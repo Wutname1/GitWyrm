@@ -1,4 +1,4 @@
-import type { ExecutionUsage, SessionUsage, UsageValue } from '@/lib/bindings'
+import type { ExecutionUsage, SessionUsage, SessionUsageOutcome, UsageValue } from '@/lib/bindings'
 
 /** One renderable row in the usage card: a label plus formatted value text. */
 export interface UsageRow {
@@ -223,4 +223,34 @@ export function nodeUsageLine(usage: ExecutionUsage | null | undefined): string 
   if (usage.turns != null && usage.turns > 0) parts.push(`${usage.turns} turn${usage.turns === 1 ? '' : 's'}`)
   if (usage.costMicroUsd != null) parts.push(formatCost(usage.costMicroUsd / 1_000_000))
   return parts.length > 0 ? parts.join(' · ') : null
+}
+
+/**
+ * Why the usage figures could not be read, when they could not.
+ *
+ * `SessionUsageOutcome` distinguishes "there is nothing recorded" from "the
+ * file is damaged" and "GitWyrm could not read it right now", and the card
+ * collapsed all three into `null` -- which it then rendered as "No usage data
+ * yet for this chat." A failed read stated as an absence is the one inversion
+ * this card exists to prevent: unknown must stay unknown, never zero, and
+ * never a confident nothing.
+ *
+ * `notFound` returns null because it genuinely IS the empty case: nothing has
+ * been recorded for this chat, which the plain empty state already says well.
+ */
+export function explainUsageUnavailable(
+  outcome: SessionUsageOutcome | undefined,
+  isError: boolean
+): string | null {
+  if (isError) return 'GitWyrm could not read this chat to work out what it cost.'
+  if (!outcome) return null
+  switch (outcome.kind) {
+    case 'available':
+    case 'notFound':
+      return null
+    case 'damaged':
+      return `This chat's saved file could not be read, so its cost is unknown: ${outcome.reason}`
+    case 'unavailable':
+      return `The cost of this chat is unknown right now: ${outcome.detail}`
+  }
 }

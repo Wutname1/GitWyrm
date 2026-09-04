@@ -242,3 +242,16 @@ export function summarizeInventoryCounts(rows: InventoryEntry[]): {
 export function itemDisplayName(entries: InventoryEntry[], itemId: string): string {
   return entries.find((e) => e.itemId === itemId)?.displayName ?? itemId
 }
+
+/**
+ * Why a copy could not be previewed.
+ *
+ * Both refusals used to end at `setPlan(null)`, which returns the dialog to
+ * the destination picker -- indistinguishable from not having chosen yet, so
+ * the person picks the same destinations again and gets the same silence.
+ */
+export function explainPreviewRefusal(kind: 'itemNotFound' | 'noDestinations'): string {
+  return kind === 'noDestinations'
+    ? 'There is nowhere to copy this to. The other apps either already have it or cannot use it.'
+    : 'That item is no longer there. It may have been changed or removed since the last scan.'
+}

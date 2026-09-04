@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildAgentUsageLines, buildUsageRows, hasAnyUsageData, nodeUsageLine } from './agentDeskUsage'
+import { buildAgentUsageLines, explainUsageUnavailable, buildUsageRows, hasAnyUsageData, nodeUsageLine } from './agentDeskUsage'
 import type { AgentUsageRow, SessionUsage } from '@/lib/bindings'
 
 const EMPTY: SessionUsage = {
@@ -270,5 +270,25 @@ describe('nodeUsageLine', () => {
 
   it('never rounds a real charge down to nothing', () => {
     expect(nodeUsageLine({ costMicroUsd: 20 })).toBe('< $0.0001')
+  })
+})
+
+describe('explainUsageUnavailable', () => {
+  it('says a damaged file means the cost is unknown, not zero', () => {
+    const msg = explainUsageUnavailable({ kind: 'damaged', reason: 'bad json' }, false)
+    expect(msg).toMatch(/unknown/i)
+    expect(msg).toMatch(/bad json/)
+  })
+  it('passes through why it is unavailable right now', () => {
+    expect(explainUsageUnavailable({ kind: 'unavailable', detail: 'file is locked' }, false)).toMatch(/file is locked/)
+  })
+  it('treats a transport failure as unknown too', () => {
+    expect(explainUsageUnavailable(undefined, true)).toMatch(/could not read/i)
+  })
+  it('stays silent for the genuinely empty case', () => {
+    // "Nothing recorded" is a real answer, and the plain empty state says it
+    // better than an error would.
+    expect(explainUsageUnavailable({ kind: 'notFound' }, false)).toBeNull()
+    expect(explainUsageUnavailable(undefined, false)).toBeNull()
   })
 })

@@ -304,6 +304,24 @@ export function AgentDeskView() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  // Re-fit the pinned panel when the window shrinks.
+  //
+  // `clampDockSizePx` takes the tighter of the 70% rule and
+  // `windowWidth - MIN_CHAT_SIZE_PX`, so a dock can never squeeze the
+  // conversation below its documented minimum -- but it only ran when the
+  // layout was restored or the divider was dragged. Nothing re-applied it when
+  // the WINDOW changed, so sizing a dock wide while maximised and then
+  // restoring the window left the conversation under that minimum, with no
+  // sign that dragging the divider once would fix it.
+  //
+  // `resizeDock` clamps internally, so passing the current size back through it
+  // is a no-op whenever the size is already legal.
+  const dockSizePx = layout.dock?.sizePx
+  useEffect(() => {
+    if (dockSizePx == null) return
+    resizeDock(dockSizePx, windowWidth)
+  }, [windowWidth, dockSizePx, resizeDock])
+
   /**
    * tasks.md 5.8: the conversation column's own width, not the window's,
    * decides whether the panes sit side by side, stack, or reduce to one pane

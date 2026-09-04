@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, ShieldCheck } from 'lucide-react'
 import type { ClientId, RedactedCopyPlan, DestinationApplyResult, InventoryEntry } from '@/lib/bindings'
-import { CLIENT_COLUMN_ORDER, clientLabel, eligibleDestinationsFor } from '@/lib/agentConfig'
+import { CLIENT_COLUMN_ORDER, clientLabel, eligibleDestinationsFor, explainPreviewRefusal } from '@/lib/agentConfig'
 import { useApplyAgentConfigCopy, usePreviewAgentConfigCopy, useUndoAgentConfigCopy } from '@/hooks/useAgentConfig'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -46,10 +47,19 @@ export function CopyPreviewDialog({
           if (outcome.kind === 'ready') {
             setPlan(outcome.plan)
           } else {
+            // Both refusals used to land here silently, putting the person
+            // back on the destination picker as though they had not chosen --
+            // so they choose the same thing again and get the same nothing.
             setPlan(null)
+            toast.error('Nothing to preview.', { description: explainPreviewRefusal(outcome.kind) })
           }
         },
-        onError: (e) => log.error(`agent config preview failed: ${String(e)}`),
+        onError: (e) => {
+          log.error(`agent config preview failed: ${String(e)}`)
+          toast.error('That copy could not be worked out.', {
+            description: 'Nothing has been changed. You can try again.',
+          })
+        },
       }
     )
   }
@@ -58,7 +68,14 @@ export function CopyPreviewDialog({
     if (!plan) return
     apply.mutate(plan.planId, {
       onSuccess: (outcome) => setResults(outcome.results),
-      onError: (e) => log.error(`agent config apply failed: ${String(e)}`),
+      // The batch path reports its failures; this single-item sibling was
+      // left log-only, so one copy failing said nothing at all.
+      onError: (e) => {
+        log.error(`agent config apply failed: ${String(e)}`)
+        toast.error('Those settings could not be copied.', {
+          description: 'Nothing was changed. You can try again.',
+        })
+      },
     })
   }
 
