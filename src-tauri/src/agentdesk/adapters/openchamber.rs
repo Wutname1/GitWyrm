@@ -138,11 +138,16 @@ impl AgentClientAdapter for OpenChamberAdapter {
 
     fn read_session(
         &self,
-        _client: &DetectedClient,
-        external_session_id: &str,
+        client: &DetectedClient,
+        _external_session_id: &str,
     ) -> Result<ExternalSessionDetail, AdapterError> {
-        Err(AdapterError::SessionNotFound {
-            external_session_id: external_session_id.into(),
+        // Same reasoning as `list_sessions` above, which this did not follow.
+        // `SessionNotFound` says "that chat is no longer in the other tool" --
+        // an assertion about a folder this adapter has never opened. The module
+        // doc has always promised both return `MissingPath` "rather than
+        // fabricated data"; only one of them did.
+        Err(AdapterError::MissingPath {
+            path: client.home_dir.display().to_string(),
         })
     }
 

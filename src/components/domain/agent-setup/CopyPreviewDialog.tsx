@@ -232,7 +232,14 @@ export function PlanReview({ plan }: { plan: RedactedCopyPlan }) {
             </ul>
           )}
 
-          {dest.redactedDiffSummary.length > 0 ? (
+          {/*
+            Filtered BEFORE the guard. The guard used to count every line while
+            the list dropped the unchanged ones, so a destination that already
+            matches -- the sync table's own "11 match" state -- passed the
+            guard and then mapped to nothing, showing empty space where this
+            block's own "No field-level changes to show." belongs.
+          */}
+          {dest.redactedDiffSummary.filter((line) => line.change !== 'unchanged').length > 0 ? (
             <ul className="flex flex-col gap-0.5">
               {dest.redactedDiffSummary
                 .filter((line) => line.change !== 'unchanged')
