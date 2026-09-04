@@ -8,6 +8,7 @@ import {
   recentBucket,
   resolveSessionRepoFilter,
   sourceKindLabel,
+  summarizeAgentActivity,
 } from './agentSessionGrouping'
 
 // Anchored to local noon (not a fixed UTC instant) so day-boundary math in
@@ -264,5 +265,34 @@ describe('resolveSessionRepoFilter', () => {
 
   it('falls back to app-wide when the toggle is on but no repo has resolved yet -- never filters to "nothing"', () => {
     expect(resolveSessionRepoFilter(true, null)).toBeNull()
+  })
+})
+
+describe('summarizeAgentActivity', () => {
+  const h = (state: string) => ({ state })
+
+  it('says nothing when nothing is happening', () => {
+    expect(summarizeAgentActivity([h('finished'), h('draft')]).tone).toBeNull()
+    expect(summarizeAgentActivity([]).tone).toBeNull()
+  })
+
+  it('reports work in progress', () => {
+    const a = summarizeAgentActivity([h('working'), h('preparing'), h('finished')])
+    expect(a.tone).toBe('working')
+    expect(a.count).toBe(2)
+    expect(a.label).toBe('2 chats are working')
+  })
+
+  it('puts a chat that needs the person ahead of one that is just busy', () => {
+    // Waiting on a person is the state that cannot make progress without
+    // them, so it outranks work that is still moving.
+    const a = summarizeAgentActivity([h('working'), h('needsInput'), h('working')])
+    expect(a.tone).toBe('needsYou')
+    expect(a.count).toBe(1)
+    expect(a.label).toBe('1 chat needs you')
+  })
+
+  it('uses the singular for one', () => {
+    expect(summarizeAgentActivity([h('working')]).label).toBe('1 chat is working')
   })
 })

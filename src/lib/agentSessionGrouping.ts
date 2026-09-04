@@ -256,3 +256,37 @@ export function sourceKindLabel(kind: string): string {
       return 'Chat'
   }
 }
+
+/**
+ * What the main window should say about agent work happening elsewhere.
+ *
+ * Agent Desk is a separate OS window by design, so "the user is looking at
+ * something else" is the normal case rather than the edge case -- and until
+ * this existed, a run could finish into a void: no badge, no notification, no
+ * signal of any kind outside a sidebar in a window nobody was watching. The
+ * only strategy available to a person was to keep checking.
+ *
+ * `needsYou` outranks `working` because it is the one that cannot make
+ * progress without them.
+ */
+export function summarizeAgentActivity(
+  headers: Array<{ state: string }>
+): { tone: 'needsYou' | 'working' | null; count: number; label: string } {
+  const needsYou = headers.filter((h) => h.state === 'needsInput').length
+  if (needsYou > 0) {
+    return {
+      tone: 'needsYou',
+      count: needsYou,
+      label: needsYou === 1 ? '1 chat needs you' : `${needsYou} chats need you`,
+    }
+  }
+  const working = headers.filter((h) => h.state === 'working' || h.state === 'preparing').length
+  if (working > 0) {
+    return {
+      tone: 'working',
+      count: working,
+      label: working === 1 ? '1 chat is working' : `${working} chats are working`,
+    }
+  }
+  return { tone: null, count: 0, label: '' }
+}
