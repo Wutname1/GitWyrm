@@ -789,7 +789,16 @@ export function AgentDeskView() {
                adapter scan starts when this component renders, so gating it
                here keeps chat loading from ever waiting on a filesystem sweep
                of other apps' session stores. */
-            <ImportPicker />
+            <ImportPicker
+              onOpenSession={(sessionId) => {
+                // Continuing an imported chat should land you in it. The
+                // import view replaces the conversation, so without this the
+                // person was told it was continuing and left looking at the
+                // list they started from.
+                onSelectSession(sessionId)
+                setCenterView('conversation')
+              }}
+            />
           ) : centerView === 'setup' ? (
             /* Agent setup takes over the centre the way OpenSpec does: it is a
                whole workspace of its own, not a panel. Closing returns to the

@@ -19,6 +19,7 @@ import {
   projectLabel,
   explainImportOutcome,
   unlinkConfirmCopy,
+  explainImportScanRefusal,
 } from '@/lib/agentImportDisplay'
 import { describeError, log } from '@/lib/log'
 import { cn } from '@/lib/utils'
@@ -32,7 +33,7 @@ import { cn } from '@/lib/utils'
  * owns concurrently. A caller mounts `<ImportPicker />` wherever the "Import
  * chats" entry point ends up living.
  */
-export function ImportPicker() {
+export function ImportPicker({ onOpenSession }: { onOpenSession?: (sessionId: string) => void }) {
   const adapters = useAgentImportAdapters()
   const [selectedAdapterId, setSelectedAdapterId] = useState<string | null>(null)
   const selectedAdapter = adapters.data?.find((a) => a.adapterId === selectedAdapterId)
@@ -66,6 +67,7 @@ export function ImportPicker() {
 
       {selectedAdapter && (
         <SessionList
+          onOpenSession={onOpenSession}
           adapterId={selectedAdapter.adapterId}
           adapterName={selectedAdapter.displayName}
           enabled={selectedAdapter.enabled}
@@ -108,10 +110,12 @@ function SessionList({
   adapterId,
   adapterName,
   enabled,
+  onOpenSession,
 }: {
   adapterId: string
   adapterName: string
   enabled: boolean
+  onOpenSession?: (sessionId: string) => void
 }) {
   const scan = useAgentImportScan(adapterId, enabled)
 
@@ -131,7 +135,14 @@ function SessionList({
     )
   }
   if (!scan.data || scan.data.kind !== 'scanned') {
-    return <p className="text-xs text-muted-foreground">No sessions available right now.</p>
+    // "No sessions available right now" for all nine outcomes read as a
+    // statement about the person's chats, when the usual truth is that
+    // GitWyrm could not look -- most often because the tool's folder moved.
+    return (
+      <p className="text-xs text-muted-foreground">
+        {scan.data ? explainImportScanRefusal(scan.data) : 'Looking for chats…'}
+      </p>
+    )
   }
   if (scan.data.sessions.length === 0) {
     return <p className="text-xs text-muted-foreground">No sessions found for this chat tool.</p>
@@ -145,6 +156,7 @@ function SessionList({
           adapterId={adapterId}
           adapterName={adapterName}
           session={s}
+          onOpenSession={onOpenSession}
         />
       ))}
     </div>
@@ -155,10 +167,12 @@ function SessionRow({
   adapterId,
   adapterName,
   session,
+  onOpenSession,
 }: {
   adapterId: string
   adapterName: string
   session: ScannedExternalSession
+  onOpenSession?: (sessionId: string) => void
 }) {
   const externalSessionId = session.summary.externalSessionId
   const importMutation = useImportExternalSession()
@@ -203,6 +217,11 @@ function SessionRow({
         switch (result.kind) {
           case 'continued':
             toast.success('Continuing this chat in GitWyrm')
+            // Land in the chat. Without this the person was told the chat was
+            // continuing and left looking at the import list, with nothing
+            // saying where it had gone -- the import view replaces the
+            // conversation entirely, so there was no way back to it either.
+            onOpenSession?.(result.session.header.sessionId)
             break
           case 'notFound':
             toast.error('That chat is no longer here.', {

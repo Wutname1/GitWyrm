@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import {explainImportOutcome, adapterDisplayName, canBrowseAdapter,
+import {
+  explainImportScanRefusal,
+  explainImportOutcome, adapterDisplayName, canBrowseAdapter,
   continueExternallyLabel,
   detectionLabel,
   linkedImportedSessionId,
@@ -237,5 +239,32 @@ describe('explainImportOutcome', () => {
     const gone = explainImportOutcome({ kind: 'clientNotDetected' }, 'x', 'vscode-copilot')
     expect(gone.message).toMatch(/VS Code Copilot Chat/)
     expect(gone.message).not.toMatch(/vscode-copilot/)
+  })
+})
+
+describe('explainImportScanRefusal', () => {
+  it('names the folder it looked in, which is the fixable case', () => {
+    const msg = explainImportScanRefusal({ kind: 'failed', error: { kind: 'missingPath', path: '/old/place' } })
+    expect(msg).toMatch(/\/old\/place/)
+    expect(msg).toMatch(/moved/i)
+  })
+  it('says which versions it can read', () => {
+    const msg = explainImportScanRefusal({
+      kind: 'failed',
+      error: { kind: 'unsupportedVersion', found: '2.0', supportedRange: '1.x' },
+    })
+    expect(msg).toMatch(/2\.0/)
+    expect(msg).toMatch(/1\.x/)
+  })
+  it('never states an absence it has not established', () => {
+    // The old copy said "No sessions available right now" for every one of
+    // these, which reads as "you have no chats there".
+    for (const o of [
+      { kind: 'adapterDisabled' },
+      { kind: 'clientNotDetected' },
+      { kind: 'failed', error: { kind: 'timedOut', millis: 5000 } },
+    ] as const) {
+      expect(explainImportScanRefusal(o)).not.toMatch(/no sessions/i)
+    }
   })
 })

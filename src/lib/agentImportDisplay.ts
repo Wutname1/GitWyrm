@@ -1,4 +1,6 @@
 import type {
+  AdapterError,
+  ImportScanOutcome,
   AdapterListEntry,
   ContinuationOutcome,
   ImportSessionOutcome,
@@ -192,5 +194,49 @@ export function explainImportOutcome(
       return { message: `That chat's file could not be read: ${outcome.detail}`, ok: false }
     case 'writeFailed':
       return { message: `Could not save the imported chat: ${outcome.detail}`, ok: false }
+  }
+}
+
+/**
+ * Why a chat tool's sessions could not be listed.
+ *
+ * Nine outcomes collapsed into "No sessions available right now." -- which
+ * reads as *you have no chats there*, a statement about the person's work,
+ * when the truth is usually that GitWyrm could not look. `AdapterError` names
+ * seven causes and carries the detail for each, and was referenced nowhere in
+ * the app.
+ *
+ * `missingPath` is the likeliest of them in practice (five adapters produce
+ * it) and the most fixable: the tool's folder moved.
+ */
+export function explainImportScanRefusal(
+  outcome: Exclude<ImportScanOutcome, { kind: 'scanned' }>
+): string {
+  switch (outcome.kind) {
+    case 'adapterDisabled':
+      return 'Importing from this tool is turned off.'
+    case 'clientNotDetected':
+      return 'That tool does not appear to be installed on this computer.'
+    case 'failed':
+      return explainAdapterError(outcome.error)
+  }
+}
+
+function explainAdapterError(error: AdapterError): string {
+  switch (error.kind) {
+    case 'clientNotDetected':
+      return 'That tool does not appear to be installed on this computer.'
+    case 'unsupportedVersion':
+      return `That tool is version ${error.found}; GitWyrm can read ${error.supportedRange}.`
+    case 'missingPath':
+      return `GitWyrm looked in ${error.path} and it is not there. The tool may have moved its files.`
+    case 'corruptSession':
+      return `One of that tool's saved chats could not be read: ${error.detail}`
+    case 'sessionNotFound':
+      return 'That chat is no longer in the other tool.'
+    case 'timedOut':
+      return 'That tool took too long to answer. It may be busy.'
+    case 'io':
+      return `GitWyrm could not read that tool's files: ${error.detail}`
   }
 }
