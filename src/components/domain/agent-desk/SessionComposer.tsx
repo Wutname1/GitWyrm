@@ -408,7 +408,11 @@ export function SessionComposer({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Say what to do next, or ask about the work…"
-          aria-label="Message the lead agent"
+          // Matches the visible team line thirty lines below, which already
+          // says "One agent" for a solo chat. Hardcoding "the lead agent" told
+          // screen-reader users about a lead that solo chats do not have --
+          // the exact claim the comment beside that line says is untrue.
+          aria-label={team === 'solo' ? 'Message the agent' : 'Message the lead agent'}
           rows={2}
           className="resize-none border-0 bg-transparent px-1 py-1 text-xs shadow-none focus-visible:ring-0"
           onKeyDown={(e) => {

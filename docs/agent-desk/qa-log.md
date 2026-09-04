@@ -85,4 +85,6 @@ competing sub-agents, the answer names the losing option too.
 | 77 | 2026-09-04 | Which of the two agent-graph projections should survive? | The TypeScript one -- the Rust copy had no caller, and its deletion leaves the scheduler itself untouched. |
 | 78 | 2026-09-04 | Does an abandoned helper really show as "queued", as one advocate claimed? | No -- it is set to failed with "Never started: it needed X to finish first", which the panel shows; the claim was wrong and checking it took minutes. |
 | 79 | 2026-09-04 | Why did a button styled with the accent colour look grey? | Because `--accent` resolves to the same hex as the border colour; the real accent is `--primary`, which the rest of the app already uses. |
+| 80 | 2026-09-04 | What should Agent Setup show when the scan itself fails? | That it could not look, plainly separated from having none, with a retry -- the sibling catalog screen already did this. |
+| 81 | 2026-09-04 | Why move the summary counting out of the component? | Its failure mode was "the numbers do not add up", which is arithmetic and belongs somewhere it can be tested. |
 

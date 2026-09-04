@@ -37,7 +37,7 @@ export function issueSourceInput(
 ): Extract<SessionSourceInput, { kind: 'issue' }> {
   const body = 'body' in issue ? issue.body : ''
   const labels = issue.labels.length > 0 ? ` [${issue.labels.join(', ')}]` : ''
-  const assignee = issue.assignee ? ` — assigned to ${issue.assignee}` : ' — unassigned'
+  const assignee = issue.assignee ? `, assigned to ${issue.assignee}` : ', unassigned'
   return {
     kind: 'issue',
     hostId,
@@ -77,7 +77,7 @@ export function pullRequestSourceInput(
     head: pr.head_ref,
     base: pr.base_ref,
     title: pr.title,
-    summary: summaryParts.join(' — '),
+    summary: summaryParts.join(' · '),
   }
 }
 
@@ -223,7 +223,7 @@ export function commitSourceInput(
     kind: 'commit',
     oid,
     title: subject || `Commit ${shortOid}`,
-    summary: [subject, author ? `by ${author}` : '', when].filter(Boolean).join(' — '),
+    summary: [subject, author ? `by ${author}` : '', when].filter(Boolean).join(' · '),
   }
 }
 

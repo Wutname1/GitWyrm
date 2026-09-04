@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { ApplyOutcome, ClientId, InventoryEntry, RedactedCopyPlan } from '@/lib/bindings'
-import { partitionBatchCandidates, clientLabel } from '@/lib/agentConfig'
+import { partitionBatchCandidates, clientLabel, itemDisplayName } from '@/lib/agentConfig'
 import { useApplyAgentConfigBatch, usePreviewAgentConfigCopy, useUndoAgentConfigCopy } from '@/hooks/useAgentConfig'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -122,8 +122,8 @@ export function BatchReviewDialog({
 
           {stage === 'empty' && (
             <p className="py-6 text-center text-2xs text-muted-foreground">
-              Nothing could be previewed -- every differing item either has no eligible destination or could not be
-              read.
+              Nothing could be previewed. Every item that differs either has nowhere it can be copied to, or could not
+              be read.
             </p>
           )}
 
@@ -140,7 +140,10 @@ export function BatchReviewDialog({
                 return (
                   <div key={plan.planId} className="rounded-md border border-border p-2.5">
                     <div className="mb-2 text-xs font-semibold text-foreground">
-                      {plan.itemId} <span className="font-normal text-muted-foreground">from {clientLabel(plan.sourceClient)}</span>
+                      {/* The plan carries only the internal id; the name lives
+                          on `entries`, which is already a prop here. */}
+                      {itemDisplayName(entries, plan.itemId)}{' '}
+                      <span className="font-normal text-muted-foreground">from {clientLabel(plan.sourceClient)}</span>
                     </div>
                     {planOutcome ? (
                       <ApplyResults

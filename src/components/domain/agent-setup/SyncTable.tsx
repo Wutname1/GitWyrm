@@ -1,5 +1,5 @@
 import type { InventoryEntry, ItemKind } from '@/lib/bindings'
-import { CLIENT_COLUMN_ORDER, clientLabel, formatSummaryLine } from '@/lib/agentConfig'
+import { CLIENT_COLUMN_ORDER, clientLabel, formatSummaryLine, summarizeInventoryCounts } from '@/lib/agentConfig'
 import { SyncStateBadge } from './SyncStateBadge'
 
 /**
@@ -94,11 +94,11 @@ export function SyncSummaryLine({
   kind: ItemKind
 }) {
   const rows = entries.filter((e) => e.kind === kind)
-  const matching = rows.filter((e) => e.perClient.every((s) => s.state === 'same' || s.state === 'isSource' || s.state === 'keptSeparate' || s.state === 'clientNotDetected')).length
-  const differing = rows.filter((e) => e.perClient.some((s) => s.state === 'different' || s.state === 'outdated')).length
-  const existsInOne = rows.filter((e) => e.perClient.every((s) => s.state === 'isSource' || s.state === 'missing' || s.state === 'clientNotDetected' || s.state === 'unsupported')).length
+  // Counted in `agentConfig.ts` so the arithmetic is testable: these three
+  // must be mutually exclusive or they add up past the total.
+  const summary = summarizeInventoryCounts(rows)
+  const { matching, differing, existsInOne } = summary
 
-  const summary = { total: rows.length, matching, differing, existsInOne }
 
   return (
     <div className="mb-2.5 flex items-center gap-3 text-2xs text-muted-foreground">

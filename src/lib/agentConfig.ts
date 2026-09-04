@@ -195,3 +195,50 @@ export function describeConfigOperation(receipt: {
   const what = receipt.beforeHash === null ? 'Created settings for' : 'Changed settings for'
   return receipt.undone ? `${what} ${receipt.client} (already put back)` : `${what} ${receipt.client}`
 }
+
+/**
+ * How many items match, differ, or live in only one app.
+ *
+ * The three used to be computed with overlapping predicates, so they could add
+ * up to more than the total: an item present in exactly one app satisfied both
+ * "match" (all its states are `isSource`/`clientNotDetected`) and "exists in
+ * one app". Three numbers printed beside a total are read as parts of it, so
+ * they are mutually exclusive and evaluated in priority order: a differing
+ * item is reported as differing whatever else is true of it.
+ */
+export function summarizeInventoryCounts(rows: InventoryEntry[]): {
+  total: number
+  matching: number
+  differing: number
+  existsInOne: number
+} {
+  const isDiffering = (e: InventoryEntry) => e.perClient.some((s) => s.state === 'different' || s.state === 'outdated')
+  const isOnlyInOne = (e: InventoryEntry) =>
+    e.perClient.every(
+      (s) => s.state === 'isSource' || s.state === 'missing' || s.state === 'clientNotDetected' || s.state === 'unsupported'
+    )
+  const differing = rows.filter(isDiffering).length
+  const existsInOne = rows.filter((e) => !isDiffering(e) && isOnlyInOne(e)).length
+  const matching = rows.filter(
+    (e) =>
+      !isDiffering(e) &&
+      !isOnlyInOne(e) &&
+      e.perClient.every(
+        (s) => s.state === 'same' || s.state === 'isSource' || s.state === 'keptSeparate' || s.state === 'clientNotDetected'
+      )
+  ).length
+  return { total: rows.length, matching, differing, existsInOne }
+}
+
+/**
+ * The name a person recognises for an inventory item, given its internal id.
+ *
+ * `RedactedCopyPlan` carries only `itemId`, which is a namespaced key like
+ * `McpConnector:github` -- so the batch review dialog headlined every card
+ * with a code identifier while the single-item dialog right beside it used the
+ * real name. Falls back to the id rather than to nothing: an unrecognisable
+ * heading beats a blank one.
+ */
+export function itemDisplayName(entries: InventoryEntry[], itemId: string): string {
+  return entries.find((e) => e.itemId === itemId)?.displayName ?? itemId
+}

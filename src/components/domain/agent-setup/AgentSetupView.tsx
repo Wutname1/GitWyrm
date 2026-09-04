@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { AlertTriangle, RefreshCw } from 'lucide-react'
 import type { InventoryEntry } from '@/lib/bindings'
 import { useAgentConfigDetectedClients, useAgentConfigInventory } from '@/hooks/useAgentConfig'
 import { hasAnyDifference } from '@/lib/agentConfig'
@@ -104,6 +104,28 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
             answers a different question entirely. */}
         {inventory.isLoading && tab !== 'detected' && tab !== 'disk' ? (
           <p className="py-6 text-center text-2xs text-muted-foreground">Scanning agent apps…</p>
+        ) : inventory.isError && tab !== 'detected' && tab !== 'disk' ? (
+          // A scan that FAILED used to fall through to the tables, which then
+          // said "No skills were found on this machine yet" -- telling someone
+          // they have nothing when the truth is that GitWyrm could not look.
+          // `AgentCatalog` in the same folder already draws this distinction;
+          // this matches it, including the retry.
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
+            <p className="flex items-center gap-1.5 text-2xs font-semibold text-destructive">
+              <AlertTriangle size={13} aria-hidden />
+              GitWyrm could not look at your other AI apps' settings.
+            </p>
+            <p className="mt-1 text-2xs text-muted-foreground">
+              This is not the same as having none. Nothing has been changed.
+            </p>
+            <button
+              type="button"
+              onClick={() => void inventory.refetch()}
+              className="mt-2 rounded border border-border px-2 py-1 text-2xs font-semibold hover:bg-panel3"
+            >
+              Try again
+            </button>
+          </div>
         ) : tab === 'skills' ? (
           <>
             <SyncSummaryLine entries={entries} kind="skill" />

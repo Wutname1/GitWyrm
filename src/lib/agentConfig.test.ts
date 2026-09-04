@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  itemDisplayName,
+  summarizeInventoryCounts,
   describeConfigOperation,
   explainConfigUndoOutcome,
   CLIENT_COLUMN_ORDER,
@@ -259,5 +261,49 @@ describe('describeConfigOperation', () => {
     expect(describeConfigOperation({ client: 'Codex', beforeHash: 'abc', undone: true })).toBe(
       'Changed settings for Codex (already put back)'
     )
+  })
+})
+
+describe('summarizeInventoryCounts', () => {
+  const row = (states: string[]) =>
+    ({ kind: 'skill', perClient: states.map((state) => ({ state })) }) as unknown as Parameters<
+      typeof summarizeInventoryCounts
+    >[0][number]
+
+  it('never counts one item under two headings', () => {
+    // An item living in exactly one app used to satisfy BOTH "match" and
+    // "exists in one app", so the numbers could add up past the total.
+    const rows = [row(['isSource', 'clientNotDetected'])]
+    const s = summarizeInventoryCounts(rows)
+    expect(s.matching + s.differing + s.existsInOne).toBeLessThanOrEqual(s.total)
+    expect(s.existsInOne).toBe(1)
+    expect(s.matching).toBe(0)
+  })
+
+  it('reports a differing item as differing whatever else is true of it', () => {
+    const s = summarizeInventoryCounts([row(['different', 'missing'])])
+    expect(s.differing).toBe(1)
+    expect(s.existsInOne).toBe(0)
+    expect(s.matching).toBe(0)
+  })
+
+  it('counts a genuine match as a match', () => {
+    const s = summarizeInventoryCounts([row(['same', 'same'])])
+    expect(s.matching).toBe(1)
+    expect(s.differing + s.existsInOne).toBe(0)
+  })
+})
+
+describe('itemDisplayName', () => {
+  const entries = [{ itemId: 'McpConnector:github', displayName: 'GitHub' }] as unknown as Parameters<
+    typeof itemDisplayName
+  >[0]
+
+  it('gives the name a person recognises, not the internal id', () => {
+    expect(itemDisplayName(entries, 'McpConnector:github')).toBe('GitHub')
+  })
+  it('falls back to the id rather than to nothing', () => {
+    // An unrecognisable heading still beats a blank one.
+    expect(itemDisplayName(entries, 'Skill:unknown')).toBe('Skill:unknown')
   })
 })
