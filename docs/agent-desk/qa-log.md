@@ -162,3 +162,5 @@ competing sub-agents, the answer names the losing option too.
 | 153 | 2026-09-04 | Should a side panel hide itself when Split View gets cramped? | No -- the panes already stack vertically before that point, so each chat keeps the full width and nothing needs to disappear. |
 | 154 | 2026-09-04 | Should a run that reports turns but no token counts say "not reported"? | No -- GitWyrm counts turns itself, so that is a real measurement, and hiding it would discard a true number. |
 | 155 | 2026-09-04 | Is the front of the app still turning up new problems? | Barely -- this round's critique traced six leads there and every one was correctly built, so the value has moved elsewhere. |
+| 156 | 2026-09-04 | Should any mention of "push" warn that work is leaving your machine? | No -- editing a file called push-notifications.md would trigger it, and false alarms teach people to click through the one warning that matters. |
+| 157 | 2026-09-04 | Was the number explaining a surprisingly small bill ever shown? | No -- both AI services report how much was served from cache and nothing displayed it, so it now appears beside the total rather than added into it. |

@@ -386,3 +386,42 @@ describe('a turn count GitWyrm measured itself is not "not reported"', () => {
     expect(helper.parts.length).toBeGreaterThan(0)
   })
 })
+
+describe('cached input tokens', () => {
+  // Both provider paths report this and nothing rendered it -- a measured
+  // number thrown away, which is the mirror of inventing an absent one.
+  it('is named beside the total, never added into it', () => {
+    const line = nodeUsageLine({
+      inputTokens: 1000,
+      outputTokens: 200,
+      cachedInputTokens: 800,
+      costMicroUsd: null,
+      turns: 2,
+    })!
+    // 1000 + 200, NOT 1000 + 200 + 800: cached input is a subset of input.
+    expect(line).toContain('1.2k tokens')
+    expect(line).toContain('800 tokens cached')
+  })
+
+  it('says nothing when there is no input figure to be a fraction of', () => {
+    const line = nodeUsageLine({
+      inputTokens: null,
+      outputTokens: 200,
+      cachedInputTokens: 800,
+      costMicroUsd: null,
+      turns: 1,
+    })!
+    expect(line).not.toContain('cached')
+  })
+
+  it('is absent, not zero, when the provider did not report it', () => {
+    const line = nodeUsageLine({
+      inputTokens: 1000,
+      outputTokens: 200,
+      cachedInputTokens: null,
+      costMicroUsd: null,
+      turns: 1,
+    })!
+    expect(line).not.toContain('cached')
+  })
+})

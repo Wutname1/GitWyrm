@@ -234,6 +234,20 @@ export function nodeUsageLine(usage: ExecutionUsage | null | undefined): string 
   // something; hiding it is the "unknown vs zero" rule inverted, dropping a
   // real figure instead of inventing an absent one. Absence is still absence:
   // `!= null` is what keeps that.
+  // Cached input, which both real provider paths report and nothing showed.
+  //
+  // A SUBSET of `inputTokens`, not an addition -- its own backend doc calls it
+  // "the number that explains a surprisingly small bill". So it is never added
+  // into the total above; it is named beside it, which is the only way it can
+  // be read without inviting double-counting.
+  //
+  // Shown only alongside a known input figure: "800 cached" on its own would
+  // be a fraction with no denominator.
+  if (haveIn && usage.cachedInputTokens != null) {
+    // `formatTokens` already ends in "tokens", so this reads "800 tokens
+    // cached" rather than repeating the noun.
+    parts.push(`${formatTokens(usage.cachedInputTokens)} cached`)
+  }
   if (usage.turns != null) parts.push(`${usage.turns} turn${usage.turns === 1 ? '' : 's'}`)
   if (usage.costMicroUsd != null) parts.push(formatCost(usage.costMicroUsd / 1_000_000))
   return parts.length > 0 ? parts.join(' · ') : null

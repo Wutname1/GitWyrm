@@ -492,6 +492,21 @@ mod tests {
             "Run `npm test`",
             "Delete build/output.txt",
             "Add a comment to the merge helper's docstring",
+            // Added after a proposal to widen this to any standalone `push`
+            // or `publish` token. That proposal passed the five cases above
+            // -- word-splitting keeps `pusher` and `gh-pages` intact -- but
+            // the tokenizer splits on every non-alphanumeric, so a hyphenated
+            // or underscored FILENAME yields a bare `push`. Each of these
+            // would then have been labelled "leaves this computer and other
+            // people may see it", including one that only reads a file.
+            //
+            // Kept as cases rather than as prose: the reason the narrow
+            // matcher is right is easier to delete than to rediscover.
+            "Edit docs/push-notifications.md",
+            "Read src/push_queue.rs",
+            "Update CHANGELOG: publish notes for v2",
+            "Revert the publish flag in config.rs",
+            "Rename publish.yml to release.yml",
         ] {
             let gate = GateRequest::classify(summary);
             assert!(
