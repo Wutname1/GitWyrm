@@ -46,8 +46,16 @@ export function SessionRow({
   onArchive,
   onDelete,
   style,
+  showProject = false,
 }: {
   header: AgentSessionHeader
+  /**
+   * Show which project this chat belongs to. Off when the group header
+   * already says it (Project grouping); on everywhere else, including the
+   * default Recent grouping, where the row otherwise gives no clue which of
+   * several open repositories a chat would act on.
+   */
+  showProject?: boolean
   selected: boolean
   onSelect: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => void
@@ -131,6 +139,9 @@ export function SessionRow({
             )}
           >
             {title}
+            {showProject && header.repoName ? (
+              <span className="ml-1.5 font-normal text-muted-foreground">{header.repoName}</span>
+            ) : null}
           </span>
           <span className="flex-none">
             {working ? (

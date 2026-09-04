@@ -151,6 +151,21 @@ describe('buildSidebarRows', () => {
     expect(rows.map((r) => r.id)).toEqual(['Today', 'today', 'Yesterday', 'yesterday'])
   })
 
+  it('marks rows whose group header already names the project, and only those', () => {
+    // The row shows the project so a chat cannot be mistaken for one in
+    // another repository -- but repeating it under a group header that
+    // already says it is noise, so grouping by project turns it off.
+    const headers = [header({ sessionId: 's1', updatedAt: daysAgo(0) })]
+    const byProject = buildSidebarRows(headers, { mode: 'project', collapsedGroupIds: new Set(), now: NOW })
+    const byRecent = buildSidebarRows(headers, { mode: 'recent', collapsedGroupIds: new Set(), now: NOW })
+    const flagOf = (rows: ReturnType<typeof buildSidebarRows>) => {
+      const row = rows.find((r) => r.kind === 'session')
+      return row?.kind === 'session' ? row.projectInHeader : undefined
+    }
+    expect(flagOf(byProject)).toBe(true)
+    expect(flagOf(byRecent)).toBeFalsy()
+  })
+
   it('keeps a group header when collapsed but omits its session rows', () => {
     const headers = [header({ sessionId: 's1', updatedAt: daysAgo(0) })]
     const rows = buildSidebarRows(headers, {

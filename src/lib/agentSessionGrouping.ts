@@ -16,7 +16,18 @@ export type SidebarGroupMode = 'recent' | 'project' | 'diff'
 /** One flattened row for the virtualizer: either a group header or a session. */
 export type SidebarRow =
   | { kind: 'header'; id: string; label: string; count: number; collapsed: boolean }
-  | { kind: 'session'; id: string; header: AgentSessionHeader }
+  | {
+      kind: 'session'
+      id: string
+      header: AgentSessionHeader
+      /**
+       * True when the row's group header already names the project, so the
+       * row must not repeat it. Every other grouping leaves the project
+       * invisible on the row, which is what the Persistent Context Rule
+       * exists to prevent -- acting on the wrong repository.
+       */
+      projectInHeader?: boolean
+    }
 
 /** Day-bucket labels for Recent grouping, oldest-eligible-first is not required -- buckets are emitted in this fixed order. */
 const RECENT_BUCKETS = ['Today', 'Yesterday', 'This week', 'Earlier'] as const
@@ -153,7 +164,7 @@ export function buildSidebarRows(
       const collapsed = collapsedGroupIds.has(key)
       rows.push({ kind: 'header', id: key, label: g.label, count: g.sessions.length, collapsed })
       if (!collapsed) {
-        for (const h of g.sessions) rows.push({ kind: 'session', id: h.sessionId, header: h })
+        for (const h of g.sessions) rows.push({ kind: 'session', id: h.sessionId, header: h, projectInHeader: true })
       }
     }
     return rows

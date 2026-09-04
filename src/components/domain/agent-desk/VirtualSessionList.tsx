@@ -98,6 +98,7 @@ export function VirtualSessionList({
             <SessionRow
               key={row.id}
               header={row.header}
+              showProject={!row.projectInHeader}
               selected={row.id === selectedId}
               onSelect={onSelectSession}
               onRename={onRename}
