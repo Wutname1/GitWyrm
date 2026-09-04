@@ -49,8 +49,27 @@ function stateForMark(mark: string): PlanRowState {
  */
 export function parsePlanChecklist(text: string): PlanRow[] {
   const rows: PlanRow[] = []
+  // Lines inside a fenced block are an EXAMPLE of the convention, not a use
+  // of it. Without this, an agent quoting the format it was asked to follow
+  // -- or quoting a tasks file -- produced a real plan card with working
+  // status icons, attached to a message that never claimed to report a plan.
+  //
+  // The OpenSpec parser reading the same syntax already tracks fences
+  // (`src-tauri/src/openspec/parse.rs`). Same convention, two parsers, and
+  // only one of them had thought about it.
+  //
+  // An UNCLOSED fence swallows the rest of the message, which is the safer
+  // reading: a stray fence means the formatting went wrong, and a plan built
+  // from the wreckage would be a confident answer to a question the text no
+  // longer answers.
+  let inFence = false
   for (const rawLine of text.split('\n')) {
     const line = rawLine.trim()
+    if (line.startsWith('```') || line.startsWith('~~~')) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence) continue
     const match = CHECKLIST_LINE.exec(line)
     if (!match) continue
     const [, mark, rest] = match

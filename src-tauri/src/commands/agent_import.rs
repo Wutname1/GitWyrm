@@ -461,7 +461,10 @@ fn import_session_at(
                             last_seen_external_updated_at: detail.summary.updated_at.clone(),
                         },
                     );
-                    write_ledger_logged(root, adapter_id, &ledger);
+                    // A refresh already has its ledger entry; losing this
+                    // update costs a re-check of messages it already has,
+                    // which provenance handles.
+                    let _ = write_ledger_logged(root, adapter_id, &ledger);
                     ImportSessionOutcome::Refreshed {
                         session,
                         new_message_count: new_count,
@@ -504,8 +507,22 @@ fn import_session_at(
                             last_seen_external_updated_at: detail.summary.updated_at.clone(),
                         },
                     );
-                    write_ledger_logged(root, adapter_id, &ledger);
-                    ImportSessionOutcome::Created { session }
+                    // Only the create path needs this. A refresh already has a
+                    // ledger entry, and message provenance covers its messages;
+                    // a first import has neither, so a lost ledger write here
+                    // is the one case that silently duplicates the whole chat.
+                    if write_ledger_logged(root, adapter_id, &ledger) {
+                        ImportSessionOutcome::Created { session }
+                    } else {
+                        let mut session = session;
+                        push_system_note(&mut session, LEDGER_NOT_SAVED_NOTE);
+                        // Best effort: the chat is already saved without the
+                        // note, so a failure here loses the warning, not the
+                        // import. Nothing further can be said if this write is
+                        // failing too.
+                        let _ = store::write_session(root, &session);
+                        ImportSessionOutcome::Created { session }
+                    }
                 }
                 Err(WriteError::Serialize { detail })
                 | Err(WriteError::CreateTemp { detail, .. })
@@ -537,13 +554,60 @@ fn write_ledger_logged(
     root: &SessionStoreRoot,
     adapter_id: &str,
     ledger: &import_store::AdapterImportLedger,
-) {
+) -> bool {
     if let Err(e) = import_store::write_ledger(root, adapter_id, ledger) {
         log::warn!(
             "import ledger for {adapter_id} could not be saved: {}",
             redact_for_log(&e.to_string())
         );
+        return false;
     }
+    true
+}
+
+/// What to tell someone whose import was saved but not recorded.
+///
+/// The doc on `already_imported_session` says a lost ledger "degrades to
+/// re-checks messages it already has, never to silently duplicates". That is
+/// true for a session already on the ledger -- message provenance catches the
+/// individual messages. It is NOT true for a first import: the create path
+/// consults only the ledger, so a lost write means the next import builds a
+/// second chat with a new id, never reading the first.
+///
+/// Logging alone did not reach the person. This does, in the one place they
+/// are certain to look.
+const LEDGER_NOT_SAVED_NOTE: &str =
+    "This chat was brought in, but GitWyrm could not save its note that it had. If you import this same chat again, you will get a second copy of it rather than an update to this one.";
+
+/// Append a plain-language note to a session the caller already holds.
+///
+/// The graph module has `append_system_note`, but that one re-reads the
+/// session under its lock. Here the session is already in hand and about to
+/// be written, so re-reading would be both wasteful and a second chance to
+/// fail.
+fn push_system_note(session: &mut AgentSession, text: &str) {
+    let now = now_rfc3339();
+    let segment_id = session
+        .segments
+        .last()
+        .map(|seg| seg.segment_id.clone())
+        .unwrap_or_default();
+    session.messages.push(SessionMessage {
+        message_id: new_id(),
+        segment_id,
+        role: MessageRole::System,
+        timestamp: now.clone(),
+        plain_content: text.to_string(),
+        rendered_content: None,
+        provider: None,
+        model: None,
+        kind: MessageKind::System,
+        execution_id: None,
+        sequence: None,
+        import: None,
+        targets: Vec::new(),
+    });
+    session.header.updated_at = now;
 }
 
 fn build_imported_session(
@@ -978,6 +1042,29 @@ fn unlink_at(locks: &SessionLocks, root: &SessionStoreRoot, session_id: &str) ->
 
 #[cfg(test)]
 mod tests {
+
+    /// A first import whose ledger note could not be saved must SAY so.
+    ///
+    /// `already_imported_session`'s doc says a lost ledger "degrades to
+    /// re-checks messages it already has, never to silently duplicates". That
+    /// holds for a refresh -- message provenance catches the messages. It does
+    /// NOT hold for a first import: the create path consults only the ledger,
+    /// so a lost write means the next import builds a SECOND chat with a new
+    /// id, never reading the first. Logging alone never reached the person.
+    ///
+    /// Pinned on the note's wording rather than the whole import flow, which
+    /// needs an adapter fixture: the wording IS the fix, and it is what a
+    /// person reads.
+    #[test]
+    fn the_lost_ledger_note_says_what_happens_next_time() {
+        let note = super::LEDGER_NOT_SAVED_NOTE;
+        assert!(note.contains("second copy"), "must say what a re-import will do");
+        assert!(note.contains("brought in"), "must confirm the chat itself was saved");
+        // Plain language: no internal words for the thing that failed.
+        for jargon in ["ledger", "bookkeeping", "adapter", "serialize"] {
+            assert!(!note.contains(jargon), "note leaks the word {jargon:?}");
+        }
+    }
 
     /// Adapter ids and provider ids are different namespaces, and an import
     /// must not put one where the other is expected.
