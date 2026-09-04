@@ -9,15 +9,21 @@
  * next. Kept here (not inline in the component) so it can be unit tested
  * without a DOM (vitest runs `src/**\/*.test.ts` in a Node env, no jsdom).
  */
-import type { ExecutionRecord, SessionState } from '@/lib/bindings'
+import type { ExecutionRecord } from '@/lib/bindings'
+import { runIsActive } from '@/lib/agentDeskResult'
 
 const MAX_CONCURRENT_HELPERS = 3
 
-const ACTIVE_STATES: SessionState[] = ['preparing', 'working', 'needsInput']
-
-function isActive(state: SessionState): boolean {
-  return ACTIVE_STATES.includes(state)
-}
+/**
+ * The same "is a run going" rule the composer and the transcript use.
+ *
+ * This was a second definition of one rule over one type. It happened to
+ * agree -- but the last time this rule existed in four hand-written copies,
+ * one of them omitted `needsInput` and the transcript went silent while an
+ * agent waited for an answer. Agreement that is not enforced is a coincidence
+ * with a shelf life.
+ */
+const isActive = runIsActive
 
 export interface GraphTreeNode {
   execution: ExecutionRecord

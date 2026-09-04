@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ExecutionRecord } from '@/lib/bindings'
 import { buildGraphTree, graphSummary, isNodeActive, nodeDotTone, nodeStatusLabel } from './agentGraphProjection'
+import { runIsActive } from './agentDeskResult'
 
 function exec(overrides: Partial<ExecutionRecord> & Pick<ExecutionRecord, 'executionId' | 'state'>): ExecutionRecord {
   return {
@@ -136,6 +137,20 @@ describe('nodeDotTone', () => {
 })
 
 describe('isNodeActive', () => {
+  it('agrees with the one shared run predicate, by construction', () => {
+    // This used to be a second definition of the same rule over the same
+    // type. It agreed -- but the last time this rule lived in four
+    // hand-written copies, one omitted `needsInput` and the transcript went
+    // silent while an agent waited. Agreement that is not enforced is a
+    // coincidence with a shelf life.
+    for (const state of ['working', 'preparing', 'needsInput'] as const) {
+      expect(isNodeActive(exec({ executionId: 'a', state }))).toBe(runIsActive(state))
+    }
+    for (const state of ['draft', 'finished', 'failed', 'stopped', 'interrupted'] as const) {
+      expect(isNodeActive(exec({ executionId: 'a', state }))).toBe(runIsActive(state))
+    }
+  })
+
   it('working, preparing, and needsInput all count as active', () => {
     expect(isNodeActive(exec({ executionId: 'a', state: 'working' }))).toBe(true)
     expect(isNodeActive(exec({ executionId: 'a', state: 'preparing' }))).toBe(true)

@@ -203,6 +203,31 @@ export function selectLiveState(sessionId: string | null): SessionState | null {
  * content, and a message id absent from `session.messages` is always new by
  * definition.
  */
+/**
+ * Whether every live message is already folded into the persisted session, so
+ * the overlay is pure duplication and can be dropped.
+ *
+ * `clearSession` was written to stop the overlay growing without bound and
+ * then never called, because nothing decided WHEN it was safe -- so a long
+ * session kept every live message in two places for the life of the window,
+ * and `mergeSessionMessages` re-walked both arrays on every render.
+ *
+ * Safe means: the persisted copy exists AND is at least as new. A live
+ * message the query has not caught up with yet must survive, or the
+ * transcript would lose a message it had already shown.
+ */
+export function liveOverlayIsRedundant(
+  session: AgentSession | null | undefined,
+  liveMessages: SessionMessage[]
+): boolean {
+  if (!session || liveMessages.length === 0) return false
+  const persisted = new Map(session.messages.map((m) => [m.messageId, m.sequence ?? 0]))
+  return liveMessages.every((live) => {
+    const seq = persisted.get(live.messageId)
+    return seq !== undefined && seq >= (live.sequence ?? 0)
+  })
+}
+
 export function mergeSessionMessages(
   session: AgentSession | null | undefined,
   liveMessages: SessionMessage[]

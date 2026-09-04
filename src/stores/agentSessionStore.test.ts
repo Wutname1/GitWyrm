@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import type { AgentSessionEvent, AgentSession, SessionMessage } from '@/lib/bindings'
-import { mergeSessionMessages, useAgentSessionStore } from './agentSessionStore'
+import { liveOverlayIsRedundant, mergeSessionMessages, useAgentSessionStore } from './agentSessionStore'
 
 const SESSION = 'session-1'
 const EXEC = 'exec-1'
@@ -201,6 +201,37 @@ describe('agentSessionStore', () => {
     useAgentSessionStore.getState().applyEvent(event)
     const entry = useAgentSessionStore.getState().bySession[SESSION]
     expect(entry?.messages).toHaveLength(1)
+  })
+})
+
+describe('liveOverlayIsRedundant', () => {
+  // `clearSession` was written to stop the live overlay growing without bound
+  // and never called, because nothing decided WHEN dropping it was safe. This
+  // is that decision, and the dangerous half is the second test: clearing too
+  // eagerly loses a message the transcript has already shown.
+  function withMessages(messages: SessionMessage[]): AgentSession {
+    return { header: {}, segments: [], messages, executions: [], attachments: [] } as unknown as AgentSession
+  }
+  const seq = (id: string, sequence: number | null): SessionMessage => ({ ...message(id), sequence })
+
+  it('is redundant once every live message is persisted at the same sequence', () => {
+    const live = [seq('a', 1), seq('b', 2)]
+    expect(liveOverlayIsRedundant(withMessages([seq('a', 1), seq('b', 2)]), live)).toBe(true)
+  })
+
+  it('keeps the overlay when the query has not caught up yet', () => {
+    // The live copy is newer, so dropping it would lose a message already on
+    // screen -- the failure that makes eager clearing worse than growth.
+    expect(liveOverlayIsRedundant(withMessages([seq('a', 1)]), [seq('a', 2)])).toBe(false)
+  })
+
+  it('keeps the overlay when a live message is not persisted at all', () => {
+    expect(liveOverlayIsRedundant(withMessages([seq('a', 1)]), [seq('a', 1), seq('b', 2)])).toBe(false)
+  })
+
+  it('never clears on nothing to clear, or before the session loads', () => {
+    expect(liveOverlayIsRedundant(withMessages([seq('a', 1)]), [])).toBe(false)
+    expect(liveOverlayIsRedundant(null, [seq('a', 1)])).toBe(false)
   })
 })
 

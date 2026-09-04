@@ -9,7 +9,7 @@ import {
 } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { log } from '@/lib/log'
-import { mergeSessionMessages, useAgentSessionStore } from '@/stores/agentSessionStore'
+import { liveOverlayIsRedundant, mergeSessionMessages, useAgentSessionStore } from '@/stores/agentSessionStore'
 
 const AGENT_SESSION_EVENT = 'agent-session-event'
 const SESSION_PAGE_SIZE = 100
@@ -95,6 +95,17 @@ export function useAgentSession(sessionId: string | null) {
     () => mergeSessionMessages(session, liveEntry?.messages ?? []),
     [session, liveEntry?.messages]
   )
+
+  // Drop the live overlay once the query has caught up with it. Without this
+  // every streamed message stayed in two places for the life of the window
+  // and `mergeSessionMessages` re-walked both arrays on every render -- the
+  // exact growth `clearSession` was written to prevent and never called to.
+  useEffect(() => {
+    if (!sessionId) return
+    if (liveOverlayIsRedundant(session, liveEntry?.messages ?? [])) {
+      useAgentSessionStore.getState().clearSession(sessionId)
+    }
+  }, [sessionId, session, liveEntry?.messages])
 
   const state = liveEntry?.state ?? session?.header.state ?? null
 
