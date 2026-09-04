@@ -153,3 +153,5 @@ competing sub-agents, the answer names the losing option too.
 | 144 | 2026-09-04 | Should Delete be blocked while GitWyrm checks for a working copy? | No -- the check walks every folder and can take seconds, and every other confirmation here waits only on its own action, so it says it is still checking instead. |
 | 145 | 2026-09-04 | Was F87's fix actually written? | No -- the audit, the commit and the changelog all recorded it while the code only ever counted two values and ignored both. |
 | 146 | 2026-09-04 | Is "has not looked yet" the same as "could not look"? | Yes, to the person reading -- both mean GitWyrm does not know, and the guard only covered the second. |
+| 147 | 2026-09-04 | Were other recorded fixes never actually written, like F87? | No -- all 488 symbols the audit claims exist do exist, and the 15 apparent gaps are prose about things deliberately removed or not attempted. |
+| 148 | 2026-09-04 | Does helper work reach your own files without you deciding? | No -- it merges into the chat's own scratch copy automatically, and only a deliberate Keep or Commit touches your checkout. |
