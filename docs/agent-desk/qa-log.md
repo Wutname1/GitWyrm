@@ -134,4 +134,6 @@ competing sub-agents, the answer names the losing option too.
 | 126 | 2026-09-04 | What should a safety label show before its answer arrives? | Nothing about permissions -- it now says just "Source" rather than implying the agent is free to change files. |
 | 127 | 2026-09-04 | Does deleting a chat also remove the working copy it was using? | No -- and afterwards nothing can find that copy, so the confirmation now warns you and points at the screen that can still clear it. |
 | 128 | 2026-09-04 | Should "0 helpers active" show on a chat that never had any? | No -- it can never be anything else there, and it stopped the usage panel from ever saying it knows nothing. |
+| 129 | 2026-09-04 | Should deleting a chat also delete its working copy? | No -- it could only ever remove the tidy cases and would leave the messy ones stranded, so the copies are listed from git instead and stay clearable. |
+| 130 | 2026-09-04 | How can GitWyrm find a working copy after its chat is gone? | Git already tags the ones GitWyrm made, and the list already reports that tag; nothing was asking it. |
 
