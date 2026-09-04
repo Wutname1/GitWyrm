@@ -469,13 +469,16 @@ export function LeftPanel() {
                     </ContextMenuSubContent>
                   </ContextMenuSub>
                 )}
+                {/* "with AI" on every sibling. "Fix with AI" above bare
+                    "Plan" and "Explain" read as though only the first one
+                    used AI at all. */}
                 <ContextMenuItem onSelect={() => startIssueAiAction(number, 'plan')}>
                   <Sparkles />
-                  Plan
+                  Plan with AI
                 </ContextMenuItem>
                 <ContextMenuItem onSelect={() => startIssueAiAction(number, 'explain')}>
                   <Sparkles />
-                  Explain
+                  Explain with AI
                 </ContextMenuItem>
               </>
             ) : (

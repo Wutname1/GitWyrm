@@ -474,7 +474,10 @@ export function ConflictView() {
             }
           >
             {aiPending ? <PendingIndicator /> : <Sparkles size={12} />}
-            {aiPending ? 'Resolving…' : 'AI resolve'}
+            {/* Verb first, like every other AI action in the app. "AI
+                resolve" was the one place the noun led, which read as a
+                different feature rather than the same one. */}
+            {aiPending ? 'Resolving…' : 'Resolve with AI'}
           </Button>
 
           <Button
