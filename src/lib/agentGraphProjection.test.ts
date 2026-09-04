@@ -5,10 +5,8 @@ import { runIsActive } from './agentDeskResult'
 
 function exec(overrides: Partial<ExecutionRecord> & Pick<ExecutionRecord, 'executionId' | 'state'>): ExecutionRecord {
   return {
-    executionId: overrides.executionId,
     sessionId: 'sess-1',
     parentExecutionId: overrides.parentExecutionId ?? null,
-    state: overrides.state,
     startedAt: '2026-01-01T00:00:00Z',
     endedAt: null,
     lastSequence: 0,
@@ -23,6 +21,11 @@ function exec(overrides: Partial<ExecutionRecord> & Pick<ExecutionRecord, 'execu
     outputSummary: overrides.outputSummary ?? null,
     proposedGraph: overrides.proposedGraph ?? null,
     conflict: overrides.conflict ?? null,
+    // Spread last so a field this helper does not list explicitly still
+    // reaches the code under test. `reviewExecutionId` was silently dropped,
+    // which would have made the review-turn tests below pass for the wrong
+    // reason -- or, as it happened, fail for the right one.
+    ...overrides,
   }
 }
 
@@ -133,6 +136,43 @@ describe('nodeDotTone', () => {
     expect(nodeDotTone(helper('failed'))).toBe('attention')
     expect(nodeDotTone(helper('missingSource'))).toBe('attention')
     expect(nodeDotTone(helper('interrupted'))).toBe('interrupted')
+  })
+})
+
+describe('the lead review turn is not a helper', () => {
+  // The backend excludes it (`agentdesk::graph`: parent is Some AND not in
+  // review_ids); the frontend filtered on "has a parent" alone. The review
+  // record is created with the lead as its parent and starts `preparing`, so
+  // for the whole of every review it showed as a fourth agent -- inflating
+  // the header count and stealing a concurrency slot from a ready helper.
+  const withReview = () => [
+    exec({ executionId: 'lead', state: 'working', reviewExecutionId: 'review' }),
+    exec({ executionId: 'h1', state: 'working', parentExecutionId: 'lead' }),
+    exec({ executionId: 'h2', state: 'working', parentExecutionId: 'lead' }),
+    exec({ executionId: 'review', state: 'preparing', parentExecutionId: 'lead' }),
+  ]
+
+  it('leaves the review turn out of the helper list', () => {
+    const ids = buildGraphTree(withReview())
+      .filter((n) => !n.isLead)
+      .map((n) => n.execution.executionId)
+    expect(ids).toEqual(['h1', 'h2'])
+    expect(ids).not.toContain('review')
+  })
+
+  it('does not count the review turn as another working agent', () => {
+    // Two helpers plus the lead are working; the reviewer is not a fourth.
+    expect(graphSummary(withReview())).toBe('3 working')
+  })
+
+  it('still treats an ordinary helper as a helper', () => {
+    const ids = buildGraphTree([
+      exec({ executionId: 'lead', state: 'working' }),
+      exec({ executionId: 'h1', state: 'working', parentExecutionId: 'lead' }),
+    ])
+      .filter((n) => !n.isLead)
+      .map((n) => n.execution.executionId)
+    expect(ids).toEqual(['h1'])
   })
 })
 
