@@ -317,3 +317,37 @@ export function summarizeAgentActivity(
 export function conversationHandoffs<T extends { segmentId: string; label: string }>(segments: readonly T[]): T[] {
   return segments.filter((s) => s.label.trim() !== 'Conversation')
 }
+
+/**
+ * What the chat list says when it has no rows to show.
+ *
+ * Pulled out of the JSX so the one case that was missing can be tested: a
+ * FAILED read. `SessionSidebar` never destructured `isError`, so a list that
+ * could not be fetched rendered the same sentence as a list that is genuinely
+ * empty -- "Start a new chat..." told someone with two hundred chats that
+ * they had none, which is the absence-for-a-failure inversion this app treats
+ * as its sharpest class of bug.
+ *
+ * Order matters: a failed read is reported before anything else, because
+ * every other branch is a statement about content that was never seen.
+ */
+export function sidebarEmptyMessage(input: {
+  failed: boolean
+  searchTerm?: string
+  archived?: boolean
+  headerCount: number
+}): string {
+  if (input.failed) {
+    return 'GitWyrm could not load your chats. They are still here; this list could not be read just now.'
+  }
+  // A search that finds nothing must not read as "you have no chats" -- that
+  // tells someone with two hundred of them to start another one.
+  if (input.searchTerm) return `No chats match "${input.searchTerm}".`
+  if (input.archived) {
+    return 'No archived chats. Archiving one puts it here, and you can put it back any time.'
+  }
+  if (input.headerCount === 0) {
+    return 'Start a new chat, or open an issue, pull request, or OpenSpec task from the main window and choose an AI action.'
+  }
+  return 'Nothing matches this grouping yet.'
+}

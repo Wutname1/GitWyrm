@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentSessionHeader, SessionSource, SessionState } from '@/lib/bindings'
 import {
   buildSidebarRows,
+  sidebarEmptyMessage,
   conversationHandoffs,
   diffBucketLabel,
   formatCompactAge,
@@ -327,5 +328,35 @@ describe('conversationHandoffs', () => {
     // is still a handoff and must survive.
     const out = conversationHandoffs([seg('a', 'Conversation imported from Codex')])
     expect(out).toHaveLength(1)
+  })
+})
+
+describe('sidebarEmptyMessage', () => {
+  it('says a failed read is a failed read, not an empty list', () => {
+    // The defect: `SessionSidebar` never read `isError`, so this case fell
+    // through to "Start a new chat", telling someone with chats they had none.
+    const msg = sidebarEmptyMessage({ failed: true, headerCount: 0 })
+    expect(msg).toMatch(/could not/i)
+    expect(msg).not.toMatch(/start a new chat/i)
+  })
+
+  it('reports a failure even while a search is active', () => {
+    // A failure is about the whole list; saying "no chats match" would blame
+    // the search for something it did not do.
+    const msg = sidebarEmptyMessage({ failed: true, searchTerm: 'auth', headerCount: 0 })
+    expect(msg).toMatch(/could not/i)
+  })
+
+  it('still distinguishes a fruitless search from an empty list', () => {
+    expect(sidebarEmptyMessage({ failed: false, searchTerm: 'auth', headerCount: 0 })).toContain('"auth"')
+    expect(sidebarEmptyMessage({ failed: false, headerCount: 0 })).toMatch(/start a new chat/i)
+  })
+
+  it('still has its own words for an empty archive', () => {
+    expect(sidebarEmptyMessage({ failed: false, archived: true, headerCount: 0 })).toMatch(/archiv/i)
+  })
+
+  it('says a grouping is empty when there are chats but none here', () => {
+    expect(sidebarEmptyMessage({ failed: false, headerCount: 12 })).toMatch(/grouping/i)
   })
 })

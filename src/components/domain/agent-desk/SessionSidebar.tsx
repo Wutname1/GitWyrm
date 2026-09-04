@@ -95,7 +95,10 @@ export function SessionSidebar({
     const id = setTimeout(() => setDebouncedSearch(search.trim()), 180)
     return () => clearTimeout(id)
   }, [search])
-  const { headers, isLoading, diagnostics, hasNextPage, isFetchingNextPage, fetchNextPage } = useAgentSessionHeaders({
+  // `isError` was never read, so a list that could not be fetched showed the
+  // same words as one that is genuinely empty -- telling someone with chats
+  // that they had none.
+  const { headers, isLoading, isError, diagnostics, hasNextPage, isFetchingNextPage, fetchNextPage } = useAgentSessionHeaders({
     repoId: effectiveRepoId,
     projectPath: null,
     states: [],
@@ -281,6 +284,7 @@ export function SessionSidebar({
 
       <SessionGroups
         headers={headers}
+        failed={isError}
         searchTerm={debouncedSearch === '' ? undefined : debouncedSearch}
         archived={showArchived}
         selectedId={selectedId}

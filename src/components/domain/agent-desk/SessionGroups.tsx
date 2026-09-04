@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { Clock3, FileDiff, Folders } from 'lucide-react'
 import type { AgentSessionHeader } from '@/lib/bindings'
-import { buildSidebarRows, type SidebarGroupMode } from '@/lib/agentSessionGrouping'
+import { buildSidebarRows, sidebarEmptyMessage, type SidebarGroupMode } from '@/lib/agentSessionGrouping'
 import { VirtualSessionList } from '@/components/domain/agent-desk/VirtualSessionList'
 import { cn } from '@/lib/utils'
 
@@ -30,12 +30,15 @@ export function SessionGroups({
   onDelete,
   searchTerm,
   archived,
+  failed = false,
 }: {
   headers: AgentSessionHeader[]
   /** Showing the archived list, so an empty one must not read as "no chats". */
   archived?: boolean
   /** What the sidebar is filtering by, so an empty list can say WHY it is empty. */
   searchTerm?: string
+  /** True when the chat list could not be read, so an empty list is not an answer. */
+  failed?: boolean
   selectedId: string | null
   onSelectSession: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => void
@@ -102,17 +105,12 @@ export function SessionGroups({
         onArchive={onArchive}
         onDelete={onDelete}
         onToggleGroup={toggleGroup}
-        emptyMessage={
-          // A search that finds nothing must not read as "you have no chats" --
-          // that tells someone with two hundred of them to start another one.
-          searchTerm
-            ? `No chats match "${searchTerm}".`
-            : archived
-              ? 'No archived chats. Archiving one puts it here, and you can put it back any time.'
-              : headers.length === 0
-              ? 'Start a new chat, or open an issue, pull request, or OpenSpec task from the main window and choose an AI action.'
-              : 'Nothing matches this grouping yet.'
-        }
+        emptyMessage={sidebarEmptyMessage({
+          failed,
+          searchTerm,
+          archived,
+          headerCount: headers.length,
+        })}
       />
     </div>
   )
