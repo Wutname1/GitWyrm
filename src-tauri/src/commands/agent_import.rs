@@ -392,7 +392,22 @@ fn import_session_at(
     };
 
     let imported_at = now_rfc3339();
-    let mut ledger = import_store::read_ledger(root, adapter_id);
+    // Checked, because everything below writes this ledger back. The
+    // defaulting read turned a damaged ledger into an empty one, and the write
+    // at the end then made that permanent -- every record of what had already
+    // been imported for this tool, discarded by an unrelated import, silently.
+    // Refusing costs the person one import; overwriting costs them all of them.
+    let mut ledger = match import_store::read_ledger_checked(root, adapter_id) {
+        Ok(l) => l,
+        Err(e) => {
+            log::error!("import ledger unreadable for {adapter_id}: {e}");
+            return ImportSessionOutcome::WriteFailed {
+                detail: format!(
+                    "GitWyrm could not read its record of what has already been brought in from                      this tool, so it stopped rather than risk losing it. ({e})"
+                ),
+            };
+        }
+    };
     let existing = import_store::already_imported_session(&ledger, external_session_id).cloned();
 
     let project = reconcile::resolve_project_path(detail.summary.project_path.as_deref(), known_repos);

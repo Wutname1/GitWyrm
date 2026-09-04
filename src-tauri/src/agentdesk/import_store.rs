@@ -56,11 +56,54 @@ fn ledger_path(root: &SessionStoreRoot, adapter_id: &str) -> PathBuf {
 /// GitWyrm session store itself as a second line of defense, not just this
 /// ledger).
 pub fn read_ledger(root: &SessionStoreRoot, adapter_id: &str) -> AdapterImportLedger {
+    read_ledger_checked(root, adapter_id).unwrap_or_default()
+}
+
+/// The ledger, or why it could not be read.
+///
+/// `read_ledger` answers the same question with a default, which is right for
+/// a file that is simply absent -- nothing has been imported for that tool yet
+/// -- and wrong for one that exists and cannot be parsed. Every write path is
+/// a read-modify-write, so treating a damaged ledger as empty meant the next
+/// import wrote an EMPTY ledger over it: every record of what had already been
+/// brought in, gone, with nothing said. Callers that are about to WRITE must
+/// use this one and refuse rather than overwrite.
+pub fn read_ledger_checked(
+    root: &SessionStoreRoot,
+    adapter_id: &str,
+) -> Result<AdapterImportLedger, LedgerReadError> {
     let path = ledger_path(root, adapter_id);
-    let Ok(raw) = std::fs::read_to_string(&path) else {
-        return AdapterImportLedger::default();
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        // Absent is a real answer: nothing has been imported for this tool.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(AdapterImportLedger::default())
+        }
+        Err(e) => {
+            return Err(LedgerReadError::Io {
+                detail: e.to_string(),
+            })
+        }
     };
-    serde_json::from_str(&raw).unwrap_or_default()
+    serde_json::from_str(&raw).map_err(|e| LedgerReadError::Parse {
+        detail: e.to_string(),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LedgerReadError {
+    #[error("could not read import ledger: {detail}")]
+    Io { detail: String },
+    #[error("import ledger is damaged: {detail}")]
+    Parse { detail: String },
+}
+
+impl LedgerReadError {
+    fn detail(&self) -> &str {
+        match self {
+            LedgerReadError::Io { detail } | LedgerReadError::Parse { detail } => detail,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -174,7 +217,11 @@ pub fn remove_link(
     adapter_id: &str,
     external_session_id: &str,
 ) -> Result<bool, LedgerWriteError> {
-    let mut ledger = read_ledger(root, adapter_id);
+    // Checked, because this writes back what it reads. With the defaulting
+    // read, a damaged ledger became an empty one and this call then wrote that
+    // emptiness over it -- unlinking one chat would have silently discarded
+    // every other import link for the tool.
+    let mut ledger = read_ledger_checked(root, adapter_id).map_err(|e| LedgerWriteError::Write(e.detail().to_string()))?;
     if ledger.sessions.remove(external_session_id).is_none() {
         return Ok(false);
     }
@@ -198,6 +245,50 @@ mod tests {
         let (_dir, root) = temp_root();
         let ledger = read_ledger(&root, "codex");
         assert!(ledger.sessions.is_empty());
+    }
+
+    /// A ledger that cannot be parsed must not read as "nothing imported".
+    ///
+    /// The ledger records which external chats have already been brought in.
+    /// `read_ledger` returned `AdapterImportLedger::default()` for an
+    /// unparseable file, and every write path is a read-modify-write -- so one
+    /// damaged ledger meant the next import silently wrote an EMPTY ledger
+    /// over it, permanently losing every link for that tool. Before that, the
+    /// picker would offer already-imported chats as new.
+    ///
+    /// A file that is simply absent is genuinely empty, which is a different
+    /// answer and stays a normal one.
+    #[test]
+    fn a_damaged_ledger_is_not_reported_as_nothing_imported() {
+        let (_dir, root) = temp_root();
+        let path = ledger_path(&root, "codex");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{ not json").unwrap();
+
+        assert!(
+            read_ledger_checked(&root, "codex").is_err(),
+            "an unparseable ledger must be reported, not treated as empty"
+        );
+    }
+
+    /// The data-loss path, closed.
+    ///
+    /// `remove_link` is a read-modify-write. With the defaulting read, a
+    /// damaged ledger became an empty one and this call wrote that emptiness
+    /// back -- unlinking one chat silently discarded every other import link
+    /// for that tool. It must refuse and leave the file exactly as it found it.
+    #[test]
+    fn unlinking_against_a_damaged_ledger_refuses_and_writes_nothing() {
+        let (_dir, root) = temp_root();
+        let path = ledger_path(&root, "codex");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{ not json").unwrap();
+
+        let result = remove_link(&root, "codex", "ext-1");
+        assert!(result.is_err(), "must refuse rather than overwrite");
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(after, "{ not json", "the damaged file must be left untouched");
     }
 
     #[test]
