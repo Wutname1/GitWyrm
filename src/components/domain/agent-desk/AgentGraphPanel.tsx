@@ -402,14 +402,17 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
 
   if (executions.length === 0) {
     // tasks.md 7.5: explain Solo/Plan/Auto in plain language rather than
-    // showing a bare "nothing here" -- verbatim mockup copy.
+    // Deliberately NOT the mockup's copy, which names a lead agent "Sol" and
+    // says "composer"/"graph". Nothing produces the name Sol -- see the same
+    // refusal in SessionComposer -- and the other two are our own words for
+    // parts the user never sees labelled that way.
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-4 py-8 text-center">
         <GitFork size={26} className="text-muted-foreground" aria-hidden />
-        <p className="text-xs font-semibold text-foreground">No graph in a solo chat.</p>
+        <p className="text-xs font-semibold text-foreground">Only one agent is on this chat.</p>
         <p className="max-w-[16rem] text-2xs leading-relaxed text-muted-foreground">
-          Choose Lead + helpers below the composer. In Plan, review the graph before it starts. In Auto, Sol starts
-          helpers when the work splits safely.
+          Choose "A lead agent, up to 3 helpers" below to let one agent split the work. In Plan you approve the split
+          first. In Auto the lead starts helpers on its own when the work divides safely.
         </p>
       </div>
     )
@@ -427,7 +430,14 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
         <AwaitingStartCard
           session={session}
           lead={awaitingStartLead}
-          onRevise={() => toast('Revise the plan in the chat, then send it again.')}
+          onRevise={() => {
+            // A button that only tells you to go do the thing elsewhere is
+            // homework, not an action. Put the caret where the revision is
+            // actually written; the toast then explains what to do there.
+            const box = document.getElementById(`agent-desk-composer-${session.header.sessionId}`)
+            if (box instanceof HTMLTextAreaElement) box.focus()
+            toast('Say what to change, then send it back to the agent.')
+          }}
         />
       </div>
     )

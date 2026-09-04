@@ -374,7 +374,7 @@ export function SessionComposer({
           data-agent-desk-composer
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Steer the lead or ask about the work…"
+          placeholder="Say what to do next, or ask about the work…"
           aria-label="Message the lead agent"
           rows={2}
           className="resize-none border-0 bg-transparent px-1 py-1 text-xs shadow-none focus-visible:ring-0"

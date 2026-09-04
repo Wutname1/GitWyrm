@@ -301,7 +301,7 @@ function SessionRow({
         {project.offerLinking && (
           <span className="inline-flex items-center gap-1 text-2xs text-muted-foreground">
             <FolderOpen size={10} aria-hidden />
-            Add this folder as a repo to link it
+            Open this folder as a project to connect it
           </span>
         )}
       </div>
