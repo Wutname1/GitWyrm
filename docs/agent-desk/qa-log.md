@@ -94,4 +94,6 @@ competing sub-agents, the answer names the losing option too.
 | 86 | 2026-09-04 | Is showing a safety-critical value enough if it is truncated? | No -- the file permissions were on screen but cut to the first path, which is closer to the original defect than to a fix. |
 | 87 | 2026-09-04 | What should happen when you delete your very last chat? | The pane clears to "No chat selected" rather than staying on the chat that was just removed. |
 | 88 | 2026-09-04 | Why could the one-subscription guard start two subscriptions? | It checked a variable that is only set after the subscription finishes registering, so anything mounting during that gap started its own. |
+| 89 | 2026-09-04 | Why were warnings unreadable on a light theme? | The five status colours were set once for dark and never rewritten when the theme changed, leaving amber at 1.67:1 against a white panel. |
+| 90 | 2026-09-04 | Should the status colours be fixed per-component or at the token layer? | At the token layer, because every component was already consuming them correctly and one change covers all 56 uses. |
 

@@ -401,6 +401,41 @@ const ACCENT_VARS: Record<keyof AccentTokens, string> = {
   accentSoft: '--gw-accent-soft',
 }
 
+/**
+ * Status colours, per mode.
+ *
+ * These five say what happened -- amber warns, red is a failure, green is
+ * done -- and they were defined once in `index.css` and never written by
+ * `applyTokens`, which only touches surfaces and the accent. So a light theme
+ * kept the dark-tuned pastels: measured against a white panel, amber came out
+ * at 1.67:1, green 1.92:1, blue 2.54:1, purple 2.72:1 and red 2.77:1, all far
+ * under the 4.5:1 needed to read as text. Amber is the warning colour, so the
+ * least legible thing on a light theme was the sentence telling someone their
+ * source had gone.
+ *
+ * The dark values are exactly what `index.css` already declared, so nothing
+ * changes for a dark theme. The light ones are the same hues darkened until
+ * each clears 4.5:1 on white and on a typical light panel.
+ */
+const STATUS_VARS = ['--gw-green', '--gw-red', '--gw-amber', '--gw-blue', '--gw-purple'] as const
+
+export const STATUS_COLORS: Record<'dark' | 'light', Record<(typeof STATUS_VARS)[number], string>> = {
+  dark: {
+    '--gw-green': '#34d399',
+    '--gw-red': '#f87171',
+    '--gw-amber': '#fbbf24',
+    '--gw-blue': '#60a5fa',
+    '--gw-purple': '#a78bfa',
+  },
+  light: {
+    '--gw-green': '#047857',
+    '--gw-red': '#b91c1c',
+    '--gw-amber': '#a16207',
+    '--gw-blue': '#1d4ed8',
+    '--gw-purple': '#6d28d9',
+  },
+}
+
 /** Write resolved tokens onto :root. */
 export function applyTokens(tokens: ResolvedTokens): void {
   const root = document.documentElement
@@ -411,5 +446,9 @@ export function applyTokens(tokens: ResolvedTokens): void {
     root.style.setProperty(ACCENT_VARS[k], tokens.accent[k])
   })
   // Let the UA theme form controls, scrollbars, etc. to match.
-  root.style.colorScheme = luminance(tokens.surface.bg) > 0.5 ? 'light' : 'dark'
+  const scheme = luminance(tokens.surface.bg) > 0.5 ? 'light' : 'dark'
+  root.style.colorScheme = scheme
+  // Same decision drives the status colours: they are readable on one kind of
+  // background or the other, never both.
+  STATUS_VARS.forEach((v) => root.style.setProperty(v, STATUS_COLORS[scheme][v]))
 }
