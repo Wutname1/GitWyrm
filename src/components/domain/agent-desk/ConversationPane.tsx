@@ -21,7 +21,7 @@ import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { SessionSourceBanner } from './SessionSourceBanner'
 import { SessionComposer } from './SessionComposer'
 import { ThoughtBlock } from './ThoughtBlock'
-import { describeImportedAt } from '@/lib/agentDeskSources'
+import { describeImportedAt, formatClock } from '@/lib/agentDeskSources'
 import { PlanChecklist } from './PlanChecklist'
 import { EventStack } from './EventStack'
 import { MessageHistoryRail } from './MessageHistoryRail'
@@ -46,12 +46,6 @@ function kindLabel(kind: SessionMessage['kind']): string {
     case 'result':
       return 'Result'
   }
-}
-
-function formatClock(iso: string): string {
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return ''
-  return new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
 /** Short avatar initials: "You" for the user, first two letters of the provider/model otherwise. */

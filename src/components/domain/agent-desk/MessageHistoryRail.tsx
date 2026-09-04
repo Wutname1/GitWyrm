@@ -1,17 +1,12 @@
 import { useRef, useState } from 'react'
 import type { SessionMessage } from '@/lib/bindings'
+import { formatClock } from '@/lib/agentDeskSources'
 import { cn } from '@/lib/utils'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { truncateSnippet, type RailTick } from '@/lib/agentDeskRail'
 
 /** How long the popup stays open after the pointer leaves the rail/popup, so crossing the gap between them does not flicker it shut. */
 const CLOSE_DELAY_MS = 150
-
-function formatClock(iso: string): string {
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return ''
-  return new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-}
 
 /**
  * Jump-to-message tick rail (tasks.md 5.x), sitting beside the transcript's

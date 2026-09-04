@@ -279,3 +279,18 @@ export function describeImportedAt(importedAt: string, now: number = Date.now())
   if (Number.isNaN(then)) return null
   return `Brought into GitWyrm ${describeAge(now - then)}`
 }
+
+/**
+ * A message's clock time, e.g. "2:05 PM", in the reader's own locale.
+ *
+ * Written out twice, byte for byte, in `ConversationPane` and
+ * `MessageHistoryRail` -- two components that show the same timestamps beside
+ * each other, so any drift between them would appear as the transcript and its
+ * rail disagreeing about when something happened. Returns an empty string for
+ * an unparseable timestamp rather than "Invalid Date".
+ */
+export function formatClock(iso: string): string {
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return ''
+  return new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}

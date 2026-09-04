@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   commitSourceInput,
   describeImportedAt,
+  formatClock,
   describeSnapshotFreshness,
   diffSourceInput,
   explainRefreshSourceOutcome,
@@ -345,5 +346,16 @@ describe('describeImportedAt', () => {
   })
   it('claims no time it does not know', () => {
     expect(describeImportedAt('not a date', now)).toBeNull()
+  })
+})
+
+describe('formatClock', () => {
+  it('shows a wall-clock time', () => {
+    // Locale-dependent, so assert the shape rather than an exact string.
+    expect(formatClock('2026-09-04T14:05:00Z')).toMatch(/\d{1,2}[:.]\d{2}/)
+  })
+  it('says nothing rather than "Invalid Date"', () => {
+    expect(formatClock('not a date')).toBe('')
+    expect(formatClock('')).toBe('')
   })
 })
