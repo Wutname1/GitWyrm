@@ -3319,6 +3319,37 @@ pub async fn agent_session_record_conflict(
 #[cfg(test)]
 mod tests {
 
+    /// Removal must never hand Start a plan `validate_graph` rejects. Fewer
+    /// nodes cannot create a cycle or exceed the concurrency cap, and edges
+    /// pointing at the removed node are pruned -- so every remaining error
+    /// variant is unreachable by removal alone. Pinned rather than argued.
+    #[test]
+    fn removing_any_helper_leaves_a_startable_plan() {
+        use crate::agentdesk::graph::{JobBudget, CompletionCondition, HelperRole, ProposedGraph, ProposedHelperJob};
+        let mk = |id: &str, deps: &[&str]| ProposedHelperJob {
+            node_id: id.into(),
+            title: format!("Job {id}"),
+            description: "test".into(),
+            role: HelperRole::Builder,
+            allowed_paths: vec!["src/**".into()],
+            depends_on: deps.iter().map(|s| s.to_string()).collect(),
+            budget: JobBudget::default(),
+            completion: CompletionCondition::ReportsResult,
+        };
+        for victim in ["a", "b", "c"] {
+            let mut graph = ProposedGraph {
+                lead_summary: "lead".into(),
+                helpers: vec![mk("a", &[]), mk("b", &["a"]), mk("c", &["a", "b"])],
+                proposed_at: "2026-01-01T00:00:00Z".into(),
+            };
+            super::remove_helper_from_graph(&mut graph, victim);
+            assert!(
+                crate::agentdesk::graph::validate_graph(&graph).is_ok(),
+                "removing {victim} left an unstartable plan"
+            );
+        }
+    }
+
     /// A removed helper must not leave an edge pointing at it: `validate_graph`
     /// would refuse the whole plan with `UnknownDependency` when the person
     /// pressed Start, turning a deliberate removal into a confusing refusal.
