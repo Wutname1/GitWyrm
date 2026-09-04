@@ -184,3 +184,5 @@ competing sub-agents, the answer names the losing option too.
 | 175 | 2026-09-04 | Does clicking a link in the pane you are not using target the wrong chat? | No -- the pane makes itself active on any click before the link runs, so the reported bug does not exist. |
 | 176 | 2026-09-04 | Was the difference between what GitWyrm counted and what a service reported real? | Only on paper -- every figure claimed the service reported it, including the turn count GitWyrm works out itself. |
 | 177 | 2026-09-04 | Should GitWyrm ever estimate a usage figure it was not given? | No -- an absent figure stays absent, so the "estimated" label having no producer is correct rather than a gap. |
+| 178 | 2026-09-04 | Did picking a different project for a chat show anything while it worked? | No -- the click was silent for the seconds it takes to open a project, though every control beside it already had that pattern. |
+| 179 | 2026-09-04 | Could the work-checker be shown half a line despite a note saying it never is? | Yes -- one line longer than the whole size limit had no break to cut at, so it got a hundred thousand characters from the middle of it. |
