@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { changeDraftPrefix, draftKey, useSpecDraftStore } from './specDraftStore'
+import { changeDraftPrefix, draftKey, useSpecDraftStore, type PendingSpecEdit } from './specDraftStore'
 
 const REPO = 'repo-1'
 const CHANGE = 'add-thing'
 
 beforeEach(() => {
-  useSpecDraftStore.setState({ drafts: {} })
+  useSpecDraftStore.setState({ drafts: {}, pendingEdit: null })
 })
 
 describe('specDraftStore', () => {
@@ -130,5 +130,49 @@ describe('specDraftStore', () => {
     const g = useSpecDraftStore.getState()
     expect(g.get(REPO, CHANGE, 'design.md')).toEqual({ text: '', original: '' })
     expect(g.isDirty(REPO, CHANGE, 'design.md')).toBe(false)
+  })
+})
+
+describe('pending AI edit', () => {
+  const edit = (over: Partial<PendingSpecEdit> = {}): PendingSpecEdit => ({
+    repoId: REPO,
+    changeId: CHANGE,
+    file: 'proposal.md',
+    body: 'new text',
+    summary: 'tightened the wording',
+    current: 'old text',
+    ...over,
+  })
+
+  it('offers an edit for review without writing it into the editor', () => {
+    // The whole point of the gate: proposing must not put text anywhere the
+    // person has not agreed to. Spec Desk and Agent Desk both produce these,
+    // and only one of them used to go through this path.
+    useSpecDraftStore.getState().proposeEdit(edit())
+    expect(useSpecDraftStore.getState().pendingEdit?.file).toBe('proposal.md')
+    expect(useSpecDraftStore.getState().drafts[draftKey(REPO, CHANGE, 'proposal.md')]).toBeUndefined()
+    expect(useSpecDraftStore.getState().isDirty(REPO, CHANGE, 'proposal.md')).toBe(false)
+  })
+
+  it('clears on reject, leaving nothing behind', () => {
+    useSpecDraftStore.getState().proposeEdit(edit())
+    useSpecDraftStore.getState().clearPendingEdit()
+    expect(useSpecDraftStore.getState().pendingEdit).toBeNull()
+    expect(useSpecDraftStore.getState().changeHasDirty(REPO, CHANGE)).toBe(false)
+  })
+
+  it('carries the repo and change so one change cannot show another change edit', () => {
+    // The review renders from a shared slot now, so it has to say who it
+    // belongs to -- otherwise selecting a different change would show it an
+    // edit drafted somewhere else.
+    useSpecDraftStore.getState().proposeEdit(edit())
+    const pending = useSpecDraftStore.getState().pendingEdit
+    expect(pending?.repoId).toBe(REPO)
+    expect(pending?.changeId).toBe(CHANGE)
+  })
+
+  it('keeps the on-disk text so the diff is against what the person saw', () => {
+    useSpecDraftStore.getState().proposeEdit(edit())
+    expect(useSpecDraftStore.getState().pendingEdit?.current).toBe('old text')
   })
 })

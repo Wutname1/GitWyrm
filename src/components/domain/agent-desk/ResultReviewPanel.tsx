@@ -112,8 +112,7 @@ export function ResultReviewPanel({
   // saves it. That keeps one write path and one refusal, and means an agent
   // never reaches a spec file on its own.
   const specAi = useSpecAi()
-  const openDraft = useSpecDraftStore((s) => s.open)
-  const replaceDraft = useSpecDraftStore((s) => s.replace)
+  const proposeEdit = useSpecDraftStore((s) => s.proposeEdit)
   const setCenterView = useAgentDeskUiStore((s) => s.setCenterView)
   const [returning, setReturning] = useState(false)
   // Undo throws the agent's whole output away. Deleting a chat -- which the
@@ -147,12 +146,16 @@ export function ResultReviewPanel({
       // Read what is on disk first, so the editor can show the real
       // difference rather than diffing against whatever the model was shown.
       const current = unwrap(await commands.openspecReadFile(repoId, changeId, draft.file))
-      openDraft(repoId, changeId, draft.file, current)
-      replaceDraft(repoId, changeId, draft.file, draft.body)
+      // Offered for review, not applied. Spec Desk's own AI edits go through a
+      // diff with Accept/Reject before any text reaches the editor, and this
+      // is the same class of generated text reaching the same files -- it used
+      // to skip that gate purely because the review state was component-local
+      // and unreachable from here.
+      proposeEdit({ repoId, changeId, file: draft.file, body: draft.body, summary: draft.summary, current })
       selectChangeEverywhere(changeId)
       setCenterView('openspec')
       toast.success(`Drafted an update to ${draft.file}.`, {
-        description: 'Read it in the spec view, then save it if it looks right.',
+        description: 'Check what changed in the spec view, then keep it or throw it away.',
       })
     } catch (e) {
       log.error(`spec return draft failed: ${describeError(e)}`)

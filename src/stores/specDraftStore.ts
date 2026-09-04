@@ -39,8 +39,37 @@ export interface SpecDraft {
   original: string
 }
 
+/**
+ * An AI-drafted edit waiting to be looked at, with the file's contents as they
+ * were when it was drafted so the diff compares against what the person saw.
+ *
+ * Held in the store rather than in `DeskDetail`'s own state because two
+ * different places produce one: Spec Desk's own Ask AI, and Agent Desk's "Tell
+ * the spec". While this was component-local, Agent Desk could not reach it, so
+ * its drafts skipped the diff review entirely and went straight into the
+ * editor -- the same class of generated text reaching the same files under two
+ * different safety contracts.
+ */
+export interface PendingSpecEdit {
+  repoId: string
+  changeId: string
+  file: string
+  /** What the AI proposes the file should become. */
+  body: string
+  /** The AI's one-line description of what it changed. */
+  summary: string
+  /** What was on disk when it was drafted, so the diff is against what the person saw. */
+  current: string
+}
+
 interface SpecDraftState {
   drafts: Record<string, SpecDraft | undefined>
+  /** An AI edit awaiting Accept/Reject, or `null`. At most one at a time. */
+  pendingEdit: PendingSpecEdit | null
+  /** Offer an AI edit for review. Never writes; the person accepts or rejects. */
+  proposeEdit: (edit: PendingSpecEdit) => void
+  /** Clear the pending edit, whether it was accepted or rejected. */
+  clearPendingEdit: () => void
   /** Start editing, or resume an existing draft for this file. */
   open: (repoId: string, changeId: string, file: string, onDisk: string) => void
   edit: (repoId: string, changeId: string, file: string, text: string) => void
@@ -56,6 +85,10 @@ interface SpecDraftState {
 
 export const useSpecDraftStore = create<SpecDraftState>((set, get) => ({
   drafts: {},
+  pendingEdit: null,
+
+  proposeEdit: (edit) => set({ pendingEdit: edit }),
+  clearPendingEdit: () => set({ pendingEdit: null }),
 
   open: (repoId, changeId, file, onDisk) => {
     const key = draftKey(repoId, changeId, file)

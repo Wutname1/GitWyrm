@@ -462,13 +462,16 @@ export function DeskDetail({
    * An AI-drafted edit waiting to be looked at, with the file's contents as they
    * were when it was drafted so the diff compares against what the user saw.
    */
-  const [drafted, setDrafted] = useState<{
-    file: string
-    body: string
-    summary: string
-    current: string
-  } | null>(null)
+  // Held in the shared store, not here: Agent Desk's "Tell the spec" produces
+  // the same kind of drafted edit and could not reach component state, so its
+  // drafts used to bypass this review entirely.
+  const pendingEdit = useSpecDraftStore((s) => s.pendingEdit)
+  const proposeEdit = useSpecDraftStore((s) => s.proposeEdit)
+  const clearPendingEdit = useSpecDraftStore((s) => s.clearPendingEdit)
+  // Only this change's pending edit belongs on this screen.
+  const drafted = pendingEdit && pendingEdit.repoId === repoId && pendingEdit.changeId === change.id ? pendingEdit : null
   const [drafting, setDrafting] = useState(false)
+  const openDraft = useSpecDraftStore((s) => s.open)
   const replaceDraft = useSpecDraftStore((s) => s.replace)
   // Which tabs hold unsaved text. Previously this collapsed to a single
   // boolean that nothing rendered, so a draft written by the AI -- including
@@ -513,7 +516,7 @@ export function DeskDetail({
           ai.model
         )
       )
-      setDrafted({ file: draft.file, body: draft.body, summary: draft.summary, current })
+      proposeEdit({ repoId, changeId: change.id, file: draft.file, body: draft.body, summary: draft.summary, current })
     } catch (e) {
       toast.error('That edit could not be drafted.', { description: describeError(e) })
     } finally {
@@ -530,10 +533,14 @@ export function DeskDetail({
    */
   const acceptDraft = () => {
     if (!drafted) return
+    // Seed the baseline with what was actually on disk before replacing it, so
+    // the editor measures "unsaved" against the real file rather than against
+    // the empty string `replace` falls back to for a file nobody had open.
+    openDraft(repoId, change.id, drafted.file, drafted.current)
     replaceDraft(repoId, change.id, drafted.file, drafted.body)
     setEditing(drafted.file)
     setTab(tabForFile(drafted.file))
-    setDrafted(null)
+    clearPendingEdit()
     toast.success(`Opened in the editor. Nothing is saved until you press Save.`)
   }
 
@@ -874,7 +881,7 @@ export function DeskDetail({
             Drafting that edit. Nothing is being changed yet.
           </p>
         )}
-        {tab === "ai" && drafted && (
+        {drafted && (tab === "ai" || tab === tabForFile(drafted.file)) && (
           <div className="mb-4">
             <DraftedEditReview
               file={drafted.file}
@@ -882,7 +889,7 @@ export function DeskDetail({
               current={drafted.current}
               proposed={drafted.body}
               onAccept={acceptDraft}
-              onReject={() => setDrafted(null)}
+              onReject={clearPendingEdit}
             />
           </div>
         )}
