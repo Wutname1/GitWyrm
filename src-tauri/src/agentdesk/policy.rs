@@ -183,7 +183,7 @@ impl ExecutionProvider {
     /// caller (`ExecutionPolicy::resolve`) treats a `Some` override that fails
     /// to parse as an unsupported-provider refusal, not as "no override was
     /// given."
-    fn parse(name: &str) -> Option<Self> {
+    pub fn parse(name: &str) -> Option<Self> {
         // Matched against the same ids the agent registry uses, so a name
         // that works in settings works here and vice versa.
         for candidate in [
@@ -787,6 +787,39 @@ mod tests {
     /// Plan cannot write before Start, but the SAME intent value can once
     /// `started` flips true -- the one case where `started` changes the
     /// answer.
+    /// The distinction the default-tool setting rests on.
+    ///
+    /// An explicit per-chat override must fail loudly -- the person named that
+    /// tool and has to be told it cannot be used. A DEFAULT naming a tool this
+    /// build does not know must be ignored instead, or a setting left behind
+    /// by an older build would block every chat in the app with an error
+    /// nobody could connect to a settings page they last touched months ago.
+    /// `start_execution_at` filters the default through this; the override
+    /// goes straight to `resolve`.
+    #[test]
+    fn an_unknown_tool_name_is_recognisable_as_unknown() {
+        assert!(ExecutionProvider::parse("copilot").is_some());
+        assert!(ExecutionProvider::parse("Claude").is_some(), "matching ignores case");
+        assert!(ExecutionProvider::parse("codex").is_some());
+        assert!(ExecutionProvider::parse("a-tool-from-a-later-build").is_none());
+        assert!(ExecutionProvider::parse("").is_none());
+    }
+
+    #[test]
+    fn an_explicit_override_of_an_unknown_tool_still_refuses() {
+        // The loud half: this is what a person picking a tool by name gets.
+        let refusal = ExecutionPolicy::resolve(
+            SessionIntent::Fix,
+            ExecutionMode::Auto,
+            ExecutionTeam::Solo,
+            Some("a-tool-from-a-later-build"),
+        );
+        assert!(matches!(
+            refusal,
+            Err(PolicyRefusal::UnsupportedProvider { .. })
+        ));
+    }
+
     #[test]
     fn plan_cannot_write_before_start_but_can_after() {
         assert!(matches!(

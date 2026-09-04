@@ -1281,11 +1281,31 @@ pub(crate) fn start_execution_at(
             }
         }
     };
+    // A chat with no tool of its own follows the person's default, and only
+    // falls back to GitWyrm's built-in choice when they have not set one.
+    // Before this, "no preference" meant a hardcoded tool no setting could
+    // change -- so someone with two tools installed had to re-pick in every
+    // single chat, and the app had no way to be told which one they wanted.
+    //
+    // A default naming a tool this build does not know is ignored rather than
+    // refused. An explicit per-chat override must fail loudly -- the person
+    // asked for that tool by name and has to be told it cannot be used -- but
+    // a setting left behind by an older build, or a tool since renamed, must
+    // not silently block every chat in the app with an error nobody can
+    // connect to a settings page they last touched months ago.
+    let configured_default = crate::settings::read_settings(app)
+        .ok()
+        .map(|s| s.default_agent_tool)
+        .filter(|t| !t.trim().is_empty())
+        .filter(|t| crate::agentdesk::policy::ExecutionProvider::parse(t).is_some());
+    let effective_provider = provider_override
+        .as_deref()
+        .or(configured_default.as_deref());
     let policy = match crate::agentdesk::policy::ExecutionPolicy::resolve(
         intent,
         mode,
         team,
-        provider_override.as_deref(),
+        effective_provider,
     ) {
         Ok(p) => p,
         Err(crate::agentdesk::policy::PolicyRefusal::UnsupportedProvider { requested }) => {

@@ -7465,6 +7465,18 @@ worktrees_setting_touched?: boolean;
  */
 enable_spec_desk?: boolean; 
 /**
+ * Which installed AI tool a new Agent Desk chat uses when nothing else
+ * says otherwise. Empty means "whatever GitWyrm resolves", which is what
+ * every chat did before this existed.
+ * 
+ * Deliberately separate from `ai_provider`: that one is an API key for
+ * commit messages, conflicts and spec drafting, while this names a CLI
+ * tool installed on the machine. They are different registries with
+ * different auth and different failure modes, and sharing one setting
+ * would make each of them lie about the other.
+ */
+default_agent_tool?: string; 
+/**
  * Skip the confirmation when archiving a change from a row button. Set by the
  * "Don't ask again" checkbox in that confirmation. Off by default: the opt-out
  * is the user's to make, never a default we ship.

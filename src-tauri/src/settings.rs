@@ -356,6 +356,17 @@ pub struct Settings {
     /// repo can be onboarded to OpenSpec from inside the app.
     #[serde(default = "default_enable_spec_desk")]
     pub enable_spec_desk: bool,
+    /// Which installed AI tool a new Agent Desk chat uses when nothing else
+    /// says otherwise. Empty means "whatever GitWyrm resolves", which is what
+    /// every chat did before this existed.
+    ///
+    /// Deliberately separate from `ai_provider`: that one is an API key for
+    /// commit messages, conflicts and spec drafting, while this names a CLI
+    /// tool installed on the machine. They are different registries with
+    /// different auth and different failure modes, and sharing one setting
+    /// would make each of them lie about the other.
+    #[serde(default)]
+    pub default_agent_tool: String,
     /// Skip the confirmation when archiving a change from a row button. Set by the
     /// "Don't ask again" checkbox in that confirmation. Off by default: the opt-out
     /// is the user's to make, never a default we ship.
@@ -787,6 +798,7 @@ impl Default for Settings {
             enable_worktrees: false,
             worktrees_setting_touched: false,
             enable_spec_desk: default_enable_spec_desk(),
+            default_agent_tool: String::new(),
             openspec_archive_without_asking: false,
             worktree_branch_cleanup: default_worktree_branch_cleanup(),
             worktree_branch_delete_on_remote: false,

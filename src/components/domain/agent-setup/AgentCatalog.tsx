@@ -5,6 +5,7 @@ import { commands } from '@/lib/bindings'
 import type { AgentProvider } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { cn } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 /**
  * Which AI tools GitWyrm can drive, and which of them are on this machine.
@@ -73,12 +74,42 @@ export function AgentCatalog() {
     )
   }
 
+  const defaultAgentTool = useWorkspaceStore((st) => st.defaultAgentTool)
+  const setDefaultAgentTool = useWorkspaceStore((st) => st.setDefaultAgentTool)
   const rows = query.data?.providers ?? []
   const installed = rows.filter((r) => r.installed)
   const missing = rows.filter((r) => !r.installed)
 
   return (
     <div className="flex flex-col gap-5">
+      {installed.length > 0 && (
+        // The default a new chat follows. Before this there was a per-chat
+        // override with nothing to override FROM: someone with two tools
+        // installed re-picked in every chat, and the app had no way to be
+        // told which one they wanted.
+        <section className="flex flex-col gap-1.5 rounded-md border border-border bg-panel2 p-2.5">
+          <div>
+            <h3 className="text-2xs font-semibold text-foreground">Which tool new chats use</h3>
+            <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
+              A chat can still pick a different one for itself. This is only the starting point.
+            </p>
+          </div>
+          <select
+            value={defaultAgentTool}
+            onChange={(e) => setDefaultAgentTool(e.target.value)}
+            aria-label="Which AI tool new chats use"
+            className="h-7 w-full rounded border border-border bg-panel px-1.5 text-2xs text-foreground"
+          >
+            <option value="">Let GitWyrm choose</option>
+            {installed.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.displayName || row.id}
+              </option>
+            ))}
+          </select>
+        </section>
+      )}
+
       <section className="flex flex-col gap-2">
         <header className="flex items-center gap-2">
           <h3 className="text-2xs font-semibold text-foreground">Installed</h3>

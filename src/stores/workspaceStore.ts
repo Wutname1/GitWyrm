@@ -769,6 +769,17 @@ interface WorkspaceState {
    */
   enableSpecDesk: boolean;
   /**
+   * Which installed AI tool a new Agent Desk chat uses when it has no
+   * preference of its own. Empty means "let GitWyrm choose", which is what
+   * every chat did before this setting existed.
+   *
+   * Separate from `aiProvider` on purpose: that one is an API key used for
+   * commit messages, conflicts and spec drafting; this names a CLI tool
+   * installed on the machine. Two registries, two auth models -- one setting
+   * would make each lie about the other.
+   */
+  defaultAgentTool: string;
+  /**
    * Archive a change from its row button without confirming first (persisted).
    *
    * Set only by the "Don't ask again" checkbox in that confirmation, and
@@ -996,6 +1007,7 @@ interface WorkspaceState {
   resolveTagSettings: (path: string | null | undefined) => ResolvedTagSettings;
   setEnableWorktrees: (enabled: boolean) => void;
   setEnableSpecDesk: (enabled: boolean) => void;
+  setDefaultAgentTool: (tool: string) => void;
   setOpenspecArchiveWithoutAsking: (skip: boolean) => void;
   setOpenspecDeleteWithoutAsking: (skip: boolean) => void;
   setWorktreeBranchCleanup: (choice: WorktreeBranchCleanup) => void;
@@ -1208,6 +1220,7 @@ function toSettings(s: WorkspaceState): Settings {
     enable_worktrees: s.enableWorktrees,
     worktrees_setting_touched: s.worktreesSettingTouched,
     enable_spec_desk: s.enableSpecDesk,
+    default_agent_tool: s.defaultAgentTool,
     openspec_archive_without_asking: s.openspecArchiveWithoutAsking,
     openspec_delete_without_asking: s.openspecDeleteWithoutAsking,
     worktree_branch_cleanup: s.worktreeBranchCleanup,
@@ -1549,6 +1562,7 @@ export const SETTINGS_DEFAULTS = {
   enableWorktrees: false,
   worktreesSettingTouched: false,
   enableSpecDesk: true,
+  defaultAgentTool: '',
   openspecArchiveWithoutAsking: false,
   openspecDeleteWithoutAsking: false,
   worktreeBranchCleanup: "ask",
@@ -1713,6 +1727,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   enableWorktrees: false,
   worktreesSettingTouched: false,
   enableSpecDesk: true,
+  defaultAgentTool: '',
   openspecArchiveWithoutAsking: false,
   openspecDeleteWithoutAsking: false,
   worktreeBranchCleanup: "ask",
@@ -2236,6 +2251,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setEnableSpecDesk: (enabled) => {
     set({ enableSpecDesk: enabled });
+    schedulePersist();
+  },
+  setDefaultAgentTool: (tool) => {
+    set({ defaultAgentTool: tool });
     schedulePersist();
   },
   setOpenspecArchiveWithoutAsking: (skip) => {

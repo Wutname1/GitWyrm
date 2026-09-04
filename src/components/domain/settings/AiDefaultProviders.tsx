@@ -69,7 +69,14 @@ export function AiDefaultProviders({
       <div className="w-52 flex-none">
         <div className="text-xs font-semibold text-foreground">Default</div>
         <div className="mt-0.5 text-2xs text-muted-foreground">
-          Choose which connected provider GitWyrm uses first.
+          {/* Named, not "uses first". This governs the API-key providers that
+              write commit messages, resolve conflicts and draft specs -- it
+              has never governed Agent Desk, which runs AI tools installed on
+              this computer and picks them per chat. The old wording claimed a
+              scope it did not have, so someone who set a default here
+              reasonably believed they had configured agent chats too. */}
+          Which one writes commit messages, resolves conflicts, and drafts specs. Agent Desk chats pick their own
+          tool.
         </div>
       </div>
       <div className="min-w-0 flex-1 space-y-1">
