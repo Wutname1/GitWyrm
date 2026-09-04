@@ -27,8 +27,11 @@ export function SessionGroups({
   onRename,
   onArchive,
   onDelete,
+  searchTerm,
 }: {
   headers: AgentSessionHeader[]
+  /** What the sidebar is filtering by, so an empty list can say WHY it is empty. */
+  searchTerm?: string
   selectedId: string | null
   onSelectSession: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => void
@@ -90,9 +93,13 @@ export function SessionGroups({
         onDelete={onDelete}
         onToggleGroup={toggleGroup}
         emptyMessage={
-          headers.length === 0
-            ? 'Start a new chat, or open an issue, pull request, or OpenSpec task from the main window and choose an AI action.'
-            : 'Nothing matches this grouping yet.'
+          // A search that finds nothing must not read as "you have no chats" --
+          // that tells someone with two hundred of them to start another one.
+          searchTerm
+            ? `No chats match "${searchTerm}".`
+            : headers.length === 0
+              ? 'Start a new chat, or open an issue, pull request, or OpenSpec task from the main window and choose an AI action.'
+              : 'Nothing matches this grouping yet.'
         }
       />
     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, Search, X } from 'lucide-react'
 import type { SessionListFilterInput } from '@/lib/bindings'
 import { useAgentSessionHeaders } from '@/hooks/useAgentSessions'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
@@ -71,6 +71,18 @@ export function SessionSidebar({
 }: SessionSidebarProps) {
   const [scopeToCurrentRepo, setScopeToCurrentRepo] = useState(false)
   const effectiveRepoId = resolveSessionRepoFilter(scopeToCurrentRepo, currentRepoId)
+  // Finding one chat among many. The backend has matched titles since the
+  // list command shipped (`SessionListFilter::title_contains`, with its own
+  // test) and the frontend passed `null` for it everywhere, so someone who
+  // starts dozens of chats a day had only scrolling.
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useEffect(() => {
+    // Typing re-queries the list, so wait for a pause rather than firing a
+    // request per keystroke.
+    const id = setTimeout(() => setDebouncedSearch(search.trim()), 180)
+    return () => clearTimeout(id)
+  }, [search])
   const { headers, isLoading } = useAgentSessionHeaders({
     repoId: effectiveRepoId,
     projectPath: null,
@@ -78,7 +90,7 @@ export function SessionSidebar({
     sourceKinds: [],
     hasChangedFiles: null,
     archived: false,
-    titleContains: null,
+    titleContains: debouncedSearch === '' ? null : debouncedSearch,
     ...filter,
   })
   const { rename, archive, markRead, remove } = useAgentSessionMutations()
@@ -140,6 +152,30 @@ export function SessionSidebar({
         <NewSessionButton onNewSession={handleNewSession} />
       </div>
 
+      <div className="flex-none px-1.5 pb-1.5">
+        <div className="flex items-center gap-1 rounded border border-border bg-panel2 px-1.5 focus-within:border-primary">
+          <Search size={11} className="flex-none text-muted-foreground" aria-hidden />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Find a chat"
+            aria-label="Find a chat by name"
+            className="min-w-0 flex-1 bg-transparent py-1 text-2xs text-foreground outline-none placeholder:text-muted-foreground"
+          />
+          {search !== '' && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label="Clear the search"
+              className="flex-none rounded p-0.5 text-muted-foreground hover:text-foreground"
+            >
+              <X size={11} aria-hidden />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* R4.1: repo filtering is an optional, visible narrowing of an
           app-wide list -- never the list's identity. Disabled (not hidden)
           while the main window's repo is still opening, with an honest
@@ -171,6 +207,7 @@ export function SessionSidebar({
 
       <SessionGroups
         headers={headers}
+        searchTerm={debouncedSearch === '' ? undefined : debouncedSearch}
         selectedId={selectedId}
         onSelectSession={handleSelect}
         onRename={(sessionId, title) => rename.mutate({ sessionId, title })}
