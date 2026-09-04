@@ -81,4 +81,5 @@ competing sub-agents, the answer names the losing option too.
 | 73 | 2026-09-04 | Should the plan checklist gain a mechanism to tick items as work lands? | No -- the honest fix was to stop promising it and teach the model the marks the app already understands, rather than invent a rewrite path late in a pass. |
 | 74 | 2026-09-04 | Should "Open client" become a working button or stop looking like one? | Stop looking like one -- no launch mechanism exists, and a label that describes where the chat lives is honest where an unimplemented action is not. |
 | 75 | 2026-09-04 | Should an undone config change disappear from the list? | No -- it stays and is marked, because the list is the record of what happened and a vanishing row reads as though it never did. |
+| 76 | 2026-09-04 | Do the pane shortcuts do nothing visible, as the critique said? | Not quite -- they do move the dock and sidebar, but they never moved the caret, so typing went to the pane you had just left. |
 

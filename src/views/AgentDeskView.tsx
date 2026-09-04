@@ -608,22 +608,33 @@ export function AgentDeskView() {
       if (e.ctrlKey && !e.altKey && !e.metaKey) {
         if (e.key === '1') {
           e.preventDefault()
+          // Described as focusing a pane, and they used to only mark one
+          // active: the dock and sidebar followed, but the caret stayed in the
+          // composer just left, so typing went to the pane the person had
+          // visibly moved away from.
           setActivePane('primary')
+          focusComposer(primarySessionId)
         } else if (e.key === '2' && layout.split) {
           e.preventDefault()
           setActivePane('secondary')
+          focusComposer(secondarySessionId)
         } else if (e.key === '\\') {
           // Focus-the-other-pane, a lightweight complement to Ctrl+1/2 when split.
           if (layout.split) {
             e.preventDefault()
-            setActivePane(otherPane(layout.activePane))
+            const next = otherPane(layout.activePane)
+            setActivePane(next)
+            focusComposer(next === 'secondary' ? secondarySessionId : primarySessionId)
           }
         }
       }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [layout.split, layout.activePane, toggleSourceBarsVisible, setActivePane])
+    // The session ids are dependencies now that the handler focuses a
+    // pane's composer by id: without them this listener would keep whichever
+    // ids were current when it was attached and focus a stale chat.
+  }, [layout.split, layout.activePane, toggleSourceBarsVisible, setActivePane, primarySessionId, secondarySessionId])
 
   const repoName = repo?.name ?? 'Loading…'
 
