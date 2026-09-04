@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { ArrowUp, Paperclip, Sparkles, Square } from 'lucide-react'
 import { commands, type AgentSessionHeader } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
-import { describeOutcome, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
+import { describeOutcome, describeSetPreferencesFailure, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError, log } from '@/lib/log'
 import { Textarea } from '@/components/ui/textarea'
@@ -162,11 +162,19 @@ export function SessionComposer({
         if (outcome.kind === 'updated') {
           void qc.invalidateQueries({ queryKey: keys.agentSession(targetSessionId) })
           void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
-        } else {
-          throw new Error(outcome.kind)
+          return
         }
+        // Every failure used to become `new Error(outcome.kind)`, so the
+        // toast's description was a JavaScript stack trace -- and the
+        // `reason`/`detail` strings the backend sends, which say what actually
+        // went wrong, were thrown away to build it.
+        log.error(`save chat preference failed: ${outcome.kind}`)
+        toast.error('Could not save that chat setting.', {
+          description: describeSetPreferencesFailure(outcome),
+        })
       })
       .catch((e) => {
+        log.error(`save chat preference threw: ${describeError(e)}`)
         toast.error('Could not save that chat setting.', { description: describeError(e) })
       })
   }

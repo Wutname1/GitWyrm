@@ -444,11 +444,28 @@ export function ResultReviewPanel({
 
   function handleOpenDiff(path?: string) {
     if (!record?.worktreePath) return
-    void commands.agentResultOpenDiff(record.worktreePath, path ?? null).then((res) => {
-      if (res.status === 'ok' && res.data.kind === 'mainWindowNotOpen') {
-        toast.error('Open the main GitWyrm window first.')
-      }
-    })
+    // Only the `ok` path was read. The command returns a Result, so a real
+    // failure -- the worktree gone, the files unreadable -- arrived as
+    // `status: 'error'` and was dropped: the button did nothing, said nothing,
+    // and left no trace, on the screen where someone is deciding whether to
+    // keep an agent's work. Its sibling `viewChanges` already reports every
+    // branch.
+    void commands
+      .agentResultOpenDiff(record.worktreePath, path ?? null)
+      .then((res) => {
+        if (res.status === 'error') {
+          log.error(`open result diff failed: ${describeError(res.error)}`)
+          toast.error('Could not open those changes.', { description: describeError(res.error) })
+          return
+        }
+        if (res.data.kind === 'mainWindowNotOpen') {
+          toast.error('Open the main GitWyrm window first.')
+        }
+      })
+      .catch((e: unknown) => {
+        log.error(`open result diff threw: ${describeError(e)}`)
+        toast.error('Could not open those changes.', { description: describeError(e) })
+      })
   }
 
   return (

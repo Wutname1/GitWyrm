@@ -27,6 +27,7 @@ import {
   explainStopOutcome,
   failingCheckLines,
   runActivityLabel,
+  describeSetPreferencesFailure,
   runStoppedBadly,
   runStoppedBadlyLabel,
   runIsActive,
@@ -807,5 +808,33 @@ describe('runStoppedBadlyLabel', () => {
   it('says nothing for a run that did not stop badly', () => {
     expect(runStoppedBadlyLabel('working')).toBeNull()
     expect(runStoppedBadlyLabel(null)).toBeNull()
+  })
+})
+
+describe('describeSetPreferencesFailure', () => {
+  it('uses the reason the backend sent, not a stack trace', () => {
+    expect(describeSetPreferencesFailure({ kind: 'damaged', reason: 'the file is truncated' })).toBe(
+      'the file is truncated'
+    )
+    expect(describeSetPreferencesFailure({ kind: 'writeFailed', detail: 'disk is full' })).toBe('disk is full')
+    expect(describeSetPreferencesFailure({ kind: 'unavailable', detail: 'in use by another window' })).toBe(
+      'in use by another window'
+    )
+  })
+
+  it('explains the one variant that carries no backend string', () => {
+    expect(describeSetPreferencesFailure({ kind: 'notFound' })).toMatch(/no longer here/i)
+  })
+
+  it('never shows a code word to the person', () => {
+    // The bug was `new Error(outcome.kind)`, which surfaced the variant name.
+    for (const o of [
+      { kind: 'notFound' } as const,
+      { kind: 'damaged', reason: 'x' } as const,
+      { kind: 'writeFailed', detail: 'y' } as const,
+      { kind: 'unavailable', detail: 'z' } as const,
+    ]) {
+      expect(describeSetPreferencesFailure(o)).not.toContain(o.kind)
+    }
   })
 })

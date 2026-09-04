@@ -13,6 +13,7 @@ import type {
   ResultRecord,
   ResultState,
   SessionIntent,
+  UpdateSessionOutcome,
   SessionState,
   StartExecutionOutcome,
   UndoResultOutcome,
@@ -845,5 +846,32 @@ export function runStoppedBadlyLabel(state: SessionState | null | undefined): st
       return 'This chat stopped when the app closed. Send a message to start it again.'
     default:
       return null
+  }
+}
+
+/**
+ * Why saving a chat's provider/mode/team choice did not stick.
+ *
+ * Every non-success variant used to be turned into `new Error(outcome.kind)`
+ * and handed to `describeError`, which returns `e.stack` -- so the toast
+ * explained a failed save with a JavaScript stack trace, while the
+ * `reason`/`detail` strings the backend sends for exactly this purpose were
+ * discarded to build it.
+ *
+ * `notFound` deliberately carries no backend string: the chat is simply gone,
+ * and there is nothing further to report about it.
+ */
+export function describeSetPreferencesFailure(outcome: UpdateSessionOutcome): string {
+  switch (outcome.kind) {
+    case 'updated':
+      return ''
+    case 'notFound':
+      return 'This chat is no longer here.'
+    case 'damaged':
+      return outcome.reason
+    case 'writeFailed':
+      return outcome.detail
+    case 'unavailable':
+      return outcome.detail
   }
 }
