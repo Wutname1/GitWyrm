@@ -19,9 +19,22 @@ const NAMED_SECRET_MARKERS: &[&str] = &[
     "token", "secret", "password", "passwd", "apikey", "api_key", "credential", "auth",
 ];
 
-/// Header names whose value is always treated as secret, even though the
-/// field name itself (`headers`) is not.
-const SECRET_HEADER_NAMES: &[&str] = &["authorization", "x-api-key", "cookie", "proxy-authorization"];
+/// Header names this code once treated as the only secret-bearing ones.
+///
+/// Kept only to name them in the reasoning: EVERY header value is now treated
+/// as secret, which is what the module doc has always said and what the
+/// four-name allowlist did not do. A bearer token under `X-Auth-Key` or
+/// `X-Session` produced no `secret_fields`, so the "secrets will be copied"
+/// warning never fired and the value was shown unredacted in the preview --
+/// on the screen whose job is disclosing what will be written into another
+/// application's config file.
+///
+/// The doc's own reasoning is the argument: header values are opaque to us,
+/// and a name is not evidence of what a value holds. Erring toward hiding a
+/// trace id costs a preview line; erring the other way copies a credential
+/// silently.
+const HISTORICALLY_KNOWN_SECRET_HEADERS: &[&str] =
+    &["authorization", "x-api-key", "cookie", "proxy-authorization"];
 
 fn is_named_secret(field_name: &str) -> bool {
     let lower = field_name.to_ascii_lowercase();
@@ -69,7 +82,9 @@ fn walk(path: &str, value: &Value, out: &mut Vec<SecretFieldRef>) {
     if path == "headers" {
         if let Value::Object(map) = value {
             for (k, v) in map {
-                if SECRET_HEADER_NAMES.contains(&k.to_ascii_lowercase().as_str()) {
+                // Every header value, not a known-names list. See
+                // `HISTORICALLY_KNOWN_SECRET_HEADERS` for why.
+                {
                     out.push(SecretFieldRef {
                         field_path: format!("{path}.{k}"),
                         reason: SecretReason::HeaderValue,
@@ -300,7 +315,31 @@ mod tests {
         let found = find_secret_fields(&extra);
         let paths: Vec<&str> = found.iter().map(|f| f.field_path.as_str()).collect();
         assert!(paths.contains(&"headers.Authorization"));
-        assert!(!paths.contains(&"headers.X-Trace-Id"));
+        // Was `assert!(!paths.contains(...))`, pinning a four-name allowlist.
+        // A name is not evidence of what a header value holds: a bearer token
+        // under `X-Auth-Key` produced no secret at all, so the "secrets will
+        // be copied" warning never fired and the value was shown in full.
+        // Hiding a trace id costs a preview line; the other error copies a
+        // credential silently.
+        assert!(
+            paths.contains(&"headers.X-Trace-Id"),
+            "every header value is treated as secret, not a known-names list"
+        );
+    }
+
+    /// The defect this replaced: a token under an unassuming header name was
+    /// not flagged, so nothing warned and nothing was hidden.
+    #[test]
+    fn a_token_under_an_unassuming_header_name_is_still_secret() {
+        let extra = extra_from(&[(
+            "headers",
+            json!({ "X-Auth-Key": "sk-live-abc123", "X-Session": "tok_xyz" }),
+        )]);
+        let found = find_secret_fields(&extra);
+        let paths: Vec<&str> = found.iter().map(|f| f.field_path.as_str()).collect();
+        assert!(paths.contains(&"headers.X-Auth-Key"), "{paths:?}");
+        assert!(paths.contains(&"headers.X-Session"), "{paths:?}");
+        assert!(!found.is_empty(), "a non-empty secret list is what fires the copy warning");
     }
 
     #[test]

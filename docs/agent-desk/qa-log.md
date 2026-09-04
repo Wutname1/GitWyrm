@@ -136,4 +136,6 @@ competing sub-agents, the answer names the losing option too.
 | 128 | 2026-09-04 | Should "0 helpers active" show on a chat that never had any? | No -- it can never be anything else there, and it stopped the usage panel from ever saying it knows nothing. |
 | 129 | 2026-09-04 | Should deleting a chat also delete its working copy? | No -- it could only ever remove the tidy cases and would leave the messy ones stranded, so the copies are listed from git instead and stay clearable. |
 | 130 | 2026-09-04 | How can GitWyrm find a working copy after its chat is gone? | Git already tags the ones GitWyrm made, and the list already reports that tag; nothing was asking it. |
+| 131 | 2026-09-04 | Were all header values treated as secret when copying settings? | No -- only four known names, so a token under any other header was shown in full and copied with no warning at all. |
+| 132 | 2026-09-04 | Should a comment asserting a safety guarantee be trusted? | No -- it is an untested assertion until a test pins it; eleven findings have now come from comments that were simply wrong. |
 
