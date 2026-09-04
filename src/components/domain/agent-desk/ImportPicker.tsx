@@ -93,7 +93,9 @@ function AdapterRow({
       className={cn(
         'flex items-center justify-between rounded-md border border-border px-2.5 py-2 text-left text-xs transition-colors',
         canBrowse ? 'hover:bg-panel2 cursor-pointer' : 'cursor-not-allowed opacity-60',
-        selected && 'border-accent bg-panel2'
+        // See AgentGraphPanel: `--accent` equals `--border`, so this edge
+        // was invisible and the tint was doing all the work.
+        selected && 'border-primary bg-panel2'
       )}
     >
       <span className="font-medium text-foreground">{entry.displayName}</span>
@@ -268,7 +270,7 @@ function SessionRow({
           type="button"
           onClick={handleImport}
           disabled={importMutation.isPending}
-          className="rounded-md bg-accent px-2 py-1 text-2xs font-medium text-accent-text hover:bg-accent-hover disabled:opacity-60"
+          className="rounded-md bg-primary px-2 py-1 text-2xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
         >
           {linkedSessionId ? 'Refresh' : 'Import'}
         </button>

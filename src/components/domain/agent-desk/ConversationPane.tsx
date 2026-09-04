@@ -217,7 +217,7 @@ function GateApprovalControls({ sessionId, message }: { sessionId: string; messa
           disabled={state !== 'idle'}
           className={cn(
             'rounded-md border px-2.5 py-1 text-2xs font-medium disabled:cursor-not-allowed disabled:opacity-50',
-            option.answer === 'allowOnce' && 'border-accent bg-accent text-accent-foreground hover:bg-accent/90',
+            option.answer === 'allowOnce' && 'border-primary bg-primary text-primary-foreground hover:bg-primary/90',
             option.answer === 'findAnotherWay' && 'border-border bg-panel2 text-foreground hover:bg-panel3',
             option.answer === 'stopRun' && 'border-destructive/40 text-destructive hover:bg-destructive/10'
           )}

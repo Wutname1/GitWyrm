@@ -81,10 +81,16 @@ function GraphNodeRow({
       )}
       <button
         type="button"
+        aria-pressed={selected}
         onClick={onSelect}
         className={cn(
           'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors',
-          selected ? 'border-accent bg-panel3' : 'border-border bg-panel hover:bg-panel3'
+          // `border-accent` was the selected edge, but `--accent` resolves to
+          // the same hex as `--border`, so a selected node had literally the
+          // same border as an unselected one -- tint alone, which the house
+          // Selected Must Read rule forbids. `SessionRow` already does this
+          // properly, so this matches it.
+          selected ? 'border-primary bg-panel3' : 'border-border bg-panel hover:bg-panel3'
         )}
       >
         <span

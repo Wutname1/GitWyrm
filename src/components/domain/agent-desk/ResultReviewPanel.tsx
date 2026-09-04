@@ -712,7 +712,7 @@ function ActionButton({
       disabled={disabled}
       className={cn(
         'inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-2xs font-medium disabled:cursor-not-allowed disabled:opacity-50',
-        variant === 'primary' && 'border-accent bg-accent text-accent-foreground hover:bg-accent/90',
+        variant === 'primary' && 'border-primary bg-primary text-primary-foreground hover:bg-primary/90',
         variant === 'default' && 'border-border bg-panel2 text-foreground hover:bg-panel3',
         variant === 'ghost' && 'border-transparent text-muted-foreground hover:text-foreground',
       )}
