@@ -143,3 +143,9 @@ competing sub-agents, the answer names the losing option too.
 | 134 | 2026-09-04 | Did the "copying failed" message tell the truth? | No -- it said "Nothing was changed" for a command that cannot fail as a whole, so it only ever appeared after some copies had already landed. |
 | 135 | 2026-09-04 | Could the "spec changed" notice be cleared by the button it pointed at? | No -- refreshing updates the cached copy, drift compares a fingerprint of what an agent read, so the button answered "nothing changed" while the notice stayed up. |
 | 136 | 2026-09-04 | Was CI compiling the integration tests? | No -- it ran `--lib` only, so 22 test binaries were never built, and one of mine sat broken through several green runs. |
+| 137 | 2026-09-04 | Were the Windows-only parts of the code being checked automatically? | No -- all checks ran on Linux, which skips them entirely, so 99 places including every agent connector were first built at release time. |
+| 138 | 2026-09-04 | Did the graph and the cost panel agree about the same helper? | No -- a reported zero showed as "0 turns" in one and vanished in the other. |
+| 139 | 2026-09-04 | Could you tell which part of a chat came from another tool? | No -- GitWyrm recorded every handover point and showed none of them, only a count labelled with a word used nowhere else. |
+| 140 | 2026-09-04 | Did the usage figures say how old they were? | No -- they are polled every 30 seconds and the timestamp built for saying so was never shown. |
+| 141 | 2026-09-04 | Was anything checking React hook rules? | No -- there is no ESLint in this repo, so a crash that blanked the whole window on every open of the AI tools tab shipped unseen. |
+| 142 | 2026-09-04 | Should a guard be trusted before it has caught its own instance? | No -- both new detectors this pass were silently wrong at first, and only reverting the real defect proved they worked. |
