@@ -477,8 +477,12 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
         <GitFork size={26} className="text-muted-foreground" aria-hidden />
         <p className="text-xs font-semibold text-foreground">Only one agent is on this chat.</p>
         <p className="max-w-[16rem] text-2xs leading-relaxed text-muted-foreground">
-          Choose "A lead agent, up to 3 helpers" below to let one agent split the work. In Plan you approve the split
-          first. In Auto the lead starts helpers on its own when the work divides safely.
+          {/* Quoted a string that is not on any control: it exists only as
+              descriptive text inside the chooser. The button says "Lead +
+              helpers". "below" was wrong too -- this panel docks left, right
+              or bottom depending on where it was moved. */}
+          Pick "Lead + helpers" in the box where you type to let one agent split the work. In Plan you approve the
+          split first. In Auto the lead starts helpers on its own when the work divides safely.
         </p>
       </div>
     )

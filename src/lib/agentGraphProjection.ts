@@ -10,7 +10,7 @@
  * without a DOM (vitest runs `src/**\/*.test.ts` in a Node env, no jsdom).
  */
 import type { ExecutionRecord } from "@/lib/bindings";
-import { runIsActive } from "@/lib/agentDeskResult";
+import { runIsActive, runStoppedBadly } from "@/lib/agentDeskResult";
 
 /**
  * How many helpers may run at once.
@@ -190,12 +190,10 @@ export function graphSummary(all: ExecutionRecord[]): string {
   // where one failed used to summarise as "2 working", which is true and
   // materially misleading -- the header is what a person glances at to decide
   // whether the run still needs them.
-  const stuck = executions.filter(
-    (e) =>
-      e.state === "failed" ||
-      e.state === "missingSource" ||
-      e.state === "interrupted",
-  ).length;
+  // Was a fourth hand-written copy of this rule, in the file that already
+  // imports the module exporting it -- and this one drives the count a person
+  // glances at to decide whether a run still needs them.
+  const stuck = executions.filter((e) => runStoppedBadly(e.state)).length;
   const parts: string[] = [];
   if (working > 0) parts.push(`${working} working`);
   if (waiting > 0) parts.push(`${waiting} waiting`);

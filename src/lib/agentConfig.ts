@@ -274,3 +274,30 @@ export function explainPreviewRefusal(kind: 'itemNotFound' | 'noDestinations'): 
     ? 'There is nowhere to copy this to. The other apps either already have it or cannot use it.'
     : 'That item is no longer there. It may have been changed or removed since the last scan.'
 }
+
+/**
+ * What a finished batch preview should show.
+ *
+ * The batch dialog counted `attempted` and `failures` under a comment saying
+ * they let "a total failure be told apart from an empty selection", then
+ * ignored both and collapsed the result to ready-or-empty. A `'failed'` stage
+ * was declared and never set. So every preview failing looked exactly like
+ * ticking nothing: the same grey sentence, no retry, no sign anything had gone
+ * wrong. The distinction matters because the two ask different things of the
+ * person - tick something, versus try again.
+ */
+export function batchBuildStage({
+  built,
+  attempted,
+  failures,
+}: {
+  built: number
+  attempted: number
+  failures: number
+}): 'ready' | 'failed' | 'empty' {
+  if (built > 0) return 'ready'
+  // Only when something was actually tried AND all of it failed. Nothing
+  // attempted is an empty selection, not a failure.
+  if (attempted > 0 && failures === attempted) return 'failed'
+  return 'empty'
+}

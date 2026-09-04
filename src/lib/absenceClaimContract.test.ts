@@ -51,7 +51,18 @@ describe('a failed read is never shown as an absence', () => {
       // guarded, the detections query not, one `isError` covering both.
       for (const m of source.matchAll(/(\w+)\.data\s*\?\?\s*(?:\[\]|'')/g)) {
         const query = m[1]
-        const guarded = new RegExp(`${query}\.isError`).test(source)
+        // BOTH states, not just failure. The delete-confirm dialog handled
+        // `isError` and passed this guard while still showing a confident
+        // "no working copy" during the whole window before its query
+        // returned -- the query starts when the dialog opens, so `data` is
+        // undefined, the list is empty and `isError` is false, all at once.
+        //
+        // "GitWyrm has not looked yet" and "GitWyrm could not look" are
+        // different sentences but the same fact: it does not know. A guard
+        // written for only the second half let the first half through.
+        const guarded =
+          new RegExp(`${query}\.isError`).test(source) &&
+          new RegExp(`${query}\.(isPending|isLoading)`).test(source)
         if (!guarded) offenders.push(`${name} (${query})`)
       }
     }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  batchBuildStage,
   itemDisplayName,
   summarizeInventoryCounts,
   describeConfigOperation,
@@ -325,5 +326,23 @@ describe('describeConfigOperation names apps the way the user sees them', () => 
     expect(describeConfigOperation({ client: 'some-new-tool', beforeHash: 'a', undone: false })).toMatch(
       /some-new-tool/
     )
+  })
+})
+
+describe('batchBuildStage', () => {
+  it('tells a total failure apart from an empty selection', () => {
+    // The whole point of the counters, which were collected and ignored.
+    expect(batchBuildStage({ built: 0, attempted: 3, failures: 3 })).toBe('failed')
+    expect(batchBuildStage({ built: 0, attempted: 0, failures: 0 })).toBe('empty')
+  })
+
+  it('is ready whenever anything at all was built', () => {
+    expect(batchBuildStage({ built: 1, attempted: 3, failures: 2 })).toBe('ready')
+  })
+
+  it('does not call a partial failure a total one', () => {
+    // Two tried, one failed, none built: something was skipped rather than
+    // broken, so "try again" would be the wrong thing to offer.
+    expect(batchBuildStage({ built: 0, attempted: 2, failures: 1 })).toBe('empty')
   })
 })

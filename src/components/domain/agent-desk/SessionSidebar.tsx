@@ -118,8 +118,22 @@ export function SessionSidebar({
   const pendingDeleteCopies = (copiesOnDisk.data ?? []).filter((c) => c.sessionId === pendingDelete?.id)
   // A failed read is not "no copies". Saying nothing here would be the same
   // absence-for-a-failure inversion the guard test exists to catch -- and it
-  // did catch this, on the dialog where the cost is an unrecoverable folder.
-  const copiesUnknown = copiesOnDisk.isError
+  // did catch this, on the dialog where the cost is a stranded folder.
+  //
+  // `isPending` counts too, and that was missed: the query STARTS when this
+  // dialog opens, so for its whole in-flight window `data` was undefined,
+  // the filtered list was empty, `isError` was false, and the dialog showed
+  // no warning at all -- reading as a confident "no working copy" at the one
+  // moment the app had not looked yet. Not-yet-known is a kind of unknown.
+  //
+  // Deliberately NOT gating the Delete button on this. `agentResultCopiesOnDisk`
+  // walks every run worktree recursively to total its size, which on a tree
+  // with node_modules is seconds, and every other confirm dialog in this app
+  // gates only on its own mutation, never on a background read. Blocking here
+  // would break the rule that an action responds immediately, at the instant
+  // the person acted. Telling them what is and is not known is the honest
+  // move; deciding for them is not.
+  const copiesUnknown = copiesOnDisk.isError || copiesOnDisk.isPending
 
   // Narrow-width drawer (task: "a hidden sidebar with no reopen affordance
   // violates house Rule #1"). Tracks the *container's* width via
@@ -300,8 +314,9 @@ export function SessionSidebar({
             */}
             {copiesUnknown && (
               <span className="mt-2 block font-semibold text-[var(--gw-amber)]">
-                GitWyrm could not check whether this chat is holding a working copy on your machine. If it is,
-                deleting the chat leaves that behind with no way to find it again.
+                {copiesOnDisk.isPending
+                  ? 'Still checking whether this chat is holding a working copy on your machine. If it is, deleting the chat now leaves that behind.'
+                  : 'GitWyrm could not check whether this chat is holding a working copy on your machine. If it is, deleting the chat leaves that behind.'}
               </span>
             )}
             {pendingDeleteCopies.length > 0 && (

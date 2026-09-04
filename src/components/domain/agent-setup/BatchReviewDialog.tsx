@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { log } from '@/lib/log'
 import { PlanReview, ApplyResults } from './CopyPreviewDialog'
+import { batchBuildStage } from '@/lib/agentConfig'
 
 type BuildStage = 'building' | 'ready' | 'empty' | 'failed'
 
@@ -81,6 +82,7 @@ export function BatchReviewDialog({
             skippedEntries.push(entry)
           }
         } catch (e) {
+          failures += 1
           log.error(`building batch preview for ${entry.itemId} failed: ${String(e)}`)
           skippedEntries.push(entry)
         }
@@ -88,7 +90,15 @@ export function BatchReviewDialog({
       if (cancelled) return
       setPlans(built)
       setSkipped(skippedEntries)
-      setStage(built.length > 0 ? 'ready' : 'empty')
+      // `failures` and `attempted` were counted here and never read: the stage
+      // collapsed to 'ready' or 'empty', so every attempt failing looked
+      // exactly like selecting nothing, under a comment saying the two were
+      // told apart. `'failed'` was declared in the union and never set.
+      //
+      // The distinction matters because the two need different things from
+      // the person: an empty selection means tick something, while everything
+      // failing means try again or look at what went wrong.
+      setStage(batchBuildStage({ built: built.length, attempted, failures }))
     }
     void buildPlans()
     return () => {
@@ -126,9 +136,28 @@ export function BatchReviewDialog({
 
           {stage === 'empty' && (
             <p className="py-6 text-center text-2xs text-muted-foreground">
-              Nothing could be previewed. Every item that differs either has nowhere it can be copied to, or could not
-              be read.
+              Nothing to preview. Every item that differs either has nowhere it can be copied to, or was not ticked.
             </p>
+          )}
+
+          {stage === 'failed' && (
+            <div className="flex flex-col items-center gap-2 py-6 text-center">
+              <p className="text-2xs text-[var(--gw-amber)]">
+                None of these could be prepared. Nothing has been changed.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  // The same counter that reruns the build when a destination
+                  // is ticked; retrying is the same operation.
+                  setStage('building')
+                  setRebuild((n) => n + 1)
+                }}
+                className="rounded border border-border px-2 py-1 text-2xs font-semibold text-foreground hover:bg-panel2"
+              >
+                Try again
+              </button>
+            </div>
           )}
 
           {(stage === 'ready' || outcomes) && (

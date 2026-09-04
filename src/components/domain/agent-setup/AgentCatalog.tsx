@@ -5,6 +5,8 @@ import { commands } from '@/lib/bindings'
 import type { AgentProvider } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
+import { describeError, log } from '@/lib/log'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 /**
@@ -47,6 +49,15 @@ export function AgentCatalog() {
       const fresh = unwrap(await commands.agentProvidersRefresh(null))
       query.refetch()
       return fresh
+    } catch (e) {
+      // `unwrap` throws, there was no catch, and both callers use
+      // `void refresh()` -- so a failed rescan looked exactly like a
+      // successful one that still found nothing. This is the only recovery
+      // path on this screen: the empty state tells people to install a tool
+      // and then press this.
+      log.error(`refreshing AI tools failed: ${describeError(e)}`)
+      toast.error('Could not check again for AI tools.', { description: describeError(e) })
+      return null
     } finally {
       setRefreshing(false)
     }
@@ -189,7 +200,10 @@ function AgentRow({ row }: { row: AgentProvider }) {
             </span>
           )}
           {row.tooOld && (
-            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-px font-mono text-2xs text-amber-600 dark:text-amber-300">
+            // Was Tailwind's amber-500, which is a different yellow from
+            // --gw-amber, so two of them sat side by side and neither
+            // followed the theme. The badge beside this one uses the token.
+            <span className="rounded border border-[color-mix(in_srgb,var(--gw-amber)_40%,transparent)] bg-[color-mix(in_srgb,var(--gw-amber)_12%,transparent)] px-1 py-px font-mono text-2xs text-[color-mix(in_srgb,var(--gw-amber)_85%,var(--gw-text))]">
               too old
             </span>
           )}

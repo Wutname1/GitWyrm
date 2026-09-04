@@ -866,7 +866,22 @@ function PullRequestButton({
           initialBody={draft.body}
           existingUrl={existing?.html_url ?? null}
           onOpen={(url) => {
-            void commands.agentResultOpenPullRequestPage(url)
+            // Dropped its Result entirely, and the dialog closes regardless --
+            // so a browser that never opened discarded the drafted title and
+            // body with it. Same defect the diff button had, corrected in this
+            // same file.
+            void commands
+              .agentResultOpenPullRequestPage(url)
+              .then((res) => {
+                if (res.status === 'error') {
+                  log.error(`open pull request page failed: ${describeError(res.error)}`)
+                  toast.error('Could not open that page.', { description: describeError(res.error) })
+                }
+              })
+              .catch((e: unknown) => {
+                log.error(`open pull request page threw: ${describeError(e)}`)
+                toast.error('Could not open that page.', { description: describeError(e) })
+              })
           }}
         />
       )}
