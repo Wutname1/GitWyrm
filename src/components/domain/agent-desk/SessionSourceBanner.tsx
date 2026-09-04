@@ -1,6 +1,7 @@
 import {
   CircleAlert,
   CircleDot,
+  Download,
   FileCheck2,
   FileDiff,
   GitBranch,
@@ -14,7 +15,14 @@ import { describeSnapshotFreshness } from '@/lib/agentDeskSources'
 import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
 
-export const SOURCE_KIND_ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+// Keyed by the real union rather than `string`, so a new source kind without
+// an icon is a compile error. As `Record<string, ...>` the `imported` kind was
+// simply absent and fell back to the manual-chat glyph -- the same picture for
+// a conversation brought in from elsewhere as for one started here.
+export const SOURCE_KIND_ICON: Record<
+  SessionSource['kind'],
+  React.ComponentType<{ size?: number; className?: string }>
+> = {
   manual: MessageSquareText,
   issue: CircleDot,
   pullRequest: GitPullRequest,
@@ -24,6 +32,7 @@ export const SOURCE_KIND_ICON: Record<string, React.ComponentType<{ size?: numbe
   diff: FileDiff,
   workingChanges: GitBranch,
   checkFailure: CircleAlert,
+  imported: Download,
 }
 
 /**

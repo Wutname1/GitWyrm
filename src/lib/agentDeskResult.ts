@@ -194,7 +194,7 @@ export function explainKeepOutcome(outcome: KeepResultOutcome): string | null {
     case 'kept':
       return null
     case 'nothingToKeep':
-      return 'There is nothing to keep -- this result made no file changes.'
+      return 'There is nothing to keep: this result made no file changes.'
     case 'resultNotFound':
       return 'That result could not be found. Try refreshing.'
     case 'sessionNotFound':
@@ -230,7 +230,7 @@ export function explainUndoOutcome(outcome: UndoResultOutcome): { message: strin
       }
     }
     case 'nothingToUndo':
-      return { message: 'There is nothing to undo -- this result made no file changes.', refusedHandEdited: false }
+      return { message: 'There is nothing to undo: this result made no file changes.', refusedHandEdited: false }
     case 'resultNotFound':
       return { message: 'That result could not be found. Try refreshing.', refusedHandEdited: false }
     case 'sessionNotFound':
@@ -243,7 +243,7 @@ export function explainUndoOutcome(outcome: UndoResultOutcome): { message: strin
       return { message: `Could not save: ${outcome.detail}`, refusedHandEdited: false }
     case 'stateChanged':
       return {
-        message: 'This result already changed somewhere else -- probably it was just committed. Refresh to see its current state.',
+        message: 'This result already changed somewhere else, probably because it was just committed. Refresh to see its current state.',
         refusedHandEdited: false,
       }
   }
@@ -295,7 +295,7 @@ export function explainCompleteOpenSpecTaskOutcome(outcome: CompleteOpenSpecTask
   switch (outcome.kind) {
     case 'completed':
       if (outcome.toggle === 'lineMoved') {
-        return 'Saved, but the task list changed since this chat started -- check tasks.md by hand to confirm the right item is checked off.'
+        return 'Saved, but the task list changed since this chat started. Check tasks.md by hand to confirm the right item is checked off.'
       }
       // 'toggled' | 'alreadyThatWay': the ordinary Keep success toast
       // already covers it, nothing extra to say.
@@ -489,7 +489,7 @@ export function explainCleanupOutcome(outcome: CleanupWorktreeOutcome): { messag
       }
     }
     case 'notIntegratedOrDiscarded':
-      return { message: 'Not yet -- keep or throw away this work first, so nothing is lost.', removed: false }
+      return { message: 'Not yet: keep or throw away this work first, so nothing is lost.', removed: false }
     case 'nothingToClean':
       return { message: 'There is nothing to clear away for this run.', removed: false }
     case 'refusedLocked':

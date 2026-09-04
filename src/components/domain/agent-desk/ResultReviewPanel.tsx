@@ -217,7 +217,7 @@ export function ResultReviewPanel({
         toast.error(explanation)
         return
       }
-      toast.success('Kept -- ready to commit when you are.')
+      toast.success('Kept. Ready to commit when you are.')
       refresh()
 
       // P1-C wiring 1: Keep is this panel's "accepted" gesture -- check the
@@ -275,7 +275,7 @@ export function ResultReviewPanel({
         refresh()
         return
       }
-      toast.success('Undone -- the changes were discarded.')
+      toast.success('Undone. The changes were discarded.')
       refresh()
     })
   }
@@ -345,7 +345,7 @@ export function ResultReviewPanel({
           await commands.agentSessionStartExecution(sessionId, policy.defaultMode, policy.defaultTeam, null)
         )
         if (startOutcome.kind === 'started') {
-          toast.success('Sent -- the lead is working on your requested changes.')
+          toast.success('Sent. The lead is working on your requested changes.')
         } else if (startOutcome.kind === 'alreadyRunning') {
           // Same "do not claim delivery that did not happen" stance
           // `SessionComposer` takes: the guidance is saved and visible, but

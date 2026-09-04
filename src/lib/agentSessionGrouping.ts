@@ -1,4 +1,4 @@
-import type { AgentSessionHeader } from '@/lib/bindings'
+import type { AgentSessionHeader, SessionSource } from '@/lib/bindings'
 
 /**
  * Grouping/row-flattening logic for the Agent Desk session sidebar (tasks
@@ -234,7 +234,12 @@ export function resolveSessionRepoFilter(scopeToCurrentRepo: boolean, currentRep
 }
 
 /** Display label for a session's leading kind icon slot, keyed off `SessionSource.kind`. */
-export function sourceKindLabel(kind: string): string {
+export function sourceKindLabel(kind: SessionSource['kind']): string {
+  // Typed as the real union, not `string`. As `string` the compiler could not
+  // check this, so when `imported` was added every typed site was named and
+  // this one silently fell through to 'Chat' -- an imported conversation
+  // labelled the same as one started here, in the panels meant to preserve
+  // where it came from.
   switch (kind) {
     case 'issue':
       return 'Issue'
@@ -252,7 +257,9 @@ export function sourceKindLabel(kind: string): string {
       return 'Working changes'
     case 'checkFailure':
       return 'Failed check'
-    default:
+    case 'imported':
+      return 'Imported chat'
+    case 'manual':
       return 'Chat'
   }
 }

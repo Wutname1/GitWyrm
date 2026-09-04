@@ -121,24 +121,31 @@ describe('formatCompactAge', () => {
 })
 
 describe('sourceKindLabel', () => {
+  // Typed, so leaving a kind out is a compile error rather than a quiet gap.
+  // The old version claimed to cover "every SessionSource kind" while its own
+  // list omitted `imported`, which is exactly the kind that was mislabelled.
+  const ALL: SessionSource['kind'][] = [
+    'manual',
+    'issue',
+    'pullRequest',
+    'openSpecChange',
+    'openSpecTask',
+    'commit',
+    'diff',
+    'workingChanges',
+    'checkFailure',
+    'imported',
+  ]
+
   it('maps every SessionSource kind to a label', () => {
-    for (const kind of [
-      'manual',
-      'issue',
-      'pullRequest',
-      'openSpecChange',
-      'openSpecTask',
-      'commit',
-      'diff',
-      'workingChanges',
-      'checkFailure',
-    ]) {
+    for (const kind of ALL) {
       expect(sourceKindLabel(kind)).not.toBe('')
     }
   })
 
-  it('falls back to Chat for an unknown kind', () => {
-    expect(sourceKindLabel('somethingNew')).toBe('Chat')
+  it('does not call an imported chat the same thing as one started here', () => {
+    expect(sourceKindLabel('imported')).toBe('Imported chat')
+    expect(sourceKindLabel('imported')).not.toBe(sourceKindLabel('manual'))
   })
 })
 

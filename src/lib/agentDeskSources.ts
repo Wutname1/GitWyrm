@@ -182,7 +182,7 @@ export function explainRefreshSourceOutcome(outcome: RefreshSourceOutcome): { me
     case 'refreshed':
       return outcome.changed
         ? { message: 'Refreshed. The chat now shows the current version.', ok: true }
-        : { message: 'Checked -- the source had not changed after all.', ok: true }
+        : { message: 'Checked: the source had not changed after all.', ok: true }
     case 'liveUnavailable':
       return {
         message: `Could not reach the original, so the saved copy was kept: ${outcome.detail}`,

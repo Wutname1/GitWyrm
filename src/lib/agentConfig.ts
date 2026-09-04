@@ -170,7 +170,7 @@ export function explainConfigUndoOutcome(outcome: UndoOutcome): { message: strin
       return { message: 'That copy could not be found, so nothing was changed.', restored: false }
     case 'concurrentChangeRefused':
       return {
-        message: 'Left alone -- the file changed after GitWyrm copied to it, and putting it back would undo that newer change.',
+        message: 'Left alone: the file changed after GitWyrm copied to it, and putting it back would undo that newer change.',
         restored: false,
       }
     case 'restoreFailed':
