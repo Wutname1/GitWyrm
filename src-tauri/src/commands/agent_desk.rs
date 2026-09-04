@@ -2275,6 +2275,19 @@ pub enum AnswerGateOutcome {
     NoLiveGate,
 }
 
+/// What the transcript records when an approval is answered.
+///
+/// Plain and in the past tense, because it is a record of something the person
+/// did rather than a description of a state.
+fn gate_answer_note(answer: crate::airun::driver::GateAnswer) -> &'static str {
+    use crate::airun::driver::GateAnswer;
+    match answer {
+        GateAnswer::AllowOnce => "You allowed this, just this once.",
+        GateAnswer::FindAnotherWay => "You asked the agent to find another way.",
+        GateAnswer::StopRun => "You stopped the run here.",
+    }
+}
+
 /// Answers a gate for exactly one live Agent Desk execution.
 ///
 /// Looked up by `(session_id, execution_id)` in the SAME registry
@@ -2285,6 +2298,8 @@ pub enum AnswerGateOutcome {
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_session_answer_gate(
+    app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
     session_id: SessionId,
     execution_id: ExecutionId,
     answer: crate::airun::driver::GateAnswer,
@@ -2292,7 +2307,7 @@ pub async fn agent_session_answer_gate(
     let sender = crate::commands::airun::gate_answers()
         .lock()
         .unwrap()
-        .get(&(session_id, execution_id))
+        .get(&(session_id.clone(), execution_id))
         .cloned();
     match sender {
         Some(tx) => {
@@ -2301,7 +2316,32 @@ pub async fn agent_session_answer_gate(
             // having found one, since the visible effect (nothing resumes)
             // is identical either way.
             match tx.send(answer) {
-                Ok(()) => Ok(AnswerGateOutcome::Delivered),
+                Ok(()) => {
+                    // Write the decision into the transcript.
+                    //
+                    // The answer used to go down this channel and nowhere
+                    // else, and the approval message is created once and never
+                    // amended -- so "Answer sent." lived only in component
+                    // state. After a pane switch, a refetch or a scroll
+                    // remount, a settled decision was amber "Needs your
+                    // approval" again with three live buttons, and clicking
+                    // one said the request was no longer waiting. The app
+                    // invited a click it then refused, on the safety card the
+                    // gate exists for.
+                    //
+                    // Best effort: the answer HAS been delivered by this
+                    // point, so a failed note must not turn a successful
+                    // approval into an error.
+                    if let Ok(root) = resolve_root(&app) {
+                        crate::commands::agent_graph::append_system_note(
+                            locks.inner(),
+                            &root,
+                            &session_id,
+                            gate_answer_note(answer),
+                        );
+                    }
+                    Ok(AnswerGateOutcome::Delivered)
+                }
                 Err(_) => Ok(AnswerGateOutcome::NoLiveGate),
             }
         }

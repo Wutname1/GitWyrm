@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GateRequest, SessionMessage } from '@/lib/bindings'
-import { gateOptions, gateRequestOf, gateSummary } from '@/lib/agentDeskGate'
+import { gateAnswerNoteFor, gateOptions, gateRequestOf, gateSummary } from '@/lib/agentDeskGate'
 
 function approvalMessage(request: GateRequest): SessionMessage {
   return {
@@ -87,5 +87,41 @@ describe('gateOptions', () => {
     for (const o of options) {
       expect(o.label.length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('gateAnswerNoteFor', () => {
+  const msg = (id: string, kind: string, content: string, executionId: string | null = 'e1') =>
+    ({ messageId: id, executionId, plainContent: content, kind }) as never
+
+  const gate = { messageId: 'g', executionId: 'e1' } as never
+
+  it('finds the note recording the answer', () => {
+    const messages = [msg('g', 'approval', 'may I?'), msg('n', 'system', 'You allowed this, just this once.')]
+    expect(gateAnswerNoteFor(messages, gate)).toBe('You allowed this, just this once.')
+  })
+
+  it('ignores a note from a different agent', () => {
+    const messages = [msg('g', 'approval', 'may I?'), msg('n', 'system', 'You stopped the run here.', 'other')]
+    expect(gateAnswerNoteFor(messages, gate)).toBeNull()
+  })
+
+  it('ignores a note that came before the gate', () => {
+    const messages = [msg('n', 'system', 'You stopped the run here.'), msg('g', 'approval', 'may I?')]
+    expect(gateAnswerNoteFor(messages, gate)).toBeNull()
+  })
+
+  it('cannot be settled by an agent quoting the phrase', () => {
+    // Exact match on a system note, not a substring of any message: otherwise
+    // an assistant reply mentioning the wording would retire a live gate.
+    const messages = [
+      msg('g', 'approval', 'may I?'),
+      msg('a', 'assistant', 'I will note that "You allowed this, just this once." and continue.'),
+    ]
+    expect(gateAnswerNoteFor(messages, gate)).toBeNull()
+  })
+
+  it('is null while the gate is genuinely unanswered', () => {
+    expect(gateAnswerNoteFor([msg('g', 'approval', 'may I?')], gate)).toBeNull()
   })
 })

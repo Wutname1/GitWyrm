@@ -13,7 +13,7 @@ import { groupEventStacks, type EventStackGroup } from '@/lib/agentDeskEvents'
 import { parsePlanChecklist } from '@/lib/agentDeskPlan'
 import { displayText, foldThoughtSummaries } from '@/lib/agentDeskTranscript'
 import { shouldShowResultPanel } from '@/lib/agentDeskResult'
-import { gateBody, gateOptions, gateRequestOf, gateSummary, type GateOption } from '@/lib/agentDeskGate'
+import { gateAnswerNoteFor, gateBody, gateOptions, gateRequestOf, gateSummary, type GateOption } from '@/lib/agentDeskGate'
 import { runActivityLabel, runIsActive } from '@/lib/agentDeskResult'
 import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { log, describeError } from '@/lib/log'
@@ -232,9 +232,17 @@ function MessageRow({
   onOpenSource,
   thought,
   onEdit,
+  answeredNote,
 }: {
   sessionId: string
   message: SessionMessage
+  /**
+   * The recorded answer, when this approval has already been decided.
+   *
+   * Passed in rather than derived here because the whole message list is the
+   * evidence, and this row only sees itself.
+   */
+  answeredNote?: string | null
   flash: boolean
   targetNav: MessageTargetNav
   onOpenSource?: () => void
@@ -310,7 +318,15 @@ function MessageRow({
         {planRows.length > 0 && (
           <PlanChecklist rows={planRows} label={message.kind === 'result' ? 'Review findings' : 'Agent plan'} />
         )}
-        {isApproval && <GateApprovalControls sessionId={sessionId} message={message} />}
+        {isApproval &&
+          (answeredNote ? (
+            // Settled. The buttons used to come back live after any remount,
+            // because "sent" lived only in component state -- so a decision
+            // already made re-offered itself and clicking was then refused.
+            <p className="mt-1.5 text-2xs font-medium text-muted-foreground">{answeredNote}</p>
+          ) : (
+            <GateApprovalControls sessionId={sessionId} message={message} />
+          ))}
         {message.targets.length > 0 && (
           <div className="mt-1 flex flex-wrap items-center gap-1">
             {message.targets.map((target, i) => (
@@ -666,6 +682,7 @@ export function ConversationPane({
                     onOpenSource={onOpenSource}
                     thought={thoughtFor.get(m.messageId)}
                     onEdit={m.role === 'user' ? editMessage : undefined}
+                    answeredNote={m.kind === 'approval' ? gateAnswerNoteFor(messages, m) : null}
                   />
                 )
               }

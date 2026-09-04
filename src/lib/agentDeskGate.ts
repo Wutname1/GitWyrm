@@ -122,3 +122,37 @@ export function gateBody(request: GateRequest): string {
       return `The AI asked to do something GitWyrm doesn't recognise: ${request.summary}. Only allow it if you understand what it will do.`
   }
 }
+
+/**
+ * Whether an approval has already been answered.
+ *
+ * The answer used to live only in component state, so a settled decision came
+ * back as amber "Needs your approval" with three live buttons after any
+ * remount -- and clicking one was refused, meaning the app invited a click it
+ * would not honour, on the card the whole gate exists for.
+ *
+ * The backend now writes a system note when an answer is delivered, so the
+ * transcript itself carries the decision. A gate is settled when any message
+ * after it, in the same execution, is one of those notes.
+ *
+ * Matched on the exact sentences the backend writes rather than a substring,
+ * so an agent quoting the phrase in its own reply cannot settle a live gate.
+ */
+const GATE_ANSWER_NOTES = new Set([
+  'You allowed this, just this once.',
+  'You asked the agent to find another way.',
+  'You stopped the run here.',
+])
+
+export function gateAnswerNoteFor(
+  messages: Pick<SessionMessage, 'messageId' | 'executionId' | 'plainContent' | 'kind'>[],
+  gate: Pick<SessionMessage, 'messageId' | 'executionId'>
+): string | null {
+  const at = messages.findIndex((m) => m.messageId === gate.messageId)
+  if (at < 0) return null
+  for (const m of messages.slice(at + 1)) {
+    if (m.executionId !== gate.executionId) continue
+    if (m.kind === 'system' && GATE_ANSWER_NOTES.has(m.plainContent.trim())) return m.plainContent.trim()
+  }
+  return null
+}
