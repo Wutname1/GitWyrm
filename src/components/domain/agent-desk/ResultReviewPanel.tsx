@@ -24,6 +24,8 @@ import {
   canEscalateToFix,
   changedPathStatusLabel,
   changedPathsSummaryLine,
+  describeCommitDestination,
+  failingCheckLines,
   checksSummaryLine,
   explainCommitOutcome,
   explainCompleteOpenSpecTaskOutcome,
@@ -185,6 +187,7 @@ export function ResultReviewPanel({
 
   const availability = resultActionAvailability(record)
   const changedLine = changedPathsSummaryLine(record.changedPaths)
+  const destination = describeCommitDestination(record)
   const checksLine = checksSummaryLine(record.checks)
   const failingChecks = hasFailingCheck(record.checks)
 
@@ -417,6 +420,21 @@ export function ResultReviewPanel({
         )}
       </div>
 
+      {destination && (
+        // Always visible, above everything: the answer to "where does this
+        // go?" is what makes Keep and Commit safe to press.
+        <p className="text-2xs leading-relaxed text-muted-foreground">
+          {destination.branch ? (
+            <>
+              Commits to <span className="font-medium text-foreground">{destination.branch}</span>, in a separate copy
+              of your project. The branch you have open is not touched.
+            </>
+          ) : (
+            destination.sentence
+          )}
+        </p>
+      )}
+
       <div className="rounded-md border border-border bg-panel2 p-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-foreground">{changedLine}</span>
@@ -454,13 +472,36 @@ export function ResultReviewPanel({
       </div>
 
       {checksLine && (
-        <div className="flex items-center gap-1.5 rounded-md border border-border bg-panel2 px-2 py-1.5 text-2xs">
-          {failingChecks ? (
-            <CircleAlert size={12} className="flex-none text-destructive" aria-hidden />
-          ) : (
-            <CheckCircle2 size={12} className="flex-none text-success" aria-hidden />
+        // A failure gets real warning weight rather than looking like the file
+        // list box above it, and names what failed -- the aggregate count
+        // alone left the person to go hunting at the moment of the decision.
+        <div
+          className={cn(
+            'flex items-start gap-1.5 rounded-md border px-2 py-1.5 text-2xs',
+            failingChecks
+              ? 'border-l-2 border-l-[var(--gw-amber)] border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10'
+              : 'border-border bg-panel2'
           )}
-          <span className={cn('text-muted-foreground', failingChecks && 'text-destructive')}>{checksLine}</span>
+        >
+          {failingChecks ? (
+            <CircleAlert size={12} className="mt-px flex-none text-[var(--gw-amber)]" aria-hidden />
+          ) : (
+            <CheckCircle2 size={12} className="mt-px flex-none text-success" aria-hidden />
+          )}
+          <div className="min-w-0 flex-1">
+            <span className={cn('text-muted-foreground', failingChecks && 'font-medium text-foreground')}>
+              {checksLine}
+            </span>
+            {failingChecks && (
+              <ul className="mt-0.5 flex flex-col gap-0.5">
+                {failingCheckLines(record.checks).map((line) => (
+                  <li key={line} className="truncate text-muted-foreground" title={line}>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
 
@@ -557,9 +598,17 @@ export function ResultReviewPanel({
           </ActionButton>
         )}
         {availability.canCommit && commitMessage !== null && (
-          <ActionButton onClick={handleCommit} disabled={busy} variant="primary">
-            Commit
-          </ActionButton>
+          <>
+            <ActionButton onClick={handleCommit} disabled={busy} variant="primary">
+              Commit
+            </ActionButton>
+            {/* Opening the message box used to be one-way: the only exit was
+                committing. Its sibling, Ask for changes, has always offered
+                this. */}
+            <ActionButton onClick={() => setCommitMessage(null)} disabled={busy} variant="ghost">
+              Cancel
+            </ActionButton>
+          </>
         )}
         {availability.canDraftPullRequest && (
           <PullRequestButton
@@ -714,7 +763,10 @@ function PullRequestButton({
         disabled={disabled || drafting}
         icon={<ExternalLink size={12} aria-hidden />}
       >
-        {existing ? `Update pull request #${existing.number}` : 'Create pull request'}
+        {/* An ellipsis because the click opens a draft for review -- nothing
+            is posted until the person acts on the host's own page. A bare
+            "Create pull request" promises something this button does not do. */}
+        {existing ? `Update pull request #${existing.number}…` : 'Draft a pull request…'}
       </ActionButton>
       {draft && (
         <PullRequestDraftDialog

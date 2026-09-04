@@ -361,6 +361,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_config::agent_config_preview_copy,
             commands::agent_config::agent_config_apply_copy,
             commands::agent_config::agent_config_apply_batch,
+            commands::agent_config::agent_config_recent_operations,
             commands::agent_config::agent_config_undo,
             commands::agent_result::agent_result_build,
             commands::agent_result::agent_result_list,

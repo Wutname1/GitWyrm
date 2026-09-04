@@ -390,3 +390,46 @@ export function explainEscalateToFixOutcome(outcome: EscalateToFixOutcome): stri
       return `Could not start a fix chat: ${outcome.detail}`
   }
 }
+
+/**
+ * Where a commit from this result will actually land, in plain words.
+ *
+ * The review panel showed the changed files and the checks and never once
+ * said which branch or which copy of the project the commit goes to. The
+ * backend commits to the WORKTREE's own HEAD (`agent_result.rs:705,729`) --
+ * a different branch from the one open in the main window -- so a person
+ * pressing Commit could reasonably believe it was landing on their own
+ * branch. "Where does this go" is the question an operator has to be able to
+ * answer before an irreversible write.
+ *
+ * `null` when there is no worktree: nothing will be committed, so there is
+ * no destination to promise.
+ */
+export function describeCommitDestination(
+  record: Pick<ResultRecord, 'worktreePath' | 'branch'>
+): { branch: string | null; isolated: boolean; sentence: string } | null {
+  if (!record.worktreePath) return null
+  const branch = record.branch ?? null
+  return {
+    branch,
+    isolated: true,
+    sentence: branch
+      ? `Commits to ${branch}, in a separate copy of your project. The branch you have open is not touched.`
+      : 'Commits into a separate copy of your project. The branch you have open is not touched.',
+  }
+}
+
+/**
+ * The checks that failed, named.
+ *
+ * The panel showed only the aggregate ("2 passed, 1 failed"), discarding the
+ * `commandName` and `summary` each outcome already carries -- so at the one
+ * moment the person decides whether to accept the work, they could see THAT
+ * something failed but had to go elsewhere to learn WHAT. The name is the
+ * part that decides whether a failure matters.
+ */
+export function failingCheckLines(checks: ResultCheckOutcome[]): string[] {
+  return checks
+    .filter((c) => c.outcome === 'failed')
+    .map((c) => (c.summary ? `${c.commandName} — ${c.summary}` : `${c.commandName} failed`))
+}

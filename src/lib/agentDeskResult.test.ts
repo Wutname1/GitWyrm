@@ -13,6 +13,8 @@ import {
   canEscalateToFix,
   changedPathStatusLabel,
   changedPathsSummaryLine,
+  describeCommitDestination,
+  failingCheckLines,
   checksSummaryLine,
   explainAutoStartOutcome,
   explainCommitOutcome,
@@ -389,5 +391,48 @@ describe('explainEscalateToFixOutcome', () => {
       'The review has not said anything yet.'
     )
     expect(explainEscalateToFixOutcome({ kind: 'failed', detail: 'disk full' })).toBe('Could not start a fix chat: disk full')
+  })
+})
+
+describe('describeCommitDestination', () => {
+  // The panel showed changed files and checks and never said where a commit
+  // lands. The backend commits to the WORKTREE's own HEAD, not the branch in
+  // the main window, so silence here let a person believe the opposite.
+  it('names the branch and says the open branch is untouched', () => {
+    const d = describeCommitDestination({ worktreePath: 'C:/wt', branch: 'agent/fix-login' })
+    expect(d?.branch).toBe('agent/fix-login')
+    expect(d?.sentence).toMatch(/agent\/fix-login/)
+    expect(d?.sentence).toMatch(/not touched/i)
+  })
+
+  it('still promises isolation when the branch name is unknown', () => {
+    const d = describeCommitDestination({ worktreePath: 'C:/wt', branch: null })
+    expect(d?.branch).toBeNull()
+    expect(d?.sentence).toMatch(/separate copy/i)
+  })
+
+  it('promises nothing when there is no worktree to commit from', () => {
+    expect(describeCommitDestination({ worktreePath: null, branch: 'main' })).toBeNull()
+  })
+})
+
+describe('failingCheckLines', () => {
+  const check = (name: string, outcome: ResultCheckOutcome['outcome'], summary: string | null = null) =>
+    ({ commandName: name, outcome, summary }) as ResultCheckOutcome
+
+  it('names what failed, which the aggregate count threw away', () => {
+    const lines = failingCheckLines([
+      check('npm run typecheck', 'failed', '3 errors'),
+      check('npm test', 'passed'),
+    ])
+    expect(lines).toEqual(['npm run typecheck — 3 errors'])
+  })
+
+  it('still names a failure that reported no detail', () => {
+    expect(failingCheckLines([check('cargo test', 'failed')])).toEqual(['cargo test failed'])
+  })
+
+  it('is empty when nothing failed', () => {
+    expect(failingCheckLines([check('npm test', 'passed'), check('lint', 'skipped')])).toEqual([])
   })
 })

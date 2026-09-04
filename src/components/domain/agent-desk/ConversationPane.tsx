@@ -13,7 +13,7 @@ import { groupEventStacks, type EventStackGroup } from '@/lib/agentDeskEvents'
 import { parsePlanChecklist } from '@/lib/agentDeskPlan'
 import { displayText, foldThoughtSummaries } from '@/lib/agentDeskTranscript'
 import { shouldShowResultPanel } from '@/lib/agentDeskResult'
-import { gateOptions, gateRequestOf, gateSummary, type GateOption } from '@/lib/agentDeskGate'
+import { gateBody, gateOptions, gateRequestOf, gateSummary, type GateOption } from '@/lib/agentDeskGate'
 import { log, describeError } from '@/lib/log'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { SessionSourceBanner } from './SessionSourceBanner'
@@ -195,6 +195,12 @@ function GateApprovalControls({ sessionId, message }: { sessionId: string; messa
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
       <p className="w-full text-2xs font-medium text-foreground">{gateSummary(request)}</p>
+      {/* The consequence, not just the ask. This used to show only the
+          one-line summary, so the warnings that exist precisely because undo
+          cannot help -- a command that reaches outside the project, or one
+          that sends work off this machine where other people can see it --
+          never reached the person actually answering the gate. */}
+      <p className="w-full text-2xs leading-relaxed text-muted-foreground">{gateBody(request)}</p>
       {gateOptions().map((option) => (
         <button
           key={option.answer}

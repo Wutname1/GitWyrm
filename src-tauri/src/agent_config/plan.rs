@@ -243,6 +243,34 @@ pub fn read_receipt(roots: &SafeWriteRoot, operation_id: &str) -> Option<Operati
     serde_json::from_slice(&bytes).ok()
 }
 
+/// Every receipt on disk, newest first.
+///
+/// Undo has always worked by operation id, and receipts were written to be
+/// "read back weeks later to undo a write" -- but nothing could ever produce
+/// that id again once the dialog that returned it closed, so Undo was
+/// reachable for a few seconds and then gone forever. This is the missing
+/// half: the list a person can come back to.
+///
+/// Unreadable entries are skipped rather than failing the whole listing. A
+/// receipt written by a future build, or a half-written file, must not make
+/// the other operations un-undoable.
+pub fn list_receipts(roots: &SafeWriteRoot) -> Vec<OperationReceipt> {
+    let dir = roots.0.join("receipts");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut receipts: Vec<OperationReceipt> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .filter_map(|e| fs::read(e.path()).ok())
+        .filter_map(|bytes| serde_json::from_slice::<OperationReceipt>(&bytes).ok())
+        .collect();
+    // Newest first: `applied_at` is RFC 3339 UTC, so a string sort is a time
+    // sort, and the most recent write is the one most likely to be undone.
+    receipts.sort_by(|a, b| b.applied_at.cmp(&a.applied_at));
+    receipts
+}
+
 fn write_receipt_overwrite(roots: &SafeWriteRoot, receipt: &OperationReceipt) -> Result<(), ApplyWriteError> {
     write_receipt(roots, receipt)
 }
@@ -561,5 +589,92 @@ mod tests {
         let restored = undo_write(&roots, "op-x").unwrap();
         assert!(restored.undone);
         assert_eq!(fs::read_to_string(&dest).unwrap(), original);
+    }
+
+    // -- list_receipts: the half of "receipt and Undo" that was missing. Undo
+    // took an operation id that only ever existed in the apply dialog's own
+    // state, so closing that dialog made the write permanent in practice. --
+
+    #[test]
+    fn every_applied_write_can_be_found_again_newest_first() {
+        let (dir, roots) = roots();
+        for (i, op) in ["op-1", "op-2", "op-3"].iter().enumerate() {
+            let dest = dir.path().join(format!("dest-{i}.json"));
+            fs::write(&dest, "{}").unwrap();
+            apply_write(
+                &roots,
+                "plan-1",
+                "claude-code",
+                &dest,
+                Some(&hash_bytes(b"{}")),
+                b"{\"a\":1}",
+                op,
+                &format!("2026-01-0{}T00:00:00Z", i + 1),
+            )
+            .unwrap();
+        }
+
+        let listed = list_receipts(&roots);
+        assert_eq!(listed.len(), 3, "every write must be findable again");
+        // Newest first: the most recent write is the one most likely to be undone.
+        let ids: Vec<&str> = listed.iter().map(|r| r.operation_id.as_str()).collect();
+        assert_eq!(ids, vec!["op-3", "op-2", "op-1"]);
+    }
+
+    #[test]
+    fn listing_is_empty_before_anything_has_been_applied() {
+        let (_dir, roots) = roots();
+        assert!(list_receipts(&roots).is_empty());
+    }
+
+    #[test]
+    fn one_unreadable_receipt_does_not_hide_the_others() {
+        // A receipt written by a future build, or a half-written file, must
+        // not make every other operation un-undoable.
+        let (dir, roots) = roots();
+        let dest = dir.path().join("dest.json");
+        fs::write(&dest, "{}").unwrap();
+        apply_write(
+            &roots,
+            "plan-1",
+            "claude-code",
+            &dest,
+            Some(&hash_bytes(b"{}")),
+            b"{\"a\":1}",
+            "op-good",
+            "2026-01-01T00:00:00Z",
+        )
+        .unwrap();
+        fs::write(roots.receipt_path("op-broken"), b"{ not json").unwrap();
+
+        let listed = list_receipts(&roots);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].operation_id, "op-good");
+    }
+
+    #[test]
+    fn an_undone_operation_still_lists_and_says_it_was_undone() {
+        // The list is a history, not a to-do: an already-undone write stays
+        // visible so a person can see what happened rather than wondering
+        // whether it ever did.
+        let (dir, roots) = roots();
+        let dest = dir.path().join("dest.json");
+        fs::write(&dest, "{}").unwrap();
+        apply_write(
+            &roots,
+            "plan-1",
+            "claude-code",
+            &dest,
+            Some(&hash_bytes(b"{}")),
+            b"{\"a\":1}",
+            "op-1",
+            "2026-01-01T00:00:00Z",
+        )
+        .unwrap();
+        undo_write(&roots, "op-1").unwrap();
+
+        let listed = list_receipts(&roots);
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].undone, "an undone write must say so rather than vanishing");
     }
 }

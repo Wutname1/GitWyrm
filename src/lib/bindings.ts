@@ -3643,6 +3643,23 @@ async agentConfigApplyBatch(request: BatchApplyRequest) : Promise<Result<BatchAp
 }
 },
 /**
+ * Every copy this app has made, newest first, so one can be undone later.
+ * 
+ * Undo has always taken an operation id, and receipts have always been
+ * written to outlive the release that made them -- but the id only ever
+ * existed in the apply dialog's own state, so closing that dialog made the
+ * write permanent in practice. The vision's "receipt and Undo" needs both
+ * halves; this is the one that was missing.
+ */
+async agentConfigRecentOperations() : Promise<Result<OperationReceipt[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_config_recent_operations") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Undo one operation by ID, restoring byte-identical prior content unless
  * the destination changed since the write (task 3.4).
  */

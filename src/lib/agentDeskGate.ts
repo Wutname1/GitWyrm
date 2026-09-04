@@ -76,3 +76,16 @@ export function gateOptions(): GateOption[] {
     { label: 'Stop the run', answer: 'stopRun' },
   ]
 }
+
+/**
+ * The consequence paragraph for a gate, re-exported so the transcript's
+ * inline gate and the standalone card cannot drift apart.
+ *
+ * It lives in `GateCard` because that is where it was written; what matters
+ * is that there is exactly one of it. The transcript used to render only
+ * `gateSummary`, so the warnings that exist because undo cannot help --
+ * a command reaching outside the project, or one sending work off this
+ * machine -- never reached the person answering the gate, which is the
+ * only place they matter.
+ */
+export { gateBody } from '@/components/domain/ai-run/GateCard'

@@ -626,6 +626,22 @@ pub async fn agent_config_apply_batch(app: AppHandle, request: BatchApplyRequest
     .map_err(|e| AppError::Other(e.to_string()))
 }
 
+/// Every copy this app has made, newest first, so one can be undone later.
+///
+/// Undo has always taken an operation id, and receipts have always been
+/// written to outlive the release that made them -- but the id only ever
+/// existed in the apply dialog's own state, so closing that dialog made the
+/// write permanent in practice. The vision's "receipt and Undo" needs both
+/// halves; this is the one that was missing.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_config_recent_operations(app: AppHandle) -> Result<Vec<crate::agent_config::model::OperationReceipt>, AppError> {
+    let write_root = resolve_write_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || plan::list_receipts(&write_root))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
 /// Undo one operation by ID, restoring byte-identical prior content unless
 /// the destination changed since the write (task 3.4).
 #[tauri::command]
