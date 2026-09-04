@@ -19,7 +19,9 @@ use gitwyrm_lib::agent_copilot_cli::{self, CliState};
 fn installed_cli() -> Option<std::path::PathBuf> {
     match &agent_copilot_cli::detect().state {
         CliState::Ready { path, .. } => Some(std::path::PathBuf::from(path)),
-        CliState::TooOld { .. } | CliState::NotFound => None,
+        // A CLI that is installed but not answering cannot run this test
+        // either, so it skips alongside the other unusable states.
+        CliState::TooOld { .. } | CliState::NotFound | CliState::FoundButUnresponsive { .. } => None,
     }
 }
 

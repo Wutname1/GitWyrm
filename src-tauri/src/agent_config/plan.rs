@@ -130,7 +130,7 @@ impl SafeWriteRoot {
 /// backup write and the final destination write so both get the same
 /// crash-safety guarantee `agentdesk::store::write_atomic` gives session
 /// files.
-fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), ApplyWriteError> {
+pub(crate) fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), ApplyWriteError> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(dir).map_err(|e| ApplyWriteError::CreateDir {
         dir: dir.to_path_buf(),

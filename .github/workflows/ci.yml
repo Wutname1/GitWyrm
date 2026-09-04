@@ -96,6 +96,16 @@ jobs:
       - name: Check
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
+      # `cargo check` does not build test targets, and the Test step below runs
+      # only --lib, so the 20-odd integration test binaries under tests/ were
+      # compiled by neither. One of them sat broken through several green CI
+      # runs: a new enum variant was added, every `match` in the lib was
+      # updated, and the one in tests/ was not. Compiling them here is cheap and
+      # catches exactly that. Most need a real repo or an installed CLI to run,
+      # which is why this builds them rather than running them.
+      - name: Check tests compile
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-run
+
       - name: Test
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 

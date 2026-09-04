@@ -51,9 +51,18 @@ fn plan_path(roots: &SafeWriteRoot, plan_id: &str) -> PathBuf {
     roots.plans_dir().join(format!("{plan_id}.json"))
 }
 
+/// The plan file is what Undo reads to put things back, so a torn one is
+/// worse than none: `read_plan` returns `None` for unparseable JSON, which
+/// the caller reports as an expired plan -- the person is told the plan is
+/// gone while the copies it describes have already landed.
+///
+/// A plain `fs::write` truncates in place, so a crash or a full disk between
+/// truncate and the last byte leaves exactly that. Every other write in this
+/// feature already goes through a temp file and a rename; this one did not.
 fn write_plan(roots: &SafeWriteRoot, plan: &CopyPlan) -> Result<(), AppError> {
     let json = serde_json::to_vec_pretty(plan).map_err(|e| AppError::Other(e.to_string()))?;
-    std::fs::write(plan_path(roots, &plan.plan_id), json).map_err(AppError::Io)
+    crate::agent_config::plan::write_atomic_bytes(&plan_path(roots, &plan.plan_id), &json)
+        .map_err(|e| AppError::Other(e.to_string()))
 }
 
 fn read_plan(roots: &SafeWriteRoot, plan_id: &str) -> Option<CopyPlan> {
@@ -714,6 +723,59 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = SafeWriteRoot::at(dir.path().join("agent-config-sync").join("v1")).unwrap();
         (dir, root)
+    }
+
+    /// The plan file is what Undo reads to put copies back. `read_plan`
+    /// returns `None` for unparseable JSON, and callers report that as an
+    /// expired plan -- so a half-written file tells the person their plan is
+    /// gone while the copies it describes have already landed.
+    ///
+    /// This pins the property that makes that impossible: writing over an
+    /// existing plan never leaves a third state on disk. A plain `fs::write`
+    /// truncates in place and does.
+    #[test]
+    fn overwriting_a_plan_never_leaves_a_partial_file() {
+        let (_dir, roots) = write_root();
+        let plan = CopyPlan {
+            plan_id: "plan-atomic".into(),
+            item_id: "Skill:demo".into(),
+            source_item: sample_item(ClientId::ClaudeCode, "demo"),
+            destinations: Vec::new(),
+            created_at: now_rfc3339(),
+        };
+        write_plan(&roots, &plan).unwrap();
+
+        // Overwrite with a much larger plan: a truncating write would pass
+        // through a state where the file holds neither one.
+        let mut bigger = plan.clone();
+        bigger.destinations = (0..200)
+            .map(|i| DestinationPreview {
+                client: ClientId::OpenCode,
+                destination_path: format!("/fake/dest/{i}"),
+                before_hash: None,
+                proposed_content: "x".repeat(400),
+                redacted_diff_summary: Vec::new(),
+                warnings: Vec::new(),
+                write_supported: true,
+            })
+            .collect();
+        write_plan(&roots, &bigger).unwrap();
+
+        let back = read_plan(&roots, "plan-atomic").expect("plan is readable after overwrite");
+        assert_eq!(back.destinations.len(), 200);
+
+        // And the rename left no temp file beside it for the person to find.
+        let dir = plan_path(&roots, "plan-atomic")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let strays: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| !n.ends_with(".json"))
+            .collect();
+        assert!(strays.is_empty(), "left temp files behind: {strays:?}");
     }
 
     fn sample_item(client: ClientId, identity: &str) -> RawItem {

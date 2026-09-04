@@ -140,3 +140,6 @@ competing sub-agents, the answer names the losing option too.
 | 132 | 2026-09-04 | Should a comment asserting a safety guarantee be trusted? | No -- it is an untested assertion until a test pins it; eleven findings have now come from comments that were simply wrong. |
 | 133 | 2026-09-04 | Could an assistant's finished work be left out with nothing saying so? | Yes -- two different situations both returned "nothing", and only one of them told you about it. |
 
+| 134 | 2026-09-04 | Did the "copying failed" message tell the truth? | No -- it said "Nothing was changed" for a command that cannot fail as a whole, so it only ever appeared after some copies had already landed. |
+| 135 | 2026-09-04 | Could the "spec changed" notice be cleared by the button it pointed at? | No -- refreshing updates the cached copy, drift compares a fingerprint of what an agent read, so the button answered "nothing changed" while the notice stayed up. |
+| 136 | 2026-09-04 | Was CI compiling the integration tests? | No -- it ran `--lib` only, so 22 test binaries were never built, and one of mine sat broken through several green runs. |
