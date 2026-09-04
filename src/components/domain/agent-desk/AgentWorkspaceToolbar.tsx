@@ -4,6 +4,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
@@ -41,7 +44,7 @@ export function AgentWorkspaceToolbar({
   dock: DockState | null
   onMoveDock: (zone: DockZone) => void
   onUnpinDock: () => void
-  onPinDock: (kind: DockKind) => void
+  onPinDock: (kind: DockKind, zone: DockZone) => void
   onResetLayout: () => void
   /** Icons only, at compact/narrow widths (mockup's 760px rule). */
   hideLabels: boolean
@@ -105,10 +108,23 @@ export function AgentWorkspaceToolbar({
             </>
           ) : (
             <>
+              {/* Every zone, not just the right. All three items used to pin
+                  to the right, and the right edge is unavailable below a
+                  window width the moving path already knows about -- so on a
+                  narrow window the only pinning affordance in the product
+                  produced no visible change at all. Bottom and left are safe
+                  at that width and were unreachable from a cold start. */}
               {(['source', 'context', 'graph'] as const).map((kind) => (
-                <DropdownMenuItem key={kind} onSelect={() => onPinDock(kind)}>
-                  Pin {dockKindLabel(kind).toLowerCase()} to the right
-                </DropdownMenuItem>
+                <DropdownMenuSub key={kind}>
+                  <DropdownMenuSubTrigger>Pin {dockKindLabel(kind).toLowerCase()}…</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {ALL_DOCK_ZONES.map((zone) => (
+                      <DropdownMenuItem key={zone} onSelect={() => onPinDock(kind, zone)}>
+                        {zoneLabel(zone)}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
               ))}
             </>
           )}

@@ -550,6 +550,30 @@ export function AgentDeskView() {
    * honoured says why and leaves the panel exactly where it was, rather than
    * silently doing nothing and looking broken.
    */
+  /**
+   * Pin a panel to a chosen zone, through the same rejection path moving
+   * already uses.
+   *
+   * Pinning used to hardcode the right edge, which is unavailable below a
+   * window width -- so on a narrow window the only pinning affordance in the
+   * product silently did nothing. Now every zone is offered and an unsafe one
+   * says why instead of failing quietly.
+   */
+  const onPinDock = (kind: DockKind, zone: DockZone) => {
+    const outcome = resolveDrop({
+      targetZone: zone,
+      dock: layout.dock,
+      rightZoneUnavailable: !isRightDockSafeAtWidth(windowWidth),
+    })
+    if (outcome.status === 'reject') {
+      toast.info(outcome.reason)
+      return
+    }
+    const placement = zoneToPlacement(outcome.zone)
+    openDock(kind, placement.edge, placement.leftOrder)
+    toast.success(`Panel pinned: ${zoneLabel(outcome.zone).toLowerCase()}.`)
+  }
+
   const onMoveDock = (zone: DockZone) => {
     const outcome = resolveDrop({
       targetZone: zone,
@@ -703,7 +727,7 @@ export function AgentDeskView() {
                   dock={layout.dock}
                   onMoveDock={onMoveDock}
                   onUnpinDock={closeDock}
-                  onPinDock={(kind) => openDock(kind, 'right')}
+                  onPinDock={onPinDock}
                   onResetLayout={() => setResetConfirmOpen(true)}
                   hideLabels={shouldHideButtonLabels(responsiveMode)}
                 />
