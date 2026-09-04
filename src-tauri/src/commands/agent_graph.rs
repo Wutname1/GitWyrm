@@ -1394,16 +1394,39 @@ fn advance_graph_after_helper_completion(
     // and its work would be folded into the integration worktree on that
     // basis. Judged BEFORE integration, so unmet work is not merged.
     let session = match enforce_completion_condition(locks, root, session_id, finished_execution_id, session) {
-        Some(updated) => updated,
+        CompletionCheck::Passed(updated) => updated,
         // Marked Failed instead: nothing to integrate, and the scheduler
         // treats it like any other helper that ended badly.
-        None => match store::read_session(root, session_id) {
+        CompletionCheck::Refused => match store::read_session(root, session_id) {
             Ok(s) => {
                 maybe_start_review_or_finish_graph(app, locks, root, session_id, &s);
                 return;
             }
             Err(_) => return,
         },
+        // The helper is not in the session that was just read. Nothing was
+        // judged and nothing was marked, so this used to skip integration in
+        // silence: the graph showed the helper Finished while its work never
+        // reached the combined result. Say so, then carry on exactly as the
+        // refusal path does -- the scheduler still needs to move.
+        CompletionCheck::ExecutionMissing => {
+            log::warn!(
+                "completion check: execution {finished_execution_id} is not in session {session_id};                  skipping integration"
+            );
+            append_system_note(
+                locks,
+                root,
+                session_id,
+                "One agent's work could not be checked, so it was not folded in. Its own files are untouched.",
+            );
+            match store::read_session(root, session_id) {
+                Ok(s) => {
+                    maybe_start_review_or_finish_graph(app, locks, root, session_id, &s);
+                    return;
+                }
+                Err(_) => return,
+            }
+        }
     };
 
     // P1 "serialize helper integration": one integration pass for this
@@ -2223,32 +2246,54 @@ fn maybe_start_review_or_finish_graph(
 ///
 /// Returns the session unchanged when the condition was met (or there was
 /// none). When it was not, the helper is marked `Failed` with the reason in
-/// plain words and `None` comes back, so the caller skips integration
+/// plain words and `Refused` comes back, so the caller skips integration
 /// entirely: work that did not meet its condition must not be merged on the
 /// strength of the helper having stopped.
+///
+/// The third outcome exists because this used to return a bare `Option`, and
+/// `None` meant two different things: "judged and refused" and "the execution
+/// was not in the session". The second marked nothing, wrote no note, and the
+/// caller's own comment said "Marked Failed instead" -- so a helper could show
+/// as Finished in the graph while its work never reached the combined result,
+/// with nothing anywhere saying so. Named separately now, and the caller says
+/// it out loud.
 ///
 /// Only a `Finished` helper is judged. One that already failed or was
 /// stopped has its own reason, and re-labelling it here would replace a true
 /// account with a narrower one.
+enum CompletionCheck {
+    /// Condition met, or none set: integrate as normal.
+    Passed(AgentSession),
+    /// Judged and refused: the helper is marked `Failed` and a note written.
+    Refused,
+    /// The execution named is not in this session. Nothing was judged, so
+    /// nothing is marked -- but the caller must not treat that silence as a
+    /// refusal it has already explained to the person.
+    ExecutionMissing,
+}
+
 fn enforce_completion_condition(
     locks: &crate::agentdesk::SessionLocks,
     root: &SessionStoreRoot,
     session_id: &str,
     helper_execution_id: &str,
     session: AgentSession,
-) -> Option<AgentSession> {
+) -> CompletionCheck {
     use crate::agentdesk::completion::{judge, CompletionVerdict};
 
-    let helper = session
+    let Some(helper) = session
         .executions
         .iter()
-        .find(|e| e.execution_id == helper_execution_id)?;
+        .find(|e| e.execution_id == helper_execution_id)
+    else {
+        return CompletionCheck::ExecutionMissing;
+    };
     if helper.state != SessionState::Finished || helper.parent_execution_id.is_none() {
-        return Some(session);
+        return CompletionCheck::Passed(session);
     }
     let condition = helper.completion.clone();
     if condition.is_none() {
-        return Some(session);
+        return CompletionCheck::Passed(session);
     }
 
     let checks = crate::commands::agent_result::checks_for_execution(&session, helper_execution_id);
@@ -2256,7 +2301,7 @@ fn enforce_completion_condition(
     let result = results.iter().find(|r| r.execution_id == helper_execution_id);
 
     let CompletionVerdict::Unmet { reason } = judge(condition.as_ref(), &checks, result) else {
-        return Some(session);
+        return CompletionCheck::Passed(session);
     };
 
     let title = helper
@@ -2271,7 +2316,7 @@ fn enforce_completion_condition(
         }
     });
     append_system_note(locks, root, session_id, &format!("\"{title}\" stopped without finishing its job. {reason}"));
-    None
+    CompletionCheck::Refused
 }
 
 /// Marks every helper that can never start as `Failed`, and says why in the
@@ -5458,7 +5503,10 @@ mod tests {
 
         // It never ran the check, so the condition is unmet.
         let outcome = enforce_completion_condition(&locks, &root, "sess-1", "helper-1", session);
-        assert!(outcome.is_none(), "an unmet condition must stop integration");
+        assert!(
+            matches!(outcome, CompletionCheck::Refused),
+            "an unmet condition must stop integration"
+        );
 
         let after = store::read_session(&root, "sess-1").unwrap();
         let helper = after
@@ -5509,13 +5557,35 @@ mod tests {
             let session = store::read_session(&root, "sess-1").unwrap();
 
             assert!(
-                enforce_completion_condition(&locks, &root, "sess-1", id, session).is_some(),
+                matches!(
+                    enforce_completion_condition(&locks, &root, "sess-1", id, session),
+                    CompletionCheck::Passed(_)
+                ),
                 "{id} should carry on to integration"
             );
             let after = store::read_session(&root, "sess-1").unwrap();
             let helper = after.executions.iter().find(|e| e.execution_id == id).unwrap();
             assert_eq!(helper.state, SessionState::Finished, "{id}");
         }
+    }
+
+    /// The path that used to be silent. `None` meant both "judged and
+    /// refused" and "not in the session", so a helper missing from the record
+    /// skipped integration with nothing marked and nothing written -- while
+    /// the caller's own comment claimed it had been marked Failed.
+    #[test]
+    fn a_helper_missing_from_the_session_is_reported_not_silently_skipped() {
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+        let session = store::read_session(&root, "sess-1").unwrap();
+
+        let outcome = enforce_completion_condition(&locks, &root, "sess-1", "not-here", session);
+
+        assert!(
+            matches!(outcome, CompletionCheck::ExecutionMissing),
+            "a missing execution is its own outcome, not the refusal one"
+        );
     }
 
     fn seed_lead_turn(root: &SessionStoreRoot, session_id: &str, mode: &str, team: &str, reply_text: &str) -> String {
