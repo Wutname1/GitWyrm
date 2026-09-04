@@ -125,4 +125,5 @@ competing sub-agents, the answer names the losing option too.
 | 117 | 2026-09-04 | Should removing a helper from a plan ask for confirmation? | No -- nothing has run yet and the plan is still a proposal, so a dialog would be ceremony over a change you can undo by asking for a new plan. |
 | 118 | 2026-09-04 | Did a file pattern like `src/*.rs` actually let an assistant write there? | No -- the matcher had no case for a star inside a segment, so it matched nothing and every write was refused after the person had already approved it. |
 | 119 | 2026-09-04 | Was the guard against "failed read shown as absence" actually working? | No -- it asked whether the file handled any failure, so one guarded query excused an unguarded one; it now checks each query by name. |
+| 120 | 2026-09-04 | Why did a failed settings copy show two different messages? | An error handler written for undo had been pasted into the copy hook, so it described putting a change back while the copy's own message said it could not be copied. |
 

@@ -6,7 +6,6 @@ import {
   Trash2,
   Bot,
 } from 'lucide-react'
-import { toast } from 'sonner'
 import type { AgentSessionHeader } from '@/lib/bindings'
 import { formatCompactAge, sourceKindLabel } from '@/lib/agentSessionGrouping'
 import { cn } from '@/lib/utils'
@@ -198,8 +197,9 @@ export function SessionRow({
         {header.archived ? (
           <ContextMenuItem
             onSelect={() => {
+              // The mutation reports both outcomes; this used to claim success
+              // before it had run.
               onArchive(header.sessionId, false)
-              toast.success(`Restored "${title}".`)
             }}
           >
             <ArchiveRestore />
@@ -209,9 +209,6 @@ export function SessionRow({
           <ContextMenuItem
             onSelect={() => {
               onArchive(header.sessionId, true)
-              toast.success(`Archived "${title}".`, {
-                description: 'You can restore it from the Archived filter any time.',
-              })
             }}
           >
             <Archive />

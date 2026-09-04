@@ -54,6 +54,18 @@ export function useAgentSessionMutations() {
       if (outcome.kind !== 'updated') {
         log.warn(`agent session archive: ${outcome.kind} for ${vars.sessionId}`)
         toast.error(vars.archived ? 'Could not archive that chat.' : 'Could not restore that chat.')
+        return
+      }
+      // Success is reported HERE, once it has actually happened. The row used
+      // to toast "Archived" synchronously on click, before the mutation ran,
+      // so a failure produced a green confirmation and a red refusal for the
+      // same click and the person could not tell which was true.
+      if (vars.archived) {
+        toast.success('Chat archived.', {
+          description: 'You can restore it from the Archived filter any time.',
+        })
+      } else {
+        toast.success('Chat restored.')
       }
     },
     onError: (e, vars) => {

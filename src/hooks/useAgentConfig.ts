@@ -53,17 +53,6 @@ export function useApplyAgentConfigCopy(repoId: string | null) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (planId: string) => unwrap(await commands.agentConfigApplyCopy(planId)),
-    // `onSuccess` covers a REFUSED undo -- one the backend answered. A thrown
-    // one never reaches it, so a failed undo was still indistinguishable from
-    // a successful one, which is the exact thing the comment above says this
-    // hook exists to prevent. Handled here rather than at the call sites
-    // because there are three of them and none passed an `onError`.
-    onError: (e) => {
-      log.error(`agent config undo failed: ${describeError(e)}`)
-      toast.error('That change could not be put back.', {
-        description: 'It has been left as it is. Nothing else was touched.',
-      })
-    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.agentConfigInventory(repoId) })
       // The receipt list shows an `undone` flag, so it has to be refetched or
@@ -113,6 +102,20 @@ export function useUndoAgentConfigCopy(repoId: string | null) {
       const { message, restored } = explainConfigUndoOutcome(outcome)
       if (restored) toast.success(message)
       else toast.warning(message)
+    },
+    // `onSuccess` covers a REFUSED undo -- one the backend answered. A thrown
+    // one never reaches it, so a failed undo was indistinguishable from a
+    // successful one, which is what this hook exists to prevent.
+    //
+    // This was added in an earlier pass and landed on the APPLY hook by
+    // mistake, where its undo wording ("could not be put back") fired
+    // alongside the call site's correct "could not be copied" -- two toasts
+    // for one failure, one of them describing a different action.
+    onError: (e) => {
+      log.error(`agent config undo failed: ${describeError(e)}`)
+      toast.error('That change could not be put back.', {
+        description: 'It has been left as it is. Nothing else was touched.',
+      })
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.agentConfigInventory(repoId) })
