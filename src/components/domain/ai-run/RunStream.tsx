@@ -61,7 +61,11 @@ function StreamRow({
   onViewDiff?: (path: string) => void
   gateBusy?: boolean
   isLatest: boolean
-}) {
+  // Annotated so the switch below is actually exhaustiveness-checked. Without
+  // it a missing arm infers `undefined` and renders as a blank list item --
+  // which is exactly what happened to `contextUsage`, under a comment three
+  // screens down claiming a future step kind could not do that.
+}): React.ReactNode {
   switch (step.kind) {
     case 'preflight':
       return (
@@ -170,10 +174,13 @@ function StreamRow({
       return <Row icon={null} text={step.detail} />
 
     // Bookkeeping, never a visible row. `aiRunStore` already drops these
-    // before they reach `steps`, so this arm is unreachable in practice --
-    // it exists so the switch stays exhaustive and a future step kind
-    // cannot silently render as an empty list item.
+    // before they reach `steps`, so these arms are unreachable in practice --
+    // they exist so the switch stays exhaustive and a future step kind
+    // cannot silently render as an empty list item. That guarantee is only
+    // real because of the return-type annotation above; it was missing, and
+    // `contextUsage` slipped through as a blank row.
     case 'usage':
+    case 'contextUsage':
       return null
   }
 }

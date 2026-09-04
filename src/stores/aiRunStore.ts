@@ -46,7 +46,12 @@ export const useAiRunStore = create<AiRunStore>((set) => ({
       // has no place in the visible stream. Dropping it here rather than in
       // the renderer keeps it out of `latest` too, which would otherwise show
       // the step's internal summary as the run's status line.
-      if (event.step.kind === 'usage') {
+      // `contextUsage` is the same kind of bookkeeping and was not filtered,
+      // so a real run's status line read "Context window: 31000 of 200000"
+      // as though that were what the agent was doing -- visible in the status
+      // bar tooltip, which is where `latest` is actually read. The comment
+      // above described this exact failure and guarded one variant of it.
+      if (event.step.kind === 'usage' || event.step.kind === 'contextUsage') {
         return {
           byRepo: {
             ...s.byRepo,
