@@ -76,3 +76,28 @@ describe('transcriptEventAnchors', () => {
     expect(transcriptEventAnchors(messages)).toEqual([])
   })
 })
+
+describe('the mirror of ConversationPane stays a mirror', () => {
+  // This function's own doc says "Mirror this function's body whenever the
+  // flatMap in ConversationPane.tsx changes" -- a hand-sync instruction with
+  // nothing enforcing it. Pass 38 checked they agreed; pass 40 checked again.
+  // Checking by hand every pass is not a mechanism.
+  //
+  // Both skip rules are one line each and quoted verbatim below, so a change
+  // to either side fails here and names what to look at. Deliberately NOT a
+  // full parse: the point is to notice drift, not to re-implement JSX.
+  const RULES = ["if (m.kind === 'tool')", 'foldedThoughtIds.has(m.messageId)']
+
+  it('applies the same two skip rules the transcript body does', async () => {
+    // @ts-expect-error -- no @types/node in this project; available at runtime
+    const { readFileSync } = await import('node:fs')
+    // @ts-expect-error -- no @types/node in this project; available at runtime
+    const { fileURLToPath } = await import('node:url')
+    const root = fileURLToPath(new URL('../', import.meta.url))
+    const pane = readFileSync(`${root}components/domain/agent-desk/ConversationPane.tsx`, 'utf8')
+    const mirror = readFileSync(`${root}lib/agentDeskTranscriptRows.ts`, 'utf8')
+
+    const missing = RULES.filter((rule) => !pane.includes(rule) || !mirror.includes(rule))
+    expect(missing, 'these skip rules are no longer in both places').toEqual([])
+  })
+})
