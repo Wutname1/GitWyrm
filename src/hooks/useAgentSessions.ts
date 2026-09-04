@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { listen } from '@tauri-apps/api/event'
+import { toast } from 'sonner'
 import {
   commands,
   type AgentSession,
@@ -175,6 +176,13 @@ export function useAgentSessionListener() {
         .catch((e) => {
           listenerStarting = false
           log.error(`agent session listener: could not subscribe: ${String(e)}`)
+          // Say so. Without live events the desk keeps rendering whatever it
+          // last read: a running agent looks like a finished, empty chat, and
+          // nothing on screen suggests anything is wrong. A log line is not a
+          // user-visible response, which house rule 1 requires.
+          toast.error('GitWyrm is not receiving live updates from your agents.', {
+            description: 'What you see may be out of date. Reopening the window usually fixes it.',
+          })
         })
     }
 

@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { commands, type ClientId } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { explainConfigUndoOutcome } from '@/lib/agentConfig'
+import { describeError, log } from '@/lib/log'
 
 /**
  * Agent Setup: read-only inventory scan (architecture.md section 13,
@@ -70,8 +71,19 @@ export function useApplyAgentConfigBatch(repoId: string | null) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (planIds: string[]) => unwrap(await commands.agentConfigApplyBatch({ planIds })),
+    // A failure here used to be completely silent: the button stopped spinning
+    // and nothing else happened, so a copy that did not run looked identical
+    // to one that did. `useUndoAgentConfigCopy` below reports both outcomes;
+    // this member of the same family simply omitted it.
+    onError: (e) => {
+      log.error(`agent config batch apply failed: ${describeError(e)}`)
+      toast.error('Those settings could not be copied.', {
+        description: 'Nothing was changed. You can try again.',
+      })
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.agentConfigInventory(repoId) })
+      qc.invalidateQueries({ queryKey: keys.agentConfigRecentOperations() })
     },
   })
 }

@@ -97,4 +97,5 @@ competing sub-agents, the answer names the losing option too.
 | 89 | 2026-09-04 | Why were warnings unreadable on a light theme? | The five status colours were set once for dark and never rewritten when the theme changed, leaving amber at 1.67:1 against a white panel. |
 | 90 | 2026-09-04 | Should the status colours be fixed per-component or at the token layer? | At the token layer, because every component was already consuming them correctly and one change covers all 56 uses. |
 | 91 | 2026-09-04 | Should a pane be allowed to show an archived chat? | Yes for one you deliberately open, but never as the automatic fallback, since landing there would undo the archiving in the user's eyes. |
+| 92 | 2026-09-04 | Is a log line enough when live updates stop arriving? | No -- the desk keeps showing stale data that looks complete, so the person has to be told on screen. |
 
