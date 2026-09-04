@@ -396,7 +396,24 @@ fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root:
         });
     }
 
-    let existing = readers::read_items(&dest_loc).unwrap_or_default();
+    // `read_items` returns an empty list for a file that is simply absent, so
+    // an Err here is a real failure: the file is there and could not be read
+    // or parsed. `unwrap_or_default()` turned that into "the destination has
+    // nothing in it", which is a different claim -- the diff below would say
+    // "adding a new item" for what may well be an overwrite.
+    let existing = match readers::read_items(&dest_loc) {
+        Ok(items) => items,
+        Err(e) => {
+            warnings.push(PlanWarning {
+                kind: WarningKind::DestinationUnreadable,
+                message: format!(
+                    "GitWyrm could not read {}'s existing settings, so it cannot show what this                      would replace. Details: {e}",
+                    client.label()
+                ),
+            });
+            Vec::new()
+        }
+    };
     let existing_item = existing.iter().find(|i| i.identity == source_item.identity);
     let destination_extra = existing_item.map(|i| &i.extra);
 
@@ -415,7 +432,25 @@ fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root:
         });
     }
 
-    let before = plan::read_current(path).ok().flatten();
+    // Same shape as the read above: a failure here leaves `before_hash` None
+    // and falls back to an empty document, so the proposed content is built as
+    // though the file were blank. Warn once -- the read above covers the
+    // common case, and two warnings for one unreadable file is noise.
+    let before = match plan::read_current(path) {
+        Ok(v) => v,
+        Err(e) => {
+            if !warnings.iter().any(|w| w.kind == WarningKind::DestinationUnreadable) {
+                warnings.push(PlanWarning {
+                    kind: WarningKind::DestinationUnreadable,
+                    message: format!(
+                        "GitWyrm could not read {}'s existing file, so the preview below starts                          from an empty one. Details: {e}",
+                        client.label()
+                    ),
+                });
+            }
+            None
+        }
+    };
     let before_hash = before.as_ref().map(|(_, h)| h.clone());
     let current_text = before
         .map(|(bytes, _)| String::from_utf8_lossy(&bytes).into_owned())

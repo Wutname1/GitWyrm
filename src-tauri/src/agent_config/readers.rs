@@ -326,6 +326,34 @@ mod tests {
         assert!(matches!(result, Err(ReadError::Parse { .. })));
     }
 
+    /// The distinction the copy preview depends on.
+    ///
+    /// A file that is simply not there is genuinely empty, and reading it is
+    /// not a failure. A file that exists and cannot be parsed is an
+    /// unanswered question. `build_destination_preview` used to collapse the
+    /// two with `unwrap_or_default()`, so an unreadable destination was
+    /// described as having nothing in it -- and the preview then said "adding
+    /// a new item" for what may have been an overwrite, on the screen whose
+    /// only job is to say what a copy will do before it does it.
+    #[test]
+    fn a_missing_file_and_an_unreadable_one_are_not_the_same_answer() {
+        let dir = TempDir::new().unwrap();
+
+        let absent = dir.path().join("never-created.json");
+        assert_eq!(
+            read_items(&loc(ClientId::ClaudeCode, &absent)).unwrap(),
+            Vec::new(),
+            "an absent file is empty, and that is a real answer"
+        );
+
+        let unreadable = dir.path().join("settings.json");
+        fs::write(&unreadable, "{ not json").unwrap();
+        assert!(
+            read_items(&loc(ClientId::ClaudeCode, &unreadable)).is_err(),
+            "an unparseable file must not read as empty"
+        );
+    }
+
     #[test]
     fn unknown_fields_on_an_item_are_preserved_in_extra() {
         let dir = TempDir::new().unwrap();

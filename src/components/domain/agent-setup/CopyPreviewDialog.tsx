@@ -228,7 +228,10 @@ export function PlanReview({ plan }: { plan: RedactedCopyPlan }) {
                   // celebration.
                   className={cn(
                     'flex items-start gap-1.5 rounded px-1.5 py-1 text-2xs',
-                    w.kind === 'secretWillBeCopied'
+                    // `destinationUnreadable` gets the same weight: it means
+                    // the diff below cannot be trusted to show what is being
+                    // replaced, which is the one thing this dialog is for.
+                    w.kind === 'secretWillBeCopied' || w.kind === 'destinationUnreadable'
                       ? 'bg-[color-mix(in_srgb,var(--gw-amber)_14%,transparent)] text-[var(--gw-amber)]'
                       : 'text-muted-foreground'
                   )}

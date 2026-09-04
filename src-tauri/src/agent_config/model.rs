@@ -386,6 +386,17 @@ pub enum WarningKind {
     /// The destination client was not detected as installed; the file would
     /// still be written to the conventional path.
     ClientNotDetected,
+    /// The destination file exists but could not be read or parsed, so the
+    /// preview below it describes an unknown starting point.
+    ///
+    /// This is NOT "the destination is empty": `readers::read_items` already
+    /// returns an empty list for a file that is simply absent, so an error
+    /// from it means a real failure. Both reads used to swallow that with
+    /// `unwrap_or_default()` / `.ok()`, which turned an unanswered question
+    /// into a confident answer -- the preview said "adding a new item" for
+    /// what may be an overwrite, and built the proposed content as though the
+    /// file were blank.
+    DestinationUnreadable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
