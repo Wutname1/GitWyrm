@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowUp, Paperclip, Sparkles } from 'lucide-react'
+import { ArrowUp, Paperclip, Sparkles, Square } from 'lucide-react'
 import { commands, type AgentSessionHeader } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -48,9 +48,13 @@ import type { ChatProjectChoice } from './NewChatLanding'
  * `canSendComposerDraft`), never the textarea itself, so the user's typing
  * is never dropped while a previous send is in flight.
  *
- * Exactly one action button -- Send. There is deliberately no separate
- * stop/icon-only button beside it; "Stop all" lives only in the Graph panel
- * header (tasks.md 6.5, `AgentGraphPanel`).
+ * One action button, which is Send while the chat is idle and Stop while a
+ * run is going. Stop used to live ONLY in the Graph panel header, and that
+ * panel is not offered for a solo chat (`sessionHasGraph` is false when there
+ * is no helper and no proposed graph) -- so the single highest-stakes control
+ * on the surface was unreachable for the simpler of the two team shapes,
+ * while an agent was editing files. The Graph panel keeps its per-node Stop
+ * and Stop all for team runs; this is the one that is always reachable.
  *
  * Draft text is session-scoped through `useAgentDeskUiStore` (task group 3:
  * "Session-scoped drafts") rather than local `useState` -- replacing this
@@ -199,6 +203,39 @@ export function SessionComposer({
   }
 
   const canSend = canSendComposerDraft({ draft, sessionId, sending })
+  // A run is going, so the action button offers the way out of it.
+  const running = header?.state === 'working' || header?.state === 'preparing' || header?.state === 'needsInput'
+  const [stopping, setStopping] = useState(false)
+
+  const stopRun = async () => {
+    if (!sessionId || stopping) return
+    setStopping(true)
+    try {
+      // Same outcome handling as the Graph panel's Stop all, so the two
+      // controls cannot report the same event differently.
+      const outcome = unwrap(await commands.agentSessionStopExecution(sessionId, { kind: 'all' }))
+      if (outcome.kind === 'stopped') {
+        void qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
+        toast.success(
+          outcome.stopped.length > 0
+            ? `Stopped ${outcome.stopped.length} agent${outcome.stopped.length === 1 ? '' : 's'}; work already done was kept.`
+            : 'Nothing was running.'
+        )
+      } else if (outcome.kind === 'notFound') {
+        toast.error('This chat is gone. It may have been archived elsewhere.')
+      } else if (outcome.kind === 'damaged') {
+        toast.error('This chat file is damaged and could not be stopped.', { description: outcome.reason })
+      } else {
+        toast.error('Could not stop this chat.', { description: outcome.kind })
+      }
+    } catch (e) {
+      const message = describeError(e)
+      log.error(`agent desk: could not stop from the composer: ${message}`)
+      toast.error('Could not stop this chat.', { description: message })
+    } finally {
+      setStopping(false)
+    }
+  }
 
   /**
    * The start step, on its own so Send and the failure card's Try again run
@@ -424,15 +461,27 @@ export function SessionComposer({
 
           <span className="flex-1" />
 
-          <button
-            type="button"
-            disabled={!canSend}
-            onClick={() => void send()}
-            className="flex flex-none items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-2xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {sending ? 'Sending…' : 'Send'}
-            <ArrowUp size={12} />
-          </button>
+          {running ? (
+            <button
+              type="button"
+              disabled={stopping}
+              onClick={() => void stopRun()}
+              className="flex flex-none items-center gap-1 rounded-md border border-destructive/50 px-2.5 py-1 text-2xs font-semibold text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {stopping ? 'Stopping…' : 'Stop'}
+              <Square size={11} aria-hidden />
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={!canSend}
+              onClick={() => void send()}
+              className="flex flex-none items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-2xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {sending ? 'Sending…' : 'Send'}
+              <ArrowUp size={12} />
+            </button>
+          )}
         </div>
       </div>
     </div>
