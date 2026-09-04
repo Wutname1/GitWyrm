@@ -156,7 +156,9 @@ describe('buildUsageRows', () => {
   })
 
   it('formats big numbers the same way the usage card does', () => {
-    expect(nodeUsageLine({ inputTokens: 1_500_000 })).toBe('1.5m tokens')
+    // Labelled "in" because output was never reported: this is not a total.
+    expect(nodeUsageLine({ inputTokens: 1_500_000 })).toBe('1.5m tokens in')
+    expect(nodeUsageLine({ inputTokens: 1_000_000, outputTokens: 500_000 })).toBe('1.5m tokens')
   })
 
   it('never rounds a real charge down to nothing', () => {
@@ -238,6 +240,15 @@ describe('nodeUsageLine', () => {
     expect(line).toMatch(/\$0.04/)
   })
 
+  it('does not count a half it was never told', () => {
+    // Each token field is looked up independently on the Rust side, so a
+    // provider can report one and not the other. Treating the missing half as
+    // zero would present a partial figure as the node's whole spend.
+    expect(nodeUsageLine({ inputTokens: 1200 })).toBe('1.2k tokens in')
+    expect(nodeUsageLine({ outputTokens: 800 })).toBe('800 tokens out')
+    expect(nodeUsageLine({ inputTokens: 1200, outputTokens: 800 })).toBe('2.0k tokens')
+  })
+
   it('uses the singular for one turn', () => {
     expect(nodeUsageLine({ turns: 1 })).toBe('1 turn')
   })
@@ -252,7 +263,9 @@ describe('nodeUsageLine', () => {
 
   it('leaves out the parts that were not reported', () => {
     expect(nodeUsageLine({ turns: 2 })).toBe('2 turns')
-    expect(nodeUsageLine({ inputTokens: 500 })).toBe('500 tokens')
+    // This asserted a bare '500 tokens', which contradicted the test's own
+    // name: output was not reported, so the figure is not the node's total.
+    expect(nodeUsageLine({ inputTokens: 500 })).toBe('500 tokens in')
   })
 
   it('never rounds a real charge down to nothing', () => {

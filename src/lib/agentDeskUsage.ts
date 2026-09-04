@@ -202,13 +202,24 @@ export function buildAgentUsageLines(usage: SessionUsage): AgentUsageLine[] {
 export function nodeUsageLine(usage: ExecutionUsage | null | undefined): string | null {
   if (!usage) return null
   const parts: string[] = []
-  const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+  // Only add up what was actually reported. `?? 0` on both meant a provider
+  // that reported input but not output (each is looked up independently, over
+  // several spellings, in `ai/agent/acp.rs`) had the missing half silently
+  // counted as zero and folded into a figure shown as the node's total -- the
+  // "absent is not zero" rule broken by the very line the doc above says
+  // keeps it. When only one half is known, say which half it is.
+  const haveIn = usage.inputTokens != null
+  const haveOut = usage.outputTokens != null
   // The card's own formatter, not a second one. A local copy claimed in its
   // comment to match this and did not: it printed "1.5M" where the card
   // printed "1.5m", diverging only above a million -- so the two disagreed
   // exactly in the long runs where cost matters most, and the comment
   // discouraged anyone from checking.
-  if (usage.inputTokens != null || usage.outputTokens != null) parts.push(formatTokens(tokens))
+  if (haveIn && haveOut) parts.push(formatTokens(usage.inputTokens! + usage.outputTokens!))
+  // `formatTokens` already ends in "tokens", so the half-known cases say
+  // which half it is by naming it up front rather than appending a suffix.
+  else if (haveIn) parts.push(`${formatTokens(usage.inputTokens!)} in`)
+  else if (haveOut) parts.push(`${formatTokens(usage.outputTokens!)} out`)
   if (usage.turns != null && usage.turns > 0) parts.push(`${usage.turns} turn${usage.turns === 1 ? '' : 's'}`)
   if (usage.costMicroUsd != null) parts.push(formatCost(usage.costMicroUsd / 1_000_000))
   return parts.length > 0 ? parts.join(' · ') : null

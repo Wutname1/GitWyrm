@@ -73,4 +73,5 @@ competing sub-agents, the answer names the losing option too.
 | 65 | 2026-09-04 | Why did the ending sentence need a system message rather than a note? | Notes get folded into the previous note, so it would have been glued onto the end of the agent's own last message instead of the app speaking for itself. |
 | 66 | 2026-09-04 | Was the text-size floor actually clean after last pass? | No -- I had swept for one literal size instead of the rule, and 29 more sites were below the floor, some at 9px. |
 | 67 | 2026-09-04 | Should an imported message show when it was brought in? | Yes -- otherwise a chat written last week reads as native history from last week, which is exactly the equivalence the vision forbids. |
+| 68 | 2026-09-04 | If a provider reports input tokens but not output, what should a helper's usage line say? | It names the half it knows ("1.2k tokens in") rather than adding zero for the other and showing a partial figure as the total. |
 
