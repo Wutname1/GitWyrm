@@ -430,13 +430,29 @@ export function ConversationPane({
   const [flashId, setFlashId] = useState<string | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
   const setComposerDraft = useAgentDeskUiStore((s) => s.setDraft)
+  const getComposerDraft = useAgentDeskUiStore((s) => s.getDraft)
   // Edit (tasks.md's message controls): puts the message's text back into
   // this session's composer draft for the user to revise and resend. There
   // is no backend command to amend a message already appended to a
   // session's transcript, so this is honestly a "resend" affordance, not an
   // in-place edit -- see `MessageActions`'s doc comment.
   const editMessage = (text: string) => {
-    if (sessionId) setComposerDraft(sessionId, text)
+    if (!sessionId) return
+    // Put the message in the box AND take the person to it.
+    //
+    // This used to write the draft and stop: no focus, no scroll, no word. In
+    // a long transcript the composer is off-screen, so the click looked like
+    // it had done nothing -- while having quietly replaced whatever was
+    // already typed there. The Revise button next door already solves both
+    // halves; this is the same treatment.
+    const previous = getComposerDraft(sessionId).trim()
+    setComposerDraft(sessionId, text)
+    const box = document.getElementById(`agent-desk-composer-${sessionId}`)
+    if (box instanceof HTMLTextAreaElement) {
+      box.focus()
+      box.setSelectionRange(box.value.length, box.value.length)
+    }
+    toast(previous === '' ? 'Copied into the message box.' : 'Copied into the message box, replacing your draft.')
   }
   // Tracks whether the reader was near the bottom just before this render's
   // message list changed, so the auto-follow effect below can tell "a new
