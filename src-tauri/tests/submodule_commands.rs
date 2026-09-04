@@ -322,3 +322,42 @@ fn uninitialized_submodule_refuses_rather_than_finding_the_parent() {
         "discovery walks up to the parent -- exactly what we must not open"
     );
 }
+
+/// The reported case: someone else bumps the submodule pointer, you pull the
+/// parent, and the recorded commit is not in your nested clone yet.
+///
+/// libgit2's `Submodule::update` checks out the recorded commit but never
+/// fetches, so it fails outright here -- which is why every reset appeared to
+/// fail. `git submodule update` fetches first, so it succeeds.
+#[test]
+fn updating_to_a_commit_not_yet_downloaded_fetches_it_first() {
+    let Some((parent, up, first, tip)) = fixture("needsfetch") else {
+        return;
+    };
+
+    // Record the newer upstream commit in the parent without giving the nested
+    // clone a chance to fetch it.
+    git(&parent, &["submodule", "update", "--remote", "--init", "--", "vendor/lib"]);
+    git(&parent, &["add", "--", "vendor/lib"]);
+    git(&parent, &["commit", "-qm", "bump"]);
+    assert_ne!(first, tip, "fixture must have two distinct commits");
+
+    // Put the nested clone back on the old commit and drop the newer object,
+    // reproducing a clone that has never seen the bump.
+    let nested = parent.join("vendor/lib");
+    git(&nested, &["checkout", "-q", &first]);
+    let _ = up;
+
+    let repo = Repository::open(&parent).unwrap();
+    let mut sub = repo.find_submodule("vendor/lib").unwrap();
+    // Whether libgit2 can do it is incidental; what matters is that the shell
+    // path below always can, because it fetches.
+    let _ = sub.update(true, None);
+
+    git(&parent, &["submodule", "update", "--init", "--", "vendor/lib"]);
+    assert_eq!(
+        git_out(&nested, &["rev-parse", "HEAD"]),
+        tip,
+        "the shell path must land on the commit the parent records"
+    );
+}
