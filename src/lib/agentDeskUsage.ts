@@ -141,9 +141,17 @@ export function buildUsageRows(usage: SessionUsage): UsageRow[] {
   return rows
 }
 
-/** True when there is nothing measured/reported to show at all. */
+/**
+ * True when there is anything measured or reported to show at all.
+ *
+ * Counts the per-agent lines as well as the session rows. It used to check
+ * only the rows -- the same blind spot that let the card print "No usage data
+ * yet for this chat" directly above a populated per-agent list, because the
+ * two are computed from different fields and a provider can report one
+ * without the other.
+ */
 export function hasAnyUsageData(usage: SessionUsage): boolean {
-  return buildUsageRows(usage).length > 0
+  return buildUsageRows(usage).length > 0 || buildAgentUsageLines(usage).length > 0
 }
 
 /** One per-agent line under the totals: who, and what they reported. */

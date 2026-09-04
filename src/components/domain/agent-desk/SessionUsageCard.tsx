@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, TimerReset } from 'lucide-react'
 import { commands } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
-import { buildAgentUsageLines, buildUsageRows } from '@/lib/agentDeskUsage'
+import { buildAgentUsageLines, buildUsageRows, hasAnyUsageData } from '@/lib/agentDeskUsage'
 import { cn } from '@/lib/utils'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 
@@ -59,7 +59,7 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
         <div className="border-t border-border px-2 py-1.5">
           {query.isLoading ? (
             <p className="py-1 text-2xs text-muted-foreground">Loading usage…</p>
-          ) : rows.length === 0 && agentLines.length === 0 ? (
+          ) : !usage || !hasAnyUsageData(usage) ? (
             // Usage honesty (tasks.md 7.4): nothing measured yet is stated
             // plainly, never rendered as a row of zeros.
             //

@@ -66,6 +66,24 @@ describe('buildUsageRows', () => {
     expect(hasAnyUsageData(EMPTY)).toBe(false)
   })
 
+  it('counts per-agent lines as data, so the card cannot deny what it displays', () => {
+    // A provider can report per-agent figures without session totals. When
+    // this checked only the rows, the card printed "No usage data yet for
+    // this chat" directly above a populated per-agent list.
+    const agentsOnly: SessionUsage = {
+      ...EMPTY,
+      // A helper, not a lone lead: a lone lead IS the session total, so it
+      // deliberately produces no breakdown (see `buildAgentUsageLines`).
+      agents: [
+        { executionId: 'lead', label: 'Lead agent', isLead: true, tokens: 1200, turns: 2, costMicroUsd: null },
+        { executionId: 'h1', label: 'Fix the parser', isLead: false, tokens: 400, turns: 1, costMicroUsd: null },
+      ],
+    }
+    expect(buildUsageRows(agentsOnly)).toEqual([])
+    expect(buildAgentUsageLines(agentsOnly).length).toBeGreaterThan(0)
+    expect(hasAnyUsageData(agentsOnly)).toBe(true)
+  })
+
   it('never shows a zero for a field that was never measured', () => {
     // Only activeHelperCount is present (as a real, measured zero) -- every
     // other field stays absent and must not appear as "0" rows.

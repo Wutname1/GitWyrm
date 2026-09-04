@@ -66,7 +66,10 @@ export interface ResultActionAvailability {
 
 export function resultActionAvailability(record: Pick<ResultRecord, 'state' | 'worktreePath' | 'changedPaths'>): ResultActionAvailability {
   const hasChanges = record.worktreePath != null && record.changedPaths.length > 0
-  const reviewing = record.state === 'reviewing' || record.state === 'revisionRequested'
+  // The named predicate above, not a second copy of it. Both existed; the
+  // named one had no caller, which is how a rule ends up with two definitions
+  // that can drift.
+  const reviewing = resultNeedsReview(record.state)
   return {
     canKeep: reviewing && hasChanges,
     canUndo: reviewing && record.worktreePath != null,
