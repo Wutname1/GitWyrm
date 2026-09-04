@@ -188,3 +188,4 @@ competing sub-agents, the answer names the losing option too.
 | 179 | 2026-09-04 | Could the work-checker be shown half a line despite a note saying it never is? | Yes -- one line longer than the whole size limit had no break to cut at, so it got a hundred thousand characters from the middle of it. |
 | 180 | 2026-09-04 | Did a chat list that failed to load look different from having no chats? | No -- it showed "Start a new chat", telling someone with two hundred of them that they had none. |
 | 181 | 2026-09-04 | Should the automatic absence check be widened to cover hooks? | No -- the default there is one link in a chain and the error check often lives in another file, so widening it reported five correct behaviours as bugs. |
+| 182 | 2026-09-04 | Does reopening a chat erase a warning that part of it was lost? | No -- the missing message was saved all along; only this window missed it live, so reopening genuinely loads the full record. |

@@ -187,6 +187,26 @@ export const useAgentSessionStore = create<AgentSessionStore>((set) => ({
         },
       }
     }),
+  /**
+   * Drops a session's live overlay once the durable record has caught up.
+   *
+   * This deletes `gappedExecutionIds` along with everything else, which reads
+   * alarming: the amber "Some of this chat did not reach this window" banner
+   * disappears, and it disappears precisely when someone follows its advice to
+   * reopen the chat.
+   *
+   * That is the correct end state, not a lost warning. A sequence gap is a
+   * DELIVERY gap: `bridge.rs` persists the gapped event with its real
+   * sequence and says so ("A gap ... is still persisted ... there is no
+   * separate stored flag because the gap is fully recoverable from
+   * `sequence`"). Nothing was lost from the record -- only this window's live
+   * stream missed a message. So a refetch really does load the full record,
+   * and a warning that survived it would be telling the person about a
+   * problem that no longer exists.
+   *
+   * Written down because a careful reading of `clearSession` alone concludes
+   * the opposite, and did.
+   */
   clearSession: (sessionId) =>
     set((s) => {
       if (!(sessionId in s.bySession)) return s
