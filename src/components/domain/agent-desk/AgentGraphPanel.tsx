@@ -149,6 +149,15 @@ function InspectorCard({
       ]
         .filter(Boolean)
         .join(' · ')
+  // What this helper is waiting for. `dependsOn` has been on the record since
+  // graphs shipped but was never rendered, so a helper sitting idle because a
+  // peer has not finished looked identical to one that had simply stalled --
+  // the person had no way to tell "blocked" from "broken". Names are resolved
+  // from the session's own executions; an id with no matching record falls
+  // back to "another agent" rather than leaking a hex id.
+  const waitingFor = (execution.dependsOn ?? [])
+    .map((id) => session.executions.find((e) => e.executionId === id)?.jobTitle ?? 'another agent')
+    .filter((name, i, all) => all.indexOf(name) === i)
   const canStop = execution.state === 'working' || execution.state === 'preparing' || execution.state === 'needsInput'
   const [resolving, setResolving] = useState<'helper' | 'integrated' | null>(null)
 
@@ -232,6 +241,14 @@ function InspectorCard({
       <div className="mt-1 text-xs font-semibold text-foreground">{title}</div>
       <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">{description}</p>
       {filesLine ? <div className="mt-1.5 font-mono text-[10px] text-muted-foreground">{filesLine}</div> : null}
+      {waitingFor.length > 0 ? (
+        <div className="mt-1.5">
+          <div className="text-2xs font-bold uppercase tracking-wide text-muted-foreground">Waiting for</div>
+          <p className="mt-0.5 text-2xs leading-relaxed text-foreground">
+            {waitingFor.join(', ')} to finish first.
+          </p>
+        </div>
+      ) : null}
       {activity ? (
         <div className="mt-1.5">
           <div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
