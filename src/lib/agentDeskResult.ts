@@ -693,6 +693,13 @@ const OUTCOME_KIND_TEXT: Record<string, string> = {
   sessionUnavailable: 'GitWyrm could not read that chat right now.',
   writeFailed: 'The change could not be saved.',
   executionNotFound: 'That agent is no longer part of this chat.',
+  // Three `explain*` functions in this file already answer this one; only the
+  // shared floor was missing it, so the one path that uses the floor --
+  // marking a result for revision -- said "Result not found" instead.
+  resultNotFound: 'That result could not be found. Try refreshing.',
+  // Three `explain*` functions in this file already answer this one; only the
+  // shared floor was missing it, so the one path that uses the floor --
+  // marking a result for revision -- said "Result not found" instead.
   sourceMissing: 'The thing this chat was started from is gone.',
   adapterUnsupported: 'That chat app is not supported here.',
   providerReconnect: 'The AI tool needs to be connected again.',

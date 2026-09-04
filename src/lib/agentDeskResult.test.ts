@@ -838,3 +838,56 @@ describe('describeSetPreferencesFailure', () => {
     }
   })
 })
+
+describe('the shared outcome describer does not hand over code words', () => {
+  // `describeOutcome` is the floor every outcome falls to when its call site
+  // has no dedicated explainer. Its own doc says "no path shows the raw
+  // token" -- the fallback spaces camelCase so a NEW variant degrades to
+  // readable rather than raw.
+  //
+  // But `resultNotFound` is not new: three explain* functions in this same
+  // file already answer it with "That result could not be found. Try
+  // refreshing." It was simply missing from the shared table, so the one
+  // path that uses the floor -- marking a result for revision -- rendered
+  // "Result not found", a code word dressed as a sentence.
+  it('answers resultNotFound with the sentence that already exists for it', () => {
+    const text = describeOutcomeKind('resultNotFound')
+    expect(text).not.toBe('Result not found')
+    expect(text).toMatch(/could not be found/i)
+  })
+
+  it('still degrades a genuinely unknown variant to readable words', () => {
+    // The floor must keep working for something this build has never seen.
+    expect(describeOutcomeKind('someBrandNewThing')).toBe('Some brand new thing')
+  })
+})
+
+describe('a sentence written once is available everywhere it is needed', () => {
+  // How `resultNotFound` slipped through: the sentence existed in three
+  // explain* functions and not in the shared table, so whichever call site
+  // used the floor got a code word instead. Checking that by hand each time
+  // catches it after it ships.
+  //
+  // These are failure kinds an explain* function answers AND that a call
+  // site can reach through the shared describer. If a sentence exists for a
+  // kind, the floor must not be worse than the raw token for it.
+  const ANSWERED_FAILURES = [
+    'resultNotFound',
+    'sessionNotFound',
+    'sessionDamaged',
+    'sessionUnavailable',
+    'writeFailed',
+    'notFound',
+    'damaged',
+    'unavailable',
+  ]
+
+  it('never falls back to spaced camelCase for a kind we have words for', () => {
+    const raw = (k: string) => {
+      const spaced = k.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
+      return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+    }
+    const bare = ANSWERED_FAILURES.filter((k) => describeOutcomeKind(k) === raw(k))
+    expect(bare, 'these render as a code word despite having a sentence elsewhere').toEqual([])
+  })
+})
