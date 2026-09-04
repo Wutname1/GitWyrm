@@ -11,6 +11,7 @@ import type {
 } from '@/lib/bindings'
 import {
   canEscalateToFix,
+  changedPathStatusLabel,
   changedPathsSummaryLine,
   checksSummaryLine,
   explainAutoStartOutcome,
@@ -135,6 +136,32 @@ describe('changedPathsSummaryLine', () => {
   })
   it('uses plural for more than one', () => {
     expect(changedPathsSummaryLine([path('M', 'a.ts'), path('M', 'b.ts')])).toBe('2 files changed')
+  })
+})
+
+describe('changedPathStatusLabel', () => {
+  // The review list is the user's evidence of what the agent did to their
+  // files. It used to render the bare status code, so a deleted file was a
+  // single grey "D" -- the scariest outcome shown as the quietest mark.
+  it('names each outcome in words a person can read', () => {
+    expect(changedPathStatusLabel('A').label).toBe('Added')
+    expect(changedPathStatusLabel('M').label).toBe('Changed')
+    expect(changedPathStatusLabel('D').label).toBe('Deleted')
+    expect(changedPathStatusLabel('R').label).toBe('Renamed')
+    expect(changedPathStatusLabel('!').label).toBe('Needs a fix')
+  })
+
+  it('colours a deletion and a conflict as removals, and an addition as added', () => {
+    expect(changedPathStatusLabel('D').tone).toBe('removed')
+    expect(changedPathStatusLabel('!').tone).toBe('removed')
+    expect(changedPathStatusLabel('A').tone).toBe('added')
+    expect(changedPathStatusLabel('M').tone).toBe('changed')
+  })
+
+  it('never leaks an unrecognised code back to the user', () => {
+    // A future status code must read as something, not as a bare letter.
+    expect(changedPathStatusLabel('Z').label).toBe('Changed')
+    expect(changedPathStatusLabel('').label).toBe('Changed')
   })
 })
 

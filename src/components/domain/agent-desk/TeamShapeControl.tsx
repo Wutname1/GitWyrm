@@ -56,7 +56,7 @@ export function TeamShapeControl({
             <User size={14} className="mt-0.5 flex-none text-muted-foreground" />
             <span className="min-w-0 flex-1">
               <strong className="block text-2xs font-semibold text-foreground">Solo agent</strong>
-              <span className="block text-[10.5px] leading-snug text-muted-foreground">
+              <span className="block text-2xs leading-snug text-muted-foreground">
                 One agent owns the chat. No graph is created.
               </span>
             </span>
@@ -76,7 +76,7 @@ export function TeamShapeControl({
             <GitFork size={14} className="mt-0.5 flex-none text-muted-foreground" />
             <span className="min-w-0 flex-1">
               <strong className="block text-2xs font-semibold text-foreground">Lead + helpers</strong>
-              <span className="block text-[10.5px] leading-snug text-muted-foreground">
+              <span className="block text-2xs leading-snug text-muted-foreground">
                 The lead splits safe work between helpers. Plan lets you approve the split first; Auto starts it when useful.
               </span>
             </span>

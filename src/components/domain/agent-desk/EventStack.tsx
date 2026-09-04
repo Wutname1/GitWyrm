@@ -35,7 +35,7 @@ function iconForHeadline(headline: string) {
 }
 
 const LIVE_LINK_CLASS =
-  'flex-none max-w-[9rem] truncate text-[10.5px] font-medium text-accent-text hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline'
+  'flex-none max-w-[9rem] truncate text-2xs font-medium text-accent-text hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline'
 
 function EventLink({
   item,
@@ -61,7 +61,7 @@ function EventLink({
         <button
           type="button"
           disabled
-          className="flex-none max-w-[9rem] truncate text-[10.5px] font-medium text-muted-foreground disabled:cursor-not-allowed"
+          className="flex-none max-w-[9rem] truncate text-2xs font-medium text-muted-foreground disabled:cursor-not-allowed"
         >
           {resolved.label}
         </button>
@@ -85,7 +85,7 @@ export function EventStack({ items, targetNav, onOpenSource }: EventStackProps) 
           <div
             key={item.messageId}
             className={cn(
-              'grid min-h-[30px] grid-cols-[17px_minmax(0,1fr)_auto] items-center gap-1.5 py-1 text-[11px] text-sub',
+              'grid min-h-[30px] grid-cols-[17px_minmax(0,1fr)_auto] items-center gap-1.5 py-1 text-2xs text-sub',
               i < items.length - 1 && 'border-b border-[color-mix(in_srgb,var(--gw-border)_65%,transparent)]'
             )}
           >

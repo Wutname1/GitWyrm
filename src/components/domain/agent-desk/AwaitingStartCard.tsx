@@ -215,7 +215,7 @@ export function AwaitingStartCard({
         // one-shot toast) until the user either revises or explicitly
         // starts anyway, since a toast alone would be gone before someone
         // reads it if they stepped away from the window.
-        <div className="mt-2 flex items-start gap-1.5 rounded border border-amber-600/40 bg-amber-500/10 px-2 py-1.5 text-2xs leading-relaxed text-amber-700 dark:text-amber-400">
+        <div className="mt-2 flex items-start gap-1.5 rounded border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10 px-2 py-1.5 text-2xs leading-relaxed text-[var(--gw-amber)]">
           <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
           <span>
             The OpenSpec change changed since this plan was drafted. Revise the plan for a fresh

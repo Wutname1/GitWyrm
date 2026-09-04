@@ -35,9 +35,9 @@ export function StartFailureCard({
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-md border border-amber-600/40 bg-amber-500/10 px-2.5 py-2 text-2xs leading-relaxed"
+      className="flex items-start gap-2 rounded-md border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10 px-2.5 py-2 text-2xs leading-relaxed"
     >
-      <TriangleAlert size={13} className="mt-px flex-none text-amber-700 dark:text-amber-400" aria-hidden />
+      <TriangleAlert size={13} className="mt-px flex-none text-[var(--gw-amber)]" aria-hidden />
       <div className="min-w-0 flex-1">
         <div className="font-semibold text-foreground">{card.title}</div>
         <p className="mt-0.5 text-foreground/90">{card.body}</p>

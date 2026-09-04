@@ -234,7 +234,7 @@ function Choice({
         {icon && <span className="text-muted-foreground">{icon}</span>}
         <span className="text-xs font-semibold text-foreground">{title}</span>
       </span>
-      <span className="text-[10.5px] leading-snug text-muted-foreground">{detail}</span>
+      <span className="text-2xs leading-snug text-muted-foreground">{detail}</span>
     </button>
   )
 }

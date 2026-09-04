@@ -4268,6 +4268,146 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.path().join("blocked")).unwrap(), "not a directory");
         assert!(!dir.path().join("blocked/nested.txt").exists());
     }
+    // -- Tasks 5.5/5.10: the two integration gaps the 2026-08-22 audit left
+    // open as "reasoned but unproven". Both claims now have a test. --
+
+    /// Task 5.10: a symlink must be integrated as a real link, not as a text
+    /// file whose contents happen to be the link target. `create_symlink`
+    /// and `read_symlink_target` have existed since 5.4 with no test, and on
+    /// Windows link creation needs developer mode or elevation -- so this
+    /// asserts the real behaviour where links can be made and, where they
+    /// cannot, asserts the typed failure rather than silently "passing" by
+    /// writing a text file that looks like a link.
+    ///
+    /// KNOWN COVERAGE LIMIT: on a Windows machine without developer mode or
+    /// elevation -- including the machine this was written on -- symlink
+    /// creation is refused by the OS, so this test takes the `Failed` branch
+    /// and proves only that a refused link fails cleanly (typed outcome, no
+    /// text stand-in, no temp file left behind). The `Applied` branch is
+    /// exercised on Unix and on Windows with developer mode on. Do not read
+    /// a green run here as proof that real link creation works on this box.
+    #[test]
+    fn apply_operation_writes_a_symlink_as_a_real_link_or_fails_typed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("real.txt"), "the real file").unwrap();
+
+        let outcome = apply_operation(
+            dir.path().to_str().unwrap(),
+            &FileOperation::Add {
+                path: "link.txt".into(),
+                content: FileContent::Symlink { target: "real.txt".into() },
+            },
+        );
+
+        let link_path = dir.path().join("link.txt");
+        match outcome {
+            ApplyOperationOutcome::Applied => {
+                // A real link, not a regular file containing "real.txt".
+                let meta = std::fs::symlink_metadata(&link_path).unwrap();
+                assert!(meta.file_type().is_symlink(), "integration must create a real symlink, not a text file holding the target path");
+                // And it must resolve to the file it names.
+                assert_eq!(std::fs::read_to_string(&link_path).unwrap(), "the real file");
+            }
+            ApplyOperationOutcome::Failed { path, detail } => {
+                // Windows without developer mode/elevation. The failure must
+                // be typed and name the path, and must NOT have left a
+                // stand-in regular file behind that a later read would
+                // mistake for the link.
+                assert_eq!(path, "link.txt");
+                assert!(!detail.is_empty(), "a failed link must explain itself");
+                assert!(!link_path.exists(), "a failed symlink must leave nothing behind, never a text stand-in");
+            }
+        }
+
+        // Either way, no temp file may survive the attempt.
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(".gitwyrm-integrate-"))
+            .collect();
+        assert!(leftovers.is_empty(), "integration left temp files behind: {leftovers:?}");
+    }
+
+    /// Tasks 5.5 and 5.10: the exactly-once claim. A batch interrupted
+    /// partway must, on restart, finish the remaining operations and leave
+    /// the already-applied ones exactly as they were -- never applying one
+    /// twice and never reporting a partial batch as complete.
+    ///
+    /// The interruption is modelled the way a real crash presents itself:
+    /// the process stops after operation 2 of 5, and the "restart" re-runs
+    /// the WHOLE batch from the beginning, which is precisely what
+    /// `integrate_helper_into` does on the next completion event. The proof
+    /// is that re-running is safe: every path holds its recorded content
+    /// once, and a delete already performed stays deleted rather than
+    /// failing the retry.
+    #[test]
+    fn an_interrupted_integration_batch_resumes_exactly_once_on_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo_path = dir.path().to_str().unwrap();
+        // Pre-existing tree: one file to modify, one to delete, one to rename.
+        std::fs::write(dir.path().join("modify.txt"), "before").unwrap();
+        std::fs::write(dir.path().join("delete.txt"), "doomed").unwrap();
+        std::fs::write(dir.path().join("old-name.txt"), "moving").unwrap();
+
+        let batch = vec![
+            FileOperation::Modify {
+                path: "modify.txt".into(),
+                content: FileContent::Text { bytes: b"after".to_vec(), executable: FileExecutable::No },
+            },
+            FileOperation::Delete { path: "delete.txt".into() },
+            FileOperation::Add {
+                path: "nested/added.txt".into(),
+                content: FileContent::Text { bytes: b"added".to_vec(), executable: FileExecutable::No },
+            },
+            FileOperation::Rename {
+                from_path: "old-name.txt".into(),
+                path: "new-name.txt".into(),
+                content: FileContent::Text { bytes: b"moving".to_vec(), executable: FileExecutable::No },
+            },
+            FileOperation::Add {
+                path: "last.txt".into(),
+                content: FileContent::Text { bytes: b"last".to_vec(), executable: FileExecutable::No },
+            },
+        ];
+
+        // First pass: the "crash" lands after operation 2 of 5.
+        for operation in batch.iter().take(2) {
+            assert_eq!(apply_operation(repo_path, operation), ApplyOperationOutcome::Applied);
+        }
+        assert_eq!(std::fs::read_to_string(dir.path().join("modify.txt")).unwrap(), "after");
+        assert!(!dir.path().join("delete.txt").exists());
+        // The tail of the batch has genuinely not happened yet.
+        assert!(!dir.path().join("nested/added.txt").exists());
+        assert!(!dir.path().join("new-name.txt").exists());
+        assert!(!dir.path().join("last.txt").exists());
+
+        // Restart: the whole batch replays, including the two already done.
+        for operation in batch.iter() {
+            assert_eq!(
+                apply_operation(repo_path, operation),
+                ApplyOperationOutcome::Applied,
+                "replaying an already-applied operation must succeed, not fail the resumed batch"
+            );
+        }
+
+        // Every operation is now applied exactly once.
+        assert_eq!(std::fs::read_to_string(dir.path().join("modify.txt")).unwrap(), "after");
+        assert!(!dir.path().join("delete.txt").exists(), "a replayed delete must stay deleted");
+        assert_eq!(std::fs::read_to_string(dir.path().join("nested/added.txt")).unwrap(), "added");
+        assert_eq!(std::fs::read_to_string(dir.path().join("new-name.txt")).unwrap(), "moving");
+        assert!(!dir.path().join("old-name.txt").exists(), "a replayed rename must not resurrect the old path");
+        assert_eq!(std::fs::read_to_string(dir.path().join("last.txt")).unwrap(), "last");
+
+        // No temp files survive either pass.
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(".gitwyrm-integrate-"))
+            .collect();
+        assert!(leftovers.is_empty(), "resumed integration left temp files behind: {leftovers:?}");
+    }
 
     // -- record_helper_launch_failure / start_or_check_lead_review /
     // finish_graph_with_combined_result (P1 "Finished is not a combined

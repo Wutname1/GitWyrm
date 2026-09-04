@@ -43,7 +43,7 @@ export function PlanChecklist({ rows, label }: PlanChecklistProps) {
   return (
     <div aria-label={label} className="mt-2 divide-y divide-[color-mix(in_srgb,var(--gw-border)_62%,transparent)] border-y border-border">
       {rows.map((row, i) => (
-        <div key={`${row.text}-${i}`} className="grid min-h-[30px] grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-2 py-1 text-[11px]">
+        <div key={`${row.text}-${i}`} className="grid min-h-[30px] grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-2 py-1 text-2xs">
           <span className="sr-only">{STATE_TEXT[row.state]}</span>
           <PlanStateIcon state={row.state} />
           <span className="min-w-0 truncate text-foreground">{row.text}</span>

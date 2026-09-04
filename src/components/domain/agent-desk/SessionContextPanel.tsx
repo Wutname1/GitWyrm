@@ -74,7 +74,7 @@ export function SessionContextPanel({ session }: { session: AgentSession }) {
   return (
     <div className="flex flex-col gap-2">
       {diverged && (
-        <div className="flex items-start gap-1.5 rounded-md border border-amber-600/40 bg-amber-500/10 px-2 py-1.5 text-2xs leading-relaxed text-amber-700 dark:text-amber-400">
+        <div className="flex items-start gap-1.5 rounded-md border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10 px-2 py-1.5 text-2xs leading-relaxed text-[var(--gw-amber)]">
           <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
           <span>
             The OpenSpec source changed since the last time an agent read it. Refresh the source,

@@ -107,7 +107,7 @@ export function PaneDetailPopover({
           {open && (
             <div className="flex flex-col">
               <div className="flex h-8 flex-none items-center gap-1.5 border-b border-border px-2">
-                <strong className="text-[10.5px] font-semibold text-foreground">{DETAIL_META[open].label.replace('Show ', '')}</strong>
+                <strong className="text-2xs font-semibold text-foreground">{DETAIL_META[open].label.replace('Show ', '')}</strong>
                 <button
                   type="button"
                   aria-label="Close"

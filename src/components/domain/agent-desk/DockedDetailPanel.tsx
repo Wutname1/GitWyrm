@@ -98,7 +98,7 @@ export function DockedDetailPanel({
         className="flex h-8 flex-none cursor-grab items-center gap-1.5 border-b border-border px-2 active:cursor-grabbing"
       >
         <Icon size={13} className="flex-none text-muted-foreground" aria-hidden />
-        <strong className="text-[10.5px] font-semibold text-foreground">{label}</strong>
+        <strong className="text-2xs font-semibold text-foreground">{label}</strong>
         <span className="ml-1 truncate text-[9.5px] text-muted-foreground">follows active chat</span>
 
         <DropdownMenu>

@@ -146,7 +146,7 @@ export function SessionRow({
                 aria-label="Needs your input"
               />
             ) : (
-              <span className="font-mono text-[0.625rem] text-muted-foreground">
+              <span className="font-mono text-[10px] text-muted-foreground">
                 {formatCompactAge(header.updatedAt)}
               </span>
             )}

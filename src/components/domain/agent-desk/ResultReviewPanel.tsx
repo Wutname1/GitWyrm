@@ -10,6 +10,7 @@ import { useSpecDraftStore } from '@/stores/specDraftStore'
 import { selectChangeEverywhere } from '@/lib/specSync'
 import { specReturnTargets } from '@/lib/agentDeskSpecReturn'
 import { useGithubPrForBranch } from '@/hooks/useGithub'
+import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { PullRequestDraftDialog } from './PullRequestDraftDialog'
 import {
   DropdownMenu,
@@ -21,6 +22,7 @@ import { useAgentSessionMutations } from '@/hooks/useAgentSessionMutations'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import {
   canEscalateToFix,
+  changedPathStatusLabel,
   changedPathsSummaryLine,
   checksSummaryLine,
   explainCommitOutcome,
@@ -114,6 +116,10 @@ export function ResultReviewPanel({
   const replaceDraft = useSpecDraftStore((s) => s.replace)
   const setCenterView = useAgentDeskUiStore((s) => s.setCenterView)
   const [returning, setReturning] = useState(false)
+  // Undo throws the agent's whole output away. Deleting a chat -- which the
+  // copy itself says touches nothing in the project -- already asks first, so
+  // the more destructive action must not be the one that acts on a single click.
+  const [confirmUndo, setConfirmUndo] = useState(false)
 
   const sendBackToSpec = async (target: (typeof specReturnTargets)[number]) => {
     if (returning || !specAi.configured) return
@@ -434,7 +440,7 @@ export function ResultReviewPanel({
                 >
                   {p.oldPath ? `${p.oldPath} → ${p.path}` : p.path}
                 </button>
-                <span className="flex-none font-mono">{p.status}</span>
+                <ChangedPathStatus status={p.status} />
               </li>
             ))}
             {record.changedPaths.length > 50 && (
@@ -485,14 +491,13 @@ export function ResultReviewPanel({
           <ActionButton
             onClick={() => void handleFixThis()}
             disabled={busy}
-            variant="primary"
             icon={<Wrench size={12} aria-hidden />}
           >
             Fix this
           </ActionButton>
         )}
         {availability.canKeep && (
-          <ActionButton onClick={handleKeep} disabled={busy}>
+          <ActionButton onClick={handleKeep} disabled={busy} variant="primary">
             Keep
           </ActionButton>
         )}
@@ -524,13 +529,13 @@ export function ResultReviewPanel({
           </DropdownMenu>
         )}
         {availability.canUndo && (
-          <ActionButton onClick={handleUndo} disabled={busy} icon={<RotateCcw size={12} aria-hidden />}>
+          <ActionButton onClick={() => setConfirmUndo(true)} disabled={busy} icon={<RotateCcw size={12} aria-hidden />}>
             Undo
           </ActionButton>
         )}
         {availability.canRequestRevision && revisionText === null && (
           <ActionButton onClick={handleRequestRevision} disabled={busy} variant="ghost">
-            Review requested changes
+            Ask for changes
           </ActionButton>
         )}
         {availability.canRequestRevision && revisionText !== null && (
@@ -545,7 +550,7 @@ export function ResultReviewPanel({
         )}
         {availability.canCommit && commitMessage === null && (
           <ActionButton onClick={handleDraftCommitMessage} disabled={busy}>
-            Prepare commit
+            Write a message and commit
           </ActionButton>
         )}
         {availability.canCommit && commitMessage !== null && (
@@ -563,7 +568,48 @@ export function ResultReviewPanel({
           />
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmUndo}
+        onOpenChange={setConfirmUndo}
+        title="Throw away this work?"
+        description={
+          <>
+            {undoCountLine(record.changedPaths.length)} Your own files outside this work are not touched.
+          </>
+        }
+        confirmLabel="Throw it away"
+        destructive
+        pending={busy}
+        pendingLabel="Throwing away…"
+        onConfirm={() => void handleUndo()}
+      />
     </div>
+  )
+}
+
+/** States what Undo is about to discard, in files rather than in Git terms. */
+export function undoCountLine(changedCount: number): string {
+  if (changedCount === 0) return 'The agent made no file changes, so there is nothing to keep.'
+  if (changedCount === 1) return 'The 1 file the agent changed goes back to how it was.'
+  return `All ${changedCount} files the agent changed go back to how they were.`
+}
+
+/** Renders a changed file's outcome as a coloured word rather than a raw code. */
+function ChangedPathStatus({ status }: { status: string }) {
+  const { label, tone } = changedPathStatusLabel(status)
+  return (
+    <span
+      className={cn(
+        'flex-none',
+        tone === 'added' && 'text-[var(--gw-green)]',
+        tone === 'changed' && 'text-[var(--gw-amber)]',
+        tone === 'removed' && 'text-[var(--gw-red)]',
+        tone === 'muted' && 'text-muted-foreground',
+      )}
+    >
+      {label}
+    </span>
   )
 }
 

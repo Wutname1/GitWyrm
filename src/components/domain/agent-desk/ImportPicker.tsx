@@ -260,7 +260,7 @@ function SessionRow({
           </span>
         )}
       </div>
-      <span className={cn('text-[11px]', project.resolved ? 'text-muted-foreground' : 'text-[var(--gw-amber)]')}>
+      <span className={cn('text-2xs', project.resolved ? 'text-muted-foreground' : 'text-[var(--gw-amber)]')}>
         {project.text}
       </span>
       <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -268,7 +268,7 @@ function SessionRow({
           type="button"
           onClick={handleImport}
           disabled={importMutation.isPending}
-          className="rounded-md bg-accent px-2 py-1 text-[11px] font-medium text-accent-text hover:bg-accent-hover disabled:opacity-60"
+          className="rounded-md bg-accent px-2 py-1 text-2xs font-medium text-accent-text hover:bg-accent-hover disabled:opacity-60"
         >
           {linkedSessionId ? 'Refresh' : 'Import'}
         </button>
@@ -276,13 +276,13 @@ function SessionRow({
           <button
             type="button"
             onClick={handleContinueHere}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-panel2"
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-2xs font-medium text-foreground hover:bg-panel2"
           >
             Continue here
           </button>
         )}
         {continueExternalLabel && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-2xs text-muted-foreground">
             <ExternalLink size={10} aria-hidden />
             {continueExternalLabel}
           </span>
@@ -292,14 +292,14 @@ function SessionRow({
             type="button"
             onClick={() => setConfirmUnlinkOpen(true)}
             disabled={unlinkMutation.isPending}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-panel2 hover:text-foreground disabled:opacity-60"
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-2xs font-medium text-muted-foreground hover:bg-panel2 hover:text-foreground disabled:opacity-60"
           >
             <Unlink size={10} aria-hidden />
             Unlink from {adapterName}
           </button>
         )}
         {project.offerLinking && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-2xs text-muted-foreground">
             <FolderOpen size={10} aria-hidden />
             Add this folder as a repo to link it
           </span>

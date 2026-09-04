@@ -100,7 +100,9 @@ export function MessageHistoryRail({
             onKeyDown={(e) => {
               if (e.key === 'Escape') scheduleClose()
             }}
-            className="group absolute inset-0 outline-none"
+            // `outline-none` drops the browser default, so a focus-visible ring has to
+            // put one back -- without it a keyboard user reaching this rail saw nothing at all.
+            className="group absolute inset-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             {railTicks.map((tick) => (
               <span

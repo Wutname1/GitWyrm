@@ -30,7 +30,7 @@ export function ThoughtBlock({ text, variant = 'thinking' }: ThoughtBlockProps) 
   return (
     <div
       className={cn(
-        'mb-1.5 mt-0.5 flex items-start gap-2 rounded-sm border-l-2 px-2 py-1.5 text-[11px] leading-relaxed',
+        'mb-1.5 mt-0.5 flex items-start gap-2 rounded-sm border-l-2 px-2 py-1.5 text-2xs leading-relaxed',
         'border-l-[var(--gw-purple)] text-sub'
       )}
       style={{ background: 'color-mix(in srgb, var(--gw-purple) 7%, transparent)' }}

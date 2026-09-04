@@ -39,7 +39,7 @@ export function SessionSourcePanel({ session, onOpenSource }: { session: AgentSe
         <div className="min-w-0 flex-1">
           <p className="text-[10px] font-bold uppercase tracking-wide text-accent-text">{kicker}</p>
           <p className="truncate text-xs font-semibold text-foreground">{title}</p>
-          <p className="truncate font-mono text-[10.5px] text-sub">{meta}</p>
+          <p className="truncate font-mono text-2xs text-sub">{meta}</p>
         </div>
       </div>
 

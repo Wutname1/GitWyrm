@@ -208,7 +208,7 @@ function ProviderRow({
       )}
       <span className="min-w-0 flex-1">
         <strong className="block text-2xs font-semibold text-foreground">{label}</strong>
-        <span className="block text-[10.5px] leading-snug text-muted-foreground">
+        <span className="block text-2xs leading-snug text-muted-foreground">
           {blocked ?? detail}
         </span>
       </span>

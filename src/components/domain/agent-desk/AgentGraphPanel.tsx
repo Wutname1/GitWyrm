@@ -26,7 +26,7 @@ const STATUS_TONE: Record<string, string> = {
 const DOT_TONE: Record<string, string> = {
   lead: 'bg-added',
   done: 'bg-added',
-  working: 'bg-accent-text animate-pulse',
+  working: 'bg-accent-text animate-pulse motion-reduce:animate-none',
   waiting: 'bg-[var(--gw-amber)]',
 }
 
@@ -51,7 +51,7 @@ function GraphNodeRow({
   const title = isLead ? 'Lead agent' : (execution.jobTitle ?? 'Helper')
   const meta = isLead
     ? 'owns source + integration'
-    : [execution.helperRole, execution.worktreePath ? 'worktree' : 'read-only'].filter(Boolean).join(' · ')
+    : [execution.helperRole, execution.worktreePath ? 'can change files' : 'reads only'].filter(Boolean).join(' · ')
 
   return (
     <div className={cn('relative', !isLead && 'pl-6')}>

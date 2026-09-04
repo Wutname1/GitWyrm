@@ -85,7 +85,7 @@ function MessageTargetLink({
         type="button"
         onClick={onOpenSource}
         disabled={!onOpenSource}
-        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-accent-text hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-semibold text-accent-text hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
       >
         <ExternalLink size={11} />
         {resolved.label}
@@ -98,7 +98,7 @@ function MessageTargetLink({
         <button
           type="button"
           disabled
-          className="inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground disabled:cursor-not-allowed"
+          className="inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-2xs font-medium text-muted-foreground disabled:cursor-not-allowed"
         >
           <Download size={11} className="flex-none rotate-180" aria-hidden />
           <span className="truncate">{resolved.label}</span>
@@ -112,7 +112,7 @@ function MessageTargetLink({
       type="button"
       onClick={() => targetNav.open(resolved)}
       title={resolved.label}
-      className="inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-accent-text hover:bg-soft"
+      className="inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-2xs font-semibold text-accent-text hover:bg-soft"
     >
       <Icon size={11} className="flex-none" aria-hidden />
       <span className="truncate">{resolved.label}</span>
@@ -280,7 +280,7 @@ function MessageRow({
       </span>
       {isUser && onEdit && <MessageActions message={message} onEdit={onEdit} className="absolute right-2 top-1.5" />}
       <div className="min-w-0">
-        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-foreground">
+        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-2xs font-semibold text-foreground">
           <span className={cn(isApproval && 'text-[var(--gw-amber)]')}>{kindLabel(message.kind)}</span>
           {message.provider && <span className="font-normal text-muted-foreground">{message.provider}</span>}
           <span className="font-normal text-muted-foreground">{formatClock(message.timestamp)}</span>
@@ -337,7 +337,7 @@ function StandaloneThoughtRow({ message }: { message: SessionMessage }) {
         {avatarInitials(message)}
       </span>
       <div className="min-w-0">
-        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-foreground">
+        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-2xs font-semibold text-foreground">
           <span>{kindLabel(message.kind)}</span>
           {message.provider && <span className="font-normal text-muted-foreground">{message.provider}</span>}
           <span className="font-normal text-muted-foreground">{formatClock(message.timestamp)}</span>
@@ -664,13 +664,15 @@ export function ConversationPane({
             })
           )}
           {(state === 'working' || state === 'preparing') && (
-            <div className="flex items-center gap-2 px-1 py-1 text-2xs text-muted-foreground">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" aria-hidden />
+            // Announced: a screen-reader user needs the run state most, and it
+            // was the one transition this pane changed silently.
+            <div role="status" aria-live="polite" className="flex items-center gap-2 px-1 py-1 text-2xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden />
               <span>{state === 'preparing' ? 'Getting ready…' : 'Working…'}</span>
             </div>
           )}
           {state === 'interrupted' && (
-            <div className="flex items-center gap-2 px-1 py-1 text-2xs text-muted-foreground">
+            <div role="status" aria-live="polite" className="flex items-center gap-2 px-1 py-1 text-2xs text-muted-foreground">
               <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" aria-hidden />
               <span>This chat stopped when the app closed. Send a message to start it again.</span>
             </div>

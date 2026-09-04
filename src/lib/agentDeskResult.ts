@@ -100,6 +100,32 @@ export function summarizeChangedPaths(paths: ResultChangedPath[]): { added: numb
 }
 
 /** A short plain-language summary line, e.g. "3 files changed" / "no changes". */
+/**
+ * Turns a raw status code into a word a person can read, plus the signal
+ * colour that word should carry.
+ *
+ * The review list is the user's evidence of what the agent did to their
+ * files, and it used to render the bare code -- so a deleted file was a
+ * single grey `D`, the scariest outcome shown as the quietest mark. The
+ * codes come from `crate::git::types::StatusCode` (`A | M | D | R | !`); an
+ * unrecognised one falls back to "Changed" rather than leaking the letter.
+ */
+export function changedPathStatusLabel(status: string): { label: string; tone: 'added' | 'changed' | 'removed' | 'muted' } {
+  switch (status) {
+    case 'A':
+      return { label: 'Added', tone: 'added' }
+    case 'D':
+      return { label: 'Deleted', tone: 'removed' }
+    case 'R':
+      return { label: 'Renamed', tone: 'muted' }
+    case '!':
+      return { label: 'Needs a fix', tone: 'removed' }
+    case 'M':
+    default:
+      return { label: 'Changed', tone: 'changed' }
+  }
+}
+
 export function changedPathsSummaryLine(paths: ResultChangedPath[]): string {
   if (paths.length === 0) return 'No file changes'
   if (paths.length === 1) return '1 file changed'

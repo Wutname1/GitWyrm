@@ -148,17 +148,16 @@ The following tasks define the actual release boundary.
       write failures return a typed `ApplyOperationOutcome::Failed`, never a silent success.
       Symlink target/type has code (`create_symlink`, `read_symlink_target`) but no dedicated
       test -- noted under 5.10, not blocking this task's core claim.
-- [ ] 5.5 Make one integration operation atomic or durably resumable. A mid-operation failure
+- [x] 5.5 Make one integration operation atomic or durably resumable. A mid-operation failure
       must not produce a partial change that is later reported as integrated or Finished.
-      PARTIAL: per-file writes are atomic (temp-write-then-rename in `write_content_atomic`),
-      and `integrate_helper_into` is designed to be idempotently re-run in full on the next
-      completion event (it compares `helper_text == integrated_text` before writing, so a
-      re-run skips already-applied operations) -- a real, reasoned resumability story, and a
-      failed operation is reported on the helper's own `output_summary` without flipping its
-      state to a false "Finished/integrated". But there is no test that actually simulates a
-      crash mid-batch (kill after operation 2 of 5, restart, verify completion) -- the
-      resumability claim rests on code inspection, not a proof. Left unchecked pending that
-      test, called for explicitly in 5.10.
+      CLOSED 2026-09-03. Per-file writes were already atomic (temp-write-then-rename in
+      `write_content_atomic`) and `integrate_helper_into` was already designed to replay the
+      whole batch idempotently on the next completion event. What was missing was the proof,
+      and it now exists: `an_interrupted_integration_batch_resumes_exactly_once_on_restart`
+      applies 2 of a 5-operation batch, asserts the tail genuinely has not happened, replays
+      the entire batch as a restart would, and asserts every operation landed exactly once --
+      a replayed delete stays deleted, a replayed rename does not resurrect the old path, and
+      no `.gitwyrm-integrate-*` temp file survives either pass.
 - [x] 5.6 Detect conflicts against the live integration worktree and preserve base, helper,
       and integrated versions plus operation metadata. Conflict refresh/restart must not
       reclassify the node as Interrupted.
@@ -195,17 +194,20 @@ The following tasks define the actual release boundary.
       `Working`, not flipped by a node count). This directly contradicts the file's own
       "SECOND AUDIT 2026-08-22" summary, which is stale against the code landed in the same
       commit.
-- [ ] 5.10 Add real-repository tests for uncommitted edits, staged edits, delete, rename,
+- [x] 5.10 Add real-repository tests for uncommitted edits, staged edits, delete, rename,
       binary content, symlink/mode where supported, same-line conflict, restart during
       integration, and proof that the user's checkout remains byte-identical.
-      PARTIAL: uncommitted/staged/committed edits, delete, rename, binary content,
-      executable-bit, same-line conflict, and byte-identical-checkout are all covered by real
-      tests (see 5.3/5.4/5.6 evidence above). Missing: a symlink-specific integration test
-      (code exists, untested) and a restart-during-integration test (kill mid-batch, restart,
-      verify exactly-once completion) -- left unchecked for those two gaps specifically.
-
-## 6. UI and recovery
-
+      CLOSED 2026-09-03, with one recorded coverage limit. The two gaps this task was held
+      open for are now covered: restart-during-integration by
+      `an_interrupted_integration_batch_resumes_exactly_once_on_restart` (see 5.5), and
+      symlinks by `apply_operation_writes_a_symlink_as_a_real_link_or_fails_typed`.
+      COVERAGE LIMIT, recorded rather than hidden: the machine this was written on is Windows
+      without developer mode, where the OS refuses symlink creation, so that test takes its
+      `Failed` branch and proves only that a refused link fails cleanly -- typed outcome, no
+      text stand-in written in the link's place, no temp file left behind. The `Applied`
+      branch (a real link is created and resolves to its target) runs on Unix and on Windows
+      with developer mode enabled, and is unproven on this box. The test asserts both branches
+      correctly; only one of them has been observed here.
 - [x] 6.1 Project graph nodes from backend records; no separate frontend graph truth.
 - [ ] 6.2 Show node state, role/model, current action, dependency, files, and output link.
       PARTIAL: `AgentGraphPanel.tsx` genuinely renders state (`nodeStatusLabel`, live status

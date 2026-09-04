@@ -126,7 +126,7 @@ export function SessionSourceBanner({
         <span className="flex min-w-0 flex-col leading-tight">
           <span className="text-[10px] font-bold uppercase tracking-wide text-accent-text">{kicker}</span>
           <span className="truncate text-xs font-semibold text-foreground">{title}</span>
-          <span className="truncate font-mono text-[10.5px] text-sub">{meta}</span>
+          <span className="truncate font-mono text-2xs text-sub">{meta}</span>
         </span>
       </button>
 
