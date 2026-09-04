@@ -6,13 +6,17 @@ import { detectProvider, providerLabel } from '@/lib/remoteProvider'
 
 const LOG_PAGE_SIZE = 200
 
-export function useCommitLog(repoId: string | null) {
+export function useCommitLog(
+  repoId: string | null,
+  hiddenBranches: string[] = [],
+  focusedBranch: string | null = null,
+) {
   return useInfiniteQuery({
-    queryKey: keys.log(repoId ?? 'none'),
+    queryKey: keys.log(repoId ?? 'none', hiddenBranches, focusedBranch),
     enabled: repoId != null,
     initialPageParam: 0,
     queryFn: async ({ pageParam }) =>
-      unwrap(await commands.getLog(repoId!, pageParam, LOG_PAGE_SIZE)),
+      unwrap(await commands.getLog(repoId!, pageParam, LOG_PAGE_SIZE, hiddenBranches, focusedBranch)),
     // Derived from the last page's own param rather than `pages.length` so the
     // offset stays correct no matter how many pages the cache is holding.
     getNextPageParam: (lastPage, _pages, lastPageParam) =>

@@ -35,6 +35,16 @@ interface Rule {
  */
 const RULES: Rule[] = [
   {
+    // Another git process is holding the index -- most often a terminal open
+    // beside the app, or a crashed process that left index.lock behind. The
+    // backend treats this as expected, so without a rule here the two layers
+    // disagreed and a routine clash was filed as a crash.
+    match: (r) => r.includes('index is locked'),
+    severity: 'warning',
+    message:
+      'Another program is using this repository right now. Wait for it to finish, then try again.',
+  },
+  {
     // A branch already checked out in another worktree folder. The backend
     // treats this as an expected refusal, so without a rule here the two layers
     // disagreed: the backend stayed quiet while the frontend logged raw

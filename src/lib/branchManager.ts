@@ -1,4 +1,4 @@
-import type { BranchInfo, RemoteInfo } from '@/lib/bindings'
+import type { BranchInfo, RemoteBranchInfo, RemoteInfo } from '@/lib/bindings'
 
 /**
  * One branch, wherever it lives.
@@ -13,8 +13,14 @@ export interface BranchRow {
   name: string
   /** The copy on this computer, when there is one. */
   local: BranchInfo | null
-  /** The remote holding a copy, when there is one. */
-  remote: string | null
+  /**
+   * Every remote holding a copy, in the order the remotes were listed.
+   *
+   * A list rather than one name: a branch can be on `origin` and a fork at the
+   * same time, and each copy is deleted separately. Collapsing them to one
+   * would make it impossible to remove a stale copy from a single remote.
+   */
+  remotes: string[]
   /** True when this is the branch currently checked out. */
   isCurrent: boolean
   /** Newest tip time across the copies, epoch seconds, for staleness sorting. */
@@ -62,7 +68,9 @@ export function buildBranchRows(
     rows.set(local.name, {
       name: local.name,
       local,
-      remote: local.upstream ? (local.upstream.split('/')[0] ?? null) : null,
+      // Filled in from the remote lists below; the upstream only names the one
+      // it tracks, which is not necessarily the only place it lives.
+      remotes: [],
       isCurrent: local.is_head,
       time: local.time,
       behind: sync.kind === 'diverged' ? sync.behind : 0,
@@ -78,27 +86,25 @@ export function buildBranchRows(
       // `tracked_by` is the real link read from config; the name match is only a
       // fallback for a branch that was never connected to anything.
       const owner = branch.tracked_by ?? (rows.has(short) ? short : null)
-      const existing = owner ? rows.get(owner) : undefined
+      const existing = owner ? rows.get(owner) : rows.get(short)
       if (existing) {
-        // A local row already covers this branch; record where its copy lives.
-        existing.remote ??= remote.name
+        // A row already covers this branch; add this as another place it lives.
+        if (!existing.remotes.includes(remote.name)) existing.remotes.push(remote.name)
         existing.time = Math.max(existing.time ?? 0, branch.time ?? 0) || existing.time
         continue
       }
       // Remote-only: no copy on this computer at all.
-      if (!rows.has(short)) {
-        rows.set(short, {
-          name: short,
-          local: null,
-          remote: remote.name,
-          isCurrent: false,
-          time: branch.time,
-          behind: 0,
-          ahead: 0,
-          neverPushed: false,
-          upstreamGone: false,
-        })
-      }
+      rows.set(short, {
+        name: short,
+        local: null,
+        remotes: [remote.name],
+        isCurrent: false,
+        time: branch.time,
+        behind: 0,
+        ahead: 0,
+        neverPushed: false,
+        upstreamGone: false,
+      })
     }
   }
 
@@ -150,4 +156,157 @@ export function sortRows(rows: BranchRow[], sort: BranchSort): BranchRow[] {
     }
     return a.name.localeCompare(b.name)
   })
+}
+
+/**
+ * One selectable copy of a branch.
+ *
+ * A branch that exists locally and on two remotes is three separate things a
+ * person may want to delete, and they rarely want all three. `local` is the
+ * copy on this computer; a string is the remote holding that copy.
+ */
+export type BranchLocation = 'local' | (string & {})
+
+/**
+ * Stable key for a single copy, used as the selection identity.
+ *
+ * The separator is a space because git refuses one in a ref name, so it cannot
+ * appear in either half and the key stays unambiguous. Do not reach for an
+ * exotic character here: this was a NUL, which a tool wrote into the source as
+ * a real byte rather than an escape, turning the whole file binary.
+ */
+export function locationKey(name: string, where: BranchLocation): string {
+  return `${where} ${name}`
+}
+
+/** Every copy of a branch that can be ticked, in display order. */
+export function locationsOf(row: BranchRow): BranchLocation[] {
+  return [...(row.local ? (['local'] as BranchLocation[]) : []), ...row.remotes]
+}
+
+/** One ticked copy, resolved back to what it refers to. */
+export interface SelectedLocation {
+  name: string
+  where: BranchLocation
+  row: BranchRow
+}
+
+/** Resolve one joined row back to its exact branch record on a remote. */
+export function remoteBranchForRow(
+  remote: RemoteInfo,
+  row: BranchRow,
+): RemoteBranchInfo | null {
+  return remote.branches.find((branch) =>
+    branch.tracked_by === row.name ||
+    branch.name === row.name ||
+    branch.name === `${remote.name}/${row.name}`,
+  ) ?? null
+}
+
+export interface SelectedBranchActions {
+  pullable: string[]
+  sendable: string[]
+  copyTargets: { name: string; remote: string }[]
+  copyAmbiguous: boolean
+}
+
+/**
+ * Turn checked locations into the bulk actions that apply to those exact
+ * locations. This is deliberately stricter for a selected remote: Get and
+ * Send only target it when it is the local branch's configured shared copy.
+ */
+export function selectedBranchActions(
+  selected: SelectedLocation[],
+  remotes: RemoteInfo[],
+): SelectedBranchActions {
+  const pullable = new Set<string>()
+  const sendable = new Set<string>()
+  const copyRemotesByBranch = new Map<string, Set<string>>()
+
+  for (const item of selected) {
+    const local = item.row.local
+    if (item.where === 'local') {
+      if (rowCapabilities(item.row).canPull) pullable.add(item.name)
+      if (local && (item.row.neverPushed || item.row.upstreamGone || item.row.ahead > 0)) {
+        sendable.add(local.name)
+      }
+      continue
+    }
+
+    if (!local) {
+      const names = copyRemotesByBranch.get(item.name) ?? new Set<string>()
+      names.add(item.where)
+      copyRemotesByBranch.set(item.name, names)
+      continue
+    }
+
+    const remote = remotes.find((candidate) => candidate.name === item.where)
+    const remoteBranch = remote ? remoteBranchForRow(remote, item.row) : null
+    if (remoteBranch?.tracked_by !== local.name) continue
+    if (rowCapabilities(item.row).canPull && remoteBranch.ahead_of_local > 0) {
+      pullable.add(local.name)
+    }
+    if (remoteBranch.behind_local > 0) sendable.add(local.name)
+  }
+
+  const copyTargets: { name: string; remote: string }[] = []
+  let copyAmbiguous = false
+  for (const [name, remoteNames] of copyRemotesByBranch) {
+    if (remoteNames.size !== 1) {
+      copyAmbiguous = true
+      continue
+    }
+    copyTargets.push({ name, remote: [...remoteNames][0] })
+  }
+
+  return {
+    pullable: [...pullable],
+    sendable: [...sendable],
+    copyTargets,
+    copyAmbiguous,
+  }
+}
+
+/**
+ * Group ticked copies into one delete instruction per branch.
+ *
+ * The delete mutation takes a branch at a time with flags for local and remote,
+ * so ticking `main` on two remotes has to become two entries rather than one --
+ * each remote is its own push.
+ */
+export function deleteTargets(
+  selected: SelectedLocation[],
+): { name: string; local: boolean; remote: string | null }[] {
+  const byName = new Map<string, { local: boolean; remotes: string[] }>()
+  for (const item of selected) {
+    const entry = byName.get(item.name) ?? { local: false, remotes: [] }
+    if (item.where === 'local') entry.local = true
+    else entry.remotes.push(item.where)
+    byName.set(item.name, entry)
+  }
+
+  const targets: { name: string; local: boolean; remote: string | null }[] = []
+  for (const [name, entry] of byName) {
+    if (entry.remotes.length === 0) {
+      targets.push({ name, local: entry.local, remote: null })
+      continue
+    }
+    // The local copy rides along with the first remote so it is deleted once.
+    entry.remotes.forEach((remote, i) => {
+      targets.push({ name, local: i === 0 && entry.local, remote })
+    })
+  }
+  return targets
+}
+
+/**
+ * Whether deleting these copies would destroy work that exists nowhere else.
+ *
+ * Only the local copy can hold unpushed work, so removing a remote copy while
+ * keeping the local one is never the risky case.
+ */
+export function riskyLocations(selected: SelectedLocation[]): SelectedLocation[] {
+  return selected.filter(
+    (item) => item.where === 'local' && rowCapabilities(item.row).losesWork,
+  )
 }

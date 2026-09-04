@@ -156,6 +156,12 @@ pub struct SubmoduleStatus {
     pub ahead: u32,
     /// Commits the workdir is behind the recorded commit.
     pub behind: u32,
+    /// Branch the nested checkout is on, when it is on one at all.
+    ///
+    /// `git submodule update` leaves a detached HEAD, which is the normal
+    /// resting state and not a fault -- but it is invisible in the UI unless
+    /// said out loud, and a user who commits there can lose the work.
+    pub head_branch: Option<String>,
     pub state: SubmoduleState,
 }
 

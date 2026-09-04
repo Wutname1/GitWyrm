@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { commands, type SubmoduleStatus } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { plural } from '@/lib/gitDisplay'
+import { describeHead, isDetached, readSubmodule } from '@/lib/submoduleState'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -33,40 +34,17 @@ import { useActiveRepo } from '@/stores/workspaceStore'
 import { useOpenSubmoduleRepo } from '@/hooks/useRepoActions'
 import { openWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
 
-/** Short label for the row's right edge, and the colour that goes with it. */
-function stateLabel(s: SubmoduleStatus): { text: string; tone: string } | null {
-  if (s.state === 'uninitialized') {
-    return { text: 'not downloaded', tone: 'text-muted-foreground' }
-  }
-  if (s.state === 'in_sync') return null
-  // Moved: say which way it went, since ahead and behind mean different things.
-  if (s.ahead > 0 && s.behind > 0) return { text: 'changed', tone: 'text-[var(--gw-amber)]' }
-  if (s.ahead > 0) return { text: `${s.ahead} ahead`, tone: 'text-[var(--gw-amber)]' }
-  if (s.behind > 0) return { text: `${s.behind} behind`, tone: 'text-[var(--gw-amber)]' }
-  return { text: 'changed', tone: 'text-[var(--gw-amber)]' }
-}
-
-/** Plain-language explanation of the row, shown on hover. */
-function tooltip(s: SubmoduleStatus): string {
-  const follows = s.branch ? ` Follows ${s.branch}.` : ''
+/**
+ * What the row says on hover: the situation, where the folder sits, and how to
+ * open it. `readSubmodule` owns the wording so the row, the menu and the
+ * confirmation cannot describe the same state three different ways.
+ */
+function tooltip(sub: SubmoduleStatus): string {
+  const { meaning } = readSubmodule(sub)
+  const follows = sub.branch ? ` Follows ${sub.branch}.` : ''
+  const where = sub.state === 'uninitialized' ? '' : ` ${describeHead(sub)}.`
   // Double-click is otherwise invisible, so every row advertises it.
-  const open = ' Double-click to open it in a tab under this project.'
-  if (s.state === 'uninitialized') {
-    return `Not downloaded yet, so this folder is empty. Download it to get the files.${follows}${open}`
-  }
-  if (s.state === 'in_sync') {
-    return `Up to date with the version this project expects.${follows}${open}`
-  }
-  if (s.ahead > 0 && s.behind > 0) {
-    return `This is on a different version than the project expects.${follows}${open}`
-  }
-  if (s.ahead > 0) {
-    return `${plural(s.ahead, 'newer commit')} than the project expects. Commit to save this update.${follows}${open}`
-  }
-  // Older than what the project pins is the shape a pull leaves behind when it
-  // could not move this folder itself -- so point at the fix rather than just
-  // stating the gap, which reads as something the user did.
-  return `${plural(s.behind, 'commit')} older than the project expects. Right-click and choose "Undo my changes" to catch it up.${follows}${open}`
+  return `${meaning}${where}${follows} Double-click to open it in a tab under this project.`
 }
 
 function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
@@ -79,7 +57,8 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
   const [opening, setOpening] = useState(false)
 
   const name = sub.path.split('/').pop() ?? sub.path
-  const label = stateLabel(sub)
+  const reading = readSubmodule(sub)
+  const detached = isDetached(sub)
   const uninitialized = sub.state === 'uninitialized'
   // Only offer a web link for a URL that resolves to a browsable page. The
   // shared parser handles self-hosted and Azure routes too.
@@ -130,11 +109,7 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
         size={11}
         className={cn(
           'flex-none',
-          uninitialized
-            ? 'text-muted-foreground'
-            : sub.state === 'moved'
-              ? 'text-[var(--gw-amber)]'
-              : 'text-muted-foreground'
+          sub.state === 'moved' ? 'text-[var(--gw-amber)]' : 'text-muted-foreground'
         )}
       />
       <span
@@ -145,8 +120,20 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
       >
         {name}
       </span>
+      {/* Where the folder sits. A checkout on no branch is the ordinary state
+          after an update, but a commit made there belongs to no branch -- so it
+          is named rather than left to infer from a sha. */}
+      {detached ? (
+        <span className="flex-none rounded-sm bg-panel3 px-1 text-[9px] leading-4 text-muted-foreground">
+          no branch
+        </span>
+      ) : sub.head_branch ? (
+        <span className="min-w-0 flex-none truncate text-[9px] text-muted-foreground">
+          {sub.head_branch}
+        </span>
+      ) : null}
       <span className="ml-auto flex flex-none items-center gap-1.5 pl-1.5 font-mono text-2xs">
-        {label && <span className={label.tone}>{label.text}</span>}
+        {reading.label && <span className={reading.tone}>{reading.label}</span>}
         {/* Where it actually sits, which only differs from the recorded commit
             when it has moved -- that is the case worth showing the sha for. */}
         <span className="text-muted-foreground">
@@ -182,19 +169,36 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
 
           <ContextMenuSeparator />
 
-          {uninitialized ? (
+          {/* The two intents, named for what the user wants rather than for
+              the git command behind them. "Match" is `git submodule update`;
+              "newest" is `git submodule update --remote`. Both were already
+              here -- one was buried under "Undo my changes", which blamed the
+              user for a state a pull had left. */}
+          {reading.canMatchProject && (
             <PendingMenuItem
-              icon={<Download />}
-              label="Download it"
-              pendingLabel="Downloading…"
+              icon={uninitialized ? <Download /> : <RotateCcw />}
+              label={
+                uninitialized ? 'Download it' : 'Match the version this project expects'
+              }
+              pendingLabel={uninitialized ? 'Downloading…' : 'Matching…'}
               pending={m.updateSubmodule.isPending}
               disabled={busy}
-              onRun={() => m.updateSubmodule.mutate({ path: sub.path, init: true })}
+              onRun={() => {
+                // Only confirm when something of the user's would go. Catching
+                // up a folder someone else moved discards nothing.
+                if (reading.matchIsSafe) {
+                  m.updateSubmodule.mutate({ path: sub.path, init: true })
+                } else {
+                  setConfirmReset(true)
+                }
+              }}
             />
-          ) : (
+          )}
+
+          {!uninitialized && (
             <PendingMenuItem
               icon={<ArrowUpCircle />}
-              label="Update to latest"
+              label="Move to the newest version"
               pendingLabel="Updating…"
               pending={m.bumpSubmodule.isPending}
               disabled={busy}
@@ -211,16 +215,6 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
             </ContextMenuItem>
           )}
 
-          {sub.state === 'moved' && (
-            <>
-              <ContextMenuSeparator />
-              <ContextMenuItem variant="destructive" onSelect={() => setConfirmReset(true)}>
-                <RotateCcw />
-                Undo my changes
-              </ContextMenuItem>
-            </>
-          )}
-
           <ContextMenuSeparator />
           <ContextMenuItem variant="destructive" onSelect={() => setConfirmRemove(true)}>
             <Trash2 />
@@ -233,18 +227,22 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
         open={confirmReset}
         onOpenChange={setConfirmReset}
         destructive
-        title={`Undo your changes to ${name}?`}
+        title={`Match the version this project expects for ${name}?`}
         description={
           <>
-            This puts <span className="font-mono text-foreground">{sub.path}</span> back to the
-            version this project expects, dropping the version it points at now. This can't be
-            undone.
+            <span className="font-mono text-foreground">{sub.path}</span> is on a
+            {reading.situation === 'diverged' ? ' different line of work' : ' newer version'}{' '}
+            than this project expects. Matching the project drops
+            {reading.situation === 'diverged'
+              ? ' what is only in this folder'
+              : ` the ${plural(sub.ahead, 'newer commit')} here`}
+            , which can't be undone. Commit inside the folder first to keep it.
           </>
         }
-        confirmLabel="Undo changes"
+        confirmLabel="Match the project"
         pending={m.updateSubmodule.isPending}
-        pendingLabel="Undoing…"
-        onConfirm={() => m.updateSubmodule.mutate({ path: sub.path, init: false })}
+        pendingLabel="Matching…"
+        onConfirm={() => m.updateSubmodule.mutate({ path: sub.path, init: true })}
       />
 
       <ConfirmDialog
@@ -296,6 +294,10 @@ export function SubmodulesSection() {
 
   const list = submodules ?? []
   const missing = list.filter((s) => s.state === 'uninitialized').length
+  // Folders left behind by someone else's update. Separated from the ones
+  // holding work of their own, because only these can be caught up without a
+  // decision -- and this is the state that reads as broken from the sidebar.
+  const behind = list.filter((s) => readSubmodule(s).situation === 'behind-project')
 
   if (list.length === 0) return null
 
@@ -330,6 +332,26 @@ export function SubmodulesSection() {
           </TooltipButton>
         )}
 
+        {behind.length > 0 && (
+          <TooltipButton
+            onClick={(e) => {
+              e.stopPropagation()
+              for (const s of behind) {
+                m.updateSubmodule.mutate({ path: s.path, init: true })
+              }
+            }}
+            disabled={m.updateSubmodule.isPending}
+            tooltip={`Catch up ${plural(behind.length, 'folder')} that ${behind.length === 1 ? 'has' : 'have'} not reached the version this project expects. Nothing of yours is lost.`}
+            className={cn(
+              'flex flex-none items-center gap-1 rounded-sm bg-[var(--gw-amber)]/15 px-1 font-mono text-2xs text-[var(--gw-amber)] hover:bg-[var(--gw-amber)]/25',
+              missing === 0 && 'ml-auto'
+            )}
+          >
+            <RotateCcw size={9} />
+            {behind.length}
+          </TooltipButton>
+        )}
+
         <TooltipButton
           onClick={(e) => {
             e.stopPropagation()
@@ -338,7 +360,7 @@ export function SubmodulesSection() {
           tooltip="Add a submodule"
           className={cn(
             'flex size-4 flex-none items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover/section:opacity-100',
-            missing === 0 && 'ml-auto'
+            missing === 0 && behind.length === 0 && 'ml-auto'
           )}
         >
           <Plus size={12} strokeWidth={2.4} />

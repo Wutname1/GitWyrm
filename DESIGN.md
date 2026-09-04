@@ -1,443 +1,312 @@
 ---
 name: GitWyrm
-description: A warm-dark workshop for Git and AI agents; dense, calm, alive only where work is happening.
+description: A calm control room built with the tactility and personality of a personal workbench.
 colors:
-  deep-mint: "#1db584"
-  mint-text: "#38b78e"
-  mint-ink: "#04120d"
-  mint-haze: "rgba(29, 181, 132, 0.13)"
-  workshop-floor: "#121212"
-  bench: "#1a1a1a"
-  bench-raised: "#262626"
-  bench-edge: "#2d2d2d"
-  chalk: "#e5e5e5"
-  chalk-dim: "#9e9e9e"
-  chalk-faint: "#717171"
-  signal-green: "#34d399"
-  signal-red: "#f87171"
-  signal-amber: "#fbbf24"
-  signal-blue: "#60a5fa"
-  signal-purple: "#a78bfa"
-  lane-mint: "#2dd4a7"
-  lane-sky: "#38bdf8"
-  lane-amber: "#f59e0b"
-  lane-violet: "#a78bfa"
-  lane-rose: "#fb7185"
-  lane-lime: "#a3e635"
+  primary: "#1db584"
+  primary-text: "#38b78e"
+  primary-ink: "#04120d"
+  canvas: "#121212"
+  surface: "#1a1a1a"
+  surface-raised: "#262626"
+  surface-active: "#2d2d2d"
+  border: "#2d2d2d"
+  text: "#e5e5e5"
+  text-secondary: "#9e9e9e"
+  text-muted: "#717171"
+  success: "#34d399"
+  danger: "#f87171"
+  warning: "#fbbf24"
+  info: "#60a5fa"
+  pull-request: "#a78bfa"
+  graph-rose: "#fb7185"
+  graph-lime: "#a3e635"
 typography:
-  wordmark:
-    fontFamily: "Sora, Inter Variable, system-ui, sans-serif"
-    fontSize: "1rem"
-    fontWeight: 600
-    lineHeight: 1
   title:
-    fontFamily: "IBM Plex Sans Variable, system-ui, sans-serif"
-    fontSize: "1.125rem"
-    fontWeight: 600
-    lineHeight: 1
-  headline:
-    fontFamily: "IBM Plex Sans Variable, system-ui, sans-serif"
+    fontFamily: "Inter Variable, system-ui, sans-serif"
     fontSize: "1rem"
     fontWeight: 600
     lineHeight: 1.25
   body:
-    fontFamily: "IBM Plex Sans Variable, system-ui, sans-serif"
-    fontSize: "0.84375rem"
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "0.875rem"
     fontWeight: 450
     lineHeight: 1.45
   label:
-    fontFamily: "IBM Plex Sans Variable, system-ui, sans-serif"
-    fontSize: "0.75rem"
-    fontWeight: 500
-    lineHeight: 1.35
-  micro:
-    fontFamily: "IBM Plex Sans Variable, system-ui, sans-serif"
+    fontFamily: "Inter Variable, system-ui, sans-serif"
     fontSize: "0.6875rem"
     fontWeight: 600
     lineHeight: 1.45
-    letterSpacing: "0.04em"
+    letterSpacing: "0.09em"
   mono:
-    fontFamily: "Geist Mono, ui-monospace, SF Mono, monospace"
+    fontFamily: "Inter Variable, ui-monospace, SF Mono, monospace"
     fontSize: "0.6875rem"
-    fontWeight: 500
-    lineHeight: 1.45
+    fontWeight: 600
+    lineHeight: 1.4
+  wordmark:
+    fontFamily: "Sora, Inter Variable, system-ui, sans-serif"
+    fontSize: "0.6875rem"
+    fontWeight: 600
+    lineHeight: 1
+    letterSpacing: "0.085em"
 rounded:
-  badge: "3px"
-  icon: "4px"
-  tab: "5px"
-  sm: "0.25rem"
-  md: "0.375rem"
-  lg: "0.5rem"
-  xl: "0.75rem"
+  status: "3px"
+  compact: "4px"
+  control: "5px"
+  md: "6px"
+  lg: "8px"
+  xl: "12px"
+  pill: "9999px"
 spacing:
-  hairline: "1px"
-  xs: "4px"
-  sm: "6px"
-  md: "8px"
-  lg: "12px"
-  xl: "16px"
-  row: "28px"
-  row-tall: "42px"
-  control: "30px"
+  micro: "4px"
+  compact: "6px"
+  control: "8px"
+  group: "12px"
+  panel: "16px"
+  dialog: "24px"
 components:
   button-primary:
-    backgroundColor: "{colors.deep-mint}"
-    textColor: "{colors.mint-ink}"
-    typography: "{typography.label}"
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.primary-ink}"
+    typography: "{typography.body}"
     rounded: "{rounded.md}"
-    padding: "0 16px"
+    padding: "8px 16px"
     height: "36px"
-  button-primary-hover:
-    backgroundColor: "rgba(29, 181, 132, 0.9)"
-    textColor: "{colors.mint-ink}"
+  button-secondary:
+    backgroundColor: "{colors.surface-active}"
+    textColor: "{colors.text}"
+    typography: "{typography.body}"
+    rounded: "{rounded.md}"
+    padding: "8px 12px"
+    height: "32px"
   button-ghost:
     backgroundColor: "transparent"
-    textColor: "{colors.chalk-dim}"
-    rounded: "{rounded.md}"
-    padding: "0 12px"
-    height: "32px"
-  button-ghost-hover:
-    backgroundColor: "{colors.bench-edge}"
-    textColor: "{colors.chalk}"
-  button-link:
-    backgroundColor: "transparent"
-    textColor: "{colors.mint-text}"
-  button-xs:
-    backgroundColor: "{colors.bench-raised}"
-    textColor: "{colors.chalk}"
-    typography: "{typography.label}"
-    rounded: "{rounded.md}"
-    padding: "0 8px"
-    height: "24px"
+    textColor: "{colors.text-secondary}"
+    typography: "{typography.body}"
+    rounded: "{rounded.control}"
+    padding: "6px 8px"
+    height: "30px"
   input:
-    backgroundColor: "transparent"
-    textColor: "{colors.chalk}"
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.text}"
     typography: "{typography.body}"
     rounded: "{rounded.md}"
     padding: "4px 12px"
     height: "36px"
-  input-search:
-    backgroundColor: "{colors.bench-raised}"
-    textColor: "{colors.chalk}"
+  repository-tab:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text-secondary}"
     typography: "{typography.label}"
-    rounded: "{rounded.md}"
-    padding: "0 10px"
-    height: "{spacing.control}"
-  panel:
-    backgroundColor: "{colors.bench}"
-    textColor: "{colors.chalk}"
-  panel-raised:
-    backgroundColor: "{colors.bench-raised}"
-    textColor: "{colors.chalk}"
-    rounded: "{rounded.lg}"
-    padding: "6px"
-  popover:
-    backgroundColor: "{colors.bench-raised}"
-    textColor: "{colors.chalk}"
-    rounded: "{rounded.md}"
-    padding: "16px"
-  menu:
-    backgroundColor: "{colors.bench-raised}"
-    textColor: "{colors.chalk}"
-    rounded: "{rounded.md}"
-    padding: "4px"
-  tooltip:
-    backgroundColor: "{colors.bench-edge}"
-    textColor: "{colors.chalk}"
-    typography: "{typography.micro}"
-    rounded: "{rounded.tab}"
-    padding: "6px 10px"
-  dialog:
-    backgroundColor: "{colors.bench}"
-    textColor: "{colors.chalk}"
-    rounded: "{rounded.lg}"
-    padding: "24px"
-  tab-active:
-    backgroundColor: "{colors.mint-haze}"
-    textColor: "{colors.chalk}"
-    rounded: "{rounded.tab}"
-  chip-status:
-    backgroundColor: "transparent"
-    textColor: "{colors.chalk-dim}"
+    rounded: "{rounded.control}"
+    padding: "0 8px"
+    height: "36px"
+  ref-chip:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.primary-ink}"
     typography: "{typography.mono}"
-    rounded: "{rounded.badge}"
-    size: "16px"
-  choice-card:
-    backgroundColor: "transparent"
-    textColor: "{colors.chalk}"
-    rounded: "{rounded.md}"
+    rounded: "{rounded.control}"
+    padding: "1px 6px"
+  agent-session-row:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
+    typography: "{typography.body}"
+    rounded: "{rounded.control}"
     padding: "8px 10px"
-  choice-card-selected:
-    backgroundColor: "{colors.mint-haze}"
-    textColor: "{colors.chalk}"
+    height: "42px"
+  agent-gate:
+    backgroundColor: "{colors.surface-raised}"
+    textColor: "{colors.text}"
+    typography: "{typography.body}"
+    rounded: "{rounded.lg}"
+    padding: "12px"
 ---
 
 # Design System: GitWyrm
 
 ## Overview
 
-**Creative North Star: "The Night Workshop"**
+**Creative North Star: "The Quiet Control Workbench"**
 
-GitWyrm looks like a workbench after hours. The surfaces are warm-dark, not cold-dark:
-a near-black floor (#121212) with benches stepping up in tone rather than in shadow, so
-a panel sits on the floor the way a tool sits on a bench, by being a shade lighter. A
-lot is laid out within reach (rows are 28 pixels, the smallest text is 11 pixels, the
-sidebar holds dozens of chats and branches) and none of it shouts. One signal light,
-Deep Mint, marks the thing that matters right now: the selected tab's edge, the one
-filled button, the ring around a drop target, the pulse on a sync in progress.
+GitWyrm combines the calm situational awareness of a control room with the approachable tactility of a personal workbench. The interface is compact, capable, and information-rich, but each tool has a clear place and every state change answers the user visibly. It should feel made by people who care about the work, not standardized by an enterprise committee.
 
-The system is alive only in small places. Motion and glow appear where work is
-happening and nowhere else: a sync badge pulses, the AI stage wakes, a dragged tab
-finds its target, the logo springs when someone clicks it for fun. Everything at rest
-is still. Copy is honest and plain: state is shown as it is, in words a non-expert can
-read, and a control that cannot act says why rather than pretending.
-
-It is not a raw terminal. Monospace is a detail (a SHA, a count, a badge), never the
-voice; hierarchy comes from weight, size and tone, not from ALL CAPS and neon on black.
-Four surface themes (Slate, Onyx, Midnight, Paper) and a light mode exist, but the
-identity is the dark Slate workshop with the mint light on.
+Personality lives in precise details: the Wyrm mark, colored graph paths, direct language, responsive presses, purposeful motion, and occasional wit. Those moments sit inside a disciplined shell so the repository remains the focus. The system is professional without becoming sterile, friendly without becoming toy-like, and dense without becoming cryptic.
 
 **Key Characteristics:**
-- Warm-dark tonal layering: four surface steps, one hairline border, no resting shadows.
-- One accent, two tokens: Deep Mint for fills and edges, a calmer Mint Text for words.
-- Dense rows, small calm type, an 11-pixel floor that nothing goes under.
-- Motion and glow only where something is happening.
-- Bright categorical palettes (graph lanes, authors, tab groups) that identify and are
-  never confused with the accent.
+
+- Dark-first, theme-aware neutral surfaces with a restrained mint accent.
+- Compact desktop density with resizable working panes and persistent context.
+- Tactile controls with unmistakable hover, pressed, selected, pending, success, and failure states.
+- Color used for meaning: action, Git topology, change status, warnings, and connected services.
+- Bright identity colors distinguish graph lanes, authors, tab groups, and agent roles without competing with Deep Mint.
+- Small, deliberate moments of branded motion and wit inside an otherwise quiet workspace.
 
 ## Colors
 
-A near-neutral dark ramp under one mint signal, with a small set of fixed status colors.
+The palette is a neutral tool bench illuminated by a small set of reliable signal colors. The frontmatter records the default Slate-dark first-paint values; runtime theme tokens preserve the same semantic roles across Slate, Onyx, Midnight, and Paper in dark and light modes.
 
 ### Primary
-- **Deep Mint** (#1db584): fills and edges only. The primary button, the active tab's
-  2px edge, the focus ring, the drop-target ring, the sync pulse. Runtime themes derive
-  it in OKLCH; the hex is the design's canonical value and the first-paint default.
-- **Mint Text** (#38b78e): every green word. Links, the accent icon on a selected row,
-  the "Change" affordance. Slightly lighter than the fill so it does not glare at ~10:1
-  on the floor.
-- **Mint Ink** (#04120d): text on a mint fill.
-- **Mint Haze** (rgba 29,181,132 at 13%): the selected tab, a selected choice card, a
-  hovered tab group; the only tinted surface in the system.
+
+- **Deep Mint** (`primary`): the scarce action color for primary buttons, active edges, focus rings, progress, and important selection feedback.
+- **Lit Mint** (`primary-text`): the calmer readable mint for accent text on dark and light surfaces.
+- **Deep Mint Ink** (`primary-ink`): high-contrast content placed directly on mint fills.
+
+### Secondary
+
+- **Signal Blue** (`info`): informational emphasis, updates, and one graph lane.
+- **Signal Purple** (`pull-request`): pull request identity and one graph lane.
+
+### Tertiary
+
+- **Signal Green** (`success`): added content and successful outcomes.
+- **Signal Red** (`danger`): removed content, errors, destructive actions, and failure emphasis.
+- **Signal Amber** (`warning`): modified content, waiting states, and warnings.
+- **Lane Rose** and **Lane Lime** (`graph-rose`, `graph-lime`): topology colors reserved for keeping graph paths distinct.
 
 ### Neutral
-- **Workshop Floor** (#121212): the app background.
-- **Bench** (#1a1a1a): panels, the modal body, cards at rest.
-- **Bench Raised** (#262626): popovers, menus, composer and secondary surfaces, the
-  search field, hover fill on list rows.
-- **Bench Edge** (#2d2d2d): the hairline border everywhere, tooltip body, the strongest
-  hover fill (ghost buttons, icon buttons).
-- **Chalk** (#e5e5e5): primary text.
-- **Chalk Dim** (#9e9e9e): secondary labels, sidebar rows at rest, toolbar labels.
-- **Chalk Faint** (#717171): placeholders, metadata, disabled and icon-only controls at
-  rest.
 
-### Tertiary (status and identity)
-- **Signal Green** (#34d399): added lines, success, a tab whose repo has pending work.
-- **Signal Red** (#f87171): removed lines, errors, the destructive button, a failed
-  panel's warmed border.
-- **Signal Amber** (#fbbf24): modified lines, warnings, a card that needs attention.
-- **Signal Blue** (#60a5fa): info.
-- **Signal Purple** (#a78bfa): pull requests, everywhere they appear, so the icon alone
-  identifies the kind.
-- **Lane palette** (#2dd4a7, #38bdf8, #f59e0b, #a78bfa, #fb7185, #a3e635): commit-graph
-  lanes; a second bright palette colours author avatars and tab groups. These identify
-  things and stay bright on purpose.
+- **Workbench Black** (`canvas`): the deepest application canvas.
+- **Bench Charcoal** (`surface`): primary panels and structural regions.
+- **Tool Steel** (`surface-raised`, `surface-active`): progressively lighter controls, hover fills, menus, and nested surfaces.
+- **Tool Edge** (`border`): quiet separation where spacing and tonal contrast are not enough.
+- **Workshop White**, **Soft Nickel**, and **Worn Steel** (`text`, `text-secondary`, `text-muted`): primary, supporting, and de-emphasized text.
 
 ### Named Rules
-**The Two-Token Mint Rule.** Mint fills use Deep Mint; mint words use Mint Text. Never
-set text in the fill colour, and never use `text-primary` for green text.
 
-**The Signal Light Rule.** The accent marks what is selected, focused, dropping or
-running. It never decorates. If two things on one screen are mint and neither is the
-current thing, one of them is wrong.
+**The Signal, Not Paint Rule.** Deep Mint and semantic colors communicate action, state, or topology; they do not decorate empty space.
 
-**The Identity Palette Rule.** Lane, author and tab-group colours are for telling things
-apart. They may be brighter than the accent, and they are never used as an accent.
+**The Selected Must Read Rule.** A selected control needs persistent contrast, an edge, a check, or another unmistakable marker. A faint tint alone is not a selected state.
+
+**The Theme Contract Rule.** Components consume semantic variables, never a hard-coded theme surface, so every supported theme retains the same hierarchy and meaning.
+
+**The Identity Palette Rule.** Bright lane, author, tab-group, and agent-role colors tell entities apart. They may be livelier than the accent, but they never substitute for action or selection feedback.
 
 ## Typography
 
-**Display Font:** Sora SemiBold (wordmark only; falls back to Inter Variable, system-ui)
-**Body Font:** IBM Plex Sans Variable (default; the person may switch to Inter, Geist,
-Roboto or the system font in Appearance, and the whole scale follows in rem)
-**Label/Mono Font:** Geist Mono (SHAs, counts, badges, paths)
+**Display Font:** Sora with Inter and system fallbacks, reserved for the GitWyrm wordmark.
 
-**Character:** Plain and even. Plex at a 450 weight and 13.5px reads like careful
-handwriting on a label rather than a headline; the wordmark is the one place the type
-has a personality of its own. Hierarchy is carried by weight (450 to 600) and a small
-size scale, never by colour or capitals alone.
+**Body Font:** Inter Variable with system fallbacks by default. The user may choose IBM Plex Sans, Geist, Roboto, the system default, or an available local font.
+
+**Label/Mono Font:** Inter Variable with monospaced fallbacks for paths, hashes, counts, timestamps, code, and compact status text.
+
+**Character:** Type is compact, practical, and quiet. Weight and contrast establish hierarchy more often than dramatic size changes, keeping dense repository information scannable without shrinking below the established micro-type floor.
 
 ### Hierarchy
-- **Wordmark** (600, 1rem, tight): the GitWyrm mark in the title bar and the AI stage.
-- **Title** (600, 1.125rem, 1): dialog titles.
-- **Headline** (600, 1rem, 1.25): the one heading on an empty state or landing pane.
-- **Body** (450, 0.84375rem, 1.45): the base label size for everything inherited; the
-  transcript, list rows, descriptions. Max reading width about 65ch in prose panels.
-- **Label** (500, 0.75rem, 1.35): control labels, toolbar text, chips, small headings.
-- **Micro** (600, 0.6875rem, 1.45, uppercase with 0.04em tracking when used as a section
-  eyebrow): the smallest size anywhere. Section eyebrows, tooltips, badge text,
-  timestamps.
-- **Mono** (500, 0.6875rem): SHAs, counts, file paths, the sync badge number.
+
+- **Title** (600, `title`): modal headings, major empty states, and the rare top-level screen heading.
+- **Body** (450, `body`): controls, explanations, settings, and ordinary interface copy. The whole application can scale from 50% to 200%, and users can separately tune font family, size, and weight.
+- **Label** (600, `label`): compact section headings and metadata labels, often uppercase when they divide a dense panel.
+- **Mono** (600, `mono`): repository paths, branches, hashes, line numbers, counts, and code-adjacent metadata.
+- **Wordmark** (600, `wordmark`): GitWyrm branding only.
 
 ### Named Rules
-**The 11px Floor Rule.** Nothing renders below `text-2xs` (0.6875rem). Need it smaller?
-It should not be on screen.
 
-**The Rem Rule.** Every font size is rem. The Text Size setting scales the root; a
-pixel size anywhere breaks that promise.
+**The Quiet Hierarchy Rule.** Prefer weight, spacing, and text tone before increasing size; large type is exceptional in an operational desktop tool.
+
+**The Micro Floor Rule.** Nothing renders below the established 0.6875rem micro size, and microcopy keeps generous line height.
 
 ## Layout
 
-A fixed desktop shell: title bar with repository tabs (28px rows, draggable, grouped),
-a toolbar of 30px controls, a left panel (branches, remotes, stashes, or the Agent
-Desk chat list), a centre view (the virtualized commit graph at 28px per row, 42px when
-a row shows its change size; the diff; the Agent Desk conversation), a right panel or
-docked detail, and a status bar. Nothing scrolls the page; every region scrolls
-itself.
+The application fills the native window and keeps its major context visible. A 36px repository strip, 48px toolbar, resizable left navigation pane, flexible center workspace, resizable right changes pane, and 24px status bar form the default desktop shell. The left pane defaults to 240px and the right to 320px, with user-controlled bounds; repository tabs can also move into a resizable vertical rail.
 
-Density is the default. Horizontal padding steps 8, 10, 12 and 16px; vertical gaps 4
-and 6px inside a row, 8 and 12px between blocks. Rows are hit-tested at their full
-28px height. Panels are separated by the hairline border, not by gaps, so the shell
-reads as one instrument rather than floating cards.
+Spacing follows a compact 4/6/8/12/16/24px rhythm. Dense rows and controls use the lower steps, grouped content uses 12-16px, and modal interiors use 24px. Dividers and tonal surface shifts carry structure so padding can remain efficient. The product targets desktop work: it adapts through resizable panes, overflow, compact variants, application zoom, and alternate tab orientation rather than collapsing into a mobile composition.
 
-Windows are resizable down to about 720 by 560; below 900px wide a right-docked detail
-becomes a bottom dock and popovers take over. There is no phone layout: this is a
-desktop application.
+Agent Desk follows the same shell instead of becoming a separate application inside the application. Its session list occupies a navigation rail, conversation stays in the flexible center, and source, plan, usage, review, or landing detail uses the existing dock and popover behavior. Narrow widths may move secondary detail below the conversation or into a popover, but source and run state remain reachable.
+
+**The Persistent Context Rule.** Repository, branch, change count, current worktree, and operation state stay visible whenever they help prevent work in the wrong place.
+
+**The Resizable Workbench Rule.** Fixed rails establish orientation, but working panes belong to the user and retain useful minimum and maximum widths.
+
+**The One Workspace Rule.** Git, OpenSpec, and agent surfaces reuse the same rails, docks, selection language, and status hierarchy so moving between them does not feel like changing products.
 
 ## Elevation & Depth
 
-Depth is tonal. Four surface steps (Floor, Bench, Bench Raised, Bench Edge) stack by
-lightness, separated by the one hairline border. Nothing at rest carries a shadow.
-
-Shadows exist only for things that genuinely float above the shell, and only while
-they float:
+Tonal layering does most of the depth work. The canvas, primary panels, raised panels, and active surfaces step upward through close neutral values; thin borders clarify boundaries only where needed. Shadows are reserved for floating menus, dialogs, tooltips, drag ghosts, and temporary attention states. They are structural and ambient, never decorative chrome.
 
 ### Shadow Vocabulary
-- **Floating menu** (`box-shadow: shadow-md`, Tailwind's medium): popovers and dropdown
-  menus, on Bench Raised.
-- **Tooltip** (`0 8px 24px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.04)`): the
-  inset hairline is the "lit top edge" of a small object on the bench.
-- **Dialog** (`shadow-lg` at 60% black over a 70% black overlay): modals, on the Bench
-  modal surface one step above the floor.
-- **Progress panel** (`0 10px 30px rgba(0,0,0,0.45)`, `0 14px 40px rgba(0,0,0,0.6)` when
-  it has failed and warmed to red).
-- **Lifted chip** (`0 2px 10px rgb(0 0 0 / 0.45)`): a branch chip expanding over the
-  graph on hover.
-- **Signal glow**: not a shadow in the depth sense. The drop-target ring is
-  `0 0 0 2px Deep Mint` with a pulsing 45% halo; the AI stage's eye pulses a 5 to 9px
-  mint glow; a tab with pending work pulses a 3px green ring. These say "here, now".
+
+- **Field lift:** a nearly flat shadow on bordered inputs and outline controls so they remain tangible against a same-tone surface.
+- **Menu lift:** a compact medium shadow for dropdowns and context menus that must detach from dense content.
+- **Dialog lift:** a strong dark shadow beneath a modal shown over the 70% black overlay.
+- **Tooltip lift:** a crisp ambient shadow plus a faint inner highlight so small hints remain legible over graph detail.
+- **Attention ring:** an accent-colored inset edge or glow used briefly to reveal a destination, tutorial target, or completed focus action.
 
 ### Named Rules
-**The Tone-Not-Shadow Rule.** If it is part of the shell, it is flat. If it floats
-(menu, tooltip, dialog, dragged thing), it may cast one shadow. Cards never get shadows
-to look important.
+
+**The Layer Before Shadow Rule.** Raise an ordinary surface with tone first; use a shadow only when the element truly floats or needs temporary attention.
 
 ## Shapes
 
-Small, precise corners: 6px (`--radius`, 0.375rem) on controls, inputs, menus and
-choice cards; 8px on dialogs and raised panels; 12px only on the progress panel; 5px on
-repository tabs and tooltips; 4px on icon tiles and toast buttons; 3px on the 16px status
-badge. Fully round is reserved for the sync count pill and avatar rings.
+The form language is gently machined rather than soft or bubbly. Most controls use 5-6px corners, compact badges tighten to 3-4px, dialogs and substantial cards open to 8-12px, and pills are reserved for branch references, statuses, progress, or compact temporary actions. Borders are usually one pixel and quiet. Circular geometry belongs to graph nodes, avatars, spinners, and icon-only status signals.
 
-Borders are one hairline of Bench Edge, everywhere, including on transparent inputs.
-Selection is an edge, not a fill: the active tab carries a 2px accent bar along the
-side it is attached to (top in the strip, left in the rail); inside a tab group that bar
-takes the group's colour. Focus is a 3px ring of Deep Mint at 50%.
+**The Radius Follows Scale Rule.** Small controls get small corners; large containers may be softer, but ordinary panels never become oversized floating capsules.
 
 ## Components
 
+Components are compact, tactile, and unmistakably responsive. Every actionable element visibly changes on hover and press, while asynchronous actions add a spinner, pending label, progress treatment, or toast rather than going silent.
+
 ### Buttons
-- **Shape:** gently rounded (6px); heights 24 (xs), 32 (sm), 36 (default), 40 (lg); icon
-  buttons are square at the same heights.
-- **Primary:** Deep Mint fill, Mint Ink text, 16px horizontal padding, 500-weight label
-  text; hover dims the fill to 90%. One per screen: the thing you are here to do
-  (Commit, Send, Allow it, Keep).
-- **Secondary:** Bench Edge fill, Chalk text; hover to 80%.
-- **Outline:** hairline border on the floor colour, hover fills Bench Edge.
-- **Ghost:** no fill, Chalk Dim text; hover fills Bench Edge and brightens to Chalk. The
-  workhorse for toolbars and row actions.
-- **Destructive:** Signal Red fill, white text, 60% in dark mode so it does not glare.
-- **Link:** Mint Text, underline on hover.
-- **Focus:** 3px ring of Deep Mint at 50%, border turns Deep Mint. Disabled: 50% opacity,
-  no pointer.
+
+- **Shape:** gently machined corners (`rounded.md`) with heights from 24px for micro-actions to 40px for large actions; 30-36px is the ordinary desktop range.
+- **Primary:** Deep Mint fill, Deep Mint Ink content, medium weight, and compact horizontal padding.
+- **Hover / Focus:** hover changes brightness or fill; keyboard focus adds a three-pixel translucent mint ring and border; pressed states darken or return toward the underlying panel.
+- **Secondary / Outline:** Tool Steel or canvas-toned fills with a quiet border and a lighter hover surface.
+- **Ghost / Link:** no resting fill; hover adds a surface or underline, and pressed state remains visible.
+- **Disabled / Pending:** disabled controls lose opacity and interaction; pending controls keep their footprint and replace or accompany the label with visible progress.
 
 ### Chips
-- **Status badge:** a 16px square, 3px corners, hairline border, one mono bold letter
-  (M, A, D) in the matching signal colour.
-- **Branch chip:** on the graph row; expands over the graph on hover with the lifted
-  chip shadow instead of forcing the column wider.
-- **Choice card** (Agent Desk landing): a 6px bordered tile with a 12px title and a
-  10.5px description; selected state swaps the border for Deep Mint at 60% and fills
-  with Mint Haze.
+
+- **Style:** branch and reference chips use compact monospaced text, 5px corners, and semantic fills. Status badges use outlined 3px squares. Pull requests, changes, and filters use restrained pill variants.
+- **State:** selection, synchronization, drag source, and valid drop target each have a separate visible treatment. Long reference names may expand on hover instead of widening the graph column.
 
 ### Cards / Containers
-- **Corner Style:** 8px for raised panels and dialogs, 6px for inline cards.
-- **Background:** Bench Raised for the composer and detail cards; Bench for panels.
-- **Shadow Strategy:** none at rest (Tone-Not-Shadow Rule).
-- **Border:** the hairline.
-- **Internal Padding:** 6px on the composer shell, 12px on detail cards, 24px in dialogs.
-- **Attention state:** an amber hairline border and a Bench Raised detail block
-  (start-failure cards); a red-warmed border when something failed.
+
+- **Corner Style:** 6px for compact cards, 8-12px for dialogs and prominent transient panels.
+- **Background:** tonal surfaces, normally Bench Charcoal or Tool Steel over Workbench Black.
+- **Shadow Strategy:** flat at rest; shadow only when floating or demanding temporary attention.
+- **Border:** a one-pixel Tool Edge when tonal contrast cannot define the boundary.
+- **Internal Padding:** usually 8-16px; dialogs use 24px unless the surface owns a denser custom header and footer.
 
 ### Inputs / Fields
-- **Style:** transparent field, hairline border, 6px corners, 36px tall, 12px
-  horizontal padding; the toolbar search is a 30px Bench Raised field with a 14px icon.
-- **Focus:** border to Deep Mint plus the 3px 50% ring; the search field only brightens
-  its border to Chalk Faint.
-- **Error / Disabled:** red border with a 20% red ring; 50% opacity.
-- **Textarea:** grows with content (`field-sizing: content`), minimum 64px; the commit
-  description grows from two lines to five before it scrolls.
+
+- **Style:** 36px default height, 6px corners, quiet border, transparent or canvas-toned fill, and selectable text.
+- **Focus:** border shifts to Deep Mint and gains the same three-pixel translucent ring used by buttons.
+- **Error / Disabled:** errors use Signal Red for border and ring; disabled fields keep their shape but reduce opacity and show the unavailable cursor.
 
 ### Navigation
-- **Repository tabs:** 28px rows, 5px corners, Chalk Dim text; hover fills Bench
-  Raised; the active tab fills Mint Haze and carries the 2px accent edge. Tab groups
-  tint their whole strip 12% of the group colour when their handle is hovered.
-- **Sidebar rows:** full-height hit areas, 12px text, hover fills Bench Raised, selected
-  fills Mint Haze with Chalk text and a Mint Text icon.
-- **Toolbar:** ghost buttons with 12px labels and 14px icons; the sync button carries a
-  mono count pill in Deep Mint that pulses while a sync runs.
-- **Docked details:** Source, Context and Graph open as popovers from icon buttons in
-  the chat header, and can be pinned right, bottom, or beside the chat list.
 
-### Feedback
-- **Toasts:** dark, with the severity carried only by the icon colour and a 3px left
-  edge (red, amber, green, blue); a copy and close rail on the right at 24px. Never a
-  fully coloured toast.
-- **Tooltips:** Bench Edge body, 5px corners, micro type, the lit-edge shadow, a 10px
-  arrow.
-- **Dialogs:** centred, 8px corners, 24px padding, 200ms fade and 95% zoom in and out
-  over a 70% black overlay; the overlay and panel share the same duration on purpose.
+Repository tabs, side-panel rows, settings navigation, and file tabs share compact labels and tonal hover states. Active repository tabs add a solid two-pixel edge on the side attached to the shell. Selected side rows combine a soft mint fill with a persistent mint edge or explicit indicator. Navigation may reveal secondary controls on hover, but keyboard focus must reveal them too.
 
-### Signature: the signal glow and the wyrm
-The AI stage (commit-message generation, agent progress) is the one place the system
-performs: an 82px logo column that wakes in 320ms and then "thinks" on a 2.6s loop, a
-mint-tinted hairline border, and node lights that pulse a 5 to 9px glow. The logo
-itself springs (0.42s, a springy cubic-bezier) when clicked and, on rapid clicks,
-blasts into shards. Every one of these respects `prefers-reduced-motion`.
+### Commit Graph
+
+The graph is GitWyrm's signature information surface. Six stable lane colors keep paths distinguishable; WIP and stash rows use distinct silhouettes and connectors rather than pretending to be ordinary commits. Branch and tag chips sit directly on the history they name. Selection, range selection, focus, dragging, and pending sync all answer with visible row, edge, chip, or motion feedback.
+
+### Agent Desk
+
+Agent Desk extends the workbench with a session rail, source banners, conversation, plans, gates, usage, and result review. Session rows use the same compact density and selected-edge language as repository navigation. Sources, agent roles, running state, requests for attention, completion evidence, and landing choices must remain visually distinct; a transcript alone is never enough to communicate run state.
+
+Gate and result cards are action surfaces, not passive messages. They use tonal elevation, a semantic edge or icon, a plain statement of what needs the user, and explicit buttons whose pending and completed states remain in place. Provider identity may add a logo or role color, but it cannot replace the textual state.
+
+### Feedback and Motion
+
+Motion explains cause and effect: sync direction drifts toward its result, selected destinations flash or pulse, drag targets light up, dialogs fade and scale together, and the Wyrm mark reacts when touched. Ordinary color changes are fast; dialogs use a coordinated 200ms transition; longer branded loops appear only during real waiting. Reduced-motion preferences remove nonessential transitions while preserving static emphasis.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** use `text-accent-text` for any green word and `bg-primary` / `border-primary`
-  for any mint fill or edge (the Two-Token Mint Rule).
-- **Do** keep every font size in rem and never below `text-2xs`.
-- **Do** separate regions with the hairline border and a tone step, not with gaps or
-  shadows.
-- **Do** put motion only on a thing that is happening: a pulse while it runs, a glow
-  where it lands, and stop it when it stops.
-- **Do** reserve the filled mint button for the one action a screen exists for, and
-  make everything else ghost or secondary.
-- **Do** write labels a non-expert can read, and let a control that cannot act say why
-  on hover.
+
+- **Do** make hover, pressed, selected, pending, success, and failure visually distinct.
+- **Do** preserve the layered neutral hierarchy and consume semantic theme variables.
+- **Do** use Deep Mint sparingly for primary action, focus, progress, and important selection.
+- **Do** keep repository context and operation state visible when an action could affect the wrong work.
+- **Do** use compact spacing and type while respecting the micro-type floor and user scaling controls.
+- **Do** allow small branded reactions and moments of wit when they reinforce a real action.
+- **Do** keep an agent session's source, current state, requested decision, and landing outcome visually connected.
 
 ### Don't:
-- **Don't** set text in Deep Mint or use `text-primary` for words; it glares.
-- **Don't** add shadows to cards or panels at rest, or use a shadow to make something
-  look important.
-- **Don't** reach for monospace as a voice. It marks a SHA, a count, a path; the raw
-  terminal is the anti-reference.
-- **Don't** use a lane, author or tab-group colour as an accent, or dull them to match
-  the accent; they identify.
-- **Don't** put a second mint highlight on a screen that already has a current thing.
-- **Don't** gate an action behind typing a word to confirm, and never leave an action
-  without a visible response.
+
+- **Don't** let any click, keypress, drag, or long-running action complete without a visible reaction.
+- **Don't** use a faint dark-on-dark tint as the only selected-state marker.
+- **Don't** decorate large areas with mint or graph colors; color must carry meaning.
+- **Don't** add shadows to ordinary resting panels when tonal layering already separates them.
+- **Don't** turn the interface into sterile enterprise software or a playful toy; keep capability and personality in balance.
+- **Don't** introduce oversized cards, inflated spacing, or mobile-style capsules into the dense desktop workspace.
+- **Don't** treat a transcript, disconnected command, or green test count as visual proof that an Agent Desk workflow is complete.

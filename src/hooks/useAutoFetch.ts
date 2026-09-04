@@ -116,7 +116,7 @@ async function fetchIfDue(qc: QueryClient, repoId: string, minAgeMs: number) {
     qc.invalidateQueries({ queryKey: keys.branches(repoId) })
     qc.invalidateQueries({ queryKey: keys.remotes(repoId) })
     qc.invalidateQueries({ queryKey: keys.tags(repoId) })
-    qc.invalidateQueries({ queryKey: keys.log(repoId) })
+    qc.invalidateQueries({ queryKey: keys.logAll(repoId) })
   } catch (err) {
     log.info(`auto-fetch failed for ${repoId}: ${String(err)}`)
   } finally {

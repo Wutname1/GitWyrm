@@ -1401,9 +1401,11 @@ function DestinationField({
 function RepoPickerPanel({
   onDone,
   wiggleNonce = 0,
+  searchFocusNonce = 0,
 }: {
   onDone: () => void;
   wiggleNonce?: number;
+  searchFocusNonce?: number;
 }) {
   const recents = useWorkspaceStore((state) => state.recents);
   const removeRecent = useWorkspaceStore((state) => state.removeRecent);
@@ -1726,6 +1728,14 @@ function RepoPickerPanel({
   useEffect(() => {
     if (wiggleNonce > 0) setWiggling(true);
   }, [wiggleNonce]);
+
+  // Opening the picker is an intent to find a repository. Focus after the
+  // screen has mounted so the first keystroke goes straight into its search.
+  useEffect(() => {
+    if (route !== "open") return;
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [route, searchFocusNonce]);
 
   useEffect(() => {
     setCloneDestination(defaultDestination);
@@ -3616,5 +3626,14 @@ export function RepoPickerView() {
   // so a half-typed clone URL survives the trip.
   const closeRepoPicker = useUiStore((state) => state.closeRepoPicker);
   const wiggleNonce = useUiStore((state) => state.repoPickerWiggleNonce);
-  return <RepoPickerPanel onDone={closeRepoPicker} wiggleNonce={wiggleNonce} />;
+  const searchFocusNonce = useUiStore(
+    (state) => state.repoPickerSearchFocusNonce,
+  );
+  return (
+    <RepoPickerPanel
+      onDone={closeRepoPicker}
+      wiggleNonce={wiggleNonce}
+      searchFocusNonce={searchFocusNonce}
+    />
+  );
 }

@@ -29,6 +29,10 @@ const EXPECTED: &[&str] = &[
     "401 unauthorized",
     "403 forbidden",
     // git refusing an operation whose preconditions are not met.
+    // Another git process holds the index -- a terminal running beside the app,
+    // or a crashed process that left index.lock behind. Nothing in the app is
+    // broken; the answer is to wait or clear the stale lock.
+    "the index is locked",
     "as it is the current head of a linked repository",
     "cannot delete branch",
     "you are not currently on a branch",

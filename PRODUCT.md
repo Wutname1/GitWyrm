@@ -6,124 +6,79 @@
 
 web
 
-Desktop application (Tauri v2, React front end, Rust backend). Windows first; Linux is
-shipped too. No mobile client exists today; a phone companion is a stated ambition for
-Agent Desk, not a product fact.
-
 ## Users
 
-There is no single target user. GitWyrm is for people doing software development who
-want the Git side of their work, and increasingly the AI-agent side, to take less effort.
-They work on their own machine with several repositories open at once. Team features
-(self-hosted, shared) do not exist yet, so the person using GitWyrm today is an
-individual developer, not a team administrator.
+GitWyrm serves two primary groups:
 
-Copy is written for a reader who does not know Git internals: plain language, no jargon
-without explanation, nothing gated behind typing a phrase to confirm.
+- People who want Git's power without first learning Git jargon.
+- People who already know Git and want common, multi-step work to take fewer clicks and stay in one focused interface.
+
+Both groups use GitWyrm while working in local software repositories, often with several projects open at once. They need to understand what happened, what will happen next, and whether their work is safe. GitWyrm is currently a tool for an individual developer, not a team administration product.
 
 ## Product Purpose
 
-GitWyrm streamlines the Git and software development process. Today its job is to be a
-fast Git client that keeps useful information at your fingertips: the commit graph,
-working changes, and the issues and pull requests across all your repositories, so you
-stay on top of them without leaving the app.
+GitWyrm is a Windows-first desktop Git client with Linux support. It makes repository history and day-to-day Git work easier to see, understand, and complete. Success means a beginner can work confidently without translating Git terminology, while an experienced user can finish routine workflows with less navigation and repetition.
 
-The next step, being built on a second branch as "GitWyrm Agent Desk", is an AI harness
-in the family of OpenChamber and Paseo: it brings spec-driven development (SDD), Git and
-your AI agents together so an app can go from idea to launched inside GitWyrm, with the
-code editor reduced to a viewer. Success is a person doing that whole loop here.
+Agent Desk is being developed in this worktree to bring repository-based planning and local AI-agent sessions into that same workflow. Its intended success is a person moving from a real repository task through planning, implementation, review, and an explicit landing decision without losing the connection to the project that started the work.
 
 ## Positioning
 
-Today: the fast Git client that surfaces issues and pull requests across repos, with
-nothing to hide (local-first, no account, no tracking beyond crash reports).
+GitWyrm combines Git's full working power with plain-language, visual workflows. It brings patterns that commonly require several clicks or separate screens into a focused workspace without taking useful control away from experienced users.
 
-By 1.0: the AI harness that lives beside your Git client. What a neighbouring agent
-client cannot honestly copy is that an agent session is born from a real repository
-object (an issue, a pull request, an OpenSpec change or task, a commit, a diff, a failed
-check) and can return to it, inside the same tool that tracks the repository. Companies
-are adopting SDD and OpenSpec because they are told a strong spec limits AI slop and
-insecure patterns; developers adopt OpenSpec without a UI and read markdown files.
-GitWyrm supplies the UI for the specs, the harness to create and implement them, and the
-Git client to track the result. Whether a strong spec really limits slop is not a claim
-GitWyrm makes.
+Agent Desk extends that position by starting an AI session from a real repository object, such as an issue, pull request, OpenSpec change, commit, diff, or failed check, and returning the result to that object for review. This repository connection is the mechanism; GitWyrm does not claim that a specification alone guarantees better or safer generated code.
 
 ## Operating Context
 
-- Repositories on the person's own disk; several open at once in tabs.
-- Git hosts (GitHub first) for issues, pull requests and checks; sign-in is handled by
-  Git Credential Manager or device flow, never by a GitWyrm account.
-- AI agents installed on the machine and driven as child processes: GitHub Copilot CLI,
-  Claude Code, Codex, Gemini CLI, opencode. Each keeps its own login and quota.
-- OpenSpec folders (`openspec/changes/<change>/{proposal,design,tasks}.md`) as the
-  planning layer; GitWyrm reads and writes them through their own writer and never
-  keeps a shadow task database.
-- Isolated git worktrees per agent run; commit, push and pull request remain explicit
-  human actions.
-- Chat history, sessions and settings are files on disk. Settings sync is planned
-  through the person's own cloud storage or a git gist, at no cost to the project.
+- GitWyrm runs as a Tauri desktop application with a React interface and a Rust backend.
+- Windows is the primary platform. Linux is also supported, with platform-specific packaging and desktop behavior.
+- People work with local repositories, commit history, branches, tags, stashes, worktrees, changed files, diffs, merges, rebases, cherry-picks, reverts, and conflicts.
+- Optional connected workflows include hosted issues and pull requests, commit identity profiles, signing, AI-assisted work, and OpenSpec planning through Spec Desk.
+- Network operations use the system Git installation so the user's existing credentials and authentication tools continue to work.
+- Agent Desk uses AI tools installed on the person's machine. Each provider retains its own login, quota, and native protocol.
+- OpenSpec files remain the planning source of truth. GitWyrm reads and writes their existing project files rather than keeping a shadow task database.
+- Agent runs may use isolated Git worktrees. Keeping, undoing, committing, pushing, and opening a pull request remain explicit human decisions.
+- Session history and settings remain local files. GitWyrm has no required account or hosted service of its own.
 
 ## Capabilities and Constraints
 
-Confirmed:
-- Local git operations through libgit2; network operations through the system git so
-  the existing credential setup works.
-- Commit graph with lanes computed in Rust, virtualized for large repositories.
-- Status, staging, commit, branches, tags, stashes, worktrees, submodules, diffs,
-  merge and conflict resolution, cherry-pick, revert, rebase.
-- Fetch, pull, push, clone with streamed progress; auto-update via a CDN bootstrapper.
-- GitHub pull requests and issues across repositories.
-- Agent Desk (second branch): sessions with Source + Intent + Conversation +
-  Execution; Ask, Plan and Auto modes; solo or lead-plus-helpers teams; an
-  independent auditor that checks finished work; per-chat AI tool choice; usage
-  reporting only from what a provider states.
-- Terminology: "chat" or "session" for an agent conversation; "helper" for a
-  sub-agent; "project" for a repository in user-facing copy; "Keep" for accepting an
-  agent's changes.
+- Local Git operations use `git2` in blocking worker tasks. Network operations use the system `git` executable.
+- Commit-graph lane calculation belongs in the Rust backend; the frontend renders the result.
+- Every user action must produce an immediate and unmistakable visible response, followed by confirmation when a slower result completes.
+- User-facing language must explain outcomes in terms of the user's files and work, at about a 6th-grade reading level.
+- Dangerous actions use a clear warning and a labeled confirmation button. GitWyrm never asks someone to type a word or phrase to confirm.
+- The product must remain approachable for beginners without slowing down experienced users or hiding useful control.
+- Generated frontend bindings are not edited by hand.
+- Native desktop interaction is part of the product contract. Browser rendering, type checks, and builds do not replace verification in the shipped desktop environment.
+- Agent Desk is under active development in this worktree. Commands, components, and passing tests do not establish product completeness without production wiring, live state and messages, result review, recovery, and signed-in provider acceptance.
+- Provider integrations must work through their native protocols and existing sign-in flows, without requiring a user-installed bridge package.
+- Agent actions must report what was verified and what was not. The product must never present incomplete or disconnected work as ready.
 
-Constraints:
-- Windows first, Linux supported; no macOS commitment recorded.
-- Local-first, no accounts, no hosted infrastructure of GitWyrm's own; nothing may
-  require a GitWyrm server.
-- Plain-language copy at roughly a 6th-grade reading level; never type-to-confirm.
-- Every user action must produce a visible response.
-- Never reference competing apps in user-facing text.
-
-Undecided (recorded, not invented):
-- Whether plan quota lines per AI provider will ever be shown (needs credential
-  scraping the project has not chosen to do).
-- Mobile or remote access design (constraints noted in the Agent Desk plan: no opened
-  ports, rendezvous handoff only, phone is plainly offline when the desktop sleeps).
-- A macOS build.
+Open decisions remain around mobile or remote access, displaying provider quota details that providers do not expose directly, and a macOS build.
 
 ## Brand Commitments
 
-- Name: GitWyrm. Logo: `logo.png` / `logo.ico`. Wordmark font: `Sora-SemiBold.ttf`.
-  All binding as they are.
-- Deep Mint accent and the dark-first theme are a commitment, not merely the
-  incumbent look.
-- Voice: dev-honest and plain. Marketing angle on the website: "A Git client with
-  nothing to hide". Claims must stay verifiable against the app repository.
+- The product name is GitWyrm.
+- The established voice is direct, calm, and plain. It describes visible outcomes rather than internal implementation details.
+- Canonical product artwork lives in `src/assets/logo.png` and `src-tauri/icons/`. Spec Desk has its own established mark at `src/assets/specdesk-logo.png`.
+- Deep Mint and the dark-first theme are established identity commitments, while supported themes must preserve the same hierarchy and interaction clarity.
+- The product is local-first and account-free. The established public promise is a Git client with nothing to hide; claims must stay verifiable against the shipping app.
+- User-facing product copy and release notes must not name competing applications.
 
 ## Evidence on Hand
 
-- The shipping app itself and its README (`README.md`), architecture and readiness
-  notes for Agent Desk (`docs/agent-desk/`), and the marketing site in a separate
-  repository (`C:\code\GitWyrm-Website`).
-- Real-binary test runs proving Codex and Copilot chats and the auditor loop work
-  (`src-tauri/src/airun/cli_run.rs`, `src-tauri/tests/copilot_acp.rs`).
-- No testimonials, customer logos, benchmarks, pricing or download counts exist;
-  future work must not fabricate them. GitWyrm is free and MIT licensed; there is no
-  code signing today.
+- `README.md` documents the product architecture, development workflow, supported Git operations, Windows distribution, and release process.
+- `src/components/modals/OnboardingModal.tsx` demonstrates the beginner-first onboarding language and hands-on practice repository.
+- `src/lib/tutorialLessons.ts` contains real task-based guidance for repository gestures and workflows.
+- `src/views/GraphView.tsx`, `src/views/DiffView.tsx`, `src/views/ConflictView.tsx`, `src/views/GithubView.tsx`, and `src/views/SpecDeskView.tsx` are working product surfaces.
+- `docs/agent-desk/`, the related OpenSpec changes, and the Agent Desk source in this worktree record the intended architecture and implementation evidence. They are not, by themselves, proof that the full workflow is ready to ship.
+- Real-binary tests exist for some provider and auditor paths. Signed-in native acceptance and complete start-to-result-to-landing evidence remain separate verification boundaries.
+- `src/assets/logo.png`, `src/assets/specdesk-logo.png`, and `src-tauri/icons/` contain established brand assets.
+- No customer testimonials, independent benchmarks, or adoption claims are recorded in this repository. Future work must not invent them.
 
 ## Product Principles
 
-1. Put the information a developer needs in front of them before they go looking:
-   issues, pull requests, changes and agent progress are one glance away.
-2. Fast first. A Git client that hesitates loses to the terminal.
-3. Honest state. Show what was verified, say plainly what was not, never claim work
-   was checked or changes are ready when they are not.
-4. The repository is the source of truth: agent sessions start from real repo objects,
-   specs live in their own files, and landing work is always an explicit human choice.
-5. Nothing to hide: local-first, no accounts, no hosted dependency, copy anyone can
-   read.
+1. Make every action visible so people always know the app heard them.
+2. Explain Git and agent work through files, tasks, and outcomes instead of requiring jargon.
+3. Turn fragmented, multi-step patterns into clear workflows without limiting expert control.
+4. Keep state honest and landing explicit: show what was verified, protect the user's work, and never claim incomplete work is ready.
+5. Keep the repository and the user's machine in control; native desktop behavior and real workflows are the final measure of whether the product works.

@@ -20,7 +20,43 @@ use crate::state::{OpenRepo, RepoManager};
 /// On a repository with over a thousand refs that was tens of milliseconds
 /// repeated on every page fetch, which is felt as a stutter while scrolling.
 /// Reading the reference names and targets directly is all a row label needs.
-fn collect_refs(repo: &git2::Repository) -> HashMap<Oid, Vec<RefInfo>> {
+fn branch_name_for_ref(repo: &git2::Repository, full_name: &str) -> Option<String> {
+    if let Some(name) = full_name.strip_prefix("refs/heads/") {
+        return Some(name.to_string());
+    }
+    let remote_ref = full_name.strip_prefix("refs/remotes/")?;
+    if let Ok(remotes) = repo.remotes() {
+        for remote in remotes.iter().filter_map(|remote| remote.ok().flatten()) {
+            if let Some(name) = remote_ref.strip_prefix(&format!("{remote}/")) {
+                return Some(name.to_string());
+            }
+        }
+    }
+    // A stale remote-tracking ref can outlive its remote configuration. It is
+    // still useful in the graph, and the first segment is the best name we have.
+    remote_ref.split_once('/').map(|(_, name)| name.to_string())
+}
+
+fn branch_is_visible(
+    repo: &git2::Repository,
+    full_name: &str,
+    hidden_branches: &HashSet<String>,
+    focused_branch: Option<&str>,
+) -> bool {
+    let Some(branch) = branch_name_for_ref(repo, full_name) else {
+        return true;
+    };
+    focused_branch.map_or_else(
+        || !hidden_branches.contains(&branch),
+        |focused| branch == focused,
+    )
+}
+
+fn collect_refs(
+    repo: &git2::Repository,
+    hidden_branches: &HashSet<String>,
+    focused_branch: Option<&str>,
+) -> HashMap<Oid, Vec<RefInfo>> {
     let mut map: HashMap<Oid, Vec<RefInfo>> = HashMap::new();
 
     let head_name = repo
@@ -32,6 +68,9 @@ fn collect_refs(repo: &git2::Repository) -> HashMap<Oid, Vec<RefInfo>> {
     if let Ok(references) = repo.references() {
         for reference in references.flatten() {
             let Ok(name) = reference.name() else { continue };
+            if !branch_is_visible(repo, name, hidden_branches, focused_branch) {
+                continue;
+            }
             let Some(oid) = reference.target() else {
                 continue;
             };
@@ -85,7 +124,11 @@ fn collect_refs(repo: &git2::Repository) -> HashMap<Oid, Vec<RefInfo>> {
 /// stash reflog. Tags can also be the sole owner of a commit. We deliberately push
 /// stash *bases* instead of stash commits because stashes have their own graph
 /// rows and their extra index/worktree parents are implementation details.
-fn collect_log_roots(repo: &git2::Repository) -> Vec<Oid> {
+fn collect_log_roots(
+    repo: &git2::Repository,
+    hidden_branches: &HashSet<String>,
+    focused_branch: Option<&str>,
+) -> Vec<Oid> {
     let mut roots = Vec::new();
     let mut seen = HashSet::new();
     let mut push_commit = |oid: Oid| {
@@ -94,10 +137,28 @@ fn collect_log_roots(repo: &git2::Repository) -> Vec<Oid> {
         }
     };
 
+    // Focus is exact: start from the requested local branch alone. Its walk
+    // naturally includes shared ancestors and merges, but no unrelated tip can
+    // introduce commits that are not part of this branch's history.
+    if let Some(focused) = focused_branch {
+        if let Ok(reference) = repo.find_reference(&format!("refs/heads/{focused}")) {
+            if let Ok(commit) = reference.peel_to_commit() {
+                push_commit(commit.id());
+            }
+        }
+        return roots;
+    }
+
     // Keep the current checkout first for stable ordering when timestamps tie.
     if let Ok(head) = repo.head() {
-        if let Ok(commit) = head.peel_to_commit() {
-            push_commit(commit.id());
+        let visible = head
+            .name()
+            .map(|name| branch_is_visible(repo, name, hidden_branches, None))
+            .unwrap_or(true);
+        if visible {
+            if let Ok(commit) = head.peel_to_commit() {
+                push_commit(commit.id());
+            }
         }
     }
 
@@ -108,6 +169,9 @@ fn collect_log_roots(repo: &git2::Repository) -> Vec<Oid> {
                 continue;
             };
             if name == "refs/stash" {
+                continue;
+            }
+            if !branch_is_visible(repo, name, hidden_branches, None) {
                 continue;
             }
             if name.starts_with("refs/heads/")
@@ -121,14 +185,18 @@ fn collect_log_roots(repo: &git2::Repository) -> Vec<Oid> {
         }
     }
 
-    // Each refs/stash reflog entry is a synthetic stash commit. Its first parent
-    // is the real history commit the stash was taken from.
-    if let Ok(reflog) = repo.reflog("refs/stash") {
-        for i in 0..reflog.len() {
-            let Some(entry) = reflog.get(i) else { continue };
-            if let Ok(stash) = repo.find_commit(entry.id_new()) {
-                if let Ok(base) = stash.parent_id(0) {
-                    push_commit(base);
+    // A filtered graph is about branches. A stash based on a hidden branch must
+    // not quietly add that branch's history back as a second root.
+    if hidden_branches.is_empty() {
+        // Each refs/stash reflog entry is a synthetic stash commit. Its first
+        // parent is the real history commit the stash was taken from.
+        if let Ok(reflog) = repo.reflog("refs/stash") {
+            for i in 0..reflog.len() {
+                let Some(entry) = reflog.get(i) else { continue };
+                if let Ok(stash) = repo.find_commit(entry.id_new()) {
+                    if let Ok(base) = stash.parent_id(0) {
+                        push_commit(base);
+                    }
                 }
             }
         }
@@ -284,6 +352,8 @@ pub async fn get_log(
     repo_id: String,
     skip: u32,
     limit: u32,
+    hidden_branches: Vec<String>,
+    focused_branch: Option<String>,
 ) -> Result<LogPage, AppError> {
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -293,6 +363,8 @@ pub async fn get_log(
         // load of a repo that simply has a great many branches.
         let timing = crate::perf::CommandTiming::start("get_log", "git.log");
         let repo = open.read();
+        let hidden_branches = hidden_branches.into_iter().collect::<HashSet<_>>();
+        let roots = collect_log_roots(&repo, &hidden_branches, focused_branch.as_deref());
 
         let head_oid = repo
             .head()
@@ -302,11 +374,11 @@ pub async fn get_log(
 
         let mut walk = repo.revwalk()?;
         walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-        for oid in collect_log_roots(&repo) {
-            walk.push(oid)?;
+        for oid in &roots {
+            walk.push(*oid)?;
         }
 
-        let refs = collect_refs(&repo);
+        let refs = collect_refs(&repo, &hidden_branches, focused_branch.as_deref());
         // Total refs, not commits carrying one: several branches on the same
         // commit each cost a pass, and it is that count the walk scales with.
         timing.set_scale(refs.values().map(|v| v.len() as u64).sum());
@@ -314,16 +386,25 @@ pub async fn get_log(
         // and dominates the cost of a page, but its answer is identical for every
         // page of the same scroll. See `OpenRepo::primary_lane`.
         let ref_tips = ref_tips_fingerprint(&repo);
-        let mut lanes = head_oid
-            .map(|head| {
-                let primary = open.cached_primary_lane(head, ref_tips).unwrap_or_else(|| {
-                    let computed = primary_lane_oid(&repo, head);
-                    open.store_primary_lane(head, ref_tips, computed);
-                    computed
-                });
-                LaneState::with_primary(primary)
-            })
-            .unwrap_or_default();
+        let filtered = focused_branch.is_some() || !hidden_branches.is_empty();
+        let mut lanes = if filtered {
+            roots
+                .first()
+                .copied()
+                .map(LaneState::with_primary)
+                .unwrap_or_default()
+        } else {
+            head_oid
+                .map(|head| {
+                    let primary = open.cached_primary_lane(head, ref_tips).unwrap_or_else(|| {
+                        let computed = primary_lane_oid(&repo, head);
+                        open.store_primary_lane(head, ref_tips, computed);
+                        computed
+                    });
+                    LaneState::with_primary(primary)
+                })
+                .unwrap_or_default()
+        };
         let mut commits = Vec::with_capacity(limit as usize);
         let mut has_more = false;
         let end = skip as usize + limit as usize;
@@ -516,7 +597,7 @@ mod tests {
         repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
             .expect("checkout main");
 
-        let roots = collect_log_roots(&repo);
+        let roots = collect_log_roots(&repo, &HashSet::new(), None);
         assert!(
             roots.contains(&detached),
             "detached stash base must remain visible"
@@ -532,6 +613,52 @@ mod tests {
         assert!(
             commits.contains(&detached),
             "detached stash base must be walked"
+        );
+    }
+
+    #[test]
+    fn branch_filters_remove_unrelated_roots_and_labels() {
+        let dir = tempfile::tempdir().expect("temp repo");
+        let repo = Repository::init(dir.path()).expect("repo");
+        let base = commit_file(&repo, "base.txt", "base", "base");
+        let base_commit = repo.find_commit(base).expect("base commit");
+        repo.branch("side", &base_commit, false)
+            .expect("side branch");
+        drop(base_commit);
+
+        let main_tip = commit_file(&repo, "main.txt", "main", "main work");
+        repo.set_head("refs/heads/side").expect("select side");
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .expect("checkout side");
+        let side_tip = commit_file(&repo, "side.txt", "side", "side work");
+        repo.reference("refs/remotes/origin/side", side_tip, true, "remote side")
+            .expect("remote side ref");
+
+        let focused_roots = collect_log_roots(&repo, &HashSet::new(), Some("master"));
+        assert_eq!(
+            focused_roots,
+            vec![main_tip],
+            "focus uses only the named local tip"
+        );
+
+        let hidden = HashSet::from(["side".to_string()]);
+        let hidden_roots = collect_log_roots(&repo, &hidden, None);
+        assert!(
+            !hidden_roots.contains(&side_tip),
+            "hidden branch tips are not walked"
+        );
+        assert!(
+            hidden_roots.contains(&main_tip),
+            "other branch tips remain visible"
+        );
+
+        let labels = collect_refs(&repo, &hidden, None);
+        assert!(
+            labels
+                .values()
+                .flatten()
+                .all(|label| label.name != "side" && label.name != "origin/side"),
+            "local and shared copies of a hidden branch lose their labels"
         );
     }
 
@@ -656,7 +783,7 @@ mod tests {
         )
         .expect("remote head");
 
-        let map = collect_refs(&repo);
+        let map = collect_refs(&repo, &HashSet::new(), None);
         let labels = map.get(&tip).expect("labels on the tip");
 
         let kind_of = |name: &str| {
@@ -690,7 +817,7 @@ mod tests {
         let tip = commit_file(&repo, "a.txt", "a", "base");
         repo.set_head_detached(tip).expect("detach");
 
-        let map = collect_refs(&repo);
+        let map = collect_refs(&repo, &HashSet::new(), None);
         let labels = map.get(&tip).expect("labels on the tip");
         assert!(
             !labels.iter().any(|r| matches!(r.ref_type, RefKind::Head)),

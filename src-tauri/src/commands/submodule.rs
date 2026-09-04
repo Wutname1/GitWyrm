@@ -134,10 +134,19 @@ pub async fn update_submodule(
     init: bool,
 ) -> Result<(), AppError> {
     let open = manager.get(&repo_id)?;
+    let repo_path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
-        let repo = open.repo.lock().unwrap();
-        let mut sub = repo.find_submodule(&path)?;
-        sub.update(init, None)?;
+        let path = clean_path(&path)?;
+        // Shell git rather than libgit2's `Submodule::update`: that one checks
+        // out the recorded commit but never fetches, so it fails outright when
+        // the commit is not in the nested clone yet -- exactly the case after
+        // someone else bumps the pointer. `git submodule update` fetches first.
+        let mut args = vec!["submodule", "update"];
+        if init {
+            args.push("--init");
+        }
+        args.extend_from_slice(&["--", &path]);
+        run_git(Some(&repo_path), &args)?;
         Ok(())
     })
     .await
