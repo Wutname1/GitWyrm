@@ -168,6 +168,10 @@ function InspectorCard({
   const waitingFor = (execution.dependsOn ?? [])
     .map((id) => session.executions.find((e) => e.executionId === id)?.jobTitle ?? 'another agent')
     .filter((name, i, all) => all.indexOf(name) === i)
+  // Ended without finishing its work, so its `outputSummary` is a reason
+  // rather than a result.
+  const stoppedBadly =
+    execution.state === 'failed' || execution.state === 'missingSource' || execution.state === 'interrupted'
   const canStop = execution.state === 'working' || execution.state === 'preparing' || execution.state === 'needsInput'
   const [resolving, setResolving] = useState<'helper' | 'integrated' | null>(null)
 
@@ -268,9 +272,21 @@ function InspectorCard({
         </div>
       ) : null}
       {execution.outputSummary ? (
+        // The same field carries a finished agent's result AND a failed one's
+        // reason. Under one neutral "Output" heading a failure read exactly
+        // like a success, which is the difference the person is looking for.
         <div className="mt-1.5">
-          <div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Output</div>
-          <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">{execution.outputSummary}</p>
+          <div
+            className={cn(
+              'text-2xs font-bold uppercase tracking-wide',
+              stoppedBadly ? 'text-[var(--gw-red)]' : 'text-muted-foreground'
+            )}
+          >
+            {stoppedBadly ? 'Why it stopped' : 'Output'}
+          </div>
+          <p className={cn('mt-0.5 text-2xs leading-relaxed', stoppedBadly ? 'text-foreground' : 'text-muted-foreground')}>
+            {execution.outputSummary}
+          </p>
         </div>
       ) : null}
       {execution.conflict ? (
