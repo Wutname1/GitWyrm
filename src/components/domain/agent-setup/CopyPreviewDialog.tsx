@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { AlertTriangle, CheckCircle2, Loader2, RotateCcw } from 'lucide-react'
 import type { ClientId, RedactedCopyPlan, DestinationApplyResult, InventoryEntry } from '@/lib/bindings'
+import { SyncStateBadge } from './SyncStateBadge'
 import { CLIENT_COLUMN_ORDER, clientLabel, eligibleDestinationsFor, explainPreviewRefusal } from '@/lib/agentConfig'
 import { useApplyAgentConfigCopy, usePreviewAgentConfigCopy, useUndoAgentConfigCopy } from '@/hooks/useAgentConfig'
 import { Button } from '@/components/ui/button'
@@ -173,7 +174,14 @@ function DestinationPicker({
               className="size-3.5 accent-[var(--gw-accent)]"
             />
             <span className="text-xs font-medium text-foreground">{clientLabel(client)}</span>
-            <span className="ml-auto text-2xs text-muted-foreground">{status?.state}</span>
+            {/*
+              This printed the raw variant -- "keptSeparate", "unsupported" --
+              in the one dialog whose whole job is deciding which apps receive
+              a setting, where that state is the deciding fact. The badge is
+              the same answer in words, and is what the sync table already
+              shows for these clients.
+            */}
+            <span className="ml-auto">{status ? <SyncStateBadge state={status.state} /> : null}</span>
           </label>
         )
       })}
