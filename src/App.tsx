@@ -56,6 +56,7 @@ import {
   flushPendingSettings,
   useWorkspaceStore,
 } from '@/stores/workspaceStore'
+import { flushPendingAgentDeskLayout } from '@/stores/agentDeskUiStore'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -313,6 +314,12 @@ function AppInner() {
   useEffect(() => {
     const pending = getCurrentWindow().onCloseRequested(() => {
       void flushPendingSettings()
+      // The Agent Desk layout is debounced the same way and was written to
+      // flush here -- its own comment says "call on window close" -- but was
+      // never wired to this handler, the only close listener in the app. So
+      // moving the dock or opening Split View and quitting within 300ms threw
+      // the change away. Synchronous, so it completes before the close does.
+      flushPendingAgentDeskLayout()
     })
     return () => {
       void pending.then((unlisten) => unlisten())

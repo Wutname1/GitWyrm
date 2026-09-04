@@ -18,6 +18,7 @@ const REAL_LAYOUT: AgentWorkspaceLayout = {
   primarySessionId: 'session-a',
   secondarySessionId: 'session-b',
   sourceBarsVisible: false,
+  sidebarGrouping: 'project',
   dock: { kind: 'context', edge: 'left', leftOrder: 'below-chats', sizePx: 420 },
 }
 
@@ -32,6 +33,22 @@ describe('migrateLayout', () => {
     const persisted = toPersistedLayout(DEFAULT_AGENT_WORKSPACE_LAYOUT)
     const result = migrateLayout(persisted)
     expect(result).toEqual({ status: 'ok', layout: DEFAULT_AGENT_WORKSPACE_LAYOUT })
+  })
+
+  it('falls back to Recent when the stored grouping is not one this build renders', () => {
+    // A value written by a future build, or a hand-edited storage entry.
+    // Casting it through would put the chat list into a mode nothing draws.
+    const persisted = toPersistedLayout(REAL_LAYOUT) as unknown as {
+      schemaVersion: number
+      layout: Record<string, unknown>
+    }
+    persisted.layout.sidebarGrouping = 'by-colour'
+    const result = migrateLayout(persisted)
+    expect(result.status).toBe('ok')
+    expect(result.layout.sidebarGrouping).toBe('recent')
+    // The rest of the layout must survive one bad field.
+    expect(result.layout.split).toBe(true)
+    expect(result.layout.dock?.edge).toBe('left')
   })
 
   it('falls back safely on null', () => {

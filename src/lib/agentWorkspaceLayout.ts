@@ -24,6 +24,7 @@
  * should even live -- exactly the reasoning left on `migrate_session`.
  */
 
+import type { SidebarGroupMode } from '@/lib/agentSessionGrouping'
 export const CURRENT_LAYOUT_SCHEMA_VERSION = 1
 
 export type PaneId = 'primary' | 'secondary'
@@ -56,6 +57,16 @@ export interface AgentWorkspaceLayout {
   primarySessionId: string | null
   secondarySessionId: string | null
   sourceBarsVisible: boolean
+  /**
+   * How the chat list is grouped: by recency, by project, or by what the
+   * chat changed.
+   *
+   * `architecture.md` lists "sidebar grouping" among what this store holds,
+   * and it did not -- it was component-local state in `SessionGroups`, so the
+   * choice was thrown away every time the app restarted. A person who works
+   * by project had to re-pick it on every launch.
+   */
+  sidebarGrouping: SidebarGroupMode
   dock: DockState | null
 }
 
@@ -113,6 +124,7 @@ export const DEFAULT_AGENT_WORKSPACE_LAYOUT: AgentWorkspaceLayout = {
   primarySessionId: null,
   secondarySessionId: null,
   sourceBarsVisible: true,
+  sidebarGrouping: 'recent',
   dock: null,
 }
 
@@ -228,12 +240,37 @@ export function migrateLayout(raw: unknown, windowBoundPx?: number): LayoutMigra
     : DEFAULT_AGENT_WORKSPACE_LAYOUT.secondarySessionId
   const sourceBarsVisible =
     typeof p.sourceBarsVisible === 'boolean' ? p.sourceBarsVisible : DEFAULT_AGENT_WORKSPACE_LAYOUT.sourceBarsVisible
+  // Validated against the real set rather than cast: a stored value from a
+  // future build, or a hand-edited one, must fall back rather than put the
+  // list into a mode nothing renders.
+  const sidebarGrouping = isSidebarGroupMode(p.sidebarGrouping)
+    ? p.sidebarGrouping
+    : DEFAULT_AGENT_WORKSPACE_LAYOUT.sidebarGrouping
   const dock = readDock(p.dock, windowBoundPx)
 
   return {
     status: 'ok',
-    layout: { split, activePane, primarySessionId, secondarySessionId, sourceBarsVisible, dock },
+    layout: {
+      split,
+      activePane,
+      primarySessionId,
+      secondarySessionId,
+      sourceBarsVisible,
+      sidebarGrouping,
+      dock,
+    },
   }
+}
+
+/**
+ * Whether a stored value is one of the grouping modes this build renders.
+ *
+ * Written as an explicit list rather than a cast so a value from a future
+ * build (or a hand-edited storage entry) falls back to the default instead of
+ * putting the chat list into a mode nothing draws.
+ */
+function isSidebarGroupMode(v: unknown): v is SidebarGroupMode {
+  return v === 'recent' || v === 'project' || v === 'diff'
 }
 
 /** Wraps a layout for persistence at the current schema version. */

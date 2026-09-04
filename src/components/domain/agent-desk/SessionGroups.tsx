@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { Clock3, FileDiff, Folders } from 'lucide-react'
 import type { AgentSessionHeader } from '@/lib/bindings'
 import { buildSidebarRows, type SidebarGroupMode } from '@/lib/agentSessionGrouping'
@@ -41,7 +42,11 @@ export function SessionGroups({
   onArchive: (sessionId: string, archived: boolean) => void
   onDelete: (sessionId: string, title: string) => void
 }) {
-  const [mode, setMode] = useState<SidebarGroupMode>('recent')
+  // Persisted, not component-local. `architecture.md` lists "sidebar
+  // grouping" among what `agentDeskUiStore` holds, and it did not -- so a
+  // person who works by project re-picked it on every launch.
+  const mode = useAgentDeskUiStore((s) => s.layout.sidebarGrouping)
+  const setMode = useAgentDeskUiStore((s) => s.setSidebarGrouping)
   // Separate collapse sets per mode: collapsing "Today" in Recent should not
   // leave a same-named/keyed group collapsed if the user switches to Project.
   const [collapsedByMode, setCollapsedByMode] = useState<Record<SidebarGroupMode, Set<string>>>({

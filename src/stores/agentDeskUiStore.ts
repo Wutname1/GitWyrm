@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { log, describeError } from '@/lib/log'
+import type { SidebarGroupMode } from '@/lib/agentSessionGrouping'
 import { resolveSplitCollapse } from '@/lib/agentDeskPaneTargeting'
 import {
   DEFAULT_AGENT_WORKSPACE_LAYOUT,
@@ -107,6 +108,8 @@ interface AgentDeskUiState {
 
   // --- Source bars / dock -----------------------------------------------------------
   setSourceBarsVisible: (visible: boolean) => void
+  /** How the chat list is grouped. Persisted: see the field's own doc. */
+  setSidebarGrouping: (mode: SidebarGroupMode) => void
   toggleSourceBarsVisible: () => void
   openDock: (kind: DockKind, edge: DockEdge, leftOrder?: LeftDockOrder) => void
   moveDock: (edge: DockEdge, leftOrder?: LeftDockOrder) => void
@@ -239,6 +242,14 @@ export const useAgentDeskUiStore = create<AgentDeskUiState>((set, get) => ({
 
   toggleSourceBarsVisible: () => {
     get().setSourceBarsVisible(!get().layout.sourceBarsVisible)
+  },
+
+  setSidebarGrouping: (mode) => {
+    set((s) => {
+      const layout = { ...s.layout, sidebarGrouping: mode }
+      schedulePersist(layout, s.hydrated)
+      return { layout }
+    })
   },
 
   openDock: (kind, edge, leftOrder) => {
