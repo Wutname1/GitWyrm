@@ -379,6 +379,20 @@ export function AgentDeskView() {
   const { headers, isLoading: sessionsLoading, isError: sessionsErrored } =
     useAgentSessionHeaders(filter)
 
+  // Archived chats, purely to decide whether a pane's session still EXISTS.
+  //
+  // The validity check below used `headers`, which is `archived: false`, so an
+  // archived session read as deleted and the pane was swapped away the moment
+  // it was opened -- making the sidebar's Archived tab unreadable and the
+  // archive toast's "you can restore it from the Archived filter any time"
+  // undeliverable. The sidebar fixed this for its own list; this second copy
+  // of the same hardcoded filter was missed.
+  //
+  // Kept as a separate query rather than widening `filter`: `headers[0]` is
+  // also what a pane falls back TO, and falling back to an archived chat would
+  // undo the archiving in the user's eyes.
+  const { headers: archivedHeaders } = useAgentSessionHeaders({ ...filter, archived: true })
+
   // Land on the most recent session automatically so the window is never
   // just an empty pane the first time it opens with sessions already saved.
   useEffect(() => {
@@ -392,7 +406,7 @@ export function AgentDeskView() {
   // showing a dead reference forever.
   useEffect(() => {
     if (!hydrated || sessionsLoading) return
-    const validIds = new Set(headers.map((h) => h.sessionId))
+    const validIds = new Set([...headers, ...archivedHeaders].map((h) => h.sessionId))
     // `headers[0]` when there is one, otherwise null. This used to return
     // early whenever the list was empty, which is exactly the case of deleting
     // your LAST chat: the pane kept pointing at the session that had just been
@@ -407,7 +421,16 @@ export function AgentDeskView() {
     if (layout.split && secondarySessionId && !validIds.has(secondarySessionId)) {
       restorePaneToFallback('secondary', fallback)
     }
-  }, [hydrated, sessionsLoading, headers, primarySessionId, secondarySessionId, layout.split, restorePaneToFallback])
+  }, [
+    hydrated,
+    sessionsLoading,
+    headers,
+    archivedHeaders,
+    primarySessionId,
+    secondarySessionId,
+    layout.split,
+    restorePaneToFallback,
+  ])
 
   /**
    * Put the caret in the composer's textarea, not the box around it.
