@@ -155,3 +155,5 @@ competing sub-agents, the answer names the losing option too.
 | 146 | 2026-09-04 | Is "has not looked yet" the same as "could not look"? | Yes, to the person reading -- both mean GitWyrm does not know, and the guard only covered the second. |
 | 147 | 2026-09-04 | Were other recorded fixes never actually written, like F87? | No -- all 488 symbols the audit claims exist do exist, and the 15 apparent gaps are prose about things deliberately removed or not attempted. |
 | 148 | 2026-09-04 | Does helper work reach your own files without you deciding? | No -- it merges into the chat's own scratch copy automatically, and only a deliberate Keep or Commit touches your checkout. |
+| 149 | 2026-09-04 | Could your edits to a pull request description be silently thrown away? | Yes -- the box let you type and then ignored it, while telling you the words were for pasting somewhere it never put them. |
+| 150 | 2026-09-04 | Had 29 passes actually looked at every part of this screen? | No -- ten components had never been named by any pass, and the one real bug this round was in one of them. |
