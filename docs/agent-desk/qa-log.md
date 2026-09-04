@@ -182,3 +182,5 @@ competing sub-agents, the answer names the losing option too.
 | 173 | 2026-09-04 | Could a failure message still come out as an internal code word? | Yes, in one place -- the wording for it existed elsewhere in the same file and just was not reachable from the path that needed it. |
 | 174 | 2026-09-04 | Did splitting the view put your next chat in the new pane? | No -- it replaced the one you were reading and left the new pane empty, which is now fixed by filling whichever pane is empty. |
 | 175 | 2026-09-04 | Does clicking a link in the pane you are not using target the wrong chat? | No -- the pane makes itself active on any click before the link runs, so the reported bug does not exist. |
+| 176 | 2026-09-04 | Was the difference between what GitWyrm counted and what a service reported real? | Only on paper -- every figure claimed the service reported it, including the turn count GitWyrm works out itself. |
+| 177 | 2026-09-04 | Should GitWyrm ever estimate a usage figure it was not given? | No -- an absent figure stays absent, so the "estimated" label having no producer is correct rather than a gap. |

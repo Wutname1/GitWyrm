@@ -2419,8 +2419,25 @@ pub struct UsageValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum UsageSource {
+    /// GitWyrm worked this out itself and can vouch for it -- turn counts,
+    /// message counts, helper counts.
     Measured,
+    /// The provider told us. True of token counts, cost, and context-window
+    /// readings: GitWyrm has no way to verify any of them.
     ProviderReported,
+    /// A figure GitWyrm derived rather than counted or received.
+    ///
+    /// **Nothing constructs this today, deliberately.** GitWyrm does not
+    /// estimate any usage figure: each one is either counted here or reported
+    /// by the provider, and an absent figure stays absent rather than being
+    /// guessed at (the "unknown stays unknown, never zero" rule). The variant
+    /// exists so that if a figure ever IS derived -- a cost computed from
+    /// token counts and a price table, say -- it can be labelled honestly
+    /// instead of borrowing one of the other two labels.
+    ///
+    /// Recorded as N6 across passes 24-41 as "unreachable". Unreachable is
+    /// the correct state for it; the real half of N6 was that `Measured` was
+    /// unreachable too, which was wrong and is now fixed.
     Estimated,
 }
 
