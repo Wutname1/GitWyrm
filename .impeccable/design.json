@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-03T22:41:32.6361517-05:00",
+  "title": "Design System: GitWyrm",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Deep Mint",
+        "canonical": "#1db584",
+        "tonalRamp": ["#06352a", "#07523e", "#0c7154", "#12916a", "#1db584", "#43c99d", "#82dec0", "#d7f5ea"]
+      },
+      "primary-text": {
+        "role": "primary",
+        "displayName": "Lit Mint",
+        "canonical": "#38b78e",
+        "tonalRamp": ["#07372b", "#0b5541", "#127459", "#20956f", "#38b78e", "#60cba8", "#96dfc7", "#def6ed"]
+      },
+      "primary-ink": {
+        "role": "neutral",
+        "displayName": "Deep Mint Ink",
+        "canonical": "#04120d",
+        "tonalRamp": ["#04120d", "#102d24", "#234a3d", "#3f6959", "#648a77", "#91ad9e", "#c2d2ca", "#edf3f0"]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Workbench Black",
+        "canonical": "#121212",
+        "tonalRamp": ["#121212", "#272727", "#3e3e3e", "#585858", "#747474", "#969696", "#bcbcbc", "#eeeeee"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Bench Charcoal",
+        "canonical": "#1a1a1a",
+        "tonalRamp": ["#151515", "#2b2b2b", "#424242", "#5c5c5c", "#787878", "#999999", "#bfbfbf", "#efefef"]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Tool Steel",
+        "canonical": "#262626",
+        "tonalRamp": ["#181818", "#303030", "#484848", "#626262", "#7e7e7e", "#9f9f9f", "#c4c4c4", "#f0f0f0"]
+      },
+      "surface-active": {
+        "role": "neutral",
+        "displayName": "Bright Tool Steel",
+        "canonical": "#2d2d2d",
+        "tonalRamp": ["#1a1a1a", "#323232", "#4b4b4b", "#656565", "#818181", "#a2a2a2", "#c7c7c7", "#f1f1f1"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Tool Edge",
+        "canonical": "#2d2d2d",
+        "tonalRamp": ["#1a1a1a", "#323232", "#4b4b4b", "#656565", "#818181", "#a2a2a2", "#c7c7c7", "#f1f1f1"]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Workshop White",
+        "canonical": "#e5e5e5",
+        "tonalRamp": ["#242424", "#414141", "#606060", "#808080", "#a2a2a2", "#c5c5c5", "#e5e5e5", "#fafafa"]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Soft Nickel",
+        "canonical": "#9e9e9e",
+        "tonalRamp": ["#202020", "#393939", "#535353", "#6e6e6e", "#898989", "#a8a8a8", "#cccccc", "#f3f3f3"]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Worn Steel",
+        "canonical": "#717171",
+        "tonalRamp": ["#1d1d1d", "#343434", "#4b4b4b", "#646464", "#7f7f7f", "#9f9f9f", "#c5c5c5", "#f1f1f1"]
+      },
+      "success": {
+        "role": "secondary",
+        "displayName": "Signal Green",
+        "canonical": "#34d399",
+        "tonalRamp": ["#073629", "#08533d", "#0c7252", "#139269", "#1fb684", "#4bd0a3", "#8ce3c5", "#daf7ed"]
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "Signal Red",
+        "canonical": "#f87171",
+        "tonalRamp": ["#4a1118", "#711d25", "#992c34", "#c33e47", "#ea5a61", "#f88787", "#fbb8b8", "#fde9e9"]
+      },
+      "warning": {
+        "role": "tertiary",
+        "displayName": "Signal Amber",
+        "canonical": "#fbbf24",
+        "tonalRamp": ["#422d04", "#684706", "#8f6408", "#b9860d", "#e3aa17", "#f6c94c", "#f9dd91", "#fdf3d2"]
+      },
+      "info": {
+        "role": "secondary",
+        "displayName": "Signal Blue",
+        "canonical": "#60a5fa",
+        "tonalRamp": ["#102f55", "#174978", "#21659e", "#3182c8", "#4fa1ed", "#79bafb", "#add6fd", "#e5f2ff"]
+      },
+      "pull-request": {
+        "role": "secondary",
+        "displayName": "Signal Purple",
+        "canonical": "#a78bfa",
+        "tonalRamp": ["#2b1e5c", "#443184", "#6048ad", "#7e62d4", "#9e82f2", "#bba4fb", "#d8ccfd", "#f1edff"]
+      },
+      "graph-rose": {
+        "role": "tertiary",
+        "displayName": "Lane Rose",
+        "canonical": "#fb7185",
+        "tonalRamp": ["#4b1420", "#74202f", "#9e3041", "#c94355", "#ee6073", "#fb8a99", "#fdb9c1", "#fee8eb"]
+      },
+      "graph-lime": {
+        "role": "tertiary",
+        "displayName": "Lane Lime",
+        "canonical": "#a3e635",
+        "tonalRamp": ["#263b08", "#3c5b0b", "#547d0f", "#6fa313", "#8eca20", "#ace74e", "#ccef90", "#eff9d4"]
+      }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "Modal headings and rare top-level headings." },
+      "body": { "displayName": "Body", "purpose": "Controls, explanations, settings, and ordinary interface copy." },
+      "label": { "displayName": "Compact Label", "purpose": "Section dividers and dense metadata labels." },
+      "mono": { "displayName": "Repository Mono", "purpose": "Paths, branches, hashes, line numbers, counts, and code-adjacent metadata." },
+      "wordmark": { "displayName": "GitWyrm Wordmark", "purpose": "Product branding only." }
+    },
+    "shadows": [
+      { "name": "field-lift", "value": "0 1px 2px rgba(0, 0, 0, 0.05)", "purpose": "Keeps bordered inputs and outline controls tangible against nearby surfaces." },
+      { "name": "menu-lift", "value": "0 4px 10px rgba(0, 0, 0, 0.34)", "purpose": "Separates dropdowns and context menus from dense repository content." },
+      { "name": "dialog-lift", "value": "0 14px 40px rgba(0, 0, 0, 0.60)", "purpose": "Places a modal clearly above its dimmed application context." },
+      { "name": "tooltip-lift", "value": "0 8px 24px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.04)", "purpose": "Keeps compact help legible over detailed graphs and panes." },
+      { "name": "attention-ring", "value": "0 0 0 2px var(--gw-accent), 0 0 12px 2px color-mix(in srgb, var(--gw-accent) 55%, transparent)", "purpose": "Briefly reveals a destination, tutorial target, or completed focus action." }
+    ],
+    "motion": [
+      { "name": "state-fast", "value": "150ms cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Hover, pressed, selection, and compact control feedback." },
+      { "name": "overlay-enter", "value": "200ms cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Coordinates dialog backdrop fade with panel fade and scale." },
+      { "name": "progress-reveal", "value": "300ms ease-out", "purpose": "Expands progress details and failure explanations without a hard jump." },
+      { "name": "wyrm-spring", "value": "420ms cubic-bezier(0.34, 1.56, 0.64, 1)", "purpose": "Branded tactile response when the Wyrm mark is clicked." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "native-window-min", "value": "1100px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The clear action for completing the current step.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary { height: 36px; padding: 8px 16px; border: 1px solid transparent; border-radius: 6px; background: var(--gw-accent); color: var(--gw-accent-fg); font: 600 14px/1.2 var(--gw-font-sans); transition: filter 150ms, transform 150ms, box-shadow 150ms; } .ds-btn-primary:hover { filter: brightness(1.08); } .ds-btn-primary:active { filter: brightness(0.88); transform: translateY(1px); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--gw-accent) 50%, transparent); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A tactile supporting action on panels and dialogs.",
+      "html": "<button class=\"ds-btn-secondary\">Open folder</button>",
+      "css": ".ds-btn-secondary { height: 32px; padding: 7px 12px; border: 1px solid var(--gw-border); border-radius: 6px; background: var(--gw-panel3); color: var(--gw-text); font: 600 13px/1.2 var(--gw-font-sans); transition: background 150ms, border-color 150ms, transform 150ms, box-shadow 150ms; } .ds-btn-secondary:hover { background: color-mix(in srgb, var(--gw-panel3) 82%, var(--gw-text)); border-color: var(--gw-muted); } .ds-btn-secondary:active { background: var(--gw-panel); transform: translateY(1px); } .ds-btn-secondary:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--gw-accent) 50%, transparent); }"
+    },
+    {
+      "name": "Ghost Tool Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "A compact toolbar action that stays quiet until approached.",
+      "html": "<button class=\"ds-btn-ghost\">Refresh</button>",
+      "css": ".ds-btn-ghost { height: 30px; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--gw-sub); font: 500 13px/1.2 var(--gw-font-sans); transition: background 150ms, color 150ms, transform 150ms, box-shadow 150ms; } .ds-btn-ghost:hover { background: var(--gw-panel3); color: var(--gw-text); } .ds-btn-ghost:active { background: var(--gw-panel2); color: var(--gw-text); transform: translateY(1px); } .ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--gw-accent); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A compact editable field with a strong visible focus response.",
+      "html": "<input class=\"ds-input\" value=\"feature/clear-history\" aria-label=\"Branch name\">",
+      "css": ".ds-input { width: 260px; height: 36px; padding: 4px 12px; border: 1px solid var(--gw-border); border-radius: 6px; background: var(--gw-bg); color: var(--gw-text); font: 450 14px/1.45 var(--gw-font-sans); transition: border-color 150ms, box-shadow 150ms; } .ds-input:hover { border-color: var(--gw-muted); } .ds-input:focus-visible { outline: none; border-color: var(--gw-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gw-accent) 50%, transparent); }"
+    },
+    {
+      "name": "Repository Tab",
+      "kind": "nav",
+      "refersTo": "repository-tab",
+      "description": "The persistent repository identity with an unmistakable active edge.",
+      "html": "<button class=\"ds-repo-tab ds-repo-tab-active\"><span class=\"ds-repo-dot\"></span>GitWyrm</button>",
+      "css": ".ds-repo-tab { position: relative; height: 36px; padding: 0 10px; border: 0; border-radius: 5px 5px 0 0; background: var(--gw-panel); color: var(--gw-sub); font: 600 11px/1 var(--gw-font-sans); letter-spacing: 0.04em; transition: background 150ms, color 150ms; } .ds-repo-tab:hover { background: var(--gw-panel3); color: var(--gw-text); } .ds-repo-tab:active { background: var(--gw-panel2); } .ds-repo-tab:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--gw-accent); } .ds-repo-tab-active::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--gw-accent); } .ds-repo-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--gw-accent); }"
+    },
+    {
+      "name": "Branch Reference Chip",
+      "kind": "chip",
+      "refersTo": "ref-chip",
+      "description": "A compact branch marker attached directly to repository history.",
+      "html": "<span class=\"ds-ref-chip\">main</span>",
+      "css": ".ds-ref-chip { display: inline-flex; align-items: center; max-width: 110px; padding: 1px 6px; overflow: hidden; border: 0; border-radius: 5px; background: var(--gw-accent); color: var(--gw-accent-fg); font: 600 11px/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; transition: filter 150ms, transform 150ms, box-shadow 150ms; } .ds-ref-chip:hover { filter: brightness(1.1); transform: translateY(-1px); } .ds-ref-chip:active { filter: brightness(0.88); transform: translateY(0); } .ds-ref-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--gw-accent), 0 0 10px 2px color-mix(in srgb, var(--gw-accent) 45%, transparent); }"
+    },
+    {
+      "name": "Selected Navigation Row",
+      "kind": "nav",
+      "description": "A dense side-panel destination whose selection never relies on tint alone.",
+      "html": "<button class=\"ds-nav-row ds-nav-row-selected\"><span>Branches</span><span class=\"ds-nav-count\">12</span></button>",
+      "css": ".ds-nav-row { position: relative; display: flex; width: 240px; align-items: center; justify-content: space-between; padding: 7px 12px 7px 14px; border: 0; border-left: 2px solid transparent; background: transparent; color: var(--gw-sub); font: 500 12px/1.3 var(--gw-font-sans); text-align: left; transition: background 150ms, color 150ms, border-color 150ms; } .ds-nav-row:hover { background: var(--gw-panel2); color: var(--gw-text); } .ds-nav-row:active { background: var(--gw-panel3); } .ds-nav-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--gw-accent); } .ds-nav-row-selected { border-left-color: var(--gw-accent); background: color-mix(in srgb, var(--gw-accent) 13%, transparent); color: var(--gw-text); } .ds-nav-count { color: var(--gw-muted); font-family: var(--font-mono); font-size: 11px; }"
+    },
+    {
+      "name": "Tool Surface Card",
+      "kind": "card",
+      "description": "A flat-at-rest container for related repository information and actions.",
+      "html": "<section class=\"ds-card\"><div class=\"ds-card-label\">CHANGES</div><strong>3 files ready</strong><p>Review what changed before you commit.</p></section>",
+      "css": ".ds-card { width: 280px; padding: 12px; border: 1px solid var(--gw-border); border-radius: 6px; background: var(--gw-panel2); color: var(--gw-text); font: 450 13px/1.45 var(--gw-font-sans); } .ds-card:hover { border-color: var(--gw-muted); background: color-mix(in srgb, var(--gw-panel2) 88%, var(--gw-text)); } .ds-card:focus-within { border-color: var(--gw-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gw-accent) 35%, transparent); } .ds-card-label { margin-bottom: 7px; color: var(--gw-sub); font-size: 11px; font-weight: 700; letter-spacing: 0.09em; } .ds-card strong { display: block; font-size: 13px; } .ds-card p { margin: 4px 0 0; color: var(--gw-muted); font-size: 11px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Control Workbench",
+    "overview": "GitWyrm combines the calm situational awareness of a control room with the approachable tactility of a personal workbench. The interface is compact, capable, and information-rich, but each tool has a clear place and every state change answers the user visibly. It should feel made by people who care about the work, not standardized by an enterprise committee.\n\nPersonality lives in precise details: the Wyrm mark, colored graph paths, direct language, responsive presses, purposeful motion, and occasional wit. Those moments sit inside a disciplined shell so the repository remains the focus. The system is professional without becoming sterile, friendly without becoming toy-like, and dense without becoming cryptic.",
+    "keyCharacteristics": [
+      "Dark-first, theme-aware neutral surfaces with a restrained mint accent.",
+      "Compact desktop density with resizable working panes and persistent context.",
+      "Tactile controls with unmistakable hover, pressed, selected, pending, success, and failure states.",
+      "Color used for meaning: action, Git topology, change status, warnings, and connected services.",
+      "Small, deliberate moments of branded motion and wit inside an otherwise quiet workspace."
+    ],
+    "rules": [
+      { "name": "The Signal, Not Paint Rule", "body": "Deep Mint and semantic colors communicate action, state, or topology; they do not decorate empty space.", "section": "colors" },
+      { "name": "The Selected Must Read Rule", "body": "A selected control needs persistent contrast, an edge, a check, or another unmistakable marker. A faint tint alone is not a selected state.", "section": "colors" },
+      { "name": "The Theme Contract Rule", "body": "Components consume semantic variables, never a hard-coded theme surface, so every supported theme retains the same hierarchy and meaning.", "section": "colors" },
+      { "name": "The Quiet Hierarchy Rule", "body": "Prefer weight, spacing, and text tone before increasing size; large type is exceptional in an operational desktop tool.", "section": "typography" },
+      { "name": "The Micro Floor Rule", "body": "Nothing renders below the established 0.6875rem micro size, and microcopy keeps generous line height.", "section": "typography" },
+      { "name": "The Persistent Context Rule", "body": "Repository, branch, change count, current worktree, and operation state stay visible whenever they help prevent work in the wrong place.", "section": "layout" },
+      { "name": "The Resizable Workbench Rule", "body": "Fixed rails establish orientation, but working panes belong to the user and retain useful minimum and maximum widths.", "section": "layout" },
+      { "name": "The Layer Before Shadow Rule", "body": "Raise an ordinary surface with tone first; use a shadow only when the element truly floats or needs temporary attention.", "section": "elevation" },
+      { "name": "The Radius Follows Scale Rule", "body": "Small controls get small corners; large containers may be softer, but ordinary panels never become oversized floating capsules.", "section": "shapes" }
+    ],
+    "dos": [
+      "Do make hover, pressed, selected, pending, success, and failure visually distinct.",
+      "Do preserve the layered neutral hierarchy and consume semantic theme variables.",
+      "Do use Deep Mint sparingly for primary action, focus, progress, and important selection.",
+      "Do keep repository context and operation state visible when an action could affect the wrong work.",
+      "Do use compact spacing and type while respecting the micro-type floor and user scaling controls.",
+      "Do allow small branded reactions and moments of wit when they reinforce a real action."
+    ],
+    "donts": [
+      "Don't let any click, keypress, drag, or long-running action complete without a visible reaction.",
+      "Don't use a faint dark-on-dark tint as the only selected-state marker.",
+      "Don't decorate large areas with mint or graph colors; color must carry meaning.",
+      "Don't add shadows to ordinary resting panels when tonal layering already separates them.",
+      "Don't turn the interface into sterile enterprise software or a playful toy; keep capability and personality in balance.",
+      "Don't introduce oversized cards, inflated spacing, or mobile-style capsules into the dense desktop workspace."
+    ]
+  }
+}
