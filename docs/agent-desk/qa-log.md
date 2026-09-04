@@ -90,4 +90,6 @@ competing sub-agents, the answer names the losing option too.
 | 82 | 2026-09-04 | Should the mode pills be hidden or disabled on a read-only chat? | Disabled with the reason shown, following the provider list's pattern, so the option stays discoverable and screen-reader users hear why. |
 | 83 | 2026-09-04 | Should more than one panel be pinnable at once? | Not decided here -- the vision's plural "panels" suggests yes, but that is a layout model change, so this pass only makes the replacement visible. |
 | 84 | 2026-09-04 | Why is a backslash written as a character code in the context panel? | Because the literal kept being eaten by the tooling, and the wrong version failed silently on Windows paths while looking correct on Unix ones. |
+| 85 | 2026-09-04 | Was the accent-colour collision only in the default theme? | No -- three of the four themes set the same two colours identically, so the fix and its guard matter across all of them. |
+| 86 | 2026-09-04 | Is showing a safety-critical value enough if it is truncated? | No -- the file permissions were on screen but cut to the first path, which is closer to the original defect than to a fix. |
 

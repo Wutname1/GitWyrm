@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allowedPathsLabel, canViewNodeChanges, helperRoleLabel, latestActivityLine, resultForNode, sessionHasGraph } from './agentDeskGraph'
+import { allowedPathLines, allowedPathsLabel, canViewNodeChanges, helperRoleLabel, latestActivityLine, resultForNode, sessionHasGraph } from './agentDeskGraph'
 
 type Session = Parameters<typeof sessionHasGraph>[0]
 
@@ -126,5 +126,23 @@ describe('allowedPathsLabel', () => {
     // No path scope means every file is in scope. Rendering nothing here
     // would read as "no files", which is the opposite of what it means.
     expect(allowedPathsLabel([])).toBe('Any file in this project')
+  })
+})
+
+describe('allowedPathLines', () => {
+  it('gives each path its own line so none is cut off', () => {
+    const { lines, rest } = allowedPathLines(['a/b.ts', 'c/d.ts'])
+    expect(lines).toEqual(['a/b.ts', 'c/d.ts'])
+    expect(rest).toBe(0)
+  })
+  it('counts what it does not show rather than trailing off', () => {
+    const { lines, rest } = allowedPathLines(['a', 'b', 'c', 'd', 'e'])
+    expect(lines).toHaveLength(3)
+    expect(rest).toBe(2)
+  })
+  it('shows no lines for an unrestricted helper', () => {
+    // The caller says "Any file in this project" -- which is wider, not
+    // narrower, so an empty line list must not read as "no files".
+    expect(allowedPathLines([])).toEqual({ lines: [], rest: 0 })
   })
 })

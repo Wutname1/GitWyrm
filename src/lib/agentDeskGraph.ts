@@ -107,3 +107,21 @@ export function allowedPathsLabel(paths: string[]): string {
   if (paths.length <= 3) return paths.join(', ')
   return `${paths.slice(0, 3).join(', ')} and ${paths.length - 3} more`
 }
+
+/**
+ * The allowed paths as separate lines, plus how many are not shown.
+ *
+ * `allowedPathsLabel` joins them into one string, which the approval card then
+ * truncated to a single line: three realistic paths are ~155 characters, and
+ * the panel can be as narrow as `MIN_CHAT_SIZE_PX` (360px) at `text-2xs`, so
+ * a person saw the first path and an ellipsis. These paths are the permission
+ * being granted, so they get a line each and the overflow is counted rather
+ * than cut mid-path.
+ *
+ * `rest` is 0 when everything fits. An empty list yields no lines at all --
+ * the caller says "Any file in this project", which is wider, not narrower.
+ */
+export function allowedPathLines(paths: string[], limit = 3): { lines: string[]; rest: number } {
+  if (paths.length === 0) return { lines: [], rest: 0 }
+  return { lines: paths.slice(0, limit), rest: Math.max(0, paths.length - limit) }
+}

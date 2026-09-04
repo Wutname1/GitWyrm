@@ -7,7 +7,7 @@ import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { describeOutcomeKind } from '@/lib/agentDeskResult'
 import { useOpenRepo } from '@/hooks/useRepoActions'
-import { allowedPathsLabel, helperRoleLabel } from '@/lib/agentDeskGraph'
+import { allowedPathLines, allowedPathsLabel, helperRoleLabel } from '@/lib/agentDeskGraph'
 import {
   startFailureCardForError,
   startFailureCardForGraph,
@@ -210,15 +210,37 @@ export function AwaitingStartCard({
         boundary the backend then enforces against them.
       */}
       <ul className="mt-1.5 flex flex-col gap-1">
-        {proposal.helpers.map((h) => (
+        {proposal.helpers.map((h) => {
+          const scope = allowedPathLines(h.allowedPaths)
+          return (
           <li key={h.nodeId} className="rounded border border-border bg-panel2 px-1.5 py-1 text-2xs">
             <span className="font-semibold text-foreground">{h.title}</span>
             <span className="text-muted-foreground"> · {helperRoleLabel(h.role)}</span>
-            <span className="mt-0.5 block truncate text-2xs text-sub" title={h.allowedPaths.join(', ')}>
-              Can change: {allowedPathsLabel(h.allowedPaths)}
+            {/*
+              A line per path. Joined into one truncated line, three realistic
+              paths run to ~155 characters and this panel can be 360px wide, so
+              the reader saw the first path and an ellipsis -- on the control
+              that grants those exact paths. Nothing is cut mid-path now; what
+              does not fit is counted.
+            */}
+            <span className="mt-0.5 block text-2xs text-sub">
+              {h.allowedPaths.length === 0 ? (
+                <>Can change: {allowedPathsLabel(h.allowedPaths)}</>
+              ) : (
+                <>
+                  Can change:
+                  {scope.lines.map((path) => (
+                    <span key={path} className="block truncate pl-2 font-mono" title={path}>
+                      {path}
+                    </span>
+                  ))}
+                  {scope.rest > 0 && <span className="block pl-2">and {scope.rest} more</span>}
+                </>
+              )}
             </span>
           </li>
-        ))}
+          )
+        })}
       </ul>
       {stale && (
         // R5.4/tasks.md 3.3: Start already refused once for this exact
