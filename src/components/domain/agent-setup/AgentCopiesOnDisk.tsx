@@ -40,7 +40,10 @@ export function AgentCopiesOnDisk() {
   }
 
   const clear = async (copy: AgentCopyOnDisk) => {
-    if (clearing) return
+    // An orphan has no chat and no result record, so `cleanup_worktree_at`
+    // (which looks the copy up through both) cannot clear it. The row offers
+    // Open folder instead of Clear rather than a button that would refuse.
+    if (clearing || !copy.sessionId || !copy.executionId) return
     setClearing(copy.executionId)
     try {
       const outcome = unwrap(
@@ -108,11 +111,18 @@ export function AgentCopiesOnDisk() {
               className="flex items-center gap-2 rounded-md border border-border bg-panel2 px-2.5 py-1.5"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate text-2xs font-medium text-foreground" title={copy.sessionTitle}>
-                  {copy.sessionTitle}
+                <p
+                  className="truncate text-2xs font-medium text-foreground"
+                  title={copy.sessionTitle ?? copy.worktreePath}
+                >
+                  {/* An orphan names itself by folder: its chat is gone, and
+                      inventing a title would claim a chat that no longer
+                      exists. */}
+                  {copy.sessionTitle ?? 'Left over from a deleted chat'}
                 </p>
                 <p className="truncate text-2xs text-muted-foreground" title={copy.worktreePath}>
-                  {formatDiskSize(copy.sizeBytes)} · {resultStateLabel(copy.state)}
+                  {formatDiskSize(copy.sizeBytes)}
+                  {copy.state ? ` · ${resultStateLabel(copy.state)}` : ' · no chat points at this any more'}
                 </p>
               </div>
               {/* The copy refuses to clear when something in it is
@@ -129,6 +139,11 @@ export function AgentCopiesOnDisk() {
                 <FolderOpen size={11} aria-hidden />
                 Open
               </button>
+              {/* Hidden rather than disabled for an orphan: the clear path
+                  looks the copy up through its chat and its result record,
+                  both of which are gone, so the button could only ever refuse.
+                  Open folder above still works, which is the useful action. */}
+              {copy.sessionId && copy.executionId && (
               <button
                 type="button"
                 onClick={() => void clear(copy)}
@@ -140,6 +155,7 @@ export function AgentCopiesOnDisk() {
                 ) : null}
                 {clearing === copy.executionId ? 'Clearing…' : 'Clear'}
               </button>
+              )}
             </li>
           ))}
         </ul>

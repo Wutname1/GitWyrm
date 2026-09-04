@@ -3806,14 +3806,6 @@ async agentResultOpenPullRequestPage(url: string) : Promise<Result<null, string>
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Every agent copy still on disk, largest first.
- * 
- * The counterpart to [`agent_result_find_orphaned_all`]: that one reports
- * results whose folder is GONE, this one reports the folders that are still
- * there. Same fan-out shape -- the cheap index for session identity, then
- * one sidecar read per session.
- */
 async agentResultCopiesOnDisk() : Promise<Result<AgentCopyOnDisk[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_result_copies_on_disk") };
@@ -3969,7 +3961,21 @@ export type AdapterListEntry = { adapterId: string; displayName: string; enabled
  * disk -- which for a product whose promise is a Git client with nothing to
  * hide is a contradiction rather than a missing feature.
  */
-export type AgentCopyOnDisk = { sessionId: string; repoId: string; sessionTitle: string; executionId: string; worktreePath: string; 
+export type AgentCopyOnDisk = { 
+/**
+ * The chat this copy belongs to, when one still does.
+ * 
+ * `None` for an orphan: a copy whose chat was deleted. Deleting a chat
+ * removes the sidecar that named this path, so before these were listed
+ * from git the folder became permanently invisible here -- on the one
+ * screen whose job is saying what GitWyrm is holding.
+ */
+sessionId: string | null; repoId: string; 
+/**
+ * The chat's title, or `None` for an orphan. The UI names it rather than
+ * inventing a placeholder title.
+ */
+sessionTitle: string | null; executionId: string | null; worktreePath: string; 
 /**
  * Total size of the copy in bytes. `None` when the folder could not be
  * measured -- reported as unknown rather than as zero, since a zero
@@ -3984,8 +3990,9 @@ export type AgentCopyOnDisk = { sessionId: string; repoId: string; sessionTitle:
 sizeBytes: number | null; 
 /**
  * The result's state, so the UI can say why a copy is still held.
+ * `None` for an orphan, whose result record is gone with its chat.
  */
-state: ResultState }
+state: ResultState | null }
 /**
  * One row in the provider picker.
  */

@@ -582,6 +582,19 @@ impl RepoManager {
             .ok_or_else(|| AppError::Other(format!("repository not open: {id}")))
     }
 
+    /// Every repository open right now, as `(id, handle)` pairs.
+    ///
+    /// Added so the disk-usage screen can ask git which agent worktrees exist
+    /// rather than inferring them from chat records -- records that vanish
+    /// when a chat is deleted, taking the only pointer to a multi-GB folder
+    /// with them.
+    pub fn open_repos(&self) -> Vec<(String, Arc<OpenRepo>)> {
+        self.repos
+            .lock()
+            .map(|m| m.iter().map(|(id, repo)| (id.clone(), repo.clone())).collect())
+            .unwrap_or_default()
+    }
+
     pub fn close(&self, id: &str) {
         self.repos.lock().unwrap().remove(id);
     }

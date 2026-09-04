@@ -1273,10 +1273,18 @@ pub async fn agent_result_find_orphaned(
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCopyOnDisk {
-    pub session_id: SessionId,
+    /// The chat this copy belongs to, when one still does.
+    ///
+    /// `None` for an orphan: a copy whose chat was deleted. Deleting a chat
+    /// removes the sidecar that named this path, so before these were listed
+    /// from git the folder became permanently invisible here -- on the one
+    /// screen whose job is saying what GitWyrm is holding.
+    pub session_id: Option<SessionId>,
     pub repo_id: String,
-    pub session_title: String,
-    pub execution_id: String,
+    /// The chat's title, or `None` for an orphan. The UI names it rather than
+    /// inventing a placeholder title.
+    pub session_title: Option<String>,
+    pub execution_id: Option<String>,
     pub worktree_path: String,
     /// Total size of the copy in bytes. `None` when the folder could not be
     /// measured -- reported as unknown rather than as zero, since a zero
@@ -1289,7 +1297,8 @@ pub struct AgentCopyOnDisk {
     /// up to 2^53 exactly, which is 9 petabytes -- past any worktree.
     pub size_bytes: Option<f64>,
     /// The result's state, so the UI can say why a copy is still held.
-    pub state: ResultState,
+    /// `None` for an orphan, whose result record is gone with its chat.
+    pub state: Option<ResultState>,
 }
 
 /// Adds up a folder's files, following no symlinks and giving up rather than
@@ -1323,37 +1332,106 @@ fn dir_size_bytes(path: &Path) -> Option<u64> {
 /// results whose folder is GONE, this one reports the folders that are still
 /// there. Same fan-out shape -- the cheap index for session identity, then
 /// one sidecar read per session.
+/// A comparable key for a worktree path.
+///
+/// The same folder reaches this function as a stored string from a chat record
+/// and as git's own path, which differ in separator and case on Windows.
+/// Mirrors `git::worktree::paths_equal`'s own fallback normalisation -- that
+/// function compares two paths, this one has to bucket many.
+fn normalize_worktree_key(path: &str) -> String {
+    // `char::from_u32(92)` is a backslash. Written this way because a literal
+    // one does not survive the tooling that edits this file -- the same trap
+    // qa-log #84 records, which produced a silently Windows-only bug once.
+    let backslash = char::from_u32(92).unwrap_or('/');
+    match std::path::Path::new(path).canonicalize() {
+        Ok(p) => p.to_string_lossy().to_lowercase().replace(backslash, "/"),
+        Err(_) => path.to_lowercase().replace(backslash, "/"),
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
-pub async fn agent_result_copies_on_disk(app: AppHandle) -> Result<Vec<AgentCopyOnDisk>, AppError> {
+pub async fn agent_result_copies_on_disk(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::state::RepoManager>,
+) -> Result<Vec<AgentCopyOnDisk>, AppError> {
     let root = resolve_root(&app)?;
+    // Every open repository, so the git side can be asked directly.
+    let repos = manager.open_repos();
+
     tauri::async_runtime::spawn_blocking(move || {
+        // What the chat records know: path -> (session, execution, title, state).
+        //
+        // This used to be the ONLY source, which is why deleting a chat made
+        // its copy permanently invisible here: the sidecar naming the path
+        // went with the chat. Now it is the join, not the enumeration.
         let loaded = crate::agentdesk::store::load_or_rebuild_index(&root);
-        let mut out: Vec<AgentCopyOnDisk> = loaded
-            .headers
-            .into_iter()
-            .flat_map(|header| {
-                let records = result::read_results(&root, &header.session_id).unwrap_or_default();
-                records
-                    .into_iter()
-                    .filter_map(|r| {
-                        let path = r.worktree_path.clone()?;
-                        if !Path::new(&path).exists() {
-                            return None;
-                        }
-                        Some(AgentCopyOnDisk {
-                            session_id: header.session_id.clone(),
-                            repo_id: header.repo_id.clone(),
-                            session_title: header.title.clone(),
-                            execution_id: r.execution_id.clone(),
-                            size_bytes: dir_size_bytes(Path::new(&path)).map(|b| b as f64),
-                            worktree_path: path,
-                            state: r.state,
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+        let mut known: std::collections::HashMap<String, AgentCopyOnDisk> = std::collections::HashMap::new();
+        for header in loaded.headers {
+            for r in result::read_results(&root, &header.session_id).unwrap_or_default() {
+                let Some(path) = r.worktree_path.clone() else {
+                    continue;
+                };
+                known.insert(
+                    normalize_worktree_key(&path),
+                    AgentCopyOnDisk {
+                        session_id: Some(header.session_id.clone()),
+                        repo_id: header.repo_id.clone(),
+                        session_title: Some(header.title.clone()),
+                        execution_id: Some(r.execution_id.clone()),
+                        size_bytes: None,
+                        worktree_path: path,
+                        state: Some(r.state),
+                    },
+                );
+            }
+        }
+
+        // Enumerate from git. Provisioning marks every agent worktree
+        // (`git::worktree::mark_as_run_worktree`) and `worktree::list` already
+        // reports that mark, so git knows which checkouts are ours whether or
+        // not a chat still points at them.
+        let mut out: Vec<AgentCopyOnDisk> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (repo_id, open) in &repos {
+            let Ok(repo) = open.repo.lock() else { continue };
+            for wt in crate::git::worktree::list(&repo, None)
+                .into_iter()
+                .filter(|w| w.is_run_worktree)
+            {
+                if !Path::new(&wt.path).exists() {
+                    continue;
+                }
+                let key = normalize_worktree_key(&wt.path);
+                if !seen.insert(key.clone()) {
+                    continue;
+                }
+                let mut row = known.remove(&key).unwrap_or(AgentCopyOnDisk {
+                    // An orphan: git has the folder, no chat claims it.
+                    session_id: None,
+                    repo_id: repo_id.clone(),
+                    session_title: None,
+                    execution_id: None,
+                    size_bytes: None,
+                    worktree_path: wt.path.clone(),
+                    state: None,
+                });
+                row.size_bytes = dir_size_bytes(Path::new(&wt.path)).map(|b| b as f64);
+                out.push(row);
+            }
+        }
+
+        // Copies a chat still names that git did not list -- a repository not
+        // open right now, most often. Kept rather than dropped: this screen
+        // reported them before and losing them would be a regression.
+        for (_key, mut row) in known {
+            if !Path::new(&row.worktree_path).exists() {
+                continue;
+            }
+            row.size_bytes = dir_size_bytes(Path::new(&row.worktree_path)).map(|b| b as f64);
+            out.push(row);
+        }
+
         // Largest first: the copy worth clearing is the one taking the room.
         // An unmeasurable copy sorts last rather than first, so a folder we
         // could not read never displaces a real 6 GB one at the top.
