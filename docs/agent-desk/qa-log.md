@@ -92,4 +92,5 @@ competing sub-agents, the answer names the losing option too.
 | 84 | 2026-09-04 | Why is a backslash written as a character code in the context panel? | Because the literal kept being eaten by the tooling, and the wrong version failed silently on Windows paths while looking correct on Unix ones. |
 | 85 | 2026-09-04 | Was the accent-colour collision only in the default theme? | No -- three of the four themes set the same two colours identically, so the fix and its guard matter across all of them. |
 | 86 | 2026-09-04 | Is showing a safety-critical value enough if it is truncated? | No -- the file permissions were on screen but cut to the first path, which is closer to the original defect than to a fix. |
+| 87 | 2026-09-04 | What should happen when you delete your very last chat? | The pane clears to "No chat selected" rather than staying on the chat that was just removed. |
 

@@ -391,15 +391,23 @@ export function AgentDeskView() {
   // out from under it) falls back to the newest valid session rather than
   // showing a dead reference forever.
   useEffect(() => {
-    if (!hydrated || headers.length === 0) return
+    if (!hydrated || sessionsLoading) return
     const validIds = new Set(headers.map((h) => h.sessionId))
+    // `headers[0]` when there is one, otherwise null. This used to return
+    // early whenever the list was empty, which is exactly the case of deleting
+    // your LAST chat: the pane kept pointing at the session that had just been
+    // removed, with nothing left to fall back to. `restorePaneToFallback`
+    // already accepts null, so the empty case only needed to be allowed to
+    // reach it. Gated on `sessionsLoading` so a list that has not arrived yet
+    // is never mistaken for a list with nothing in it.
+    const fallback = headers.length > 0 ? headers[0].sessionId : null
     if (primarySessionId && !validIds.has(primarySessionId)) {
-      restorePaneToFallback('primary', headers[0].sessionId)
+      restorePaneToFallback('primary', fallback)
     }
     if (layout.split && secondarySessionId && !validIds.has(secondarySessionId)) {
-      restorePaneToFallback('secondary', headers[0].sessionId)
+      restorePaneToFallback('secondary', fallback)
     }
-  }, [hydrated, headers, primarySessionId, secondarySessionId, layout.split, restorePaneToFallback])
+  }, [hydrated, sessionsLoading, headers, primarySessionId, secondarySessionId, layout.split, restorePaneToFallback])
 
   /**
    * Put the caret in the composer's textarea, not the box around it.
