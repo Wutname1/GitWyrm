@@ -1263,6 +1263,112 @@ pub async fn agent_result_find_orphaned(
     .map_err(|e| AppError::Other(e.to_string()))
 }
 
+/// One agent copy still on disk, named to the chat it belongs to.
+///
+/// Agent runs work in a full checkout so they cannot disturb what the person
+/// has open. Those copies were removable from the result panel but nowhere
+/// said they existed, so discovery happened in the file manager or on a full
+/// disk -- which for a product whose promise is a Git client with nothing to
+/// hide is a contradiction rather than a missing feature.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCopyOnDisk {
+    pub session_id: SessionId,
+    pub repo_id: String,
+    pub session_title: String,
+    pub execution_id: String,
+    pub worktree_path: String,
+    /// Total size of the copy in bytes. `None` when the folder could not be
+    /// measured -- reported as unknown rather than as zero, since a zero
+    /// would read as "this costs nothing" when the truth is "we could not
+    /// look".
+    ///
+    /// `f64`, not `u64`: Specta refuses to export 64-bit integers because it
+    /// cannot know whether the serializer handles BigInt, and `cargo check`
+    /// stays green while `export_bindings` dies. A double holds every integer
+    /// up to 2^53 exactly, which is 9 petabytes -- past any worktree.
+    pub size_bytes: Option<f64>,
+    /// The result's state, so the UI can say why a copy is still held.
+    pub state: ResultState,
+}
+
+/// Adds up a folder's files, following no symlinks and giving up rather than
+/// guessing.
+///
+/// Returns `None` on any read failure, because a partial total presented as a
+/// total is worse than no number: someone deciding whether to clear 6 GB must
+/// not be shown 200 MB because a subfolder was unreadable.
+fn dir_size_bytes(path: &Path) -> Option<u64> {
+    let mut total: u64 = 0;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).ok()? {
+            let entry = entry.ok()?;
+            // `symlink_metadata` so a link is counted as the link, never
+            // followed out of the folder being measured.
+            let meta = entry.metadata().ok()?;
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else if meta.is_file() {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    Some(total)
+}
+
+/// Every agent copy still on disk, largest first.
+///
+/// The counterpart to [`agent_result_find_orphaned_all`]: that one reports
+/// results whose folder is GONE, this one reports the folders that are still
+/// there. Same fan-out shape -- the cheap index for session identity, then
+/// one sidecar read per session.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_result_copies_on_disk(app: AppHandle) -> Result<Vec<AgentCopyOnDisk>, AppError> {
+    let root = resolve_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let loaded = crate::agentdesk::store::load_or_rebuild_index(&root);
+        let mut out: Vec<AgentCopyOnDisk> = loaded
+            .headers
+            .into_iter()
+            .flat_map(|header| {
+                let records = result::read_results(&root, &header.session_id).unwrap_or_default();
+                records
+                    .into_iter()
+                    .filter_map(|r| {
+                        let path = r.worktree_path.clone()?;
+                        if !Path::new(&path).exists() {
+                            return None;
+                        }
+                        Some(AgentCopyOnDisk {
+                            session_id: header.session_id.clone(),
+                            repo_id: header.repo_id.clone(),
+                            session_title: header.title.clone(),
+                            execution_id: r.execution_id.clone(),
+                            size_bytes: dir_size_bytes(Path::new(&path)).map(|b| b as f64),
+                            worktree_path: path,
+                            state: r.state,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        // Largest first: the copy worth clearing is the one taking the room.
+        // An unmeasurable copy sorts last rather than first, so a folder we
+        // could not read never displaces a real 6 GB one at the top.
+        out.sort_by(|a, b| {
+            b.size_bytes
+                .unwrap_or(0.0)
+                .partial_cmp(&a.size_bytes.unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        out
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
 /// One orphaned result, named to the session it belongs to -- what
 /// [`agent_result_find_orphaned`] cannot say on its own, since it already
 /// takes a single `session_id` and answers only for that one session.
@@ -1981,6 +2087,35 @@ mod tests {
         // Never called Keep -- still Reviewing.
         let outcome = commit_result_at(&locks, &root, "sess-1", "exec-1", SessionIntent::Fix, "improved: x");
         assert!(matches!(outcome, CommitResultOutcome::NothingToCommit));
+    }
+
+    // -- dir_size_bytes: the number a person decides on. It must be right or
+    // absent, never a partial total wearing the word "total". --
+
+    #[test]
+    fn dir_size_adds_up_nested_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), vec![0u8; 100]).unwrap();
+        std::fs::create_dir_all(dir.path().join("nested/deeper")).unwrap();
+        std::fs::write(dir.path().join("nested/b.txt"), vec![0u8; 250]).unwrap();
+        std::fs::write(dir.path().join("nested/deeper/c.txt"), vec![0u8; 400]).unwrap();
+
+        assert_eq!(dir_size_bytes(dir.path()), Some(750));
+    }
+
+    #[test]
+    fn dir_size_of_an_empty_folder_is_zero_not_unknown() {
+        // Zero and unknown mean different things: this folder genuinely costs
+        // nothing, which is not the same as being unable to look.
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(dir_size_bytes(dir.path()), Some(0));
+    }
+
+    #[test]
+    fn dir_size_is_unknown_rather_than_wrong_when_the_folder_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("never-existed");
+        assert_eq!(dir_size_bytes(&gone), None);
     }
 
     #[test]

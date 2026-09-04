@@ -3788,6 +3788,22 @@ async agentResultOpenPullRequestPage(url: string) : Promise<Result<null, string>
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Every agent copy still on disk, largest first.
+ * 
+ * The counterpart to [`agent_result_find_orphaned_all`]: that one reports
+ * results whose folder is GONE, this one reports the folders that are still
+ * there. Same fan-out shape -- the cheap index for session identity, then
+ * one sidecar read per session.
+ */
+async agentResultCopiesOnDisk() : Promise<Result<AgentCopyOnDisk[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_result_copies_on_disk") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async agentResultCleanupWorktree(repoId: string, sessionId: string, executionId: string) : Promise<Result<CleanupWorktreeOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_result_cleanup_worktree", { repoId, sessionId, executionId }) };
@@ -3926,6 +3942,32 @@ export type AdapterError = { kind: "clientNotDetected" } | { kind: "unsupportedV
  * client was found.
  */
 export type AdapterListEntry = { adapterId: string; displayName: string; enabled: boolean; supportedVersionRange: string; detection: DetectionOutcome }
+/**
+ * One agent copy still on disk, named to the chat it belongs to.
+ * 
+ * Agent runs work in a full checkout so they cannot disturb what the person
+ * has open. Those copies were removable from the result panel but nowhere
+ * said they existed, so discovery happened in the file manager or on a full
+ * disk -- which for a product whose promise is a Git client with nothing to
+ * hide is a contradiction rather than a missing feature.
+ */
+export type AgentCopyOnDisk = { sessionId: string; repoId: string; sessionTitle: string; executionId: string; worktreePath: string; 
+/**
+ * Total size of the copy in bytes. `None` when the folder could not be
+ * measured -- reported as unknown rather than as zero, since a zero
+ * would read as "this costs nothing" when the truth is "we could not
+ * look".
+ * 
+ * `f64`, not `u64`: Specta refuses to export 64-bit integers because it
+ * cannot know whether the serializer handles BigInt, and `cargo check`
+ * stays green while `export_bindings` dies. A double holds every integer
+ * up to 2^53 exactly, which is 9 petabytes -- past any worktree.
+ */
+sizeBytes: number | null; 
+/**
+ * The result's state, so the UI can say why a copy is still held.
+ */
+state: ResultState }
 /**
  * One row in the provider picker.
  */

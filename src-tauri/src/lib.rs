@@ -374,6 +374,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_result::agent_result_message_trailers,
             commands::agent_result::agent_result_draft_pull_request,
             commands::agent_result::agent_result_open_pull_request_page,
+            commands::agent_result::agent_result_copies_on_disk,
             commands::agent_result::agent_result_cleanup_worktree,
             commands::agent_result::agent_result_find_orphaned,
             commands::agent_result::agent_result_find_orphaned_all,

@@ -484,3 +484,42 @@ export function explainCleanupOutcome(outcome: CleanupWorktreeOutcome): { messag
       return { message: `Could not save the change: ${outcome.detail}`, removed: false }
   }
 }
+
+/**
+ * A file size a person can read, or "unknown" when it could not be measured.
+ *
+ * Unknown deliberately does not fall back to 0: the usage panel already holds
+ * the line that an unreported figure stays blank rather than reading as zero,
+ * and a copy we could not measure must not look like a copy that costs
+ * nothing.
+ */
+export function formatDiskSize(bytes: number | null): string {
+  if (bytes == null) return 'size unknown'
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  // One decimal below 10 so "1.4 GB" and "12 GB" both read cleanly.
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
+}
+
+/**
+ * The headline for the agent-copies list: how much room they take together.
+ *
+ * Says how many could not be measured rather than quietly leaving them out of
+ * the total, so the number is never smaller than the truth without saying so.
+ */
+export function summarizeDiskUsage(copies: Array<{ sizeBytes: number | null }>): string {
+  if (copies.length === 0) return 'No agent copies on disk.'
+  const measured = copies.filter((c) => c.sizeBytes != null)
+  const total = measured.reduce((sum, c) => sum + (c.sizeBytes ?? 0), 0)
+  const noun = copies.length === 1 ? 'copy' : 'copies'
+  const unmeasured = copies.length - measured.length
+  const tail = unmeasured > 0 ? ` (${unmeasured} could not be measured)` : ''
+  if (measured.length === 0) return `${copies.length} agent ${noun}, size unknown.`
+  return `${copies.length} agent ${noun} using ${formatDiskSize(total)}${tail}.`
+}

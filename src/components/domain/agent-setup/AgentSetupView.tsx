@@ -8,16 +8,18 @@ import { cn } from '@/lib/utils'
 import { SyncSummaryLine, SyncTable } from './SyncTable'
 import { CopyPreviewDialog } from './CopyPreviewDialog'
 import { BatchReviewDialog } from './BatchReviewDialog'
+import { AgentCopiesOnDisk } from './AgentCopiesOnDisk'
 import { AgentCatalog } from './AgentCatalog'
 import { DetectedAppsTab } from './DetectedAppsTab'
 
-type SetupTab = 'skills' | 'connections' | 'providers' | 'detected'
+type SetupTab = 'skills' | 'connections' | 'providers' | 'detected' | 'disk'
 
 const TABS: { id: SetupTab; label: string }[] = [
   { id: 'skills', label: 'Skills' },
   { id: 'connections', label: 'Connections' },
   { id: 'providers', label: 'AI tools' },
   { id: 'detected', label: 'Detected apps' },
+  { id: 'disk', label: 'Disk use' },
 ]
 
 /**
@@ -93,7 +95,10 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
-        {inventory.isLoading && tab !== 'detected' ? (
+        {/* Disk use is exempt like Detected apps: it reads its own query and
+            must not sit behind a scan of the OTHER agent apps' config, which
+            answers a different question entirely. */}
+        {inventory.isLoading && tab !== 'detected' && tab !== 'disk' ? (
           <p className="py-6 text-center text-2xs text-muted-foreground">Scanning agent apps…</p>
         ) : tab === 'skills' ? (
           <>
@@ -107,6 +112,8 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
           </>
         ) : tab === 'providers' ? (
           <AgentCatalog />
+        ) : tab === 'disk' ? (
+          <AgentCopiesOnDisk />
         ) : (
           <DetectedAppsTab detections={detections.data ?? []} />
         )}

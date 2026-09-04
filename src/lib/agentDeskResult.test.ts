@@ -16,6 +16,8 @@ import {
   describeCommitDestination,
   explainCleanupOutcome,
   failingCheckLines,
+  formatDiskSize,
+  summarizeDiskUsage,
   checksSummaryLine,
   explainAutoStartOutcome,
   explainCommitOutcome,
@@ -479,5 +481,50 @@ describe('explainCleanupOutcome', () => {
     const partial = explainCleanupOutcome({ kind: 'partiallyRemoved', path: 'C:/wt/leftover' })
     expect(partial.message).toMatch(/C:\/wt\/leftover/)
     expect(partial.removed).toBe(false)
+  })
+})
+
+describe('formatDiskSize', () => {
+  it('scales to a unit a person can read', () => {
+    expect(formatDiskSize(512)).toBe('512 B')
+    expect(formatDiskSize(2048)).toBe('2.0 KB')
+    expect(formatDiskSize(5 * 1024 * 1024)).toBe('5.0 MB')
+    expect(formatDiskSize(1.4 * 1024 * 1024 * 1024)).toBe('1.4 GB')
+  })
+
+  it('drops the decimal once the number is big enough not to need it', () => {
+    expect(formatDiskSize(12 * 1024 * 1024 * 1024)).toBe('12 GB')
+  })
+
+  it('says unknown rather than zero when it could not be measured', () => {
+    // A copy we could not measure must not look like one that costs nothing.
+    expect(formatDiskSize(null)).toBe('size unknown')
+    expect(formatDiskSize(0)).toBe('0 B')
+  })
+})
+
+describe('summarizeDiskUsage', () => {
+  it('adds up what is there', () => {
+    const copies = [{ sizeBytes: 1024 * 1024 * 100 }, { sizeBytes: 1024 * 1024 * 400 }]
+    expect(summarizeDiskUsage(copies)).toBe('2 agent copies using 500 MB.')
+  })
+
+  it('uses the singular for one', () => {
+    expect(summarizeDiskUsage([{ sizeBytes: 1024 * 1024 }])).toMatch(/^1 agent copy using/)
+  })
+
+  it('says how many it could not measure instead of quietly leaving them out', () => {
+    // The total must never be smaller than the truth without saying so.
+    const line = summarizeDiskUsage([{ sizeBytes: 1024 * 1024 }, { sizeBytes: null }])
+    expect(line).toMatch(/2 agent copies/)
+    expect(line).toMatch(/1 could not be measured/)
+  })
+
+  it('does not invent a total when nothing could be measured', () => {
+    expect(summarizeDiskUsage([{ sizeBytes: null }])).toBe('1 agent copy, size unknown.')
+  })
+
+  it('says plainly when there are none', () => {
+    expect(summarizeDiskUsage([])).toBe('No agent copies on disk.')
   })
 })
