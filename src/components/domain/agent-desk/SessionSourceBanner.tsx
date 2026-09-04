@@ -14,6 +14,7 @@ import type { SessionSource, SessionState } from '@/lib/bindings'
 import { describeSnapshotFreshness } from '@/lib/agentDeskSources'
 import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
+import { useSessionReadOnly } from '@/hooks/useAgentSessions'
 
 // Keyed by the real union rather than `string`, so a new source kind without
 // an icon is a compile error. As `Record<string, ...>` the `imported` kind was
@@ -114,10 +115,13 @@ export function describeSource(source: SessionSource): { kicker: string; title: 
  * `.ag-source-state` sibling.
  */
 export function SessionSourceBanner({
+  sessionId,
   source,
   state,
   onOpenSource,
 }: {
+  /** Needed to ask the engine whether this chat may change files. */
+  sessionId: string
   source: SessionSource
   state: SessionState
   /** Opens the live source (issue/PR/OpenSpec item) this chat started from. */
@@ -131,7 +135,19 @@ export function SessionSourceBanner({
   const freshness =
     source.kind === 'manual' ? null : describeSnapshotFreshness(source.snapshot.capturedAt, liveUnavailable)
   const missingSource = state === 'missingSource'
-  const readOnly = source.kind === 'pullRequest' || source.kind === 'commit' || source.kind === 'diff'
+  // "Read-only review" is a claim about what the agent may do, so it comes
+  // from the engine's own tool gate rather than from the source kind.
+  //
+  // This used to read `pullRequest || commit || diff`, which is not the
+  // question the engine asks at all -- it decides from the chat's intent and
+  // whether a plan has started. The two agreed only because of which kickoffs
+  // happen to exist today, and issue kickoffs already accept `fix`. The
+  // provider picker's own comment records this exact rule being re-derived in
+  // the UI once before and disagreeing with the engine.
+  //
+  // `null` while unknown: the label simply does not claim read-only until it
+  // has an answer, rather than guessing in either direction.
+  const readOnly = useSessionReadOnly(sessionId)
 
   return (
     <div className="flex flex-none items-center gap-2 border-b border-border bg-panel2 px-3 py-1.5">
@@ -157,9 +173,16 @@ export function SessionSourceBanner({
           <span className="font-semibold text-[var(--gw-amber)]" title={freshness ?? undefined}>
             No longer available
           </span>
-        ) : readOnly ? (
+        ) : readOnly === true ? (
           <span className="font-semibold text-muted-foreground" title={freshness ?? undefined}>
             Read-only review
+          </span>
+        ) : readOnly === null ? (
+          // Not known yet. Says nothing about permissions rather than falling
+          // through to "Live source", which asserts the chat CAN change files
+          // -- the wrong direction to guess on a safety label.
+          <span className="font-semibold text-muted-foreground" title={freshness ?? undefined}>
+            Source
           </span>
         ) : (
           <span className="font-semibold text-accent-text" title={freshness ?? undefined}>

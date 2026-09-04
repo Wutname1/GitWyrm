@@ -659,6 +659,7 @@ export function ConversationPane({
           same information is always one click away. */}
       {showSourceBanner && (
         <SessionSourceBanner
+          sessionId={sessionId}
           source={session.header.source}
           state={state ?? session.header.state}
           onOpenSource={onOpenSource}

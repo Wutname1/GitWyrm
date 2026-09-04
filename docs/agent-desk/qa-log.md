@@ -130,4 +130,6 @@ competing sub-agents, the answer names the losing option too.
 | 122 | 2026-09-04 | Why did an approval you had already answered still ask again? | The answer was only held in the screen's memory, never written down, so any refresh brought the buttons back on a decision already made. |
 | 123 | 2026-09-04 | Why did GitWyrm say a tool was not installed when it was? | Any failure to read its version was recorded as "not found", so a busy or broken tool looked identical to a missing one. |
 | 124 | 2026-09-04 | Does the absence-claim guard cover the Rust side? | No -- it only reads frontend components, and this pass found the same inversion sitting in a Rust probe where the guard cannot see. |
+| 125 | 2026-09-04 | Was "Read-only review" telling the truth about what an agent could do? | Only by coincidence -- it guessed from the kind of thing the chat started from, not from the permission the engine actually enforces. |
+| 126 | 2026-09-04 | What should a safety label show before its answer arrives? | Nothing about permissions -- it now says just "Source" rather than implying the agent is free to change files. |
 

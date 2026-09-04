@@ -242,3 +242,29 @@ export function useAgentSessionExistence(sessionId: string | null) {
   })
   return query.data
 }
+
+/**
+ * Whether this chat may change files, as the engine's own tool gate decides.
+ *
+ * There were three answers to this question. `ProviderControl` asks the
+ * backend, and its comment records an earlier version being re-derived in the
+ * UI and disagreeing with the engine. `SessionSourceBanner` had a third rule --
+ * "a pull request, commit or diff is read-only" -- which is not the question
+ * the engine asks at all: the backend decides from the chat's *intent* and
+ * whether a plan has started.
+ *
+ * They agree today only because of which kickoffs happen to exist. Issue
+ * kickoffs already accept `fix`, so a writable chat with a read-only-looking
+ * source is a caller away, and the banner is a safety label.
+ *
+ * Shares `ProviderControl`'s query key, so opening the picker and reading the
+ * banner cannot give different answers, and the two share one fetch.
+ */
+export function useSessionReadOnly(sessionId: string | null) {
+  const query = useQuery({
+    queryKey: keys.agentProviders(sessionId ?? 'none'),
+    enabled: sessionId != null,
+    queryFn: async () => unwrap(await commands.agentProvidersList(sessionId!)),
+  })
+  return query.data?.readOnly ?? null
+}
