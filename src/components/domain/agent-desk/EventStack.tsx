@@ -25,7 +25,18 @@ export interface EventStackProps {
   onOpenSource?: () => void
 }
 
-/** Icon per event, chosen from the headline's own wording -- matching the mockup's per-row icon variety. */
+/**
+ * Icon per event, chosen from the headline's own wording -- matching the
+ * mockup's per-row icon variety.
+ *
+ * KNOWN LIMIT: this matches English substrings, so a reworded headline or a
+ * translated one silently falls through to the generic `Wrench` rather than
+ * erroring. That is deliberate for now -- the icon is decoration beside a
+ * headline that already says the same thing in words, so a wrong icon costs
+ * nothing a reader can be misled by. If these events ever need to be
+ * reliably distinguishable at a glance, the fix is a typed event kind on the
+ * backend's own event model, not a longer list of words to match here.
+ */
 function iconForHeadline(headline: string) {
   const lower = headline.toLowerCase()
   if (lower.includes('research') || lower.includes('review')) return SearchCheck
