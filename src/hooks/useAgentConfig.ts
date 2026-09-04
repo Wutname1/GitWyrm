@@ -53,6 +53,17 @@ export function useApplyAgentConfigCopy(repoId: string | null) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (planId: string) => unwrap(await commands.agentConfigApplyCopy(planId)),
+    // `onSuccess` covers a REFUSED undo -- one the backend answered. A thrown
+    // one never reaches it, so a failed undo was still indistinguishable from
+    // a successful one, which is the exact thing the comment above says this
+    // hook exists to prevent. Handled here rather than at the call sites
+    // because there are three of them and none passed an `onError`.
+    onError: (e) => {
+      log.error(`agent config undo failed: ${describeError(e)}`)
+      toast.error('That change could not be put back.', {
+        description: 'It has been left as it is. Nothing else was touched.',
+      })
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.agentConfigInventory(repoId) })
       // The receipt list shows an `undone` flag, so it has to be refetched or
