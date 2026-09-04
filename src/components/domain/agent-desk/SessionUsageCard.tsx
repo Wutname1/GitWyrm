@@ -4,6 +4,7 @@ import { ChevronDown, TimerReset } from 'lucide-react'
 import { commands } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { buildAgentUsageLines, explainUsageUnavailable, buildUsageRows, hasAnyUsageData } from '@/lib/agentDeskUsage'
+import { formatCompactAge } from '@/lib/agentSessionGrouping'
 import { cn } from '@/lib/utils'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 
@@ -43,6 +44,7 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
   const unavailable = explainUsageUnavailable(query.data, query.isError)
   const rows = usage ? buildUsageRows(usage) : []
   const agentLines = usage ? buildAgentUsageLines(usage) : []
+  const asOf = usage ? formatCompactAge(usage.dataTimestamp) : null
 
   return (
     <section className="rounded-md border border-border bg-panel2">
@@ -120,6 +122,19 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
                 </li>
               ))}
             </ul>
+          )}
+          {/*
+            These figures are polled, not pushed -- up to 30 seconds old, and
+            older still if a poll fails. The backend has always stamped the
+            moment it produced them, and said in its own type why: "so the UI
+            can show 'as of' rather than implying it is live". Nothing showed
+            it, so a stale number read as a current one on the card whose
+            entire purpose is that a figure never claims more than it knows.
+          */}
+          {usage && (
+            <p className="mt-1.5 border-t border-border pt-1.5 text-2xs text-muted-foreground">
+              {asOf === 'now' ? 'Counted just now' : `Counted ${asOf} ago`}
+            </p>
           )}
         </div>
       )}
