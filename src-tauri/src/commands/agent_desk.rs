@@ -2390,8 +2390,18 @@ pub struct AgentUsageRow {
     /// (falling back to its execution id when a helper has none).
     pub label: String,
     pub is_lead: bool,
-    /// Input plus output tokens, when either was reported.
+    /// Input plus output tokens, when BOTH were reported.
+    ///
+    /// This used to be `a.unwrap_or(0) + b.unwrap_or(0)` whenever either was
+    /// present, so a provider reporting input but not output produced an
+    /// undercounted figure presented as the agent's total. The graph panel
+    /// already refuses that (`nodeUsageLine` names the half it knows), and
+    /// qa-log #68 settled the rule -- one layer away from here.
     pub tokens: Option<u32>,
+    /// The halves, so a caller can say which one it knows when only one was
+    /// reported rather than adding a zero for the other.
+    pub input_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
     /// Provider-reported cost in millionths of a dollar.
     pub cost_micro_usd: Option<u32>,
     pub turns: Option<u32>,
@@ -2459,10 +2469,19 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
         if session.executions.iter().any(|e| e.parent_execution_id.is_some()) {
             Some(count)
         } else {
-            // No helper executions have ever existed on this session --
-            // "zero helpers" is a real, known count here (not an unknown
-            // provider field), so it is fine to report as measured zero.
-            Some(0)
+            // A chat that never had helpers gets no row at all.
+            //
+            // This used to return `Some(0)`, reasoning that zero is a real
+            // measured count rather than an unknown. True -- but it meant
+            // every solo chat carried a permanent "Helpers active 0" about a
+            // concept its owner has not met, and it meant `buildUsageRows`
+            // was never empty, so the card's own "no usage data yet" state
+            // was unreachable. qa-log #94 settled that a count which can only
+            // ever be zero should not be shown.
+            //
+            // A chat that HAS had helpers still reports 0 when none are
+            // running: there the number is telling you something changed.
+            None
         }
     };
 
@@ -2504,11 +2523,16 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
         .filter_map(|e| {
             let usage = e.usage.as_ref()?;
             let is_lead = e.parent_execution_id.is_none();
+            // Only a real total. A half-known figure is reported through
+            // `input_tokens`/`output_tokens` instead, so the caller can say
+            // which half it is.
             let tokens = match (usage.input_tokens, usage.output_tokens) {
-                (None, None) => None,
-                (a, b) => Some(a.unwrap_or(0).saturating_add(b.unwrap_or(0))),
+                (Some(a), Some(b)) => Some(a.saturating_add(b)),
+                _ => None,
             };
             Some(AgentUsageRow {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
                 execution_id: e.execution_id.clone(),
                 label: if is_lead {
                     "Lead".to_string()
@@ -5191,7 +5215,15 @@ mod tests {
         assert!(usage.plan_limit.is_none());
         assert!(usage.plan_reset_at.is_none());
         assert!(usage.session_requests.is_none(), "no execution messages exist yet");
-        assert_eq!(usage.active_helper_count, Some(0), "zero helpers is a real measured count, not unknown");
+        // Was `Some(0)`, reasoning that zero helpers is a real measured count.
+        // It is -- but on a chat that never had any it is also a number that
+        // can never be anything else, so it earned a permanent row about a
+        // concept its owner has not met and made the card's empty state
+        // unreachable. qa-log #94.
+        assert_eq!(
+            usage.active_helper_count, None,
+            "a chat that never had helpers reports no helper count at all"
+        );
     }
 
     #[test]
@@ -5326,7 +5358,12 @@ mod tests {
         assert_eq!(helper.execution_id, helper_id);
         assert_eq!(helper.label, "Trace the crash");
         assert!(!helper.is_lead);
-        assert_eq!(helper.tokens, Some(500), "input alone is still a real token figure");
+        // Was `Some(500)` from input alone, called "a real token figure". It
+        // is not a TOTAL, which is what the field means and how the card
+        // renders it -- the graph panel refuses the same sum one layer up.
+        assert_eq!(helper.tokens, None, "a half-known figure is not a total");
+        assert_eq!(helper.input_tokens, Some(500), "the half that WAS reported is still carried");
+        assert_eq!(helper.output_tokens, None);
         assert_eq!(helper.cost_micro_usd, None, "an unreported cost stays absent, never zero");
         assert_eq!(helper.turns, Some(2));
     }

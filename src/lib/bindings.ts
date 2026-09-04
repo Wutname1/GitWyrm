@@ -4191,9 +4191,20 @@ export type AgentUsageRow = { executionId: string;
  */
 label: string; isLead: boolean; 
 /**
- * Input plus output tokens, when either was reported.
+ * Input plus output tokens, when BOTH were reported.
+ * 
+ * This used to be `a.unwrap_or(0) + b.unwrap_or(0)` whenever either was
+ * present, so a provider reporting input but not output produced an
+ * undercounted figure presented as the agent's total. The graph panel
+ * already refuses that (`nodeUsageLine` names the half it knows), and
+ * qa-log #68 settled the rule -- one layer away from here.
  */
 tokens: number | null; 
+/**
+ * The halves, so a caller can say which one it knows when only one was
+ * reported rather than adding a zero for the other.
+ */
+inputTokens: number | null; outputTokens: number | null; 
 /**
  * Provider-reported cost in millionths of a dollar.
  */

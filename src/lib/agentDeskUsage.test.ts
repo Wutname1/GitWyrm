@@ -17,6 +17,8 @@ const EMPTY: SessionUsage = {
 
 const LEAD: AgentUsageRow = {
   executionId: 'lead-1',
+  inputTokens: null,
+  outputTokens: null,
   label: 'Lead',
   isLead: true,
   tokens: 1200,
@@ -26,6 +28,8 @@ const LEAD: AgentUsageRow = {
 
 const HELPER: AgentUsageRow = {
   executionId: 'helper-1',
+  inputTokens: null,
+  outputTokens: null,
   label: 'Trace the crash',
   isLead: false,
   tokens: 500,
@@ -75,8 +79,8 @@ describe('buildUsageRows', () => {
       // A helper, not a lone lead: a lone lead IS the session total, so it
       // deliberately produces no breakdown (see `buildAgentUsageLines`).
       agents: [
-        { executionId: 'lead', label: 'Lead agent', isLead: true, tokens: 1200, turns: 2, costMicroUsd: null },
-        { executionId: 'h1', label: 'Fix the parser', isLead: false, tokens: 400, turns: 1, costMicroUsd: null },
+        { executionId: 'lead', label: 'Lead agent', isLead: true, tokens: 1200, inputTokens: null, outputTokens: null, turns: 2, costMicroUsd: null },
+        { executionId: 'h1', label: 'Fix the parser', isLead: false, tokens: 400, inputTokens: null, outputTokens: null, turns: 1, costMicroUsd: null },
       ],
     }
     expect(buildUsageRows(agentsOnly)).toEqual([])
@@ -290,5 +294,32 @@ describe('explainUsageUnavailable', () => {
     // better than an error would.
     expect(explainUsageUnavailable({ kind: 'notFound' }, false)).toBeNull()
     expect(explainUsageUnavailable(undefined, false)).toBeNull()
+  })
+})
+
+describe('buildAgentUsageLines with a half-known token figure', () => {
+  const agent = (over: Record<string, unknown>) => ({
+    executionId: 'e',
+    label: 'Helper',
+    isLead: false,
+    tokens: null,
+    inputTokens: null,
+    outputTokens: null,
+    costMicroUsd: null,
+    turns: null,
+    ...over,
+  })
+  // Two agents, or `buildAgentUsageLines` deliberately produces no breakdown.
+  const withAgents = (helper: ReturnType<typeof agent>) =>
+    ({ agents: [agent({ executionId: 'lead', inputTokens: null, outputTokens: null, isLead: true }), helper] }) as never
+
+  it('names the half it knows rather than showing it as a total', () => {
+    const lines = buildAgentUsageLines(withAgents(agent({ inputTokens: 500 })))
+    expect(lines[1].parts.join(' ')).toMatch(/500 tokens in/)
+  })
+  it('still shows a real total when both halves are known', () => {
+    const lines = buildAgentUsageLines(withAgents(agent({ tokens: 1200, inputTokens: 500, outputTokens: 700 })))
+    expect(lines[1].parts.join(' ')).toMatch(/1\.2k tokens/)
+    expect(lines[1].parts.join(' ')).not.toMatch(/ in| out/)
   })
 })

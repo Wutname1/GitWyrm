@@ -177,7 +177,12 @@ export function buildAgentUsageLines(usage: SessionUsage): AgentUsageLine[] {
   if (agents.length < 2 && !hasHelper) return []
   return agents.map((agent) => {
     const parts: string[] = []
+    // Same rule as `nodeUsageLine`: name the half you know rather than adding
+    // a zero for the other. The backend used to fold a half-known figure into
+    // `tokens` and present it as a total; it now sends the halves.
     if (agent.tokens != null) parts.push(formatTokens(agent.tokens))
+    else if (agent.inputTokens != null) parts.push(`${formatTokens(agent.inputTokens)} in`)
+    else if (agent.outputTokens != null) parts.push(`${formatTokens(agent.outputTokens)} out`)
     if (agent.turns != null) parts.push(`${formatCount(agent.turns)} turn${agent.turns === 1 ? '' : 's'}`)
     if (agent.costMicroUsd != null) parts.push(formatCost(agent.costMicroUsd / 1_000_000))
     return { key: agent.executionId, label: agent.label, parts }
