@@ -140,3 +140,46 @@ export function adapterDisplayName(adapterId: string): string {
       return adapterId
   }
 }
+
+/**
+ * Plain-language result of importing a chat, and whether it worked.
+ *
+ * The failure path used to render the raw enum as its headline -- "Could not
+ * import: corruptSession" -- while the same file's unlink handler ten lines
+ * away already did this properly. A person meeting a damaged file learned
+ * nothing about whose problem it was or what to do.
+ *
+ * The success path distinguishes a refresh that brought something from one
+ * that brought nothing: `newMessageCount` was computed by the backend
+ * specifically so the UI could say, and nothing read it, so twelve new
+ * messages and none looked identical.
+ */
+export function explainImportOutcome(
+  outcome: ImportSessionOutcome,
+  title: string,
+  adapterId: string
+): { message: string; ok: boolean } {
+  const client = adapterDisplayName(adapterId)
+  switch (outcome.kind) {
+    case 'created':
+      return { message: `Imported "${title}"`, ok: true }
+    case 'refreshed':
+      return {
+        message:
+          outcome.newMessageCount === 0
+            ? `"${title}" is already up to date`
+            : `Added ${outcome.newMessageCount} new message${outcome.newMessageCount === 1 ? '' : 's'} to "${title}"`,
+        ok: true,
+      }
+    case 'adapterDisabled':
+      return { message: `GitWyrm cannot read ${client} chats yet.`, ok: false }
+    case 'clientNotDetected':
+      return { message: `${client} is not on this computer any more.`, ok: false }
+    case 'sessionNotFound':
+      return { message: `${client} no longer has that chat.`, ok: false }
+    case 'corruptSession':
+      return { message: `That chat's file could not be read: ${outcome.detail}`, ok: false }
+    case 'writeFailed':
+      return { message: `Could not save the imported chat: ${outcome.detail}`, ok: false }
+  }
+}

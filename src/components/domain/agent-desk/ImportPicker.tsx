@@ -17,6 +17,7 @@ import {
   detectionLabel,
   linkedImportedSessionId,
   projectLabel,
+  explainImportOutcome,
   unlinkConfirmCopy,
 } from '@/lib/agentImportDisplay'
 import { describeError, log } from '@/lib/log'
@@ -178,11 +179,9 @@ function SessionRow({
       { adapterId, externalSessionId },
       {
         onSuccess: (result) => {
-          if (result.kind === 'created' || result.kind === 'refreshed') {
-            toast.success(`Imported "${session.summary.title}"`)
-          } else {
-            toast.error(`Could not import: ${result.kind}`)
-          }
+          const { message, ok } = explainImportOutcome(result, session.summary.title, adapterId)
+          if (ok) toast.success(message)
+          else toast.error(message)
         },
         onError: (error) => {
           log.error(`import session failed: ${String(error)}`)

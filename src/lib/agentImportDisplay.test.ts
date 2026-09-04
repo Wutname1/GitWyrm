@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {adapterDisplayName, canBrowseAdapter,
+import {explainImportOutcome, adapterDisplayName, canBrowseAdapter,
   continueExternallyLabel,
   detectionLabel,
   linkedImportedSessionId,
@@ -199,5 +199,39 @@ describe('adapterDisplayName', () => {
   it('says the unfamiliar thing it knows rather than inventing a name', () => {
     // An adapter from a later build should not be given a made-up label.
     expect(adapterDisplayName('some-future-client')).toBe('some-future-client')
+  })
+})
+
+describe('explainImportOutcome', () => {
+  const session = {} as never
+
+  it('distinguishes a refresh that brought something from one that brought nothing', () => {
+    // `newMessageCount` was computed by the backend so the UI could say, and
+    // nothing read it -- twelve new messages and none looked identical.
+    const some = explainImportOutcome({ kind: 'refreshed', session, newMessageCount: 12 }, 'Fix login', 'codex')
+    expect(some.message).toMatch(/Added 12 new messages/)
+    const none = explainImportOutcome({ kind: 'refreshed', session, newMessageCount: 0 }, 'Fix login', 'codex')
+    expect(none.message).toMatch(/already up to date/)
+    expect(none.ok).toBe(true)
+  })
+
+  it('uses the singular for one new message', () => {
+    const one = explainImportOutcome({ kind: 'refreshed', session, newMessageCount: 1 }, 'Fix login', 'codex')
+    expect(one.message).toMatch(/1 new message to/)
+    expect(one.message).not.toMatch(/1 new messages/)
+  })
+
+  it('never shows a raw outcome name to the person', () => {
+    // "Could not import: corruptSession" was the headline for a damaged file.
+    const bad = explainImportOutcome({ kind: 'corruptSession', detail: 'unexpected end of file' }, 'x', 'codex')
+    expect(bad.ok).toBe(false)
+    expect(bad.message).not.toMatch(/corruptSession/)
+    expect(bad.message).toMatch(/unexpected end of file/)
+  })
+
+  it('names the client a person recognises when it is the client at fault', () => {
+    const gone = explainImportOutcome({ kind: 'clientNotDetected' }, 'x', 'vscode-copilot')
+    expect(gone.message).toMatch(/VS Code Copilot Chat/)
+    expect(gone.message).not.toMatch(/vscode-copilot/)
   })
 })
