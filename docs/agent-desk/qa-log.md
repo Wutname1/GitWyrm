@@ -132,4 +132,5 @@ competing sub-agents, the answer names the losing option too.
 | 124 | 2026-09-04 | Does the absence-claim guard cover the Rust side? | No -- it only reads frontend components, and this pass found the same inversion sitting in a Rust probe where the guard cannot see. |
 | 125 | 2026-09-04 | Was "Read-only review" telling the truth about what an agent could do? | Only by coincidence -- it guessed from the kind of thing the chat started from, not from the permission the engine actually enforces. |
 | 126 | 2026-09-04 | What should a safety label show before its answer arrives? | Nothing about permissions -- it now says just "Source" rather than implying the agent is free to change files. |
+| 127 | 2026-09-04 | Does deleting a chat also remove the working copy it was using? | No -- and afterwards nothing can find that copy, so the confirmation now warns you and points at the screen that can still clear it. |
 

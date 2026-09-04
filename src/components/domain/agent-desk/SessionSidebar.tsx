@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { PanelLeftClose, PanelLeftOpen, Search, X } from 'lucide-react'
-import type { SessionListFilterInput } from '@/lib/bindings'
+import { commands, type SessionListFilterInput } from '@/lib/bindings'
+import { unwrap } from '@/lib/queryKeys'
+import { summarizeDiskUsage } from '@/lib/agentDeskResult'
 import { useAgentSessionHeaders } from '@/hooks/useAgentSessions'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { useAgentSessionMutations } from '@/hooks/useAgentSessionMutations'
@@ -105,6 +108,18 @@ export function SessionSidebar({
   const { rename, archive, markRead, remove } = useAgentSessionMutations()
   // Which chat a delete has been asked for, held until it is confirmed.
   const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null)
+  // Copies this chat is holding, so the confirmation can say what deleting
+  // strands. Fetched only while a delete is pending.
+  const copiesOnDisk = useQuery({
+    queryKey: ['agentCopiesOnDisk'],
+    queryFn: async () => unwrap(await commands.agentResultCopiesOnDisk()),
+    enabled: pendingDelete != null,
+  })
+  const pendingDeleteCopies = (copiesOnDisk.data ?? []).filter((c) => c.sessionId === pendingDelete?.id)
+  // A failed read is not "no copies". Saying nothing here would be the same
+  // absence-for-a-failure inversion the guard test exists to catch -- and it
+  // did catch this, on the dialog where the cost is an unrecoverable folder.
+  const copiesUnknown = copiesOnDisk.isError
 
   // Narrow-width drawer (task: "a hidden sidebar with no reopen affordance
   // violates house Rule #1"). Tracks the *container's* width via
@@ -272,6 +287,30 @@ export function SessionSidebar({
             This chat and everything in it are removed for good. Any files the agent already
             changed stay exactly where they are, and nothing in your project is touched. If you
             only want it out of the way, Archive keeps it.
+            {/*
+              The working copy is the part this dialog used to leave out. It is
+              not removed by deleting, and afterwards nothing can see it: the
+              "what GitWyrm holds on disk" screen finds copies by walking chat
+              records, and this deletes the record. So the copy becomes
+              unreachable rather than merely left behind.
+
+              Said only when there is one, and it names the size, because the
+              honest answer to "should I clear this first?" depends on how big
+              it is.
+            */}
+            {copiesUnknown && (
+              <span className="mt-2 block font-semibold text-[var(--gw-amber)]">
+                GitWyrm could not check whether this chat is holding a working copy on your machine. If it is,
+                deleting the chat leaves that behind with no way to find it again.
+              </span>
+            )}
+            {pendingDeleteCopies.length > 0 && (
+              <span className="mt-2 block font-semibold text-[var(--gw-amber)]">
+                This chat still has {summarizeDiskUsage(pendingDeleteCopies).toLowerCase().replace(/\.$/, '')} on
+                this machine. Deleting the chat leaves that behind with no way to find it again. Clear it first from
+                Agent Setup if you want the space back.
+              </span>
+            )}
           </>
         }
         confirmLabel="Delete"

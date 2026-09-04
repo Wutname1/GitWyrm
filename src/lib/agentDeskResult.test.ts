@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest'
+// @ts-expect-error -- no @types/node in this project; available at runtime
+import { readFileSync } from 'node:fs'
+// @ts-expect-error -- no @types/node in this project; available at runtime
+import { fileURLToPath } from 'node:url'
 import type {
   CompleteOpenSpecTaskOutcome,
   EscalateToFixOutcome,
@@ -730,5 +734,31 @@ describe('explainResultListUnavailable', () => {
   it('stays silent when the list really is just empty', () => {
     expect(explainResultListUnavailable({ kind: 'found', records: [] }, false)).toBeNull()
     expect(explainResultListUnavailable(undefined, false)).toBeNull()
+  })
+})
+
+describe('canEscalateToFix agrees with the backend that enforces it', () => {
+  it('lists exactly the intents can_escalate_to_fix allows', () => {
+    // The doc says this "mirrors the backend's `can_escalate_to_fix`". A mirror
+    // nobody checks is the shape that produced F130 -- there the UI rule and
+    // the engine's rule agreed only by coincidence, on a safety label. This one
+    // only decides whether to draw a button, so drift is milder, but it is the
+    // same shape and the check is nearly free.
+    const rust = readFileSync(
+      fileURLToPath(new URL('../../src-tauri/src/commands/agent_kickoff.rs', import.meta.url)),
+      'utf8'
+    )
+    // Up to the closing brace of the function, not the first `)` -- the
+    // signature's own parenthesis comes first and yielded an empty list.
+    const from = rust.indexOf('pub fn can_escalate_to_fix')
+    const body = rust.slice(from, rust.indexOf(String.fromCharCode(10) + '}', from))
+    const listed = body.match(/SessionIntent::(\w+)/g) ?? []
+    const backend = listed.map((m: string) => m.replace('SessionIntent::', '').toLowerCase()).sort()
+
+    const all: Parameters<typeof canEscalateToFix>[0][] = ['ask', 'explain', 'plan', 'fix', 'review', 'summarize']
+    const frontend = all.filter(canEscalateToFix).sort()
+
+    expect(backend.length, 'parsed nothing from the Rust source').toBeGreaterThan(0)
+    expect(frontend).toEqual(backend)
   })
 })
