@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { HardDrive, Loader2 } from 'lucide-react'
+import { FolderOpen, HardDrive, Loader2 } from 'lucide-react'
 import { commands, type AgentCopyOnDisk } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { explainCleanupOutcome, formatDiskSize, resultStateLabel, summarizeDiskUsage } from '@/lib/agentDeskResult'
@@ -28,6 +28,16 @@ export function AgentCopiesOnDisk() {
   })
 
   const copies = query.data ?? []
+
+  const reveal = async (copy: AgentCopyOnDisk) => {
+    try {
+      unwrap(await commands.openFolderInFileManager(copy.repoId, copy.worktreePath))
+    } catch (e) {
+      const detail = describeError(e)
+      log.error(`agent desk: could not open an agent copy's folder: ${detail}`)
+      toast.error('Could not open that folder.', { description: detail })
+    }
+  }
 
   const clear = async (copy: AgentCopyOnDisk) => {
     if (clearing) return
@@ -81,6 +91,20 @@ export function AgentCopiesOnDisk() {
                   {formatDiskSize(copy.sizeBytes)} · {resultStateLabel(copy.state)}
                 </p>
               </div>
+              {/* The copy refuses to clear when something in it is
+                  unaccounted for and tells the person to open the folder and
+                  look -- which it had no way to let them do. A guard-rail on
+                  a destructive action that cannot be followed is worse than
+                  no guard-rail: the choice becomes clear blind, or give up. */}
+              <button
+                type="button"
+                onClick={() => void reveal(copy)}
+                disabled={clearing !== null}
+                className="flex flex-none items-center gap-1 rounded border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground hover:bg-panel3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <FolderOpen size={11} aria-hidden />
+                Open
+              </button>
               <button
                 type="button"
                 onClick={() => void clear(copy)}
