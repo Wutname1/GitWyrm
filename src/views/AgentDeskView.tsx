@@ -784,31 +784,42 @@ export function AgentDeskView() {
                           )}
                         >
                           {splitPresentation === 'active-only' ? (
-                            /* One pane only. When the split is open this is
-                               whichever pane the switcher/Ctrl+1/Ctrl+2 has
-                               made active; when it is closed there is only
-                               ever the primary pane to show. */
-                            layout.split && activePane === 'secondary' ? (
-                              <AgentDeskPane
-                                pane="secondary"
-                                sessionId={secondarySessionId}
-                                isActive
-                                onFocusPane={onFocusPane}
-                                onPin={onPin}
-                                showSourceBanner={layout.sourceBarsVisible}
-                                detailSession={secondaryDetailSession}
-                              />
-                            ) : (
-                              <AgentDeskPane
-                                pane="primary"
-                                sessionId={primarySessionId}
-                                isActive={!layout.split || activePane === 'primary'}
-                                onFocusPane={onFocusPane}
-                                onPin={onPin}
-                                showSourceBanner={layout.sourceBarsVisible}
-                                detailSession={primaryDetailSession}
-                              />
-                            )
+                            /* One pane VISIBLE. When the split is open, both
+                               panes stay mounted and the inactive one is
+                               hidden -- swapping which element exists would
+                               unmount the pane being left, and an unmounted
+                               transcript loses its scroll position, so
+                               Ctrl+1/Ctrl+2 kept snapping the reader back to
+                               the newest message. When the split is closed
+                               there is only ever the primary pane. */
+                            <>
+                              <div
+                                className={cn('flex min-h-0 flex-1', layout.split && activePane === 'secondary' && 'hidden')}
+                              >
+                                <AgentDeskPane
+                                  pane="primary"
+                                  sessionId={primarySessionId}
+                                  isActive={!layout.split || activePane === 'primary'}
+                                  onFocusPane={onFocusPane}
+                                  onPin={onPin}
+                                  showSourceBanner={layout.sourceBarsVisible}
+                                  detailSession={primaryDetailSession}
+                                />
+                              </div>
+                              {layout.split && (
+                                <div className={cn('flex min-h-0 flex-1', activePane !== 'secondary' && 'hidden')}>
+                                  <AgentDeskPane
+                                    pane="secondary"
+                                    sessionId={secondarySessionId}
+                                    isActive
+                                    onFocusPane={onFocusPane}
+                                    onPin={onPin}
+                                    showSourceBanner={layout.sourceBarsVisible}
+                                    detailSession={secondaryDetailSession}
+                                  />
+                                </div>
+                              )}
+                            </>
                           ) : (
                             <>
                               <AgentDeskPane
