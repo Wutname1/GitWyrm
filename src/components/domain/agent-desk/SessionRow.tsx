@@ -71,6 +71,12 @@ export function SessionRow({
   const title = header.title.trim() || 'Untitled chat'
   const needsYou = header.state === 'needsInput'
   const working = header.state === 'working'
+  // A run that died mid-flight used to fall through to a plain grey
+  // timestamp, so a chat killed by a crash -- still holding changed files --
+  // looked exactly like one that finished cleanly. Returning after a crash is
+  // precisely when a person scans this list for what needs them.
+  const stoppedBadly =
+    header.state === 'failed' || header.state === 'interrupted' || header.state === 'missingSource'
 
   const commitRename = () => {
     setRenaming(false)
@@ -160,6 +166,12 @@ export function SessionRow({
                 className="block h-1.5 w-1.5 rounded-full bg-[var(--gw-amber)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--gw-amber)_18%,transparent)]"
                 role="status"
                 aria-label="Needs your input"
+              />
+            ) : stoppedBadly ? (
+              <span
+                className="block h-1.5 w-1.5 rounded-full bg-[var(--gw-red)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--gw-red)_18%,transparent)]"
+                role="status"
+                aria-label="Stopped before finishing"
               />
             ) : (
               <span className="font-mono text-[10px] text-muted-foreground">

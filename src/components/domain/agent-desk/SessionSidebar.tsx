@@ -75,6 +75,15 @@ export function SessionSidebar({
   // list command shipped (`SessionListFilter::title_contains`, with its own
   // test) and the frontend passed `null` for it everywhere, so someone who
   // starts dozens of chats a day had only scrolling.
+  // Whether the list is showing active chats or archived ones.
+  //
+  // Archive was a one-way trapdoor: `archived: false` was hardcoded, no caller
+  // ever passed the `filter` prop that would change it, and the archive toast
+  // promised "You can restore it from the Archived filter any time" -- a
+  // filter that did not exist. The Restore action on the row was live code no
+  // one could reach, because reaching it needed a row the query could never
+  // return. Worse, the delete dialog recommends Archive as the safe option.
+  const [showArchived, setShowArchived] = useState(false)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   useEffect(() => {
@@ -89,7 +98,7 @@ export function SessionSidebar({
     states: [],
     sourceKinds: [],
     hasChangedFiles: null,
-    archived: false,
+    archived: showArchived,
     titleContains: debouncedSearch === '' ? null : debouncedSearch,
     ...filter,
   })
@@ -181,6 +190,28 @@ export function SessionSidebar({
           while the main window's repo is still opening, with an honest
           reason, rather than silently doing nothing on click. */}
       <div className="flex-none px-1.5 pb-1.5">
+        <div role="tablist" aria-label="Which chats to show" className="flex gap-0.5">
+          {([false, true] as const).map((archived) => (
+            <button
+              key={String(archived)}
+              type="button"
+              role="tab"
+              aria-selected={showArchived === archived}
+              onClick={() => setShowArchived(archived)}
+              className={cn(
+                'flex-1 rounded border-b-2 px-1.5 py-0.5 text-2xs font-semibold',
+                showArchived === archived
+                  ? 'border-primary bg-panel2 text-foreground'
+                  : 'border-transparent text-muted-foreground hover:bg-panel2 hover:text-foreground'
+              )}
+            >
+              {archived ? 'Archived' : 'Active'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-none px-1.5 pb-1.5">
         <label
           className={cn(
             'flex items-center gap-1.5 rounded px-1.5 py-1 text-2xs text-muted-foreground',
@@ -208,6 +239,7 @@ export function SessionSidebar({
       <SessionGroups
         headers={headers}
         searchTerm={debouncedSearch === '' ? undefined : debouncedSearch}
+        archived={showArchived}
         selectedId={selectedId}
         onSelectSession={handleSelect}
         onRename={(sessionId, title) => rename.mutate({ sessionId, title })}

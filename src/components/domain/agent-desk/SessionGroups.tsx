@@ -28,8 +28,11 @@ export function SessionGroups({
   onArchive,
   onDelete,
   searchTerm,
+  archived,
 }: {
   headers: AgentSessionHeader[]
+  /** Showing the archived list, so an empty one must not read as "no chats". */
+  archived?: boolean
   /** What the sidebar is filtering by, so an empty list can say WHY it is empty. */
   searchTerm?: string
   selectedId: string | null
@@ -99,7 +102,9 @@ export function SessionGroups({
           // that tells someone with two hundred of them to start another one.
           searchTerm
             ? `No chats match "${searchTerm}".`
-            : headers.length === 0
+            : archived
+              ? 'No archived chats. Archiving one puts it here, and you can put it back any time.'
+              : headers.length === 0
               ? 'Start a new chat, or open an issue, pull request, or OpenSpec task from the main window and choose an AI action.'
               : 'Nothing matches this grouping yet.'
         }

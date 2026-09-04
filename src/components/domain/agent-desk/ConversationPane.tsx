@@ -677,7 +677,10 @@ export function ConversationPane({
               <span>{state === 'preparing' ? 'Getting ready…' : 'Working…'}</span>
             </div>
           )}
-          {state === 'interrupted' && (
+          {/* Startup recovery writes `failed`, while this line was gated only on
+              `interrupted` -- so a chat recovered by the crash sweep showed no
+              explanation at all. Two names for one situation. */}
+          {(state === 'interrupted' || state === 'failed') && (
             <div role="status" aria-live="polite" className="flex items-center gap-2 px-1 py-1 text-2xs text-muted-foreground">
               <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" aria-hidden />
               <span>This chat stopped when the app closed. Send a message to start it again.</span>
