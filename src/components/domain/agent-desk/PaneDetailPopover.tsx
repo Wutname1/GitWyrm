@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { GitFork, Link2, Gauge, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-react'
+import { Coins, GitFork, Link2, Gauge, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-react'
 import type { AgentSession } from '@/lib/bindings'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
@@ -8,10 +8,17 @@ import type { DockKind } from '@/lib/agentWorkspaceLayout'
 import { SessionSourcePanel } from './SessionSourcePanel'
 import { SessionContextPanel } from './SessionContextPanel'
 import { AgentGraphPanel } from './AgentGraphPanel'
+import { SessionUsageCard } from './SessionUsageCard'
 
 const DETAIL_META: Record<DockKind, { label: string; icon: React.ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean }> }> = {
   source: { label: 'Show source', icon: Link2 },
   context: { label: 'Show context', icon: Gauge },
+  // Usage is the panel a person most wants kept in view while a costly run
+  // burns tokens, and it was the only one of the four the vision names that
+  // could not be opened or pinned on its own -- it rendered nested inside
+  // Context, so checking spend mid-run meant opening Context and scrolling
+  // past unrelated content.
+  usage: { label: 'Show usage', icon: Coins },
   graph: { label: 'Show agent graph', icon: GitFork },
 }
 
@@ -127,6 +134,10 @@ export function PaneDetailPopover({
                   <SessionSourcePanel session={session} onOpenSource={onOpenSource} />
                 ) : open === 'context' ? (
                   <SessionContextPanel session={session} />
+                ) : open === 'usage' ? (
+                  <div className="p-2">
+                    <SessionUsageCard sessionId={session.header.sessionId} />
+                  </div>
                 ) : (
                   <AgentGraphPanel session={session} />
                 )}

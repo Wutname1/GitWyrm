@@ -1,4 +1,4 @@
-import { GitFork, Gauge, Link2, MoreHorizontal, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-react'
+import { Coins, GitFork, Gauge, Link2, MoreHorizontal, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-react'
 import type { AgentSession } from '@/lib/bindings'
 import { ResizeHandle } from '@/components/ui/ResizeHandle'
 import {
@@ -13,11 +13,13 @@ import { sessionHasGraph } from '@/lib/agentDeskGraph'
 import { useAgentDeskPanelDrag } from '@/hooks/useAgentDeskPanelDrag'
 import { SessionSourcePanel } from './SessionSourcePanel'
 import { SessionContextPanel } from './SessionContextPanel'
+import { SessionUsageCard } from './SessionUsageCard'
 import { AgentGraphPanel } from './AgentGraphPanel'
 
 const DETAIL_META: Record<DockKind, { label: string; icon: React.ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean }> }> = {
   source: { label: 'Source', icon: Link2 },
   context: { label: 'Context', icon: Gauge },
+  usage: { label: 'Usage', icon: Coins },
   graph: { label: 'Agent graph', icon: GitFork },
 }
 
@@ -141,6 +143,10 @@ export function DockedDetailPanel({
           <SessionSourcePanel session={session} onOpenSource={onOpenSource} />
         ) : kind === 'context' ? (
           <SessionContextPanel session={session} />
+        ) : kind === 'usage' ? (
+          <div className="p-2">
+            <SessionUsageCard sessionId={session.header.sessionId} />
+          </div>
         ) : sessionHasGraph(session) ? (
           <AgentGraphPanel session={session} />
         ) : (

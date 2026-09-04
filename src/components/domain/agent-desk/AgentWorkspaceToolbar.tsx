@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { ALL_DOCK_ZONES, dockKindLabel, zoneLabel } from '@/lib/agentDeskDock'
+import { ALL_DOCK_KINDS, ALL_DOCK_ZONES, dockKindLabel, zoneLabel } from '@/lib/agentDeskDock'
 import type { DockZone } from '@/lib/agentDeskDockPlacement'
 import type { DockKind, DockState } from '@/lib/agentWorkspaceLayout'
 
@@ -114,7 +114,7 @@ export function AgentWorkspaceToolbar({
                   narrow window the only pinning affordance in the product
                   produced no visible change at all. Bottom and left are safe
                   at that width and were unreachable from a cold start. */}
-              {(['source', 'context', 'graph'] as const).map((kind) => (
+              {ALL_DOCK_KINDS.map((kind) => (
                 <DropdownMenuSub key={kind}>
                   <DropdownMenuSubTrigger>Pin {dockKindLabel(kind).toLowerCase()}…</DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>

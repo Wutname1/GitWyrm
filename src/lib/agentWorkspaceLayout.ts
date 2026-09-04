@@ -27,7 +27,7 @@
 export const CURRENT_LAYOUT_SCHEMA_VERSION = 1
 
 export type PaneId = 'primary' | 'secondary'
-export type DockKind = 'source' | 'context' | 'graph'
+export type DockKind = 'source' | 'context' | 'usage' | 'graph'
 export type DockEdge = 'left' | 'right' | 'bottom'
 export type LeftDockOrder = 'above-chats' | 'below-chats'
 
@@ -126,7 +126,7 @@ function isPaneId(v: unknown): v is PaneId {
 }
 
 function isDockKind(v: unknown): v is DockKind {
-  return v === 'source' || v === 'context' || v === 'graph'
+  return v === 'source' || v === 'context' || v === 'usage' || v === 'graph'
 }
 
 function isDockEdge(v: unknown): v is DockEdge {

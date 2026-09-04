@@ -40,10 +40,20 @@ export function dockKindLabel(kind: DockKind): string {
       return 'Source'
     case 'context':
       return 'Context'
+    case 'usage':
+      return 'Usage'
     case 'graph':
       return 'Agent graph'
   }
 }
+
+/**
+ * Every panel that can be pinned, in the order menus show them.
+ *
+ * Exported so a menu cannot hand-list a subset and quietly drop one -- which
+ * is exactly how Usage stayed unpinnable after the type already allowed it.
+ */
+export const ALL_DOCK_KINDS: DockKind[] = ['source', 'context', 'usage', 'graph']
 
 /** The zone a dock currently occupies, or null when nothing is pinned. */
 export function currentZone(dock: DockState | null): DockZone | null {

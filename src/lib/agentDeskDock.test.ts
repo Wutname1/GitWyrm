@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  ALL_DOCK_ZONES,
+import {ALL_DOCK_KINDS, ALL_DOCK_ZONES,
   COMPACT_BREAKPOINT_PX,
   MIN_CHAT_SIZE_PX,
   NARROW_BREAKPOINT_PX,
@@ -231,5 +230,26 @@ describe('every placement is reachable by every route (tasks.md 7.7 / 9.4)', () 
 
   it('offers all four placements, so no menu entry is missing a drop target', () => {
     expect([...ALL_DOCK_ZONES].sort()).toEqual(['bottom', 'left-above', 'left-below', 'right'])
+  })
+})
+
+describe('ALL_DOCK_KINDS', () => {
+  // The invariant that was missing. The pin menu hand-listed three kinds, so
+  // Usage stayed unpinnable after the type already allowed it -- a menu that
+  // silently drops a panel nobody notices is gone.
+  it('has a plain-language label for every pinnable panel', () => {
+    for (const kind of ALL_DOCK_KINDS) {
+      const label = dockKindLabel(kind)
+      expect(label.length).toBeGreaterThan(0)
+      expect(label).not.toBe(kind)
+    }
+  })
+
+  it('lists each panel exactly once', () => {
+    expect(new Set(ALL_DOCK_KINDS).size).toBe(ALL_DOCK_KINDS.length)
+  })
+
+  it('includes usage, the one that was missing', () => {
+    expect(ALL_DOCK_KINDS).toContain('usage')
   })
 })
