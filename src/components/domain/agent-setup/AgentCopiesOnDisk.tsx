@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { FolderOpen, HardDrive, Loader2 } from 'lucide-react'
+import { AlertTriangle, FolderOpen, HardDrive, Loader2 } from 'lucide-react'
 import { commands, type AgentCopyOnDisk } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { explainCleanupOutcome, formatDiskSize, resultStateLabel, summarizeDiskUsage } from '@/lib/agentDeskResult'
@@ -61,6 +61,30 @@ export function AgentCopiesOnDisk() {
 
   if (query.isLoading) {
     return <p className="py-6 text-center text-2xs text-muted-foreground">Measuring agent copies…</p>
+  }
+
+  // A failed read used to fall through to `copies = []`, which
+  // `summarizeDiskUsage` renders as "No agent copies on disk." -- a confident
+  // all-clear about disk space, on the screen whose whole purpose is
+  // disclosing what GitWyrm is holding. The function itself is careful about
+  // sizes it could not measure; only this path was missing.
+  if (query.isError) {
+    return (
+      <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
+        <p className="flex items-center gap-1.5 text-2xs font-semibold text-destructive">
+          <AlertTriangle size={13} aria-hidden />
+          GitWyrm could not check what it is holding on this machine.
+        </p>
+        <p className="mt-1 text-2xs text-muted-foreground">This is not the same as holding nothing.</p>
+        <button
+          type="button"
+          onClick={() => void query.refetch()}
+          className="mt-2 rounded border border-border px-2 py-1 text-2xs font-semibold hover:bg-panel3"
+        >
+          Try again
+        </button>
+      </div>
+    )
   }
 
   return (
